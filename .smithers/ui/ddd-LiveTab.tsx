@@ -6,6 +6,7 @@ import {
   asArray,
   asString,
   buildChatLines,
+  formatStatus,
   fmtTime,
   logLineFromFrame,
   statusClass,
@@ -111,7 +112,7 @@ function Node({ node }: { node: RunNode }) {
     <li>
       <div className="node-row">
         <span className={`badge ${statusClass(asString(node.status))}`} data-status={asString(node.status)}>
-          {asString(node.status) || "—"}
+          {formatStatus(asString(node.status)) || "-"}
         </span>
         <span className="node-name">{label}</span>
         {agent ? <span className="pill">{agent}</span> : null}
@@ -130,7 +131,7 @@ export function LiveTab(props: LiveTabProps) {
   return (
     <div className="live pane" data-testid="ddd-live-tab">
       <div className="runlist" data-testid="ddd-run-list">
-        <div className="card-head"><h2>Running apps</h2><span className="pill">{runs.length || (runsLoading ? "…" : 0)}</span></div>
+        <div className="card-head"><h2>Docs runs</h2><span className="pill">{runs.length || (runsLoading ? "..." : 0)}</span></div>
         {runs.length ? (
           runs.map((run) => (
             <button
@@ -141,14 +142,14 @@ export function LiveTab(props: LiveTabProps) {
             >
               <span className="rid">{run.runId}</span>
               <div className="meta-row">
-                <span className={`badge ${statusClass(run.status)}`}>{run.status ?? "—"}</span>
-                <span className="pill">{run.workflowKey ?? "workflow"}</span>
+                <span className={`badge ${statusClass(run.status)}`}>{formatStatus(run.status) || "-"}</span>
+                <span className="pill">{run.workflowKey ?? "docs-driven-development"}</span>
                 {run.createdAtMs ? <span className="pill">{fmtTime(run.createdAtMs)}</span> : null}
               </div>
             </button>
           ))
         ) : (
-          <p>{runsLoading ? "Loading runs…" : "No runs yet. Dispatch agents from the Specs tab."}</p>
+          <p>{runsLoading ? "Loading runs..." : "No docs-driven-development runs yet. Dispatch agents from the Docs tab."}</p>
         )}
       </div>
 
@@ -160,10 +161,10 @@ export function LiveTab(props: LiveTabProps) {
             <section className="card" data-testid="ddd-run-tree">
               <div className="card-head">
                 <h2>Run node tree</h2>
-                <span className={`badge ${statusClass(props.runStatus)}`}>{props.runStatus ?? runTree.status ?? "—"}</span>
+                <span className={`badge ${statusClass(props.runStatus ?? runTree.status)}`}>{formatStatus(props.runStatus ?? runTree.status) || "-"}</span>
               </div>
               <div className="nodetree">
-                {runTree.root ? <ul><Node node={runTree.root as unknown as RunNode} /></ul> : <p>{runTree.isLoading ? "Loading tree…" : "No node tree."}</p>}
+                {runTree.root ? <ul><Node node={runTree.root as unknown as RunNode} /></ul> : <p>{runTree.isLoading ? "Loading tree..." : "No node tree."}</p>}
               </div>
             </section>
 

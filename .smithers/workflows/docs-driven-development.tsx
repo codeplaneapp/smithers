@@ -184,13 +184,13 @@ Architecture constraints:
 const META_TICKET_FIELD_LIMIT = 12_000;
 const BOOTSTRAP_ARTIFACT = `${ROOT}/.smithers/docs-driven-development/bootstrap-latest.json`;
 
-function artifactPath(name: string) {
+export function artifactPath(name: string) {
   const dir = `${ROOT}/.smithers/docs-driven-development/artifacts`;
   mkdirSync(dir, { recursive: true });
   return `${dir}/${name}`;
 }
 
-function boundedField(value: string, name: string) {
+export function boundedField(value: string, name: string) {
   if (value.length <= META_TICKET_FIELD_LIMIT) {
     return { value, artifactPath: "", truncated: false };
   }
@@ -203,12 +203,12 @@ function boundedField(value: string, name: string) {
   };
 }
 
-function writeJsonArtifact(path: string, value: unknown) {
+export function writeJsonArtifact(path: string, value: unknown) {
   mkdirSync(path.slice(0, path.lastIndexOf("/")), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function cleanDiffForMetaTicket(value: string) {
+export function cleanDiffForMetaTicket(value: string) {
   return value
     .split(/\r?\n/)
     .filter((line) => {
@@ -242,7 +242,7 @@ function tryRunCommand(command: string, args: string[]) {
   }
 }
 
-function ticketSlug(value: unknown): string {
+export function ticketSlug(value: unknown): string {
   return String(value ?? "")
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
@@ -250,11 +250,11 @@ function ticketSlug(value: unknown): string {
     .slice(0, 80) || "ticket";
 }
 
-function ticketPathFor(runId: string, item: any): string {
+export function ticketPathFor(runId: string, item: any): string {
   return `docs-driven-development--${ticketSlug(runId)}--${String(item.slot ?? "0").padStart(2, "0")}-${ticketSlug(item.featureId ?? item.title)}`;
 }
 
-function ticketMarkdownFor(runId: string, item: any): string {
+export function ticketMarkdownFor(runId: string, item: any): string {
   const list = (title: string, values: unknown) => {
     const items = Array.isArray(values) ? values.map(String).filter(Boolean) : [];
     return items.length ? `\n## ${title}\n\n${items.map((value) => `- ${value}`).join("\n")}\n` : "";
@@ -279,7 +279,7 @@ function ticketMarkdownFor(runId: string, item: any): string {
   ].join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
-function materializeTriageTickets(runId: string, triage: any) {
+export function materializeTriageTickets(runId: string, triage: any) {
   const directory = `${ROOT}/.smithers/tickets`;
   mkdirSync(directory, { recursive: true });
   const now = Date.now();
@@ -304,7 +304,7 @@ function triageReady(ctx: any): boolean {
   return !!ctx.outputMaybe("triage", { nodeId: "triage" });
 }
 
-function resolvedMaxAgents(value: unknown) {
+export function resolvedMaxAgents(value: unknown) {
   const numeric = Number(value ?? 1);
   if (!Number.isInteger(numeric)) return 1;
   return Math.min(8, Math.max(1, numeric));
@@ -331,7 +331,7 @@ function auditAgent(ctx: any) {
 // in the reference implementation: run finished with 38/52 features
 // partial/broken/missing). features.json is the source of truth, so require it
 // to actually be clean before declaring complete.
-function featuresStillIncomplete(): number {
+export function featuresStillIncomplete(): number {
   try {
     const features = JSON.parse(readFileSync(`${ROOT}/.smithers/spec/features.json`, "utf8")) as Array<{ status?: string }>;
     const open = new Set(["broken", "partial", "missing", "missing-tests", "missing-docs"]);
@@ -341,7 +341,7 @@ function featuresStillIncomplete(): number {
   }
 }
 
-function productComplete(ctx: any): boolean {
+export function productComplete(ctx: any): boolean {
   const summary = ctx.outputMaybe("summary", { nodeId: "round-summary" });
   if (summary?.status !== "done") return false;
   const incomplete = featuresStillIncomplete();

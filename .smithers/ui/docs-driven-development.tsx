@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
@@ -20,6 +20,7 @@ import {
   assetBaseFromUrl,
   isRecord,
   makeAssetUrl,
+  normalizeMarkdownForDirty,
   resolveDocLink,
   rowOf,
   runIdFromUrl,
@@ -38,7 +39,7 @@ import { LiveTab } from "./ddd-LiveTab";
 import { TicketsTab } from "./ddd-TicketsTab";
 import { FeaturesTab } from "./ddd-FeaturesTab";
 
-type TriageItem = {
+export type TriageItem = {
   slot: number;
   featureId: string;
   title: string;
@@ -50,7 +51,7 @@ type TriageItem = {
   acceptance: string[];
 };
 
-function parseArray(value: unknown): unknown[] {
+export function parseArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (typeof value === "string") {
     try {
@@ -63,7 +64,7 @@ function parseArray(value: unknown): unknown[] {
   return [];
 }
 
-function extractTriage(value: unknown): TriageItem[] {
+export function extractTriage(value: unknown): TriageItem[] {
   const row = rowOf(value);
   return parseArray(row?.selected)
     .filter(isRecord)
@@ -81,7 +82,7 @@ function extractTriage(value: unknown): TriageItem[] {
     .filter((item) => item.slot > 0);
 }
 
-function ticketSlug(value: unknown): string {
+export function ticketSlug(value: unknown): string {
   return asString(value)
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
@@ -89,7 +90,7 @@ function ticketSlug(value: unknown): string {
     .slice(0, 80) || "ticket";
 }
 
-function ticketMarkdownFor(runId: string | undefined, item: TriageItem): string {
+export function ticketMarkdownFor(runId: string | undefined, item: TriageItem): string {
   const list = (title: string, values: string[]) =>
     values.length ? `\n## ${title}\n\n${values.map((value) => `- ${value}`).join("\n")}\n` : "";
 
@@ -112,7 +113,7 @@ function ticketMarkdownFor(runId: string | undefined, item: TriageItem): string 
   ].join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
-function ticketsFromTriage(runId: string | undefined, triage: TriageItem[]): TicketRow[] {
+export function ticketsFromTriage(runId: string | undefined, triage: TriageItem[]): TicketRow[] {
   return triage.map((item) => ({
     path: `docs-driven-development--${ticketSlug(runId ?? "current")}--${String(item.slot).padStart(2, "0")}-${ticketSlug(item.featureId || item.title)}`,
     kind: "ticket",
@@ -122,7 +123,7 @@ function ticketsFromTriage(runId: string | undefined, triage: TriageItem[]): Tic
   }));
 }
 
-function extractMaterializedTickets(value: unknown): TicketRow[] {
+export function extractMaterializedTickets(value: unknown): TicketRow[] {
   const row = rowOf(value);
   return parseArray(row?.tickets)
     .filter(isRecord)
@@ -140,7 +141,7 @@ function extractMaterializedTickets(value: unknown): TicketRow[] {
     .filter((ticket) => ticket.path.length > 0);
 }
 
-function mergeTickets(...groups: TicketRow[][]): TicketRow[] {
+export function mergeTickets(...groups: TicketRow[][]): TicketRow[] {
   const byPath = new Map<string, TicketRow>();
   for (const group of groups) {
     for (const ticket of group) {
@@ -151,12 +152,17 @@ function mergeTickets(...groups: TicketRow[][]): TicketRow[] {
   return [...byPath.values()];
 }
 
-function toRunRows(data: unknown): RunSummaryRow[] {
+export function toRunRows(data: unknown): RunSummaryRow[] {
   const raw = Array.isArray(data) ? data : isRecord(data) ? asArray(data.runs) : [];
   return raw
     .filter(isRecord)
     .map((row) => ({ ...row, runId: asString(row.runId ?? row.id) }))
     .filter((row): row is RunSummaryRow => row.runId.length > 0);
+}
+
+function isDocsDrivenRun(run: RunSummaryRow, activeRunId: string | undefined): boolean {
+  const workflowKey = asString(run.workflowKey ?? run.workflowName ?? run.workflow);
+  return workflowKey === "docs-driven-development" || (!!activeRunId && run.runId === activeRunId);
 }
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -209,11 +215,19 @@ function App() {
   const materializedTicketsOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "materialize-tickets", iteration: 0 });
   const roundSummaryOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "round-summary", iteration: 0 });
 
-  const runsState = useGatewayRuns({});
+  const runsState = useGatewayRuns({ filter: { limit: 100 } });
   const runDetail = useGatewayRun(liveRunId);
   const runTree = useGatewayRunTree(liveRunId);
   const runEvents = useGatewayRunEvents(liveRunId, { maxEvents: 500 });
   const ticketsState = useGatewayTickets({});
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = window.setInterval(() => {
+      void runsState.refetch?.();
+    }, 10_000);
+    return () => window.clearInterval(id);
+  }, [runsState.refetch]);
 
   // ---- derived (no hooks below this line) ----
   const bootstrap = rowOf(bootstrapOut.data);
@@ -224,7 +238,7 @@ function App() {
   const triage = extractTriage(triageOut.data);
   const materializedTickets = extractMaterializedTickets(materializedTicketsOut.data);
 
-  const runs = toRunRows(runsState.data);
+  const runs = toRunRows(runsState.data).filter((run) => isDocsDrivenRun(run, liveRunId));
   const runStatus = asString(rowOf(runDetail.data)?.status) || undefined;
   const gatewayTickets = (ticketsState.data ?? []) as unknown as TicketRow[];
   // The full backlog (one ticket per gap, derived from features.json) is the
@@ -236,11 +250,19 @@ function App() {
 
   const changedFiles = docsContent
     .map((doc) => ({ path: doc.path, beforeMarkdown: doc.content, afterMarkdown: drafts[doc.path] ?? doc.content }))
-    .filter((doc) => doc.beforeMarkdown !== doc.afterMarkdown);
+    .filter((doc) => normalizeMarkdownForDirty(doc.beforeMarkdown) !== normalizeMarkdownForDirty(doc.afterMarkdown));
   const changedPaths = changedFiles.map((doc) => doc.path);
 
   function updateDraft(path: string, markdown: string) {
-    setDrafts((current) => ({ ...current, [path]: markdown }));
+    const original = docsContent.find((doc) => doc.path === path)?.content ?? "";
+    setDrafts((current) => {
+      if (normalizeMarkdownForDirty(markdown) === normalizeMarkdownForDirty(original)) {
+        const next = { ...current };
+        delete next[path];
+        return next;
+      }
+      return { ...current, [path]: markdown };
+    });
   }
 
   function openDoc(href: string) {
@@ -390,4 +412,6 @@ function App() {
   );
 }
 
-createGatewayReactRoot(<App />);
+if (typeof document !== "undefined") {
+  createGatewayReactRoot(<App />);
+}

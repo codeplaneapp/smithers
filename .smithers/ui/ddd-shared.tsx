@@ -124,20 +124,66 @@ export function assetBaseFromUrl(): string | undefined {
   return base ? base.replace(/\/+$/, "") : undefined;
 }
 
+export function normalizeStatus(status: string | undefined): string {
+  return asString(status).trim().toLowerCase().replaceAll("_", "-");
+}
+
+export function formatStatus(status: string | undefined): string {
+  const normalized = normalizeStatus(status);
+  if (!normalized) return "";
+  const labels: Record<string, string> = {
+    ok: "Complete",
+    success: "Complete",
+    fixed: "Fixed",
+    ready: "Ready",
+    done: "Done",
+    finished: "Finished",
+    running: "Running",
+    pending: "Pending",
+    queued: "Queued",
+    waiting: "Waiting",
+    "waiting-approval": "Waiting for approval",
+    "waiting-event": "Waiting for event",
+    "waiting-timer": "Waiting on timer",
+    partial: "Partial",
+    "missing-tests": "Missing e2e",
+    missing: "Missing",
+    broken: "Broken",
+    blocked: "Blocked",
+    failed: "Failed",
+    error: "Error",
+    cancelled: "Cancelled",
+    canceled: "Cancelled",
+    skipped: "Skipped",
+    todo: "Todo",
+    open: "Open",
+    closed: "Closed",
+  };
+  return labels[normalized] ?? normalized.split("-").map((part) => part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part).join(" ");
+}
+
 export function statusClass(status: string | undefined): string {
-  if (status === "fixed" || status === "ready" || status === "done" || status === "finished" || status === "success") return "ok";
-  if (status === "broken" || status === "blocked" || status === "failed" || status === "error") return "bad";
-  if (status === "partial" || status === "missing-tests" || status === "running" || status === "pending") return "warn";
+  const normalized = normalizeStatus(status);
+  if (["fixed", "ready", "done", "finished", "success", "ok", "complete", "completed", "closed"].includes(normalized)) return "ok";
+  if (["broken", "blocked", "failed", "failure", "error"].includes(normalized)) return "bad";
+  if (
+    ["partial", "missing-tests", "missing", "running", "pending", "queued", "waiting", "cancelled", "canceled", "todo", "open"].includes(normalized) ||
+    normalized.startsWith("waiting-")
+  ) return "warn";
   return "muted";
 }
 
 export function fmtTime(ms: number | undefined): string {
   if (!ms || !Number.isFinite(ms)) return "";
   try {
-    return new Date(ms).toLocaleTimeString();
+    return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   } catch {
     return "";
   }
+}
+
+export function normalizeMarkdownForDirty(markdown: string): string {
+  return markdown.replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").trimEnd();
 }
 
 export function makeAssetUrl(assetBase: string | undefined) {
@@ -161,6 +207,20 @@ export async function uploadAsset(assetBase: string, file: File): Promise<string
   return json.url;
 }
 
+function frameEnvelope(frame: EventFrame): { event: string; payload: Record<string, unknown> } | null {
+  const outerPayload = isRecord(frame.payload) ? frame.payload : {};
+  const wrappedEvent = typeof outerPayload.event === "string" ? outerPayload.event : asString(outerPayload.type);
+  if (wrappedEvent) {
+    return {
+      event: wrappedEvent,
+      payload: isRecord(outerPayload.payload) ? outerPayload.payload : outerPayload,
+    };
+  }
+  const event = typeof frame.event === "string" ? frame.event : asString(frame.type);
+  if (!event) return null;
+  return { event, payload: outerPayload };
+}
+
 /**
  * Run-event frames are double-wrapped: the real domain event + data live at
  * `frame.payload.event` / `frame.payload.payload`. The gateway's mapEvent remaps
@@ -170,10 +230,9 @@ export async function uploadAsset(assetBase: string, file: File): Promise<string
  * run.completed/failed/cancelled, approval.*. Match those, not the engine names.
  */
 export function chatLineFromFrame(frame: EventFrame): { who: string; text: string } | null {
-  const env = isRecord(frame.payload) ? frame.payload : undefined;
+  const env = frameEnvelope(frame);
   if (!env) return null;
-  const event = typeof env.event === "string" ? env.event : asString(env.type);
-  const payload = isRecord(env.payload) ? env.payload : env;
+  const { event, payload } = env;
   if (event === "task.output") {
     const text = asString(payload.output);
     if (text.trim()) return { who: asString(payload.nodeId) || "node", text };
@@ -243,10 +302,9 @@ function contentToText(content: unknown): string {
  * activity so the chat panel reads like the agent's actual conversation.
  */
 export function chatLinesFromFrame(frame: EventFrame): ChatLine[] {
-  const env = isRecord(frame.payload) ? frame.payload : undefined;
+  const env = frameEnvelope(frame);
   if (!env) return [];
-  const event = typeof env.event === "string" ? env.event : asString(env.type);
-  const payload = isRecord(env.payload) ? env.payload : env;
+  const { event, payload } = env;
   const lines: ChatLine[] = [];
 
   if (event === "agent.session" || event === "AgentSessionEvent") {
@@ -337,8 +395,7 @@ function normalizeChatText(text: string): string {
  */
 export function buildChatLines(frames: EventFrame[]): ChatLine[] {
   const sessionEventOf = (frame: EventFrame): string => {
-    const env = isRecord(frame.payload) ? frame.payload : undefined;
-    return env ? (typeof env.event === "string" ? env.event : asString(env.type)) : "";
+    return frameEnvelope(frame)?.event ?? "";
   };
   const isSession = (frame: EventFrame): boolean => {
     const event = sessionEventOf(frame);
@@ -382,11 +439,10 @@ export function buildChatLines(frames: EventFrame[]): ChatLine[] {
  * --interactive` style feed). Renders every public event, not just agent text.
  */
 export function logLineFromFrame(frame: EventFrame): { seq: number; event: string; node: string; detail: string } | null {
-  const env = isRecord(frame.payload) ? frame.payload : undefined;
+  const env = frameEnvelope(frame);
   if (!env) return null;
-  const event = typeof env.event === "string" ? env.event : asString(env.type);
+  const { event, payload } = env;
   if (!event || event === "run.heartbeat" || event === "task.heartbeat") return null;
-  const payload = isRecord(env.payload) ? env.payload : env;
   const node = asString(payload.nodeId ?? payload.node ?? payload.id);
   const trace = isRecord(payload.trace) ? payload.trace : undefined;
   const tracePayload = trace && isRecord(trace.payload) ? trace.payload : undefined;
@@ -506,8 +562,15 @@ export function MarkdownEditor({
           }
         : {},
     });
+    const initialMarkdown = normalizeMarkdownForDirty(initialValue);
+    let ignoredInitialMarkdown = false;
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown) => {
+        if (!ignoredInitialMarkdown && normalizeMarkdownForDirty(markdown) === initialMarkdown) {
+          ignoredInitialMarkdown = true;
+          return;
+        }
+        ignoredInitialMarkdown = true;
         onChangeRef.current(markdown);
       });
     });
@@ -651,7 +714,7 @@ export function CapabilityBlock({ capabilities }: { capabilities?: FeatureCapabi
           <div className="cap" key={`cap:${index}`}>
             <div className="cap-head">
               <span className="cap-title">{cap.title}</span>
-              {cap.status ? <span className={`badge ${statusClass(cap.status)}`}>{statusLabels[cap.status] ?? cap.status}</span> : null}
+              {cap.status ? <span className={`badge ${statusClass(cap.status)}`}>{statusLabels[cap.status] ?? formatStatus(cap.status)}</span> : null}
             </div>
             <p>{cap.detail}</p>
           </div>
@@ -671,7 +734,7 @@ export function EndpointBlock({ endpoints, onOpenDoc }: { endpoints?: FeatureEnd
         {eps.map((ep, index) => (
           <li key={`ep:${index}`}>
             <code className="endpoint">{ep.method} {ep.path}</code>
-            {ep.note ? <span className="endpoint-note"> — {ep.note}</span> : null}
+            {ep.note ? <span className="endpoint-note">({ep.note})</span> : null}
             {ep.doc ? (
               <button type="button" className="doc-link" onClick={() => onOpenDoc?.(ep.doc!)}>docs ↗</button>
             ) : null}
@@ -762,7 +825,7 @@ export function OutputCard({ label, row, pending = "waiting" }: { label: string;
     <section className="card" data-testid={testId}>
       <div className="card-head">
         <h2>{label}</h2>
-        <span className={`badge ${statusClass(status)}`}>{status}</span>
+        <span className={`badge ${statusClass(status)}`}>{formatStatus(status)}</span>
       </div>
       <p>{summary}</p>
     </section>
@@ -795,16 +858,16 @@ export const styles = [
     " --hover:#26262b; --hover-subtle:rgba(255,255,255,0.05); --inverse-bg:#f4f4f5; --inverse-text:#0a0a0a;" +
     " --code-bg:#09090b; --code-text:#e4e4e7; --brand:#8b78e6; --success:#2ec9a8; --danger:#f2555a; --warning:#e0a23a; --shadow-rgb:0 0 0; }",
   "* { box-sizing:border-box; }",
-  "body { margin:0; background:var(--bg); color:var(--text); font-size:13px; }",
+  "body { margin:0; background:var(--bg); color:var(--text); font-size:13px; overflow:hidden; }",
   "button { font:inherit; }",
-  ".shell { height:100vh; display:grid; grid-template-rows:auto auto 1fr; }",
-  ".top { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border-bottom:1px solid var(--border); background:var(--surface-glass-strong); -webkit-backdrop-filter:blur(18px) saturate(180%); backdrop-filter:blur(18px) saturate(180%); }",
-  ".title { display:flex; align-items:center; gap:12px; min-width:0; }",
-  "h1 { margin:0; font-size:15px; font-weight:650; }",
+  ".shell { height:100vh; width:100%; max-width:100vw; overflow:hidden; display:grid; grid-template-rows:auto auto 1fr; }",
+  ".top { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border-bottom:1px solid var(--border); background:var(--surface-glass-strong); -webkit-backdrop-filter:blur(18px) saturate(180%); backdrop-filter:blur(18px) saturate(180%); }",
+  ".title { display:flex; align-items:center; gap:12px; min-width:0; flex:1 1 auto; }",
+  "h1 { margin:0; font-size:15px; font-weight:650; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
   "h2 { margin:0; font-size:12px; font-weight:650; }",
   "p { margin:0; color:var(--muted); line-height:1.45; }",
   ".eyebrow { display:block; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }",
-  ".pill,.badge { display:inline-flex; align-items:center; min-height:22px; padding:1px 10px; border:1px solid var(--border); border-radius:999px; font-size:11px; color:var(--text-muted); font-family:ui-monospace,monospace; white-space:nowrap; }",
+  ".pill,.badge { display:inline-flex; align-items:center; min-width:0; max-width:100%; min-height:22px; padding:1px 10px; border:1px solid var(--border); border-radius:999px; font-size:11px; color:var(--text-muted); font-family:ui-monospace,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }",
   ".pill { border-color:color-mix(in srgb,var(--brand) 22%,transparent); background:color-mix(in srgb,var(--brand) 14%,transparent); color:var(--brand); }",
   ".badge { text-transform:uppercase; font-family:inherit; font-weight:650; }",
   ".badge.ok { color:var(--ok); border-color:color-mix(in srgb,var(--ok),transparent 45%); }",
@@ -818,14 +881,14 @@ export const styles = [
   ".button.primary:focus-visible { outline:none; box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 25%,transparent); }",
   ".button:disabled { cursor:not-allowed; opacity:.45; }",
   ".icon-button { width:32px; min-height:32px; padding:0; border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:6px; cursor:pointer; }",
-  ".tabbar { display:flex; align-items:center; gap:6px; padding:8px 14px; border-bottom:1px solid var(--border); background:var(--surface); }",
-  ".tab { border:1px solid transparent; background:transparent; color:var(--muted); border-radius:6px; min-height:30px; padding:0 12px; cursor:pointer; font-weight:650; display:inline-flex; align-items:center; gap:7px; }",
+  ".tabbar { min-width:0; display:flex; align-items:center; gap:6px; padding:8px 14px; border-bottom:1px solid var(--border); background:var(--surface); overflow-x:auto; scrollbar-width:thin; }",
+  ".tab { flex:0 0 auto; border:1px solid transparent; background:transparent; color:var(--muted); border-radius:6px; min-height:30px; padding:0 12px; cursor:pointer; font-weight:650; display:inline-flex; align-items:center; gap:7px; }",
   ".tab:hover { color:var(--text); }",
   ".tab.is-active { background:color-mix(in srgb,var(--brand) 12%,transparent); border-color:color-mix(in srgb,var(--brand) 30%,transparent); color:var(--brand); }",
   ".tab .count { font-family:ui-monospace,monospace; font-size:10px; color:var(--muted); }",
-  ".content { min-height:0; overflow:hidden; }",
+  ".content { min-width:0; min-height:0; overflow:hidden; }",
   ".content > [hidden] { display:none; }",
-  ".pane { height:100%; min-height:0; }",
+  ".pane { height:100%; min-width:0; min-height:0; }",
   // Specs tab
   ".specs { height:100%; display:grid; grid-template-columns:minmax(220px,260px) minmax(0,1fr); min-height:0; }",
   ".specs-tree { border-right:1px solid var(--border); min-height:0; height:100%; overflow:auto; background:var(--surface); }",
@@ -839,33 +902,38 @@ export const styles = [
   ".tree-file:hover { background:var(--hover); }",
   ".tree-file.is-active { background:color-mix(in srgb,var(--blue) 16%,transparent); border-color:color-mix(in srgb,var(--blue) 35%,transparent); color:var(--text); }",
   ".specs-main { min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr) auto; }",
-  ".editor-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-bottom:1px solid var(--border); background:var(--surface); }",
+  ".editor-bar { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-bottom:1px solid var(--border); background:var(--surface); }",
+  ".editor-title { min-width:0; display:flex; align-items:center; gap:8px; }",
   ".editor-bar .path { font-family:ui-monospace,monospace; font-size:12px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
-  ".dispatch-actions { display:flex; align-items:center; gap:8px; }",
+  ".dispatch-actions { display:flex; align-items:center; gap:8px; min-width:0; }",
   ".crepe-host { min-height:0; overflow:auto; }",
   ".crepe-host .milkdown { height:100%; }",
   ".empty { padding:24px; }",
   ".meta-status { display:flex; align-items:center; gap:10px; padding:10px 14px; border-top:1px solid var(--line); color:var(--muted); }",
   // generic scroll column
-  ".scroll { height:100%; overflow:auto; padding:14px; display:grid; align-content:start; gap:12px; }",
-  ".card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px; display:grid; gap:8px; box-shadow:0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 8px 24px rgb(var(--shadow-rgb) / 0.06); }",
-  ".card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }",
+  ".scroll { height:100%; min-width:0; overflow:auto; padding:14px; display:grid; align-content:start; gap:12px; }",
+  ".card { min-width:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; display:grid; gap:8px; box-shadow:0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 8px 24px rgb(var(--shadow-rgb) / 0.06); }",
+  ".card-head { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; }",
   ".stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }",
-  ".stat { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px; text-align:left; cursor:default; }",
+  ".stat { min-width:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px; text-align:left; cursor:default; }",
   ".stat strong { display:block; font-size:18px; }",
   ".stat span { color:var(--muted); font-size:11px; }",
   ".grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:start; }",
   // audit findings
-  ".finding { display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid var(--border); border-radius:10px; padding:9px 11px; background:var(--surface); cursor:pointer; text-align:left; color:var(--text); width:100%; transition:border-color .12s ease, background .12s ease; }",
+  ".finding { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid var(--border); border-radius:8px; padding:9px 11px; background:var(--surface); cursor:pointer; text-align:left; color:var(--text); width:100%; transition:border-color .12s ease, background .12s ease; }",
   ".finding:hover { background:var(--hover); border-color:var(--border-strong); }",
   ".finding .fid { font-family:ui-monospace,monospace; font-size:12px; }",
   ".status-counts { display:flex; flex-wrap:wrap; gap:6px; }",
+  ".filters { display:grid; grid-template-columns:minmax(180px,1fr) repeat(2,minmax(150px,auto)) auto; gap:8px; align-items:end; min-width:0; }",
+  ".filter-field { min-width:0; display:grid; gap:4px; color:var(--text-muted); font-size:11px; font-weight:650; }",
+  ".search-input,.select { min-width:0; width:100%; height:32px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); padding:0 10px; font:inherit; }",
+  ".search-input:focus,.select:focus { outline:none; border-color:color-mix(in srgb,var(--brand) 45%,transparent); box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 20%,transparent); }",
   ".feature-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:8px; }",
-  ".feature-card { border:1px solid var(--border); border-radius:10px; padding:10px; display:grid; gap:7px; background:var(--surface); }",
+  ".feature-card { min-width:0; border:1px solid var(--border); border-radius:8px; padding:10px; display:grid; gap:7px; background:var(--surface); }",
   ".feature-card.is-clickable { cursor:pointer; text-align:left; color:var(--text); width:100%; transition:border-color .12s ease, background .12s ease; }",
   ".feature-card.is-clickable:hover { background:var(--hover); border-color:color-mix(in srgb,var(--brand) 45%,transparent); }",
-  ".feature-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }",
-  ".feature-card-head strong { font-size:12px; }",
+  ".feature-card-head { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:8px; }",
+  ".feature-card-head strong { min-width:0; overflow:hidden; text-overflow:ellipsis; font-size:12px; }",
   ".feature-card-foot { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }",
   ".tier-section { display:grid; gap:10px; }",
   ".tier-head { display:flex; align-items:center; gap:10px; }",
@@ -873,23 +941,25 @@ export const styles = [
   ".tier-blurb { margin-top:-4px; }",
   ".group-block { display:grid; gap:7px; }",
   ".group-title { margin:6px 0 2px; font-size:11px; font-weight:650; color:var(--blue); text-transform:uppercase; letter-spacing:.05em; }",
-  ".feature-media { width:100%; border-radius:10px; border:1px solid var(--border); }",
-  ".slot { border:1px solid var(--border); border-radius:10px; padding:10px; display:grid; gap:7px; background:var(--surface); }",
+  ".feature-media { width:100%; border-radius:8px; border:1px solid var(--border); }",
+  ".slot { min-width:0; border:1px solid var(--border); border-radius:8px; padding:10px; display:grid; gap:7px; background:var(--surface); }",
   ".ticket-row { width:100%; text-align:left; cursor:pointer; color:var(--text); font:inherit; transition:border-color .12s ease, background .12s ease; }",
   ".ticket-row:hover { border-color:var(--border-strong); background:var(--hover); }",
-  ".slot-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }",
-  ".slot-title strong { font-size:12px; }",
-  ".meta-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }",
+  ".slot-title { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:8px; }",
+  ".slot-title strong { min-width:0; overflow:hidden; text-overflow:ellipsis; font-size:12px; }",
+  ".meta-row { min-width:0; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }",
+  ".meta-row > .pill,.meta-row > .badge { min-width:0; max-width:100%; }",
+  ".ticket-path { max-width:min(100%, 52ch); }",
   ".audit-note { color:var(--warn); }",
-  ".code { display:block; overflow:auto; white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:11px; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:9px; }",
-  ".source { display:block; max-height:480px; overflow:auto; white-space:pre; font-family:ui-monospace,monospace; font-size:11px; line-height:1.5; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:12px; }",
+  ".code { display:block; min-width:0; overflow:auto; white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:11px; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:9px; }",
+  ".source { display:block; min-width:0; max-width:100%; max-height:480px; overflow:auto; white-space:pre; font-family:ui-monospace,monospace; font-size:11px; line-height:1.5; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:12px; }",
   ".list-block { display:grid; gap:6px; }",
   ".list-block strong { color:var(--text); font-size:12px; }",
   "ul { margin:0; padding-left:18px; color:var(--muted); line-height:1.45; }",
   ".user-value { color:var(--text); }",
   ".user-value strong { color:var(--blue); }",
   ".cap-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px; }",
-  ".cap { border:1px solid var(--border); border-radius:10px; padding:9px 10px; background:var(--surface); display:grid; gap:5px; }",
+  ".cap { min-width:0; border:1px solid var(--border); border-radius:8px; padding:9px 10px; background:var(--surface); display:grid; gap:5px; }",
   ".cap-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }",
   ".cap-title { color:var(--text); font-weight:650; font-size:12px; }",
   ".endpoint-list { list-style:none; padding-left:0; display:grid; gap:5px; }",
@@ -899,21 +969,21 @@ export const styles = [
   ".doc-link { border:1px solid color-mix(in srgb,var(--blue),transparent 55%); background:transparent; color:var(--blue); border-radius:6px; padding:1px 8px; font-size:11px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; }",
   ".doc-link:hover { background:color-mix(in srgb,var(--blue) 14%, transparent); }",
   // live tab
-  ".live { height:100%; display:grid; grid-template-columns:minmax(240px,300px) minmax(0,1fr); min-height:0; }",
-  ".runlist { border-right:1px solid var(--border); min-height:0; height:100%; overflow:auto; padding:10px; display:grid; align-content:start; gap:6px; background:var(--surface); }",
-  ".run-row { border:1px solid var(--border); border-radius:10px; padding:8px 10px; background:var(--surface); cursor:pointer; display:grid; gap:4px; text-align:left; color:var(--text); width:100%; transition:border-color .12s ease, background .12s ease; }",
+  ".live { height:100%; min-width:0; display:grid; grid-template-columns:minmax(240px,300px) minmax(0,1fr); min-height:0; }",
+  ".runlist { min-width:0; border-right:1px solid var(--border); min-height:0; height:100%; overflow:auto; padding:10px; display:grid; align-content:start; gap:6px; background:var(--surface); }",
+  ".run-row { min-width:0; border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--surface); cursor:pointer; display:grid; gap:4px; text-align:left; color:var(--text); width:100%; transition:border-color .12s ease, background .12s ease; }",
   ".run-row:hover { background:var(--hover); }",
   ".run-row.is-active { border-color:color-mix(in srgb,var(--brand) 40%,transparent); background:color-mix(in srgb,var(--brand) 8%,var(--surface)); }",
   ".run-row .rid { font-family:ui-monospace,monospace; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
-  ".livelog { max-height:340px; overflow:auto; background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:8px; font-family:ui-monospace,monospace; font-size:11px; line-height:1.55; }",
+  ".livelog { max-height:340px; overflow:auto; background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:8px; font-family:ui-monospace,monospace; font-size:11px; line-height:1.55; }",
   ".livelog-line { display:flex; gap:8px; padding:1px 0; white-space:pre-wrap; word-break:break-word; }",
   ".livelog-event { color:var(--blue); flex:none; }",
   ".livelog-node { color:var(--warn); flex:none; }",
   ".livelog-detail { color:var(--code-text); min-width:0; }",
   ".chat { display:grid; gap:8px; }",
-  ".chat-line { border:1px solid var(--border); border-left:3px solid var(--border-strong); border-radius:10px; padding:8px 10px; background:var(--surface); }",
+  ".chat-line { min-width:0; border:1px solid var(--border); border-left:3px solid var(--border-strong); border-radius:8px; padding:8px 10px; background:var(--surface); }",
   ".chat-line .who { color:var(--blue); font-family:ui-monospace,monospace; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }",
-  ".chat-line pre { margin:4px 0 0; white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:11px; color:var(--text); }",
+  ".chat-line pre { margin:4px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; font-family:ui-monospace,monospace; font-size:11px; color:var(--text); }",
   // Tint the accent + who-label by role/kind so assistant turns read distinctly
   // from the user, raw node output, and reasoning. Tokens keep light/dark safe.
   ".chat-line.chat-role-assistant { border-left-color:var(--brand); }",
@@ -931,8 +1001,14 @@ export const styles = [
   ".nodetree li { margin:4px 0; }",
   ".nodetree .node-row { display:flex; align-items:center; gap:8px; }",
   ".nodetree .node-name { color:var(--text); }",
-  ".modal-backdrop { position:fixed; inset:0; background:rgb(var(--shadow-rgb) / 0.5); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px); display:grid; place-items:center; padding:20px; z-index:60; }",
-  ".modal { width:min(760px,100%); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:18px; display:grid; gap:13px; box-shadow:0 24px 80px rgb(var(--shadow-rgb) / 0.2); }",
-  ".modal-head { display:flex; align-items:start; justify-content:space-between; gap:12px; }",
-  "@media (max-width: 980px) { .specs,.live { grid-template-columns:1fr; } }",
+  ".ticket-detail-body { display:grid; gap:10px; }",
+  ".ticket-section { display:grid; gap:6px; }",
+  ".ticket-section h3 { margin:0; font-size:12px; }",
+  ".modal-backdrop { position:fixed; inset:0; background:rgb(var(--shadow-rgb) / 0.5); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px); display:grid; place-items:center; padding:20px; z-index:60; overflow:hidden; }",
+  ".modal { width:min(760px,calc(100vw - 40px)); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; display:grid; gap:13px; box-shadow:0 24px 80px rgb(var(--shadow-rgb) / 0.2); }",
+  ".modal-head { min-width:0; display:flex; align-items:start; justify-content:space-between; gap:12px; }",
+  ".modal-head > div { min-width:0; }",
+  ".modal-head h2 { overflow-wrap:anywhere; }",
+  "@media (max-width: 980px) { .specs,.live { grid-template-columns:1fr; } .specs-tree,.runlist { border-right:0; border-bottom:1px solid var(--border); max-height:220px; } }",
+  "@media (max-width: 620px) { .shell { height:100dvh; } .top { align-items:flex-start; flex-wrap:wrap; padding:10px 12px; gap:10px; } .title { flex-wrap:wrap; gap:8px; } h1 { width:100%; } .actions { width:100%; justify-content:flex-start; } .tabbar { padding:8px 10px; } .scroll { padding:10px; } .card { padding:12px; } .card-head { align-items:flex-start; flex-wrap:wrap; } .stats,.grid2 { grid-template-columns:1fr; } .feature-grid,.cap-grid { grid-template-columns:minmax(0,1fr); } .filters { grid-template-columns:1fr; } .editor-bar { align-items:flex-start; flex-wrap:wrap; } .editor-title { width:100%; } .dispatch-actions { width:100%; display:grid; grid-template-columns:1fr; } .button { width:100%; } .specs-tree,.runlist { max-height:190px; } .slot-title { align-items:flex-start; } .modal-backdrop { padding:10px; place-items:start center; } .modal { width:calc(100vw - 20px); max-height:calc(100dvh - 20px); padding:14px; } }",
 ].join("\n");

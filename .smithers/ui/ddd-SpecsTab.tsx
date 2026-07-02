@@ -35,7 +35,14 @@ export function SpecsTab(props: SpecsTabProps) {
       </div>
       <div className="specs-main">
         <div className="editor-bar">
-          <span className="path">{selectedDoc?.path ?? "No spec selected"}</span>
+          <div className="editor-title">
+            <span className="path">{selectedDoc?.path ?? "No spec selected"}</span>
+            {selectedDoc ? (
+              <span className={`badge ${currentDirty ? "warn" : "muted"}`}>
+                {currentDirty ? "Unsaved" : "Clean"}
+              </span>
+            ) : null}
+          </div>
           <div className="dispatch-actions">
             <button
               className="button"
