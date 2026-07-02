@@ -263,7 +263,7 @@ For each one, cd into the project directory (projects live under $HOME, e.g. /Us
 - Orphaned run (no heartbeat) with activity in the last 24h → resume it detached: \`smithers up <workflow file> --run-id <id> --resume true --force true --detach\`. If resume fails with RESUME_METADATA_MISMATCH, report it — do NOT delete or recreate anything.
 - Stale/orphaned run with NO activity for over 24h → abandoned debris: \`smithers cancel <runId>\`. NEVER resume anything idle for more than 24h; resurrecting old builds burns agents on dead work.
 - Stale leftover probe/test runs (e2e-*-probe, *-smoke leftovers superseded by a newer run) → \`smithers cancel <runId>\`.
-- A run waiting on an approval or human question → do NOT decide it; list it in escalatedToHuman with the question.
+- A run waiting on an approval or human question → do NOT decide it; list it in escalatedToHuman with the question. Exception: if \`smithers ps\` shows that run's status as cancelled/finished, the gate is a stale projection (smithersai/smithers#487) — ignore it entirely, do not escalate.
 NEVER: cancel a run doing real work, push/publish anything, edit workflow source files, or approve/deny gates. When unsure, escalate instead of acting.
 
 Verify each remediation took effect (\`smithers ps\`) and report actionsTaken with results.`}
