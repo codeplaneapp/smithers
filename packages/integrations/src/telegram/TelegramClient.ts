@@ -115,4 +115,14 @@ export type TelegramClientService = {
     callbackQueryId: string,
     options?: { text?: string; showAlert?: boolean },
   ) => Effect.Effect<unknown, SmithersError>;
+  /**
+   * Answer a Mini App inline query: post the `result` back to the chat on the
+   * user's behalf and close the Mini App. `webAppQueryId` is the `query_id`
+   * from a Mini App launched by an inline-keyboard `web_app` button. `result`
+   * is a Bot API `InlineQueryResult`. Returns the `SentWebAppMessage`.
+   */
+  answerWebAppQuery: (
+    webAppQueryId: string,
+    result: Record<string, unknown>,
+  ) => Effect.Effect<unknown, SmithersError>;
 };

@@ -55,3 +55,20 @@ export const TelegramCallbackQuerySchema = z
     message: TelegramMessageSchema.optional(),
 })
     .passthrough();
+
+/** The `web_app_data` field of a message from a reply-keyboard Mini App's `sendData`. */
+export const TelegramWebAppDataSchema = z
+    .object({
+    data: z.string(),
+    button_text: z.string().optional(),
+})
+    .passthrough();
+
+/**
+ * Payload delivered for `integration:telegram:web_app_data`: the Message that
+ * carries the `web_app_data` field (untrusted `data`, but the sender is
+ * Telegram-guaranteed).
+ */
+export const TelegramWebAppDataMessageSchema = TelegramMessageSchema.extend({
+    web_app_data: TelegramWebAppDataSchema.optional(),
+});

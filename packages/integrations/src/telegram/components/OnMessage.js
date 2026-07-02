@@ -9,8 +9,8 @@
  */
 // @smithers-type-exports-end
 
-import { TelegramCallbackQuerySchema, TelegramMessageSchema } from "../schemas.js";
-import { TELEGRAM_CALLBACK_QUERY_EVENT, TELEGRAM_EDITED_MESSAGE_EVENT, TELEGRAM_MESSAGE_EVENT } from "../TelegramSource.js";
+import { TelegramCallbackQuerySchema, TelegramMessageSchema, TelegramWebAppDataMessageSchema } from "../schemas.js";
+import { TELEGRAM_CALLBACK_QUERY_EVENT, TELEGRAM_EDITED_MESSAGE_EVENT, TELEGRAM_MESSAGE_EVENT, TELEGRAM_WEB_APP_DATA_EVENT } from "../TelegramSource.js";
 import { renderTelegramListener } from "./listenerInternals.js";
 
 /**
@@ -37,4 +37,18 @@ export function OnMessage(props) {
  */
 export function OnCallbackQuery(props) {
     return renderTelegramListener(TELEGRAM_CALLBACK_QUERY_EVENT, props, props.schema ?? TelegramCallbackQuerySchema);
+}
+
+/**
+ * Durable wait for structured data from a reply-keyboard Mini App
+ * (`Telegram.WebApp.sendData`), which arrives as a message carrying a
+ * `web_app_data` field. Renders `smithers:wait-for-event` on
+ * `integration:telegram:web_app_data`; children receive the zod-parsed Message,
+ * whose `web_app_data.data` holds the payload the Mini App sent.
+ *
+ * @template {import("zod").ZodTypeAny} Schema
+ * @param {OnMessageProps<Schema>} props
+ */
+export function OnWebAppData(props) {
+    return renderTelegramListener(TELEGRAM_WEB_APP_DATA_EVENT, props, props.schema ?? TelegramWebAppDataMessageSchema);
 }
