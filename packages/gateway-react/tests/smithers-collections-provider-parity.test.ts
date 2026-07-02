@@ -44,6 +44,20 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function removeSqliteFile(path: string) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      rmSync(path, { force: true });
+      return;
+    } catch (error: any) {
+      if (process.platform !== "win32" || !["EBUSY", "EPERM"].includes(error?.code) || attempt === 29) {
+        throw error;
+      }
+      await sleep(100);
+    }
+  }
+}
+
 async function waitFor(assertion: () => void | boolean | Promise<void | boolean>, timeoutMs = 5_000) {
   const started = Date.now();
   let lastError: unknown;
@@ -72,20 +86,6 @@ function makeDbPath(name: string) {
   return join(tmpdir(), `smithers-collections-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
-async function removeSqliteFiles(dbPath: string) {
-  for (const target of [dbPath, `${dbPath}-shm`, `${dbPath}-wal`]) {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      try {
-        rmSync(target, { force: true });
-        break;
-      } catch {
-        if (attempt === 5) break;
-        await sleep(50);
-      }
-    }
-  }
-}
-
 async function createApi(backend: Backend) {
   const schemas = {
     result: z.object({ value: z.number() }),
@@ -95,11 +95,10 @@ async function createApi(backend: Backend) {
     const dbPath = makeDbPath("sqlite");
     const api = createSmithers(schemas, { dbPath });
     cleanups.push(async () => {
-      api.db.$client?.close?.();
-      // bun:sqlite does not release the file lock synchronously after close()
-      // on Windows, so a same-tick rm throws EBUSY and fails the just-finished
-      // test. These are throwaway tmpdir files — retry briefly, then give up.
-      await removeSqliteFiles(dbPath);
+      await api.db.$client?.close?.();
+      await removeSqliteFile(dbPath);
+      await removeSqliteFile(`${dbPath}-shm`);
+      await removeSqliteFile(`${dbPath}-wal`);
     });
     return api;
   }
