@@ -11,7 +11,7 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
 
 export default smithers(() => (
   <Workflow name="fail-probe">
-    <Task id="boom" output={outputs.out}>
+    <Task id="boom" output={outputs.out} retries={0}>
       {() => {
         throw new Error("fail-probe: intentional failure to exercise the post-failure auto-trigger");
       }}
