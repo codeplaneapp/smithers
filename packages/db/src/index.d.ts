@@ -1,11 +1,12 @@
 import * as zod from 'zod';
-import { z } from 'zod';
+import { z as z$1 } from 'zod';
 import * as drizzle_orm from 'drizzle-orm';
 import { Table as Table$1, and } from 'drizzle-orm';
-import * as _smithers_errors_SmithersError from '@smithers-orchestrator/errors/SmithersError';
+import * as _smithers_orchestrator_errors_SmithersError from '@smithers-orchestrator/errors/SmithersError';
 import { SmithersError as SmithersError$2 } from '@smithers-orchestrator/errors/SmithersError';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
 import { Database } from 'bun:sqlite';
+import { ManagedRuntime, Effect } from 'effect';
 import * as SqlClient from '@effect/sql/SqlClient';
 import { SqlError } from '@effect/sql/SqlError';
 import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
@@ -14,21 +15,6 @@ type SchemaRegistryEntry$1 = {
     table: Table$1;
     zodSchema: zod.ZodObject;
 };
-
-type Dialect = "sqlite" | "postgres";
-declare const SQLITE: "sqlite";
-declare const POSTGRES: "postgres";
-declare function isDialect(value: unknown): value is Dialect;
-declare function quoteIdentifier(identifier: string): string;
-declare function translatePlaceholders(dialect: Dialect, sql: string): string;
-declare function columnType(dialect: Dialect, sqliteType: string): string;
-declare function translateDdl(dialect: Dialect, ddl: string): string;
-declare function tableColumnsSql(dialect: Dialect, table: string): {
-    sql: string;
-    params: ReadonlyArray<string>;
-};
-declare function beginTransactionSql(dialect: Dialect): string;
-declare function jsonExtractText(dialect: Dialect, columnSql: string, jsonPath: string): string;
 
 type SignalQuery$1 = {
     signalName?: string;
@@ -222,6 +208,109 @@ type SqlMessageStorageEventHistoryQuery$1 = {
 };
 
 /**
+ * @param {string} identifier
+ * @returns {string}
+ */
+declare function quoteIdentifier(identifier: string): string;
+/**
+ * Rewrite positional `?` placeholders to PostgreSQL's `$1, $2, …`. SQLite keeps
+ * `?`. A `?` inside a string literal, quoted identifier, or comment is left
+ * untouched so only real placeholders are renumbered.
+ *
+ * @param {Dialect} dialect
+ * @param {string} sql
+ * @returns {string}
+ */
+declare function translatePlaceholders(dialect: Dialect, sql: string): string;
+/**
+ * Map a single SQLite column type keyword (`INTEGER`, `REAL`, `BLOB`, `TEXT`) to
+ * the dialect equivalent. Used by the Zod→DDL generator for schema-derived
+ * columns such as `INTEGER`, `REAL`, and `TEXT`.
+ *
+ * @param {Dialect} dialect
+ * @param {string} sqliteType
+ * @returns {string}
+ */
+declare function columnType(dialect: Dialect, sqliteType: string): string;
+/**
+ * Translate a complete `CREATE TABLE`/`CREATE INDEX` statement written in SQLite
+ * DDL to the target dialect. Only the controlled, internal Smithers DDL passes
+ * through here (no user-supplied text), so keyword-level regex substitution is
+ * safe. Order matters: the autoincrement primary key is rewritten before the
+ * blanket `INTEGER → BIGINT` so it is not double-translated.
+ *
+ * @param {Dialect} dialect
+ * @param {string} ddl
+ * @returns {string}
+ */
+declare function translateDdl(dialect: Dialect, ddl: string): string;
+/**
+ * The statement that begins a write transaction. SQLite takes the write lock
+ * eagerly with `BEGIN IMMEDIATE`; PostgreSQL uses a plain `BEGIN`.
+ *
+ * @param {Dialect} dialect
+ * @returns {string}
+ */
+declare function beginTransactionSql(dialect: Dialect): string;
+/**
+ * A scalar SQL expression extracting a top-level string field from a JSON column
+ * stored as TEXT. SQLite uses `json_extract(col, '$.key')`; PostgreSQL casts to
+ * `json` and uses the `->>` operator. Only simple top-level paths (`$.key`) are
+ * used in Smithers' queries.
+ *
+ * @param {Dialect} dialect
+ * @param {string} columnSql Already-quoted/qualified column expression.
+ * @param {string} jsonPath SQLite-style path, e.g. `$.nodeId`.
+ * @returns {string}
+ */
+declare function jsonExtractText(dialect: Dialect, columnSql: string, jsonPath: string): string;
+/**
+ * SQL dialect seam for the Smithers persistence layer.
+ *
+ * Smithers' storage was authored against SQLite (bun:sqlite). This module is the
+ * single source of truth for the handful of places where SQLite and PostgreSQL
+ * SQL diverge, so the same hand-written SQL the adapter emits can run unchanged
+ * against either backend:
+ *
+ *   - placeholder style: SQLite `?` vs PostgreSQL `$1, $2, …`
+ *   - DDL types: SQLite's permissive `INTEGER`/`REAL`/`BLOB` vs PostgreSQL's
+ *     stricter `BIGINT`/`DOUBLE PRECISION`/`BYTEA` (millisecond timestamps stored
+ *     in `INTEGER` overflow PostgreSQL's 32-bit `integer`, hence `BIGINT`)
+ *   - autoincrement: `INTEGER PRIMARY KEY AUTOINCREMENT` vs `BIGSERIAL PRIMARY KEY`
+ *   - schema introspection: `PRAGMA table_info` vs `information_schema.columns`
+ *   - transaction start: `BEGIN IMMEDIATE` (SQLite write-lock) vs `BEGIN`
+ *
+ * Identifier quoting (`"x"`), `ON CONFLICT … DO UPDATE SET … = excluded.…`, and
+ * `CREATE TABLE/INDEX IF NOT EXISTS` are already standard across both dialects,
+ * so they need no translation.
+ *
+ * @typedef {"sqlite" | "postgres"} Dialect
+ */
+declare const SQLITE: "sqlite";
+declare const POSTGRES: "postgres";
+/**
+ * SQL dialect seam for the Smithers persistence layer.
+ *
+ * Smithers' storage was authored against SQLite (bun:sqlite). This module is the
+ * single source of truth for the handful of places where SQLite and PostgreSQL
+ * SQL diverge, so the same hand-written SQL the adapter emits can run unchanged
+ * against either backend:
+ *
+ *   - placeholder style: SQLite `?` vs PostgreSQL `$1, $2, …`
+ *   - DDL types: SQLite's permissive `INTEGER`/`REAL`/`BLOB` vs PostgreSQL's
+ *     stricter `BIGINT`/`DOUBLE PRECISION`/`BYTEA` (millisecond timestamps stored
+ *     in `INTEGER` overflow PostgreSQL's 32-bit `integer`, hence `BIGINT`)
+ *   - autoincrement: `INTEGER PRIMARY KEY AUTOINCREMENT` vs `BIGSERIAL PRIMARY KEY`
+ *   - schema introspection: `PRAGMA table_info` vs `information_schema.columns`
+ *   - transaction start: `BEGIN IMMEDIATE` (SQLite write-lock) vs `BEGIN`
+ *
+ * Identifier quoting (`"x"`), `ON CONFLICT … DO UPDATE SET … = excluded.…`, and
+ * `CREATE TABLE/INDEX IF NOT EXISTS` are already standard across both dialects,
+ * so they need no translation.
+ */
+type Dialect = "sqlite" | "postgres";
+
+/**
  * @param {BunSQLiteDatabase<any> | Database} db
  * @returns {SqlMessageStorage}
  */
@@ -238,11 +327,18 @@ declare function ensureSqlMessageStorageEffect(db: BunSQLiteDatabase$3<any> | Da
 declare function ensureSqlMessageStorage(db: BunSQLiteDatabase$3<any> | Database): Promise<void>;
 declare class SqlMessageStorage {
     /**
-   * @param {BunSQLiteDatabase<any> | Database} db
+   * @param {BunSQLiteDatabase<any> | Database | { dialect: "postgres"; connection: object }} db
    */
-    constructor(db: BunSQLiteDatabase$3<any> | Database);
-    sqlite: Database;
-    runtime: any;
+    constructor(db: BunSQLiteDatabase$3<any> | Database | {
+        dialect: "postgres";
+        connection: object;
+    });
+    sqlite: Database | null;
+    /** @type {import("./dialect.js").Dialect} */
+    dialect: Dialect;
+    /** @type {object | null} */
+    pgConn: object | null;
+    runtime: ManagedRuntime.ManagedRuntime<SqlClient.SqlClient, never>;
     tableColumnsCache: Map<any, any>;
     /**
    * @param {string} table
@@ -295,6 +391,23 @@ declare class SqlMessageStorage {
     queryOne<T>(statement: string, params?: ReadonlyArray<SqliteParam>, options?: {
         booleanColumns?: readonly string[];
     }): Promise<T | undefined>;
+    /**
+   * Like {@link queryAll} but returns rows with their on-disk column names (no
+   * snake→camel transform). Used for "raw" output-table reads where callers
+   * expect the storage column names verbatim.
+   * @template T
+   * @param {string} statement
+   * @param {ReadonlyArray<SqliteParam>} [params]
+   * @returns {Promise<Array<T>>}
+   */
+    queryAllRaw<T>(statement: string, params?: ReadonlyArray<SqliteParam>): Promise<Array<T>>;
+    /**
+   * @template T
+   * @param {string} statement
+   * @param {ReadonlyArray<SqliteParam>} [params]
+   * @returns {Promise<T | undefined>}
+   */
+    queryOneRaw<T>(statement: string, params?: ReadonlyArray<SqliteParam>): Promise<T | undefined>;
     /**
    * @param {string} statement
    * @param {ReadonlyArray<SqliteParam>} [params]
@@ -376,6 +489,7 @@ type SqliteParam = string | number | bigint | boolean | Uint8Array | null | unde
 /** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
 /** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
+/** @typedef {import("drizzle-orm").Table} Table */
 /** @typedef {import("./adapter/EventHistoryQuery.ts").EventHistoryQuery} EventHistoryQuery */
 /** @typedef {import("./adapter/HumanRequestRow.ts").HumanRequestRow} HumanRequestRow */
 /** @typedef {import("./output/OutputKey.ts").OutputKey} OutputKey */
@@ -674,7 +788,13 @@ declare class SmithersDb {
    * @param {number} iteration
    * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
    */
-    getRawNodeOutputForIteration(tableName: string, runId: string, nodeId: string, iteration: number): RunnableEffect<Record<string, unknown> | null, SmithersError$1>;
+    /**
+   * Whether a physical table with this exact name exists in the database.
+   * @param {string} tableName
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    hasPhysicalTable(tableName: string): RunnableEffect<boolean, SmithersError$1>;
+    getRawNodeOutputForIteration(tableName: any, runId: any, nodeId: any, iteration: any): RunnableEffect<Record<string, unknown> | null, never>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
@@ -909,28 +1029,55 @@ declare class SmithersDb {
    */
     listToolCalls(runId: string, nodeId: string, iteration: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
+   * Record a distinct working-copy state (deduped by jj commit id). Upsert so a
+   * re-snapshot of the same tree refreshes the operation handle.
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertWorkspaceState(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listWorkspaceStates(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
+   * Record a snapshot checkpoint event. One row per tool/watch boundary; never
+   * deduped, so a Tier 1 boundary always has a seq to bind a resume to.
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    insertWorkspaceCheckpoint(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listWorkspaceCheckpoints(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
+   * Prune old workspace states for a run, keeping the most recent maxKeep by
+   * created_at_ms. The latest rows are always kept. Row-value NOT IN avoids the
+   * string-concat collision a naive key would have; portable to SQLite + Postgres.
+   * @param {string} runId
+   * @param {number} [maxKeep]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    pruneWorkspaceStates(runId: string, maxKeep?: number): RunnableEffect<void, SmithersError$1>;
+    /**
+   * Prune old workspace checkpoints, keeping the most recent maxKeepPerScope per
+   * (node_id, iteration, attempt) via a window function. The latest checkpoint per
+   * scope is always kept, so resume-restore targets survive.
+   * @param {string} runId
+   * @param {number} [maxKeepPerScope]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    pruneWorkspaceCheckpoints(runId: string, maxKeepPerScope?: number): RunnableEffect<void, SmithersError$1>;
+    /**
+   * Upsert a DB-backed markdown artifact. When an existing live row has a
+   * different content hash, last-write-wins still applies, but a conflict marker
+   * row is inserted so the UI can surface the mismatch.
    * @param {DocRow} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
     upsertDocRow(row: DocRow): RunnableEffect<void, SmithersError$1>;
-    /**
-   * @param {string} path
-   * @param {{ includeDeleted?: boolean }} [options]
-   * @returns {RunnableEffect<DocRow | undefined, SmithersError>}
-   */
-    getDoc(path: string, options?: {
-        includeDeleted?: boolean;
-    }): RunnableEffect<DocRow | undefined, SmithersError$1>;
-    /**
-   * @param {{ kind?: string; includeDeleted?: boolean; updatedAfterMs?: number; limit?: number }} [options]
-   * @returns {RunnableEffect<DocRow[], SmithersError>}
-   */
-    listDocs(options?: {
-        kind?: string;
-        includeDeleted?: boolean;
-        updatedAfterMs?: number;
-        limit?: number;
-    }): RunnableEffect<DocRow[], SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
@@ -996,6 +1143,9 @@ declare class SmithersDb {
    */
     listDecidedApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
+   * Returns all decided approvals for a run (approved or denied), regardless of
+   * node state. Used by why-diagnosis so denied gates (node state = 'failed')
+   * are included in the diagnosis output.
    * @param {string} runId
    * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
    */
@@ -1076,6 +1226,25 @@ declare class SmithersDb {
    */
     deleteFramesAfter(runId: string, frameNo: number): RunnableEffect<void, SmithersError$1>;
     /**
+   * Delete durable snapshot rows for frames after `frameNo`. Snapshots are keyed
+   * (run_id, frame_no) and are the hydration/fork source, so a rewind that
+   * truncates frames must truncate the matching snapshots too — otherwise
+   * fork/replay/loadLatestSnapshot can resurrect logically-discarded state.
+   * @param {string} runId
+   * @param {number} frameNo
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    deleteSnapshotsAfter(runId: string, frameNo: number): RunnableEffect<void, SmithersError$1>;
+    /**
+   * Delete VCS tag rows for frames after `frameNo`, keyed (run_id, frame_no).
+   * A rewind truncates frames; the matching vcs-tags must go too or
+   * rerunAtRevision/loadVcsTag can restore a discarded working-copy revision.
+   * @param {string} runId
+   * @param {number} frameNo
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    deleteVcsTagsAfter(runId: string, frameNo: number): RunnableEffect<void, SmithersError$1>;
+    /**
    * @param {string} runId
    * @param {number} limit
    * @param {number} [afterFrameNo]
@@ -1113,6 +1282,105 @@ declare class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
     deleteCron(cronId: string): RunnableEffect<void, SmithersError$1>;
+    /**
+   * List cross-run memory facts, optionally scoped to a namespace. Reads the
+   * `_smithers_memory_facts` table written by `@smithers-orchestrator/memory`'s
+   * MemoryStore (`setFact`) — the SAME table the `smithers memory list` CLI reads
+   * — so a fact set by any run/workflow surfaces here. Columns are snake→camel
+   * cased by the storage layer (`value_json → valueJson`, etc.). A null/undefined
+   * namespace returns every namespace's facts; ordering is stable (namespace, key)
+   * so the gateway's `listMemoryFacts` RPC returns a deterministic list.
+   * @param {string | null} [namespace]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listMemoryFacts(namespace?: string | null): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
+   * List LIVE docs from `_smithers_docs` (tombstones — `deleted_at_ms IS NOT
+   * NULL` — are NEVER returned), optionally scoped to one `kind`. Backs the
+   * gateway's `listTickets` RPC and the file-watcher's reconcile read. Columns
+   * are snake→camel cased by the storage layer (`content_hash → contentHash`,
+   * etc.); newest-updated first so the surface shows recent edits on top.
+   * @param {string | null | { kind?: string; includeDeleted?: boolean; updatedAfterMs?: number; limit?: number }} [arg]
+   *   Either a positional `kind` filter (string) or an options object.
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listDocs(arg?: string | null | {
+        kind?: string;
+        includeDeleted?: boolean;
+        updatedAfterMs?: number;
+        limit?: number;
+    }): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
+   * Read a single doc row by path (INCLUDING a tombstone, so the watcher's
+   * last-write-wins can compare against a soft-deleted row). Returns `undefined`
+   * when the path was never written.
+   * @param {string} path
+   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+   */
+    getDoc(path: string, options?: {}): RunnableEffect<Record<string, unknown> | undefined, SmithersError$1>;
+    /**
+   * Upsert a doc row (insert-or-replace by `path`). The caller supplies the
+   * already-computed `contentHash` (`sha256(content)`) and `updatedAtMs` so the
+   * RPC handler and the file-watcher hash/stamp identically. Writing a row with
+   * `deletedAtMs: null` REVIVES a previously soft-deleted path (a re-create or a
+   * fresh file write), which is the intended last-write-wins behaviour.
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertDoc(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
+    /**
+   * Soft-delete a doc by stamping `deleted_at_ms` (a tombstone) rather than
+   * removing the row, so `listTickets` hides it while the watcher can still see
+   * it survived. `updated_at_ms` is bumped so the change orders correctly.
+   * @param {string} path
+   * @param {number} deletedAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    softDeleteDoc(path: string, deletedAtMs: number): RunnableEffect<void, SmithersError$1>;
+    /**
+   * Insert an integration-delivery dedupe row if `(sourceId, dedupeKey)` was
+   * never recorded. Returns `true` when the row was inserted (first delivery)
+   * and `false` when it already existed (a redelivery to drop). The
+   * check-then-insert runs inside a single adapter transaction so two
+   * concurrent redeliveries cannot both claim "first".
+   * @param {{ sourceId: string; dedupeKey: string; eventName: string; receivedAtMs: number }} row
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    insertIntegrationDeliveryIfNew(row: {
+        sourceId: string;
+        dedupeKey: string;
+        eventName: string;
+        receivedAtMs: number;
+    }): RunnableEffect<boolean, SmithersError$1>;
+    /**
+   * Read a polling source's persisted cursor. Returns `undefined` when the
+   * source never persisted one; a stored NULL cursor comes back as `null`.
+   * @param {string} sourceId
+   * @returns {RunnableEffect<string | null | undefined, SmithersError>}
+   */
+    getIntegrationCursor(sourceId: string): RunnableEffect<string | null | undefined, SmithersError$1>;
+    /**
+   * Persist a polling source's cursor (upsert by `source_id`).
+   * @param {string} sourceId
+   * @param {string | null} cursor
+   * @param {number} [updatedAtMs]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    setIntegrationCursor(sourceId: string, cursor: string | null, updatedAtMs?: number): RunnableEffect<void, SmithersError$1>;
+    /**
+   * Find runs with a node currently parked on `WaitForEvent` for
+   * `eventName` + `correlationId`. This is the run-targeting query for
+   * external integration events: SQL narrows to non-terminal runs whose
+   * `waiting-event` nodes have a `waiting-event` attempt with wait-for-event
+   * metadata, then the shared `parseWaitForEventAttemptSnapshot` parser
+   * (also used by the engine's `bridgeSignalResolve`) confirms the exact
+   * signal-name + normalized-correlation-id match in JS. Returns distinct
+   * run ids.
+   * @param {string} eventName
+   * @param {string | null} [correlationId]
+   * @returns {RunnableEffect<string[], SmithersError>}
+   */
+    findRunsAwaitingEvent(eventName: string, correlationId?: string | null): RunnableEffect<string[], SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
@@ -1274,12 +1542,13 @@ type AlertRow = AlertRow$1;
 type AlertStatus = AlertStatus$1;
 type AttemptRow = AttemptRow$1;
 type BunSQLiteDatabase$2 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
+type Table = drizzle_orm.Table;
 type EventHistoryQuery = EventHistoryQuery$1;
 type HumanRequestRow = HumanRequestRow$1;
 type OutputKey = OutputKey$1;
 type RunnableEffect<A, E> = Effect.Effect<A, E> & PromiseLike<A>;
 type SignalQuery = SignalQuery$1;
-type SmithersError$1 = _smithers_errors_SmithersError.SmithersError;
+type SmithersError$1 = _smithers_orchestrator_errors_SmithersError.SmithersError;
 type FrameRow = {
     runId: string;
     frameNo: number;
@@ -1322,6 +1591,30 @@ type DocRow = {
     updatedAtMs: number;
     deletedAtMs?: number | null;
 };
+type SqliteTransactionState = {
+    depth: number;
+    ownerThread: string | null;
+    tail: Promise<unknown>;
+};
+
+/**
+ * Throw a clear error if a user schema field collides with a smithers internal
+ * key column. Output tables reserve `run_id`/`node_id`/`iteration`; input tables
+ * reserve only `run_id`. Without this guard a colliding field either crashes DDL
+ * with a raw `duplicate column name` (the SQL path) or silently overwrites the
+ * internal key column and corrupts the composite primary key (the drizzle path),
+ * with no diagnostic naming the offending field.
+ *
+ * @param {{ shape?: Record<string, unknown> }} schema
+ * @param {string} [tableName]
+ * @param {{ isInput?: boolean }} [opts]
+ * @returns {void}
+ */
+declare function assertNoReservedColumns(schema: {
+    shape?: Record<string, unknown>;
+}, tableName?: string, opts?: {
+    isInput?: boolean;
+}): void;
 
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} _BunSQLiteDatabase */
 /** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} _SmithersError */
@@ -1335,7 +1628,7 @@ declare function ensureSmithersTablesEffect(db: _BunSQLiteDatabase<Record<string
  */
 declare function ensureSmithersTables(db: _BunSQLiteDatabase<Record<string, unknown>>): void;
 type _BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
-type _SmithersError = _smithers_errors_SmithersError.SmithersError;
+type _SmithersError = _smithers_orchestrator_errors_SmithersError.SmithersError;
 
 type JsonBounds$2 = {
     maxArrayLength?: number;
@@ -1478,6 +1771,20 @@ type FrameEncoding = FrameEncoding$1;
 type JsonPath = JsonPath$1;
 type JsonPathSegment = JsonPathSegment$1;
 
+/**
+ * Return the durable Smithers schema head and a stable hash of the internal
+ * table catalog. The migration head is the client persistence schemaVersion;
+ * the signature lets clients or operators detect a same-head table-shape drift.
+ *
+ * @param {unknown} adapterOrStorage
+ * @returns {Promise<{ schemaVersion: string; signature: string; components: Record<string, string> }>}
+ */
+declare function getSmithersSchemaSignature(adapterOrStorage: unknown): Promise<{
+    schemaVersion: string;
+    signature: string;
+    components: Record<string, string>;
+}>;
+
 /** @typedef {import("drizzle-orm").Table} _Table */
 /**
  * @param {_Table} table
@@ -1490,6 +1797,1404 @@ declare function validateInput(table: _Table$3, payload: unknown): {
     error?: z.ZodError;
 };
 type _Table$3 = drizzle_orm.Table;
+
+declare const smithersScorers: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_scorers";
+    schema: undefined;
+    columns: {
+        id: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "id";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        runId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "run_id";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        nodeId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "node_id";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        iteration: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "iteration";
+            tableName: "_smithers_scorers";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        attempt: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "attempt";
+            tableName: "_smithers_scorers";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        scorerId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "scorer_id";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        scorerName: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "scorer_name";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        source: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "source";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        score: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "score";
+            tableName: "_smithers_scorers";
+            dataType: "number";
+            columnType: "SQLiteReal";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        reason: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "reason";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        metaJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "meta_json";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        inputJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "input_json";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        outputJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "output_json";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        groundTruthJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "ground_truth_json";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        contextJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "context_json";
+            tableName: "_smithers_scorers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        latencyMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "latency_ms";
+            tableName: "_smithers_scorers";
+            dataType: "number";
+            columnType: "SQLiteReal";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        scoredAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "scored_at_ms";
+            tableName: "_smithers_scorers";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        durationMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "duration_ms";
+            tableName: "_smithers_scorers";
+            dataType: "number";
+            columnType: "SQLiteReal";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+declare const smithersMemoryFacts: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_memory_facts";
+    schema: undefined;
+    columns: {
+        namespace: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "namespace";
+            tableName: "_smithers_memory_facts";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        key: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "key";
+            tableName: "_smithers_memory_facts";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        valueJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "value_json";
+            tableName: "_smithers_memory_facts";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        schemaSig: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "schema_sig";
+            tableName: "_smithers_memory_facts";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        createdAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "created_at_ms";
+            tableName: "_smithers_memory_facts";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        updatedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "updated_at_ms";
+            tableName: "_smithers_memory_facts";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        ttlMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "ttl_ms";
+            tableName: "_smithers_memory_facts";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+declare const smithersMemoryThreads: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_memory_threads";
+    schema: undefined;
+    columns: {
+        threadId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "thread_id";
+            tableName: "_smithers_memory_threads";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        namespace: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "namespace";
+            tableName: "_smithers_memory_threads";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        title: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "title";
+            tableName: "_smithers_memory_threads";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        metadataJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "metadata_json";
+            tableName: "_smithers_memory_threads";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        createdAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "created_at_ms";
+            tableName: "_smithers_memory_threads";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        updatedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "updated_at_ms";
+            tableName: "_smithers_memory_threads";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+declare const smithersMemoryMessages: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_memory_messages";
+    schema: undefined;
+    columns: {
+        id: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "id";
+            tableName: "_smithers_memory_messages";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        threadId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "thread_id";
+            tableName: "_smithers_memory_messages";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        role: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "role";
+            tableName: "_smithers_memory_messages";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        contentJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "content_json";
+            tableName: "_smithers_memory_messages";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        runId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "run_id";
+            tableName: "_smithers_memory_messages";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        nodeId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "node_id";
+            tableName: "_smithers_memory_messages";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        createdAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "created_at_ms";
+            tableName: "_smithers_memory_messages";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+declare const smithersWorkspaceStates: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_workspace_states";
+    schema: undefined;
+    columns: {
+        runId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "run_id";
+            tableName: "_smithers_workspace_states";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        jjCwd: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "jj_cwd";
+            tableName: "_smithers_workspace_states";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        jjCommitId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "jj_commit_id";
+            tableName: "_smithers_workspace_states";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        jjOperationId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "jj_operation_id";
+            tableName: "_smithers_workspace_states";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        jjChangeId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "jj_change_id";
+            tableName: "_smithers_workspace_states";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        createdAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "created_at_ms";
+            tableName: "_smithers_workspace_states";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+declare const smithersWorkspaceCheckpoints: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_workspace_checkpoints";
+    schema: undefined;
+    columns: {
+        runId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "run_id";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        nodeId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "node_id";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        iteration: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "iteration";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        attempt: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "attempt";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        seq: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "seq";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        jjCwd: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "jj_cwd";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        jjCommitId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "jj_commit_id";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        source: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "source";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        tier: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "tier";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        label: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "label";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        toolUseId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "tool_use_id";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        createdAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "created_at_ms";
+            tableName: "_smithers_workspace_checkpoints";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+/**
+ * `_smithers_docs` — durable markdown work-docs (tickets, plans, specs,
+ * proposals) the gateway lists/creates/updates/soft-deletes via the
+ * `listTickets`/`createTicket`/`updateTicket`/`deleteTicket` RPCs and that the
+ * file-watcher seam (`watchDocsDirectory`) upserts from a `.md` directory.
+ *
+ *  - `path`          PK; the doc identity (a file path or stable id).
+ *  - `kind`          one of `ticket | plan | spec | proposal` (default `ticket`).
+ *  - `content`       the full markdown body.
+ *  - `contentHash`   `sha256(content)` — the watcher's last-write-wins compare key.
+ *  - `status`        rides the sync row so a ticket's status survives reload
+ *                    (LOCKED Path A); free-form text (e.g. `todo`/`in-progress`/`done`).
+ *  - `updatedAtMs`   last write (Unix epoch ms).
+ *  - `deletedAtMs`   soft-delete tombstone; NULL means live. `listTickets`
+ *                    filters tombstones and the watcher never materializes them.
+ */
+declare const smithersDocs: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_docs";
+    schema: undefined;
+    columns: {
+        path: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "path";
+            tableName: "_smithers_docs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        kind: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "kind";
+            tableName: "_smithers_docs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        content: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "content";
+            tableName: "_smithers_docs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        contentHash: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "content_hash";
+            tableName: "_smithers_docs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        status: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "status";
+            tableName: "_smithers_docs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        updatedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "updated_at_ms";
+            tableName: "_smithers_docs";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        deletedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "deleted_at_ms";
+            tableName: "_smithers_docs";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+/**
+ * `_smithers_integration_deliveries` — dedupe ledger for external integration
+ * events (webhooks, polling sources). Before an event is fanned out to waiting
+ * runs via `signalRun`, the delivery pipeline attempts an insert-if-new on
+ * `(source_id, dedupe_key)`; a redelivery (same webhook retried, same update
+ * polled twice) hits the primary key and is dropped.
+ *
+ *  - `sourceId`      the integration event source (e.g. `github`, `telegram`,
+ *                    or a generic webhook source id).
+ *  - `dedupeKey`     provider-stable delivery id (GitHub delivery GUID,
+ *                    Telegram update_id, payload hash for generic webhooks).
+ *  - `eventName`     the smithers signal name (`integration:<service>:<event>`).
+ *  - `receivedAtMs`  when the event was first accepted (Unix epoch ms).
+ */
+declare const smithersIntegrationDeliveries: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_integration_deliveries";
+    schema: undefined;
+    columns: {
+        sourceId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "source_id";
+            tableName: "_smithers_integration_deliveries";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        dedupeKey: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "dedupe_key";
+            tableName: "_smithers_integration_deliveries";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        eventName: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "event_name";
+            tableName: "_smithers_integration_deliveries";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        receivedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "received_at_ms";
+            tableName: "_smithers_integration_deliveries";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+/**
+ * `_smithers_integration_cursors` — durable per-source cursors for polling
+ * integration sources (e.g. the Telegram long-poll `offset`). A polling source
+ * loads its cursor on start and persists it after each successful poll so a
+ * process restart resumes where it left off instead of re-delivering.
+ *
+ *  - `sourceId`      the integration event source id (PK).
+ *  - `cursor`        opaque cursor string (NULL until the first poll lands).
+ *  - `updatedAtMs`   last persist (Unix epoch ms).
+ */
+declare const smithersIntegrationCursors: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_integration_cursors";
+    schema: undefined;
+    columns: {
+        sourceId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "source_id";
+            tableName: "_smithers_integration_cursors";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        cursor: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "cursor";
+            tableName: "_smithers_integration_cursors";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        updatedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "updated_at_ms";
+            tableName: "_smithers_integration_cursors";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
 
 declare const smithersRuns: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_runs";
@@ -4619,6 +6324,7 @@ declare const smithersRalph: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     };
     dialect: "sqlite";
 }>;
+
 declare const smithersVectors: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_vectors";
     schema: undefined;
@@ -4940,7 +6646,123 @@ declare const smithersCron: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     };
     dialect: "sqlite";
 }>;
-declare const smithersDocs: any;
+declare const smithersSchemaMigrations: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_schema_migrations";
+    schema: undefined;
+    columns: {
+        id: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "id";
+            tableName: "_smithers_schema_migrations";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        name: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "name";
+            tableName: "_smithers_schema_migrations";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        appliedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "applied_at_ms";
+            tableName: "_smithers_schema_migrations";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        checksum: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "checksum";
+            tableName: "_smithers_schema_migrations";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        destructive: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "destructive";
+            tableName: "_smithers_schema_migrations";
+            dataType: "boolean";
+            columnType: "SQLiteBoolean";
+            data: boolean;
+            driverParam: number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        detailsJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "details_json";
+            tableName: "_smithers_schema_migrations";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+    };
+    dialect: "sqlite";
+}>;
 
 /** @typedef {import("drizzle-orm").AnyColumn} AnyColumn */
 /** @typedef {import("./output/OutputKey.ts").OutputKey} _OutputKey */
@@ -5015,7 +6837,7 @@ declare function upsertOutputRow(db: BunSQLiteDatabase$1<Record<string, unknown>
 declare function validateOutput(table: _Table$2, payload: unknown): {
     ok: boolean;
     data?: unknown;
-    error?: z.ZodError;
+    error?: z$1.ZodError;
 };
 /**
  * @param {_Table} table
@@ -5025,19 +6847,19 @@ declare function validateOutput(table: _Table$2, payload: unknown): {
 declare function validateExistingOutput(table: _Table$2, payload: unknown): {
     ok: boolean;
     data?: unknown;
-    error?: z.ZodError;
+    error?: z$1.ZodError;
 };
 /**
  * @param {_Table} table
  * @returns {z.ZodObject}
  */
-declare function getAgentOutputSchema(table: _Table$2): z.ZodObject;
+declare function getAgentOutputSchema(table: _Table$2): z$1.ZodObject;
 /**
  * @param {_Table | z.ZodObject} tableOrSchema
  * @param {z.ZodObject} [zodSchema]
  * @returns {string}
  */
-declare function describeSchemaShape(tableOrSchema: _Table$2 | z.ZodObject, zodSchema?: z.ZodObject): string;
+declare function describeSchemaShape(tableOrSchema: _Table$2 | z$1.ZodObject, zodSchema?: z$1.ZodObject): string;
 type AnyColumn = drizzle_orm.AnyColumn;
 type _OutputKey = OutputKey$1;
 type _Table$2 = drizzle_orm.Table;
@@ -5051,19 +6873,40 @@ type BunSQLiteDatabase$1 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 declare function schemaSignature(table: _Table$1): string;
 type _Table$1 = drizzle_orm.Table;
 
-declare function getSmithersSchemaSignature(adapterOrStorage: unknown): Promise<{
-    schemaVersion: string;
-    signature: string;
-    components: Record<string, string>;
-}>;
-
+/**
+ * Keys of every json-mode column on the table. zodToTable maps any
+ * array/object/union/complex Zod field to a Drizzle `text(col,{mode:'json'})`
+ * column, which Drizzle's bun:sqlite reader auto-decodes on read. The Postgres
+ * path stores those as TEXT, so we must JSON.parse them to match.
+ * @param {_Table} table
+ * @returns {string[]}
+ */
+declare function getJsonColumnKeys(table: _Table): string[];
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
  * @param {_Table} inputTable
  * @param {string} runId
  * @returns {Effect.Effect<Record<string, unknown> | undefined, SmithersError>}
  */
-declare function loadInputEffect(db: BunSQLiteDatabase<Record<string, unknown>>, inputTable: _Table, runId: string): Effect.Effect<Record<string, unknown> | undefined, SmithersError$2>;
+/**
+ * @param {unknown} db
+ * @returns {boolean}
+ */
+declare function isPostgresDb(db: unknown): boolean;
+/**
+ * Map a raw node-postgres row (snake_case columns, JSON stored as TEXT) into the
+ * shape Drizzle's bun:sqlite reader returns (camelCase keys, json-mode columns
+ * decoded), so input/output consumers stay dialect-agnostic. `jsonKeys` is the
+ * set of camelCase json-mode column keys (from getJsonColumnKeys); every TEXT
+ * value for those columns is JSON.parsed to match Drizzle's mode:'json' read.
+ * The literal `payload` column is always decoded so callers that omit `jsonKeys`
+ * (single-value outputs) keep working.
+ * @param {Record<string, unknown>} row
+ * @param {readonly string[]} [jsonKeys]
+ * @returns {Record<string, unknown>}
+ */
+declare function pgRowToDrizzle(row: Record<string, unknown>, jsonKeys?: readonly string[]): Record<string, unknown>;
+declare function loadInputEffect(db: any, inputTable: any, runId: any): Effect.Effect<any, SmithersError$2, never>;
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
  * @param {_Table} inputTable
@@ -5085,6 +6928,16 @@ declare function loadOutputsEffect(db: BunSQLiteDatabase<Record<string, unknown>
  * @returns {Promise<OutputSnapshot>}
  */
 declare function loadOutputs(db: BunSQLiteDatabase<Record<string, unknown>>, schema: Record<string, _Table | unknown>, runId: string): Promise<OutputSnapshot>;
+/**
+ * Read every row of a single output table for a run, returning Drizzle-shaped
+ * rows (camelCase keys, boolean columns coerced to JS booleans). Dialect-aware:
+ * Drizzle for bun:sqlite, a raw `$n` query for the Postgres descriptor.
+ * @param {unknown} db
+ * @param {_Table} table
+ * @param {string} [runId]
+ * @returns {Effect.Effect<Array<Record<string, unknown>>, SmithersError>}
+ */
+declare function loadRunOutputRowsEffect(db: unknown, table: _Table, runId?: string): Effect.Effect<Array<Record<string, unknown>>, SmithersError$2>;
 type OutputSnapshot = Record<string, Array<unknown>>;
 type BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 type _Table = drizzle_orm.Table;
@@ -5204,7 +7057,7 @@ declare function isRetryableSqliteWriteError(error: unknown): boolean;
  * @returns {Effect.Effect<A, SmithersError>}
  */
 declare function withSqliteWriteRetryEffect<A>(operation: () => Effect.Effect<A, SmithersError>, opts?: SqliteWriteRetryOptions$1): Effect.Effect<A, SmithersError>;
-type SmithersError = _smithers_errors_SmithersError.SmithersError;
+type SmithersError = _smithers_orchestrator_errors_SmithersError.SmithersError;
 type SqliteWriteRetryOptions$1 = SqliteWriteRetryOptions$2;
 
 /**
@@ -5218,24 +7071,57 @@ declare function withSqliteWriteRetry<A>(operation: () => A | PromiseLike<A>, op
 type SqliteWriteRetryOptions = SqliteWriteRetryOptions$2;
 
 /**
- * Generates a CREATE TABLE IF NOT EXISTS SQL statement from a Zod schema.
- * Used for runtime table creation without Drizzle migrations.
+ * Returns the user-defined columns derived from a Zod schema (excluding the
+ * fixed run_id/node_id/iteration prefix). Each entry is `{ name, sqliteType }`.
  */
-declare function zodToCreateTableSQL(tableName: any, schema: any, opts: any): string;
-
 declare function zodSchemaColumns(schema: any): {
     name: any;
     sqliteType: string;
+    kind: string;
 }[];
-
+/**
+ * Generates a CREATE TABLE IF NOT EXISTS SQL statement from a Zod schema.
+ * Used for runtime table creation without Drizzle migrations. Pass
+ * `opts.dialect` to emit PostgreSQL-compatible column types; the default
+ * (`sqlite`) is byte-identical to the historical output.
+ */
+declare function zodToCreateTableSQL(tableName: any, schema: any, opts: any): string;
+/**
+ * Ensures `tableName` exists with all columns implied by `schema`, adding
+ * any missing columns via ALTER TABLE. Idempotent and safe to call on every
+ * boot — fixes the case where the schema evolves but the table was created
+ * by an earlier version (CREATE TABLE IF NOT EXISTS would silently no-op).
+ *
+ * `sqlite` must be a `bun:sqlite` Database (or compatible) exposing
+ * `.run(sql)` and `.query(sql).all()`.
+ */
 declare function syncZodTableSchema(sqlite: any, tableName: any, schema: any, opts: any): void;
+/**
+ * Async PostgreSQL/PGlite equivalent of {@link syncZodTableSchema}. It creates
+ * the table when missing and adds newly introduced Zod columns when the table
+ * already exists from an older workflow schema.
+ *
+ * @param {{ query: (config: { text: string; values?: ReadonlyArray<unknown> } | string, values?: ReadonlyArray<unknown>) => Promise<unknown> }} client
+ * @param {string} tableName
+ * @param {any} schema
+ * @param {{ isInput?: boolean; dialect?: import("./dialect.js").Dialect }} [opts]
+ */
+declare function syncZodTableSchemaPostgres(client: {
+    query: (config: {
+        text: string;
+        values?: ReadonlyArray<unknown>;
+    } | string, values?: ReadonlyArray<unknown>) => Promise<unknown>;
+}, tableName: string, schema: any, opts?: {
+    isInput?: boolean;
+    dialect?: Dialect;
+}): Promise<void>;
 
 /**
  * Generates a Drizzle sqliteTable from a Zod object schema.
  *
  * Each Zod field is mapped to a SQLite column:
  * - z.string() / z.enum() -> text column
- * - z.number() -> integer column
+ * - z.number() -> real column
  * - z.boolean() -> integer column with boolean mode
  * - z.array() / z.object() / complex -> text column with json mode
  *
@@ -5274,4 +7160,4 @@ declare function camelToSnake(str: any): any;
 
 type SchemaRegistryEntry = SchemaRegistryEntry$1;
 
-export { type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Dialect, type DocRow, type EventHistoryQuery, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteWriteRetryOptions, type StaleRunRecord, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, columnType, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, isDialect, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, normalizeFrameEncoding, parseFrameDelta, quoteIdentifier, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvents, smithersFrames, smithersHumanRequests, smithersNodeDiffs, smithersNodes, smithersRalph, smithersRuns, smithersSandboxes, smithersSignals, smithersTimeTravelAudit, smithersToolCalls, smithersVectors, stripAutoColumns, syncZodTableSchema, tableColumnsSql, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };
+export { type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Dialect, type DocRow, type EventHistoryQuery, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type Table, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, columnType, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, isPostgresDb, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, parseFrameDelta, pgRowToDrizzle, quoteIdentifier, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersTimeTravelAudit, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };

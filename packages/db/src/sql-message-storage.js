@@ -404,6 +404,18 @@ const CREATE_TABLE_STATEMENTS = [
     updated_at_ms INTEGER NOT NULL,
     deleted_at_ms INTEGER
   )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_integration_deliveries (
+    source_id TEXT NOT NULL,
+    dedupe_key TEXT NOT NULL,
+    event_name TEXT NOT NULL,
+    received_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (source_id, dedupe_key)
+  )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_integration_cursors (
+    source_id TEXT PRIMARY KEY,
+    cursor TEXT,
+    updated_at_ms INTEGER NOT NULL
+  )`,
 ];
 const CREATE_INDEX_STATEMENTS = [
     `CREATE INDEX IF NOT EXISTS _smithers_runs_status_heartbeat_idx

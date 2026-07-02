@@ -7,10 +7,12 @@ import * as DurableDeferred from "@effect/workflow/DurableDeferred";
 import { resolve as resolvePath } from "node:path";
 import { Effect, Exit, Schema } from "effect";
 import { updateAsyncExternalWaitPending } from "@smithers-orchestrator/observability/metrics";
+import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot, parseWaitForEventOptionalFiniteNumber, } from "@smithers-orchestrator/db/waitForEventAttempt";
 /**
  * @typedef {{ _tag: "Complete"; exit: Exit.Exit<any, any>; } | { _tag: "Pending"; }} BridgeDeferredResult
  */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("@smithers-orchestrator/db/waitForEventAttempt").WaitForEventAttemptSnapshot} WaitForEventAttemptSnapshot */
 /**
  * @typedef {{ signalName: string; correlationId: string | null; payloadJson: string; seq: number; receivedAtMs: number; }} WaitForEventSignalInput
  */
@@ -50,60 +52,12 @@ const waitForEventDurableDeferredSuccessSchema = Schema.Struct({
     seq: Schema.Number,
     receivedAtMs: Schema.Number,
 });
-/**
- * @param {string | null | undefined} value
- * @returns {string | null}
- */
-function normalizeCorrelationId(value) {
-    const normalized = typeof value === "string" ? value.trim() : "";
-    return normalized.length > 0 ? normalized : null;
-}
-/**
- * @param {unknown} value
- * @returns {number | undefined}
- */
-function parseOptionalFiniteNumber(value) {
-    if (value == null || value === "") {
-        return undefined;
-    }
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-}
-/**
- * @param {string | null} [metaJson]
- * @returns {WaitForEventAttemptSnapshot | null}
- */
-function parseWaitForEventAttemptSnapshot(metaJson) {
-    if (!metaJson)
-        return null;
-    try {
-        const parsed = JSON.parse(metaJson);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-            return null;
-        }
-        const waitForEvent = parsed?.waitForEvent;
-        if (!waitForEvent || typeof waitForEvent !== "object" || Array.isArray(waitForEvent)) {
-            return null;
-        }
-        const signalName = typeof waitForEvent.signalName === "string"
-            ? waitForEvent.signalName.trim()
-            : "";
-        if (!signalName) {
-            return null;
-        }
-        return {
-            meta: parsed,
-            signalName,
-            correlationId: normalizeCorrelationId(waitForEvent.correlationId),
-            waitAsync: waitForEvent.waitAsync === true,
-            resolvedSignalSeq: parseOptionalFiniteNumber(waitForEvent.resolvedSignalSeq),
-            receivedAtMs: parseOptionalFiniteNumber(waitForEvent.receivedAtMs),
-        };
-    }
-    catch {
-        return null;
-    }
-}
+// The wait-for-event attempt-meta parser is shared with the db adapter's
+// `findRunsAwaitingEvent` — the single implementation lives in
+// `@smithers-orchestrator/db/waitForEventAttempt` (imported above). Local
+// aliases keep this module's exported internals stable.
+const normalizeCorrelationId = normalizeWaitForEventCorrelationId;
+const parseOptionalFiniteNumber = parseWaitForEventOptionalFiniteNumber;
 /**
  * @param {WaitForEventAttemptSnapshot} snapshot
  * @param {WaitForEventSignalInput} signal

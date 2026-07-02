@@ -24,6 +24,7 @@ import { getKeyColumns } from "./output.js";
 import { withSqliteWriteRetryEffect } from "./write-retry.js";
 import { camelToSnake } from "./utils/camelToSnake.js";
 import { capturePostgresTransactionTxid, recordCommittedTxid, shouldCapturePostgresTxid, } from "./captureTxid.js";
+import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot, } from "./waitForEventAttempt.js";
 /** @typedef {import("./adapter/AlertRow.ts").AlertRow} AlertRow */
 /** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
 /** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
@@ -2993,6 +2994,121 @@ export class SmithersDb {
    */
     softDeleteDoc(path, deletedAtMs) {
         return this.write(`soft delete doc ${path}`, () => this.internalStorage.updateWhere("_smithers_docs", { deletedAtMs, updatedAtMs: deletedAtMs }, "path = ?", [path]));
+    }
+    // ---------------------------------------------------------------------------
+    // Integrations (external event delivery + polling cursors)
+    // ---------------------------------------------------------------------------
+    /**
+   * Insert an integration-delivery dedupe row if `(sourceId, dedupeKey)` was
+   * never recorded. Returns `true` when the row was inserted (first delivery)
+   * and `false` when it already existed (a redelivery to drop). The
+   * check-then-insert runs inside a single adapter transaction so two
+   * concurrent redeliveries cannot both claim "first".
+   * @param {{ sourceId: string; dedupeKey: string; eventName: string; receivedAtMs: number }} row
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+    insertIntegrationDeliveryIfNew(row) {
+        const self = this;
+        return runnableEffect(this.withTransactionEffect(`insert integration delivery ${row.sourceId}`, Effect.gen(function* () {
+            const existing = yield* self.read(`get integration delivery ${row.sourceId}`, () => self.internalStorage.queryOne(`SELECT source_id
+             FROM _smithers_integration_deliveries
+             WHERE source_id = ? AND dedupe_key = ?`, [row.sourceId, row.dedupeKey]));
+            if (existing) {
+                return false;
+            }
+            yield* self.write(`insert integration delivery ${row.sourceId}`, () => self.internalStorage.insertIgnore("_smithers_integration_deliveries", {
+                sourceId: row.sourceId,
+                dedupeKey: row.dedupeKey,
+                eventName: row.eventName,
+                receivedAtMs: row.receivedAtMs,
+            }));
+            return true;
+        })).pipe(Effect.annotateLogs({
+            sourceId: row.sourceId,
+            eventName: row.eventName,
+        })));
+    }
+    /**
+   * Read a polling source's persisted cursor. Returns `undefined` when the
+   * source never persisted one; a stored NULL cursor comes back as `null`.
+   * @param {string} sourceId
+   * @returns {RunnableEffect<string | null | undefined, SmithersError>}
+   */
+    getIntegrationCursor(sourceId) {
+        return runnableEffect(this.read(`get integration cursor ${sourceId}`, () => this.internalStorage.queryOne(`SELECT cursor
+         FROM _smithers_integration_cursors
+         WHERE source_id = ?`, [sourceId])).pipe(Effect.map((row) => (row === undefined ? undefined : (row.cursor ?? null)))));
+    }
+    /**
+   * Persist a polling source's cursor (upsert by `source_id`).
+   * @param {string} sourceId
+   * @param {string | null} cursor
+   * @param {number} [updatedAtMs]
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    setIntegrationCursor(sourceId, cursor, updatedAtMs = Date.now()) {
+        return this.write(`set integration cursor ${sourceId}`, () => this.internalStorage.upsert("_smithers_integration_cursors", {
+            sourceId,
+            cursor,
+            updatedAtMs,
+        }, ["source_id"], ["cursor", "updatedAtMs"]));
+    }
+    /**
+   * Find runs with a node currently parked on `WaitForEvent` for
+   * `eventName` + `correlationId`. This is the run-targeting query for
+   * external integration events: SQL narrows to non-terminal runs whose
+   * `waiting-event` nodes have a `waiting-event` attempt with wait-for-event
+   * metadata, then the shared `parseWaitForEventAttemptSnapshot` parser
+   * (also used by the engine's `bridgeSignalResolve`) confirms the exact
+   * signal-name + normalized-correlation-id match in JS. Returns distinct
+   * run ids.
+   * @param {string} eventName
+   * @param {string | null} [correlationId]
+   * @returns {RunnableEffect<string[], SmithersError>}
+   */
+    findRunsAwaitingEvent(eventName, correlationId = null) {
+        const normalizedCorrelationId = normalizeWaitForEventCorrelationId(correlationId);
+        const self = this;
+        return runnableEffect(this.read(`find runs awaiting ${eventName}`, () => self.internalStorage.queryAll(`SELECT a.run_id, a.node_id, a.iteration, a.attempt, a.state, a.meta_json
+         FROM _smithers_attempts a
+         JOIN _smithers_nodes n
+           ON n.run_id = a.run_id AND n.node_id = a.node_id AND n.iteration = a.iteration
+         JOIN _smithers_runs r
+           ON r.run_id = a.run_id
+         WHERE n.state = 'waiting-event'
+           AND r.status NOT IN ('finished', 'failed', 'cancelled', 'continued')
+           AND a.meta_json LIKE '%"signalName"%'
+         ORDER BY a.run_id, a.node_id, a.iteration, a.attempt`, [])).pipe(Effect.map((rows) => {
+            const runIds = new Set();
+            // Mirror `bridgeSignalResolve`: prefer the waiting-event attempt for a
+            // node, falling back to the node's first attempt.
+            /** @type {Map<string, Array<Record<string, unknown>>>} */
+            const byNode = new Map();
+            for (const row of rows) {
+                const key = `${row.runId} ${row.nodeId} ${row.iteration}`;
+                const list = byNode.get(key) ?? [];
+                list.push(row);
+                byNode.set(key, list);
+            }
+            for (const attempts of byNode.values()) {
+                const candidate = attempts.find((attempt) => attempt.state === "waiting-event") ??
+                    attempts[0];
+                const snapshot = parseWaitForEventAttemptSnapshot(typeof candidate?.metaJson === "string" ? candidate.metaJson : null);
+                if (!snapshot)
+                    continue;
+                if (snapshot.resolvedSignalSeq !== undefined)
+                    continue;
+                if (snapshot.signalName !== eventName)
+                    continue;
+                if (snapshot.correlationId !== normalizedCorrelationId)
+                    continue;
+                runIds.add(String(candidate.runId));
+            }
+            return [...runIds];
+        }), Effect.annotateLogs({
+            eventName,
+            correlationId: normalizedCorrelationId,
+        })));
     }
     // ---------------------------------------------------------------------------
     // Scorer results

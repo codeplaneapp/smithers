@@ -746,6 +746,25 @@ function buildMigrations(context) {
                 return { table: "_smithers_docs" };
             },
         },
+        {
+            id: "0019_add_integration_tables",
+            name: "Add integration delivery-dedupe and polling-cursor tables",
+            checksum: "packages/db/migrations/0019_add_integration_tables.sql",
+            isApplied: (sqlite) => tableExists(sqlite, "_smithers_integration_deliveries") &&
+                tableExists(sqlite, "_smithers_integration_cursors"),
+            isAppliedPostgres: async (pgConn) => (await tableExistsPostgres(pgConn, "_smithers_integration_deliveries")) &&
+                (await tableExistsPostgres(pgConn, "_smithers_integration_cursors")),
+            up: (sqlite) => {
+                sqlite.run(createTableStatementFor("_smithers_integration_deliveries", context.createTableStatements));
+                sqlite.run(createTableStatementFor("_smithers_integration_cursors", context.createTableStatements));
+                return { tables: ["_smithers_integration_deliveries", "_smithers_integration_cursors"] };
+            },
+            upPostgres: async (pgConn) => {
+                await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_integration_deliveries", context.createTableStatements)) });
+                await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_integration_cursors", context.createTableStatements)) });
+                return { tables: ["_smithers_integration_deliveries", "_smithers_integration_cursors"] };
+            },
+        },
     ];
 }
 
