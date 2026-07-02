@@ -7,9 +7,9 @@ description: Run Smithers crons from a short-lived Vercel Cron -> route handler 
 
 `smithers cron start` runs a long-lived scheduler process (`apps/cli/src/scheduler.js`) that polls the database every 15 seconds and spawns detached subprocesses for due workflow runs. That model needs a process that stays up. On a serverless platform like Vercel, you instead want a short-lived HTTP handler that a **Vercel Cron** job hits on a schedule.
 
-`runCronTick(db, opts)`, exported from `smithers-orchestrator/server`, is exactly that short-lived unit of work — the SAME function the CLI scheduler's poll loop calls internally, so there is one implementation of "claim due crons, start their workflow runs, record the next run time" for both deployment models.
+`runServerlessTick(db, opts)`, exported from `smithers-orchestrator/server`, is exactly that short-lived unit of work: it runs `runCronTick` (claim due crons, start their workflow runs, record the next run time) and then `runResumeTick` (claim and resume runs suspended while detached — see below) and returns a summary of both. Both halves are the SAME functions the CLI uses internally (`runCronTick` backs the scheduler's poll loop, `runResumeTick`'s claim/resume primitive backs `smithers supervise`), so there is one implementation of each behavior for both deployment models.
 
-## Vercel Cron -> route handler -> runCronTick
+## Vercel Cron -> route handler -> runServerlessTick
 
 1. Add a [Vercel Cron Job](https://vercel.com/docs/cron-jobs) in `vercel.json` that hits a route on a schedule:
 
@@ -21,12 +21,12 @@ description: Run Smithers crons from a short-lived Vercel Cron -> route handler 
 }
 ```
 
-2. Implement the route handler. It opens the database, calls `runCronTick`, and returns the summary:
+2. Implement the route handler. It opens the database, calls `runServerlessTick`, and returns the summary:
 
 ```ts
 // app/api/cron-tick/route.ts (Next.js App Router)
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { runCronTick } from "@smithers-orchestrator/server";
+import { runServerlessTick } from "@smithers-orchestrator/server";
 
 export async function GET(request: Request) {
   // Vercel signs cron requests with a bearer token; verify it before doing any work.
@@ -36,17 +36,23 @@ export async function GET(request: Request) {
   }
 
   const db = await openProductionDb(); // your Postgres/SQLite connection, wrapped in SmithersDb
-  const result = await runCronTick(db, {
+  const result = await runServerlessTick(db, {
     workerId: `vercel-cron:${process.env.VERCEL_DEPLOYMENT_ID ?? "local"}`,
     // Detached child processes don't outlive a serverless invocation, so
-    // provide a startWorkflowRun that fits your deployment (kick off a
-    // Vercel Sandbox run, enqueue a job, call an internal API, etc.)
+    // provide a startWorkflowRun/resumeRun that fit your deployment (kick off
+    // a Vercel Sandbox run, enqueue a job, call an internal API, etc.) — the
+    // long agent work always happens in the sandbox/queue/worker, never in
+    // this route handler, so the invocation itself stays short regardless of
+    // how long the workflow takes to finish.
     startWorkflowRun: async (job) => {
       await startWorkflowRunOnVercelSandbox(job);
     },
+    resumeRun: async (job) => {
+      await resumeWorkflowRunOnVercelSandbox(job);
+    },
   });
 
-  return Response.json(result);
+  return Response.json(result); // { cron: {...}, resume: {...} }
 }
 ```
 
@@ -56,10 +62,12 @@ export async function GET(request: Request) {
 
 Vercel Cron does not guarantee exactly-once delivery, and manual triggers or overlapping deploys can call the route concurrently. `runCronTick` claims due crons through `adapter.claimDueCrons(nowMs, leaseMs, workerId)`, an atomic `UPDATE ... WHERE ... RETURNING` claim (implemented once, through the adapter, for both the SQLite and PostgreSQL dialects — see `packages/db/src/adapter.js` and the `_smithers_cron` table's `claimed_at_ms`/`claimed_by` lease columns). Two overlapping `runCronTick` calls cannot both claim (and therefore cannot both fire) the same due cron; a claim that isn't released (e.g. a crashed worker) expires after `leaseMs` (default 5 minutes) and can then be claimed by a later tick.
 
-## The "row not a process" model, and its limits
+## The "row not a process" model
 
 Moving cron *firing* to a stateless HTTP handler is straightforward — the cron schedule and lease live entirely in the database row, not in an in-memory timer or long-lived process, so any short-lived process (a serverless function, a fresh CLI invocation) can advance it correctly.
 
-**Advancing a suspended workflow run** (a run paused on a `HumanTask`/approval, mid-`Sandbox` execution, etc.) from a fresh short-lived process against PostgreSQL is a **separate, harder question that this change does not fully resolve**. Smithers' durable frame/snapshot model (`_smithers_frames`, `_smithers_snapshots` in `packages/db`) is designed to be process-agnostic — a run's state is reconstructable from its rows — but parts of the run/workflow engine (`packages/engine`) still assume a single long-lived process drives a run to completion once started (in-process node execution, `AsyncLocalStorage`-scoped sandbox execution context in `packages/sandbox/src/execute.js`, etc.). Resuming a suspended run from a *different* short-lived process than the one that suspended it needs the engine to fully rehydrate from the durable frame/snapshot state and needs some coordination so two processes don't advance the same run concurrently (similar in spirit to the cron lease this change adds, but for run frames, not cron rows).
+**Advancing a suspended workflow run** (a run paused on a `HumanTask`/approval, or one whose driver process died mid-run) needs the same treatment, and it turns out the engine already supports it: `smithers up <path> --resume --run-id <id>` from a fresh process correctly rehydrates a run from its durable frame/snapshot state (`_smithers_frames`, `_smithers_snapshots` in `packages/db`) and continues it. What was missing wasn't the ability to resume — it was something to *notice* a resumable run and trigger that resume, the run-level equivalent of `runCronTick` noticing a due cron.
 
-That is deeper engine surgery than this change attempts. `runCronTick`'s default `startWorkflowRun` therefore still spawns a detached CLI subprocess (`smithers up <path> -d`) for parity with the historical scheduler behavior; on Vercel, supply your own `startWorkflowRun` that starts the run somewhere that *can* keep running to completion (a Vercel Sandbox, a queue consumed by a long-lived worker, etc.) rather than relying on the serverless function itself to run the workflow to completion.
+`runResumeTick` (see above) is that missing piece: it finds runs resumable because they're `running` but stale (no heartbeat for `staleThresholdMs`, 30s by default — the same threshold `smithers supervise` uses via `--supervise-stale-threshold`), or suspended `waiting-event` with a decided approval and no engine alive to act on it (the `approval-decided-resume-required` blocked kind), claims each through the same run-level lease (`db.claimRunForResume`/`db.releaseRunResumeClaim`, an atomic `UPDATE ... RETURNING` on `_smithers_runs`) `smithers supervise`'s auto-resume already uses, and resumes it. `smithers supervise` itself now delegates to the same underlying claim/resume primitive, so there is exactly one implementation of "claim a resumable run and resume it" for both the long-running CLI supervisor and a serverless tick.
+
+As with `runCronTick`'s `startWorkflowRun`, the long agent work should happen *inside* whatever `resumeRun`/`startWorkflowRun` kicks off (a Vercel Sandbox, a queue consumed by a long-lived worker) — not inside the route handler itself — so the serverless function invocation stays short (just claim + kick off) regardless of how long the resumed workflow takes to finish.
