@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { ChangedFile } from "../src/walkthrough/changedFileSchema";
 import { renderWalkthroughHtml } from "../src/walkthrough/renderWalkthroughHtml";
 
+type RenderWalkthroughInput = Parameters<typeof renderWalkthroughHtml>[0];
+
 function patchFor(path: string, removed: string, added: string[]): string {
   return [
     `diff --git a/${path} b/${path}`,
@@ -55,7 +57,7 @@ const story = {
   ],
 };
 
-const comments = [
+const comments: RenderWalkthroughInput["comments"] = [
   {
     path: "src/a.ts",
     content: "Possible bug: <b>unescaped</b> & dangerous",
@@ -64,6 +66,9 @@ const comments = [
     startLine: 2,
     endLine: 2,
     thinking: "",
+    severity: "major",
+    category: "correctness",
+    confidence: "plausible",
   },
 ];
 
