@@ -121,7 +121,8 @@
           "guides/agent-trace-otel-verification",
           "deployment/reference",
           "deployment/control-plane",
-          "deployment/production-hardening"
+          "deployment/production-hardening",
+          "deployment/serverless-deployment"
         ]
       },
       {
@@ -312,7 +313,8 @@
               "examples/generate-llms-txt",
               "examples/ci-workflow",
               "examples/agents-md",
-              "examples/freestyle-sandbox-provider"
+              "examples/freestyle-sandbox-provider",
+              "examples/vercel-sandbox-provider"
             ]
           },
           {

@@ -1,0 +1,74 @@
+---
+title: Vercel Sandbox Provider
+description: Build a third-party Sandbox provider backed by Vercel Sandbox.
+---
+
+# Vercel Sandbox Provider
+
+[Vercel Sandbox](https://vercel.com/docs/sandbox) runs arbitrary code in isolated, ephemeral Firecracker microVMs (`@vercel/sandbox`), authenticated with Vercel OIDC tokens or access tokens and integrated directly with the rest of the Vercel platform (Vercel Cron, Vercel Functions, Vercel Container Registry images). Use it when you want your agent's remote sandbox to run on the same platform as your deployment.
+
+The workflow sets no hardcoded runtime. Instead it passes a `SandboxProvider` object to `<Sandbox provider={vercelSandboxProvider}>`, so the same workflow code runs on any sandbox backend.
+
+## Provider shape
+
+```ts
+import { Sandbox } from "@vercel/sandbox";
+import { createVercelSandboxProvider } from "./provider.js";
+
+const vercelSandboxProvider = createVercelSandboxProvider({
+  vercelSandbox: { create: (options) => Sandbox.create(options) },
+  runtime: "node24",
+  timeout: 5 * 60 * 1000,
+  createOptions: {
+    source: { type: "git", url: "https://github.com/your-org/your-repo.git" },
+  },
+  setupFiles: {
+    "/vercel/sandbox/run-smithers-sandbox.js": {
+      content: `
+        const fs = require("node:fs");
+        const req = JSON.parse(fs.readFileSync("/vercel/sandbox/smithers-request.json", "utf8"));
+        fs.writeFileSync("/vercel/sandbox/smithers-result.json", JSON.stringify({
+          status: "finished",
+          output: { summary: "handled " + req.input.prompt },
+          runId: "vercel:" + req.sandboxId
+        }));
+      `,
+    },
+  },
+});
+```
+
+## Workflow
+
+```tsx
+<Workflow name="vercel-sandbox-provider-example">
+  <Sandbox
+    id="remote-edit"
+    provider={vercelSandboxProvider}
+    workflow={remoteChildWorkflow}
+    input={{ prompt: ctx.input.prompt }}
+    output={outputs.sandboxResult}
+    reviewDiffs={false}
+    retries={0}
+  />
+</Workflow>
+```
+
+## Why this shape
+
+`Sandbox.create()`, `sandbox.writeFiles()`, `sandbox.runCommand()`, `sandbox.readFileToBuffer()`, and `sandbox.stop()` map cleanly to the Smithers provider contract: Smithers creates the request bundle, the provider writes any setup files and the request JSON with `sandbox.writeFiles()`, the command runs with `sandbox.runCommand()`, the provider reads `smithers-result.json` with `sandbox.readFileToBuffer()`, and Smithers validates/applies the result bundle. `cleanup()` calls `sandbox.stop()` even when the run throws, so a failed run doesn't leave a sandbox (and its billing) running.
+
+Return a `diffBundle` (a Smithers diff-bundle object) from the provider for file changes, and Smithers will surface them through the same review-and-apply path used by `<Sandbox reviewDiffs>`.
+
+## Dependency and auth
+
+`@vercel/sandbox` is an **optional peer dependency** — install it yourself (`pnpm add @vercel/sandbox`) in the project that wires up the provider. It is never a dependency of any core Smithers package (`packages/sandbox`, `packages/server`, etc.), matching the same pattern as the [Freestyle sandbox provider](/examples/freestyle-sandbox-provider).
+
+Authentication is handled entirely by the SDK, not by this provider:
+
+- **Local development / on Vercel**: `VERCEL_OIDC_TOKEN` (run `vercel link && vercel env pull` locally; automatic in production on Vercel).
+- **External CI/CD or non-Vercel hosts**: `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID` (access-token auth).
+
+See [Vercel Sandbox Authentication](https://vercel.com/docs/sandbox/concepts/authentication) for full setup instructions.
+
+See the full runnable example (with a mock `@vercel/sandbox` client for typechecking without credentials) at `examples/vercel-sandbox/` in the repo.
