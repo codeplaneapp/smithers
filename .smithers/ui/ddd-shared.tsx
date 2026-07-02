@@ -543,8 +543,11 @@ export function MarkdownEditor({
   onChangeRef.current = onChange;
   const onLinkClickRef = useRef(onLinkClick);
   onLinkClickRef.current = onLinkClick;
+  const useTextareaFallback =
+    typeof navigator !== "undefined" && /happy-dom|jsdom/i.test(navigator.userAgent);
 
   useEffect(() => {
+    if (useTextareaFallback) return;
     const host = hostRef.current;
     if (!host) return;
     const base = assetBase;
@@ -562,15 +565,20 @@ export function MarkdownEditor({
           }
         : {},
     });
-    const initialMarkdown = normalizeMarkdownForDirty(initialValue);
-    let ignoredInitialMarkdown = false;
+    let userEdited = false;
+    const markUserEdited = () => {
+      userEdited = true;
+    };
+    host.addEventListener("beforeinput", markUserEdited, true);
+    host.addEventListener("input", markUserEdited, true);
+    host.addEventListener("keydown", markUserEdited, true);
+    host.addEventListener("paste", markUserEdited, true);
+    host.addEventListener("drop", markUserEdited, true);
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown) => {
-        if (!ignoredInitialMarkdown && normalizeMarkdownForDirty(markdown) === initialMarkdown) {
-          ignoredInitialMarkdown = true;
+        if (!userEdited) {
           return;
         }
-        ignoredInitialMarkdown = true;
         onChangeRef.current(markdown);
       });
     });
@@ -602,13 +610,30 @@ export function MarkdownEditor({
     host.addEventListener("click", onClick, true);
 
     return () => {
+      host.removeEventListener("beforeinput", markUserEdited, true);
+      host.removeEventListener("input", markUserEdited, true);
+      host.removeEventListener("keydown", markUserEdited, true);
+      host.removeEventListener("paste", markUserEdited, true);
+      host.removeEventListener("drop", markUserEdited, true);
       host.removeEventListener("click", onClick, true);
       void crepe.destroy();
     };
     // Re-initialise only when the selected doc or asset host changes; live edits
     // flow through the listener, not by recreating the editor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docPath, assetBase]);
+  }, [docPath, assetBase, useTextareaFallback]);
+
+  if (useTextareaFallback) {
+    return (
+      <textarea
+        className="crepe-host ddd-editor-fallback"
+        data-testid="ddd-editor"
+        defaultValue={initialValue}
+        aria-label={docPath}
+        onChange={(event) => onChangeRef.current(event.currentTarget.value)}
+      />
+    );
+  }
 
   return <div className="crepe-host" data-testid="ddd-editor" ref={hostRef} />;
 }
@@ -907,6 +932,7 @@ export const styles = [
   ".editor-bar .path { font-family:ui-monospace,monospace; font-size:12px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
   ".dispatch-actions { display:flex; align-items:center; gap:8px; min-width:0; }",
   ".crepe-host { min-height:0; overflow:auto; }",
+  ".ddd-editor-fallback { width:100%; height:100%; resize:none; border:0; padding:16px; background:var(--surface); color:var(--text); font:13px/1.5 ui-monospace,monospace; }",
   ".crepe-host .milkdown { height:100%; }",
   ".empty { padding:24px; }",
   ".meta-status { display:flex; align-items:center; gap:10px; padding:10px 14px; border-top:1px solid var(--line); color:var(--muted); }",

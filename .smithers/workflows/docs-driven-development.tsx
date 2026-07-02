@@ -3,28 +3,27 @@
 /** @jsxImportSource smithers-orchestrator */
 import { Approval, createSmithers, Loop, Sequence, Task } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod/v4";
 import { providers } from "../agents";
+import { dddRootOrCwd } from "../lib/ddd/dddRoot.ts";
 
 // Repo root: walk up from cwd until .smithers/spec/features.json is found, so
 // the workflow behaves the same whether launched from the repo root or from
 // .smithers/. No absolute machine paths.
-function resolveRepoRoot(): string {
-  let dir = resolve(process.cwd());
-  for (;;) {
-    if (existsSync(resolve(dir, ".smithers/spec/features.json"))) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) return process.cwd();
-    dir = parent;
-  }
-}
-const ROOT = resolveRepoRoot();
+const ROOT = dddRootOrCwd();
 
 const planner = providers.claude;
 const trivialEditor = providers.claudeSonnet;
 const codex = providers.codex;
+
+// One changed-file shape, shared by the editor-submitted input ticket and the
+// metaTicket node output so the two can never drift apart.
+const changedFileSchema = z.object({
+  path: z.string(),
+  beforeMarkdown: z.string().default(""),
+  afterMarkdown: z.string().default(""),
+});
 
 const inputSchema = z.object({
   maxAgents: z.preprocess((value) => value ?? undefined, z.number().int().min(1).max(8).default(1)),
@@ -38,11 +37,7 @@ const inputSchema = z.object({
     source: z.string().default("manual"),
     docPath: z.string().default(".smithers/spec"),
     featureIds: z.array(z.string()).default([]),
-    changedFiles: z.array(z.object({
-      path: z.string(),
-      beforeMarkdown: z.string().default(""),
-      afterMarkdown: z.string().default(""),
-    })).default([]),
+    changedFiles: z.array(changedFileSchema).default([]),
     beforeMarkdown: z.string().default(""),
     afterMarkdown: z.string().default(""),
     changedAtIso: z.string().default(""),
@@ -79,11 +74,7 @@ const metaTicketSchema = z.object({
   source: z.string().default(""),
   docPath: z.string().default(""),
   featureIds: z.array(z.string()).default([]),
-  changedFiles: z.array(z.object({
-    path: z.string(),
-    beforeMarkdown: z.string().default(""),
-    afterMarkdown: z.string().default(""),
-  })).default([]),
+  changedFiles: z.array(changedFileSchema).default([]),
   beforeMarkdown: z.string().default(""),
   afterMarkdown: z.string().default(""),
   gitStatus: z.string().default(""),
@@ -209,20 +200,28 @@ export function writeJsonArtifact(path: string, value: unknown) {
 }
 
 export function cleanDiffForMetaTicket(value: string) {
-  return value
-    .split(/\r?\n/)
-    .filter((line) => {
-      const lower = line.toLowerCase();
-      return (
-        !lower.includes(".smithers/spec/content/features/") &&
-        !lower.includes(".smithers/ui/ddd-") &&
-        !lower.includes(".smithers/workflows/docs-driven-development.tsx") &&
-        !lower.includes(".smithers/ui/docs-driven-development.tsx") &&
-        !lower.includes(".smithers/lib/ddd/")
-      );
-    })
-    .join("\n")
-    .trim();
+  const ignored = (line: string) => {
+    const lower = line.toLowerCase();
+    return (
+      lower.includes(".smithers/spec/content/features/") ||
+      lower.includes(".smithers/ui/ddd-") ||
+      lower.includes(".smithers/workflows/docs-driven-development.tsx") ||
+      lower.includes(".smithers/ui/docs-driven-development.tsx") ||
+      lower.includes(".smithers/lib/ddd/")
+    );
+  };
+  const out: string[] = [];
+  let skippingDiff = false;
+  for (const line of value.split(/\r?\n/)) {
+    if (line.startsWith("diff --git ")) {
+      skippingDiff = ignored(line);
+      if (!skippingDiff) out.push(line);
+      continue;
+    }
+    if (skippingDiff) continue;
+    if (!ignored(line)) out.push(line);
+  }
+  return out.join("\n").trim();
 }
 
 function runCommand(command: string, args: string[]) {
@@ -300,7 +299,7 @@ export function materializeTriageTickets(runId: string, triage: any) {
   };
 }
 
-function triageReady(ctx: any): boolean {
+export function triageReady(ctx: any): boolean {
   return !!ctx.outputMaybe("triage", { nodeId: "triage" });
 }
 
@@ -310,7 +309,12 @@ export function resolvedMaxAgents(value: unknown) {
   return Math.min(8, Math.max(1, numeric));
 }
 
-function agentForSlot(ctx: any, slot: number) {
+export function resolvedMaxRounds(value: unknown) {
+  const numeric = Number(value);
+  return numeric >= 1 ? numeric : 100000;
+}
+
+export function agentForSlot(ctx: any, slot: number) {
   const triage = ctx.outputMaybe("triage", { nodeId: "triage" });
   const selected = triage?.selected?.find((item: any) => item.slot === slot);
   if (selected?.agent === "opus") return ctx.input.useClaudeForPlanning ? planner : codex;
@@ -318,11 +322,11 @@ function agentForSlot(ctx: any, slot: number) {
   return codex;
 }
 
-function planningAgent(ctx: any) {
+export function planningAgent(ctx: any) {
   return ctx.input.useClaudeForPlanning ? planner : codex;
 }
 
-function auditAgent(ctx: any) {
+export function auditAgent(ctx: any) {
   return ctx.input.useClaudeForPlanning ? trivialEditor : codex;
 }
 
@@ -334,7 +338,9 @@ function auditAgent(ctx: any) {
 export function featuresStillIncomplete(): number {
   try {
     const features = JSON.parse(readFileSync(`${ROOT}/.smithers/spec/features.json`, "utf8")) as Array<{ status?: string }>;
-    const open = new Set(["broken", "partial", "missing", "missing-tests", "missing-docs"]);
+    // Exactly the open statuses featuresSchema.ts can produce ("fixed" is the
+    // only closed state).
+    const open = new Set(["broken", "partial", "missing", "missing-tests"]);
     return features.filter((feature) => open.has(String(feature.status))).length;
   } catch {
     return -1; // unreadable → don't claim completion on a read error
@@ -373,6 +379,38 @@ ${CONTEXT}`
   };
 }
 
+export function roundSummaryFromDeps(deps: any) {
+  const workItems = Array.isArray(deps.work) ? deps.work : deps.work ? [deps.work] : [];
+  const fixed = workItems
+    .filter((item: any) => item?.status === "done")
+    .map((item: any) => `${item.featureId || "unknown"}: ${item.summary || "completed"}`);
+  const remaining = [
+    ...(deps.audit?.broken ?? []).map((id: string) => `broken: ${id}`),
+    ...(deps.audit?.partial ?? []).map((id: string) => `partial: ${id}`),
+    ...(deps.audit?.missingE2E ?? deps.audit?.missing_e2e ?? []).map((id: string) => `missing e2e: ${id}`),
+    ...(deps.audit?.missingDocs ?? deps.audit?.missing_docs ?? []).map((id: string) => `missing docs: ${id}`),
+    ...workItems
+      .filter((item: any) => item?.status && item.status !== "done" && item.status !== "skipped")
+      .map((item: any) => `${item.status}: ${item.featureId || "unknown"} - ${item.summary || "not complete"}`),
+    ...(deps.review?.blockingFindings ?? deps.review?.blocking_findings ?? []).map((finding: string) => `review blocker: ${finding}`),
+  ];
+  const blocked = (deps.review?.blockingFindings ?? deps.review?.blocking_findings ?? []).length > 0;
+  const done =
+    remaining.length === 0 &&
+    deps.review?.approved === true &&
+    workItems.length > 0 &&
+    workItems.every((item: any) => item?.status === "done");
+
+  return {
+    status: done ? "done" : blocked ? "blocked" : "partial",
+    fixed,
+    remaining,
+    summary: done
+      ? "All tracked P0/P1 features are complete, tested, documented, and reviewed."
+      : "Cycle complete, but tracked features still have broken, partial, missing-test, missing-doc, or review follow-up items. Continue the improvement loop.",
+  };
+}
+
 export default smithers((ctx) => {
   // Robust against inputs that arrive without zod defaults applied: implementation
   // runs unless explicitly disabled, so the work wave is never silently skipped.
@@ -381,7 +419,7 @@ export default smithers((ctx) => {
   // the floor, so maxIterations can never be 0/null (which silently caps the loop
   // at a single iteration — observed when a stale self-edited module dropped the
   // fallback). Only an explicit >=1 input overrides the long-running default.
-  const maxRounds = Number(ctx.input.maxRounds) >= 1 ? Number(ctx.input.maxRounds) : 100000;
+  const maxRounds = resolvedMaxRounds(ctx.input.maxRounds);
   const runImplementation = ctx.input.runImplementation !== false;
   const requireImplementationApproval = ctx.input.requireImplementationApproval === true;
   const implementationApproved = ctx.input.implementationApproved !== false;
@@ -553,37 +591,7 @@ ${CONTEXT}`}
               ...(workApproved ? { work: outputs.work } : {}),
             }}
           >
-            {(deps: any) => {
-              const workItems = Array.isArray(deps.work) ? deps.work : deps.work ? [deps.work] : [];
-              const fixed = workItems
-                .filter((item: any) => item?.status === "done")
-                .map((item: any) => `${item.featureId || "unknown"}: ${item.summary || "completed"}`);
-              const remaining = [
-                ...(deps.audit?.broken ?? []).map((id: string) => `broken: ${id}`),
-                ...(deps.audit?.partial ?? []).map((id: string) => `partial: ${id}`),
-                ...(deps.audit?.missingE2E ?? deps.audit?.missing_e2e ?? []).map((id: string) => `missing e2e: ${id}`),
-                ...(deps.audit?.missingDocs ?? deps.audit?.missing_docs ?? []).map((id: string) => `missing docs: ${id}`),
-                ...workItems
-                  .filter((item: any) => item?.status && item.status !== "done" && item.status !== "skipped")
-                  .map((item: any) => `${item.status}: ${item.featureId || "unknown"} - ${item.summary || "not complete"}`),
-                ...(deps.review?.blockingFindings ?? deps.review?.blocking_findings ?? []).map((finding: string) => `review blocker: ${finding}`),
-              ];
-              const blocked = (deps.review?.blockingFindings ?? deps.review?.blocking_findings ?? []).length > 0;
-              const done =
-                remaining.length === 0 &&
-                deps.review?.approved === true &&
-                workItems.length > 0 &&
-                workItems.every((item: any) => item?.status === "done");
-
-              return {
-                status: done ? "done" : blocked ? "blocked" : "partial",
-                fixed,
-                remaining,
-                summary: done
-                  ? "All tracked P0/P1 features are complete, tested, documented, and reviewed."
-                  : "Cycle complete, but tracked features still have broken, partial, missing-test, missing-doc, or review follow-up items. Continue the improvement loop.",
-              };
-            }}
+            {roundSummaryFromDeps}
           </Task>
         </Sequence>
       </Loop>

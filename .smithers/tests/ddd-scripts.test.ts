@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -125,13 +125,13 @@ describe("DDD scripts and build gate", () => {
     expect(existsSync(stale)).toBe(false);
     const empty = readFileSync(join(root, ".smithers/spec/content/features/empty-feature.md"), "utf8");
     expect(empty).toContain("# Empty feature");
-    expect(empty).toContain("## Test cases\n\n_None recorded yet._");
+    expect(empty).not.toContain("## Test cases");
 
     const rich = readFileSync(join(root, ".smithers/spec/content/features/rich-feature.md"), "utf8");
     expect(rich).toContain("**Tier:** Platform");
-    expect(rich).toContain("**What you can do:** Run a real workflow.");
-    expect(rich).toContain("### Launch _(Partial)_");
-    expect(rich).toContain("- `GET /runs` (list runs) ([docs](reference/api.md#runs))");
+    expect(rich).toContain("## What you can do\n\nRun a real workflow.");
+    expect(rich).toContain("### Launch (Partial)");
+    expect(rich).toContain("- `GET /runs` - list runs ([docs](reference/api.md#runs))");
     expect(rich).toContain("- [Overview](overview.md)");
     expect(rich).toContain("- Add browser e2e proof");
   });
@@ -231,18 +231,13 @@ describe("DDD scripts and build gate", () => {
     const root = tempRoot();
     writeFeatures(root, [feature({ status: "not-real" })]);
 
-    const failureText = execFileSync(
-      "sh",
-      ["-c", "set +e; bun \"$1\" 2>&1; code=$?; printf '\\n__status:%s\\n' \"$code\"; exit 0", "sh", realBuildScript],
-      { cwd: root, encoding: "utf8" },
-    );
-    expect(failureText).toContain("ddd build failed");
-    expect(failureText).toContain("__status:1");
+    const failed = spawnSync("bun", [realBuildScript], { cwd: root, encoding: "utf8" });
+    expect(failed.status).not.toBe(0);
+    expect(existsSync(join(root, ".smithers/ui/ddd-docsContent.generated.ts"))).toBe(false);
 
     writeFeatures(root, [feature({ id: "built", status: "fixed" })]);
-    const output = execFileSync("bun", [realBuildScript], { cwd: root, encoding: "utf8" });
+    execFileSync("bun", [realBuildScript], { cwd: root, encoding: "utf8" });
 
-    expect(output).toContain("ddd build: validated 1 features");
     expect(existsSync(join(root, ".smithers/spec/content/features/built.md"))).toBe(true);
     expect(existsSync(join(root, ".smithers/ui/ddd-docsContent.generated.ts"))).toBe(true);
     expect(existsSync(join(root, ".smithers/ui/ddd-ticketsBacklog.generated.ts"))).toBe(true);

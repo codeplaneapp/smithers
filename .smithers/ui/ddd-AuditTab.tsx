@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import {
   OutputCard,
+  formatStatus,
   features,
   findingLabels,
   statusClass,
@@ -28,11 +29,11 @@ function findingsOf(audit: AuditRow | null): AuditFinding[] {
   return kinds.flatMap((kind) => {
     const raw =
       kind === "missingE2E"
-        ? audit.missingE2E ?? (audit as Record<string, unknown>).missing_e2e
+        ? [...strings(audit.missingE2E), ...strings((audit as Record<string, unknown>).missing_e2e)]
         : kind === "missingDocs"
-          ? audit.missingDocs ?? (audit as Record<string, unknown>).missing_docs
-          : audit[kind];
-    return strings(raw).map((featureId) => ({ kind, featureId }));
+          ? [...strings(audit.missingDocs), ...strings((audit as Record<string, unknown>).missing_docs)]
+          : strings(audit[kind]);
+    return [...new Set(raw)].map((featureId) => ({ kind, featureId }));
   });
 }
 
@@ -54,7 +55,7 @@ export function AuditTab(props: AuditTabProps) {
       <section className="card" data-testid="ddd-output-audit">
         <div className="card-head">
           <h2>Audit findings</h2>
-          <span className={`badge ${audit ? "ok" : "muted"}`}>{audit ? "ready" : "waiting"}</span>
+          <span className={`badge ${audit ? "ok" : "muted"}`}>{formatStatus(audit ? "ready" : "waiting")}</span>
         </div>
         {findings.length ? (
           findings.map((finding) => {
@@ -89,7 +90,7 @@ export function AuditTab(props: AuditTabProps) {
       <section className="card" data-testid="ddd-output-triage">
         <div className="card-head">
           <h2>Triage slots</h2>
-          <span className={`badge ${triage.length ? "ok" : "muted"}`}>{triage.length || "waiting"}</span>
+          <span className={`badge ${triage.length ? "ok" : "muted"}`}>{triage.length || formatStatus("waiting")}</span>
         </div>
         {triage.length ? (
           triage.map((item) => (

@@ -220,14 +220,15 @@ function App() {
   const runTree = useGatewayRunTree(liveRunId);
   const runEvents = useGatewayRunEvents(liveRunId, { maxEvents: 500 });
   const ticketsState = useGatewayTickets({});
+  const refetchRuns = runsState.refetch;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const id = window.setInterval(() => {
-      void runsState.refetch?.();
+      void refetchRuns();
     }, 10_000);
     return () => window.clearInterval(id);
-  }, [runsState.refetch]);
+  }, [refetchRuns]);
 
   // ---- derived (no hooks below this line) ----
   const bootstrap = rowOf(bootstrapOut.data);
