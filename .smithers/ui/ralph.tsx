@@ -7,6 +7,7 @@ import {
   useGatewayRunEvents,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
+import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 
 const WORKFLOW_KEY = "ralph";
 
@@ -178,6 +179,7 @@ function App() {
   return (
     <main className="shell" data-testid="ralph-ui">
       <style>{styles}</style>
+      <WorkflowUiStyles mode="theme" />
       <header className="topbar">
         <div className="title-group">
           <h1>Ralph</h1>

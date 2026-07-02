@@ -4,6 +4,7 @@ import {
   useGatewayNodeOutput,
   useGatewayRunEvents,
 } from "smithers-orchestrator/gateway-react";
+import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 
 const GATED_NODE_ID = "gated-task";
 
@@ -57,6 +58,7 @@ function App() {
   return (
     <main className="shell">
       <style>{styles}</style>
+      <WorkflowUiStyles mode="theme" />
       <div className="head">
         <h1>E2E Approval Probe</h1>
         <span className="pill" data-testid="approval-probe-run-id">{runId ?? ""}</span>

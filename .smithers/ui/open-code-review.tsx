@@ -7,6 +7,7 @@ import {
   useGatewayRunEvents,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
+import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 
 const WORKFLOW_KEY = "open-code-review";
 
@@ -336,6 +337,7 @@ function App() {
   return (
     <main className="shell" data-testid="open-code-review-ui">
       <style>{styles}</style>
+      <WorkflowUiStyles mode="theme" />
       <header className="topbar">
         <h1>Open Code Review</h1>
         <span className={"badge " + workflowStatus} data-testid="ocr-workflow-status">

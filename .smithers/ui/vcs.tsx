@@ -7,6 +7,7 @@ import {
   useGatewayRunEvents,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
+import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 
 const WORKFLOW_KEY = "vcs";
 const ACTIONS = ["status", "log", "commit", "rebase-plan"] as const;
@@ -216,6 +217,7 @@ function App() {
   return (
     <main className="shell" data-testid="vcs-ui">
       <style>{styles}</style>
+      <WorkflowUiStyles mode="theme" />
       <header className="topbar">
         <div className="title-group">
           <h1>VCS</h1>

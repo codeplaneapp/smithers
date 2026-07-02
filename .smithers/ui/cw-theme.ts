@@ -2,7 +2,10 @@
 // This intentionally mirrors multi's shipped custom UI vocabulary: Inter,
 // small dense controls, light-by-default surfaces, soft borders/shadows, glass
 // top bars, and color used only for brand/status.
+import { workflowUiStyles } from "smithers-orchestrator/gateway-ui";
+
 export const themeCss = [
+  workflowUiStyles,
   ":root { color-scheme:light; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;" +
     " --bg:#ffffff; --text:#0a0a0a; --text-muted:#525252; --text-faint:#6f6f6f; --text-placeholder:#767676;" +
     " --surface:#ffffff; --surface-glass:rgba(255,255,255,0.72); --surface-glass-strong:rgba(255,255,255,0.85);" +

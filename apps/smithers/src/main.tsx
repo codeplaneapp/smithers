@@ -2,6 +2,7 @@ import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { SmithersGatewayProvider, SyncProvider } from "@smithers-orchestrator/gateway-react";
+import { WorkflowUiStyles } from "@smithers-orchestrator/gateway-ui";
 import { bindRouteStore } from "./app/bindRouteStore";
 import { router } from "./app/router";
 import { bindDock } from "./apps/bindDock";
@@ -64,6 +65,7 @@ function LocalWorkspaceRuntime() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
+    <WorkflowUiStyles mode="theme" />
     <LocalWorkspaceRuntime />
   </StrictMode>,
 );

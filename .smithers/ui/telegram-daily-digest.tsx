@@ -7,6 +7,7 @@ import {
   useGatewayRun,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
+import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 
 const WORKFLOW_KEY = "telegram-daily-digest";
 
@@ -88,6 +89,7 @@ function App() {
   return (
     <main className="shell">
       <style>{styles}</style>
+      <WorkflowUiStyles mode="theme" />
       <header className="topbar">
         <div>
           <h1>Telegram Daily Digest</h1>

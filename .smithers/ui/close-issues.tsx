@@ -9,6 +9,7 @@ import {
   useGatewayRunEvents,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
+import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 
 const WORKFLOW_KEY = "close-issues";
 
@@ -232,6 +233,7 @@ function App() {
   return (
     <main className="shell" data-testid="close-issues-ui">
       <style>{styles}</style>
+      <WorkflowUiStyles mode="theme" />
       <header className="topbar">
         <h1>Close Issues · Codex</h1>
         <span className="pill"><span className="mono">{shortRunId(activeRunId)}</span></span>

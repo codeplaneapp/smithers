@@ -8,19 +8,20 @@ import {
   useGatewayRunEvents,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
+import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 
 const WORKFLOW_KEY = "monitor-smithers";
 
 type Run = { runId: string; workflowKey?: string; status?: string; createdAtMs?: number };
 
 const S = {
-  page: { fontFamily: "-apple-system,BlinkMacSystemFont,sans-serif", fontSize: 13, background: "#0c0c0e", color: "#eee", minHeight: "100vh", padding: 20 } as const,
-  h: { fontSize: 14, fontWeight: 600, margin: "0 0 12px" } as const,
-  sub: { fontSize: 11, color: "#8a8a8e", textTransform: "uppercase" as const, letterSpacing: 0.5, margin: "20px 0 8px" },
-  card: { background: "#151518", border: "1px solid #262629", borderRadius: 8, padding: "10px 12px", marginBottom: 8 } as const,
+  page: { fontFamily: "var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif)", fontSize: 13, background: "var(--bg)", color: "var(--text)", minHeight: "100vh", padding: 20 } as const,
+  h: { fontSize: 15, fontWeight: 650, margin: "0 0 12px" } as const,
+  sub: { fontSize: 11, color: "var(--muted)", textTransform: "uppercase" as const, letterSpacing: 0.5, margin: "20px 0 8px", fontWeight: 650 },
+  card: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", marginBottom: 8, boxShadow: "0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 8px 24px rgb(var(--shadow-rgb) / 0.06)" } as const,
   mono: { fontFamily: "ui-monospace,monospace", fontSize: 12 } as const,
-  btn: { padding: "5px 12px", border: "1px solid #333", borderRadius: 6, background: "#1c1c20", color: "#eee", cursor: "pointer", fontSize: 12 } as const,
-  input: { padding: "5px 8px", border: "1px solid #333", borderRadius: 6, background: "#151518", color: "#eee", fontSize: 12, width: 70 } as const,
+  btn: { padding: "5px 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--panel)", color: "var(--text)", cursor: "pointer", fontSize: 12 } as const,
+  input: { padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--panel)", color: "var(--text)", fontSize: 12, width: 70 } as const,
   chip: (color: string) => ({ fontSize: 11, color, border: `1px solid ${color}44`, background: `${color}18`, borderRadius: 10, padding: "1px 8px" }) as const,
 };
 
@@ -58,16 +59,16 @@ function asObject(v: unknown): Record<string, unknown> {
   return {};
 }
 function statusColor(status: string | undefined) {
-  if (status === "running" || status === "continued") return "#4ea1ff";
-  if (status === "finished" || status === "completed") return "#3ecf8e";
-  if (status === "failed" || status === "cancelled") return "#ff6369";
-  return "#8a8a8e";
+  if (status === "running" || status === "continued") return "var(--warning)";
+  if (status === "finished" || status === "completed") return "var(--success)";
+  if (status === "failed" || status === "cancelled") return "var(--danger)";
+  return "var(--muted)";
 }
 function healthColor(bucket: string) {
-  if (bucket === "healthy") return "#3ecf8e";
-  if (bucket === "blocked") return "#f5b83d";
-  if (bucket === "stuck" || bucket === "overBudget") return "#f58a3d";
-  return "#ff6369"; // failed
+  if (bucket === "healthy") return "var(--success)";
+  if (bucket === "blocked") return "var(--warning)";
+  if (bucket === "stuck" || bucket === "overBudget") return "var(--warning)";
+  return "var(--danger)";
 }
 
 /** The watchdog's per-sweep nodes are loop-scoped; find the newest iteration from the event stream. */
@@ -119,11 +120,11 @@ function FleetPanel({ runId }: { runId: string }) {
           {runs.map((r) => {
             const id = String(r.runId ?? "?");
             const bucket = bucketOf(id);
-            const color = bucket === "unclassified" ? "#8a8a8e" : healthColor(bucket);
+            const color = bucket === "unclassified" ? "var(--muted)" : healthColor(bucket);
             return (
               <div key={id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "3px 0" }}>
                 <span style={{ ...S.mono, flex: 1 }}>{id}</span>
-                <span style={{ fontSize: 11, color: "#8a8a8e" }}>{String(r.lastEvent ?? "")}</span>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>{String(r.lastEvent ?? "")}</span>
                 <span style={S.chip(statusColor(String(r.status)))}>{String(r.status ?? "?")}</span>
                 <span style={S.chip(color)}>{bucket}</span>
               </div>
@@ -135,10 +136,10 @@ function FleetPanel({ runId }: { runId: string }) {
         <>
           <div style={S.sub}>Escalations</div>
           {actions.map((a, i) => (
-            <div key={i} style={{ ...S.card, borderColor: "#f5b83d55" }}>
+            <div key={i} style={{ ...S.card, borderColor: "color-mix(in srgb,var(--warning) 45%,transparent)" }}>
               <div style={S.mono}>{String(a.project ?? "")} / {String(a.runId ?? "")}</div>
-              <div style={{ color: "#f5b83d", margin: "4px 0" }}>{String(a.problem ?? "")}</div>
-              <div style={{ color: "#bbb" }}>{String(a.recommendedAction ?? "")}</div>
+              <div style={{ color: "var(--warning)", margin: "4px 0" }}>{String(a.problem ?? "")}</div>
+              <div style={{ color: "var(--text)" }}>{String(a.recommendedAction ?? "")}</div>
             </div>
           ))}
         </>
@@ -181,30 +182,31 @@ function App() {
 
   return (
     <main style={S.page}>
+      <WorkflowUiStyles mode="theme" />
       <h2 style={S.h}>Smithers fleet monitor</h2>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
-        <label style={{ fontSize: 12, color: "#8a8a8e" }}>sweeps</label>
+        <label style={{ fontSize: 12, color: "var(--muted)" }}>sweeps</label>
         <input style={S.input} type="number" min={1} value={iterations} onChange={(e) => setIterations(Number(e.currentTarget.value) || 1)} />
-        <label style={{ fontSize: 12, color: "#8a8a8e" }}>every (min)</label>
+        <label style={{ fontSize: 12, color: "var(--muted)" }}>every (min)</label>
         <input style={S.input} type="number" min={1} value={intervalMinutes} onChange={(e) => setIntervalMinutes(Number(e.currentTarget.value) || 1)} />
-        <button style={{ ...S.btn, borderColor: "#5e6ad2", background: "#5e6ad2", color: "#fff" }} disabled={busy} onClick={() => void startWatch()}>
+        <button style={{ ...S.btn, borderColor: "color-mix(in srgb,var(--brand) 40%,transparent)", background: "color-mix(in srgb,var(--brand) 10%,var(--surface))", color: "var(--brand)", fontWeight: 650 }} disabled={busy} onClick={() => void startWatch()}>
           Start watchdog
         </button>
-        {activeRunId ? <span style={{ ...S.mono, color: "#8a8a8e" }}>watching {activeRunId}</span> : null}
+        {activeRunId ? <span style={{ ...S.mono, color: "var(--muted)" }}>watching {activeRunId}</span> : null}
       </div>
 
       {approvals.length > 0 ? (
         <>
           <div style={S.sub}>Pending approvals ({approvals.length})</div>
           {approvals.map((a) => (
-            <div key={`${a.runId}:${a.nodeId}:${a.iteration}`} style={{ ...S.card, borderColor: "#5e6ad255" }}>
+            <div key={`${a.runId}:${a.nodeId}:${a.iteration}`} style={{ ...S.card, borderColor: "color-mix(in srgb,var(--brand) 35%,transparent)" }}>
               <div style={{ fontWeight: 600 }}>{a.requestTitle ?? a.nodeId}</div>
-              <div style={{ ...S.mono, color: "#8a8a8e", margin: "2px 0 6px" }}>{a.runId} · {a.nodeId}</div>
-              {a.requestSummary ? <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, color: "#bbb", margin: "0 0 8px" }}>{a.requestSummary}</pre> : null}
+              <div style={{ ...S.mono, color: "var(--muted)", margin: "2px 0 6px" }}>{a.runId} · {a.nodeId}</div>
+              {a.requestSummary ? <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, color: "var(--text)", margin: "0 0 8px" }}>{a.requestSummary}</pre> : null}
               <div style={{ display: "flex", gap: 8 }}>
-                <button style={{ ...S.btn, borderColor: "#3ecf8e", color: "#3ecf8e" }} onClick={() => void decide(a, true)}>Approve</button>
-                <button style={{ ...S.btn, borderColor: "#ff6369", color: "#ff6369" }} onClick={() => void decide(a, false)}>Deny</button>
+                <button style={{ ...S.btn, borderColor: "color-mix(in srgb,var(--success) 45%,transparent)", color: "var(--success)" }} onClick={() => void decide(a, true)}>Approve</button>
+                <button style={{ ...S.btn, borderColor: "color-mix(in srgb,var(--danger) 45%,transparent)", color: "var(--danger)" }} onClick={() => void decide(a, false)}>Deny</button>
               </div>
             </div>
           ))}
@@ -216,13 +218,13 @@ function App() {
         <div key={r.runId} style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px" }}>
           <span style={S.mono}>{r.runId}</span>
           <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontSize: 11, color: "#8a8a8e" }}>{r.workflowKey ?? ""}</span>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>{r.workflowKey ?? ""}</span>
             <span style={S.chip(statusColor(r.status))}>{r.status ?? "running"}</span>
           </span>
         </div>
       ))}
 
-      {activeRunId ? <FleetPanel runId={activeRunId} /> : <div style={{ color: "#888", padding: 24 }}>No watchdog run yet — start one above.</div>}
+      {activeRunId ? <FleetPanel runId={activeRunId} /> : <div style={{ color: "var(--muted)", padding: 24 }}>No watchdog run yet — start one above.</div>}
     </main>
   );
 }
