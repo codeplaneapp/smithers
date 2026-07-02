@@ -15,9 +15,10 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
+const IGNORED_DIRS = new Set(["node_modules", "dist", "coverage", ".git", ".turbo"]);
 
 /**
- * Enumerate all published workspace packages. `skipSubdirs` lists entry points
+ * Enumerate all published package roots. `skipSubdirs` lists entry points
  * whose externals are intentionally owned by the consumer (plugin-host
  * pattern), not by Smithers itself.
  */
@@ -25,18 +26,24 @@ function discoverPackages() {
     /** @type {{ name: string; dir: string; skipSubdirs: string[]; }[]} */
     const packages = [];
     for (const base of ["packages", "apps"]) {
-        const absBase = resolve(REPO_ROOT, base);
-        for (const entry of readdirSync(absBase)) {
-            const dir = `${base}/${entry}`;
-            const manifestPath = join(REPO_ROOT, dir, "package.json");
-            if (!existsSync(manifestPath)) {
-                continue;
-            }
-            const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-            if (manifest.private) {
-                continue;
-            }
-            packages.push({
+        collectPackages(base, packages);
+    }
+    return packages.sort((a, b) => a.dir.localeCompare(b.dir));
+}
+
+/**
+ * @param {string} dir
+ * @param {{ name: string; dir: string; skipSubdirs: string[]; }[]} out
+ */
+function collectPackages(dir, out) {
+    const absDir = resolve(REPO_ROOT, dir);
+    if (!existsSync(absDir)) return;
+
+    const manifestPath = join(absDir, "package.json");
+    if (existsSync(manifestPath)) {
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        if (!manifest.private && manifest.name) {
+            out.push({
                 name: manifest.name,
                 dir,
                 skipSubdirs: manifest.name === "smithers-orchestrator"
@@ -45,8 +52,17 @@ function discoverPackages() {
             });
         }
     }
-    return packages;
+
+    for (const entry of readdirSync(absDir)) {
+        if (IGNORED_DIRS.has(entry)) continue;
+        const full = join(absDir, entry);
+        const st = statSync(full);
+        if (st.isDirectory()) {
+            collectPackages(`${dir}/${entry}`, out);
+        }
+    }
 }
+
 const PACKAGES = discoverPackages();
 
 // Node built-ins — always resolvable, never need declaration.
@@ -94,16 +110,18 @@ function packageNameFromSpecifier(specifier) {
 
 /**
  * @param {string} dir
+ * @param {string} packageRoot
  * @returns {string[]}
  */
-function walkSourceFiles(dir) {
+function walkSourceFiles(dir, packageRoot = dir) {
     const out = [];
     for (const entry of readdirSync(dir)) {
-        if (entry === "node_modules" || entry === "dist" || entry === ".git") continue;
+        if (IGNORED_DIRS.has(entry)) continue;
         const full = join(dir, entry);
         const st = statSync(full);
         if (st.isDirectory()) {
-            out.push(...walkSourceFiles(full));
+            if (full !== packageRoot && existsSync(join(full, "package.json"))) continue;
+            out.push(...walkSourceFiles(full, packageRoot));
             continue;
         }
         if (/\.(m?js|cjs|ts|tsx|jsx)$/.test(entry) && !/\.d\.ts$/.test(entry)) {
@@ -151,9 +169,9 @@ for (const pkg of PACKAGES) {
         const selfName = manifest.name;
 
         const srcDir = join(pkgDir, "src");
-        // Binary-only published packages (e.g. the vendored jj platform packages)
-        // ship a bin/ payload with no src/ tree, so there are no imports to check.
-        const files = existsSync(srcDir) ? walkSourceFiles(srcDir) : [];
+        // Embedded packages can keep their entry files at package root, while
+        // binary-only packages simply contribute no JS/TS files here.
+        const files = existsSync(srcDir) ? walkSourceFiles(srcDir, pkgDir) : walkSourceFiles(pkgDir, pkgDir);
 
         /** @type {Map<string, string[]>} */
         const missing = new Map();
