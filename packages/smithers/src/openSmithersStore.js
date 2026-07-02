@@ -15,8 +15,13 @@ async function openSqliteStore(dbPath, opts = {}) {
     const { drizzle } = await import("drizzle-orm/bun-sqlite");
     const sqlite = new Database(dbPath);
     const db = drizzle(sqlite);
-    ensureSmithersTables(db);
     if (opts.read) {
+        // Read mode executes NO DDL: a `smithers ps` must not mutate the store
+        // (spec: singleton-gateway.md decision 9). A store written by an older
+        // smithers that lacks a newer table fails loud on the query instead of
+        // being silently upgraded by a passing reader; any write path (or
+        // `smithers migrate`) brings the schema forward.
+        //
         // Transient CLI readers (inspect/ps/tui/logs) must NOT disturb the WAL that a
         // concurrent `smithers up` writer depends on. They can't use {readonly:true}
         // (SQLite can't read a WAL db read-only — it needs write access to the -shm
@@ -28,6 +33,9 @@ async function openSqliteStore(dbPath, opts = {}) {
         // busy_timeout lets a brief writer lock clear instead of erroring immediately.
         sqlite.run("PRAGMA busy_timeout = 30000");
         sqlite.run("PRAGMA wal_autocheckpoint = 0");
+    }
+    else {
+        ensureSmithersTables(db);
     }
     return {
         adapter: new SmithersDb(db),

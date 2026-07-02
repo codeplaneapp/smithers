@@ -77,6 +77,46 @@ describe("openSmithersBackend", () => {
     }
   });
 
+  test("sqlite read mode executes no DDL on an existing store", async () => {
+    const cwd = makeWorkspace("smithers-open-sqlite-read-no-ddl");
+    const dbPath = join(cwd, "smithers.db");
+    // Simulate a store written by an older smithers: the runs table exists
+    // (so the read gate passes) but the rest of the schema does not. A read
+    // open must not bring the schema forward (singleton-gateway.md, decision
+    // 9): `smithers ps` is not a writer.
+    const seed = new Database(dbPath);
+    seed.run("CREATE TABLE _smithers_runs (run_id TEXT PRIMARY KEY)");
+    seed.close();
+
+    const store = await openSmithersStore({ cwd, mode: "read", env: {}, wait: { timeoutMs: 0 } });
+    try {
+      const check = new Database(dbPath, { readonly: true });
+      const tables = check
+        .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name GLOB '_smithers_*'")
+        .all();
+      check.close();
+      expect(tables.map((row) => row.name)).toEqual(["_smithers_runs"]);
+    } finally {
+      await store.cleanup?.();
+    }
+  });
+
+  test("sqlite write mode still provisions the full schema", async () => {
+    const cwd = makeWorkspace("smithers-open-sqlite-write-provisions");
+    const dbPath = join(cwd, "smithers.db");
+    const store = await openSmithersStore({ cwd, env: {} });
+    try {
+      const check = new Database(dbPath, { readonly: true });
+      const tables = check
+        .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name GLOB '_smithers_*'")
+        .all();
+      check.close();
+      expect(tables.length).toBeGreaterThan(1);
+    } finally {
+      await store.cleanup?.();
+    }
+  });
+
   test("forwards custom pgliteDataDir through resolve and opens that store", async () => {
     const cwd = makeWorkspace("smithers-open-custom-pglite-dir");
     const customDir = join(cwd, ".smithers", "custom-pg");

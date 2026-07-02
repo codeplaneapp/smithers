@@ -767,7 +767,7 @@ describe("migrateSmithersStore", () => {
     expect(choice.pglite.runCount).toBe(1);
   });
 
-  test("upgrades an older SQLite source before read and migration to PGlite", async () => {
+  test("read leaves an older SQLite source untouched; migrate upgrades it before copying to PGlite", async () => {
     const cwd = makeWorkspace("smithers-migrate-older-sqlite");
     const dbPath = seedOlderSqliteStore(cwd);
 
@@ -776,10 +776,11 @@ describe("migrateSmithersStore", () => {
 
     let sqlite = new Database(dbPath, { readonly: true });
     try {
+      // Read mode executes no DDL (singleton-gateway.md decision 9): the old
+      // schema stays old until a writer or `smithers migrate` brings it
+      // forward. `smithers ps` is not a writer.
       const runColumns = sqlite.query("PRAGMA table_info(_smithers_runs)").all().map((row) => row.name);
-      const eventColumns = sqlite.query("PRAGMA table_info(_smithers_events)").all().map((row) => row.name);
-      expect(runColumns).toEqual(expect.arrayContaining(["workflow_path", "started_at_ms", "finished_at_ms"]));
-      expect(eventColumns).toContain("timestamp_ms");
+      expect(runColumns).not.toContain("workflow_path");
       expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_runs").get().count).toBe(1);
     } finally {
       sqlite.close();
@@ -787,6 +788,17 @@ describe("migrateSmithersStore", () => {
 
     const result = await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite" });
     expect(result.schemaVersion).toBe("0018");
+
+    // The migration itself upgraded the source schema before copying.
+    sqlite = new Database(dbPath, { readonly: true });
+    try {
+      const runColumns = sqlite.query("PRAGMA table_info(_smithers_runs)").all().map((row) => row.name);
+      const eventColumns = sqlite.query("PRAGMA table_info(_smithers_events)").all().map((row) => row.name);
+      expect(runColumns).toEqual(expect.arrayContaining(["workflow_path", "started_at_ms", "finished_at_ms"]));
+      expect(eventColumns).toContain("timestamp_ms");
+    } finally {
+      sqlite.close();
+    }
 
     const api = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
     try {
