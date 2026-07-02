@@ -64,6 +64,11 @@
       "import": "./src/sandbox.js",
       "default": "./src/sandbox.js"
     },
+    "./telegram": {
+      "types": "./src/telegram.d.ts",
+      "import": "./src/telegram.js",
+      "default": "./src/telegram.js"
+    },
     "./control-plane": {
       "types": "./src/control-plane.d.ts",
       "import": "./src/control-plane.js",
@@ -127,6 +132,7 @@
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/scorers": "workspace:*",
     "@smithers-orchestrator/server": "workspace:*",
+    "@smithers-orchestrator/telegram": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
     "@smithers-orchestrator/tool-context": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",

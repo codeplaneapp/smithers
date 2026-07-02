@@ -129,6 +129,9 @@ importers:
       '@smithers-orchestrator/server':
         specifier: workspace:*
         version: link:packages/server
+      '@smithers-orchestrator/telegram':
+        specifier: workspace:*
+        version: link:packages/telegram
       '@smithers-orchestrator/time-travel':
         specifier: workspace:*
         version: link:packages/time-travel
@@ -1671,6 +1674,9 @@ importers:
       '@smithers-orchestrator/server':
         specifier: workspace:*
         version: link:../server
+      '@smithers-orchestrator/telegram':
+        specifier: workspace:*
+        version: link:../telegram
       '@smithers-orchestrator/time-travel':
         specifier: workspace:*
         version: link:../time-travel
@@ -1718,6 +1724,15 @@ importers:
       pg:
         specifier: ^8.22.0
         version: 8.22.0
+
+  packages/telegram:
+    devDependencies:
+      '@types/bun':
+        specifier: latest
+        version: 1.3.14
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/time-travel:
     dependencies:

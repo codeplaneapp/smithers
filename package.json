@@ -37,6 +37,11 @@
       "import": "./packages/sandbox/src/index.js",
       "default": "./packages/sandbox/src/index.js"
     },
+    "./telegram": {
+      "types": "./packages/telegram/src/index.d.ts",
+      "import": "./packages/telegram/src/index.js",
+      "default": "./packages/telegram/src/index.js"
+    },
     "./cloudflare": {
       "types": "./packages/smithers/src/cloudflare.d.ts",
       "import": "./packages/smithers/src/cloudflare.js",
@@ -147,6 +152,7 @@
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/scorers": "workspace:*",
     "@smithers-orchestrator/server": "workspace:*",
+    "@smithers-orchestrator/telegram": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
     "@smithers-orchestrator/tool-context": "workspace:*",
     "@smithers-orchestrator/tui": "workspace:*",
