@@ -3,11 +3,11 @@ title: Custom Workflow UIs
 description: Build a first-class browser UI for your workflow with smithers ui, the Gateway, gateway-client, and gateway-react.
 ---
 
-A custom workflow UI is a small browser bundle that *lives next to your workflow* and talks to the Smithers Gateway over the same RPC and WebSocket protocol the Gateway already serves. You write it once in `.smithers/ui/<workflow>.tsx`, the Gateway builds and serves it at `/workflows/<key>`, and `bunx smithers-orchestrator ui` opens it for a run with a stable `?runId=` deep link.
+A custom workflow UI is a small browser bundle that *lives next to your workflow* and talks to the Smithers Gateway through its domain API, RPC API, and live event streams. You write it once in `.smithers/ui/<workflow>.tsx`, the Gateway builds and serves it at `/workflows/<key>`, and `bunx smithers-orchestrator ui` opens it for a run with a stable `?runId=` deep link.
 
 This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through smithers ui and the Gateway.
 
-For the underlying RPC and event protocol, see [Gateway](/integrations/gateway). For two compact end-to-end examples, see [Workflow UI (React)](/examples/workflow-ui-react) and [Workflow UI (Vanilla)](/examples/workflow-ui-vanilla). For the *visual* language every workflow UI shares (tokens, type, depth, motion) so they look like one product, see [Workflow UI Design Principles](/guides/workflow-ui-design).
+For the underlying RPC and event protocol, see [Gateway](/integrations/gateway). For the TanStack DB collection layer that backs the React hooks, see [Sync](/guides/sync). For two compact end-to-end examples, see [Workflow UI (React)](/examples/workflow-ui-react) and [Workflow UI (Vanilla)](/examples/workflow-ui-vanilla). For the *visual* language every workflow UI shares (tokens, type, depth, motion) so they look like one product, see [Workflow UI Design Principles](/guides/workflow-ui-design).
 
 <Note>API reference: [Gateway React](/reference/gateway-react) lists every hook and component, its options, and links to source and tests.</Note>
 
@@ -37,12 +37,12 @@ Three pieces collaborate:
 |---|---|---|
 | **Footprint** | One zero-dep class, no framework | React 19 + ReactDOM + hooks |
 | **Boot** | `new SmithersGatewayClient()` | `createGatewayReactRoot(<App />)` |
-| **Live events** | `streamRunEventsResilient` async generator | `useGatewayRunEvents(runId)` |
-| **Reads** | `client.getNodeOutput({...})` | `useGatewayNodeOutput({...})` |
-| **Writes** | `client.submitApproval(...)` | `useGatewayActions().submitApproval(...)` |
+| **Live events** | `streamRunEventsResilient` async generator | `useGatewayRunEvents(runId)` over TanStack DB |
+| **Reads** | `client.getNodeOutput({...})` and REST domain calls | `useGateway*` hooks or `useLiveQuery` over collections |
+| **Writes** | `client.submitApproval(...)` and REST domain writes | `useGatewayActions()` or collection mutation handlers |
 | **Use when** | You want one tiny bundle, or you already own your render layer (Solid, Lit, vanilla DOM) | You are writing a React UI and want the stale-data-free model baked in |
 
-Both SDKs talk to the same Gateway and produce the same wire frames. Pick by appetite, not by capability. The vanilla SDK is published as `@smithers-orchestrator/gateway-client`; the React layer is `@smithers-orchestrator/gateway-react` and adds context/hooks on top of the same client instead of a separate wire protocol.
+Both SDKs talk to the same Gateway. The vanilla SDK is published as `@smithers-orchestrator/gateway-client`; the React layer is `@smithers-orchestrator/gateway-react` and adds providers plus hooks over the TanStack DB collections.
 
 ## The boot config
 
@@ -75,7 +75,7 @@ const runId = new URLSearchParams(location.search).get("runId") ?? undefined;
 
 ## React: `createGatewayReactRoot` and hooks
 
-`createGatewayReactRoot` is the one-line bootstrap: it reads the boot config, constructs a `SmithersGatewayClient`, mounts the `SmithersGatewayProvider`, and renders your tree.
+`createGatewayReactRoot` is the one-line bootstrap: it reads the boot config, constructs a `SmithersGatewayClient`, mounts the `SmithersGatewayProvider`, and renders your tree. The provider also mounts `SmithersCollectionsProvider`, which creates the TanStack DB collection registry for the current `WorkspaceMode`. Local mode reads through `/v1/api/*` and refreshes from `/v1/api/stream`; multiplayer mode reads through Electric shapes served by `@smithers-orchestrator/electric-proxy`.
 
 ```tsx
 /** @jsxImportSource react */
@@ -111,7 +111,7 @@ function App() {
 createGatewayReactRoot(<App />);
 ```
 
-The React hooks all live in `packages/gateway-react/src` and follow one rule: **they never surface a previous run's data after the inputs change.** When `runId` changes (or any other dep), the underlying `useGatewayRpc` clears `data` and `error` synchronously, bumps a generation counter that invalidates any in-flight request, then issues a fresh fetch. A late response from the previous `runId` cannot repopulate the cleared state, so the UI never blinks the wrong run between transitions. See [Stale-data-free update model](#stale-data-free-update-model) for why this matters at the iframe boundary.
+The React hooks all live in `packages/gateway-react/src` and follow one rule: **they never surface a previous run's data after the inputs change.** Collection hooks key their TanStack DB query to the current input, and RPC escape hatches still clear `data` and `error` synchronously before issuing a fresh fetch. A late response from the previous `runId` cannot repopulate the cleared state, so the UI never blinks the wrong run between transitions. See [Stale-data-free update model](#stale-data-free-update-model) for why this matters at the iframe boundary.
 
 | Hook | Returns | Notes |
 |---|---|---|
@@ -127,8 +127,8 @@ The React hooks all live in `packages/gateway-react/src` and follow one rule: **
 | `useGatewayExtensionResource(namespace, key, params?, opts?)` | `GatewayAsyncState<T>` | Declarative extension read/action call over `SmithersGatewayClient.extensionRpc` with the same stale-response fence as `useGatewayRpc`. |
 | `useGatewayExtensionAction(namespace, key)` | `{ call, pending, error, data }` | Imperative extension action helper backed by `extensionRpc`; generation-fenced so rapid calls cannot leave stale state. |
 | `useGatewayExtensionStream(namespace, key, params?, opts?)` | `{ frames, latest, error, streaming }` | Extension stream subscription with bounded frames, stale-frame fencing, and backoff reconnect. |
-| `SyncProvider` + `useSyncQuery` / `useSyncMutation` / `useSyncSubscription` | Sync cache hooks | Wrap a `SyncClient` for stale-while-revalidate reads, optimistic mutations, and shared stream subscriptions. |
-| `useGatewayQuery` / `useGatewayMutation` / `useGatewayRunStream` | Gateway sync shortcuts | Typed helpers over `gatewayKeys`, Gateway RPC methods, and the shared subscription hub. |
+| `useSmithersCollections()` | `{ client, collections, queryClient }` | Direct access to the TanStack DB collection registry for custom `useLiveQuery` reads. |
+| `SmithersCollectionsProvider` | React provider | Advanced provider for supplying a custom `WorkspaceMode`, `SmithersDataClient`, or `QueryClient`. |
 
 ## Vanilla SDK
 
@@ -194,7 +194,7 @@ A row arrives either inline (`status: "produced"`) or as a typed `pending` / `fa
 
 ## DevTools observability streams
 
-Beyond standard node output and run events, `streamDevTools` provides the live DevTools tree: an initial snapshot plus `devtools.event` delta frames such as `replaceRoot`, `addNode`, `removeNode`, `updateProps`, and `updateTask`. Use it for inspectors that need node props, task metadata, and rebaselining after rewind. It is a raw WebSocket iterator on `SmithersGatewayClient`; if you need reconnect behavior, re-subscribe with the last `afterSeq` or use the sync subscription layer on top of `gatewayKeys.devtools(runId)`.
+Beyond standard node output and run events, `streamDevTools` provides the live DevTools tree: an initial snapshot plus `devtools.event` delta frames such as `replaceRoot`, `addNode`, `removeNode`, `updateProps`, and `updateTask`. Use it for inspectors that need node props, task metadata, and rebaselining after rewind. It is a raw WebSocket iterator on `SmithersGatewayClient`; if you need reconnect behavior, re-subscribe with the last `afterSeq`.
 
 ## Approvals, signals, and lifecycle actions
 

@@ -14,9 +14,10 @@ import { bindScoresActions, useScoresStore } from "./scoresStore";
  *   • the active run's scorer rows come from a NEW `useGatewayScores(runId)` over
  *     the `listScores` RPC (the `_smithers_scorers` table).
  *
- * The Zustand store can't call React hooks, so this component — mounted inside
- * `<SyncProvider>` in `main.tsx` next to `<CronsBridge/>`/`<MemoryFactsBridge/>`
- * — maps both into the store on every change and installs the `refetch` seam
+ * The Zustand store can't call React hooks, so this component is mounted inside
+ * `SmithersCollectionsProvider` in `main.tsx` next to
+ * `<CronsBridge/>`/`<MemoryFactsBridge/>`. It maps both into the store on every
+ * change and installs the `refetch` seam
  * (`bindScoresActions`) so the surface's Refresh button re-pulls live.
  *
  * `listScores` REQUIRES a `runId`, so the per-run fetch is split into a child

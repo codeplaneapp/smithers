@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,19 +32,33 @@ function run(command, args) {
   }
 }
 
+const before = new Map(
+  generatedFiles.map((file) => [
+    file,
+    existsSync(resolve(root, file)) ? readFileSync(resolve(root, file), "utf8") : null,
+  ]),
+);
+
 run("bun", ["scripts/generate-llms.ts"]);
 run("bun", ["scripts/optimize-llms-full.ts"]);
 
-const status = spawnSync("git", ["status", "--porcelain", "--", ...generatedFiles], {
-  cwd: root,
-  encoding: "utf8",
+const changed = generatedFiles.filter((file) => {
+  const path = resolve(root, file);
+  const previous = before.get(file) ?? null;
+  const current = existsSync(path) ? readFileSync(path, "utf8") : null;
+  return previous !== current;
 });
-if (status.status !== 0) {
-  process.exit(status.status ?? 1);
-}
-if (status.stdout.trim()) {
+
+if (changed.length) {
+  const status = spawnSync("git", ["status", "--porcelain", "--", ...changed], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (status.status !== 0) {
+    process.exit(status.status ?? 1);
+  }
   console.error("Generated llms artifacts are out of date:");
-  console.error(status.stdout.trimEnd());
+  console.error(status.stdout.trimEnd() || changed.map((file) => ` M ${file}`).join("\n"));
   console.error("\nRun `pnpm docs:llms` and commit the resulting files.");
   process.exit(1);
 }

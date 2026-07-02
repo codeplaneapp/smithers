@@ -60,7 +60,7 @@ function echo(say: string, title: string, detail: string): void {
 
 export const useRunsListStore = create<RunsListState>((set, get) => ({
   // Sourced live from the gateway `runs` collection via `RunsListBridge`; starts
-  // empty until the first collection push (the bridge mounts inside SyncProvider).
+  // empty until the first collection push.
   runs: [],
   statusFilter: DEFAULT_FILTERS.status,
   workflowFilter: DEFAULT_FILTERS.workflow,

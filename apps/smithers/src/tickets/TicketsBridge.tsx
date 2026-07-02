@@ -14,8 +14,8 @@ import { bindTicketActions, useTicketsStore } from "./ticketsStore";
 /**
  * Bridge the live `tickets` gateway collection into the tickets store
  * (docs/p1b-plan.md §3.4). The Zustand store can't call React hooks, so this
- * component — mounted inside `<SyncProvider>` in `main.tsx` next to
- * `<CronsBridge/>` / `<MemoryFactsBridge/>` — calls `useGatewayTickets()`, maps
+ * component mounted inside `SmithersCollectionsProvider` in `main.tsx` next to
+ * `<CronsBridge/>` / `<MemoryFactsBridge/>` calls `useGatewayTickets()`, maps
  * each `GatewayTicketRow` onto the surface's `Ticket`, and pushes the result into
  * the store on every change. It also installs the
  * `createTicket`/`updateTicket`/`deleteTicket` RPC seam (`bindTicketActions`) so

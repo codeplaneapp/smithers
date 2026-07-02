@@ -14,8 +14,8 @@ import { bindCronActions, useCronsStore } from "./cronsStore";
 /**
  * Bridge the live `crons` gateway collection into the triggers store
  * (docs/p1b-plan.md §3.1). The Zustand store can't call React hooks, so this
- * component — mounted inside `<SyncProvider>` in `main.tsx` next to
- * `<RunsListBridge/>` / `<ApprovalsBridge/>` — calls `useGatewayCrons()`, maps
+ * component mounted inside `SmithersCollectionsProvider` in `main.tsx` next to
+ * `<RunsListBridge/>` / `<ApprovalsBridge/>` calls `useGatewayCrons()`, maps
  * each `GatewayCronRow` onto a `Cron`, and pushes the result into the store on
  * every change. It also installs the `cronCreate`/`cronDelete` RPC seam
  * (`bindCronActions`) so the store's create/delete/toggle drive the REAL gateway.

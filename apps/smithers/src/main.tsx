@@ -1,7 +1,10 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
-import { SmithersGatewayProvider, SyncProvider } from "@smithers-orchestrator/gateway-react";
+import {
+  SmithersCollectionsProvider,
+  SmithersGatewayProvider,
+} from "@smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "@smithers-orchestrator/gateway-ui";
 import { bindRouteStore } from "./app/bindRouteStore";
 import { router } from "./app/router";
@@ -15,7 +18,6 @@ import { PromptsBridge } from "./prompts/PromptsBridge";
 import { ScoresBridge } from "./scores/ScoresBridge";
 import { TicketsBridge } from "./tickets/TicketsBridge";
 import { startApprovalWatcher } from "./runs/watchApprovals";
-import { appGatewayCollections } from "./sync/appGatewayCollections";
 import { useWorkspaceStore } from "./app/workspaceStore";
 import "./styles.css";
 
@@ -28,8 +30,8 @@ startApprovalWatcher();
 /**
  * The gateway → Zustand bridges. Each subscribes a gateway-react live hook and
  * mirrors it into the matching Zustand store the surfaces read. Local-only: no
- * auth gate, no OPFS persistence, no Electric — the live RPC + WebSocket path
- * from the local gateway is the only source.
+ * auth gate, no OPFS persistence, no Electric. The local gateway domain API plus
+ * TanStack DB collections are the only source.
  */
 function GatewayBridges() {
   return (
@@ -55,10 +57,10 @@ function LocalWorkspaceRuntime() {
 
   return (
     <SmithersGatewayProvider client={getGatewayClient()}>
-      <SyncProvider client={appGatewayCollections}>
+      <SmithersCollectionsProvider>
         {ready ? <GatewayBridges /> : null}
         <RouterProvider router={router} />
-      </SyncProvider>
+      </SmithersCollectionsProvider>
     </SmithersGatewayProvider>
   );
 }

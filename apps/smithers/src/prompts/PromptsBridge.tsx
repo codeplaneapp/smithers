@@ -9,8 +9,8 @@ import { usePromptsStore } from "./promptsStore";
 /**
  * Bridge the live `prompts` gateway collection into the prompts-editor store
  * (P1b §3.5). The Zustand store can't call React hooks, so this component —
- * mounted inside `<SyncProvider>` in `main.tsx` next to the other surface
- * bridges — calls `useGatewayPrompts()`, maps each `GatewayPromptRow` onto a
+ * mounted inside `SmithersCollectionsProvider` in `main.tsx` next to the other
+ * surface bridges. It calls `useGatewayPrompts()`, maps each `GatewayPromptRow` onto a
  * `Prompt`, and pushes the result into the store on every change. Prompts are
  * READ-ONLY on the wire (only a `listPrompts` RPC, no write), so there is no
  * mutation seam: the gateway enumerates the `.smithers/prompts/**.{md,mdx}`

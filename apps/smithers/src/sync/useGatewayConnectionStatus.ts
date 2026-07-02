@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { useSyncClient } from "@smithers-orchestrator/gateway-react";
+import { useSmithersCollections } from "@smithers-orchestrator/gateway-react";
 import {
   connectionStateValue,
   gatewayConnectionState,
@@ -13,25 +13,20 @@ type GatewayConnectionStatus = {
 };
 
 /**
- * Connection status derived from the registry's connection observer, which the
- * instrumented transport drives off real traffic (RPC resolves, stream frames,
- * auth/transport errors). This replaces an earlier `useGatewayWorkflows` probe
- * that could never surface an error (collection-backed hooks return
- * `error: undefined`), so offline/unauthorized links were reported as `online`.
+ * Connection status derived from the data client's SSE stream observer, which
+ * is driven by real gateway traffic and auth/transport errors.
  */
 export function useGatewayConnectionStatus(): GatewayConnectionStatus {
-  const registry = useSyncClient();
+  const { client } = useSmithersCollections();
   const state = useSyncExternalStore(
-    registry.subscribeConnection,
-    registry.connection,
-    registry.connection,
+    client.stream.subscribeStatus,
+    client.stream.status,
+    client.stream.status,
   );
 
-  // Probe once on mount so an otherwise idle link leaves `idle`; the observer
-  // flips to online/offline/unauthorized off the result.
   useEffect(() => {
-    void registry.connect();
-  }, [registry]);
+    return client.stream.subscribe(() => {});
+  }, [client]);
 
   const status = state.status as GatewayStatus;
 

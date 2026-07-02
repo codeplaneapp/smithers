@@ -8,8 +8,8 @@ import { useMemoryStore } from "./memoryStore";
 /**
  * Bridge the live `memoryFacts` gateway collection into the memory store
  * (docs/p1b-plan.md §3.2). The Zustand store can't call React hooks, so this
- * component — mounted inside `<SyncProvider>` in `main.tsx` next to
- * `<CronsBridge/>` — calls `useGatewayMemoryFacts()`, maps each
+ * component mounted inside `SmithersCollectionsProvider` in `main.tsx` next to
+ * `<CronsBridge/>` calls `useGatewayMemoryFacts()`, maps each
  * `GatewayMemoryFactRow` onto a `MemoryFact`, and pushes the result into the
  * store on every change. Memory is READ-ONLY on the wire (only a
  * `listMemoryFacts` RPC, no write), so there is no mutation seam: facts are

@@ -117,6 +117,7 @@
           "guides/workflow-optimization",
           "guides/tui",
           "guides/custom-workflow-ui",
+          "guides/sync",
           "guides/workflow-ui-design",
           "guides/alerting",
           "guides/agent-trace-otel-verification",

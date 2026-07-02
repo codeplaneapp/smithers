@@ -6,9 +6,9 @@ import { statusClass, statusColor } from "../src/theme";
 /**
  * Pure-component + helper tests. These render with `renderToStaticMarkup` (no
  * DOM, no gateway context) so they run on CI's headless box. The hook-driven
- * components (RunList, RunTree, ApprovalPanel, …) require a live
- * `SyncProvider`/gateway and are exercised by the gateway-react integration
- * suite and the real-backend e2e, not here.
+ * components (RunList, RunTree, ApprovalPanel, …) require the live gateway
+ * collection provider and are exercised by gateway-react integration tests and
+ * the real-backend e2e, not here.
  */
 describe("statusColor", () => {
   test("maps known statuses to accent colors", () => {

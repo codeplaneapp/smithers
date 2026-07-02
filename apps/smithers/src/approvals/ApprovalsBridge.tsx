@@ -14,7 +14,7 @@ import { bindApprovalActions, syncSelection, useApprovalsStore } from "./approva
 /**
  * Bridge the live `approvals` gateway collection into the approvals store
  * (§3.A/§3.C.4 of docs/p1a-plan.md). The store can't call React hooks, so this
- * component — mounted inside `<SyncProvider>` in `main.tsx` — calls
+ * component mounted inside `SmithersCollectionsProvider` in `main.tsx` calls
  * `useGatewayApprovals()`, maps each `GatewayApprovalSummary` onto an
  * `ApprovalGate`, and pushes the result into the store (re-running the selection
  * sync so the detail pane stays populated as gates arrive/resolve). It also

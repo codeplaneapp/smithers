@@ -29,7 +29,7 @@ export function useApprovals(runId: string): GatewayAsyncState<GatewayApprovalRo
  * Single source of truth for how much run-event history the TUI retains.
  *
  * The gateway caches one `runEvents` collection per `(runId, maxRows)` (the cap
- * is part of the collection key — see gatewayCollectionDefs / gatewayKeys), so
+ * is part of the collection key), so
  * consumers asking for different caps get separate rings and separate streams.
  * Every TUI event consumer therefore requests THIS one cap, so they all share a
  * single correctly-sized ring (and one stream) regardless of mount order —

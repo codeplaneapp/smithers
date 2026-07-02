@@ -1,12 +1,8 @@
 #!/usr/bin/env bun
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { SmithersGatewayClient, createSmithersGatewayTransport } from "@smithers-orchestrator/gateway-client";
-import {
-  SmithersGatewayProvider,
-  SyncProvider,
-  createGatewayCollections,
-} from "@smithers-orchestrator/gateway-react";
+import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
+import { SmithersGatewayProvider } from "@smithers-orchestrator/gateway-react";
 import { spawn } from "node:child_process";
 import { resolveGatewayConfig, isValidGatewayPort, GatewayConfigError } from "./gatewayConfig.ts";
 import { resolveCliEntry } from "./cliEntry.ts";
@@ -308,18 +304,12 @@ const client = new SmithersGatewayClient({
   token: GATEWAY_TOKEN,
 });
 
-const collections = createGatewayCollections({
-  client: createSmithersGatewayTransport(client),
-});
-
 root.render(
   <ErrorBoundary onExit={onExit}>
     <RendererProvider value={renderer}>
       <Keybindings>
         <SmithersGatewayProvider client={client}>
-          <SyncProvider client={collections}>
-            <App runId={runId} onExit={onExit} />
-          </SyncProvider>
+          <App runId={runId} onExit={onExit} />
         </SmithersGatewayProvider>
       </Keybindings>
     </RendererProvider>
