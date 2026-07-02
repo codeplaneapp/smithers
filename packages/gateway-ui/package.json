@@ -10,6 +10,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./styleguide-css": {
+      "types": "./src/styleguide-css.ts",
+      "import": "./src/styleguide-css.ts",
+      "default": "./src/styleguide-css.ts"
+    },
     "./*": {
       "types": "./src/*.ts",
       "import": "./src/*.ts",
