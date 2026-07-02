@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
@@ -293,8 +293,9 @@ function App() {
   const activeStage = !hasTarget ? "target" : !hasPreview ? "preview" : !hasReview ? "review" : !hasSummary ? "summary" : "";
   const reviewableEntries = preview?.entries.filter((entry) => entry.willReview) ?? [];
   const excludedEntries = preview?.entries.filter((entry) => !entry.willReview) ?? [];
+  const totalTokens = review?.summary?.totalTokens ?? summary?.totalTokens ?? 0;
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     await Promise.all([
       runsQuery.refetch(),
       targetOut.refetch(),
@@ -302,7 +303,13 @@ function App() {
       reviewOut.refetch(),
       summaryOut.refetch(),
     ]);
-  }
+  }, [
+    runsQuery.refetch,
+    targetOut.refetch,
+    previewOut.refetch,
+    reviewOut.refetch,
+    summaryOut.refetch,
+  ]);
   async function launch() {
     setBusy(true);
     try {
@@ -333,6 +340,14 @@ function App() {
       setBusy(false);
     }
   }
+  useEffect(() => {
+    if (typeof window === "undefined" || !activeRunId || (hasReview && hasSummary)) return;
+    void refresh();
+    const id = window.setInterval(() => {
+      void refresh();
+    }, 1_000);
+    return () => window.clearInterval(id);
+  }, [activeRunId, hasReview, hasSummary, refresh]);
 
   return (
     <main className="shell" data-testid="open-code-review-ui">
@@ -423,7 +438,7 @@ function App() {
             </div>
             <div className="kpi" data-testid="ocr-kpi-tokens">
               <div className="label">Tokens</div>
-              <div className="value">{review?.summary?.totalTokens ?? 0}</div>
+              <div className="value">{totalTokens}</div>
             </div>
           </div>
 
