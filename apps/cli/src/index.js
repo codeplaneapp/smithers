@@ -7801,7 +7801,17 @@ async function buildInlineChatWorkflow(agentId, cwd) {
     });
     const chatTableName = camelToSnake("chat");
     const chatTable = zodToTable(chatTableName, chatSchema);
-    const sqlite = new Database(resolve(cwd, "smithers.db"));
+    // Use the workspace store, not a stray ./smithers.db in whatever
+    // subdirectory chat was launched from: same anchor rule as createSmithers,
+    // same fail-loud guard for non-sqlite workspaces (this inline workflow is
+    // bun:sqlite-only).
+    const { findSmithersAnchorDir } = await import("smithers-orchestrator/findSmithersAnchorDir");
+    const anchorDir = findSmithersAnchorDir(cwd);
+    const workspaceBackend = readBackendMarkerForCwd(cwd);
+    if (workspaceBackend && workspaceBackend !== "sqlite") {
+        throw new SmithersError("BACKEND_MISMATCH", `This workspace's store is ${workspaceBackend}, but \`smithers chat create\` currently supports only the sqlite backend. Run it in a sqlite workspace or migrate with \`smithers migrate --to sqlite\`.`, { backend: workspaceBackend });
+    }
+    const sqlite = new Database(resolve(anchorDir ?? cwd, "smithers.db"));
     sqlite.run("PRAGMA journal_mode = WAL");
     sqlite.run("PRAGMA busy_timeout = 30000");
     sqlite.run("PRAGMA synchronous = NORMAL");
