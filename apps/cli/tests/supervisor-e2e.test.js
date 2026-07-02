@@ -220,8 +220,10 @@ describe("supervisor e2e", () => {
                     },
                 ]);
                 const run = await adapter.getRun(runId);
-                expect(run?.heartbeatAtMs).toBe(now);
-                expect(run?.runtimeOwnerId).toBe("supervisor:priority-e2e");
+                expect(run?.heartbeatAtMs).toBe(originalHeartbeats[runId]);
+                expect(run?.runtimeOwnerId).toBe("pid:99999:owner");
+                expect(run?.claimedBy).toBe("supervisor:priority-e2e");
+                expect(run?.claimedAtMs).toBe(now);
             }
             for (const runId of ["run-fresher", "run-freshest"]) {
                 expect(await eventPayloads(adapter, runId, "RunAutoResumeSkipped")).toEqual([
@@ -336,8 +338,10 @@ describe("supervisor e2e", () => {
             });
             expect(resumed).toEqual(["run-idempotent"]);
             const run = await adapter.getRun("run-idempotent");
-            expect(run?.heartbeatAtMs).toBe(now);
-            expect(run?.runtimeOwnerId).toBe("supervisor:idempotent-e2e");
+            expect(run?.heartbeatAtMs).toBe(now - 60_000);
+            expect(run?.runtimeOwnerId).toBe("pid:99999:owner");
+            expect(run?.claimedBy).toBe("supervisor:idempotent-e2e");
+            expect(run?.claimedAtMs).toBe(now);
             expect(await eventPayloads(adapter, "run-idempotent", "RunAutoResumed")).toHaveLength(1);
             const supervisorEvents = await eventPayloads(adapter, SUPERVISOR_EVENT_RUN_ID, "SupervisorPollCompleted");
             expect(supervisorEvents).toEqual([
@@ -401,8 +405,10 @@ describe("supervisor e2e", () => {
             });
             expect(resumed).toEqual(["run-timer-idempotent"]);
             const run = await adapter.getRun("run-timer-idempotent");
-            expect(run?.runtimeOwnerId).toBe("supervisor:timer-idempotent-e2e");
-            expect(run?.heartbeatAtMs).toBe(now);
+            expect(run?.runtimeOwnerId).toBeNull();
+            expect(run?.heartbeatAtMs).toBeNull();
+            expect(run?.claimedBy).toBe("supervisor:timer-idempotent-e2e");
+            expect(run?.claimedAtMs).toBe(now);
             expect(await eventPayloads(adapter, "run-timer-idempotent", "RunAutoResumed")).toHaveLength(1);
         }
         finally {

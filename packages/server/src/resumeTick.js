@@ -107,18 +107,55 @@ async function defaultResumeRun(job) {
 }
 
 /**
+ * Resume a run whose row-level lease is already held. On resume-start failure
+ * it releases the lease so a later tick/supervisor poll can retry.
+ * @param {SmithersDb} db
+ * @param {Record<string, unknown>} run
+ * @param {{ now: number; resumeRun: RunResumeTickOptions["resumeRun"]; cliEntrypoint?: string; claimOwnerId: string; claimHeartbeatAtMs: number }} ctx
+ * @param {string} kind
+ * @returns {Promise<{ runId: string; resumed: boolean; kind?: string; error?: string }>}
+ */
+async function resumeClaimedRun(db, run, ctx, kind) {
+    const runId = /** @type {string} */ (run.runId);
+    const claimOwnerId = ctx.claimOwnerId;
+    const claimHeartbeatAtMs = ctx.claimHeartbeatAtMs;
+    const runtimeOwnerId = /** @type {string | null} */ (run.runtimeOwnerId ?? null);
+    const heartbeatAtMs = /** @type {number | null} */ (run.heartbeatAtMs ?? null);
+    try {
+        await ctx.resumeRun({
+            runId,
+            workflowPath: /** @type {string} */ (run.workflowPath),
+            claimOwnerId,
+            claimHeartbeatAtMs,
+            restoreRuntimeOwnerId: runtimeOwnerId,
+            restoreHeartbeatAtMs: heartbeatAtMs,
+            cliEntrypoint: ctx.cliEntrypoint,
+        }, { now: ctx.now });
+        return { runId, resumed: true, kind };
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        try {
+            await db.releaseRunClaim(runId);
+        }
+        catch {
+            // Best-effort release; the lease will simply expire on its own.
+        }
+        return { runId, resumed: false, kind, error: message };
+    }
+}
+/**
  * Attempt to atomically claim and resume one candidate run. This is the
  * single "claim + resume + release-on-failure" primitive shared by
- * `runResumeTick` (below, for serverless ticks) and
  * `apps/cli/src/supervisor.js`'s `processCandidateEffect` /
  * `processApprovalDecidedCandidateEffect` (for the long-running CLI
- * supervisor loop): claim via `db.claimRunForResume` (the SAME
- * lease-guarded `UPDATE ... RETURNING` either caller uses), then call
- * `resumeRun`, releasing the claim on failure so a later tick can retry.
+ * supervisor loop): claim via `db.claimRunForResume` (the same run lease
+ * guarded `UPDATE ... RETURNING` the engine consumes), then call `resumeRun`,
+ * releasing the claim on failure so a later tick can retry.
  *
- * Exported so `smithers supervise` can delegate to it instead of
- * duplicating the claim/resume/release sequence, mirroring how
- * `apps/cli/src/scheduler.js` delegates to `runCronTick`.
+ * Exported so `smithers supervise` can delegate to it instead of duplicating
+ * the claim/resume/release sequence, mirroring how `apps/cli/src/scheduler.js`
+ * delegates to `runCronTick`.
  *
  * @param {SmithersDb} db
  * @param {Record<string, unknown>} run
@@ -145,44 +182,23 @@ export async function claimAndResumeRun(db, run, ctx, kind) {
     if (!claimed) {
         return { runId, resumed: false };
     }
-    try {
-        await ctx.resumeRun({
-            runId,
-            workflowPath: /** @type {string} */ (run.workflowPath),
-            claimOwnerId,
-            claimHeartbeatAtMs,
-            restoreRuntimeOwnerId: runtimeOwnerId,
-            restoreHeartbeatAtMs: heartbeatAtMs,
-            cliEntrypoint: ctx.cliEntrypoint,
-        }, { now: ctx.now });
-        return { runId, resumed: true, kind };
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        try {
-            await db.releaseRunResumeClaim({
-                runId,
-                claimOwnerId,
-                restoreRuntimeOwnerId: runtimeOwnerId,
-                restoreHeartbeatAtMs: heartbeatAtMs,
-            });
-        }
-        catch {
-            // Best-effort release; the lease will simply expire on its own.
-        }
-        return { runId, resumed: false, kind, error: message };
-    }
+    return resumeClaimedRun(db, run, {
+        now: ctx.now,
+        resumeRun: ctx.resumeRun,
+        cliEntrypoint: ctx.cliEntrypoint,
+        claimOwnerId,
+        claimHeartbeatAtMs,
+    }, kind);
 }
 
 /**
  * A single, storage-agnostic "resume tick": find every run resumable because
  * (i) its heartbeat has gone stale while `running` (the engine process that
  * owned it died or the invocation that owned it ended), or (ii) it is
- * `waiting-event` with at least one decided approval recorded while
- * detached (`approval-decided-resume-required` — the gate node is already
+ * `waiting-event` with a decided approval / answered human request recorded
+ * while detached (`approval-decided-resume-required` — the gate node is already
  * "pending" but no engine is alive to execute it) — then claims a lease via
- * `db.claimRunForResume` (the same lease-guarded claim `smithers supervise`
- * uses) and resumes each claimed run.
+ * `db.claimResumableRuns` and resumes each claimed run.
  *
  * Safe to call from a short-lived HTTP handler: it does not loop or block
  * waiting on workflow completion, only claims + kicks off resumes and
@@ -196,37 +212,27 @@ export async function claimAndResumeRun(db, run, ctx, kind) {
 export async function runResumeTick(db, opts = {}) {
     const now = opts.now ?? Date.now();
     const staleThresholdMs = opts.staleThresholdMs ?? DEFAULT_STALE_THRESHOLD_MS;
-    const staleBeforeMs = now - staleThresholdMs;
     const limit = opts.limit ?? 100;
     const workerId = opts.workerId ?? randomUUID();
     const resumeRun = opts.resumeRun ?? defaultResumeRun;
-    const ctx = { now, staleBeforeMs, workerId, resumeRun, cliEntrypoint: opts.cliEntrypoint };
+    const claimOwnerId = `resume-tick:${workerId}`;
+    const ctx = {
+        now,
+        resumeRun,
+        cliEntrypoint: opts.cliEntrypoint,
+        claimOwnerId,
+        claimHeartbeatAtMs: now,
+    };
 
     const resumed = [];
     const errors = [];
 
-    const staleRuns = await db.listStaleRunningRuns(staleBeforeMs, limit);
-    for (const run of staleRuns) {
-        const result = await claimAndResumeRun(db, run, ctx, "stale-running");
-        if (result.resumed) {
-            resumed.push({ runId: result.runId, kind: /** @type {string} */ (result.kind) });
-        }
-        else if (result.error) {
-            errors.push({ runId: result.runId, error: result.error });
-        }
-    }
-
-    const waitingEventRuns = await db.listRuns(limit, "waiting-event");
-    for (const run of waitingEventRuns) {
-        const heartbeatAtMs = /** @type {number | null} */ (run.heartbeatAtMs ?? null);
-        if (heartbeatAtMs !== null && heartbeatAtMs >= staleBeforeMs) {
-            continue;
-        }
-        const decided = await db.listDecidedApprovals(/** @type {string} */ (run.runId));
-        if (decided.length === 0) {
-            continue;
-        }
-        const result = await claimAndResumeRun(db, run, ctx, "approval-decided-resume-required");
+    const claimedRuns = await db.claimResumableRuns(now, staleThresholdMs, claimOwnerId, limit);
+    for (const run of claimedRuns) {
+        const kind = run.status === "running"
+            ? "stale-running"
+            : "approval-decided-resume-required";
+        const result = await resumeClaimedRun(db, run, ctx, kind);
         if (result.resumed) {
             resumed.push({ runId: result.runId, kind: /** @type {string} */ (result.kind) });
         }

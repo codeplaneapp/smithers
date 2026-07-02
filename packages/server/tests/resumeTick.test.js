@@ -73,6 +73,43 @@ async function insertApprovalDecidedRun(adapter, runId, opts = {}) {
     });
 }
 
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
+async function insertAnsweredHumanRun(adapter, runId) {
+    await adapter.insertRun(runRow(runId, {
+        status: "waiting-event",
+        heartbeatAtMs: now - 60_000,
+    }));
+    await adapter.insertNode({
+        runId,
+        nodeId: "human-input",
+        iteration: 0,
+        state: "pending",
+        lastAttempt: 1,
+        updatedAtMs: now - 2_000,
+        outputTable: "",
+        label: "human:input",
+    });
+    await adapter.insertHumanRequest({
+        requestId: `${runId}:human-input:0`,
+        runId,
+        nodeId: "human-input",
+        iteration: 0,
+        kind: "json",
+        status: "answered",
+        prompt: "Provide input",
+        schemaJson: null,
+        optionsJson: null,
+        responseJson: "{}",
+        requestedAtMs: now - 2_000,
+        answeredAtMs: now - 1_000,
+        answeredBy: "user:test",
+        timeoutAtMs: null,
+    });
+}
+
 describe("runResumeTick", () => {
     test("resumes a stale running run", async () => {
         const { adapter, sqlite } = openAdapter();
@@ -92,6 +129,10 @@ describe("runResumeTick", () => {
             expect(result.resumedCount).toBe(1);
             expect(result.resumed[0]).toEqual({ runId: "run-stale", kind: "stale-running" });
             expect(result.errors).toHaveLength(0);
+            const run = await adapter.getRun("run-stale");
+            expect(run?.runtimeOwnerId).toBe("pid:99999:owner");
+            expect(run?.claimedBy).toBe("resume-tick:test-worker");
+            expect(run?.claimedAtMs).toBe(now);
         }
         finally {
             sqlite.close();
@@ -115,6 +156,31 @@ describe("runResumeTick", () => {
             expect(resumeCalls).toEqual(["run-approved"]);
             expect(result.resumedCount).toBe(1);
             expect(result.resumed[0]).toEqual({ runId: "run-approved", kind: "approval-decided-resume-required" });
+            const run = await adapter.getRun("run-approved");
+            expect(run?.claimedBy).toBe("resume-tick:test-worker");
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("resumes an answered human-request suspended run", async () => {
+        const { adapter, sqlite } = openAdapter();
+        try {
+            await insertAnsweredHumanRun(adapter, "run-human-answered");
+            const resumeCalls = [];
+            const result = await runResumeTick(adapter, {
+                now,
+                staleThresholdMs: 30_000,
+                workerId: "test-worker",
+                resumeRun: async (job) => {
+                    resumeCalls.push(job.runId);
+                },
+            });
+
+            expect(resumeCalls).toEqual(["run-human-answered"]);
+            expect(result.resumedCount).toBe(1);
+            expect(result.resumed[0]).toEqual({ runId: "run-human-answered", kind: "approval-decided-resume-required" });
         }
         finally {
             sqlite.close();
@@ -142,6 +208,8 @@ describe("runResumeTick", () => {
             const [row] = await adapter.listRuns(10, "running");
             expect(row.runtimeOwnerId).toBe("pid:99999:owner");
             expect(row.heartbeatAtMs).toBe(now - 1_000);
+            expect(row.claimedAtMs).toBeNull();
+            expect(row.claimedBy).toBeNull();
         }
         finally {
             sqlite.close();
@@ -185,20 +253,10 @@ describe("runResumeTick", () => {
     test("lease expires after the staleness timeout, allowing reclaim", async () => {
         const { adapter, sqlite } = openAdapter();
         try {
-            await adapter.insertRun(runRow("run-lease-expired"));
-            // First tick claims the run but its resumeRun never resolves cleanly
-            // (simulate a crash mid-resume by not releasing the claim): the claim
-            // sticks around with the resume-tick's claimOwnerId/heartbeat.
-            await adapter.claimRunForResume({
-                runId: "run-lease-expired",
-                expectedStatus: "running",
-                expectedRuntimeOwnerId: "pid:99999:owner",
-                expectedHeartbeatAtMs: now - 60_000,
-                staleBeforeMs: now - 30_000,
-                claimOwnerId: "resume-tick:crashed-worker",
-                claimHeartbeatAtMs: now - 60_000, // claimed a while ago, itself now stale
-                requireStale: true,
-            });
+            await adapter.insertRun(runRow("run-lease-expired", {
+                claimedAtMs: now - 60_000,
+                claimedBy: "resume-tick:crashed-worker",
+            }));
 
             const resumeCalls = [];
             const result = await runResumeTick(adapter, {
@@ -212,6 +270,9 @@ describe("runResumeTick", () => {
 
             expect(resumeCalls).toEqual(["run-lease-expired"]);
             expect(result.resumedCount).toBe(1);
+            const run = await adapter.getRun("run-lease-expired");
+            expect(run?.claimedBy).toBe("resume-tick:worker-recover");
+            expect(run?.claimedAtMs).toBe(now);
         }
         finally {
             sqlite.close();

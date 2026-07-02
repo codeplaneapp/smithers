@@ -54,9 +54,10 @@ Key responsibilities:
 
 <ResponseField name="run lifecycle" type="methods">
   `insertRun`, `updateRun`, `getRun`, `listRuns`, `heartbeatRun`,
-  `requestRunCancel`, `requestRunHijack`, `claimRunForResume`,
-  `listStaleRunningRuns`, and the ancestry helpers track a run from start to
-  terminal state and support crash recovery.
+  `requestRunCancel`, `requestRunHijack`, `claimResumableRuns`,
+  `releaseRunClaim`, `claimRunForResume`, `listStaleRunningRuns`, and the
+  ancestry helpers track a run from start to terminal state and support crash
+  recovery.
 </ResponseField>
 
 <ResponseField name="nodes & attempts" type="methods">

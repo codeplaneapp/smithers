@@ -404,8 +404,10 @@ describe("supervisor poll core", () => {
         expect(resumed).toEqual(["run-approval-decided"]);
         expect(await listEventTypes(adapter, "run-approval-decided")).toContain("RunAutoResumed");
         const run = await adapter.getRun("run-approval-decided");
-        expect(run?.runtimeOwnerId).toBe("supervisor:approval-resume");
-        expect(run?.heartbeatAtMs).toBe(now);
+        expect(run?.runtimeOwnerId).toBe("pid:99999:owner");
+        expect(run?.heartbeatAtMs).toBe(now - 60_000);
+        expect(run?.claimedBy).toBe("supervisor:approval-resume");
+        expect(run?.claimedAtMs).toBe(now);
         sqlite.close();
     });
     test("does not resume a waiting-event run whose approval is still undecided", async () => {
@@ -498,6 +500,8 @@ describe("supervisor poll core", () => {
         const afterFail = await adapter.getRun("run-spawn-fail");
         expect(afterFail?.runtimeOwnerId).toBe(original.runtimeOwnerId);
         expect(afterFail?.heartbeatAtMs).toBe(original.heartbeatAtMs);
+        expect(afterFail?.claimedBy).toBeNull();
+        expect(afterFail?.claimedAtMs).toBeNull();
         // Second poll with a working spawn must succeed (run was not left stuck).
         throwOnSpawn = false;
         const second = await Effect.runPromise(supervisorPollEffect(options));

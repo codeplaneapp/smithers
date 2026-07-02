@@ -4620,12 +4620,7 @@ export function renderFrame(workflow, ctx, opts) {
  */
 async function releaseResumeClaimQuietly(adapter, runId, cleanup) {
     try {
-        await Effect.runPromise(adapter.releaseRunResumeClaim({
-            runId,
-            claimOwnerId: cleanup.claimOwnerId,
-            restoreRuntimeOwnerId: cleanup.restoreRuntimeOwnerId,
-            restoreHeartbeatAtMs: cleanup.restoreHeartbeatAtMs,
-        }));
+        await Effect.runPromise(adapter.releaseRunClaim(runId));
     }
     catch (error) {
         logWarning("failed to release resume claim", {
@@ -4677,8 +4672,8 @@ async function activateRunForResume(adapter, existingRun, opts, runtimeOwnerId, 
         if (opts.resumeClaim) {
             const claimedRun = await Effect.runPromise(adapter.getRun(existingRun.runId));
             if (!claimedRun ||
-                claimedRun.runtimeOwnerId !== claimOwnerId ||
-                (claimedRun.heartbeatAtMs ?? null) !== claimHeartbeatAtMs) {
+                claimedRun.claimedBy !== claimOwnerId ||
+                (claimedRun.claimedAtMs ?? null) !== claimHeartbeatAtMs) {
                 throw new SmithersError("RUN_RESUME_CLAIM_LOST", `Resume claim for run ${existingRun.runId} is no longer held.`, {
                     runId: existingRun.runId,
                     claimOwnerId,
@@ -4718,14 +4713,18 @@ async function activateRunForResume(adapter, existingRun, opts, runtimeOwnerId, 
         const activatedAtMs = nowMs();
         const activated = await Effect.runPromise(adapter.updateClaimedRun({
             runId: existingRun.runId,
-            expectedRuntimeOwnerId: claimOwnerId,
-            expectedHeartbeatAtMs: claimHeartbeatAtMs,
+            expectedRuntimeOwnerId: existingRun.runtimeOwnerId ?? null,
+            expectedHeartbeatAtMs: existingRun.heartbeatAtMs ?? null,
+            expectedClaimedBy: claimOwnerId,
+            expectedClaimedAtMs: claimHeartbeatAtMs,
             patch: {
                 status: "running",
                 startedAtMs: existingRun.startedAtMs ?? activatedAtMs,
                 finishedAtMs: null,
                 heartbeatAtMs: activatedAtMs,
                 runtimeOwnerId,
+                claimedAtMs: null,
+                claimedBy: null,
                 cancelRequestedAtMs: null,
                 hijackRequestedAtMs: null,
                 hijackTarget: null,
