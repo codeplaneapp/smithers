@@ -52,7 +52,8 @@ export function renderFallbackDiffHtml(diffText: string): string {
     if (note) rows.push(noteRow(note));
   };
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
+    const raw = lines[i];
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
     if (rendered >= MAX_RENDERED_LINES) {
       truncatedAt = i;
       break;
