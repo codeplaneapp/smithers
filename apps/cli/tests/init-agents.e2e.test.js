@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenCodeBinary, } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenClawBinary, writeFakeOpenCodeBinary, } from "../../../packages/smithers/tests/e2e-helpers.js";
 /**
  * @param {string} homeDir
  * @param {string} binDir
@@ -86,6 +86,26 @@ test("smithers init falls back to OpenRouter for OpenCode-only credentials", () 
     expect(agentsSource).toContain("openrouter: createOpenRouterAgent()");
     expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.openrouter,/);
     expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.openrouter,/);
+});
+test("smithers init can use OpenClaw as the only workflow agent", () => {
+    const repo = createTempRepo();
+    const binDir = createExecutableDir();
+    writeFakeOpenClawBinary(binDir);
+    repo.write(".openclaw/openclaw.json", JSON.stringify({ agents: { default: "main" } }) + "\n");
+    const result = runSmithers(["init"], {
+        cwd: repo.dir,
+        format: "json",
+        env: buildEnv(repo.dir, binDir),
+    });
+    expect(result.exitCode).toBe(0);
+    const agentsSource = repo.read(".smithers/agents.ts");
+    expect(agentsSource).toContain("OpenClawAgent as SmithersOpenClawAgent");
+    expect(agentsSource).toContain("openclaw: new SmithersOpenClawAgent");
+    expect(agentsSource).toMatch(/cheapFast:\s*\[\s*providers\.openclaw,/);
+    expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.openclaw,/);
+    expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.openclaw,/);
+    expect(uncommented(agentsSource)).not.toContain("providers.claude");
+    expect(uncommented(agentsSource)).not.toContain("providers.codex");
 });
 test("smithers init orders role chains correctly when multiple local agent CLIs are available", () => {
     const repo = createTempRepo();

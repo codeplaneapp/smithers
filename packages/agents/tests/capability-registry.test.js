@@ -7,6 +7,7 @@ import { AntigravityAgent } from "../src/AntigravityAgent.js";
 import { ClaudeCodeAgent } from "../src/ClaudeCodeAgent.js";
 import { CodexAgent } from "../src/CodexAgent.js";
 import { KimiAgent } from "../src/KimiAgent.js";
+import { OpenClawAgent } from "../src/OpenClawAgent.js";
 import { PiAgent } from "../src/PiAgent.js";
 import { hashCapabilityRegistry, } from "../src/capability-registry/index.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
@@ -84,6 +85,7 @@ describe("CLI adapter capability registries", () => {
         const codex = new CodexAgent();
         const antigravity = new AntigravityAgent();
         const kimi = new KimiAgent();
+        const openclaw = new OpenClawAgent();
         const pi = new PiAgent();
         expect(claude.capabilities).toMatchObject({
             version: 1,
@@ -129,6 +131,17 @@ describe("CLI adapter capability registries", () => {
             skills: {
                 supportsSkills: true,
                 installMode: "dir",
+            },
+        });
+        expect(openclaw.capabilities).toMatchObject({
+            version: 1,
+            engine: "openclaw",
+            mcp: {
+                bootstrap: "project-config",
+            },
+            skills: {
+                supportsSkills: true,
+                installMode: "plugin",
             },
         });
         expect(pi.capabilities).toMatchObject({
@@ -249,6 +262,7 @@ describe("smithers agents capabilities", () => {
             "hermes",
             "kimi",
             "opencode",
+            "openclaw",
             "pi",
             "vibe",
         ]);

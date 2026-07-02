@@ -454,6 +454,36 @@ export const CLI_AGENT_SURFACE_MANIFEST = [
       notes: "OpenCode receives a session id through --session for headless continuation.",
     },
   },
+  {
+    id: "openclaw",
+    displayName: "OpenClaw",
+    binary: "openclaw",
+    packageExport: "OpenClawAgent",
+    defaultOutputFormat: "json",
+    docsUrls: ["https://docs.openclaw.ai/concepts/messages"],
+    emittedFlags: [
+      "agent",
+      "--agent",
+      "--session",
+      "--continue",
+      "--workspace",
+      "--json",
+      "--message",
+    ],
+    supportedFlags: [],
+    unsupportedFlags: [],
+    optionMappings: [
+      { option: "agent", flag: "--agent" },
+      { option: "session", flag: "--session" },
+      { option: "resumeSession", flag: "--session" },
+      { option: "workspace", flag: "--workspace" },
+    ],
+    resume: {
+      kind: "flag",
+      emitted: ["--session"],
+      notes: "Smithers sends prompts through `openclaw agent --session <id>` when a session id is supplied.",
+    },
+  },
 ];
 
 /**

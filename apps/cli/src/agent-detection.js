@@ -214,14 +214,35 @@ const DETECTORS = [
         },
         setupHint: "Install the Hermes Agent CLI and run `hermes` to configure a provider.",
     },
+    {
+        id: "openclaw",
+        displayName: "OpenClaw",
+        binary: "openclaw",
+        authSignals: (homeDir) => [
+            join(homeDir, ".openclaw", "openclaw.json"),
+            join(homeDir, ".openclaw"),
+        ],
+        apiKeys: [],
+        availabilityProbe: (homeDir, env) => {
+            const status = runProbeCommand("openclaw", ["status"], env);
+            if (status.status === 0 && /configured|gateway|agent|provider|ready|running/i.test(status.output)) {
+                return passProbe("openclaw status reports a configured runtime");
+            }
+            if (jsonFileHasContent(join(homeDir, ".openclaw", "openclaw.json"))) {
+                return passProbe("OpenClaw config is present");
+            }
+            return failProbe(status.output || "OpenClaw setup not verified");
+        },
+        setupHint: "Install OpenClaw and finish onboarding with `openclaw configure` or the first-run wizard.",
+    },
 ];
 const ROLE_PREFERENCES = {
-    spec: ["claude", "codex", "opencode"],
-    research: ["antigravity", "kimi", "opencode", "codex", "claude"],
-    plan: ["claude", "codex", "opencode", "antigravity", "kimi"],
-    implement: ["codex", "opencode", "amp", "antigravity", "claude", "kimi"],
-    validate: ["codex", "opencode", "amp", "antigravity"],
-    review: ["claude", "amp", "codex", "opencode"],
+    spec: ["claude", "codex", "opencode", "openclaw"],
+    research: ["antigravity", "kimi", "opencode", "codex", "claude", "openclaw"],
+    plan: ["claude", "codex", "opencode", "antigravity", "kimi", "openclaw"],
+    implement: ["codex", "opencode", "amp", "antigravity", "openclaw", "claude", "kimi"],
+    validate: ["codex", "opencode", "amp", "antigravity", "openclaw"],
+    review: ["claude", "amp", "codex", "opencode", "openclaw"],
 };
 const AGENT_VARIANTS = [
     {
@@ -264,9 +285,9 @@ const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
     ...SCAFFOLDED_PROVIDER_FILES,
 };
 const TIER_PREFERENCES = {
-    cheapFast: { order: ["claudeSonnet", "kimi", "vibe", "antigravity", "pi"], maxSize: 2 },
-    smart: { order: ["claude", "claudeOpus", "codex", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
-    smartTool: { order: ["claude", "claudeOpus", "codex", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
+    cheapFast: { order: ["claudeSonnet", "kimi", "vibe", "antigravity", "openclaw", "pi"], maxSize: 2 },
+    smart: { order: ["claude", "claudeOpus", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
+    smartTool: { order: ["claude", "claudeOpus", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
 };
 const REQUIRED_DEFAULT_TIERS = ["smart", "smartTool"];
 const CONSTRUCTORS = {
@@ -309,6 +330,10 @@ const CONSTRUCTORS = {
     hermes: {
         importName: "HermesCliAgent",
         expr: "new SmithersHermesCliAgent({ cwd: process.cwd() })",
+    },
+    openclaw: {
+        importName: "OpenClawAgent",
+        expr: "new SmithersOpenClawAgent({ cwd: process.cwd() })",
     },
 };
 /**

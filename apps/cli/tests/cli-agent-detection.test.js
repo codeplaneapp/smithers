@@ -2,7 +2,7 @@ import { describe, expect, onTestFinished, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { createExecutableDir, writeExecutable, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenCodeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { createExecutableDir, writeExecutable, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenClawBinary, writeFakeOpenCodeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { ask } from "../src/ask.js";
 // We test the exported pure-logic functions by importing the module.
 // detectAvailableAgents calls spawnSync so we test the scoring/status logic
@@ -56,7 +56,8 @@ describe("detectAvailableAgents", () => {
         expect(ids).toContain("amp");
         expect(ids).toContain("vibe");
         expect(ids).toContain("hermes");
-        expect(results.length).toBe(10);
+        expect(ids).toContain("openclaw");
+        expect(results.length).toBe(11);
     });
     test("each result has required fields", () => {
         const results = detectAvailableAgents({});
@@ -133,6 +134,18 @@ describe("detectAvailableAgents", () => {
         expect(opencode.hasAuthSignal).toBe(true);
         expect(opencode.usable).toBe(true);
     });
+    test("OpenClaw detects openclaw plus openclaw.json runtime config", () => {
+        const home = tempHome();
+        const binDir = createExecutableDir();
+        writeFakeOpenClawBinary(binDir);
+        mkdirSync(join(home, ".openclaw"), { recursive: true });
+        writeFileSync(join(home, ".openclaw", "openclaw.json"), JSON.stringify({ agents: { default: "main" } }) + "\n");
+        const results = detectAvailableAgents(envWithPath(home, binDir));
+        const openclaw = results.find((r) => r.id === "openclaw");
+        expect(openclaw.hasBinary).toBe(true);
+        expect(openclaw.hasAuthSignal).toBe(true);
+        expect(openclaw.usable).toBe(true);
+    });
     test("generated agents.ts falls back to OpenRouter for OpenCode-only defaults", () => {
         const home = tempHome();
         const binDir = createExecutableDir();
@@ -145,6 +158,23 @@ describe("detectAvailableAgents", () => {
         expect(source).toContain("openrouter: createOpenRouterAgent()");
         expect(source).toContain("smart: [\n    providers.openrouter,");
         expect(source).toContain("smartTool: [\n    providers.openrouter,");
+    });
+    test("generated agents.ts can use OpenClaw as a workflow agent without local scaffolding", () => {
+        const home = tempHome();
+        const binDir = createExecutableDir();
+        writeFakeOpenClawBinary(binDir);
+        mkdirSync(join(home, ".openclaw"), { recursive: true });
+        writeFileSync(join(home, ".openclaw", "openclaw.json"), JSON.stringify({ agents: { default: "main" } }) + "\n");
+        const source = generateAgentsTs(envWithPath(home, binDir), {
+            cwd: home,
+            scaffoldProviderIds: ["claude", "codex"],
+        });
+        expect(source).toContain("OpenClawAgent as SmithersOpenClawAgent");
+        expect(source).toContain("openclaw: new SmithersOpenClawAgent");
+        expect(source).toContain("cheapFast: [\n    providers.openclaw,");
+        expect(source).toContain("smart: [\n    providers.openclaw,");
+        expect(source).toContain("smartTool: [\n    providers.openclaw,");
+        expect(source).not.toContain("./agents/openclaw");
     });
     test("Antigravity detects agy plus antigravity-cli config", () => {
         const home = tempHome();

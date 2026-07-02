@@ -307,6 +307,22 @@ export function writeFakeOpenCodeBinary(dir, response = FAKE_AGENT_RESPONSE) {
 /**
  * @param {string} dir
  */
+export function writeFakeOpenClawBinary(dir, response = FAKE_AGENT_RESPONSE) {
+    return writeExecutable(dir, "openclaw", [
+        EXECUTABLE_SHEBANG,
+        "const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? " + JSON.stringify(response) + ";",
+        "const args = process.argv.slice(2);",
+        "if (args[0] === 'status') {",
+        "  process.stdout.write('OpenClaw gateway ready\\nProvider: test\\n');",
+        "  process.exit(0);",
+        "}",
+        "process.stdout.write(JSON.stringify({ reply: '```json\\n' + payload + '\\n```\\n' }) + '\\n');",
+        "",
+    ].join("\n"));
+}
+/**
+ * @param {string} dir
+ */
 export function writeFakeGeminiBinary(dir, response = FAKE_AGENT_RESPONSE) {
     return writeExecutable(dir, "gemini", [
         EXECUTABLE_SHEBANG,

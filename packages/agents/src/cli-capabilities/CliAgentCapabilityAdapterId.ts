@@ -7,5 +7,6 @@ export type CliAgentCapabilityAdapterId =
   | "hermes"
   | "kimi"
   | "opencode"
+  | "openclaw"
   | "pi"
   | "vibe";

@@ -11,6 +11,7 @@ import {
   ForgeAgent,
   HermesCliAgent,
   KimiAgent,
+  OpenClawAgent,
   OpenCodeAgent,
   PiAgent,
   VibeAgent,
@@ -245,6 +246,16 @@ async function buildDeclaredSurfaceCommands() {
         continueSession: true,
       }),
       params: commonParams(),
+    },
+    {
+      id: "openclaw",
+      agent: new OpenClawAgent({
+        agent: "main",
+        session: "session",
+        continueSession: true,
+        workspace: REPO_ROOT,
+      }),
+      params: commonParams({ resumeSession: "resume-session" }),
     },
     {
       id: "pi",

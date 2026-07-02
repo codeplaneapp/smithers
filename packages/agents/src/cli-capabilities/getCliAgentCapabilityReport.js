@@ -6,6 +6,7 @@ import { createCodexCapabilityRegistry } from "../CodexAgent.js";
 import { createForgeCapabilityRegistry } from "../ForgeAgent.js";
 import { createHermesCliCapabilityRegistry } from "../HermesCliAgent.js";
 import { createKimiCapabilityRegistry } from "../KimiAgent.js";
+import { createOpenClawCapabilityRegistry } from "../OpenClawAgent.js";
 import { createOpenCodeCapabilityRegistry } from "../OpenCodeAgent.js";
 import { createPiCapabilityRegistry } from "../PiAgent.js";
 import { createVibeCapabilityRegistry } from "../VibeAgent.js";
@@ -52,6 +53,11 @@ const CLI_AGENT_CAPABILITY_ADAPTERS = [
         id: "opencode",
         binary: "opencode",
         buildRegistry: () => createOpenCodeCapabilityRegistry(),
+    },
+    {
+        id: "openclaw",
+        binary: "openclaw",
+        buildRegistry: () => createOpenClawCapabilityRegistry(),
     },
     {
         id: "pi",
