@@ -8,6 +8,15 @@ export type GatewayOptions = {
   protocol?: number;
   features?: string[];
   heartbeatMs?: number;
+  /**
+   * Idle spin-down (spec decision 14). When > 0 and `onIdle` is set, the daemon
+   * fires `onIdle` once it has been idle — no WS clients, no in-flight runs, no
+   * registered crons or pending timers — for this many milliseconds. Wired by
+   * the CLI for autostarted daemons only; 0 (default) never idle-exits.
+   */
+  idleTimeoutMs?: number;
+  /** Called once when the daemon goes idle for `idleTimeoutMs` (graceful shutdown). */
+  onIdle?: () => void | Promise<void>;
   auth?: GatewayAuthConfig;
   ui?: GatewayUiConfig;
   /**

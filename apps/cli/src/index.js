@@ -1606,6 +1606,7 @@ const gatewayOptions = z.object({
     authToken: z.string().optional().describe("Bearer token for HTTP/WS auth (or set SMITHERS_API_KEY); required to bind a non-loopback --host"),
     mintToken: z.boolean().default(false).describe("Mint a random bearer token, require it on every request, and record it only in the 0600 runtime state file"),
     insecure: z.boolean().default(false).describe("Allow binding a non-loopback --host with NO auth (exposes a full-control, unauthenticated control plane — dangerous)"),
+    idleTimeout: z.number().int().min(0).optional().describe("Exit after this many ms with no clients, in-flight runs, or registered schedules (0 = stay up; autostarted daemons set this automatically). Overridable via SMITHERS_GATEWAY_IDLE_MS."),
 });
 const migrateOptions = z.object({
     from: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Source backend; inferred when exactly one store has runs"),
@@ -2472,7 +2473,13 @@ async function ensureWorkspaceGateway(workspace, preferredPort) {
     try {
         const { logFile } = gatewayRuntimePaths(workspace);
         stderrFd = openSync(logFile, "w", 0o600);
-        child = spawn(process.argv[0], [process.argv[1], "gateway", "--host", "127.0.0.1", "--port", String(preferredPort)], {
+        // Autostarted daemons idle-exit (spec decision 14) so they never outlive
+        // the client that started them. Default 5 min idle; SMITHERS_GATEWAY_IDLE_MS
+        // overrides (0 disables). An explicit `smithers gateway` gets no flag and stays up.
+        const autostartIdleMs = process.env.SMITHERS_GATEWAY_IDLE_MS
+            ? String(Math.max(0, Math.floor(Number(process.env.SMITHERS_GATEWAY_IDLE_MS) || 0)))
+            : "300000";
+        child = spawn(process.argv[0], [process.argv[1], "gateway", "--host", "127.0.0.1", "--port", String(preferredPort), "--idle-timeout", autostartIdleMs], {
             stdio: ["ignore", stderrFd, stderrFd],
             detached: true,
             cwd: workspace,
@@ -2868,10 +2875,15 @@ async function runGatewayCommand(options) {
         import("smithers-orchestrator"),
     ]);
     identityBackend = options.backend ?? process.env.SMITHERS_BACKEND ?? readBackendMarkerForCwd(workspace) ?? "sqlite";
+    // Idle spin-down (spec decision 14): autostarted daemons pass --idle-timeout
+    // (see ensureWorkspaceGateway) so they exit once idle; an explicit
+    // `smithers gateway` leaves it 0 and stays up. SMITHERS_GATEWAY_IDLE_MS overrides.
+    const idleTimeoutMs = Math.max(0, Math.floor(Number(options.idleTimeout ?? process.env.SMITHERS_GATEWAY_IDLE_MS ?? 0) || 0));
     gateway = new Gateway({
         heartbeatMs: 15_000,
         workspaceRoot: workspace,
         identity: { backend: identityBackend, version: readPackageVersion() },
+        idleTimeoutMs,
         ...(auth ? { auth } : {}),
     });
     const workspaceApi = await openSmithersBackend({}, {
@@ -3002,6 +3014,15 @@ async function runGatewayCommand(options) {
             })
                 .finally(resolvePromise);
         };
+        if (idleTimeoutMs > 0) {
+            // The Gateway fires onIdle after idleTimeoutMs with no clients, runs,
+            // or schedules; treat it exactly like a SIGTERM (graceful shutdown +
+            // state-file cleanup). onIdle is set now that `shutdown` exists, then
+            // the monitor is (re)armed (listen() started it before onIdle existed).
+            gateway.onIdle = () => shutdown();
+            gateway.startIdleMonitor();
+            process.stderr.write(`[smithers] Idle spin-down: exits after ${Math.round(idleTimeoutMs / 1000)}s idle (no clients, runs, or schedules)\n`);
+        }
         process.once("SIGINT", shutdown);
         process.once("SIGTERM", shutdown);
     });

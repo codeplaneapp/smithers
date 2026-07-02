@@ -1636,12 +1636,30 @@ export class Gateway {
     outOfProcessEventBridgeDrainedRuns = new Set();
     stateVersion = 0;
     startedAtMs = nowMs();
+    // Idle spin-down (spec decision 14). When idleTimeoutMs > 0 and an onIdle
+    // handler is set, the daemon fires onIdle once it has been idle — no clients,
+    // no in-flight runs, no registered schedules — for idleTimeoutMs. The CLI
+    // wires this for AUTOSTARTED daemons only; an explicit `smithers gateway`
+    // leaves idleTimeoutMs at 0 and never idle-exits.
+    idleTimeoutMs = 0;
+    /** @type {(() => void | Promise<void>) | null} */
+    onIdle = null;
+    lastActivityMs = nowMs();
+    /** @type {ReturnType<typeof setInterval> | null} */
+    idleTimer = null;
+    idleFired = false;
+    hasActiveCrons = false;
+    hasPendingTimers = false;
     /**
    * @param {GatewayOptions} [options]
    */
     constructor(options = {}) {
         this.protocol = options.protocol ?? DEFAULT_PROTOCOL;
         this.features = [...(options.features ?? ["streaming", "runs"])];
+        this.idleTimeoutMs = options.idleTimeoutMs === undefined
+            ? 0
+            : Math.max(0, Math.floor(Number(options.idleTimeoutMs) || 0));
+        this.onIdle = typeof options.onIdle === "function" ? options.onIdle : null;
         this.heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
         this.maxBodyBytes = options.maxBodyBytes === undefined
             ? DEFAULT_MAX_BODY_BYTES
@@ -3533,6 +3551,8 @@ export class Gateway {
         await this.syncRegisteredSchedules();
         this.startScheduler();
         this.startOutOfProcessEventBridge();
+        this.lastActivityMs = nowMs();
+        this.startIdleMonitor();
         // Durability seam: when a tickets directory is configured, watch its
         // `*.md` docs and upsert them into `_smithers_docs` (file → DB,
         // last-write-wins). A hiccup here never fails `listen()`.
@@ -3548,6 +3568,7 @@ export class Gateway {
         return server;
     }
     async close() {
+        this.stopIdleMonitor();
         const activeRuns = [...this.activeRuns.values()];
         for (const activeRun of activeRuns) {
             activeRun.abort.abort();
@@ -3639,6 +3660,73 @@ export class Gateway {
             void this.processDueCrons();
             void this.processDueTimers();
         }, intervalMs);
+    }
+    /**
+   * Record client activity for idle spin-down (spec decision 14). Called on
+   * every RPC (HTTP + WS) and on each new WS connection. If the daemon had
+   * already fired onIdle but a client came back, re-arm the monitor.
+   */
+    markActivity() {
+        this.lastActivityMs = nowMs();
+        if (this.idleFired) {
+            this.idleFired = false;
+            this.startIdleMonitor();
+        }
+    }
+    /**
+   * Whether the daemon has nothing to do: no attached WS clients, no in-flight
+   * runs, and no registered crons or pending durable timers. Schedules count as
+   * "busy" so an autostarted daemon that owns a schedule does not idle-exit and
+   * silently stop firing it.
+   * @returns {boolean}
+   */
+    isIdle() {
+        return this.connections.size === 0
+            && this.activeRuns.size === 0
+            && this.inflightRuns.size === 0
+            && !this.hasActiveCrons
+            && !this.hasPendingTimers;
+    }
+    startIdleMonitor() {
+        this.stopIdleMonitor();
+        if (!(this.idleTimeoutMs > 0) || typeof this.onIdle !== "function") {
+            return;
+        }
+        const checkMs = Math.max(1_000, Math.min(this.idleTimeoutMs, 30_000));
+        this.idleTimer = setInterval(() => {
+            void this.checkIdle();
+        }, checkMs);
+        this.idleTimer.unref?.();
+    }
+    stopIdleMonitor() {
+        if (this.idleTimer) {
+            clearInterval(this.idleTimer);
+            this.idleTimer = null;
+        }
+    }
+    async checkIdle() {
+        if (!(this.idleTimeoutMs > 0) || typeof this.onIdle !== "function") {
+            return;
+        }
+        if (this.idleFired || !this.isIdle()) {
+            return;
+        }
+        if (nowMs() - this.lastActivityMs < this.idleTimeoutMs) {
+            return;
+        }
+        // Final synchronous re-check right before firing so a client that
+        // attached between the interval tick and here is not stranded.
+        if (!this.isIdle()) {
+            return;
+        }
+        this.idleFired = true;
+        this.stopIdleMonitor();
+        try {
+            await this.onIdle?.();
+        }
+        catch (error) {
+            emitGatewayLog("warning", "Gateway onIdle handler failed", { error: errorToJson(error) }, "gateway:idle");
+        }
     }
     startOutOfProcessEventBridge() {
         this.stopOutOfProcessEventBridge();
@@ -3775,12 +3863,18 @@ export class Gateway {
     }
     async processDueCrons() {
         const now = nowMs();
+        // Refresh the idle-spin-down keep-alive signal every tick (decision 14):
+        // a daemon that owns any cron must not idle-exit and stop firing it.
+        this.hasActiveCrons = false;
         emitGatewayLog("debug", "Gateway cron evaluation tick", {
             workflowCount: this.workflows.size,
         }, "gateway:cron");
         for (const entry of this.workflows.values()) {
             const adapter = this.adapterForWorkflow(entry.workflow);
             const crons = await adapter.listCrons(true);
+            if (crons.length > 0) {
+                this.hasActiveCrons = true;
+            }
             for (const cron of crons) {
                 const workflowKey = workflowKeyFromCronPath(cron.workflowPath);
                 if (!workflowKey || workflowKey !== entry.key) {
@@ -3874,6 +3968,9 @@ export class Gateway {
         this.timerSweepInFlight = true;
         try {
             const now = nowMs();
+            // Refresh the idle keep-alive signal: a pending durable timer must
+            // keep an autostarted daemon alive so the sweep can resume it.
+            this.hasPendingTimers = false;
             const registeredKeys = new Set(this.workflows.keys());
             const seenAdapters = new Set();
             for (const entry of this.workflows.values()) {
@@ -3886,6 +3983,9 @@ export class Gateway {
                 let waitingRuns;
                 try {
                     waitingRuns = await adapter.listRuns(1_000, "waiting-timer");
+                    if (waitingRuns.length > 0) {
+                        this.hasPendingTimers = true;
+                    }
                 }
                 catch (error) {
                     emitGatewayLog("error", "Gateway timer sweep failed to list runs", {
@@ -4128,6 +4228,7 @@ export class Gateway {
             heartbeatTimer: null,
         };
         this.connections.add(connection);
+        this.markActivity();
         emitGatewayEffect(Effect.all([
             incrementMetric(gatewayConnectionsTotal, { transport: "ws" }),
             updateMetric(gatewayConnectionsActive, 1, { transport: "ws" }),
@@ -5659,6 +5760,7 @@ export class Gateway {
    * @returns {Promise<ResponseFrame>}
    */
     async routeRequest(connection, frame) {
+        this.markActivity();
         const params = asObject(frame.params) ?? {};
         if (isExtensionMethod(frame.method)) {
             return this.routeExtensionRequest(connection, frame, params);
