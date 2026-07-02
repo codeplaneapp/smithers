@@ -10,6 +10,9 @@
     "deploy": "alchemy deploy",
     "destroy": "alchemy destroy"
   },
+  "dependencies": {
+    "@smithers-orchestrator/gateway-ui": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "26.1.0",
     "alchemy": "^0.93.12",

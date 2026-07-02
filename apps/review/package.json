@@ -21,6 +21,7 @@
     "@pierre/diffs": "^1.2.12",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
+    "@smithers-orchestrator/gateway-ui": "workspace:*",
     "effect": "3.21.4",
     "mermaid": "^11.16.0",
     "smithers-orchestrator": "workspace:*",

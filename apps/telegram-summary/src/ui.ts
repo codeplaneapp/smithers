@@ -1,3 +1,4 @@
+import { workflowUiThemeCss } from "@smithers-orchestrator/gateway-ui/styleguide-css";
 import type { DigestRow } from "./service.ts";
 import { digestJsonFromRow } from "./service.ts";
 
@@ -44,25 +45,19 @@ export function renderDashboard(): Response {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Telegram Summary</title>
   <style>
+    ${workflowUiThemeCss}
     :root {
-      color-scheme: light;
-      --bg: #f6f7f4;
-      --ink: #20231f;
-      --muted: #687066;
-      --panel: #ffffff;
-      --line: #dfe3dc;
-      --green: #1f7a4d;
-      --green-soft: #e4f2e9;
-      --amber: #a06012;
-      --amber-soft: #fbecd8;
-      --blue: #27638a;
-      --shadow: 0 10px 30px rgba(31, 38, 32, 0.08);
+      --ink: var(--text);
+      --green: var(--success);
+      --green-soft: color-mix(in srgb, var(--success) 12%, var(--surface));
+      --amber: var(--warning);
+      --amber-soft: color-mix(in srgb, var(--warning) 12%, var(--surface));
+      --shadow: 0 10px 30px rgb(var(--shadow-rgb) / 0.08);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: var(--bg);
       color: var(--ink);
       letter-spacing: 0;
@@ -117,7 +112,7 @@ export function renderDashboard(): Response {
       border-radius: 6px;
       padding: 0 10px;
       min-width: 210px;
-      background: #fff;
+      background: var(--surface);
       color: var(--ink);
     }
     .toolbar {
@@ -151,7 +146,7 @@ export function renderDashboard(): Response {
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 12px;
-      background: #fbfcfa;
+      background: var(--hover-subtle);
     }
     .stat strong {
       display: block;
@@ -211,7 +206,7 @@ export function renderDashboard(): Response {
     }
     .topic p {
       margin: 0 0 8px;
-      color: #333932;
+      color: var(--text);
       line-height: 1.45;
     }
     ul {
@@ -230,7 +225,7 @@ export function renderDashboard(): Response {
       width: 100%;
       min-height: 56px;
       text-align: left;
-      background: #fbfcfa;
+      background: var(--hover-subtle);
       display: grid;
       gap: 3px;
     }
@@ -242,7 +237,7 @@ export function renderDashboard(): Response {
       color: var(--muted);
       border: 1px dashed var(--line);
       border-radius: 8px;
-      background: #fbfcfa;
+      background: var(--hover-subtle);
     }
     .text-block {
       white-space: pre-wrap;
@@ -250,7 +245,7 @@ export function renderDashboard(): Response {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 12px;
       line-height: 1.5;
-      background: #f3f5f1;
+      background: var(--hover-subtle);
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 12px;
@@ -259,7 +254,7 @@ export function renderDashboard(): Response {
     }
     .toast {
       min-height: 22px;
-      color: var(--blue);
+      color: var(--brand);
       font-size: 12px;
       margin-top: 10px;
     }

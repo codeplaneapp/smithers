@@ -455,6 +455,9 @@ importers:
       '@smithers-orchestrator/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@smithers-orchestrator/gateway-ui':
+        specifier: workspace:*
+        version: link:../../packages/gateway-ui
       effect:
         specifier: 3.21.4
         version: 3.21.4
@@ -585,6 +588,10 @@ importers:
         version: 4.4.3
 
   apps/telegram-summary:
+    dependencies:
+      '@smithers-orchestrator/gateway-ui':
+        specifier: workspace:*
+        version: link:../../packages/gateway-ui
     devDependencies:
       '@types/node':
         specifier: 26.1.0
