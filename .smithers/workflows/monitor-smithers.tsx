@@ -275,12 +275,13 @@ Verify each remediation took effect (\`smithers ps\`) and report actionsTaken wi
                 healthyRuns: classify.buckets.healthy.length,
                 unhealthyRuns: unhealthy.length,
                 escalations: triage?.actions.length ?? 0,
-                summary: triage?.digest ?? classify.summary,
+                fixesApplied: fix?.actionsTaken?.length ?? 0,
+                summary: fix?.summary ?? triage?.digest ?? classify.summary,
               })}
             </Task>
           ) : null}
 
-          {/* 5 — Wait out the sweep interval before the next iteration. */}
+          {/* 6 — Wait out the sweep interval before the next iteration. */}
           {iterations > 1 && sweepsDone + 1 < iterations ? (
             <Timer id="tick" duration={`${intervalMinutes}m`} />
           ) : null}
