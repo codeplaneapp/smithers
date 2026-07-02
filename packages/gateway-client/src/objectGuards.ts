@@ -1,6 +1,5 @@
 // Shared object guards for the gateway-client. Previously copy-pasted across
-// SmithersGatewayClient, SmithersGatewayConnection, createSmithersGatewayTransport,
-// gatewayCollectionDefs, and snapshotToGatewayRunNode.
+// SmithersGatewayClient, SmithersGatewayConnection, and snapshotToGatewayRunNode.
 import type { GatewayResponseFrame } from "./GatewayResponseFrame.ts";
 
 /** Narrow an unknown value to a plain (non-array, non-null) object. */

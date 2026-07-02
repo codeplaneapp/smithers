@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { gatewayKeys, type GatewayMemoryFactRow } from "@smithers-orchestrator/gateway-client";
+import type { GatewayMemoryFactRow } from "@smithers-orchestrator/gateway-client";
 import type { ListMemoryFactsRequest } from "@smithers-orchestrator/gateway/rpc";
-import { useSyncClient } from "./sync/useSyncClient.ts";
+import { useSmithersCollections } from "./useSmithersCollections.ts";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
@@ -15,12 +15,12 @@ import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
  */
 export function useGatewayMemoryFacts(namespace?: string): GatewayAsyncState<GatewayMemoryFactRow[]> {
   const params: ListMemoryFactsRequest = namespace ? { namespace } : {};
-  const registry = useSyncClient();
-  const collection = registry.memoryFacts(params);
+  const { collections } = useSmithersCollections();
+  const collection = collections.memoryFacts(params);
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
-    await registry.invalidate(gatewayKeys.memoryFacts(params));
-  }, [registry, collection]);
+    await collections.invalidate(["memoryFacts"]);
+  }, [collections, namespace]);
 
   const data = (live.data ?? []) as GatewayMemoryFactRow[];
   return {

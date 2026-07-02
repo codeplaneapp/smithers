@@ -54,9 +54,7 @@ createGatewayReactRoot(<App />);
   creates a `SmithersGatewayClient`, and installs both gateway contexts. This is
   the default bootstrap for `.smithers/ui/*.tsx` bundles served by `smithers ui`.
 - `SmithersGatewayProvider` provides an existing or newly-created gateway client
-  to hooks that make direct RPC calls.
-- `SyncProvider` provides the live collection registry used by the sync-backed
-  hooks. `createGatewayReactRoot` wires this automatically.
+  and the Smithers TanStack DB collections used by the live hooks.
 
 ## Hooks
 
@@ -67,9 +65,8 @@ createGatewayReactRoot(<App />);
 - `useGatewayExtensionResource`, `useGatewayExtensionAction`, and
   `useGatewayExtensionStream` bind custom gateway extensions into React.
 - `useGatewayRpc` is the lower-level escape hatch for gateway RPC methods.
-- `useGatewayQuery`, `useGatewayMutation`, `useSyncQuery`,
-  `useSyncMutation`, and `useSyncSubscription` expose the declarative sync
-  client when a UI needs collection-level control.
+- `useSmithersCollections` exposes the collection client for advanced
+  collection-level control.
 
 ## Manual provider setup
 
@@ -81,24 +78,18 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import {
   SmithersGatewayProvider,
-  SyncProvider,
-  createGatewayCollections,
 } from "@smithers-orchestrator/gateway-react";
 import {
   SmithersGatewayClient,
-  createSmithersGatewayTransport,
 } from "@smithers-orchestrator/gateway-client";
 
 const client = new SmithersGatewayClient({ baseUrl: "http://localhost:7331" });
-const collections = createGatewayCollections({
-  client: createSmithersGatewayTransport(client),
-});
 
 createRoot(document.getElementById("root")!).render(
   createElement(
     SmithersGatewayProvider,
     { client },
-    createElement(SyncProvider, { client: collections }, createElement(App)),
+    createElement(App),
   ),
 );
 ```

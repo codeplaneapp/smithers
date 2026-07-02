@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { buildGatewayRunTree } from "./buildGatewayRunTree.ts";
-import { useSyncClient } from "./useSyncClient.ts";
+import { useSmithersCollections } from "../useSmithersCollections.ts";
 
 /** The six tones the run UI knows; mirrors `snapshotToGatewayRunNode`'s output. */
 export type NodeStatus = "ok" | "running" | "queued" | "failed" | "waiting" | "cancelled";
@@ -34,8 +34,8 @@ export type UseGatewayRunTreeResult = {
  * every devtools frame — the headline win over the old whole-tree refetch.
  */
 export function useGatewayRunTree(runId: string | undefined): UseGatewayRunTreeResult {
-  const registry = useSyncClient();
-  const collection = runId ? registry.nodes(runId) : undefined;
+  const { collections } = useSmithersCollections();
+  const collection = runId ? collections.nodes(runId) : undefined;
 
   const live = useLiveQuery(
     (q) => (collection ? q.from({ row: collection }) : undefined),

@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { gatewayKeys, type GatewayWorkflowRow } from "@smithers-orchestrator/gateway-client";
+import type { GatewayWorkflowRow } from "@smithers-orchestrator/gateway-client";
 import type { ListWorkflowsRequest, ListWorkflowsResponse } from "@smithers-orchestrator/gateway/rpc";
-import { useSyncClient } from "./sync/useSyncClient.ts";
+import { useSmithersCollections } from "./useSmithersCollections.ts";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
@@ -11,12 +11,12 @@ import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
  * returned.
  */
 export function useGatewayWorkflows(params: ListWorkflowsRequest = {}): GatewayAsyncState<ListWorkflowsResponse> {
-  const registry = useSyncClient();
-  const collection = registry.workflows(params);
+  const { collections } = useSmithersCollections();
+  const collection = collections.workflows(params);
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
-    await registry.invalidate(gatewayKeys.workflows(params.filter));
-  }, [registry, collection, params]);
+    await collections.invalidate(["workflows"]);
+  }, [collections, params]);
 
   const data = (live.data ?? []) as GatewayWorkflowRow[] as ListWorkflowsResponse;
   return {

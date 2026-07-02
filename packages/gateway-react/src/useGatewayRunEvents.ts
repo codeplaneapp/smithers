@@ -1,10 +1,10 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayEventFrame, GatewayRunEventRow } from "@smithers-orchestrator/gateway-client";
-import { useSyncClient } from "./sync/useSyncClient.ts";
+import { useSmithersCollections } from "./useSmithersCollections.ts";
 
 const DEFAULT_MAX_EVENTS = 1000;
-/** Mirrors the `runEvents` collection's default `maxRows` ring size (see gatewayCollectionDefs). */
+/** Mirrors the `runEvents` collection's default `maxRows` ring size. */
 const DEFAULT_COLLECTION_MAX_ROWS = 1024;
 
 /**
@@ -35,11 +35,11 @@ export function useGatewayRunEvents(
   error: Error | undefined;
   streaming: boolean;
 } {
-  const registry = useSyncClient();
+  const { client, collections } = useSmithersCollections();
   const connection = useSyncExternalStore(
-    registry.subscribeConnection,
-    registry.connection,
-    registry.connection,
+    client.stream.subscribeStatus,
+    client.stream.status,
+    client.stream.status,
   );
   const afterSeq = options.afterSeq;
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
@@ -51,14 +51,14 @@ export function useGatewayRunEvents(
   // default subscriber that mounts first no longer pins a later larger one to
   // the smaller ring — each distinct cap resolves to its own sized collection.
   const collection = runId
-    ? registry.runEvents(runId, Math.max(maxEvents, DEFAULT_COLLECTION_MAX_ROWS))
+    ? collections.runEvents(runId, Math.max(maxEvents, DEFAULT_COLLECTION_MAX_ROWS))
     : undefined;
   const live = useLiveQuery(
     (q) => (collection ? q.from({ row: collection }) : undefined),
     [collection],
   );
 
-  const rows = (live.data ?? []) as GatewayRunEventRow[];
+  const rows = ((live.data ?? []) as GatewayRunEventRow[]).filter((row) => row.runId === runId);
   const { events, lastHeartbeat } = useMemo(() => {
     const sorted = [...rows].sort((left, right) => left.seq - right.seq);
     const eligible = typeof afterSeq === "number" ? sorted.filter((row) => row.seq > afterSeq) : sorted;

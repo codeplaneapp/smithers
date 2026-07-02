@@ -24,14 +24,14 @@
     "test": "bun test tests"
   },
   "dependencies": {
+    "@smithers-orchestrator/electric-proxy": "workspace:^",
     "@smithers-orchestrator/gateway": "workspace:*",
-    "@tanstack/db": "0.6.13"
-  },
-  "optionalDependencies": {
-    "@electric-sql/client": "^1.5.22"
+    "@tanstack/db": "0.6.13",
+    "@tanstack/electric-db-collection": "0.3.11",
+    "@tanstack/query-db-collection": "1.0.45",
+    "@tanstack/react-query": "5.101.2"
   },
   "devDependencies": {
-    "@electric-sql/client": "^1.5.15",
     "@types/bun": "latest",
     "typescript": "~6.0.3"
   }

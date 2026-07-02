@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { gatewayKeys, type GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
+import type { GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
 import type { ListApprovalsRequest, ListApprovalsResponse } from "@smithers-orchestrator/gateway/rpc";
-import { useSyncClient } from "./sync/useSyncClient.ts";
+import { useSmithersCollections } from "./useSmithersCollections.ts";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
@@ -12,12 +12,12 @@ import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
  * shape the RPC hook returned.
  */
 export function useGatewayApprovals(params: ListApprovalsRequest = {}): GatewayAsyncState<ListApprovalsResponse> {
-  const registry = useSyncClient();
-  const collection = registry.approvals(params);
+  const { collections } = useSmithersCollections();
+  const collection = collections.approvals(params);
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
-    await registry.invalidate(gatewayKeys.approvals(params));
-  }, [registry, collection, params]);
+    await collections.invalidate(["approvals"]);
+  }, [collections, params]);
 
   const data = (live.data ?? []) as GatewayApprovalRow[] as ListApprovalsResponse;
   return {

@@ -14,13 +14,13 @@ import { createRoot, type Root } from "react-dom/client";
 import type { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
 import { SmithersGatewayClient as RealSmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
 import {
+  SmithersCollectionsContext,
   SmithersGatewayContext,
   SmithersGatewayProvider,
-  SyncContext,
   createGatewayReactRoot,
   useGatewayRpc,
 } from "../src/index.ts";
-import type { GatewayCollections } from "../src/index.ts";
+import type { SmithersCollections } from "@smithers-orchestrator/gateway-client";
 
 // React's act() requires this flag so updates are flushed synchronously and
 // warnings are suppressed in the bun + happy-dom test environment.
@@ -53,9 +53,8 @@ async function mountHarness(): Promise<Harness> {
   };
 }
 
-// `useGatewayRunEvents` is now backed by the `SyncProvider` registry's
-// `runEvents` collection; its heartbeat-filtering + ring-cap behavior is covered
-// in `tests/sync/sync.test.ts`.
+// `useGatewayRunEvents` is backed by the Smithers collections registry's
+// `runEvents` collection.
 
 describe("SmithersGatewayProvider", () => {
   test("an inline options literal does not recreate the client across renders (memoized on baseUrl/token)", async () => {
@@ -354,21 +353,21 @@ describe("useGatewayRpc", () => {
 });
 
 describe("createGatewayReactRoot", () => {
-  test("mounts the element under both SmithersGatewayProvider and SyncProvider", async () => {
+  test("mounts the element under the gateway and collections providers", async () => {
     const container = document.createElement("div");
     container.id = "cov-31-test-root";
     document.body.appendChild(container);
 
     let gatewayCtxValue: SmithersGatewayClient | null = null;
-    let syncCtxValue: GatewayCollections | null = null;
+    let collectionsCtxValue: SmithersCollections | null = null;
 
     function Probe() {
       return createElement(SmithersGatewayContext.Consumer, {
         children: (gw: SmithersGatewayClient | null) => {
           gatewayCtxValue = gw;
-          return createElement(SyncContext.Consumer, {
-            children: (sync: GatewayCollections | null) => {
-              syncCtxValue = sync;
+          return createElement(SmithersCollectionsContext.Consumer, {
+            children: (sync) => {
+              collectionsCtxValue = sync?.collections ?? null;
               return null;
             },
           });
@@ -387,8 +386,8 @@ describe("createGatewayReactRoot", () => {
     expect(returnedClient).toBeInstanceOf(RealSmithersGatewayClient);
     // SmithersGatewayProvider wired: context value matches the returned client
     expect(gatewayCtxValue).toBe(returnedClient);
-    // SyncProvider wired: sync context is non-null (GatewayCollections registry)
-    expect(syncCtxValue).not.toBeNull();
+    // Collections provider wired: context is non-null.
+    expect(collectionsCtxValue).not.toBeNull();
 
     container.remove();
   });

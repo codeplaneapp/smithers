@@ -100,6 +100,8 @@ async function waitForElectricHealthy(electricBase: string, timeoutMs = 60_000):
 export type ElectricFixture = {
   /** Base Electric shape URL the proxy fronts: `${base}/v1/shape`. */
   shapeUrl: string;
+  /** Postgres-of-record URL for tests that need Gateway writes and Electric reads against one database. */
+  postgresUrl: string;
   /** Seed `_smithers_runs` rows (run_id, status). */
   seedRuns(rows: ReadonlyArray<{ runId: string; status: string; workflow?: string }>): void;
   teardown(): void;
@@ -123,6 +125,7 @@ export async function startElectricFixture(): Promise<ElectricFixture> {
 
   return {
     shapeUrl: `${electricBase}/v1/shape`,
+    postgresUrl: `postgresql://smithers:smithers_pw@localhost:${composeEnv.SMITHERS_PG_PORT}/smithers`,
     seedRuns(rows) {
       for (const row of rows) {
         const workflow = (row.workflow ?? "hello").replaceAll("'", "''");
