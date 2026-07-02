@@ -180,7 +180,14 @@ async function pollProject(dir: string) {
 async function pollFleet(projects: string[] | null, staleMinutes: number) {
   const dirs = projects && projects.length > 0 ? projects : discoverProjects();
   const perProject = await Promise.all(dirs.map((dir) => pollProject(dir)));
-  const runs = perProject.flat();
+  // Live health only: keep non-terminal runs, plus failures fresh enough
+  // (<60m) to still be actionable. Old terminal runs are history, not health —
+  // without this the medic re-inspects months-dead runs on every sweep.
+  const runs = perProject.flat().filter((run) => {
+    if (run.status === "finished" || run.status === "cancelled") return false;
+    if (run.status === "failed") return run.ageMinutes < 60;
+    return true;
+  });
   const active = runs.filter((run) => run.status === "running" || run.status === "continued");
   const staleCount = active.filter((run) => run.ageMinutes >= staleMinutes).length;
   return {
