@@ -22,6 +22,7 @@ const findingSchema = z.object({
   id: z.string(),
   title: z.string(),
   severity: z.enum(["critical", "major", "minor"]).default("minor"),
+  priority: z.enum(["p0", "p1", "p2"]).optional(),
   featureId: z.string().default(""),
   file: z.string().default(""),
   evidence: z.string().default(""),
@@ -76,6 +77,7 @@ export function bugTicketMarkdown(runId: string, finding: any): string {
     `Run: ${runId}`,
     `Kind: fix`,
     `Severity: ${finding.severity ?? "minor"}`,
+    finding.priority ? `Priority: ${String(finding.priority).toUpperCase()}` : "",
     `Feature: ${finding.featureId ?? ""}`,
     finding.featureTitle ? `Feature title: ${finding.featureTitle}` : "",
     `File: ${finding.file ?? ""}`,
@@ -101,11 +103,16 @@ export function fileBugTickets(runId: string, confirmed: any[], root: string = R
   mkdirSync(directory, { recursive: true });
   const ticketPaths: string[] = [];
   let skippedExisting = 0;
-  const featureTitles = new Map<string, string>();
+  const featureMeta = new Map<string, { title: string; priority: string }>();
   const featuresPath = resolve(root, ".smithers/spec/features.json");
   try {
     const features = JSON.parse(readFileSync(featuresPath, "utf8")) as Array<Record<string, any>>;
-    for (const feature of features) featureTitles.set(String(feature.id ?? ""), String(feature.title ?? ""));
+    for (const feature of features) {
+      featureMeta.set(String(feature.id ?? ""), {
+        title: String(feature.title ?? ""),
+        priority: String(feature.priority ?? ""),
+      });
+    }
   } catch {
     // Tickets still carry the finding even when the spec cannot be read.
   }
@@ -113,7 +120,8 @@ export function fileBugTickets(runId: string, confirmed: any[], root: string = R
   for (const finding of confirmed) {
     const enrichedFinding = {
       ...finding,
-      featureTitle: finding.featureTitle ?? featureTitles.get(String(finding.featureId ?? "")) ?? "",
+      featureTitle: finding.featureTitle ?? featureMeta.get(String(finding.featureId ?? ""))?.title ?? "",
+      priority: finding.priority ?? featureMeta.get(String(finding.featureId ?? ""))?.priority ?? "",
     };
     const name = `ddd-bug-scan--${bugSlug(finding.file || finding.featureId || "repo")}--${bugSlug(finding.title || finding.id)}.md`;
     const full = resolve(directory, name);
@@ -135,9 +143,16 @@ export function fileBugTickets(runId: string, confirmed: any[], root: string = R
       if (!feature) continue;
       const gap = `Bug (${finding.severity}): ${finding.title}${finding.file ? ` [${finding.file}]` : ""}`;
       const missing: string[] = Array.isArray(feature.missing) ? feature.missing : [];
-      if (missing.includes(gap)) continue;
-      feature.missing = [...missing, gap];
-      if (!featuresUpdated.includes(feature.id)) featuresUpdated.push(feature.id);
+      let changed = false;
+      if (!missing.includes(gap)) {
+        feature.missing = [...missing, gap];
+        changed = true;
+      }
+      if (feature.status === "fixed") {
+        feature.status = "broken";
+        changed = true;
+      }
+      if (changed && !featuresUpdated.includes(feature.id)) featuresUpdated.push(feature.id);
     }
     if (featuresUpdated.length > 0) {
       writeFileSync(featuresPath, `${JSON.stringify(features, null, 2)}\n`);

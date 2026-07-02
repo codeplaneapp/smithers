@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { useState } from "react";
-import { MarkdownEditor, SpecFileTree, formatStatus, resolveDocLink, type DocsContentEntry } from "./ddd-shared";
+import { MarkdownEditor, MarkdownPreview, SpecFileTree, formatStatus, resolveDocLink, type DocsContentEntry } from "./ddd-shared";
 
 export type SpecsTabProps = {
   docs: DocsContentEntry[];
@@ -8,10 +8,14 @@ export type SpecsTabProps = {
   selectedPath: string;
   assetBase: string | undefined;
   changedPaths: string[];
+  launchPending?: boolean;
   launchedRunId: string | null;
   launchError: string | null;
+  recoveredPaths?: string[];
+  editorResetKey?: number;
   onSelectPath: (path: string) => void;
   onDraftChange: (path: string, markdown: string) => void;
+  onDiscardDrafts?: (paths: string[]) => void;
   onDispatch: (paths: string[]) => void;
 };
 
@@ -24,8 +28,9 @@ function docSearchBlob(doc: DocsContentEntry): string {
 }
 
 export function SpecsTab(props: SpecsTabProps) {
-  const { docs, drafts, selectedPath, assetBase, changedPaths, launchedRunId, launchError } = props;
+  const { docs, drafts, selectedPath, assetBase, changedPaths, launchPending = false, launchedRunId, launchError, recoveredPaths = [], editorResetKey = 0 } = props;
   const [query, setQuery] = useState("");
+  const [technicalView, setTechnicalView] = useState<"preview" | "source">("preview");
   const needle = query.trim().toLowerCase();
   const productDocsAll = docs.filter((doc) => !docIsTechnical(doc));
   const technicalDocsAll = docs.filter(docIsTechnical);
@@ -35,6 +40,14 @@ export function SpecsTab(props: SpecsTabProps) {
   const selectedTechnical = docIsTechnical(selectedDoc);
   const draftValue = selectedDoc ? drafts[selectedDoc.path] ?? selectedDoc.content : "";
   const currentDirty = !!selectedDoc && changedPaths.includes(selectedDoc.path);
+  const dispatchableChangedPaths = changedPaths.filter((path) => {
+    const doc = docs.find((item) => item.path === path);
+    return !!doc && !docIsTechnical(doc);
+  });
+  const dispatchLabel = launchPending ? "Dispatching..." : "Dispatch agents for this file";
+  const dispatchAllLabel = launchPending
+    ? "Dispatching changes..."
+    : `Dispatch all changes${dispatchableChangedPaths.length ? ` (${dispatchableChangedPaths.length})` : ""}`;
 
   // An in-spec markdown link (e.g. "features/x.md", "../overview.md") opens
   // that doc in the tree rather than navigating the browser to a dead URL.
@@ -104,19 +117,37 @@ export function SpecsTab(props: SpecsTabProps) {
               className="button"
               type="button"
               data-testid="ddd-dispatch-file"
-              disabled={!currentDirty || selectedTechnical}
+              disabled={launchPending || !currentDirty || selectedTechnical}
               onClick={() => selectedDoc && props.onDispatch([selectedDoc.path])}
             >
-              Dispatch agents for this file
+              {dispatchLabel}
             </button>
             <button
               className="button primary"
               type="button"
               data-testid="ddd-create-meta-ticket"
-              disabled={changedPaths.length === 0}
-              onClick={() => props.onDispatch(changedPaths)}
+              disabled={launchPending || dispatchableChangedPaths.length === 0}
+              onClick={() => props.onDispatch(dispatchableChangedPaths)}
             >
-              Dispatch all changes{changedPaths.length ? ` (${changedPaths.length})` : ""}
+              {dispatchAllLabel}
+            </button>
+            <button
+              className="button"
+              type="button"
+              data-testid="ddd-discard-file"
+              disabled={!currentDirty || selectedTechnical}
+              onClick={() => selectedDoc && props.onDiscardDrafts?.([selectedDoc.path])}
+            >
+              Revert file
+            </button>
+            <button
+              className="button"
+              type="button"
+              data-testid="ddd-discard-all"
+              disabled={dispatchableChangedPaths.length === 0}
+              onClick={() => props.onDiscardDrafts?.(dispatchableChangedPaths)}
+            >
+              Discard all
             </button>
           </div>
         </div>
@@ -125,14 +156,39 @@ export function SpecsTab(props: SpecsTabProps) {
           selectedTechnical ? (
             // Derived docs are regenerated wholesale every build; hand-edits
             // would be silently clobbered, so render them read-only.
-            <pre className="source technical-doc-view" data-testid="ddd-technical-doc-view">
-              {selectedDoc.content}
-            </pre>
+            <div className="technical-doc-shell" data-testid="ddd-technical-doc-view">
+              <div className="preview-toolbar" role="group" aria-label="Technical doc view">
+                <button
+                  type="button"
+                  className={technicalView === "preview" ? "segmented is-active" : "segmented"}
+                  data-testid="ddd-technical-preview-toggle"
+                  onClick={() => setTechnicalView("preview")}
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  className={technicalView === "source" ? "segmented is-active" : "segmented"}
+                  data-testid="ddd-technical-source-toggle"
+                  onClick={() => setTechnicalView("source")}
+                >
+                  Source
+                </button>
+              </div>
+              {technicalView === "preview" ? (
+                <MarkdownPreview markdown={selectedDoc.content} onLinkClick={openLink} />
+              ) : (
+                <pre className="source technical-doc-source" data-testid="ddd-technical-doc-source">
+                  {selectedDoc.content}
+                </pre>
+              )}
+            </div>
           ) : (
             <MarkdownEditor
               key={selectedDoc.path}
               docPath={selectedDoc.path}
               initialValue={draftValue}
+              resetKey={editorResetKey}
               assetBase={assetBase}
               onChange={(markdown) => props.onDraftChange(selectedDoc.path, markdown)}
               onLinkClick={openLink}
@@ -145,7 +201,22 @@ export function SpecsTab(props: SpecsTabProps) {
         {launchedRunId || launchError ? (
           <div className="meta-status" data-testid="ddd-meta-ticket-status">
             <span className={`badge ${launchError ? "bad" : "ok"}`}>{formatStatus(launchError ? "failed" : "queued")}</span>
-            <span>{launchError ?? `Run ${launchedRunId} dispatched from the docs editor.`}</span>
+            <span>{launchError ?? `Run ${launchedRunId} dispatched from the docs editor. Drafts stay local until the agent applies them.`}</span>
+          </div>
+        ) : null}
+        {launchPending ? (
+          <div className="meta-status" data-testid="ddd-meta-ticket-launching">
+            <span className="badge warn">Launching</span>
+            <span>Dispatching a docs-driven-development run. Buttons are disabled until the gateway responds.</span>
+          </div>
+        ) : null}
+        {recoveredPaths.length ? (
+          <div className="meta-status" data-testid="ddd-draft-recovered">
+            <span className="badge warn">Recovered</span>
+            <span>{recoveredPaths.length} local draft{recoveredPaths.length === 1 ? "" : "s"} restored from this browser.</span>
+            <button type="button" className="button" onClick={() => props.onDiscardDrafts?.(recoveredPaths)}>
+              Discard recovered
+            </button>
           </div>
         ) : null}
       </div>

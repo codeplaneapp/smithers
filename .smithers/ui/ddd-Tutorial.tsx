@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useRef, useState } from "react";
+import { useDialogFocusTrap } from "./ddd-shared";
 
 /**
  * First-launch guided tutorial, told over a canned hello-world app so the user
@@ -110,8 +111,8 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 
 export function Tutorial({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [step, setStep] = useState(0);
+  const cardRef = useRef<HTMLElement | null>(null);
   const nextRef = useRef<HTMLButtonElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   function finish() {
     markTutorialDone();
@@ -119,32 +120,38 @@ export function Tutorial({ open, onClose }: { open: boolean; onClose: () => void
     onClose();
   }
 
+  useDialogFocusTrap({ active: open, containerRef: cardRef, initialFocusRef: nextRef, onClose: finish });
+
   useEffect(() => {
     if (!open) return;
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    nextRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") finish();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      previousFocusRef.current?.focus?.();
-    };
-  }, [open, onClose]);
+    window.requestAnimationFrame(() => nextRef.current?.focus());
+  }, [open]);
 
   if (!open) return null;
   const current = TUTORIAL_STEPS[Math.min(step, TUTORIAL_STEPS.length - 1)]!;
   const last = step >= TUTORIAL_STEPS.length - 1;
 
   return (
-    <div className="tutorial-backdrop" data-testid="ddd-tutorial" role="dialog" aria-modal="true" aria-label="Guided tutorial">
-      <div className="tutorial-card">
+    <div className="tutorial-backdrop" data-testid="ddd-tutorial" role="presentation" onClick={finish}>
+      <section
+        ref={cardRef}
+        className="tutorial-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ddd-tutorial-title"
+        tabIndex={-1}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="tutorial-head">
           <span className="eyebrow">Guided tour · hello-world</span>
-          <span className="pill">{step + 1} / {TUTORIAL_STEPS.length}</span>
+          <div className="tutorial-head-actions">
+            <span className="pill">{step + 1} / {TUTORIAL_STEPS.length}</span>
+            <button type="button" className="icon-button" aria-label="Close tutorial" onClick={finish}>
+              x
+            </button>
+          </div>
         </div>
-        <h2 className="tutorial-title">{current.title}</h2>
+        <h2 id="ddd-tutorial-title" className="tutorial-title">{current.title}</h2>
         <p className="tutorial-body">{current.body}</p>
         {current.sample ? <pre className="code tutorial-sample">{current.sample}</pre> : null}
         <p className="tutorial-hint">{current.hint}</p>
@@ -172,7 +179,7 @@ export function Tutorial({ open, onClose }: { open: boolean; onClose: () => void
             </button>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

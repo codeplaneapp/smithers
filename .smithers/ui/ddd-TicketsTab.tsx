@@ -1,6 +1,21 @@
 /** @jsxImportSource react */
-import { useEffect, useMemo, useState } from "react";
-import { asString, fmtTime, formatStatus, statusClass, type TicketRow } from "./ddd-shared";
+import { useMemo, useRef, useState } from "react";
+import {
+  asString,
+  fmtTime,
+  formatCount,
+  formatPriority,
+  formatSeverity,
+  formatStatus,
+  formatTicketKind,
+  priorityRank,
+  severityClass,
+  severityRank,
+  statusClass,
+  ticketRiskClass,
+  useDialogFocusTrap,
+  type TicketRow,
+} from "./ddd-shared";
 
 export type TicketsTabProps = {
   tickets: TicketRow[];
@@ -18,8 +33,10 @@ function ticketSearchBlob(ticket: TicketRow): string {
     ticket.kind,
     ticket.status,
     ticketTitle(ticket),
-    asString(ticket.featureTitle),
-    asString(ticket.featureId),
+    asString(ticket.featureTitle ?? ticket.feature_title),
+    asString(ticket.featureId ?? ticket.feature_id),
+    asString(ticket.priority),
+    asString(ticket.severity),
     asString(ticket.content),
   ].filter(Boolean).join(" ").toLowerCase();
 }
@@ -29,10 +46,18 @@ function uniqueTicketValues(tickets: TicketRow[], field: "kind" | "status"): str
     .sort((left, right) => left.localeCompare(right));
 }
 
-type TicketSection = { title: string; body: string[]; items: string[] };
-type TicketDetail = { metadata: Record<string, string>; sections: TicketSection[] };
+function uniqueTicketMetadataValues(tickets: TicketRow[], key: "Priority" | "Severity"): string[] {
+  return [...new Set(tickets.map((ticket) => metadataForTicket(ticket)[key]?.trim()).filter(Boolean))]
+    .sort((left, right) => {
+      if (key === "Priority") return priorityRank(left) - priorityRank(right) || left.localeCompare(right);
+      return severityRank(left) - severityRank(right) || left.localeCompare(right);
+    });
+}
 
-const METADATA_ORDER = ["Status", "Kind", "Severity", "Run", "Slot", "Agent", "Task type", "Feature", "Feature title", "Feature status", "File"];
+type TicketSection = { title: string; body: string[]; items: string[] };
+type TicketDetail = { metadata: Record<string, string>; plainBody: string[]; sections: TicketSection[] };
+
+const METADATA_ORDER = ["Status", "Kind", "Priority", "Severity", "Run", "Slot", "Agent", "Task type", "Feature", "Feature title", "Feature status", "File"];
 
 function parseMetadataLine(line: string): Array<[string, string]> {
   const entries: Array<[string, string]> = [];
@@ -49,6 +74,7 @@ function parseMetadataLine(line: string): Array<[string, string]> {
 function ticketDetail(content: string): TicketDetail {
   const sections: TicketSection[] = [];
   const metadata: Record<string, string> = {};
+  const plainBody: string[] = [];
   let current: TicketSection | null = null;
   for (const rawLine of content.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -60,13 +86,18 @@ function ticketDetail(content: string): TicketDetail {
       continue;
     }
     if (!current) {
-      for (const [key, value] of parseMetadataLine(line)) metadata[key] = value;
+      const metadataEntries = parseMetadataLine(line);
+      if (metadataEntries.length > 0 && line.split(/\s+·\s+/).every((part) => parseMetadataLine(part).length === 1)) {
+        for (const [key, value] of metadataEntries) metadata[key] = value;
+      } else {
+        plainBody.push(line);
+      }
       continue;
     }
     if (line.startsWith("- ")) current.items.push(line.slice(2).trim());
-    else if (!/^[A-Za-z][A-Za-z ]+:\s*/.test(line)) current.body.push(line);
+    else current.body.push(line);
   }
-  return { metadata, sections };
+  return { metadata, plainBody, sections };
 }
 
 function metadataEntries(metadata: Record<string, string>): Array<[string, string]> {
@@ -80,17 +111,21 @@ function metadataEntries(metadata: Record<string, string>): Array<[string, strin
 function metadataForTicket(ticket: TicketRow): Record<string, string> {
   const detail = ticketDetail(asString(ticket.content));
   const metadata = { ...detail.metadata };
-  const featureId = asString(ticket.featureId);
-  const featureTitle = asString(ticket.featureTitle);
+  const featureId = asString(ticket.featureId ?? ticket.feature_id);
+  const featureTitle = asString(ticket.featureTitle ?? ticket.feature_title);
+  const priority = asString(ticket.priority);
+  const severity = asString(ticket.severity);
   if (featureId && !metadata.Feature) metadata.Feature = featureId;
   if (featureTitle && !metadata["Feature title"]) metadata["Feature title"] = featureTitle;
+  if (priority && !metadata.Priority) metadata.Priority = priority;
+  if (severity && !metadata.Severity) metadata.Severity = severity;
   if (asString(ticket.kind) && !metadata.Kind) metadata.Kind = asString(ticket.kind);
   if (asString(ticket.status) && !metadata.Status) metadata.Status = asString(ticket.status);
   return metadata;
 }
 
 function ticketFeatureLabel(ticket: TicketRow, metadata: Record<string, string> = metadataForTicket(ticket)): string {
-  return asString(ticket.featureTitle) || metadata["Feature title"] || metadata.Feature || asString(ticket.featureId);
+  return asString(ticket.featureTitle ?? ticket.feature_title) || metadata["Feature title"] || metadata.Feature || asString(ticket.featureId ?? ticket.feature_id);
 }
 
 function ticketFileLabel(metadata: Record<string, string>): string {
@@ -101,7 +136,7 @@ function TicketDetailBody({ ticket }: { ticket: TicketRow }) {
   const content = asString(ticket.content);
   const detail = ticketDetail(content);
   const entries = metadataEntries(metadataForTicket(ticket));
-  if (detail.sections.length === 0 && entries.length === 0) return <p>No detail recorded for this ticket.</p>;
+  if (detail.sections.length === 0 && detail.plainBody.length === 0 && entries.length === 0) return <p>No detail recorded for this ticket.</p>;
   return (
     <div className="ticket-detail-body">
       {entries.length ? (
@@ -111,10 +146,26 @@ function TicketDetailBody({ ticket }: { ticket: TicketRow }) {
             {entries.map(([key, value]) => (
               <div className="ticket-meta" key={key}>
                 <span>{key}</span>
-                <strong title={value}>{key === "Status" ? formatStatus(value) : value}</strong>
+                <strong title={value}>
+                  {key === "Status"
+                    ? formatStatus(value)
+                    : key === "Kind"
+                      ? formatTicketKind(value)
+                      : key === "Priority"
+                        ? formatPriority(value)
+                        : key === "Severity"
+                          ? formatSeverity(value)
+                          : value}
+                </strong>
               </div>
             ))}
           </div>
+        </section>
+      ) : null}
+      {detail.plainBody.length ? (
+        <section className="ticket-section">
+          <h3>Description</h3>
+          {detail.plainBody.map((line, index) => <p key={`plain:${index}`}>{line}</p>)}
         </section>
       ) : null}
       {detail.sections.map((section) => (
@@ -136,25 +187,34 @@ function TicketModal({ ticket, onClose }: { ticket: TicketRow; onClose: () => vo
   const metadata = metadataForTicket(ticket);
   const featureTitle = ticketFeatureLabel(ticket, metadata);
   const file = ticketFileLabel(metadata);
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  const priority = metadata.Priority;
+  const severity = metadata.Severity;
+  const modalRef = useRef<HTMLElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  useDialogFocusTrap({ containerRef: modalRef, initialFocusRef: closeRef, onClose });
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <section className="modal" role="dialog" aria-modal="true" data-testid="ddd-ticket-detail" onClick={(event) => event.stopPropagation()}>
+      <section
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ddd-ticket-detail-title"
+        tabIndex={-1}
+        data-testid="ddd-ticket-detail"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="modal-head">
           <div>
-            <span className="eyebrow">{asString(ticket.kind) || "ticket"}</span>
-            <h2>{ticketTitle(ticket)}</h2>
+            <span className="eyebrow">{formatTicketKind(asString(ticket.kind) || "ticket")}</span>
+            <h2 id="ddd-ticket-detail-title">{ticketTitle(ticket)}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
+          <button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
         </div>
         <div className="meta-row">
           {ticket.status ? <span className={`badge ${statusClass(asString(ticket.status))}`}>{formatStatus(asString(ticket.status))}</span> : null}
+          {priority ? <span className={`badge ${ticketRiskClass(priority, severity)}`}>{formatPriority(priority)}</span> : null}
+          {severity ? <span className={`badge ${severityClass(severity)}`}>{formatSeverity(severity)}</span> : null}
           {featureTitle ? <span className="pill">{featureTitle}</span> : null}
           {file ? <span className="pill ticket-path" title={file}>{file}</span> : null}
           <span className="pill ticket-path" title={ticket.path}>{ticket.path}</span>
@@ -172,26 +232,45 @@ export function TicketsTab(props: TicketsTabProps) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [kindFilter, setKindFilter] = useState("all");
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [sortMode, setSortMode] = useState<"risk" | "updated" | "title">("risk");
   const statuses = useMemo(() => uniqueTicketValues(tickets, "status"), [tickets]);
   const kinds = useMemo(() => uniqueTicketValues(tickets, "kind"), [tickets]);
+  const severities = useMemo(() => uniqueTicketMetadataValues(tickets, "Severity"), [tickets]);
   const filteredTickets = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return tickets.filter((ticket) => {
+    const filtered = tickets.map((ticket, index) => ({ ticket, index })).filter(({ ticket }) => {
+      const metadata = metadataForTicket(ticket);
       if (statusFilter !== "all" && asString(ticket.status) !== statusFilter) return false;
       if (kindFilter !== "all" && asString(ticket.kind) !== kindFilter) return false;
+      if (severityFilter !== "all" && metadata.Severity !== severityFilter) return false;
       return !needle || ticketSearchBlob(ticket).includes(needle);
     });
-  }, [tickets, query, statusFilter, kindFilter]);
-  const filtersActive = query.trim().length > 0 || statusFilter !== "all" || kindFilter !== "all";
+    return [...filtered].sort((left, right) => {
+      if (sortMode === "updated") return Number(right.ticket.updatedAtMs ?? 0) - Number(left.ticket.updatedAtMs ?? 0) || left.index - right.index;
+      if (sortMode === "title") return ticketTitle(left.ticket).localeCompare(ticketTitle(right.ticket)) || left.index - right.index;
+      const leftMeta = metadataForTicket(left.ticket);
+      const rightMeta = metadataForTicket(right.ticket);
+      return (
+        Math.min(priorityRank(leftMeta.Priority), severityRank(leftMeta.Severity)) -
+          Math.min(priorityRank(rightMeta.Priority), severityRank(rightMeta.Severity)) ||
+        severityRank(leftMeta.Severity) - severityRank(rightMeta.Severity) ||
+        priorityRank(leftMeta.Priority) - priorityRank(rightMeta.Priority) ||
+        Number(right.ticket.updatedAtMs ?? 0) - Number(left.ticket.updatedAtMs ?? 0) ||
+        left.index - right.index
+      );
+    }).map(({ ticket }) => ticket);
+  }, [tickets, query, statusFilter, kindFilter, severityFilter, sortMode]);
+  const filtersActive = query.trim().length > 0 || statusFilter !== "all" || kindFilter !== "all" || severityFilter !== "all";
 
   return (
     <div className="scroll pane" data-testid="ddd-tickets-tab">
       <section className="card">
         <div className="card-head">
           <h2>Tickets</h2>
-          <span className={`badge ${filteredTickets.length ? "ok" : "muted"}`}>{loading ? "Loading" : `${filteredTickets.length} of ${tickets.length}`}</span>
+          <span className={`badge ${filteredTickets.length ? "ok" : "muted"}`}>{loading ? "Loading" : filteredTickets.length === tickets.length ? formatCount(tickets.length, "ticket") : `${formatCount(filteredTickets.length, "ticket")} of ${formatCount(tickets.length, "ticket")}`}</span>
         </div>
-        <div className="filters" role="search" aria-label="Ticket filters">
+        <div className="filters ticket-filters" role="search" aria-label="Ticket filters">
           <label className="filter-field">
             <span>Search</span>
             <input
@@ -199,6 +278,7 @@ export function TicketsTab(props: TicketsTabProps) {
               type="search"
               value={query}
               placeholder="Title, path, feature, status"
+              onInput={(event) => setQuery(event.currentTarget.value)}
               onChange={(event) => setQuery(event.currentTarget.value)}
             />
           </label>
@@ -213,11 +293,26 @@ export function TicketsTab(props: TicketsTabProps) {
             <span>Kind</span>
             <select className="select" value={kindFilter} onChange={(event) => setKindFilter(event.currentTarget.value)}>
               <option value="all">All kinds</option>
-              {kinds.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+              {kinds.map((kind) => <option key={kind} value={kind}>{formatTicketKind(kind)}</option>)}
+            </select>
+          </label>
+          <label className="filter-field">
+            <span>Severity</span>
+            <select className="select" value={severityFilter} onChange={(event) => setSeverityFilter(event.currentTarget.value)}>
+              <option value="all">All severities</option>
+              {severities.map((severity) => <option key={severity} value={severity}>{formatSeverity(severity)}</option>)}
+            </select>
+          </label>
+          <label className="filter-field">
+            <span>Sort</span>
+            <select className="select" value={sortMode} onChange={(event) => setSortMode(event.currentTarget.value as "risk" | "updated" | "title")}>
+              <option value="risk">Highest risk</option>
+              <option value="updated">Recently updated</option>
+              <option value="title">Title</option>
             </select>
           </label>
           {filtersActive ? (
-            <button className="button" type="button" onClick={() => { setQuery(""); setStatusFilter("all"); setKindFilter("all"); }}>
+            <button className="button" type="button" onClick={() => { setQuery(""); setStatusFilter("all"); setKindFilter("all"); setSeverityFilter("all"); }}>
               Clear
             </button>
           ) : null}
@@ -228,10 +323,12 @@ export function TicketsTab(props: TicketsTabProps) {
               const metadata = metadataForTicket(ticket);
               const feature = ticketFeatureLabel(ticket, metadata);
               const file = ticketFileLabel(metadata);
+              const priority = metadata.Priority;
+              const severity = metadata.Severity;
               return (
             <button
               type="button"
-              className="slot ticket-row"
+              className={`slot ticket-row risk-${ticketRiskClass(priority, severity)}`}
               key={ticket.path}
               data-testid="ddd-ticket"
               onClick={() => setSelected(ticket)}
@@ -241,7 +338,9 @@ export function TicketsTab(props: TicketsTabProps) {
                 {ticket.status ? <span className={`badge ${statusClass(asString(ticket.status))}`}>{formatStatus(asString(ticket.status))}</span> : null}
               </div>
               <div className="meta-row">
-                <span className="pill">{ticket.kind ?? "ticket"}</span>
+                <span className="pill">{formatTicketKind(asString(ticket.kind) || "ticket")}</span>
+                {priority ? <span className={`badge ${ticketRiskClass(priority, severity)}`}>{formatPriority(priority)}</span> : null}
+                {severity ? <span className={`badge ${severityClass(severity)}`}>{formatSeverity(severity)}</span> : null}
                 {feature ? <span className="pill">{feature}</span> : null}
                 {file ? <span className="pill ticket-path" title={file}>{file}</span> : null}
                 <span className="pill ticket-path" title={ticket.path}>{ticket.path}</span>
@@ -252,7 +351,7 @@ export function TicketsTab(props: TicketsTabProps) {
             })()
           ))
         ) : (
-          <p>{loading ? "Loading tickets…" : filtersActive ? "No tickets match the current filters." : "No tickets yet. Triage should materialize selected work into tickets before agents run."}</p>
+          <p>{loading ? "Loading tickets..." : filtersActive ? "No tickets match the current filters." : "No tickets yet. Triage should materialize selected work into tickets before agents run."}</p>
         )}
       </section>
       {selected ? <TicketModal ticket={selected} onClose={() => setSelected(null)} /> : null}

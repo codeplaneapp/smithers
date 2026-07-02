@@ -16,7 +16,7 @@ planning/review/implement pools with ordered failover in `.smithers/agents.ts`.
 
 ### Accounts
 
-`smithers agent add`|list|remove manages per-account configDirs.
+`smithers agent add` | `smithers agent list` | `smithers agent remove` manages per-account configDirs.
 
 ## Test cases
 

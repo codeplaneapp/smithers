@@ -61,12 +61,32 @@ function writeFakeCodex(binDir: string, payload: unknown) {
     `const fs = require("node:fs");`,
     `const payload = process.env.SMITHERS_FAKE_CODEX_RESPONSE ?? ${JSON.stringify(JSON.stringify(payload))};`,
     `const args = process.argv.slice(2);`,
+    `function promptText() { try { return args.join("\\n") + "\\n" + fs.readFileSync(0, "utf8"); } catch { return args.join("\\n"); } }`,
+    `fs.appendFileSync("codex-calls.jsonl", JSON.stringify({ args, prompt: promptText(), payload: JSON.parse(payload) }) + "\\n");`,
     `const outputIndex = args.indexOf("--output-last-message");`,
     `if (outputIndex >= 0 && args[outputIndex + 1]) fs.writeFileSync(args[outputIndex + 1], "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n", "utf8");`,
     `process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");`,
     ``,
   ].join("\n"));
   chmodSync(join(binDir, "codex"), 0o755);
+}
+
+function writeFakeClaude(binDir: string, payload: unknown) {
+  writeFileSync(join(binDir, "claude"), [
+    `#!${process.execPath}`,
+    `const fs = require("node:fs");`,
+    `const args = process.argv.slice(2);`,
+    `if (args.join(" ") === "auth status") { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) + "\\n"); process.exit(0); }`,
+    `const payload = process.env.SMITHERS_FAKE_CLAUDE_RESPONSE ?? ${JSON.stringify(JSON.stringify(payload))};`,
+    `const prompt = args.join("\\n");`,
+    `fs.appendFileSync("claude-calls.jsonl", JSON.stringify({ args, prompt, payload: JSON.parse(payload) }) + "\\n");`,
+    `const answer = "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n";`,
+    `process.stdout.write(JSON.stringify({ type: "system", subtype: "init", session_id: "fake-claude-ddd-bug-scan" }) + "\\n");`,
+    `process.stdout.write(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: answer }] } }) + "\\n");`,
+    `process.stdout.write(JSON.stringify({ type: "result", subtype: "success", result: answer, session_id: "fake-claude-ddd-bug-scan" }) + "\\n");`,
+    ``,
+  ].join("\n"));
+  chmodSync(join(binDir, "claude"), 0o755);
 }
 
 async function runBugScan(repo: { root: string; binDir: string }, runId: string, input: Record<string, unknown>) {
@@ -98,6 +118,59 @@ async function runBugScan(repo: { root: string; binDir: string }, runId: string,
 }
 
 describe("ddd-bug-scan real workflow run", () => {
+  test("uses the default Claude verifier while the scan prompt preserves the default maxFindings bound", async () => {
+    const repo = tempRepo();
+    const finding = {
+      id: "default-bound",
+      title: "Default bound issue",
+      severity: "minor",
+      featureId: "known-feature",
+      file: "packages/core/src/default.ts",
+      evidence: "The default scan path found a bounded issue.",
+    };
+    writeFakeCodex(repo.binDir, {
+      findings: [finding],
+      areasCovered: ["packages/core"],
+      summary: "codex default scan",
+    });
+    writeFakeClaude(repo.binDir, {
+      confirmed: [finding],
+      rejected: [],
+      summary: "claude verified the default scan",
+    });
+
+    const runId = "ddd-bug-scan-default-claude";
+    const gateway = await runBugScan(repo, runId, {});
+    const connection = createConnectionContext();
+
+    const scan = await nodeOutput(gateway, connection, runId, "scan");
+    expect(scan.row.summary).toBe("codex default scan");
+    expect(scan.row.findings).toHaveLength(1);
+
+    const verify = await nodeOutput(gateway, connection, runId, "verify");
+    expect(verify.row.summary).toBe("claude verified the default scan");
+    expect(verify.row.confirmed[0]).toMatchObject({ id: "default-bound", featureId: "known-feature" });
+
+    const filed = await nodeOutput(gateway, connection, runId, "file-tickets");
+    expect(filed.row.created).toBe(1);
+
+    const codexCalls = readFileSync(join(repo.root, "codex-calls.jsonl"), "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as { prompt: string });
+    expect(codexCalls[0]!.prompt).toContain("Report at most 8 findings");
+
+    const claudeCalls = readFileSync(join(repo.root, "claude-calls.jsonl"), "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as { args: string[]; prompt: string; payload: { summary?: string } });
+    expect(claudeCalls).toHaveLength(1);
+    expect(claudeCalls[0]!.args).toEqual(expect.arrayContaining(["--model", "claude-fable-5"]));
+    expect(claudeCalls[0]!.prompt).toContain("Adversarially verify each finding below");
+    expect(claudeCalls[0]!.prompt).toContain("default-bound");
+    expect(claudeCalls[0]!.payload.summary).toBe("claude verified the default scan");
+  }, 120_000);
+
   test("scans, verifies, files a ticket, updates features.json, and rebuilds generated docs", async () => {
     const repo = tempRepo();
     const finding = {
@@ -138,6 +211,7 @@ describe("ddd-bug-scan real workflow run", () => {
     expect(existsSync(ticketPath)).toBe(true);
     expect(readFileSync(ticketPath, "utf8")).toContain("trimName(null) throws before validation.");
     expect(readFileSync(ticketPath, "utf8")).toContain("Feature title: Known Feature");
+    expect(readFileSync(ticketPath, "utf8")).toContain("Priority: P0");
     expect(readFileSync(join(repo.root, ".smithers/spec/features.json"), "utf8")).toContain(
       "Bug (major): Null trim crashes [packages/core/src/trim.ts]",
     );

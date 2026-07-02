@@ -78,14 +78,33 @@ function formatCommandList(value: string): string | null {
   return `${items.map(codeSpan).join(", ")}${trailingPeriod ? "." : ""}`;
 }
 
+type InlineReplacement = { start: number; end: number; text: string };
+
+function commandPipeReplacements(value: string): InlineReplacement[] {
+  const replacements: InlineReplacement[] = [];
+  const pattern = /\bsmithers\s+([A-Za-z0-9-]+)\s+([A-Za-z0-9-]+(?:\|[A-Za-z0-9-]+)+)\b/g;
+  for (const match of value.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    const group = match[1] ?? "";
+    const alternatives = (match[2] ?? "").split("|").filter(Boolean);
+    if (!group || alternatives.length < 2) continue;
+    replacements.push({
+      start,
+      end: start + (match[0] ?? "").length,
+      text: alternatives.map((alternative) => codeSpan(`smithers ${group} ${alternative}`)).join(" | "),
+    });
+  }
+  return replacements;
+}
+
 function codeRanges(value: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
   const patterns = [
-    /\bbun\s+[^\s,)]+/g,
-    /\bpnpm(?:\s+-C\s+[^\s,)]+)?(?:\s+[^\s,)]+)+/g,
+    /\bbun\s+test\b(?:\s+(?:(?:\.{0,2}\/|\.smithers\/|apps\/|packages\/|docs\/|e2e\/|scripts\/|skills\/)[^\s,;)]+))*|(?:\bbun\s+(?:\.{0,2}\/)?[A-Za-z0-9._/-]+\.(?:ts|tsx|js|mjs|cjs))/g,
+    /\bpnpm\s+-C\s+[^\s,;:)]+\s+[A-Za-z][A-Za-z0-9:_-]*(?:\s+(?:(?:\.{0,2}\/|\.smithers\/|apps\/|packages\/|docs\/|e2e\/|scripts\/|skills\/)[^\s,;)]+))*|\bpnpm\s+(?:typecheck|test(?::[A-Za-z0-9_-]+)?|docs:llms|docs:[A-Za-z0-9_-]+|check-[A-Za-z0-9-]+)\b(?:\s+(?:(?:\.{0,2}\/|\.smithers\/|apps\/|packages\/|docs\/|e2e\/|scripts\/|skills\/)[^\s,;)]+))*/g,
     /\bsmithers\s+workflow\s+run\s+[A-Za-z0-9._~:/?#@!$&'*+=-]+/g,
     /\bsmithers(?:\s+(?:init|workflow|list|run|up|ps|inspect|output|monitor|migrate|gateway|ui|agent|add|remove|retry-task|resume|approve|deny|alerts|cron|memory|usage|down|cancel|hijack|logs|events|openapi|optimize|eval|scores|snapshot|snapshots|restore|replay|fork|rewind|signal|why|human|ask|chat|token|tree|docs|docs-full))+/g,
-    /(?:^|(?<=[\s(]))(?:\.smithers|apps|packages|docs|e2e|scripts|skills)\/[A-Za-z0-9._~:/?#@!$&'*+,;=-]+/g,
+    /(?:^|(?<=[\s(]))(?:\.smithers|apps|packages|docs|e2e|scripts|skills)\/[A-Za-z0-9._~:/?#@!$&'*+=-]+/g,
     /\bfeatures\.json\b/g,
   ];
   for (const pattern of patterns) {
@@ -95,7 +114,7 @@ function codeRanges(value: string): Array<{ start: number; end: number }> {
       const leadingSpace = raw.match(/^\s/) ? 1 : 0;
       const start = rawStart + leadingSpace;
       let end = rawStart + raw.length;
-      while (end > start && /[.;:]$/.test(value.slice(end - 1, end))) end -= 1;
+      while (end > start && /[.,;:]$/.test(value.slice(end - 1, end))) end -= 1;
       if (start < end) ranges.push({ start, end });
     }
   }
@@ -115,14 +134,25 @@ function codeRanges(value: string): Array<{ start: number; end: number }> {
 function formatInline(value: string): string {
   const commandList = formatCommandList(value);
   if (commandList) return commandList;
+  const special = commandPipeReplacements(value);
   const ranges = codeRanges(value);
-  if (ranges.length === 0) return escapeMarkdownText(value);
+  const replacements: InlineReplacement[] = [
+    ...special,
+    ...ranges.map((range): InlineReplacement => ({ start: range.start, end: range.end, text: codeSpan(value.slice(range.start, range.end)) })),
+  ].sort((left, right) => left.start - right.start || right.end - left.end);
+  const nonOverlapping: InlineReplacement[] = [];
+  for (const replacement of replacements) {
+    const previous = nonOverlapping.at(-1);
+    if (previous && replacement.start < previous.end) continue;
+    nonOverlapping.push(replacement);
+  }
+  if (nonOverlapping.length === 0) return escapeMarkdownText(value);
   let cursor = 0;
   let out = "";
-  for (const range of ranges) {
-    out += escapeMarkdownText(value.slice(cursor, range.start));
-    out += codeSpan(value.slice(range.start, range.end));
-    cursor = range.end;
+  for (const replacement of nonOverlapping) {
+    out += escapeMarkdownText(value.slice(cursor, replacement.start));
+    out += replacement.text;
+    cursor = replacement.end;
   }
   out += escapeMarkdownText(value.slice(cursor));
   return out;

@@ -41,6 +41,10 @@ export function AuditTab(props: AuditTabProps) {
   const { audit, triage } = props;
   const findings = findingsOf(audit);
   const notes = strings(audit?.notes);
+  const bootstrapRow =
+    props.bootstrap && props.bootstrap.docsBuildPassed === false && !props.bootstrap.status
+      ? { ...props.bootstrap, status: "failed" }
+      : props.bootstrap;
   const counts: Record<FeatureStatus, number> = { fixed: 0, partial: 0, broken: 0, "missing-tests": 0, missing: 0 };
   for (const feature of features) if (feature.status in counts) counts[feature.status] += 1;
 
@@ -48,6 +52,10 @@ export function AuditTab(props: AuditTabProps) {
     const feature = features.find((item) => item.id === featureId);
     const note = notes.find((entry) => entry.includes(featureId));
     if (feature) props.onOpenFeature(feature, note);
+  }
+
+  function noteFor(featureId: string): string {
+    return notes.find((entry) => entry.includes(featureId)) ?? "";
   }
 
   return (
@@ -60,6 +68,26 @@ export function AuditTab(props: AuditTabProps) {
         {findings.length ? (
           findings.map((finding) => {
             const feature = features.find((item) => item.id === finding.featureId);
+            if (!feature) {
+              const note = noteFor(finding.featureId);
+              return (
+                <article
+                  key={`${finding.kind}:${finding.featureId}`}
+                  className="finding unresolved-finding"
+                  data-testid="ddd-unresolved-finding"
+                >
+                  <div className="unresolved-finding-head">
+                    <span className="fid">{finding.featureId}</span>
+                    <span className={`badge ${statusClass(finding.kind === "broken" ? "broken" : "partial")}`}>
+                      {findingLabels[finding.kind]}
+                    </span>
+                  </div>
+                  <p>Audit returned an unknown feature id.</p>
+                  {note ? <p><strong>Note:</strong> {note}</p> : null}
+                  <p><strong>Next step:</strong> Add this feature to features.json or update the audit result to reference an existing feature.</p>
+                </article>
+              );
+            }
             return (
               <button
                 key={`${finding.kind}:${finding.featureId}`}
@@ -81,7 +109,7 @@ export function AuditTab(props: AuditTabProps) {
       </section>
 
       <div className="grid2">
-        <OutputCard label="Bootstrap" row={props.bootstrap} />
+        <OutputCard label="Bootstrap" row={bootstrapRow} />
         <OutputCard label="Meta Ticket" row={props.metaTicket} pending="edit a spec and dispatch agents" />
         <OutputCard label="Spec Update" row={props.spec} />
         <OutputCard label="Final Summary" row={props.summary} pending="run the workflow to produce a summary" />
@@ -125,7 +153,7 @@ export function AuditTab(props: AuditTabProps) {
                 <strong>{feature.title}</strong>
                 <span className={`badge ${statusClass(feature.status)}`}>{statusLabels[feature.status] ?? feature.status}</span>
               </div>
-              <p>{feature.summary}</p>
+              <p className="feature-card-summary">{feature.summary}</p>
               <button className="button" type="button" onClick={() => props.onOpenFeature(feature)}>Details</button>
             </article>
           ))}

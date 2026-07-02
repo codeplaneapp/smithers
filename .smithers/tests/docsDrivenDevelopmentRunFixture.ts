@@ -19,6 +19,12 @@ export type DddFixtureRepo = {
   cleanup: () => void;
 };
 
+export type DddFixtureRepoOptions = {
+  features?: unknown[];
+};
+
+export type DddFakeAgentResponses = Record<string, string | Record<string, unknown>>;
+
 export async function withDddProcessEnvLock<T>(body: () => Promise<T>): Promise<T> {
   const key = "__smithersDddProcessEnvLock";
   const state = globalThis as typeof globalThis & Record<typeof key, Promise<void> | undefined>;
@@ -36,7 +42,32 @@ export async function withDddProcessEnvLock<T>(body: () => Promise<T>): Promise<
   }
 }
 
-export function createDddFixtureRepo(): DddFixtureRepo {
+export function dddFixtureFeature(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "docs-driven-development",
+    title: "Docs driven development",
+    summary: "Maintain the Smithers product spec.",
+    status: "fixed",
+    priority: "p0",
+    owner: "product",
+    tier: "feature",
+    group: "Ship & review",
+    userValue: "Keep docs and implementation work connected.",
+    capabilities: [{ title: "Audit loop", detail: "Runs a bounded audit and triage loop.", status: "fixed" }],
+    endpoints: [{ method: "POST", path: "/runs", doc: "overview.md#runs", note: "launch workflow runs" }],
+    links: [{ label: "Overview", href: "overview.md" }],
+    tests: ["bun test tests/docs-driven-development-run.e2e.test.ts"],
+    observability: ["gateway run events"],
+    debug: ["smithers output <runId> <nodeId>"],
+    architecture: ["docs-driven-development workflow"],
+    changes: ["fixture seed"],
+    diffHints: [".smithers/workflows/docs-driven-development.tsx"],
+    missing: [],
+    ...overrides,
+  };
+}
+
+export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFixtureRepo {
   const root = mkdtempSync(join(tmpdir(), "ddd-run-e2e-"));
   const binDir = mkdtempSync(join(tmpdir(), "ddd-run-bin-"));
 
@@ -49,29 +80,7 @@ export function createDddFixtureRepo(): DddFixtureRepo {
   mkdirSync(join(root, ".smithers/specs"), { recursive: true });
   mkdirSync(join(root, ".smithers/workflows"), { recursive: true });
   cpSync(agentsDir, join(root, ".smithers/agents"), { recursive: true });
-  writeFileSync(join(root, ".smithers/spec/features.json"), `${JSON.stringify([
-    {
-      id: "docs-driven-development",
-      title: "Docs driven development",
-      summary: "Maintain the Smithers product spec.",
-      status: "fixed",
-      priority: "p0",
-      owner: "product",
-      tier: "feature",
-      group: "Ship & review",
-      userValue: "Keep docs and implementation work connected.",
-      capabilities: [{ title: "Audit loop", detail: "Runs a bounded audit and triage loop.", status: "fixed" }],
-      endpoints: [{ method: "POST", path: "/runs", doc: "overview.md#runs", note: "launch workflow runs" }],
-      links: [{ label: "Overview", href: "overview.md" }],
-      tests: ["bun test tests/docs-driven-development-run.e2e.test.ts"],
-      observability: ["gateway run events"],
-      debug: ["smithers output <runId> <nodeId>"],
-      architecture: ["docs-driven-development workflow"],
-      changes: ["fixture seed"],
-      diffHints: [".smithers/workflows/docs-driven-development.tsx"],
-      missing: [],
-    },
-  ], null, 2)}\n`);
+  writeFileSync(join(root, ".smithers/spec/features.json"), `${JSON.stringify(options.features ?? [dddFixtureFeature()], null, 2)}\n`);
   writeFileSync(join(root, ".smithers/spec/content/overview.md"), "# Overview\n\nInitial DDD overview.\n");
   writeFileSync(join(root, ".smithers/specs/docs-driven-development.md"), "# Docs Driven Development\n");
   cpSync(workflowPath, join(root, ".smithers/workflows/docs-driven-development.tsx"));
@@ -101,9 +110,20 @@ export function createDddFixtureRepo(): DddFixtureRepo {
 function writeFakeAgents(binDir: string) {
   const claudeSrc = [
     `#!${process.execPath}`,
+    `const fs = require("node:fs");`,
     `const args = process.argv.slice(2);`,
     `if (args.join(" ") === "auth status") { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) + "\\n"); process.exit(0); }`,
-    `const payload = process.env.SMITHERS_FAKE_CLAUDE_RESPONSE ?? process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}";`,
+    `function promptText() { try { return args.join("\\n") + "\\n" + fs.readFileSync(0, "utf8"); } catch { return args.join("\\n"); } }`,
+    `function pickPayload() {`,
+    `  const fallback = process.env.SMITHERS_FAKE_CLAUDE_RESPONSE ?? process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}";`,
+    `  let byNode = {};`,
+    `  try { byNode = JSON.parse(process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE ?? "{}"); } catch {}`,
+    `  const prompt = promptText();`,
+    `  const pairs = [["audit", "Audit the current docs-driven-development spec state"], ["spec-update", "Update the smithers product spec"], ["triage", "Plan the next docs-driven-development round"], ["work:1", "Implement or execute triage slot 1"], ["work:1", "No triage item selected for slot 1"], ["cycle-review", "Review this entire docs-driven-development cycle"]];`,
+    `  for (const [node, marker] of pairs) if (prompt.includes(marker) && byNode[node]) return typeof byNode[node] === "string" ? byNode[node] : JSON.stringify(byNode[node]);`,
+    `  return fallback;`,
+    `}`,
+    `const payload = pickPayload();`,
     `process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n" }] } }) + "\\n");`,
     ``,
   ].join("\n");
@@ -113,8 +133,18 @@ function writeFakeAgents(binDir: string) {
   const codexSrc = [
     `#!${process.execPath}`,
     `const fs = require("node:fs");`,
-    `const payload = process.env.SMITHERS_FAKE_CODEX_RESPONSE ?? process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}";`,
     `const args = process.argv.slice(2);`,
+    `function promptText() { try { return args.join("\\n") + "\\n" + fs.readFileSync(0, "utf8"); } catch { return args.join("\\n"); } }`,
+    `function pickPayload() {`,
+    `  const fallback = process.env.SMITHERS_FAKE_CODEX_RESPONSE ?? process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}";`,
+    `  let byNode = {};`,
+    `  try { byNode = JSON.parse(process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE ?? "{}"); } catch {}`,
+    `  const prompt = promptText();`,
+    `  const pairs = [["audit", "Audit the current docs-driven-development spec state"], ["spec-update", "Update the smithers product spec"], ["triage", "Plan the next docs-driven-development round"], ["work:1", "Implement or execute triage slot 1"], ["work:1", "No triage item selected for slot 1"], ["cycle-review", "Review this entire docs-driven-development cycle"]];`,
+    `  for (const [node, marker] of pairs) if (prompt.includes(marker) && byNode[node]) return typeof byNode[node] === "string" ? byNode[node] : JSON.stringify(byNode[node]);`,
+    `  return fallback;`,
+    `}`,
+    `const payload = pickPayload();`,
     `const outputIndex = args.indexOf("--output-last-message");`,
     `if (outputIndex >= 0 && args[outputIndex + 1]) fs.writeFileSync(args[outputIndex + 1], "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n", "utf8");`,
     `process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");`,
@@ -124,7 +154,7 @@ function writeFakeAgents(binDir: string) {
   chmodSync(join(binDir, "codex"), 0o755);
 }
 
-export function fakeAgentResponse(summary: string) {
+export function fakeAgentResponse(summary: string, overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
     generatedSiteBuilds: true,
     featureIds: ["docs-driven-development"],
@@ -158,23 +188,61 @@ export function fakeAgentResponse(summary: string) {
     blockingFindings: [],
     inefficiencies: [],
     summary,
+    ...overrides,
   });
 }
 
-export async function runDddWorkflow(repo: DddFixtureRepo, runId: string, input: Record<string, unknown>) {
+function serializeFakeResponsesByNode(responses: DddFakeAgentResponses | undefined): string | undefined {
+  if (!responses) return undefined;
+  return JSON.stringify(Object.fromEntries(
+    Object.entries(responses).map(([key, value]) => [key, typeof value === "string" ? value : JSON.stringify(value)]),
+  ));
+}
+
+export async function withDddFixtureExecutionEnv<T>(
+  repo: DddFixtureRepo,
+  body: () => Promise<T>,
+  options: { agentResponsesByNode?: DddFakeAgentResponses } = {},
+): Promise<T> {
   return withDddProcessEnvLock(async () => {
     const previousCwd = process.cwd();
     const previousPath = process.env.PATH;
     const previousCodex = process.env.SMITHERS_FAKE_CODEX_RESPONSE;
     const previousClaude = process.env.SMITHERS_FAKE_CLAUDE_RESPONSE;
+    const previousByNode = process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE;
     const previousTestAgentPath = process.env.SMITHERS_TEST_AGENT_PATH;
     process.chdir(repo.root);
     process.env.PATH = `${repo.binDir}:${process.env.PATH ?? ""}`;
     process.env.SMITHERS_TEST_AGENT_PATH = process.env.PATH;
     process.env.SMITHERS_FAKE_CODEX_RESPONSE = fakeAgentResponse("codex fake output");
     process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = fakeAgentResponse("claude fake output");
-
+    const byNode = serializeFakeResponsesByNode(options.agentResponsesByNode);
+    if (byNode) process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE = byNode;
+    else delete process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE;
     try {
+      return await body();
+    } finally {
+      process.chdir(previousCwd);
+      process.env.PATH = previousPath;
+      if (previousCodex === undefined) delete process.env.SMITHERS_FAKE_CODEX_RESPONSE;
+      else process.env.SMITHERS_FAKE_CODEX_RESPONSE = previousCodex;
+      if (previousClaude === undefined) delete process.env.SMITHERS_FAKE_CLAUDE_RESPONSE;
+      else process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = previousClaude;
+      if (previousByNode === undefined) delete process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE;
+      else process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE = previousByNode;
+      if (previousTestAgentPath === undefined) delete process.env.SMITHERS_TEST_AGENT_PATH;
+      else process.env.SMITHERS_TEST_AGENT_PATH = previousTestAgentPath;
+    }
+  });
+}
+
+export async function runDddWorkflow(
+  repo: DddFixtureRepo,
+  runId: string,
+  input: Record<string, unknown>,
+  options: { agentResponsesByNode?: DddFakeAgentResponses } = {},
+) {
+  return withDddFixtureExecutionEnv(repo, async () => {
       const tempWorkflowPath = join(repo.root, ".smithers/workflows/docs-driven-development.tsx");
       const mod = await import(`${tempWorkflowPath}?run=${encodeURIComponent(runId)}-${Date.now()}-${Math.random()}`);
       const gateway = new Gateway({ heartbeatMs: 50 });
@@ -186,17 +254,9 @@ export async function runDddWorkflow(repo: DddFixtureRepo, runId: string, input:
       const inflight = gateway.inflightRuns.get(runId);
       if (inflight) await inflight;
       return gateway;
-    } finally {
-      process.chdir(previousCwd);
-      process.env.PATH = previousPath;
-      if (previousCodex === undefined) delete process.env.SMITHERS_FAKE_CODEX_RESPONSE;
-      else process.env.SMITHERS_FAKE_CODEX_RESPONSE = previousCodex;
-      if (previousClaude === undefined) delete process.env.SMITHERS_FAKE_CLAUDE_RESPONSE;
-      else process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = previousClaude;
-      if (previousTestAgentPath === undefined) delete process.env.SMITHERS_TEST_AGENT_PATH;
-      else process.env.SMITHERS_TEST_AGENT_PATH = previousTestAgentPath;
-    }
-  });
+    },
+    options,
+  );
 }
 
 export function createConnectionContext() {
@@ -222,8 +282,8 @@ export async function gatewayRequest(gateway: Gateway, connection: ReturnType<ty
   });
 }
 
-export async function nodeOutput(gateway: Gateway, connection: ReturnType<typeof createConnectionContext>, runId: string, nodeId: string) {
-  const response = await gatewayRequest(gateway, connection, "getNodeOutput", { runId, nodeId, iteration: 0 });
+export async function nodeOutput(gateway: Gateway, connection: ReturnType<typeof createConnectionContext>, runId: string, nodeId: string, iteration = 0) {
+  const response = await gatewayRequest(gateway, connection, "getNodeOutput", { runId, nodeId, iteration });
   if (!response.ok) throw new Error(`getNodeOutput ${nodeId} failed: ${response.error?.code ?? "unknown"}`);
   return response.payload;
 }

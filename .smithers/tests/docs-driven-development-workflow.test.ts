@@ -126,14 +126,59 @@ describe("docs-driven-development workflow guards", () => {
     expect(readFileSync(written, "utf8")).toContain("Task type: fix");
   });
 
-  test("agent routing clamps max agents and falls back to Codex when Claude planning is disabled", async () => {
+  test("materializeTriageTickets uses real ticket paths and feature-title fallbacks", async () => {
+    const root = tempRoot();
+    const mod = await importWorkflow(root);
+
+    const full = mod.materializeTriageTickets("path-shape-run", {
+      selected: [
+        {
+          slot: 1,
+          featureId: "docs-driven-development",
+          title: "",
+          agent: "codex",
+          taskType: "e2e",
+          reason: "Materialized and gateway tickets must dedupe to one row.",
+        },
+        {
+          slot: 2,
+          feature_id: "",
+          feature_title: "Snake Case Feature",
+          title: "",
+          agent: "sonnet",
+          task_type: "fix",
+          reason: "Empty feature id and title still produce a stable ticket.",
+        },
+      ],
+    });
+
+    expect(full.created).toBe(2);
+    expect(full.tickets[0]).toMatchObject({
+      path: "docs-driven-development--path-shape-run--01-docs-driven-development",
+      featureId: "docs-driven-development",
+      featureTitle: "Docs driven development",
+    });
+    expect(full.tickets[1]).toMatchObject({
+      path: "docs-driven-development--path-shape-run--02-ticket",
+      featureId: "",
+      featureTitle: "Snake Case Feature",
+    });
+
+    const materializedPath = join(root, ".smithers/tickets/docs-driven-development--path-shape-run--01-docs-driven-development.md");
+    expect(existsSync(materializedPath)).toBe(true);
+    const materialized = readFileSync(materializedPath, "utf8");
+    expect(materialized).toContain("Feature title: Docs driven development");
+    expect(materialized).toContain("Materialized and gateway tickets must dedupe");
+  });
+
+  test("agent routing caps max agents to the single rendered work slot and falls back to Codex when Claude planning is disabled", async () => {
     const mod = await importWorkflow(tempRoot());
 
     expect(mod.resolvedMaxAgents(undefined)).toBe(1);
     expect(mod.resolvedMaxAgents(null)).toBe(1);
     expect(mod.resolvedMaxAgents(0)).toBe(1);
-    expect(mod.resolvedMaxAgents(99)).toBe(8);
-    expect(mod.resolvedMaxAgents("3")).toBe(3);
+    expect(mod.resolvedMaxAgents(99)).toBe(1);
+    expect(mod.resolvedMaxAgents("3")).toBe(1);
     expect(mod.resolvedMaxRounds(undefined)).toBe(100000);
     expect(mod.resolvedMaxRounds(null)).toBe(100000);
     expect(mod.resolvedMaxRounds(0)).toBe(100000);

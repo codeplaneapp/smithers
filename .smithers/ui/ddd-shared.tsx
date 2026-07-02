@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { featuresData } from "./ddd-features.generated";
-import { workflowSource, workflowSourcePath } from "./ddd-workflowSource.generated";
+import { workflowSource, workflowSourcePath, workflowSources } from "./ddd-workflowSource.generated";
 import type { DocsContentEntry } from "./ddd-docsContent.generated";
 
 export type { DocsContentEntry };
@@ -61,12 +61,14 @@ export type RunSummaryRow = Record<string, unknown> & {
   status?: string;
   createdAtMs?: number;
 };
-export type EventFrame = { type?: string; event?: string; payload?: unknown; seq: number; stateVersion?: number };
+export type EventFrame = { type?: string; event?: string; payload?: unknown; seq?: number; stateVersion?: number };
 export type TicketRow = Record<string, unknown> & {
   path: string;
   kind?: string;
   content?: string;
   status?: string | null;
+  priority?: string | null;
+  severity?: string | null;
   updatedAtMs?: number;
 };
 
@@ -108,8 +110,14 @@ export function rowOf(value: unknown): Record<string, unknown> | null {
 }
 
 export function paramFromUrl(name: string): string | undefined {
-  if (typeof location === "undefined") return undefined;
-  return new URLSearchParams(location.search).get(name) ?? undefined;
+  const search =
+    typeof window !== "undefined" && window.location
+      ? window.location.search
+      : typeof location !== "undefined"
+        ? location.search
+        : "";
+  if (!search) return undefined;
+  return new URLSearchParams(search).get(name) ?? undefined;
 }
 export function runIdFromUrl(): string | undefined {
   return paramFromUrl("runId");
@@ -172,6 +180,118 @@ export function statusClass(status: string | undefined): string {
   return "muted";
 }
 
+export function formatNumber(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  try {
+    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+  } catch {
+    return String(Math.trunc(value));
+  }
+}
+
+export function formatCount(count: number, singular: string, plural = `${singular}s`): string {
+  const label = Math.abs(count) === 1 ? singular : plural;
+  return `${formatNumber(count)} ${label}`;
+}
+
+export const featureTierLabels: Record<FeatureTier, string> = {
+  feature: "Feature",
+  platform: "Platform",
+  reference: "Reference",
+};
+
+export function formatFeatureTier(tier: string | undefined): string {
+  const normalized = normalizeStatus(tier);
+  return featureTierLabels[normalized as FeatureTier] ?? formatStatus(normalized);
+}
+
+export const ticketKindLabels: Record<string, string> = {
+  ticket: "Ticket",
+  issue: "Issue",
+  fix: "Fix",
+  e2e: "E2E",
+  review: "Review",
+  feature: "Feature",
+  docs: "Docs",
+};
+
+export function formatTicketKind(kind: string | undefined): string {
+  const normalized = normalizeStatus(kind);
+  if (!normalized) return "Ticket";
+  return ticketKindLabels[normalized] ?? formatStatus(normalized);
+}
+
+const ticketSeverityLabels: Record<string, string> = {
+  critical: "Critical",
+  major: "Major",
+  minor: "Minor",
+};
+
+const ticketSeverityRanks: Record<string, number> = {
+  critical: 0,
+  major: 1,
+  minor: 2,
+};
+
+const ticketPriorityRanks: Record<string, number> = {
+  p0: 0,
+  p1: 1,
+  p2: 2,
+};
+
+export function normalizePriority(priority: unknown): string {
+  const normalized = normalizeStatus(asString(priority));
+  if (/^p\d+$/.test(normalized)) return normalized;
+  if (/^\d+$/.test(normalized)) return `p${normalized}`;
+  return normalized;
+}
+
+export function formatPriority(priority: unknown): string {
+  const normalized = normalizePriority(priority);
+  return /^p\d+$/.test(normalized) ? normalized.toUpperCase() : formatStatus(normalized);
+}
+
+export function priorityRank(priority: unknown): number {
+  const normalized = normalizePriority(priority);
+  return ticketPriorityRanks[normalized] ?? 99;
+}
+
+export function normalizeSeverity(severity: unknown): string {
+  const normalized = normalizeStatus(asString(severity));
+  if (["critical", "blocker", "p0"].includes(normalized)) return "critical";
+  if (["major", "high", "p1"].includes(normalized)) return "major";
+  if (["minor", "low", "info", "p2"].includes(normalized)) return "minor";
+  return normalized;
+}
+
+export function formatSeverity(severity: unknown): string {
+  const normalized = normalizeSeverity(severity);
+  return ticketSeverityLabels[normalized] ?? formatStatus(normalized);
+}
+
+export function severityRank(severity: unknown): number {
+  const normalized = normalizeSeverity(severity);
+  return ticketSeverityRanks[normalized] ?? 99;
+}
+
+export function severityClass(severity: unknown): string {
+  const rank = severityRank(severity);
+  if (rank === 0) return "bad";
+  if (rank === 1) return "warn";
+  return "muted";
+}
+
+export function ticketRiskClass(priority: unknown, severity: unknown): "bad" | "warn" | "muted" {
+  if (severityRank(severity) === 0 || priorityRank(priority) === 0) return "bad";
+  if (severityRank(severity) === 1 || priorityRank(priority) === 1) return "warn";
+  return "muted";
+}
+
+export function isTerminalRunStatus(status: string | undefined): boolean {
+  const normalized = normalizeStatus(status);
+  return ["done", "finished", "success", "ok", "complete", "completed", "failed", "failure", "error", "cancelled", "canceled", "skipped"].includes(normalized);
+}
+
 export function fmtTime(ms: number | undefined): string {
   if (!ms || !Number.isFinite(ms)) return "";
   try {
@@ -200,8 +320,161 @@ export function ErrorBanner({ title, errors }: { title: string; errors: unknown[
   );
 }
 
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "textarea:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+const activeDialogStack: HTMLElement[] = [];
+
+function focusableElements(container: HTMLElement): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter((element) => {
+    if (element.getAttribute("aria-hidden") === "true") return false;
+    return element.tabIndex >= 0;
+  });
+}
+
+function removeDialogFromStack(container: HTMLElement) {
+  const index = activeDialogStack.lastIndexOf(container);
+  if (index >= 0) activeDialogStack.splice(index, 1);
+}
+
+/**
+ * Trap focus inside the top-most dialog, close on Escape, and restore the
+ * element that opened it. Multiple DDD overlays can coexist, so only the last
+ * mounted dialog responds to keyboard events.
+ */
+export function useDialogFocusTrap({
+  active = true,
+  containerRef,
+  initialFocusRef,
+  onClose,
+}: {
+  active?: boolean;
+  containerRef: { current: HTMLElement | null };
+  initialFocusRef?: { current: HTMLElement | null };
+  onClose: () => void;
+}) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!active || typeof document === "undefined") return;
+    const container = containerRef.current;
+    if (!container) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    activeDialogStack.push(container);
+
+    const isTopDialog = () => activeDialogStack.at(-1) === container;
+    const focusInitial = () => {
+      const target = initialFocusRef?.current ?? focusableElements(container)[0] ?? container;
+      target.focus();
+    };
+
+    window.requestAnimationFrame(focusInitial);
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isTopDialog()) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusables = focusableElements(container);
+      if (focusables.length === 0) {
+        event.preventDefault();
+        container.focus();
+        return;
+      }
+      const first = focusables[0]!;
+      const last = focusables[focusables.length - 1]!;
+      const current = document.activeElement;
+      if (event.shiftKey && current === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && current === last) {
+        event.preventDefault();
+        first.focus();
+      } else if (!container.contains(current)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    const onFocusIn = (event: FocusEvent) => {
+      if (!isTopDialog()) return;
+      const target = event.target instanceof Node ? event.target : null;
+      if (target && container.contains(target)) return;
+      focusInitial();
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("focusin", onFocusIn);
+      removeDialogFromStack(container);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [active, containerRef, initialFocusRef]);
+}
+
 export function normalizeMarkdownForDirty(markdown: string): string {
   return markdown.replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").trimEnd();
+}
+
+const SPEC_DRAFTS_STORAGE_KEY = "smithers.ddd.specDrafts.v1";
+
+function localStorageSafe(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const storage = window.localStorage;
+    const probe = "__smithers_ddd_draft_probe__";
+    storage.setItem(probe, "1");
+    storage.removeItem(probe);
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+export function loadSpecDrafts(docs: ReadonlyArray<DocsContentEntry>): Record<string, string> {
+  const storage = localStorageSafe();
+  if (!storage) return {};
+  try {
+    const parsed = JSON.parse(storage.getItem(SPEC_DRAFTS_STORAGE_KEY) ?? "{}");
+    const rawDrafts = isRecord(parsed) && isRecord(parsed.drafts) ? parsed.drafts : isRecord(parsed) ? parsed : {};
+    const docsByPath = new Map(docs.map((doc) => [doc.path, doc]));
+    const drafts: Record<string, string> = {};
+    for (const [path, value] of Object.entries(rawDrafts)) {
+      const doc = docsByPath.get(path);
+      if (!doc || doc.level !== "product" || typeof value !== "string") continue;
+      if (normalizeMarkdownForDirty(value) === normalizeMarkdownForDirty(doc.content)) continue;
+      drafts[path] = value;
+    }
+    return drafts;
+  } catch {
+    return {};
+  }
+}
+
+export function saveSpecDrafts(drafts: Record<string, string>) {
+  const storage = localStorageSafe();
+  if (!storage) return;
+  try {
+    if (Object.keys(drafts).length === 0) {
+      storage.removeItem(SPEC_DRAFTS_STORAGE_KEY);
+      return;
+    }
+    storage.setItem(SPEC_DRAFTS_STORAGE_KEY, JSON.stringify({ savedAt: Date.now(), drafts }));
+  } catch {
+    // Draft persistence is best-effort; the in-memory editor remains usable.
+  }
 }
 
 export function makeAssetUrl(assetBase: string | undefined) {
@@ -239,6 +512,11 @@ function frameEnvelope(frame: EventFrame): { event: string; payload: Record<stri
   return { event, payload: outerPayload };
 }
 
+function finiteSeq(value: unknown): number {
+  const seq = Number(value ?? 0);
+  return Number.isFinite(seq) ? seq : 0;
+}
+
 /**
  * Run-event frames are double-wrapped: the real domain event + data live at
  * `frame.payload.event` / `frame.payload.payload`. The gateway's mapEvent remaps
@@ -255,7 +533,7 @@ export function chatLineFromFrame(frame: EventFrame): { who: string; text: strin
     const text = asString(payload.output);
     if (text.trim()) return { who: asString(payload.nodeId) || "node", text };
   }
-  if (event === "agent.trace") {
+  if (event === "agent.trace" || event === "AgentTraceEvent") {
     const trace = isRecord(payload.trace) ? payload.trace : undefined;
     const tracePayload = trace && isRecord(trace.payload) ? trace.payload : undefined;
     const text = tracePayload ? asString(tracePayload.text) : "";
@@ -401,15 +679,27 @@ function normalizeChatText(text: string): string {
   return text.trim().replace(/\s+/g, " ");
 }
 
+function sourceKeyFromPayload(payload: Record<string, unknown>, fallback: string): string {
+  const sessionRecord = isRecord(payload.session) ? payload.session : {};
+  const node = asString(payload.nodeId ?? payload.node_id ?? payload.node ?? payload.taskId ?? payload.task_id);
+  const session = asString(payload.sessionId ?? payload.session_id ?? sessionRecord.id ?? payload.id);
+  const engine = asString(payload.engine);
+  return [node, session, engine].filter(Boolean).join(":") || fallback;
+}
+
+function chatSourceKey(frame: EventFrame, fallbackPrefix: string): string {
+  const env = frameEnvelope(frame);
+  if (!env) return `${fallbackPrefix}:unknown`;
+  return `${fallbackPrefix}:${sourceKeyFromPayload(env.payload, "global")}`;
+}
+
 /**
  * Build a clean, de-duplicated conversation for the Chat logs panel.
  *
- * `agent.session` events fire repeatedly, each carrying the CUMULATIVE transcript,
- * so rendering every one would repeat the whole conversation N times. We therefore
- * take the single most-complete transcript (most messages, tie → highest seq) as the
- * conversation, then append any `agent.event` / `task.output` text lines that the
- * transcript doesn't already contain (streaming fragments subsumed by a transcript
- * message are dropped).
+ * `agent.session` events fire repeatedly, each carrying that node/session's
+ * cumulative transcript. Real DDD runs have separate cumulative sessions for
+ * audit, spec-update, triage, work, and review, so de-dupe per node/session
+ * instead of picking one global best transcript.
  */
 export function buildChatLines(frames: EventFrame[]): ChatLine[] {
   const sessionEventOf = (frame: EventFrame): string => {
@@ -420,31 +710,50 @@ export function buildChatLines(frames: EventFrame[]): ChatLine[] {
     return event === "agent.session" || event === "AgentSessionEvent";
   };
 
-  let best: { seq: number; lines: ChatLine[] } | null = null;
+  const sessions = new Map<string, { firstSeq: number; seq: number; lines: ChatLine[] }>();
   for (const frame of frames) {
     if (!isSession(frame)) continue;
     const candidate = chatLinesFromFrame(frame);
-    const seq = Number(frame.seq ?? 0);
+    const seq = finiteSeq(frame.seq);
+    const key = chatSourceKey(frame, "session");
+    const best = sessions.get(key);
     if (!best || candidate.length > best.lines.length || (candidate.length === best.lines.length && seq > best.seq)) {
-      best = { seq, lines: candidate };
+      sessions.set(key, { firstSeq: best ? Math.min(best.firstSeq, seq) : seq, seq, lines: candidate });
+    } else if (seq < best.firstSeq) {
+      sessions.set(key, { ...best, firstSeq: seq });
     }
   }
 
   const result: ChatLine[] = [];
-  const seen = new Set<string>();
-  const sessionBlob = best ? best.lines.map((line) => normalizeChatText(line.text)).join("\n") : "";
-  if (best) {
-    for (const line of best.lines) {
+  const seenBySource = new Map<string, Set<string>>();
+  const sessionBlobBySource = new Map<string, string>();
+  const allSessionBlobs: string[] = [];
+  for (const [source, session] of [...sessions.entries()].sort((left, right) => left[1].firstSeq - right[1].firstSeq)) {
+    const seen = seenBySource.get(source) ?? new Set<string>();
+    seenBySource.set(source, seen);
+    const sessionParts: string[] = [];
+    for (const line of session.lines) {
+      const key = normalizeChatText(line.text);
+      if (!key || seen.has(key)) continue;
       result.push(line);
-      seen.add(normalizeChatText(line.text));
+      seen.add(key);
+      sessionParts.push(key);
     }
+    const blob = sessionParts.join("\n");
+    sessionBlobBySource.set(source, blob);
+    if (blob) allSessionBlobs.push(blob);
   }
   for (const frame of frames) {
     if (isSession(frame)) continue;
+    const source = chatSourceKey(frame, "session");
+    const seen = seenBySource.get(source) ?? new Set<string>();
+    seenBySource.set(source, seen);
+    const sourceBlob = sessionBlobBySource.get(source) ?? "";
     for (const line of chatLinesFromFrame(frame)) {
       const key = normalizeChatText(line.text);
       if (!key || seen.has(key)) continue;
-      if (sessionBlob && sessionBlob.includes(key)) continue; // streaming fragment already in transcript
+      if (sourceBlob && sourceBlob.includes(key)) continue; // streaming fragment already in this transcript
+      if (!sourceBlob && allSessionBlobs.some((blob) => blob.includes(key))) continue;
       seen.add(key);
       result.push(line);
     }
@@ -452,11 +761,91 @@ export function buildChatLines(frames: EventFrame[]): ChatLine[] {
   return result;
 }
 
+function formatDuration(ms: unknown): string {
+  const value = Number(ms ?? 0);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  if (value < 1000) return `${Math.round(value)} ms`;
+  const seconds = value / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)} s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return remainder ? `${minutes} min ${remainder} s` : `${minutes} min`;
+}
+
+function shortText(value: string, limit = 220): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= limit) return compact;
+  return `${compact.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+}
+
+function parseStructuredText(value: string): unknown | null {
+  const trimmed = value.trim();
+  if (!trimmed || !/^[{[]/.test(trimmed)) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function summarizeStructured(value: unknown): string {
+  if (Array.isArray(value)) return formatCount(value.length, "item");
+  if (!isRecord(value)) return shortText(asString(value));
+
+  const row = isRecord(value.row) ? value.row : value;
+  const parts: string[] = [];
+  const status = asString(row.status);
+  const summary = asString(row.summary) || asString(row.message) || asString(row.title);
+  if (status) parts.push(formatStatus(status));
+  if (summary && summary !== status) parts.push(shortText(summary, 140));
+
+  const countFields: Array<[string, string, string]> = [
+    ["selected", "slot", "slots"],
+    ["tickets", "ticket", "tickets"],
+    ["ticketPaths", "ticket", "tickets"],
+    ["featuresUpdated", "feature", "features"],
+    ["findings", "finding", "findings"],
+    ["confirmed", "confirmed", "confirmed"],
+    ["rejected", "rejected", "rejected"],
+    ["changedFiles", "file", "files"],
+    ["files", "file", "files"],
+  ];
+  for (const [key, singular, plural] of countFields) {
+    const count = asArray(row[key]).length;
+    if (count > 0) parts.push(formatCount(count, singular, plural));
+  }
+
+  if (typeof row.buildPassed === "boolean") parts.push(row.buildPassed ? "build passed" : "build failed");
+  if (typeof row.docsBuildPassed === "boolean") parts.push(row.docsBuildPassed ? "docs build passed" : "docs build failed");
+  const duration = formatDuration(row.durationMs ?? row.elapsedMs ?? row.elapsed_ms);
+  if (duration) parts.push(duration);
+
+  if (parts.length > 0) return parts.join(" · ");
+  return formatCount(Object.keys(row).length, "field");
+}
+
+function summarizeEventValue(value: unknown): string {
+  if (typeof value === "string") {
+    const structured = parseStructuredText(value);
+    return structured === null ? shortText(value) : summarizeStructured(structured);
+  }
+  if (isRecord(value) || Array.isArray(value)) return summarizeStructured(value);
+  return shortText(asString(value));
+}
+
+function safeDebugJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return asString(value);
+  }
+}
+
 /**
  * Generic one-line view of any run event for the live log (the `smithers up
  * --interactive` style feed). Renders every public event, not just agent text.
  */
-export function logLineFromFrame(frame: EventFrame): { seq: number; event: string; node: string; detail: string } | null {
+export function logLineFromFrame(frame: EventFrame): { seq: number; event: string; node: string; detail: string; raw?: string } | null {
   const env = frameEnvelope(frame);
   if (!env) return null;
   const { event, payload } = env;
@@ -465,15 +854,37 @@ export function logLineFromFrame(frame: EventFrame): { seq: number; event: strin
   const trace = isRecord(payload.trace) ? payload.trace : undefined;
   const tracePayload = trace && isRecord(trace.payload) ? trace.payload : undefined;
   const agentEvent = isRecord(payload.event) ? payload.event : undefined;
-  const detail =
-    asString(payload.output) ||
-    asString(payload.text) ||
-    (agentEvent ? asString(agentEvent.message) : "") ||
-    (tracePayload ? asString(tracePayload.text) : "") ||
-    asString(payload.status) ||
-    asString(payload.message) ||
-    "";
-  return { seq: Number(frame.seq ?? 0), event, node, detail: detail.slice(0, 600) };
+  let detail = "";
+
+  if (event === "task.output" || event === "NodeOutput" || event === "TaskOutput") {
+    detail = summarizeEventValue(payload.output ?? payload.text);
+  } else if (event === "agent.session" || event === "AgentSessionEvent") {
+    detail = formatCount(asArray(payload.transcript).length, "message");
+  } else if (event === "agent.event" || event === "AgentEvent") {
+    const type = agentEvent ? asString(agentEvent.type) : "";
+    const action = agentEvent && isRecord(agentEvent.action) ? agentEvent.action : undefined;
+    const actionKind = action ? asString(action.kind) || asString(action.title) : "";
+    if (type === "completed") detail = `Completed${asString(agentEvent?.answer) ? `: ${shortText(asString(agentEvent?.answer), 160)}` : ""}`;
+    else if (type === "action") detail = [formatStatus(actionKind) || "Action", shortText(asString(agentEvent?.message), 160)].filter(Boolean).join(": ");
+    else detail = [formatStatus(type), shortText(asString(agentEvent?.message ?? agentEvent?.text ?? agentEvent?.delta), 160)].filter(Boolean).join(": ");
+  } else if (event === "agent.trace" || event === "AgentTraceEvent") {
+    detail = shortText(tracePayload ? asString(tracePayload.text) : "");
+  } else if (event.startsWith("node.")) {
+    const verb = event.split(".").at(-1) ?? "event";
+    const duration = formatDuration(payload.durationMs ?? payload.elapsedMs ?? payload.elapsed_ms);
+    detail = [formatStatus(verb), formatStatus(asString(payload.status)), duration, shortText(asString(payload.message), 120)].filter(Boolean).join(" · ");
+  } else if (event.startsWith("run.")) {
+    const verb = event.split(".").at(-1) ?? "event";
+    const duration = formatDuration(payload.durationMs ?? payload.elapsedMs ?? payload.elapsed_ms);
+    detail = [formatStatus(asString(payload.status)) || formatStatus(verb), duration, shortText(asString(payload.message), 120)].filter(Boolean).join(" · ");
+  } else if (payload.output !== undefined || payload.text !== undefined) {
+    detail = summarizeEventValue(payload.output ?? payload.text);
+  } else {
+    detail = [formatStatus(asString(payload.status)), shortText(asString(payload.message), 180)].filter(Boolean).join(" · ") || summarizeStructured(payload);
+  }
+
+  const raw = safeDebugJson({ event, payload });
+  return { seq: finiteSeq(frame.seq), event, node, detail: shortText(detail, 260), raw };
 }
 
 export function ListBlock({ title, items }: { title: string; items: string[] }) {
@@ -544,12 +955,14 @@ export function resolveDocLink(
 export function MarkdownEditor({
   docPath,
   initialValue,
+  resetKey = 0,
   assetBase,
   onChange,
   onLinkClick,
 }: {
   docPath: string;
   initialValue: string;
+  resetKey?: number;
   /** Undefined when the page has no ?assetBaseUrl — image upload is disabled. */
   assetBase: string | undefined;
   onChange: (markdown: string) => void;
@@ -557,6 +970,11 @@ export function MarkdownEditor({
   onLinkClick?: (href: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "failed">("loading");
+  const [loadError, setLoadError] = useState("");
+  const [retryKey, setRetryKey] = useState(0);
+  const [fallbackValue, setFallbackValue] = useState(initialValue);
+  const fallbackValueRef = useRef(initialValue);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onLinkClickRef = useRef(onLinkClick);
@@ -565,7 +983,19 @@ export function MarkdownEditor({
     typeof window === "undefined" ||
     typeof document === "undefined" ||
     !document?.createElement ||
-    (typeof navigator !== "undefined" && /happy-dom|jsdom|bun/i.test(navigator.userAgent));
+    (typeof navigator !== "undefined" && /happy-?dom|jsdom|bun/i.test(navigator.userAgent));
+
+  useEffect(() => {
+    fallbackValueRef.current = initialValue;
+    setFallbackValue(initialValue);
+  }, [docPath, initialValue, resetKey, retryKey]);
+
+  const onFallbackInput = (value: string) => {
+    if (value === fallbackValueRef.current) return;
+    fallbackValueRef.current = value;
+    setFallbackValue(value);
+    onChangeRef.current(value);
+  };
 
   useEffect(() => {
     if (useTextareaFallback) return;
@@ -575,8 +1005,21 @@ export function MarkdownEditor({
     let cancelled = false;
     let crepe: { destroy: () => unknown } | null = null;
     let userEdited = false;
+    setLoadState("loading");
+    setLoadError("");
+    host.innerHTML = "";
     const markUserEdited = () => {
       userEdited = true;
+    };
+    const fail = (error: unknown) => {
+      if (cancelled) return;
+      setLoadError(error instanceof Error ? error.message : String(error));
+      setLoadState("failed");
+      try {
+        void crepe?.destroy();
+      } catch {
+        // Fallback textarea remains editable even if cleanup itself fails.
+      }
     };
 
     void import("@milkdown/crepe").then(({ Crepe }) => {
@@ -609,8 +1052,12 @@ export function MarkdownEditor({
           onChangeRef.current(markdown);
         });
       });
-      void editor.create();
-    });
+      Promise.resolve(editor.create())
+        .then(() => {
+          if (!cancelled) setLoadState("ready");
+        })
+        .catch(fail);
+    }).catch(fail);
 
     // Crepe renders links as plain <a href> that, when clicked, would navigate
     // the browser to the raw relative href (e.g. features/runs.md) against the
@@ -625,7 +1072,7 @@ export function MarkdownEditor({
       event.preventDefault();
       event.stopPropagation();
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(href) || href.startsWith("mailto:")) {
-        window.open(href, "_blank", "noopener,noreferrer");
+        window.open(href, "_blank", "noopener");
         return;
       }
       if (href.startsWith("#")) {
@@ -650,21 +1097,50 @@ export function MarkdownEditor({
     // Re-initialise only when the selected doc or asset host changes; live edits
     // flow through the listener, not by recreating the editor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docPath, assetBase, useTextareaFallback]);
+  }, [docPath, assetBase, useTextareaFallback, retryKey, resetKey]);
 
   if (useTextareaFallback) {
     return (
       <textarea
         className="crepe-host ddd-editor-fallback"
         data-testid="ddd-editor"
-        defaultValue={initialValue}
+        value={fallbackValue}
         aria-label={docPath}
-        onChange={(event) => onChangeRef.current(event.currentTarget.value)}
+        onInput={(event) => onFallbackInput(event.currentTarget.value)}
+        onChange={(event) => onFallbackInput(event.currentTarget.value)}
       />
     );
   }
 
-  return <div className="crepe-host" data-testid="ddd-editor" ref={hostRef} />;
+  return (
+    <div className="crepe-shell" data-testid="ddd-editor">
+      {loadState === "loading" ? (
+        <div className="editor-state" data-testid="ddd-editor-loading" role="status">
+          Loading editor...
+        </div>
+      ) : null}
+      {loadState === "failed" ? (
+        <div className="editor-failure" data-testid="ddd-editor-error" role="alert">
+          <div>
+            <strong>Editor failed to load</strong>
+            <p>{loadError || "Milkdown Crepe did not initialize. You can keep editing in markdown below."}</p>
+          </div>
+          <button type="button" className="button" data-testid="ddd-editor-retry" onClick={() => setRetryKey((key) => key + 1)}>
+            Retry editor
+          </button>
+          <textarea
+            className="ddd-editor-fallback editor-fallback"
+            data-testid="ddd-editor-fallback"
+            value={fallbackValue}
+            aria-label={`${docPath} markdown fallback`}
+            onInput={(event) => onFallbackInput(event.currentTarget.value)}
+            onChange={(event) => onFallbackInput(event.currentTarget.value)}
+          />
+        </div>
+      ) : null}
+      <div className={loadState === "failed" ? "crepe-host is-hidden" : "crepe-host"} ref={hostRef} />
+    </div>
+  );
 }
 
 type TreeDir = { name: string; path: string; dirs: TreeDir[]; files: string[] };
@@ -755,14 +1231,262 @@ export function SpecFileTree({
   );
 }
 
-export function WorkflowSource() {
+type MarkdownBlock =
+  | { type: "heading"; level: number; text: string }
+  | { type: "paragraph"; text: string }
+  | { type: "quote"; text: string }
+  | { type: "list"; ordered: boolean; items: string[] }
+  | { type: "code"; lang: string; code: string };
+
+function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  const blocks: MarkdownBlock[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+    const fence = line.match(/^```([\w-]*)\s*$/);
+    if (fence) {
+      const lang = fence[1] ?? "";
+      const code: string[] = [];
+      index += 1;
+      while (index < lines.length && !/^```\s*$/.test(lines[index] ?? "")) {
+        code.push(lines[index] ?? "");
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push({ type: "code", lang, code: code.join("\n") });
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      blocks.push({ type: "heading", level: heading[1]!.length, text: heading[2]!.trim() });
+      index += 1;
+      continue;
+    }
+    const quote = line.match(/^>\s?(.*)$/);
+    if (quote) {
+      const quoted: string[] = [];
+      while (index < lines.length) {
+        const match = (lines[index] ?? "").match(/^>\s?(.*)$/);
+        if (!match) break;
+        quoted.push(match[1] ?? "");
+        index += 1;
+      }
+      blocks.push({ type: "quote", text: quoted.join("\n").trim() });
+      continue;
+    }
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+    const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
+    if (bullet || ordered) {
+      const items: string[] = [];
+      const isOrdered = !!ordered;
+      while (index < lines.length) {
+        const match = (lines[index] ?? "").match(isOrdered ? /^\s*\d+\.\s+(.+)$/ : /^\s*[-*]\s+(.+)$/);
+        if (!match) break;
+        items.push(match[1]!.trim());
+        index += 1;
+      }
+      blocks.push({ type: "list", ordered: isOrdered, items });
+      continue;
+    }
+    const paragraph: string[] = [];
+    while (index < lines.length) {
+      const next = lines[index] ?? "";
+      if (!next.trim()) break;
+      if (/^```/.test(next) || /^#{1,6}\s+/.test(next) || /^>\s?/.test(next) || /^\s*[-*]\s+/.test(next) || /^\s*\d+\.\s+/.test(next)) break;
+      paragraph.push(next.trim());
+      index += 1;
+    }
+    blocks.push({ type: "paragraph", text: paragraph.join(" ") });
+  }
+  return blocks;
+}
+
+function markdownEscaped(value: string, index: number): boolean {
+  let count = 0;
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor -= 1) count += 1;
+  return count % 2 === 1;
+}
+
+function findUnescaped(value: string, token: string, start: number): number {
+  let index = value.indexOf(token, start);
+  while (index >= 0) {
+    if (!markdownEscaped(value, index)) return index;
+    index = value.indexOf(token, index + token.length);
+  }
+  return -1;
+}
+
+function unescapeMarkdownText(value: string): string {
+  return value.replace(/\\([\\`*_[\]{}()#+\-.!<>|])/g, "$1");
+}
+
+function renderInlineMarkdown(value: string, keyPrefix: string, onLinkClick?: (href: string) => void): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  let textStart = 0;
+  const flushText = (end: number) => {
+    if (end > textStart) nodes.push(unescapeMarkdownText(value.slice(textStart, end)));
+  };
+
+  while (cursor < value.length) {
+    if (value[cursor] === "`" && !markdownEscaped(value, cursor)) {
+      const end = findUnescaped(value, "`", cursor + 1);
+      if (end > cursor) {
+        flushText(cursor);
+        nodes.push(<code key={`${keyPrefix}:code:${cursor}`}>{value.slice(cursor + 1, end).replace(/\\`/g, "`")}</code>);
+        cursor = end + 1;
+        textStart = cursor;
+        continue;
+      }
+    }
+
+    if (value.startsWith("**", cursor) && !markdownEscaped(value, cursor)) {
+      const end = findUnescaped(value, "**", cursor + 2);
+      if (end > cursor) {
+        flushText(cursor);
+        nodes.push(
+          <strong key={`${keyPrefix}:strong:${cursor}`}>
+            {renderInlineMarkdown(value.slice(cursor + 2, end), `${keyPrefix}:strong:${cursor}`, onLinkClick)}
+          </strong>,
+        );
+        cursor = end + 2;
+        textStart = cursor;
+        continue;
+      }
+    }
+
+    if (value[cursor] === "[" && !markdownEscaped(value, cursor)) {
+      const labelEnd = findUnescaped(value, "]", cursor + 1);
+      if (labelEnd > cursor && value[labelEnd + 1] === "(") {
+        const hrefEnd = findUnescaped(value, ")", labelEnd + 2);
+        if (hrefEnd > labelEnd) {
+          flushText(cursor);
+          const label = value.slice(cursor + 1, labelEnd);
+          const href = unescapeMarkdownText(value.slice(labelEnd + 2, hrefEnd));
+          if (/^[a-z][a-z0-9+.-]*:\/\//i.test(href) || href.startsWith("mailto:")) {
+            nodes.push(
+              <a key={`${keyPrefix}:link:${cursor}`} className="doc-link" href={href} target="_blank" rel="noreferrer">
+                {renderInlineMarkdown(label, `${keyPrefix}:link-label:${cursor}`, onLinkClick)}
+              </a>,
+            );
+          } else {
+            nodes.push(
+              <button key={`${keyPrefix}:link:${cursor}`} type="button" className="doc-link" onClick={() => onLinkClick?.(href)}>
+                {renderInlineMarkdown(label, `${keyPrefix}:link-label:${cursor}`, onLinkClick)}
+              </button>,
+            );
+          }
+          cursor = hrefEnd + 1;
+          textStart = cursor;
+          continue;
+        }
+      }
+    }
+
+    cursor += 1;
+  }
+  flushText(value.length);
+  return nodes;
+}
+
+function hashText(value: string): string {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function MermaidPreview({ code, index }: { code: string; index: number }) {
+  const [svg, setSvg] = useState("");
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    let alive = true;
+    const load = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<any>;
+    void load("mermaid")
+      .then((module) => {
+        if (!alive) return;
+        const mermaid = module.default ?? module;
+        mermaid.initialize?.({ startOnLoad: false, securityLevel: "strict", theme: "neutral" });
+        return mermaid.render?.(`ddd-mermaid-${index}-${hashText(code)}`, code);
+      })
+      .then((result) => {
+        if (!alive || !result) return;
+        setSvg(asString(result.svg ?? result));
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [code, index]);
+
+  return (
+    <div className="mermaid-preview" data-testid="ddd-mermaid-preview">
+      <div className="mermaid-title">Diagram preview</div>
+      {svg && !failed ? (
+        <div className="mermaid-rendered" dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : (
+        <pre className="mermaid-source">{code}</pre>
+      )}
+    </div>
+  );
+}
+
+export function MarkdownPreview({ markdown, onLinkClick }: { markdown: string; onLinkClick?: (href: string) => void }) {
+  const blocks = parseMarkdownBlocks(markdown);
+  if (blocks.length === 0) return <p className="empty">No documentation content.</p>;
+  return (
+    <div className="markdown-preview" data-testid="ddd-markdown-preview">
+      {blocks.map((block, index) => {
+        const key = `md:${index}`;
+        if (block.type === "heading") {
+          if (block.level <= 1) return <h1 key={key}>{renderInlineMarkdown(block.text, key, onLinkClick)}</h1>;
+          if (block.level === 2) return <h2 key={key}>{renderInlineMarkdown(block.text, key, onLinkClick)}</h2>;
+          return <h3 key={key}>{renderInlineMarkdown(block.text, key, onLinkClick)}</h3>;
+        }
+        if (block.type === "quote") return <blockquote key={key}>{renderInlineMarkdown(block.text, key, onLinkClick)}</blockquote>;
+        if (block.type === "list") {
+          const List = block.ordered ? "ol" : "ul";
+          return (
+            <List key={key}>
+              {block.items.map((item, itemIndex) => (
+                <li key={`${key}:item:${itemIndex}`}>{renderInlineMarkdown(item, `${key}:item:${itemIndex}`, onLinkClick)}</li>
+              ))}
+            </List>
+          );
+        }
+        if (block.type === "code") {
+          if (block.lang.toLowerCase() === "mermaid") return <MermaidPreview key={key} code={block.code} index={index} />;
+          return (
+            <pre key={key} className="markdown-code">
+              <code>{block.code}</code>
+            </pre>
+          );
+        }
+        return <p key={key}>{renderInlineMarkdown(block.text, key, onLinkClick)}</p>;
+      })}
+    </div>
+  );
+}
+
+export function WorkflowSource({ workflowKey = "docs-driven-development" }: { workflowKey?: string }) {
+  const entry = workflowSources[workflowKey] ?? (workflowKey === "docs-driven-development" ? { path: workflowSourcePath, source: workflowSource } : undefined);
+  if (!entry?.source) return null;
   return (
     <section className="card" data-testid="ddd-workflow-source">
       <div className="card-head">
         <h2>Smithers script</h2>
-        <span className="pill">{workflowSourcePath}</span>
+        <span className="pill">{entry.path}</span>
       </div>
-      <pre className="source">{workflowSource}</pre>
+      <pre className="source">{entry.source}</pre>
     </section>
   );
 }
@@ -846,22 +1570,25 @@ export function FeatureDetail({
 }) {
   const media = assetUrl(feature.gif) ?? assetUrl(feature.image);
   const tier = feature.tier ?? "feature";
+  const modalRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
-    closeRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  useDialogFocusTrap({ containerRef: modalRef, initialFocusRef: closeRef, onClose });
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <section className="modal" role="dialog" aria-modal="true" data-testid="ddd-feature-detail" onClick={(event) => event.stopPropagation()}>
+      <section
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ddd-feature-detail-title"
+        tabIndex={-1}
+        data-testid="ddd-feature-detail"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="modal-head">
           <div>
             <span className="eyebrow">{feature.id}{feature.group ? ` · ${feature.group}` : ""}</span>
-            <h2>{feature.title}</h2>
+            <h2 id="ddd-feature-detail-title">{feature.title}</h2>
           </div>
           <button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
         </div>
@@ -869,7 +1596,7 @@ export function FeatureDetail({
           <span className={`badge ${statusClass(feature.status)}`}>{statusLabels[feature.status] ?? feature.status}</span>
           <span className="pill">Priority {feature.priority.toUpperCase()}</span>
           <span className="pill">Owner {feature.owner}</span>
-          {tier !== "feature" ? <span className="pill">{tier}</span> : null}
+          {tier !== "feature" ? <span className="pill">{formatFeatureTier(tier)}</span> : null}
         </div>
         {note ? <p className="audit-note">Audit note: {note}</p> : null}
         {media ? <img className="feature-media" src={media} alt="" /> : null}
@@ -942,6 +1669,7 @@ export const styles = [
   ".eyebrow { display:block; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }",
   ".pill,.badge { display:inline-flex; align-items:center; min-width:0; max-width:100%; min-height:22px; padding:1px 10px; border:1px solid var(--border); border-radius:999px; font-size:11px; color:var(--text-muted); font-family:ui-monospace,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }",
   ".pill { border-color:color-mix(in srgb,var(--brand) 22%,transparent); background:color-mix(in srgb,var(--brand) 14%,transparent); color:var(--brand); }",
+  ".pill.muted { border-color:var(--border); background:var(--hover-subtle); color:var(--text-muted); }",
   ".badge { text-transform:uppercase; font-family:inherit; font-weight:650; }",
   ".badge.ok { color:var(--ok); border-color:color-mix(in srgb,var(--ok),transparent 45%); }",
   ".badge.warn { color:var(--warn); border-color:color-mix(in srgb,var(--warn),transparent 45%); }",
@@ -951,7 +1679,7 @@ export const styles = [
   ".button:hover { background:var(--hover); }",
   ".button.primary { border-color:color-mix(in srgb,var(--brand) 40%,transparent); background:color-mix(in srgb,var(--brand) 10%,var(--surface)); color:var(--brand); font-weight:650; }",
   ".button.primary:hover { background:color-mix(in srgb,var(--brand) 16%,var(--surface)); }",
-  ".button:focus-visible,.icon-button:focus-visible,.tab:focus-visible,.tree-file:focus-visible,.run-row:focus-visible,.finding:focus-visible,.feature-card.is-clickable:focus-visible,.ticket-row:focus-visible,.doc-link:focus-visible,.tree-dir-name:focus-visible,.tree-section-toggle:focus-visible { outline:none; border-color:color-mix(in srgb,var(--brand) 50%,transparent); box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent); }",
+  ".button:focus-visible,.icon-button:focus-visible,.tab:focus-visible,.tree-file:focus-visible,.run-row:focus-visible,.finding:focus-visible,.feature-card.is-clickable:focus-visible,.ticket-row:focus-visible,.doc-link:focus-visible,.tree-dir-name:focus-visible,.tree-section-toggle:focus-visible,.segmented:focus-visible { outline:none; border-color:color-mix(in srgb,var(--brand) 50%,transparent); box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent); }",
   ".button:disabled { cursor:not-allowed; opacity:.45; }",
   ".icon-button { width:32px; min-height:32px; padding:0; border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:6px; cursor:pointer; }",
   ".tabbar { min-width:0; display:flex; align-items:center; gap:6px; padding:8px 14px; border-bottom:1px solid var(--border); background:var(--surface); overflow-x:auto; scrollbar-width:thin; }",
@@ -982,8 +1710,16 @@ export const styles = [
   ".editor-title { min-width:0; display:flex; align-items:center; gap:8px; }",
   ".editor-bar .path { font-family:ui-monospace,monospace; font-size:12px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
   ".dispatch-actions { display:flex; align-items:center; gap:8px; min-width:0; }",
+  ".crepe-shell { min-height:0; min-width:0; overflow:hidden; display:grid; grid-template-rows:minmax(0,1fr); position:relative; background:var(--surface); }",
   ".crepe-host { min-height:0; overflow:auto; }",
+  ".crepe-shell .crepe-host { height:100%; }",
+  ".crepe-host.is-hidden { display:none; }",
+  ".editor-state { position:absolute; inset:0; display:grid; place-items:center; padding:24px; color:var(--text-muted); background:var(--surface); z-index:1; }",
+  ".editor-failure { min-height:0; overflow:auto; display:grid; align-content:start; gap:12px; padding:16px; background:var(--surface); }",
+  ".editor-failure strong { color:var(--danger); font-size:13px; }",
+  ".editor-failure .button { justify-self:start; }",
   ".ddd-editor-fallback { width:100%; height:100%; resize:none; border:0; padding:16px; background:var(--surface); color:var(--text); font:13px/1.5 ui-monospace,monospace; }",
+  ".editor-failure .editor-fallback { min-height:320px; border:1px solid var(--border); border-radius:8px; }",
   ".crepe-host .milkdown { height:100%; }",
   ".empty { padding:24px; }",
   ".meta-status { display:flex; align-items:center; gap:10px; padding:10px 14px; border-top:1px solid var(--line); color:var(--muted); }",
@@ -1003,8 +1739,14 @@ export const styles = [
   ".finding { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid var(--border); border-radius:8px; padding:9px 11px; background:var(--surface); cursor:pointer; text-align:left; color:var(--text); width:100%; transition:border-color .12s ease, background .12s ease; }",
   ".finding:hover { background:var(--hover); border-color:var(--border-strong); }",
   ".finding .fid { font-family:ui-monospace,monospace; font-size:12px; }",
+  ".unresolved-finding { display:grid; align-items:start; justify-content:stretch; cursor:default; border-color:color-mix(in srgb,var(--warning) 45%,var(--border)); background:color-mix(in srgb,var(--warning) 8%,var(--surface)); }",
+  ".unresolved-finding:hover { background:color-mix(in srgb,var(--warning) 8%,var(--surface)); border-color:color-mix(in srgb,var(--warning) 45%,var(--border)); }",
+  ".unresolved-finding-head { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; }",
+  ".unresolved-finding p { overflow-wrap:anywhere; }",
+  ".unresolved-finding strong { color:var(--text); }",
   ".status-counts { display:flex; flex-wrap:wrap; gap:6px; }",
   ".filters { display:grid; grid-template-columns:minmax(180px,1fr) repeat(2,minmax(150px,auto)) auto; gap:8px; align-items:end; min-width:0; }",
+  ".ticket-filters { grid-template-columns:minmax(180px,1fr) repeat(4,minmax(132px,auto)) auto; }",
   ".filter-field { min-width:0; display:grid; gap:4px; color:var(--text-muted); font-size:11px; font-weight:650; }",
   ".search-input,.select { min-width:0; width:100%; height:32px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); padding:0 10px; font:inherit; }",
   ".search-input:focus,.select:focus { outline:none; border-color:color-mix(in srgb,var(--brand) 45%,transparent); box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 20%,transparent); }",
@@ -1014,6 +1756,7 @@ export const styles = [
   ".feature-card.is-clickable:hover { background:var(--hover); border-color:color-mix(in srgb,var(--brand) 45%,transparent); }",
   ".feature-card-head { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:8px; }",
   ".feature-card-head strong { min-width:0; overflow:hidden; text-overflow:ellipsis; font-size:12px; }",
+  ".feature-card-summary { min-width:0; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }",
   ".feature-card-foot { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }",
   ".tier-section { display:grid; gap:10px; }",
   ".tier-head { display:flex; align-items:center; gap:10px; }",
@@ -1025,11 +1768,13 @@ export const styles = [
   ".slot { min-width:0; border:1px solid var(--border); border-radius:8px; padding:10px; display:grid; gap:7px; background:var(--surface); }",
   ".ticket-row { width:100%; text-align:left; cursor:pointer; color:var(--text); font:inherit; transition:border-color .12s ease, background .12s ease; }",
   ".ticket-row:hover { border-color:var(--border-strong); background:var(--hover); }",
+  ".ticket-row.risk-bad { border-color:color-mix(in srgb,var(--danger) 48%,var(--border)); box-shadow:inset 3px 0 0 var(--danger); }",
+  ".ticket-row.risk-warn { border-color:color-mix(in srgb,var(--warning) 42%,var(--border)); box-shadow:inset 3px 0 0 var(--warning); }",
   ".slot-title { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:8px; }",
   ".slot-title strong { min-width:0; overflow:hidden; text-overflow:ellipsis; font-size:12px; }",
-  ".meta-row { min-width:0; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }",
-  ".meta-row > .pill,.meta-row > .badge { min-width:0; max-width:100%; }",
-  ".ticket-path { max-width:min(100%, 52ch); }",
+  ".meta-row { min-width:0; max-width:100%; display:flex; align-items:center; gap:6px; flex-wrap:wrap; overflow:hidden; }",
+  ".meta-row > .pill,.meta-row > .badge { min-width:0; max-width:100%; flex:0 1 auto; }",
+  ".ticket-path { flex:1 1 auto; max-width:min(100%, 52ch); }",
   ".audit-note { color:var(--warn); }",
   ".code { display:block; min-width:0; overflow:auto; white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:11px; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:9px; }",
   ".source { display:block; min-width:0; max-width:100%; max-height:480px; overflow:auto; white-space:pre; font-family:ui-monospace,monospace; font-size:11px; line-height:1.5; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:12px; }",
@@ -1051,15 +1796,21 @@ export const styles = [
   // live tab
   ".live { height:100%; min-width:0; display:grid; grid-template-columns:minmax(240px,300px) minmax(0,1fr); min-height:0; }",
   ".runlist { min-width:0; border-right:1px solid var(--border); min-height:0; height:100%; overflow:auto; padding:10px; display:grid; align-content:start; gap:6px; background:var(--surface); }",
+  ".run-filters { min-width:0; display:grid; grid-template-columns:minmax(0,1fr); gap:6px; padding:2px 0 6px; }",
+  ".run-filters .button { width:100%; }",
   ".run-row { min-width:0; border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--surface); cursor:pointer; display:grid; gap:4px; text-align:left; color:var(--text); width:100%; transition:border-color .12s ease, background .12s ease; }",
   ".run-row:hover { background:var(--hover); }",
   ".run-row.is-active { border-color:color-mix(in srgb,var(--brand) 40%,transparent); background:color-mix(in srgb,var(--brand) 8%,var(--surface)); }",
   ".run-row .rid { font-family:ui-monospace,monospace; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
   ".livelog { max-height:340px; overflow:auto; background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:8px; font-family:ui-monospace,monospace; font-size:11px; line-height:1.55; }",
-  ".livelog-line { display:flex; gap:8px; padding:1px 0; white-space:pre-wrap; word-break:break-word; }",
+  ".livelog-line { display:grid; gap:2px; padding:2px 0; white-space:pre-wrap; word-break:break-word; }",
+  ".livelog-main { min-width:0; display:flex; gap:8px; }",
   ".livelog-event { color:var(--blue); flex:none; }",
   ".livelog-node { color:var(--warn); flex:none; }",
   ".livelog-detail { color:var(--code-text); min-width:0; }",
+  ".livelog-debug { margin-left:18px; color:var(--text-faint); }",
+  ".livelog-debug summary { cursor:pointer; font-size:10px; }",
+  ".livelog-debug pre { margin:4px 0 6px; max-height:180px; overflow:auto; white-space:pre-wrap; color:var(--code-text); }",
   ".chat { display:grid; gap:8px; }",
   ".chat-line { min-width:0; border:1px solid var(--border); border-left:3px solid var(--border-strong); border-radius:8px; padding:8px 10px; background:var(--surface); }",
   ".chat-line .who { color:var(--blue); font-family:ui-monospace,monospace; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }",
@@ -1081,15 +1832,18 @@ export const styles = [
   ".nodetree li { margin:4px 0; }",
   ".nodetree .node-row { display:flex; align-items:center; gap:8px; }",
   ".nodetree .node-name { color:var(--text); }",
-  ".ticket-detail-body { display:grid; gap:10px; }",
+  ".ticket-detail-body { min-width:0; max-width:100%; display:grid; gap:10px; overflow-x:hidden; }",
   ".ticket-section { display:grid; gap:6px; }",
   ".ticket-section h3 { margin:0; font-size:12px; }",
-  ".ticket-meta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; }",
+  ".ticket-section p { color:var(--text); overflow-wrap:anywhere; }",
+  ".ticket-meta-grid { min-width:0; max-width:100%; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; }",
   ".ticket-meta { min-width:0; border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--hover-subtle); display:grid; gap:3px; }",
   ".ticket-meta span { color:var(--text-muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; font-weight:650; }",
   ".ticket-meta strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--text); }",
   ".modal-backdrop { position:fixed; inset:0; background:rgb(var(--shadow-rgb) / 0.5); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px); display:grid; place-items:center; padding:20px; z-index:60; overflow:hidden; }",
-  ".modal { width:min(760px,calc(100vw - 40px)); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; display:grid; gap:13px; box-shadow:0 24px 80px rgb(var(--shadow-rgb) / 0.2); }",
+  ".modal { min-width:0; width:min(760px,calc(100vw - 40px)); max-height:86vh; overflow-y:auto; overflow-x:hidden; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; display:grid; gap:13px; box-shadow:0 24px 80px rgb(var(--shadow-rgb) / 0.2); }",
+  ".modal .meta-row { align-items:flex-start; }",
+  ".modal .ticket-path { max-width:100%; }",
   ".modal-head { min-width:0; display:flex; align-items:start; justify-content:space-between; gap:12px; }",
   ".modal-head > div { min-width:0; }",
   ".modal-head h2 { overflow-wrap:anywhere; }",
@@ -1104,7 +1858,29 @@ export const styles = [
   ".tree-section-title .count { font-family:ui-monospace,monospace; font-size:10px; }",
   ".tree-empty { padding:4px 6px; font-size:11px; }",
   ".agent-docs-callout { margin:4px 6px 6px; padding:8px 10px; font-size:11px; line-height:1.5; color:var(--text-muted); border:1px solid color-mix(in srgb,var(--brand) 30%,transparent); border-radius:8px; background:color-mix(in srgb,var(--brand) 7%,var(--surface)); }",
-  ".technical-doc-view { max-height:none; height:100%; border:0; border-radius:0; }",
+  ".technical-doc-shell { min-height:0; height:100%; display:grid; grid-template-rows:auto minmax(0,1fr); background:var(--surface); }",
+  ".preview-toolbar { display:flex; align-items:center; justify-content:flex-end; gap:4px; padding:8px 12px; border-bottom:1px solid var(--border); background:var(--surface); }",
+  ".segmented { min-height:28px; border:1px solid var(--border); background:var(--surface); color:var(--text-muted); border-radius:6px; padding:0 10px; cursor:pointer; font:inherit; font-size:12px; }",
+  ".segmented:hover { background:var(--hover); color:var(--text); }",
+  ".segmented.is-active { border-color:color-mix(in srgb,var(--brand) 38%,transparent); background:color-mix(in srgb,var(--brand) 12%,var(--surface)); color:var(--brand); font-weight:650; }",
+  ".markdown-preview { min-height:0; overflow:auto; padding:22px clamp(18px,4vw,48px); display:block; background:var(--surface); }",
+  ".markdown-preview h1 { margin:0 0 14px; width:auto; white-space:normal; overflow:visible; text-overflow:clip; font-size:22px; line-height:1.2; }",
+  ".markdown-preview h2 { margin:22px 0 8px; font-size:16px; line-height:1.3; }",
+  ".markdown-preview h3 { margin:18px 0 7px; font-size:13px; line-height:1.35; }",
+  ".markdown-preview p,.markdown-preview li,.markdown-preview blockquote { color:var(--text); font-size:13px; line-height:1.65; overflow-wrap:anywhere; }",
+  ".markdown-preview p { margin:0 0 10px; max-width:82ch; }",
+  ".markdown-preview ul,.markdown-preview ol { margin:0 0 12px; padding-left:22px; color:var(--text); }",
+  ".markdown-preview code { font-family:ui-monospace,monospace; font-size:.92em; color:var(--text); background:color-mix(in srgb,var(--text) 8%,transparent); border:1px solid var(--border); border-radius:5px; padding:1px 4px; }",
+  ".markdown-preview blockquote { margin:0 0 12px; padding:8px 12px; border-left:3px solid color-mix(in srgb,var(--brand) 45%,transparent); background:color-mix(in srgb,var(--brand) 7%,var(--surface)); border-radius:0 8px 8px 0; }",
+  ".markdown-code,.mermaid-source,.technical-doc-source { max-height:none; white-space:pre-wrap; overflow-wrap:anywhere; }",
+  ".markdown-code { margin:0 0 12px; overflow:auto; font-family:ui-monospace,monospace; font-size:12px; line-height:1.55; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:12px; }",
+  ".markdown-code code { background:transparent; border:0; border-radius:0; color:inherit; font:inherit; padding:0; }",
+  ".mermaid-preview { margin:0 0 14px; border:1px solid var(--border); border-radius:8px; background:var(--hover-subtle); overflow:hidden; }",
+  ".mermaid-title { padding:8px 10px; border-bottom:1px solid var(--border); color:var(--text-muted); font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.06em; }",
+  ".mermaid-rendered { padding:14px; overflow:auto; background:var(--surface); }",
+  ".mermaid-rendered svg { max-width:100%; height:auto; }",
+  ".mermaid-source { margin:0; overflow:auto; padding:12px; font-family:ui-monospace,monospace; font-size:12px; line-height:1.55; color:var(--text); background:var(--surface); }",
+  ".technical-doc-source { height:100%; border:0; border-radius:0; }",
   // start pane (the way in: create a new app / generate docs from code)
   ".start.scroll { max-width:960px; margin:0 auto; width:100%; }",
   ".start-intro p { max-width:64ch; }",
@@ -1115,6 +1891,7 @@ export const styles = [
   ".tutorial-backdrop { position:fixed; inset:0; background:rgb(var(--shadow-rgb) / 0.5); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px); display:grid; place-items:center; padding:20px; z-index:70; }",
   ".tutorial-card { width:min(620px,calc(100vw - 40px)); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; display:grid; gap:12px; box-shadow:0 24px 80px rgb(var(--shadow-rgb) / 0.2); }",
   ".tutorial-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }",
+  ".tutorial-head-actions { display:flex; align-items:center; gap:8px; }",
   ".tutorial-title { font-size:16px; }",
   ".tutorial-body { color:var(--text); line-height:1.55; }",
   ".tutorial-sample { max-height:220px; }",

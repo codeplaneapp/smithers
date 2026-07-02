@@ -165,6 +165,8 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     expect(markdown).toContain("# bug-1");
     expect(markdown).toContain("Run: run-1");
     expect(markdown).toContain("Severity: minor");
+    expect(markdown).not.toContain("Priority:");
+    expect(bugTicketMarkdown("run-2", { id: "bug-2", priority: "p1" })).toContain("Priority: P1");
     expect(markdown).toContain("No evidence recorded.");
     expect(markdown).toContain("Not specified.");
     expect(markdown.endsWith("\n")).toBe(true);
@@ -172,6 +174,17 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
 
   test("fileBugTickets files markdown, dedupes existing tickets, updates known features, and rebuilds generated docs", async () => {
     const root = tempRoot();
+    writeFeatures(root, [
+      {
+        id: "known-feature",
+        title: "Known Feature",
+        summary: "Known feature summary.",
+        status: "fixed",
+        priority: "p0",
+        owner: "product",
+        missing: [],
+      },
+    ]);
     const { fileBugTickets } = await bugScanModule();
     const finding = {
       id: "bug-1",
@@ -193,10 +206,11 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     const ticket = readFileSync(join(root, ".smithers/tickets", first.ticketPaths[0]), "utf8");
     expect(ticket).toContain("# Trim crashes on null");
     expect(ticket).toContain("Feature title: Known Feature");
+    expect(ticket).toContain("Priority: P0");
     expect(ticket).toContain("risk(null) throws");
-    expect(readFileSync(join(root, ".smithers/spec/features.json"), "utf8")).toContain(
-      "Bug (major): Trim crashes on null [packages/server/src/index.ts]",
-    );
+    const updatedFeatures = readFileSync(join(root, ".smithers/spec/features.json"), "utf8");
+    expect(updatedFeatures).toContain('"status": "broken"');
+    expect(updatedFeatures).toContain("Bug (major): Trim crashes on null [packages/server/src/index.ts]");
     expect(readFileSync(join(root, ".smithers/spec/content/features/known-feature.md"), "utf8")).toContain("Trim crashes on null");
 
     const second = fileBugTickets("run-2", [finding], root);
@@ -237,5 +251,106 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     expect(invalidBuild.created).toBe(1);
     expect(invalidBuild.featuresUpdated).toEqual(["bad"]);
     expect(invalidBuild.buildPassed).toBe(false);
+  });
+
+  test("fileBugTickets is idempotent when ticket files preexist but feature state is stale", async () => {
+    const root = tempRoot();
+    writeFeatures(root, [
+      {
+        id: "known-feature",
+        title: "Known Feature",
+        summary: "Known feature summary.",
+        status: "fixed",
+        priority: "p0",
+        owner: "product",
+        missing: "not-an-array",
+      },
+    ]);
+    const { fileBugTickets, bugSlug } = await bugScanModule();
+    const finding = {
+      id: "bug-1",
+      title: "Existing ticket still updates feature",
+      severity: "critical",
+      featureId: "known-feature",
+      file: "packages/server/src/existing.ts",
+      evidence: "existing(null) throws",
+      suggestedFix: "Handle null.",
+    };
+    mkdirSync(join(root, ".smithers/tickets"), { recursive: true });
+    const ticketName = `ddd-bug-scan--${bugSlug(finding.file)}--${bugSlug(finding.title)}.md`;
+    writeFileSync(join(root, ".smithers/tickets", ticketName), "# Existing ticket\n");
+
+    const result = fileBugTickets("run-existing", [finding], root);
+    expect(result.created).toBe(0);
+    expect(result.skippedExisting).toBe(1);
+    expect(result.ticketPaths).toEqual([]);
+    expect(result.featuresUpdated).toEqual(["known-feature"]);
+    expect(result.buildPassed).toBe(true);
+
+    const features = JSON.parse(readFileSync(join(root, ".smithers/spec/features.json"), "utf8"));
+    expect(features[0].status).toBe("broken");
+    expect(features[0].missing).toEqual(["Bug (critical): Existing ticket still updates feature [packages/server/src/existing.ts]"]);
+
+    const second = fileBugTickets("run-existing-again", [finding], root);
+    expect(second.created).toBe(0);
+    expect(second.skippedExisting).toBe(1);
+    expect(second.featuresUpdated).toEqual([]);
+    const stableFeatures = JSON.parse(readFileSync(join(root, ".smithers/spec/features.json"), "utf8"));
+    expect(stableFeatures[0].missing).toEqual(features[0].missing);
+  });
+
+  test("fileBugTickets collapses duplicate confirmed findings and reports build failure after updating features", async () => {
+    const root = tempRoot();
+    writeFeatures(root, [
+      {
+        id: "known-feature",
+        title: "Known Feature",
+        summary: "Known feature summary.",
+        status: "fixed",
+        priority: "p0",
+        owner: "product",
+        missing: [],
+      },
+      {
+        id: "broken-build-feature",
+        title: "Broken Build Feature",
+        summary: "Invalid status should make the rebuild fail after updates.",
+        status: "not-real",
+        priority: "p0",
+        owner: "product",
+        missing: [],
+      },
+    ]);
+    const { fileBugTickets } = await bugScanModule();
+    const duplicate = {
+      id: "bug-duplicate",
+      title: "Duplicate gap",
+      severity: "major",
+      featureId: "known-feature",
+      file: "packages/server/src/duplicate.ts",
+      evidence: "duplicate evidence",
+    };
+    const buildFailure = {
+      id: "bug-build",
+      title: "Build failure is still reported",
+      severity: "minor",
+      featureId: "broken-build-feature",
+      file: "packages/server/src/build.ts",
+      evidence: "build evidence",
+    };
+
+    const result = fileBugTickets("run-duplicates", [duplicate, { ...duplicate, id: "bug-duplicate-again" }, buildFailure], root);
+    expect(result.created).toBe(2);
+    expect(result.skippedExisting).toBe(1);
+    expect(result.featuresUpdated.sort()).toEqual(["broken-build-feature", "known-feature"]);
+    expect(result.buildPassed).toBe(false);
+    expect(result.summary).toContain("build FAILED");
+
+    const ticketFiles = result.ticketPaths.filter((path) => path.includes("duplicate-gap"));
+    expect(ticketFiles).toHaveLength(1);
+    const features = JSON.parse(readFileSync(join(root, ".smithers/spec/features.json"), "utf8"));
+    const known = features.find((feature: any) => feature.id === "known-feature");
+    expect(known.status).toBe("broken");
+    expect(known.missing).toEqual(["Bug (major): Duplicate gap [packages/server/src/duplicate.ts]"]);
   });
 });

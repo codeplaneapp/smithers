@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
@@ -10,6 +10,7 @@ import {
   useGatewayRuns,
   useGatewayTickets,
 } from "smithers-orchestrator/gateway-react";
+import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 import { docsContent } from "./ddd-docsContent.generated";
 import { crepeThemeCss } from "./crepeTheme.generated";
 import { ticketsBacklog } from "./ddd-ticketsBacklog.generated";
@@ -19,12 +20,16 @@ import {
   asArray,
   asString,
   assetBaseFromUrl,
+  errorMessage,
   features,
   isRecord,
   makeAssetUrl,
+  loadSpecDrafts,
+  isTerminalRunStatus,
   normalizeMarkdownForDirty,
   resolveDocLink,
   rowOf,
+  saveSpecDrafts,
   runIdFromUrl,
   strings,
   styles,
@@ -108,11 +113,26 @@ export function mergeTickets(...groups: TicketRow[][]): TicketRow[] {
   const byPath = new Map<string, TicketRow>();
   for (const group of groups) {
     for (const ticket of group) {
-      if (!ticket.path || byPath.has(ticket.path)) continue;
-      byPath.set(ticket.path, ticket);
+      const key = normalizedTicketPathKey(ticket.path);
+      if (!key || byPath.has(key)) continue;
+      byPath.set(key, ticket);
     }
   }
   return [...byPath.values()];
+}
+
+export function normalizedTicketPathKey(path: unknown): string {
+  let value = asString(path).trim().replace(/\\/g, "/");
+  if (value.startsWith(".smithers/tickets/")) value = value.slice(".smithers/tickets/".length);
+  value = value.replace(/^\.?\/*/, "");
+  if (value.startsWith("tickets/")) value = value.slice("tickets/".length);
+  value = value.replace(/\/+/g, "/");
+  if (value.toLowerCase().endsWith(".md")) value = value.slice(0, -3);
+  return value;
+}
+
+export function launchResultRunId(result: unknown): string {
+  return isRecord(result) ? asString(result.runId) : "";
 }
 
 export function toRunRows(data: unknown): RunSummaryRow[] {
@@ -123,9 +143,11 @@ export function toRunRows(data: unknown): RunSummaryRow[] {
     .filter((row): row is RunSummaryRow => row.runId.length > 0);
 }
 
+const DDD_WORKFLOW_KEYS = new Set(["docs-driven-development", "ddd-generate-docs", "ddd-bug-scan"]);
+
 function isDocsDrivenRun(run: RunSummaryRow, activeRunId: string | undefined): boolean {
   const workflowKey = asString(run.workflowKey ?? run.workflowName ?? run.workflow);
-  return workflowKey === "docs-driven-development" || (!!activeRunId && run.runId === activeRunId);
+  return DDD_WORKFLOW_KEYS.has(workflowKey) || (!!activeRunId && run.runId === activeRunId);
 }
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -164,24 +186,39 @@ export function workflowUiHref(workflowKey: string, runId: string, pathname: str
   return `${base}/workflows/${encodeURIComponent(workflowKey)}?runId=${encodeURIComponent(runId)}`;
 }
 
-function App() {
+export function workflowKeyFromPathname(pathname: string = typeof window === "undefined" ? "" : window.location.pathname): string {
+  const match = pathname.match(/\/workflows\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]!) : "";
+}
+
+export function App() {
   const runId = runIdFromUrl();
   const assetBase = assetBaseFromUrl();
   const assetUrl = makeAssetUrl(assetBase);
   const stub = specIsStub(features);
   const firstProductDoc = docsContent.find((doc) => doc.level === "product") ?? docsContent[0];
+  const pageWorkflowKey = workflowKeyFromPathname();
 
   const [activeTab, setActiveTab] = useState<TabKey>("features");
   const [selectedPath, setSelectedPath] = useState(firstProductDoc?.path ?? "");
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const initialDraftsRef = useRef<Record<string, string> | null>(null);
+  if (initialDraftsRef.current === null) initialDraftsRef.current = loadSpecDrafts(docsContent);
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => initialDraftsRef.current ?? {});
+  const [editorResetVersions, setEditorResetVersions] = useState<Record<string, number>>({});
+  const [recoveredDraftPaths, setRecoveredDraftPaths] = useState<string[]>(() => Object.keys(initialDraftsRef.current ?? {}));
   const [launchedRunId, setLaunchedRunId] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const [launchPending, setLaunchPending] = useState(false);
   const [pickedRunId, setPickedRunId] = useState<string | undefined>(undefined);
   const [activeFeature, setActiveFeature] = useState<{ feature: Feature; note?: string } | null>(null);
   const [showStart, setShowStart] = useState(stub);
   const [showTutorial, setShowTutorial] = useState(shouldShowTutorial());
   const [createRun, setCreateRun] = useState<LaunchState>({ runId: null, error: null });
   const [generateRun, setGenerateRun] = useState<LaunchState>({ runId: null, error: null });
+  const [observedMaterializedTickets, setObservedMaterializedTickets] = useState<TicketRow[]>([]);
+  const dispatchLaunchInFlight = useRef(false);
+  const createLaunchInFlight = useRef(false);
+  const generateLaunchInFlight = useRef(false);
 
   // ---- every gateway hook is called unconditionally, at the top, never behind
   //      a ??/&&/ternary/loop (short-circuiting a hook crashes React). ----
@@ -191,6 +228,13 @@ function App() {
   // dispatched from Specs (pickedRunId/launchedRunId), else the URL ?runId.
   // Bind every node-output hook to liveRunId so a dispatched run populates Audit.
   const liveRunId = pickedRunId ?? launchedRunId ?? runId;
+
+  // Only product docs are editable; technical docs are derived and read-only.
+  const changedFiles = docsContent
+    .filter((doc) => doc.level === "product")
+    .map((doc) => ({ path: doc.path, beforeMarkdown: doc.content, afterMarkdown: drafts[doc.path] ?? doc.content }))
+    .filter((doc) => normalizeMarkdownForDirty(doc.beforeMarkdown) !== normalizeMarkdownForDirty(doc.afterMarkdown));
+  const changedPaths = changedFiles.map((doc) => doc.path);
 
   const bootstrapOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "bootstrap", iteration: 0 });
   const metaTicketOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "metaTicket", iteration: 0 });
@@ -205,6 +249,8 @@ function App() {
 
   const runsState = useGatewayRuns({ filter: { limit: 100 } });
   const runDetail = useGatewayRun(liveRunId);
+  const createRunDetail = useGatewayRun(createRun.runId ?? undefined);
+  const generateRunDetail = useGatewayRun(generateRun.runId ?? undefined);
   const runTree = useGatewayRunTree(liveRunId);
   const runEvents = useGatewayRunEvents(liveRunId, { maxEvents: 500 });
   const ticketsState = useGatewayTickets({});
@@ -229,7 +275,20 @@ function App() {
     return () => window.clearInterval(id);
   }, [generateRun.runId, bugScanRunId, kickoffOut.refetch]);
 
-  // ---- derived (no hooks below this line) ----
+  useEffect(() => {
+    saveSpecDrafts(drafts);
+  }, [drafts]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || changedPaths.length === 0) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [changedPaths.length]);
+
   const bootstrap = rowOf(bootstrapOut.data);
   const metaTicket = rowOf(metaTicketOut.data);
   const audit = rowOf(auditOut.data) as AuditRow | null;
@@ -239,8 +298,87 @@ function App() {
   const materializedTickets = extractMaterializedTickets(materializedTicketsOut.data);
   const bugScanSummary = bugScanRunId ? "" : asString(kickoffRow?.summary);
 
-  const runs = toRunRows(runsState.data).filter((run) => isDocsDrivenRun(run, liveRunId));
-  const runStatus = asString(rowOf(runDetail.data)?.status) || undefined;
+  const runDetailRow = rowOf(runDetail.data);
+  const createRunRow = rowOf(createRunDetail.data);
+  const generateRunRow = rowOf(generateRunDetail.data);
+  const listedRuns = toRunRows(runsState.data).filter((run) => isDocsDrivenRun(run, liveRunId));
+  const activeRunWorkflowKey =
+    asString(runDetailRow?.workflowKey ?? runDetailRow?.workflowName ?? runDetailRow?.workflow) ||
+    (generateRun.runId && liveRunId === generateRun.runId ? "ddd-generate-docs" : "") ||
+    (bugScanRunId && liveRunId === bugScanRunId ? "ddd-bug-scan" : "") ||
+    (DDD_WORKFLOW_KEYS.has(pageWorkflowKey) ? pageWorkflowKey : "") ||
+    "docs-driven-development";
+  const runs =
+    liveRunId && !listedRuns.some((run) => run.runId === liveRunId)
+      ? [
+          {
+            ...(runDetailRow ?? {}),
+            runId: liveRunId,
+            workflowKey: activeRunWorkflowKey,
+            status: asString(runDetailRow?.status) || "queued",
+            createdAtMs: Number(runDetailRow?.createdAtMs ?? runDetailRow?.created_at_ms ?? Date.now()),
+          } as RunSummaryRow,
+          ...listedRuns,
+        ]
+      : listedRuns;
+  const selectedRun = runs.find((run) => run.runId === liveRunId);
+  const selectedWorkflowKey =
+    asString(selectedRun?.workflowKey ?? selectedRun?.workflowName ?? selectedRun?.workflow) ||
+    activeRunWorkflowKey;
+  const expectsDddNodeOutputs = selectedWorkflowKey === "docs-driven-development";
+  const runStatus = asString(runDetailRow?.status) || undefined;
+  const refetchDddNodeOutputs = useCallback(() => {
+    return Promise.all([
+      bootstrapOut.refetch(),
+      metaTicketOut.refetch(),
+      auditOut.refetch(),
+      specOut.refetch(),
+      triageOut.refetch(),
+      materializedTicketsOut.refetch(),
+      roundSummaryOut.refetch(),
+    ]);
+  }, [
+    bootstrapOut.refetch,
+    metaTicketOut.refetch,
+    auditOut.refetch,
+    specOut.refetch,
+    triageOut.refetch,
+    materializedTicketsOut.refetch,
+    roundSummaryOut.refetch,
+  ]);
+  useEffect(() => {
+    if (!liveRunId || !isTerminalRunStatus(runStatus)) return;
+    void refetchDddNodeOutputs();
+  }, [liveRunId, runStatus, refetchDddNodeOutputs]);
+  const bootstrapReady = Boolean(asString(bootstrap?.summary));
+  const roundSummaryReady = Boolean(asString(summary?.summary));
+  useEffect(() => {
+    if (!liveRunId || !roundSummaryReady) return;
+    void refetchDddNodeOutputs();
+  }, [liveRunId, roundSummaryReady, refetchDddNodeOutputs]);
+  useEffect(() => {
+    if (typeof window === "undefined" || !liveRunId || !expectsDddNodeOutputs) return;
+    if (bootstrapReady && roundSummaryReady) return;
+    void refetchDddNodeOutputs();
+    const id = window.setInterval(() => {
+      void refetchDddNodeOutputs();
+    }, 1_000);
+    return () => window.clearInterval(id);
+  }, [liveRunId, expectsDddNodeOutputs, bootstrapReady, roundSummaryReady, refetchDddNodeOutputs]);
+  const createRunStatus = asString(createRunRow?.status) || (createRun.runId ? "running" : undefined);
+  const generateRunStatus = asString(generateRunRow?.status) || (generateRun.runId ? "running" : undefined);
+  const createRunLiveState: LaunchState = {
+    ...createRun,
+    status: createRunStatus,
+    statusLoading: createRunDetail.loading,
+    statusError: errorMessage(createRunDetail.error),
+  };
+  const generateRunLiveState: LaunchState = {
+    ...generateRun,
+    status: generateRunStatus,
+    statusLoading: generateRunDetail.loading,
+    statusError: errorMessage(generateRunDetail.error),
+  };
   const gatewayTickets = (ticketsState.data ?? []) as unknown as TicketRow[];
   // The full backlog (one ticket per gap, derived from features.json) is the
   // baseline; live gateway tickets + this round's materialized tickets overlay
@@ -248,15 +386,47 @@ function App() {
   // actually materialized are the only run-time source: synthesizing tickets
   // client-side from triage output duplicated them with a second shape.
   const backlogTickets = ticketsBacklog as unknown as TicketRow[];
-  const tickets = mergeTickets(gatewayTickets, materializedTickets, backlogTickets);
+  const materializedTicketsKey = materializedTickets
+    .map((ticket) => {
+      const content = asString(ticket.content ?? "");
+      return `${normalizedTicketPathKey(ticket.path)}:${ticket.updatedAtMs ?? 0}:${content.length}`;
+    })
+    .join("|");
+  useEffect(() => {
+    if (materializedTickets.length === 0) return;
+    setObservedMaterializedTickets((current) => {
+      const next = mergeTickets(materializedTickets, current);
+      const unchanged =
+        next.length === current.length &&
+        next.every((ticket, index) => {
+          const previous = current[index];
+          return (
+            previous &&
+            normalizedTicketPathKey(previous.path) === normalizedTicketPathKey(ticket.path) &&
+            asString(previous.content) === asString(ticket.content) &&
+            previous.updatedAtMs === ticket.updatedAtMs
+          );
+        });
+      return unchanged ? current : next;
+    });
+  }, [materializedTicketsKey]);
+  const tickets = mergeTickets(gatewayTickets, materializedTickets, observedMaterializedTickets, backlogTickets);
   const events = (runEvents.events ?? []) as unknown as EventFrame[];
+  const latestRunEventSeq = events.reduce((latest, frame) => {
+    const seq = Number(frame.seq ?? 0);
+    return Number.isFinite(seq) ? Math.max(latest, seq) : latest;
+  }, 0);
+  useEffect(() => {
+    if (typeof window === "undefined" || !liveRunId || latestRunEventSeq <= 0) return;
+    const timeout = window.setTimeout(() => {
+      void refetchDddNodeOutputs();
+      void runDetail.refetch();
+      void refetchRuns();
+    }, 100);
+    return () => window.clearTimeout(timeout);
+  }, [liveRunId, latestRunEventSeq, refetchDddNodeOutputs, runDetail.refetch, refetchRuns]);
 
-  // Only product docs are editable; technical docs are derived and read-only.
-  const changedFiles = docsContent
-    .filter((doc) => doc.level === "product")
-    .map((doc) => ({ path: doc.path, beforeMarkdown: doc.content, afterMarkdown: drafts[doc.path] ?? doc.content }))
-    .filter((doc) => normalizeMarkdownForDirty(doc.beforeMarkdown) !== normalizeMarkdownForDirty(doc.afterMarkdown));
-  const changedPaths = changedFiles.map((doc) => doc.path);
+  // ---- derived values below this point must not call hooks. ----
 
   function updateDraft(path: string, markdown: string) {
     const original = docsContent.find((doc) => doc.path === path)?.content ?? "";
@@ -268,6 +438,22 @@ function App() {
       }
       return { ...current, [path]: markdown };
     });
+    setRecoveredDraftPaths((current) => current.filter((draftPath) => draftPath !== path));
+  }
+
+  function discardDrafts(paths: string[]) {
+    const discard = new Set(paths);
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const path of discard) delete next[path];
+      return next;
+    });
+    setEditorResetVersions((current) => {
+      const next = { ...current };
+      for (const path of discard) next[path] = (next[path] ?? 0) + 1;
+      return next;
+    });
+    setRecoveredDraftPaths((current) => current.filter((path) => !discard.has(path)));
   }
 
   function openDoc(href: string) {
@@ -279,9 +465,12 @@ function App() {
   }
 
   function dispatchAgents(paths: string[]) {
+    if (dispatchLaunchInFlight.current) return;
     const files = changedFiles.filter((file) => paths.includes(file.path));
     if (files.length === 0) return;
+    dispatchLaunchInFlight.current = true;
     setLaunchError(null);
+    setLaunchPending(true);
     const primary = docsContent.find((doc) => doc.path === files[0]!.path);
     const payload = {
       title: files.length === 1 ? `Docs change: ${files[0]!.path}` : `Docs change: ${files.length} markdown files`,
@@ -299,7 +488,7 @@ function App() {
         input: { maxAgents: 1, maxRounds: 1, runImplementation: false, implementationApproved: false, metaTicket: payload },
       })
       .then((result: unknown) => {
-        const nextRunId = isRecord(result) ? asString(result.runId) : "";
+        const nextRunId = launchResultRunId(result);
         if (!nextRunId) {
           setLaunchError("The gateway accepted the request but did not return a run id. Try dispatching again.");
           return;
@@ -312,11 +501,17 @@ function App() {
       })
       .catch((error: unknown) => {
         setLaunchError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        dispatchLaunchInFlight.current = false;
+        setLaunchPending(false);
       });
   }
 
   function launchCreateApp(description: string) {
-    setCreateRun({ runId: null, error: null });
+    if (createLaunchInFlight.current) return;
+    createLaunchInFlight.current = true;
+    setCreateRun({ runId: null, error: null, pending: true });
     void actions
       .launchRun({
         workflow: "create-workflow",
@@ -328,33 +523,41 @@ function App() {
         },
       })
       .then((result: unknown) => {
-        const nextRunId = isRecord(result) ? asString(result.runId) : "";
+        const nextRunId = launchResultRunId(result);
         setCreateRun(
           nextRunId
-            ? { runId: nextRunId, error: null }
-            : { runId: null, error: "The gateway accepted the request but did not return a run id. Try again." },
+            ? { runId: nextRunId, error: null, pending: false }
+            : { runId: null, error: "The gateway accepted the request but did not return a run id. Try again.", pending: false },
         );
       })
       .catch((error: unknown) => {
-        setCreateRun({ runId: null, error: error instanceof Error ? error.message : String(error) });
+        setCreateRun({ runId: null, error: error instanceof Error ? error.message : String(error), pending: false });
+      })
+      .finally(() => {
+        createLaunchInFlight.current = false;
       });
   }
 
   function launchGenerateDocs() {
-    setGenerateRun({ runId: null, error: null });
+    if (generateLaunchInFlight.current) return;
+    generateLaunchInFlight.current = true;
+    setGenerateRun({ runId: null, error: null, pending: true });
     void actions
       .launchRun({ workflow: "ddd-generate-docs", input: {} })
       .then((result: unknown) => {
-        const nextRunId = isRecord(result) ? asString(result.runId) : "";
+        const nextRunId = launchResultRunId(result);
         setGenerateRun(
           nextRunId
-            ? { runId: nextRunId, error: null }
-            : { runId: null, error: "The gateway accepted the request but did not return a run id. Try again." },
+            ? { runId: nextRunId, error: null, pending: false }
+            : { runId: null, error: "The gateway accepted the request but did not return a run id. Try again.", pending: false },
         );
         if (nextRunId) setPickedRunId(nextRunId);
       })
       .catch((error: unknown) => {
-        setGenerateRun({ runId: null, error: error instanceof Error ? error.message : String(error) });
+        setGenerateRun({ runId: null, error: error instanceof Error ? error.message : String(error), pending: false });
+      })
+      .finally(() => {
+        generateLaunchInFlight.current = false;
       });
   }
 
@@ -378,6 +581,7 @@ function App() {
     <main className="shell" data-testid="docs-driven-development-ui">
       <style>{crepeThemeCss}</style>
       <style>{styles}</style>
+      <WorkflowUiStyles mode="theme" />
       <header className="top">
         <div className="title">
           <h1>Docs Driven Development</h1>
@@ -447,8 +651,8 @@ function App() {
             onClose={stub ? null : () => setShowStart(false)}
             onCreateApp={launchCreateApp}
             onGenerateDocs={launchGenerateDocs}
-            createState={createRun}
-            generateState={generateRun}
+            createState={createRunLiveState}
+            generateState={generateRunLiveState}
             bugScanRunId={bugScanRunId}
             bugScanSummary={bugScanSummary}
             workflowUiHref={workflowUiHref}
@@ -467,10 +671,14 @@ function App() {
             selectedPath={selectedPath}
             assetBase={assetBase}
             changedPaths={changedPaths}
+            launchPending={launchPending}
             launchedRunId={launchedRunId}
             launchError={launchError}
+            recoveredPaths={recoveredDraftPaths.filter((path) => changedPaths.includes(path))}
+            editorResetKey={editorResetVersions[selectedPath] ?? 0}
             onSelectPath={setSelectedPath}
             onDraftChange={updateDraft}
+            onDiscardDrafts={discardDrafts}
             onDispatch={dispatchAgents}
           />
         ) : null}
@@ -492,6 +700,7 @@ function App() {
             runs={runs}
             runsLoading={runsState.loading}
             selectedRunId={liveRunId}
+            selectedWorkflowKey={selectedWorkflowKey}
             onSelectRun={setPickedRunId}
             runStatus={runStatus}
             runTree={runTree}

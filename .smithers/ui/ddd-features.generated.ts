@@ -421,7 +421,7 @@ export const featuresData = [
     "owner": "smithers-maintainers",
     "tier": "feature",
     "group": "Author workflows",
-    "userValue": "Keep an honest, always-current spec of the product and let agents burn down its gaps.",
+    "userValue": "Keep an honest, always-current spec of the product, review what changed across docs, audits, tickets, and live runs, then let agents burn down the highest-value gaps without losing the product narrative.",
     "capabilities": [
       {
         "title": "Build gate",
@@ -434,16 +434,24 @@ export const featuresData = [
     ],
     "endpoints": [],
     "links": [],
-    "tests": [],
+    "tests": [
+      ".smithers/tests/ddd-bug-scan-run.e2e.test.ts",
+      ".smithers/tests/ddd-generate-bug-scan.test.ts",
+      ".smithers/tests/ddd-generate-docs-run.e2e.test.ts",
+      ".smithers/tests/ddd-scripts.test.ts",
+      ".smithers/tests/ddd-ui-parsers.test.ts",
+      ".smithers/tests/docs-driven-development-run.e2e.test.ts",
+      ".smithers/tests/docs-driven-development-ui.e2e.test.tsx",
+      ".smithers/tests/docs-driven-development-workflow.test.ts",
+      ".smithers/ui/ddd-tabs.test.tsx"
+    ],
     "observability": [],
     "debug": [],
     "architecture": [],
     "changes": [],
     "diffHints": [],
     "missing": [
-      "Mermaid diagram preview in the Docs tab",
-      "Image upload target: Crepe ImageBlock needs an asset server; v1 wires ?assetBaseUrl passthrough but ships no asset server (uploads disabled when absent)",
-      "Only work:1 single-agent wave, matching multi's SQLite-fanout caution"
+      "Image upload target: Crepe ImageBlock needs an asset server; v1 wires ?assetBaseUrl passthrough but ships no asset server (uploads disabled when absent)"
     ]
   }
 ];

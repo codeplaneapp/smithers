@@ -1,6 +1,15 @@
 /** @jsxImportSource react */
 import { useMemo, useState } from "react";
-import { features, statusClass, statusLabels, type Feature, type FeatureStatus, type FeatureTier } from "./ddd-shared";
+import {
+  features,
+  formatCount,
+  formatFeatureTier,
+  statusClass,
+  statusLabels,
+  type Feature,
+  type FeatureStatus,
+  type FeatureTier,
+} from "./ddd-shared";
 
 /**
  * The top-level product spec: end-user features first, grouped by journey, then
@@ -77,7 +86,7 @@ export function FeaturesTab(props: FeaturesTabProps) {
       <section className="card">
         <div className="card-head">
           <h2>Smithers product spec</h2>
-          <span className="pill">{filteredFeatures.length} of {features.length} features</span>
+          <span className="pill">{filteredFeatures.length === features.length ? formatCount(features.length, "feature") : `${formatCount(filteredFeatures.length, "feature")} of ${formatCount(features.length, "feature")}`}</span>
         </div>
         <p>
           The smithers product, top to bottom: every end-user feature, the platform it runs on, and the
@@ -92,6 +101,7 @@ export function FeaturesTab(props: FeaturesTabProps) {
               type="search"
               value={query}
               placeholder="Title, owner, path, capability"
+              onInput={(event) => setQuery(event.currentTarget.value)}
               onChange={(event) => setQuery(event.currentTarget.value)}
             />
           </label>
@@ -107,7 +117,7 @@ export function FeaturesTab(props: FeaturesTabProps) {
             <span>Kind</span>
             <select className="select" value={tierFilter} onChange={(event) => setTierFilter(event.currentTarget.value as "all" | FeatureTier)}>
               {TIER_OPTIONS.map((tier) => (
-                <option key={tier} value={tier}>{tier === "all" ? "All kinds" : `${tier[0]!.toUpperCase()}${tier.slice(1)}`}</option>
+                <option key={tier} value={tier}>{tier === "all" ? "All kinds" : formatFeatureTier(tier)}</option>
               ))}
             </select>
           </label>
@@ -131,7 +141,7 @@ export function FeaturesTab(props: FeaturesTabProps) {
           <section className="tier-section" key={sec.tier} data-testid={`ddd-tier-${sec.tier}`}>
             <div className="tier-head">
               <h2>{sec.label}</h2>
-              <span className="pill">{tierItems.length}</span>
+              <span className="pill">{formatCount(tierItems.length, "feature")}</span>
             </div>
             <p className="tier-blurb">{sec.blurb}</p>
             {groupsInOrder(tierItems).map((grp) => (
@@ -150,12 +160,12 @@ export function FeaturesTab(props: FeaturesTabProps) {
                         <strong>{feature.title}</strong>
                         <span className={`badge ${statusClass(feature.status)}`}>{statusLabels[feature.status] ?? feature.status}</span>
                       </div>
-                      <p>{feature.userValue ?? feature.summary}</p>
+                      <p className="feature-card-summary">{feature.userValue ?? feature.summary}</p>
                       <div className="feature-card-foot">
                         <span className="pill muted">P{feature.priority.replace(/^p/i, "")}</span>
-                        {feature.capabilities?.length ? <span className="pill">{feature.capabilities.length} capabilities</span> : null}
-                        {feature.endpoints?.length ? <span className="pill">{feature.endpoints.length} endpoints</span> : null}
-                        {feature.links?.length ? <span className="pill">{feature.links.length} docs</span> : null}
+                        {feature.capabilities?.length ? <span className="pill">{formatCount(feature.capabilities.length, "capability", "capabilities")}</span> : null}
+                        {feature.endpoints?.length ? <span className="pill">{formatCount(feature.endpoints.length, "endpoint")}</span> : null}
+                        {feature.links?.length ? <span className="pill">{formatCount(feature.links.length, "doc")}</span> : null}
                       </div>
                     </button>
                   ))}

@@ -1,19 +1,27 @@
 import { describe, expect, test } from "bun:test";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
+  ErrorBanner,
   assetBaseFromUrl,
   buildChatLines,
   chatLineFromFrame,
   chatLinesFromFrame,
+  fmtTime,
+  formatStatus,
   logLineFromFrame,
   makeAssetUrl,
+  normalizeStatus,
   resolveDocLink,
   rowOf,
+  statusClass,
   type EventFrame,
 } from "../ui/ddd-shared.tsx";
 import {
   extractMaterializedTickets,
   extractTriage,
+  launchResultRunId,
   mergeTickets,
+  normalizedTicketPathKey,
   specIsStub,
   toRunRows,
   workflowUiHref,
@@ -104,6 +112,53 @@ describe("DDD UI parser contracts", () => {
     ]);
   });
 
+  test("mergeTickets dedupes equivalent materialized ticket paths with live row precedence", () => {
+    expect(normalizedTicketPathKey(".smithers/tickets/docs-driven-development--run--01-docs-driven-development.md"))
+      .toBe("docs-driven-development--run--01-docs-driven-development");
+    expect(normalizedTicketPathKey("tickets/docs-driven-development--run--01-docs-driven-development"))
+      .toBe("docs-driven-development--run--01-docs-driven-development");
+
+    const gateway = [
+      {
+        path: "tickets/docs-driven-development--run--01-docs-driven-development.md",
+        kind: "ticket",
+        status: "in-progress",
+        content: "# Live row wins",
+        feature_id: "docs-driven-development",
+        feature_title: "Live DDD title",
+      },
+    ];
+    const materialized = [
+      {
+        path: "docs-driven-development--run--01-docs-driven-development",
+        kind: "ticket",
+        status: "todo",
+        content: "# Materialized duplicate",
+        featureId: "docs-driven-development",
+        featureTitle: "Materialized title",
+      },
+    ];
+    const backlog = [
+      {
+        path: ".smithers/tickets/docs-driven-development--run--01-docs-driven-development.md",
+        kind: "e2e",
+        status: "todo",
+        content: "# Backlog duplicate",
+      },
+      {
+        path: "tickets/docs-driven-development--run--02-other-gap.md",
+        kind: "e2e",
+        status: "todo",
+        content: "# Other gap",
+      },
+    ];
+
+    expect(mergeTickets(gateway, materialized, backlog).map((ticket) => `${ticket.path}:${ticket.content}`)).toEqual([
+      "tickets/docs-driven-development--run--01-docs-driven-development.md:# Live row wins",
+      "tickets/docs-driven-development--run--02-other-gap.md:# Other gap",
+    ]);
+  });
+
   test("extractTriage drops invalid JSON, non-arrays, object rows, and slotless entries", () => {
     expect(extractTriage({ row: { selected: "{" } })).toEqual([]);
     expect(extractTriage({ row: { selected: JSON.stringify({ slot: 1 }) } })).toEqual([]);
@@ -146,6 +201,12 @@ describe("DDD UI parser contracts", () => {
       .toBe("/workflows/ddd%20generate%2Fdocs?runId=run%20%3F%26");
   });
 
+  test("launchResultRunId covers successful, no-run-id, and malformed launch results", () => {
+    expect(launchResultRunId({ runId: "run-1" })).toBe("run-1");
+    expect(launchResultRunId({ workflow: "docs-driven-development" })).toBe("");
+    expect(launchResultRunId(null)).toBe("");
+  });
+
   test("chatLineFromFrame handles public dotted events, top-level event frames, and legacy engine events", () => {
     expect(chatLineFromFrame(frame(1, "task.output", { nodeId: "bootstrap", output: "built" }))).toEqual({
       who: "bootstrap",
@@ -164,6 +225,42 @@ describe("DDD UI parser contracts", () => {
       text: "legacy message",
     });
     expect(chatLineFromFrame({ seq: 5, payload: null })).toBeNull();
+  });
+
+  test("chat line parsers cover wrapped and top-level trace/output event variants", () => {
+    const cases: Array<{ frame: EventFrame; expected: { who: string; text: string } | null }> = [
+      {
+        frame: frame(1, "AgentTraceEvent", { nodeId: "audit", trace: { payload: { text: "wrapped trace" } } }),
+        expected: { who: "audit", text: "wrapped trace" },
+      },
+      {
+        frame: { seq: 2, event: "AgentTraceEvent", payload: { nodeId: "spec-update", trace: { payload: { text: "top trace" } } } },
+        expected: { who: "spec-update", text: "top trace" },
+      },
+      {
+        frame: { seq: 3, event: "NodeOutput", payload: { nodeId: "triage", output: "node output" } },
+        expected: { who: "triage", text: "node output" },
+      },
+      {
+        frame: frame(4, "TaskOutput", { nodeId: "work:1", text: "task output" }),
+        expected: { who: "work:1", text: "task output" },
+      },
+      {
+        frame: frame(5, "TaskOutput", { nodeId: "empty", output: "   " }),
+        expected: null,
+      },
+    ];
+
+    for (const item of cases) {
+      expect(chatLineFromFrame(item.frame)).toEqual(item.expected);
+    }
+
+    expect(chatLinesFromFrame({ seq: 3, event: "NodeOutput", payload: { nodeId: "triage", output: "node output" } }))
+      .toContainEqual({ who: "triage", text: "node output", kind: "output" });
+    expect(chatLinesFromFrame(frame(4, "TaskOutput", { nodeId: "work:1", text: "task output" })))
+      .toContainEqual({ who: "work:1", text: "task output", kind: "output" });
+    expect(chatLinesFromFrame(frame(6, "AgentTraceEvent", { nodeId: "review", trace: { payload: { text: "assistant trace" } } })))
+      .toEqual([{ who: "review", role: "assistant", text: "assistant trace", kind: "message" }]);
   });
 
   test("chatLinesFromFrame expands transcripts, summarizes tool use, suppresses tool results, and tolerates malformed payloads", () => {
@@ -189,6 +286,57 @@ describe("DDD UI parser contracts", () => {
     expect(lines.map((line) => line.text).join("\n")).not.toContain("very noisy output");
     expect(chatLinesFromFrame({ seq: 2, payload: { event: "agent.session", payload: { transcript: [null, { content: [] }] } } })).toEqual([]);
     expect(chatLinesFromFrame({ seq: 3, payload: null })).toEqual([]);
+    expect(chatLinesFromFrame(frame(4, "agent.session", {
+      transcript: [
+        {
+          role: "assistant",
+          content: [
+            "loose text block",
+            { type: "unknown", text: "unknown text survives" },
+            { type: "thinking", thinking: "thinking text survives" },
+            { type: "tool_call" },
+            42,
+          ],
+        },
+      ],
+    }))).toEqual([
+      { who: "assistant", role: "assistant", text: "loose text block\nunknown text survives\nthinking text survives\n↗ tool\n42", kind: "message" },
+    ]);
+  });
+
+  test("chatLinesFromFrame keeps action reasoning and dedupes completed answers with whitespace differences", () => {
+    expect(chatLinesFromFrame(frame(1, "agent.event", {
+      engine: "codex",
+      event: { type: "action", action: { kind: "reasoning" }, message: "checking the build gate" },
+    }))).toEqual([
+      { who: "codex", role: "reasoning", text: "checking the build gate", kind: "message" },
+    ]);
+
+    const lines = buildChatLines([
+      frame(1, "agent.session", { transcript: [{ role: "assistant", content: "Done with parser tests" }] }),
+      frame(2, "agent.event", { engine: "codex", event: { type: "completed", answer: "  Done   with\nparser tests  " } }),
+    ]);
+    expect(lines.map((line) => line.text)).toEqual(["Done with parser tests"]);
+  });
+
+  test("buildChatLines picks the best cumulative session and uses seq as the tie breaker", () => {
+    const lines = buildChatLines([
+      frame(1, "agent.session", {
+        transcript: [
+          { role: "user", content: "older prompt" },
+          { role: "assistant", content: "older answer" },
+        ],
+      }),
+      frame(9, "agent.session", {
+        transcript: [
+          { role: "user", content: "newer prompt" },
+          { role: "assistant", content: "newer answer" },
+        ],
+      }),
+      { payload: { event: "agent.session", payload: { transcript: [{ role: "assistant", content: "missing seq loses tie" }] } } },
+    ]);
+
+    expect(lines.map((line) => line.text)).toEqual(["newer prompt", "newer answer"]);
   });
 
   test("buildChatLines dedupes cumulative sessions and completed answers while preserving unique output lines", () => {
@@ -221,7 +369,7 @@ describe("DDD UI parser contracts", () => {
     ]);
   });
 
-  test("logLineFromFrame skips heartbeats and truncates detail to 600 characters", () => {
+  test("logLineFromFrame skips heartbeats and keeps noisy payloads behind debug JSON", () => {
     expect(logLineFromFrame(frame(1, "run.heartbeat", { status: "ok" }))).toBeNull();
     expect(logLineFromFrame(frame(2, "task.heartbeat", { status: "ok" }))).toBeNull();
 
@@ -232,7 +380,82 @@ describe("DDD UI parser contracts", () => {
     expect(line?.seq).toBe(3);
     expect(line?.event).toBe("agent.event");
     expect(line?.node).toBe("work:1");
-    expect(line?.detail).toHaveLength(600);
+    expect(line?.detail.length).toBeLessThanOrEqual(260);
+    expect(line?.detail).not.toContain("{");
+    expect(line?.raw).toContain("\"nodeId\": \"work:1\"");
+  });
+
+  test("logLineFromFrame summarizes structured task output into counts and status", () => {
+    const line = logLineFromFrame(frame(4, "task.output", {
+      nodeId: "materialize-tickets",
+      output: JSON.stringify({ status: "done", summary: "materialized", tickets: [{ path: "one" }, { path: "two" }] }),
+    }));
+
+    expect(line).toMatchObject({
+      seq: 4,
+      event: "task.output",
+      node: "materialize-tickets",
+      detail: "Done · materialized · 2 tickets",
+    });
+    expect(line?.detail).not.toContain("\"tickets\"");
+  });
+
+  test("logLineFromFrame covers lifecycle events, status/message fallback, and missing or nonfinite seq", () => {
+    const cases: Array<{ frame: EventFrame; expected: { seq: number; event: string; node: string; detail: string } }> = [
+      {
+        frame: { payload: { event: "node.started", payload: { nodeId: "bootstrap", status: "running" } } },
+        expected: { seq: 0, event: "node.started", node: "bootstrap", detail: "Started · Running" },
+      },
+      {
+        frame: { seq: Number.POSITIVE_INFINITY, payload: { event: "node.finished", payload: { id: "triage", status: "done" } } },
+        expected: { seq: 0, event: "node.finished", node: "triage", detail: "Finished · Done" },
+      },
+      {
+        frame: { seq: Number.NaN, payload: { event: "node.failed", payload: { node: "work:1", message: "agent failed" } } },
+        expected: { seq: 0, event: "node.failed", node: "work:1", detail: "Failed · agent failed" },
+      },
+      {
+        frame: frame(4, "run.completed", { status: "success" }),
+        expected: { seq: 4, event: "run.completed", node: "", detail: "Complete" },
+      },
+      {
+        frame: frame(5, "run.failed", { message: "build failed" }),
+        expected: { seq: 5, event: "run.failed", node: "", detail: "Failed · build failed" },
+      },
+      {
+        frame: frame(6, "run.cancelled", { status: "cancelled" }),
+        expected: { seq: 6, event: "run.cancelled", node: "", detail: "Cancelled" },
+      },
+    ];
+
+    for (const item of cases) {
+      expect(logLineFromFrame(item.frame)).toMatchObject(item.expected);
+    }
+  });
+
+  test("status helpers, invalid times, and ErrorBanner normalization are stable", () => {
+    expect(normalizeStatus(" Waiting_Approval ")).toBe("waiting-approval");
+    expect(formatStatus("ok")).toBe("Complete");
+    expect(formatStatus("completed")).toBe("Completed");
+    expect(formatStatus("waiting_event")).toBe("Waiting for event");
+    expect(formatStatus("custom_status")).toBe("Custom Status");
+    expect(statusClass("SUCCESS")).toBe("ok");
+    expect(statusClass("failure")).toBe("bad");
+    expect(statusClass("waiting_timer")).toBe("warn");
+    expect(statusClass("unknown")).toBe("muted");
+    expect(fmtTime(undefined)).toBe("");
+    expect(fmtTime(0)).toBe("");
+    expect(fmtTime(Number.NaN)).toBe("");
+    expect(fmtTime(Number.POSITIVE_INFINITY)).toBe("");
+
+    const html = renderToStaticMarkup(ErrorBanner({
+      title: "Gateway data issue",
+      errors: [" duplicate ", new Error("duplicate"), "", null, "second"],
+    }) as any);
+    expect(html).toContain("Gateway data issue");
+    expect((html.match(/duplicate/g) ?? []).length).toBe(1);
+    expect(html).toContain("second");
+    expect(ErrorBanner({ title: "empty", errors: [" ", null] })).toBeNull();
   });
 
   test("resolveDocLink covers external, mailto, anchor, root-relative, relative, and dead links", () => {

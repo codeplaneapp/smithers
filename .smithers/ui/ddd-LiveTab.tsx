@@ -7,6 +7,7 @@ import {
   asArray,
   asString,
   buildChatLines,
+  formatCount,
   formatStatus,
   fmtTime,
   logLineFromFrame,
@@ -18,6 +19,29 @@ import {
 // Read run-tree nodes structurally — GatewayRunNode's fields aren't barrel-exported.
 type RunNode = Record<string, unknown>;
 
+function runWorkflow(run: RunSummaryRow): string {
+  return asString(run.workflowKey ?? run.workflowName ?? run.workflow) || "docs-driven-development";
+}
+
+function runSearchBlob(run: RunSummaryRow): string {
+  return [
+    run.runId,
+    runWorkflow(run),
+    run.status,
+    fmtTime(run.createdAtMs),
+    run.createdAtMs ? new Date(run.createdAtMs).toISOString() : "",
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function shortRunId(runId: string): string {
+  return runId.length <= 24 ? runId : `${runId.slice(0, 12)}...${runId.slice(-8)}`;
+}
+
+function uniqueRunStatuses(runs: RunSummaryRow[]): string[] {
+  return [...new Set(runs.map((run) => asString(run.status).trim()).filter(Boolean))]
+    .sort((left, right) => formatStatus(left).localeCompare(formatStatus(right)));
+}
+
 /** `smithers up --interactive` style streaming feed: every run event as a log line, auto-scrolled. */
 function LiveLog({ events, streaming }: { events: EventFrame[]; streaming: boolean }) {
   const lines = events.map((frame) => logLineFromFrame(frame)).filter(Boolean) as Array<{
@@ -25,6 +49,7 @@ function LiveLog({ events, streaming }: { events: EventFrame[]; streaming: boole
     event: string;
     node: string;
     detail: string;
+    raw?: string;
   }>;
   const endRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -41,9 +66,17 @@ function LiveLog({ events, streaming }: { events: EventFrame[]; streaming: boole
         <div className="livelog">
           {lines.map((line) => (
             <div className="livelog-line" key={line.seq}>
-              <span className="livelog-event">{line.event}</span>
-              {line.node ? <span className="livelog-node">{line.node}</span> : null}
-              {line.detail ? <span className="livelog-detail">{line.detail}</span> : null}
+              <div className="livelog-main">
+                <span className="livelog-event">{line.event}</span>
+                {line.node ? <span className="livelog-node">{line.node}</span> : null}
+                {line.detail ? <span className="livelog-detail">{line.detail}</span> : null}
+              </div>
+              {line.raw ? (
+                <details className="livelog-debug">
+                  <summary>debug</summary>
+                  <pre>{line.raw}</pre>
+                </details>
+              ) : null}
             </div>
           ))}
           <div ref={endRef} />
@@ -59,6 +92,7 @@ export type LiveTabProps = {
   runs: RunSummaryRow[];
   runsLoading: boolean;
   selectedRunId: string | undefined;
+  selectedWorkflowKey?: string;
   onSelectRun: (runId: string) => void;
   runStatus: string | undefined;
   runTree: UseGatewayRunTreeResult;
@@ -131,32 +165,74 @@ function Node({ node }: { node: RunNode }) {
 
 export function LiveTab(props: LiveTabProps) {
   const { runs, runsLoading, selectedRunId, runTree, events, streaming } = props;
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const persistedEvents = usePersistedRunEvents(props.assetBase, selectedRunId);
   const allEvents = useMemo(() => mergeEvents(persistedEvents.events, events), [persistedEvents.events, events]);
   const chatLines = useMemo(() => buildChatLines(allEvents), [allEvents]);
+  const statuses = useMemo(() => uniqueRunStatuses(runs), [runs]);
+  const filteredRuns = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return runs.filter((run) => {
+      if (statusFilter !== "all" && asString(run.status) !== statusFilter) return false;
+      return !needle || runSearchBlob(run).includes(needle);
+    });
+  }, [runs, query, statusFilter]);
+  const filtersActive = query.trim().length > 0 || statusFilter !== "all";
+  const countLabel = runsLoading
+    ? "Loading"
+    : filteredRuns.length === runs.length
+      ? formatCount(runs.length, "run")
+      : `${formatCount(filteredRuns.length, "run")} of ${formatCount(runs.length, "run")}`;
 
   return (
     <div className="live pane" data-testid="ddd-live-tab">
       <div className="runlist" data-testid="ddd-run-list">
-        <div className="card-head"><h2>Docs runs</h2><span className="pill">{runs.length || (runsLoading ? "..." : 0)}</span></div>
-        {runs.length ? (
-          runs.map((run) => (
+        <div className="card-head"><h2>Docs runs</h2><span className="pill">{countLabel}</span></div>
+        <div className="run-filters" role="search" aria-label="Run filters">
+          <label className="filter-field">
+            <span>Search</span>
+            <input
+              className="search-input"
+              type="search"
+              value={query}
+              data-testid="ddd-run-search"
+              placeholder="Run id, workflow, status, date"
+              onInput={(event) => setQuery(event.currentTarget.value)}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+          </label>
+          <label className="filter-field">
+            <span>Status</span>
+            <select className="select" value={statusFilter} data-testid="ddd-run-status-filter" onChange={(event) => setStatusFilter(event.currentTarget.value)}>
+              <option value="all">All statuses</option>
+              {statuses.map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
+            </select>
+          </label>
+          {filtersActive ? (
+            <button className="button" type="button" onClick={() => { setQuery(""); setStatusFilter("all"); }}>
+              Clear
+            </button>
+          ) : null}
+        </div>
+        {filteredRuns.length ? (
+          filteredRuns.map((run) => (
             <button
               key={run.runId}
               type="button"
               className={run.runId === selectedRunId ? "run-row is-active" : "run-row"}
               onClick={() => props.onSelectRun(run.runId)}
             >
-              <span className="rid">{run.runId}</span>
+              <span className="rid" title={run.runId}>{shortRunId(run.runId)}</span>
               <div className="meta-row">
                 <span className={`badge ${statusClass(run.status)}`}>{formatStatus(run.status) || "-"}</span>
-                <span className="pill">{run.workflowKey ?? "docs-driven-development"}</span>
+                <span className="pill">{runWorkflow(run)}</span>
                 {run.createdAtMs ? <span className="pill">{fmtTime(run.createdAtMs)}</span> : null}
               </div>
             </button>
           ))
         ) : (
-          <p>{runsLoading ? "Loading runs..." : "No docs-driven-development runs yet. Dispatch agents from the Docs tab."}</p>
+          <p>{runsLoading ? "Loading runs..." : filtersActive ? "No runs match the current filters." : "No docs-driven-development runs yet. Dispatch agents from the Docs tab."}</p>
         )}
       </div>
 
@@ -202,7 +278,7 @@ export function LiveTab(props: LiveTabProps) {
               )}
             </section>
 
-            <WorkflowSource />
+            <WorkflowSource workflowKey={props.selectedWorkflowKey} />
 
             <LiveLog events={allEvents} streaming={streaming} />
           </>

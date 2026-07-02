@@ -7,6 +7,8 @@ import { validateFeatures } from "./validateFeatures.ts";
  * next work items from a bounded list instead of re-auditing the repo.
  * Ordering: broken p0 first, then partial p0, then missing-tests, then
  * missing/other gaps. Usage: bun .smithers/lib/ddd/triageCandidates.ts --max N
+ * --max controls how many ranked options planning may inspect; the current DDD
+ * workflow still executes one implementation slot per round.
  */
 export type TriageCandidate = {
   featureId: string;

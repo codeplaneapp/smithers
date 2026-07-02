@@ -5,15 +5,26 @@ import { dddRoot } from "./dddRoot.ts";
 /**
  * Prints the bounded set of files an auditor should read for a
  * docs-driven-development round, so audits do not wander the whole repo:
- * features.json, the editable overview + reference/derived content, the design
- * spec doc, the workflow source, the ddd scripts, and a listing of the latest
- * artifacts directory.
+ * features.json, the editable overview + reference/derived content, the
+ * approved app design, the DDD workflow sources, the DDD UI surface, the DDD
+ * scripts, and a listing of the latest artifacts directory.
  */
 const FIXED_INPUTS = [
   ".smithers/spec/features.json",
   ".smithers/spec/content/overview.md",
-  ".smithers/specs/docs-driven-development.md",
+  ".smithers/specs/ddd-app-v2.md",
   ".smithers/workflows/docs-driven-development.tsx",
+  ".smithers/workflows/ddd-generate-docs.tsx",
+  ".smithers/workflows/ddd-bug-scan.tsx",
+  ".smithers/ui/docs-driven-development.tsx",
+  ".smithers/ui/ddd-shared.tsx",
+  ".smithers/ui/ddd-SpecsTab.tsx",
+  ".smithers/ui/ddd-FeaturesTab.tsx",
+  ".smithers/ui/ddd-AuditTab.tsx",
+  ".smithers/ui/ddd-LiveTab.tsx",
+  ".smithers/ui/ddd-TicketsTab.tsx",
+  ".smithers/ui/ddd-StartPane.tsx",
+  ".smithers/ui/ddd-Tutorial.tsx",
 ];
 
 const LISTED_DIRS = [

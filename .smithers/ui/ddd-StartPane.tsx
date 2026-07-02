@@ -1,8 +1,16 @@
 /** @jsxImportSource react */
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { formatStatus, isTerminalRunStatus, statusClass } from "./ddd-shared";
 
-export type LaunchState = { runId: string | null; error: string | null };
+export type LaunchState = {
+  runId: string | null;
+  error: string | null;
+  pending?: boolean;
+  status?: string;
+  statusLoading?: boolean;
+  statusError?: string;
+};
 
 export type StartPaneProps = {
   /** True when the spec is missing or the seeded stub: the pane is the landing view and cannot be dismissed. */
@@ -18,9 +26,24 @@ export type StartPaneProps = {
   bugScanSummary?: string;
   /** Same-origin href to another workflow's run UI (e.g. create-workflow). */
   workflowUiHref: (workflowKey: string, runId: string) => string;
+  /** Reloads the current DDD UI after generated modules have changed. */
+  onReload?: () => void;
 };
 
-function LaunchStatus({ state, label, href }: { state: LaunchState; label: string; href?: string }) {
+function launchIsActive(state: LaunchState): boolean {
+  if (!state.runId) return false;
+  if (!state.status) return true;
+  return !isTerminalRunStatus(state.status);
+}
+
+function LaunchStatus({ state, label, href, testId = "ddd-start-launched" }: { state: LaunchState; label: string; href?: string; testId?: string }) {
+  if (state.pending) {
+    return (
+      <p className="start-status" data-testid={`${testId}-launching`}>
+        <span className="badge warn">Launching</span> {label}
+      </p>
+    );
+  }
   if (state.error) {
     return (
       <p className="start-status" data-testid="ddd-start-error">
@@ -29,9 +52,11 @@ function LaunchStatus({ state, label, href }: { state: LaunchState; label: strin
     );
   }
   if (!state.runId) return null;
+  const status = state.status || "running";
+  const terminal = isTerminalRunStatus(status);
   return (
-    <p className="start-status" data-testid="ddd-start-launched">
-      <span className="badge ok">Running</span> {label}{" "}
+    <p className="start-status" data-testid={testId}>
+      <span className={`badge ${statusClass(status)}`}>{state.statusLoading ? "Checking" : formatStatus(status)}</span> {label}{" "}
       {href ? (
         <a className="doc-link" href={href} target="_blank" rel="noreferrer">
           open run UI ↗
@@ -39,15 +64,24 @@ function LaunchStatus({ state, label, href }: { state: LaunchState; label: strin
       ) : (
         <span className="pill">{state.runId}</span>
       )}
+      {terminal ? <span className="pill muted">Ready for another launch</span> : null}
+      {state.statusError ? <span className="badge bad" data-testid={`${testId}-status-error`} title={state.statusError}>Status unavailable</span> : null}
     </p>
   );
 }
 
-function BugScanStatus({ runId, summary }: { runId: string; summary?: string }) {
+function BugScanStatus({ runId, summary, href }: { runId: string; summary?: string; href?: string }) {
   if (runId) {
     return (
       <p className="start-status" data-testid="ddd-start-bug-scan">
-        <span className="badge ok">Bug scan</span> Async scan running as <span className="pill">{runId}</span>;
+        <span className="badge ok">Bug scan</span> Async scan running{" "}
+        {href ? (
+          <a className="doc-link" href={href} target="_blank" rel="noreferrer">
+            {runId}
+          </a>
+        ) : (
+          <span className="pill">{runId}</span>
+        )}{" "}
         confirmed findings appear in Tickets.
       </p>
     );
@@ -71,7 +105,24 @@ function BugScanStatus({ runId, summary }: { runId: string; summary?: string }) 
 export function StartPane(props: StartPaneProps) {
   const [description, setDescription] = useState("");
   const canCreate = description.trim().length >= 8;
+  const createDisabled = !canCreate || !!props.createState.pending || launchIsActive(props.createState);
+  const generateDisabled = !!props.generateState.pending || launchIsActive(props.generateState);
+  const createAgain = !!props.createState.runId && isTerminalRunStatus(props.createState.status);
+  const generateAgain = !!props.generateState.runId && isTerminalRunStatus(props.generateState.status);
   const updateDescription = (event: FormEvent<HTMLTextAreaElement>) => setDescription(event.currentTarget.value);
+  const generatedDocsRunHref = props.generateState.runId
+    ? props.workflowUiHref("ddd-generate-docs", props.generateState.runId)
+    : undefined;
+  const bugScanRunHref = props.bugScanRunId
+    ? props.workflowUiHref("ddd-bug-scan", props.bugScanRunId)
+    : undefined;
+  const reloadGeneratedDocs = () => {
+    if (props.onReload) {
+      props.onReload();
+      return;
+    }
+    window.location.reload();
+  };
 
   return (
     <div className="start pane scroll" data-testid="ddd-start-pane">
@@ -113,10 +164,10 @@ export function StartPane(props: StartPaneProps) {
               type="button"
               className="button primary"
               data-testid="ddd-start-create-launch"
-              disabled={!canCreate || !!props.createState.runId}
+              disabled={createDisabled}
               onClick={() => props.onCreateApp(description.trim())}
             >
-              Create app + builder workflow
+              {props.createState.pending ? "Launching builder..." : createAgain ? "Create another app + builder workflow" : "Create app + builder workflow"}
             </button>
           </div>
           <LaunchStatus
@@ -139,14 +190,27 @@ export function StartPane(props: StartPaneProps) {
               type="button"
               className="button primary"
               data-testid="ddd-start-generate-launch"
-              disabled={!!props.generateState.runId}
+              disabled={generateDisabled}
               onClick={props.onGenerateDocs}
             >
-              Generate docs
+              {props.generateState.pending ? "Launching docs..." : generateAgain ? "Generate docs again" : "Generate docs"}
             </button>
           </div>
-          <LaunchStatus state={props.generateState} label="ddd-generate-docs is reading your repo." />
-          <BugScanStatus runId={props.bugScanRunId} summary={props.bugScanSummary} />
+          <LaunchStatus
+            state={props.generateState}
+            label="ddd-generate-docs is reading your repo."
+            href={generatedDocsRunHref}
+            testId="ddd-start-generate-run"
+          />
+          <BugScanStatus runId={props.bugScanRunId} summary={props.bugScanSummary} href={bugScanRunHref} />
+          {props.generateState.runId ? (
+            <div className="start-reload" data-testid="ddd-start-reload-path">
+              <p>After the generate-docs run finishes, reload this UI to load the generated spec modules.</p>
+              <button type="button" className="button" data-testid="ddd-start-reload" onClick={reloadGeneratedDocs}>
+                Reload docs
+              </button>
+            </div>
+          ) : null}
         </section>
       </div>
     </div>

@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Platform & delivery | **Tier:** Platform
 
-HTTP/WS gateway (`packages/server,` `packages/gateway-client`) exposing runs, live events, PTY, approvals, and workflow launch to UIs and remote clients, including shared-DB run attribution and serverless resume/cron tick endpoints.
+HTTP/WS gateway (`packages/server`, `packages/gateway-client`) exposing runs, live events, PTY, approvals, and workflow launch to UIs and remote clients, including shared-DB run attribution and serverless resume/cron tick endpoints.
 
 ## What you can do
 

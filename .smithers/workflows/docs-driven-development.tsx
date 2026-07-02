@@ -26,7 +26,7 @@ const changedFileSchema = z.object({
 });
 
 const inputSchema = z.object({
-  maxAgents: z.preprocess((value) => value ?? undefined, z.number().int().min(1).max(8).default(1)),
+  maxAgents: z.preprocess((value) => value ?? undefined, z.number().int().min(1).max(1).default(1)),
   maxRounds: z.preprocess((value) => value ?? undefined, z.number().int().min(1).max(100000).default(100000)),
   implementationApproved: z.preprocess((value) => value ?? undefined, z.boolean().default(true)),
   requireImplementationApproval: z.preprocess((value) => value ?? undefined, z.boolean().default(false)),
@@ -87,7 +87,7 @@ const metaTicketSchema = z.object({
 
 const triageSchema = z.object({
   selected: z.array(z.object({
-    slot: z.number().int().min(1).max(8),
+    slot: z.number().int().min(1).max(1),
     featureId: z.string(),
     title: z.string(),
     agent: z.enum(["codex", "sonnet", "opus"]),
@@ -167,7 +167,7 @@ Architecture constraints:
 - No fake success. If a feature cannot be proven, keep it partial/broken/missing-tests.
 - Spec source for the smithers product: .smithers/spec/features.json (structured source of truth — the feature matrix). .smithers/spec/content/features/<id>.md are DERIVED from features.json by bun .smithers/lib/ddd/build.ts (regenerated each build — do not hand-edit; change features.json instead). .smithers/spec/content/overview.md is the editable product overview. The spec UI is .smithers/ui/docs-driven-development.tsx.
 - Reproducible build/gate command: bun .smithers/lib/ddd/build.ts (run from the repo root). It validates features.json against the zod schema, regenerates the derived feature docs, and regenerates the UI content modules (.smithers/ui/ddd-*.generated.ts).
-- Default maxAgents is 1 because SQLite-backed runs reproduced write failures at 4+ worker fanout. Use 4-8 only when the backing store is healthy enough for high-write fanout.
+- maxAgents is capped at 1 until the graph renders matching implementation slots. This avoids triage materializing work that never runs.
 - To avoid wasting context, start audits/reviews with "bun .smithers/lib/ddd/auditInputs.ts" and inspect only the listed files plus exact current-run outputs when needed. Do not recursively read .smithers/executions or .smithers/pg.
 - To pick next work without re-auditing the repo, start triage with "bun .smithers/lib/ddd/triageCandidates.ts --max <N>". Use it as the bounded ranked candidate list, then inspect only the selected feature's exact files.
 - To read a workflow output robustly, use "smithers output <runId> <nodeId>"; use "smithers inspect <runId>" for run-level state.
@@ -322,7 +322,7 @@ export function triageReady(ctx: any): boolean {
 export function resolvedMaxAgents(value: unknown) {
   const numeric = Number(value ?? 1);
   if (!Number.isInteger(numeric)) return 1;
-  return Math.min(8, Math.max(1, numeric));
+  return 1;
 }
 
 export function resolvedMaxRounds(value: unknown) {
@@ -439,9 +439,10 @@ export default smithers((ctx) => {
   const runImplementation = ctx.input.runImplementation !== false;
   const requireImplementationApproval = ctx.input.requireImplementationApproval === true;
   const implementationApproved = ctx.input.implementationApproved !== false;
+  const approvalRequired = runImplementation && requireImplementationApproval && !implementationApproved;
   const workApproved =
     runImplementation &&
-    (implementationApproved || !requireImplementationApproval);
+    (implementationApproved || !requireImplementationApproval || approvalRequired);
 
   return (
     <Workflow name="docs-driven-development">
@@ -547,7 +548,7 @@ ${CONTEXT}`}
             {(deps: any) => materializeTriageTickets(String((ctx as any).runId ?? (ctx.input as any).runId ?? "unknown-run"), deps.triage)}
           </Task>
 
-          {triageReady(ctx) && runImplementation && requireImplementationApproval && !implementationApproved ? (
+          {triageReady(ctx) && approvalRequired ? (
             <Approval
               id="approve-implementation"
               output={outputs.review}
@@ -572,7 +573,7 @@ ${CONTEXT}`}
               retries={1}
               timeoutMs={60 * 60 * 1000}
               heartbeatTimeoutMs={20 * 60 * 1000}
-              dependsOn={["materialize-tickets"]}
+              dependsOn={approvalRequired ? ["materialize-tickets", "approve-implementation"] : ["materialize-tickets"]}
               deps={{ triage: outputs.triage }}
             >
               {workSlotPrompt(ctx, 1)}
