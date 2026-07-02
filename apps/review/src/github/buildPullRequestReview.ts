@@ -1,7 +1,11 @@
 import type { ReviewRunOutput } from "smithers-workflows/lib/open-code-review";
+import type { Quiz } from "../quiz/quizSchema";
 import type { Story } from "../walkthrough/storySchema";
+import type { PullRequestFile } from "./listPullRequestFiles";
 
 type Finding = ReviewRunOutput["comments"][number];
+type Severity = Finding["severity"];
+type Warning = { file: string; message: string; type: string };
 
 export type PullRequestReviewPayload = {
   commit_id: string;
@@ -19,55 +23,240 @@ export type PullRequestReviewPayload = {
 
 const MAX_BODY_CHARS = 60_000;
 const MAX_FILES_PER_CHAPTER = 30;
+const MAX_FILE_TABLE_ROWS = 30;
 
-function findingBody(finding: Finding): string {
-  const parts = [finding.content];
+const SEVERITY_ORDER: Severity[] = ["critical", "major", "minor", "info"];
+const SEVERITY_EMOJI: Record<Severity, string> = {
+  critical: "💥",
+  major: "🔴",
+  minor: "🟡",
+  info: "ℹ️",
+};
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * Fence long enough that untrusted content (agent-echoed from PR code) cannot
+ * break out of it: one backtick more than the longest backtick run in the
+ * content, minimum three. GFM treats longer fences as valid — including for
+ * GitHub's ```suggestion blocks.
+ */
+function fenceFor(content: string): string {
+  let longest = 0;
+  for (const match of content.matchAll(/`+/g)) {
+    longest = Math.max(longest, match[0].length);
+  }
+  return "`".repeat(Math.max(longest + 1, 3));
+}
+
+function findingBody(finding: Finding, degradedAnchor: boolean): string {
+  const parts = [`${SEVERITY_EMOJI[finding.severity]} **${finding.severity}** · ${finding.category}`, "", finding.content];
   if (finding.suggestionCode) {
-    parts.push("", "```suggestion", finding.suggestionCode, "```");
+    const fence = fenceFor(finding.suggestionCode);
+    if (degradedAnchor) {
+      // The anchor collapsed to a single line, so a ```suggestion block would
+      // replace the wrong range on "Apply suggestion" and corrupt the file.
+      parts.push(
+        "",
+        `Suggested replacement for lines ${finding.startLine}–${finding.endLine}:`,
+        "",
+        fence,
+        finding.suggestionCode,
+        fence,
+      );
+    } else {
+      parts.push("", `${fence}suggestion`, finding.suggestionCode, fence);
+    }
   }
   return parts.join("\n");
 }
 
 function unanchoredLine(finding: Finding): string {
   const loc = finding.startLine > 0 ? `:${finding.startLine}` : "";
-  return `- \`${finding.path}${loc}\` — ${finding.content.split("\n").join(" ")}`;
+  return `- ${SEVERITY_EMOJI[finding.severity]} \`${finding.path}${loc}\` (${finding.category}) — ${finding.content.split("\n").join(" ")}`;
+}
+
+function severityBreakdown(findings: Finding[]): string {
+  const parts: string[] = [];
+  for (const severity of SEVERITY_ORDER) {
+    const count = findings.filter((finding) => finding.severity === severity).length;
+    if (count > 0) parts.push(`${SEVERITY_EMOJI[severity]} ${count} ${severity}`);
+  }
+  return parts.join(" · ");
 }
 
 /**
- * Compose one PR review from the story and findings: a narrative body
- * (headline, synopsis, reading order, walkthrough link) plus inline comments
- * for every finding that anchors into the PR diff. Findings that cannot
- * anchor (no resolved lines, or path not in the PR) are listed in the body
- * instead, so nothing is dropped.
+ * Whether a finding can anchor inline against the PR's actual diff. GitHub
+ * rejects the whole review batch when any comment's line is not part of a
+ * diff hunk, so a finding only anchors when its line(s) are commentable;
+ * multi-line ranges degrade to the end line when the range does not fully
+ * sit inside the diff.
+ */
+function anchorFor(
+  finding: Finding,
+  prFiles: Map<string, PullRequestFile>,
+): { line: number; startLine?: number; degraded: boolean } | null {
+  const file = prFiles.get(finding.path);
+  if (!file || finding.startLine <= 0) return null;
+  const lines = file.commentableLines;
+  const endLine = finding.endLine >= finding.startLine ? finding.endLine : finding.startLine;
+  if (!lines.has(endLine)) return null;
+  if (endLine > finding.startLine) {
+    let rangeOk = true;
+    for (let line = finding.startLine; line <= endLine; line += 1) {
+      if (!lines.has(line)) {
+        rangeOk = false;
+        break;
+      }
+    }
+    if (rangeOk) return { line: endLine, startLine: finding.startLine, degraded: false };
+    // The multi-line range collapsed to its end line.
+    return { line: endLine, degraded: true };
+  }
+  return { line: endLine, degraded: false };
+}
+
+function quizSection(quiz: Quiz, walkthroughUrl?: string): string[] {
+  const lines: string[] = [
+    "",
+    "<details>",
+    `<summary>🧠 Reviewer quiz (${plural(quiz.questions.length, "question")} — ${quiz.impact.level} impact) — can you answer these before approving?</summary>`,
+    "",
+  ];
+  const reasons = quiz.impact.reasons.filter((reason) => reason.signal).slice(0, 3);
+  if (reasons.length > 0) {
+    lines.push("**Why this change matters:**", "");
+    for (const reason of reasons) {
+      lines.push(`- ${reason.signal}${reason.path ? ` (\`${reason.path}\`)` : ""}`);
+    }
+    lines.push("");
+  }
+  quiz.questions.forEach((question, index) => {
+    lines.push(`**${index + 1}. ${question.question}**${question.path ? ` (\`${question.path}\`)` : ""}`, "");
+    question.options.forEach((option, optionIndex) => {
+      lines.push(`- ${String.fromCharCode(65 + optionIndex)}. ${option}`);
+    });
+    if (walkthroughUrl) {
+      // Anti-cheese: answers live in the walkthrough only, so an expanded
+      // <details> in the PR body cannot spoil the quiz.
+      lines.push("", `Answer in the walkthrough → ${walkthroughUrl}`, "");
+    } else {
+      lines.push(
+        "",
+        "<details>",
+        "<summary>Answer</summary>",
+        "",
+        `**${String.fromCharCode(65 + question.correctIndex)}. ${question.options[question.correctIndex] ?? ""}**`,
+        "",
+        question.explanation,
+        "",
+        "</details>",
+        "",
+      );
+    }
+  });
+  if (walkthroughUrl) {
+    lines.push(`📖 [Take the quiz in the walkthrough](${walkthroughUrl})`, "");
+  }
+  lines.push("</details>");
+  return lines;
+}
+
+/**
+ * Compose one PR review from the story, findings, and quiz: a narrative body
+ * (headline, synopsis, severity groups, file table, reading order,
+ * walkthrough link) plus inline comments for every finding that anchors into
+ * the PR's actual diff. Findings that cannot anchor are grouped by severity
+ * in the body (minor and below collapsed), so nothing is dropped. When the
+ * review degraded (failed file reviews), the body says so instead of reading
+ * like a clean pass.
  */
 export function buildPullRequestReview(args: {
   story: Story;
   findings: Finding[];
-  prPaths: Set<string>;
+  prFiles: Map<string, PullRequestFile>;
   headSha: string;
   walkthroughUrl?: string;
+  quiz?: Quiz | null;
+  reviewStatus?: string;
+  warnings?: Warning[];
 }): PullRequestReviewPayload {
   const anchored: PullRequestReviewPayload["comments"] = [];
   const unanchored: Finding[] = [];
   for (const finding of args.findings) {
-    if (finding.startLine > 0 && args.prPaths.has(finding.path)) {
-      const multiLine = finding.endLine > finding.startLine;
+    const anchor = anchorFor(finding, args.prFiles);
+    if (anchor) {
       anchored.push({
         path: finding.path,
-        line: multiLine ? finding.endLine : finding.startLine,
+        line: anchor.line,
         side: "RIGHT",
-        ...(multiLine ? { start_line: finding.startLine, start_side: "RIGHT" as const } : {}),
-        body: findingBody(finding),
+        ...(anchor.startLine != null ? { start_line: anchor.startLine, start_side: "RIGHT" as const } : {}),
+        body: findingBody(finding, anchor.degraded),
       });
     } else {
       unanchored.push(finding);
     }
   }
 
+  const warnings = args.warnings ?? [];
+  const failedFileReviews = warnings.filter((warning) => warning.type === "subtask_error").length;
+  const degraded = args.reviewStatus === "failed" || failedFileReviews > 0;
+
   const lines: string[] = ["<!-- smithers-review -->"];
   lines.push(`## smithers review — ${args.story.headline || "change walkthrough"}`);
   if (args.story.synopsis) lines.push("", args.story.synopsis);
   if (args.walkthroughUrl) lines.push("", `**📖 Full walkthrough:** ${args.walkthroughUrl}`);
+
+  if (degraded) {
+    const detail =
+      failedFileReviews > 0
+        ? `${plural(failedFileReviews, "file review")} failed`
+        : "the review agents failed";
+    lines.push("", `> ⚠️ **Review degraded:** ${detail}; findings may be incomplete. Do not treat this as a clean pass.`);
+  }
+
+  if (args.findings.length > 0) {
+    lines.push("", `### Findings: ${severityBreakdown(args.findings)}`);
+  }
+
+  if (unanchored.length > 0) {
+    lines.push("", `### ${plural(unanchored.length, "finding")} without an inline anchor`);
+    for (const severity of SEVERITY_ORDER) {
+      const group = unanchored.filter((finding) => finding.severity === severity);
+      if (group.length === 0) continue;
+      if (severity === "minor" || severity === "info") {
+        lines.push(
+          "",
+          "<details>",
+          `<summary>${SEVERITY_EMOJI[severity]} ${severity} (${group.length})</summary>`,
+          "",
+          ...group.map(unanchoredLine),
+          "",
+          "</details>",
+        );
+      } else {
+        lines.push("", `**${SEVERITY_EMOJI[severity]} ${severity} (${group.length})**`, "", ...group.map(unanchoredLine));
+      }
+    }
+  }
+
+  if (args.prFiles.size > 0) {
+    const findingsByPath = new Map<string, number>();
+    for (const finding of args.findings) {
+      findingsByPath.set(finding.path, (findingsByPath.get(finding.path) ?? 0) + 1);
+    }
+    const rows = [...args.prFiles.values()];
+    const shown = rows.slice(0, MAX_FILE_TABLE_ROWS);
+    lines.push("", "### Files", "", "| File | +/- | Findings |", "| --- | --- | --- |");
+    for (const file of shown) {
+      const count = findingsByPath.get(file.filename) ?? 0;
+      lines.push(`| \`${file.filename}\` | +${file.additions} −${file.deletions} | ${count > 0 ? count : ""} |`);
+    }
+    const hidden = rows.length - shown.length;
+    if (hidden > 0) lines.push("", `…and ${plural(hidden, "more file")}.`);
+  }
 
   if (args.story.chapters.length > 0) {
     lines.push("", "### Reading order");
@@ -84,25 +273,29 @@ export function buildPullRequestReview(args: {
         lines.push(`- \`${block.path}\`${block.intro ? ` — ${block.intro}` : ""}`);
       }
       const hidden = diffBlocks.length - shown.length;
-      if (hidden > 0) lines.push(`- …and ${hidden} more file(s)`);
+      if (hidden > 0) lines.push(`- …and ${plural(hidden, "more file")}`);
       const diagrams = chapter.blocks.filter((block) => block.kind === "diagram").length;
-      if (diagrams > 0) lines.push(`- 📊 ${diagrams} diagram(s) in the full walkthrough`);
+      if (diagrams > 0) lines.push(`- 📊 ${plural(diagrams, "diagram")} in the full walkthrough`);
     });
   }
 
-  if (unanchored.length > 0) {
-    lines.push("", `### Findings without inline anchors (${unanchored.length})`);
-    lines.push(...unanchored.map(unanchoredLine));
+  if (args.quiz && args.quiz.questions.length > 0) {
+    lines.push(...quizSection(args.quiz, args.walkthroughUrl));
   }
 
-  lines.push(
-    "",
-    `_${args.findings.length} finding(s) · ${anchored.length} inline · generated by smithers review_`,
-  );
+  const footerParts = [`${plural(args.findings.length, "finding")} · ${anchored.length} inline`];
+  if (degraded) footerParts.push(`⚠️ ${plural(failedFileReviews, "file review")} failed`);
+  else if (args.reviewStatus === "completed_with_warnings") footerParts.push("⚠️ completed with warnings; see the run log");
+  footerParts.push("generated by smithers review");
+  lines.push("", `_${footerParts.join(" · ")}_`);
 
   let body = lines.join("\n");
   if (body.length > MAX_BODY_CHARS) {
-    body = `${body.slice(0, MAX_BODY_CHARS)}\n\n_…truncated; see the full walkthrough._`;
+    // Cut at a section boundary (blank line) so the truncation cannot land
+    // inside an open <details>, table, or code fence and wreck the rendering.
+    const slice = body.slice(0, MAX_BODY_CHARS);
+    const boundary = slice.lastIndexOf("\n\n");
+    body = `${boundary > 0 ? slice.slice(0, boundary) : slice}\n\n_…truncated; see the full walkthrough._`;
   }
 
   return { commit_id: args.headSha, event: "COMMENT", body, comments: anchored };

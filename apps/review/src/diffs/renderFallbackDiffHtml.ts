@@ -11,14 +11,18 @@ type FilePreamble = {
   sawHunk: boolean;
 };
 
+// The +/− marker column duplicates the row color on purpose: color-blind
+// readers get a non-color signal, and copied text keeps diff semantics.
+const signOf = { add: "+", del: "−", ctx: "" } as const;
+
 function row(kind: "add" | "del" | "ctx", oldNum: string, newNum: string, text: string): string {
   const oldAttr = oldNum ? ` data-old="${oldNum}"` : "";
   const newAttr = newNum ? ` data-new="${newNum}"` : "";
-  return `<tr class="${kind}"${oldAttr}${newAttr}><td class="ln">${oldNum}</td><td class="ln">${newNum}</td><td class="code">${escapeHtml(text)}</td></tr>`;
+  return `<tr class="${kind}"${oldAttr}${newAttr}><td class="ln">${oldNum}</td><td class="ln">${newNum}</td><td class="sign">${signOf[kind]}</td><td class="code">${escapeHtml(text)}</td></tr>`;
 }
 
 function noteRow(text: string): string {
-  return `<tr class="hunk note"><td class="ln"></td><td class="ln"></td><td class="code">${escapeHtml(text)}</td></tr>`;
+  return `<tr class="hunk note"><td class="ln"></td><td class="ln"></td><td class="sign"></td><td class="code">${escapeHtml(text)}</td></tr>`;
 }
 
 function preambleNote(file: FilePreamble): string | null {
@@ -72,7 +76,7 @@ export function renderFallbackDiffHtml(diffText: string): string {
       file.sawHunk = true;
       oldLine = Number(hunk[1]);
       newLine = Number(hunk[2]);
-      rows.push(`<tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="code">@@ −${hunk[1]} +${hunk[2]} @@${escapeHtml(hunk[3])}</td></tr>`);
+      rows.push(`<tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="sign"></td><td class="code">@@ −${hunk[1]} +${hunk[2]} @@${escapeHtml(hunk[3])}</td></tr>`);
       rendered += 1;
       continue;
     }
@@ -100,7 +104,7 @@ export function renderFallbackDiffHtml(diffText: string): string {
   }
   if (truncatedAt >= 0) {
     const remaining = lines.length - truncatedAt;
-    rows.push(`<tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="code">… diff truncated (${remaining} more line(s))</td></tr>`);
+    rows.push(`<tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="sign"></td><td class="code">… diff truncated (${remaining} more line(s))</td></tr>`);
   } else {
     flushFileNote();
   }

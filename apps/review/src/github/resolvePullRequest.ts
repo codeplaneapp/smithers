@@ -8,6 +8,8 @@ export type PullRequestTarget = {
   baseRefName: string;
   headRefName: string;
   headSha: string;
+  title: string;
+  body: string;
 };
 
 /** Resolve a PR (number or URL) to its coordinates via the gh CLI. */
@@ -21,7 +23,7 @@ export async function resolvePullRequest(
     "view",
     prRef,
     "--json",
-    "number,url,baseRefName,headRefName,headRefOid",
+    "number,url,baseRefName,headRefName,headRefOid,title,body",
   ]);
   const data = JSON.parse(raw) as {
     number: number;
@@ -29,8 +31,18 @@ export async function resolvePullRequest(
     baseRefName: string;
     headRefName: string;
     headRefOid: string;
+    title?: string;
+    body?: string;
   };
-  const match = /github\.com\/([^/]+)\/([^/]+)\/pull\//.exec(data.url);
+  // Match on the URL path, not a hardcoded github.com host, so GitHub
+  // Enterprise PR URLs resolve too.
+  let path = "";
+  try {
+    path = new URL(data.url).pathname;
+  } catch {
+    // Unparseable URL: fall through to the error below.
+  }
+  const match = /\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(path);
   if (!match) throw new Error(`cannot parse owner/repo from PR url: ${data.url}`);
   return {
     owner: match[1],
@@ -40,5 +52,7 @@ export async function resolvePullRequest(
     baseRefName: data.baseRefName,
     headRefName: data.headRefName,
     headSha: data.headRefOid,
+    title: data.title ?? "",
+    body: data.body ?? "",
   };
 }

@@ -27,3 +27,34 @@ export async function runGh(repoDir: string, args: string[], stdin?: string): Pr
   }
   return result.stdout ?? "";
 }
+
+/**
+ * Run gh with a per-item `... | @json` --jq program and parse each stdout
+ * line as one JSON record. One compact object per line survives gh's
+ * per-page --jq application under --paginate where raw concatenated page
+ * arrays would not parse. gh prints jq string results raw, but
+ * double-encoded output (a JSON string containing JSON) has been observed
+ * across jq builds, so string results are unwrapped once; blank and
+ * unparseable lines are skipped.
+ */
+export async function runGhJsonLines(
+  repoDir: string,
+  args: string[],
+  gh: typeof runGh = runGh,
+): Promise<object[]> {
+  const raw = await gh(repoDir, args);
+  const records: object[] = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+      if (typeof parsed === "string") parsed = JSON.parse(parsed);
+    } catch {
+      continue;
+    }
+    if (parsed && typeof parsed === "object") records.push(parsed);
+  }
+  return records;
+}

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { extractDiffAssets } from "../src/diffs/extractDiffAssets";
 import { renderPierreFileDiff } from "../src/diffs/renderPierreFileDiff";
 
 const patch = [
@@ -19,26 +18,57 @@ describe("renderPierreFileDiff", () => {
     expect(html).toContain("data-dehydrated");
     expect(html).toContain('data-line-type="change-addition"');
     expect(html).toContain('data-line-type="change-deletion"');
-    expect(html).toContain("--diffs-token-light");
     expect(html).toContain("data-line-number-content");
   });
 
-  test("split style renders the split layout", async () => {
-    const html = await renderPierreFileDiff({ diff: patch, diffStyle: "split" });
-    expect(html).toContain('data-diff-type="split"');
+  test("defaults to the system theme with both light and dark tokens", async () => {
+    const html = await renderPierreFileDiff({ diff: patch });
+    expect(html).toContain("--diffs-token-light");
+    expect(html).toContain("--diffs-token-dark");
+    expect(html).toContain("--diffs-dark");
+    expect(html).toContain("color-scheme");
   });
 
-  test("extractDiffAssets splits sprite, styles, and body", async () => {
-    const html = await renderPierreFileDiff({ diff: patch });
-    const assets = extractDiffAssets(html);
-    expect(assets.sprite.startsWith("<svg")).toBe(true);
-    expect(assets.styles.length).toBeGreaterThanOrEqual(2);
-    for (const style of assets.styles) {
-      expect(style.startsWith("<style")).toBe(true);
-      expect(style.endsWith("</style>")).toBe(true);
-    }
-    expect(assets.body).toContain("data-dehydrated");
-    expect(assets.body).not.toContain("<style");
-    expect(assets.sprite + assets.styles.join("") + assets.body).toBe(html);
+  test("unified is the default layout, split opts in", async () => {
+    const unified = await renderPierreFileDiff({ diff: patch });
+    expect(unified).toContain('data-diff-type="single"');
+    expect(unified).toContain("data-unified");
+    const split = await renderPierreFileDiff({ diff: patch, diffStyle: "split" });
+    expect(split).toContain('data-diff-type="split"');
+  });
+
+  test("explicit light theme still renders light tokens", async () => {
+    const html = await renderPierreFileDiff({ diff: patch, themeType: "light" });
+    expect(html).toContain("--diffs-token-light");
+  });
+
+  test("annotations prerender named slots after their target lines", async () => {
+    const html = await renderPierreFileDiff({
+      diff: patch,
+      annotations: [
+        { side: "additions", lineNumber: 2 },
+        { side: "deletions", lineNumber: 2 },
+      ],
+    });
+    expect(html).toContain('<slot name="annotation-additions-2"></slot>');
+    expect(html).toContain('<slot name="annotation-deletions-2"></slot>');
+    expect(html).toContain("data-line-annotation");
+    expect(html).toContain("data-annotation-content");
+    // gutter gains a matching spacer per annotation so numbers stay aligned
+    expect(html).toContain('data-gutter-buffer="annotation"');
+    // the addition slot sits directly after the addition line's content row
+    const addLine = html.indexOf('data-line="2" data-line-type="change-addition"');
+    const addSlot = html.indexOf('<slot name="annotation-additions-2">');
+    expect(addLine).toBeGreaterThan(-1);
+    expect(addSlot).toBeGreaterThan(addLine);
+  });
+
+  test("annotations work in split view too", async () => {
+    const html = await renderPierreFileDiff({
+      diff: patch,
+      diffStyle: "split",
+      annotations: [{ side: "additions", lineNumber: 3 }],
+    });
+    expect(html).toContain('<slot name="annotation-additions-3"></slot>');
   });
 });

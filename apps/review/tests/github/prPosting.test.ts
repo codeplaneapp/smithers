@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { PullRequestReviewPayload } from "../../src/github/buildPullRequestReview";
-import { listPullRequestFiles } from "../../src/github/listPullRequestFiles";
+import { listPullRequestFiles, type PullRequestFile } from "../../src/github/listPullRequestFiles";
 import { postPullRequestReview } from "../../src/github/postPullRequestReview";
 import { resolvePullRequest, type PullRequestTarget } from "../../src/github/resolvePullRequest";
 
@@ -37,6 +37,8 @@ const pr: PullRequestTarget = {
   baseRefName: "main",
   headRefName: "fix-i306-w8",
   headSha: "abc123",
+  title: "Fix the widget",
+  body: "Closes #306.",
 };
 
 describe("GitHub PR posting helpers", () => {
@@ -48,6 +50,8 @@ describe("GitHub PR posting helpers", () => {
         baseRefName: "main",
         headRefName: "fix-i306-w8",
         headRefOid: "abc123",
+        title: "Fix the widget",
+        body: "Closes #306.",
       }),
     );
 
@@ -55,9 +59,28 @@ describe("GitHub PR posting helpers", () => {
     expect(ghCalls).toEqual([
       {
         repoDir: "/repo",
-        args: ["pr", "view", "306", "--json", "number,url,baseRefName,headRefName,headRefOid"],
+        args: ["pr", "view", "306", "--json", "number,url,baseRefName,headRefName,headRefOid,title,body"],
       },
     ]);
+  });
+
+  test("resolvePullRequest resolves GitHub Enterprise PR URLs by path", async () => {
+    ghResponses.push(
+      JSON.stringify({
+        number: 9,
+        url: "https://ghe.example.corp/acme/tools/pull/9",
+        baseRefName: "main",
+        headRefName: "topic",
+        headRefOid: "fee1dead",
+      }),
+    );
+
+    const resolved = await resolvePullRequest("/repo", "9", runGhMock);
+    expect(resolved.owner).toBe("acme");
+    expect(resolved.repo).toBe("tools");
+    expect(resolved.number).toBe(9);
+    expect(resolved.title).toBe("");
+    expect(resolved.body).toBe("");
   });
 
   test("resolvePullRequest rejects PR URLs that cannot identify owner and repo", async () => {
@@ -76,12 +99,44 @@ describe("GitHub PR posting helpers", () => {
     );
   });
 
-  test("listPullRequestFiles returns trimmed changed paths from paginated gh api output", async () => {
-    ghResponses.push("\nsrc/index.ts\n\n apps/review/src/github/runGh.ts \n");
-
-    await expect(listPullRequestFiles("/repo", pr, runGhMock)).resolves.toEqual(
-      new Set(["src/index.ts", "apps/review/src/github/runGh.ts"]),
+  test("listPullRequestFiles maps JSON-lines gh api output to files with commentable lines", async () => {
+    ghResponses.push(
+      [
+        "",
+        JSON.stringify({
+          filename: "src/index.ts",
+          additions: 2,
+          deletions: 1,
+          patch: "@@ -1,2 +1,3 @@\n context\n-old\n+new\n+more",
+        }),
+        // Renamed file: previous_filename comes along but is not part of the map key.
+        JSON.stringify({
+          filename: "src/renamed.ts",
+          previous_filename: "src/original.ts",
+          status: "renamed",
+          additions: 0,
+          deletions: 0,
+          patch: "@@ -1 +1 @@\n same",
+        }),
+        // Binary file: no patch at all → no commentable lines, stats preserved.
+        JSON.stringify({ filename: "assets/logo.png", status: "added", additions: 0, deletions: 0 }),
+        "",
+      ].join("\n"),
     );
+
+    const files = await listPullRequestFiles("/repo", pr, runGhMock);
+    expect([...files.keys()]).toEqual(["src/index.ts", "src/renamed.ts", "assets/logo.png"]);
+    expect(files.get("src/index.ts")).toEqual({
+      filename: "src/index.ts",
+      additions: 2,
+      deletions: 1,
+      commentableLines: new Set([1, 2, 3]),
+    });
+    expect(files.get("src/renamed.ts")?.commentableLines).toEqual(new Set([1]));
+    const binary = files.get("assets/logo.png") as PullRequestFile;
+    expect(binary.additions).toBe(0);
+    expect(binary.deletions).toBe(0);
+    expect(binary.commentableLines.size).toBe(0);
     expect(ghCalls).toEqual([
       {
         repoDir: "/repo",
@@ -90,7 +145,7 @@ describe("GitHub PR posting helpers", () => {
           "--paginate",
           "repos/smithersai/smithers/pulls/306/files",
           "--jq",
-          ".[].filename",
+          ".[] | {filename, additions, deletions, patch} | @json",
         ],
       },
     ]);

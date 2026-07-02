@@ -3,10 +3,13 @@ import type { PullRequestTarget } from "./resolvePullRequest";
 import { runGh as defaultRunGh } from "./runGh";
 
 /**
- * Post a review to the PR via `gh api`. GitHub rejects the whole batch (422)
- * when any inline comment fails to anchor in the diff, so on failure the
- * inline comments are folded into the body and posted once more — a review is
- * always posted.
+ * Post a review to the PR via `gh api`. GitHub rejects the whole batch (422,
+ * typically mentioning "line" or "position") when any inline comment fails to
+ * anchor in the diff, so on any failure the inline comments are folded into
+ * the body and posted once more — a review is never lost. The 422 anchor case
+ * is the expected trigger; folding on every error keeps transient anchor
+ * validation drift (PR head moved between fetch and post) from dropping the
+ * review.
  */
 export async function postPullRequestReview(
   repoDir: string,
