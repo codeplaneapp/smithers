@@ -107,21 +107,28 @@ async function defaultResumeRun(job) {
 }
 
 /**
- * Attempt to atomically claim and resume one candidate run, mirroring
+ * Attempt to atomically claim and resume one candidate run. This is the
+ * single "claim + resume + release-on-failure" primitive shared by
+ * `runResumeTick` (below, for serverless ticks) and
  * `apps/cli/src/supervisor.js`'s `processCandidateEffect` /
- * `processApprovalDecidedCandidateEffect`: claim via `db.claimRunForResume`
- * (the SAME lease-guarded `UPDATE ... RETURNING` used by `smithers
- * supervise`), then call `resumeRun`, releasing the claim on failure so a
- * later tick can retry.
+ * `processApprovalDecidedCandidateEffect` (for the long-running CLI
+ * supervisor loop): claim via `db.claimRunForResume` (the SAME
+ * lease-guarded `UPDATE ... RETURNING` either caller uses), then call
+ * `resumeRun`, releasing the claim on failure so a later tick can retry.
+ *
+ * Exported so `smithers supervise` can delegate to it instead of
+ * duplicating the claim/resume/release sequence, mirroring how
+ * `apps/cli/src/scheduler.js` delegates to `runCronTick`.
+ *
  * @param {SmithersDb} db
  * @param {Record<string, unknown>} run
- * @param {{ now: number; staleBeforeMs: number; workerId: string; resumeRun: RunResumeTickOptions["resumeRun"]; cliEntrypoint?: string }} ctx
+ * @param {{ now: number; staleBeforeMs: number; workerId: string; resumeRun: RunResumeTickOptions["resumeRun"]; cliEntrypoint?: string; claimOwnerId?: string }} ctx
  * @param {string} kind
  * @returns {Promise<{ runId: string; resumed: boolean; kind?: string; error?: string }>}
  */
-async function claimAndResume(db, run, ctx, kind) {
+export async function claimAndResumeRun(db, run, ctx, kind) {
     const runId = /** @type {string} */ (run.runId);
-    const claimOwnerId = `resume-tick:${ctx.workerId}`;
+    const claimOwnerId = ctx.claimOwnerId ?? `resume-tick:${ctx.workerId}`;
     const claimHeartbeatAtMs = ctx.now;
     const runtimeOwnerId = /** @type {string | null} */ (run.runtimeOwnerId ?? null);
     const heartbeatAtMs = /** @type {number | null} */ (run.heartbeatAtMs ?? null);
@@ -200,7 +207,7 @@ export async function runResumeTick(db, opts = {}) {
 
     const staleRuns = await db.listStaleRunningRuns(staleBeforeMs, limit);
     for (const run of staleRuns) {
-        const result = await claimAndResume(db, run, ctx, "stale-running");
+        const result = await claimAndResumeRun(db, run, ctx, "stale-running");
         if (result.resumed) {
             resumed.push({ runId: result.runId, kind: /** @type {string} */ (result.kind) });
         }
@@ -219,7 +226,7 @@ export async function runResumeTick(db, opts = {}) {
         if (decided.length === 0) {
             continue;
         }
-        const result = await claimAndResume(db, run, ctx, "approval-decided-resume-required");
+        const result = await claimAndResumeRun(db, run, ctx, "approval-decided-resume-required");
         if (result.resumed) {
             resumed.push({ runId: result.runId, kind: /** @type {string} */ (result.kind) });
         }

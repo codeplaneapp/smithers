@@ -6,6 +6,7 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { trackEvent } from "@smithers-orchestrator/observability/metrics";
 import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
 import { SmithersError } from "@smithers-orchestrator/errors";
+import { claimAndResumeRun } from "@smithers-orchestrator/server";
 import { resumeRunDetached } from "./resume-detached.js";
 /** @typedef {import("./RunAutoResumeSkipReason.ts").RunAutoResumeSkipReason} RunAutoResumeSkipReason */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
@@ -203,45 +204,48 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
             return "skipped";
         }
         const claimHeartbeatAtMs = options.deps.now();
-        const claimed = yield* options.adapter
-            .claimRunForResumeEffect({
-            runId: staleRun.runId,
-            expectedRuntimeOwnerId: staleRun.runtimeOwnerId ?? null,
-            expectedHeartbeatAtMs: staleRun.heartbeatAtMs ?? null,
-            staleBeforeMs,
-            claimOwnerId,
-            claimHeartbeatAtMs,
-        })
-            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to claim run ${staleRun.runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as(false))));
-        if (!claimed) {
-            yield* Effect.logDebug(`Skipping run ${staleRun.runId}: claim not acquired`);
-            return "skipped";
-        }
-        const spawnResult = yield* Effect.try({
-            try: () => options.deps.spawnResumeDetached(workflowPath, staleRun.runId, {
+        // Delegates the claim/resume/release-on-failure sequence to
+        // `@smithers-orchestrator/server`'s `claimAndResumeRun` — the SAME
+        // primitive a serverless `runResumeTick` uses — so there is exactly ONE
+        // implementation of "atomically claim a resumable run, then resume it,
+        // releasing the claim if the resume attempt itself fails" for both the
+        // long-running CLI supervisor and short-lived serverless ticks (mirrors
+        // how `apps/cli/src/scheduler.js` delegates to `runCronTick`).
+        let resumePid = null;
+        const claimAndResumeResult = yield* Effect.tryPromise({
+            try: () => claimAndResumeRun(options.adapter, {
+                runId: staleRun.runId,
+                status: "running",
+                runtimeOwnerId: staleRun.runtimeOwnerId ?? null,
+                heartbeatAtMs: staleRun.heartbeatAtMs ?? null,
+                workflowPath: staleRun.workflowPath,
+            }, {
+                now: claimHeartbeatAtMs,
+                staleBeforeMs,
+                workerId: options.supervisorId,
                 claimOwnerId,
-                claimHeartbeatAtMs,
-                restoreRuntimeOwnerId: staleRun.runtimeOwnerId ?? null,
-                restoreHeartbeatAtMs: staleRun.heartbeatAtMs ?? null,
-            }),
+                resumeRun: async (job) => {
+                    resumePid = options.deps.spawnResumeDetached(workflowPath, job.runId, {
+                        claimOwnerId: job.claimOwnerId,
+                        claimHeartbeatAtMs: job.claimHeartbeatAtMs,
+                        restoreRuntimeOwnerId: job.restoreRuntimeOwnerId,
+                        restoreHeartbeatAtMs: job.restoreHeartbeatAtMs,
+                    });
+                },
+            }, "stale-running"),
             catch: (cause) => toSmithersError(cause, `resume stale run ${staleRun.runId}`, {
                 code: "PROCESS_SPAWN_FAILED",
                 details: { runId: staleRun.runId, workflowPath },
             }),
-        }).pipe(Effect.either);
-        if (spawnResult._tag === "Left") {
-            yield* Effect.logWarning(`[supervisor] failed to resume run ${staleRun.runId}: ${spawnResult.left.message}`);
-            yield* options.adapter
-                .releaseRunResumeClaimEffect({
-                runId: staleRun.runId,
-                claimOwnerId,
-                restoreRuntimeOwnerId: staleRun.runtimeOwnerId ?? null,
-                restoreHeartbeatAtMs: staleRun.heartbeatAtMs ?? null,
-            })
-                .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to release claim for run ${staleRun.runId}: ${error instanceof Error ? error.message : String(error)}`)));
+        }).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to claim run ${staleRun.runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as({ resumed: false }))));
+        if (!claimAndResumeResult.resumed && !claimAndResumeResult.error) {
+            yield* Effect.logDebug(`Skipping run ${staleRun.runId}: claim not acquired`);
             return "skipped";
         }
-        const resumePid = spawnResult.right;
+        if (!claimAndResumeResult.resumed) {
+            yield* Effect.logWarning(`[supervisor] failed to resume run ${staleRun.runId}: ${claimAndResumeResult.error}`);
+            return "skipped";
+        }
         yield* Effect.logInfo(`Resuming stale run ${staleRun.runId} (last heartbeat ${staleDurationMs}ms ago)${resumePid ? ` with pid ${resumePid}` : ""}`);
         yield* emitEventEffect(options.adapter, {
             type: "RunAutoResumed",
@@ -284,47 +288,43 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
         }
         const claimOwnerId = `supervisor:${options.supervisorId}`;
         const claimHeartbeatAtMs = options.deps.now();
-        const claimed = yield* options.adapter
-            .claimRunForResumeEffect({
-            runId: run.runId,
-            expectedStatus: "waiting-timer",
-            expectedRuntimeOwnerId: run.runtimeOwnerId ?? null,
-            expectedHeartbeatAtMs: run.heartbeatAtMs ?? null,
-            staleBeforeMs,
-            claimOwnerId,
-            claimHeartbeatAtMs,
-            requireStale: true,
-        })
-            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to claim timer run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as(false))));
-        if (!claimed) {
-            yield* Effect.logDebug(`Skipping timer run ${run.runId}: claim not acquired`);
-            return "skipped";
-        }
-        const spawnResult = yield* Effect.try({
-            try: () => options.deps.spawnResumeDetached(workflowPath, run.runId, {
+        // Delegates to `@smithers-orchestrator/server`'s `claimAndResumeRun`; see
+        // the comment in `processCandidateEffect` above.
+        let resumePid = null;
+        const claimAndResumeResult = yield* Effect.tryPromise({
+            try: () => claimAndResumeRun(options.adapter, {
+                runId: run.runId,
+                status: "waiting-timer",
+                runtimeOwnerId: run.runtimeOwnerId ?? null,
+                heartbeatAtMs: run.heartbeatAtMs ?? null,
+                workflowPath: run.workflowPath,
+            }, {
+                now: claimHeartbeatAtMs,
+                staleBeforeMs,
+                workerId: options.supervisorId,
                 claimOwnerId,
-                claimHeartbeatAtMs,
-                restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
-                restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
-            }),
+                resumeRun: async (job) => {
+                    resumePid = options.deps.spawnResumeDetached(workflowPath, job.runId, {
+                        claimOwnerId: job.claimOwnerId,
+                        claimHeartbeatAtMs: job.claimHeartbeatAtMs,
+                        restoreRuntimeOwnerId: job.restoreRuntimeOwnerId,
+                        restoreHeartbeatAtMs: job.restoreHeartbeatAtMs,
+                    });
+                },
+            }, "waiting-timer"),
             catch: (cause) => toSmithersError(cause, `resume timer run ${run.runId}`, {
                 code: "PROCESS_SPAWN_FAILED",
                 details: { runId: run.runId, workflowPath },
             }),
-        }).pipe(Effect.either);
-        if (spawnResult._tag === "Left") {
-            yield* Effect.logWarning(`[supervisor] failed to resume timer run ${run.runId}: ${spawnResult.left.message}`);
-            yield* options.adapter
-                .releaseRunResumeClaimEffect({
-                runId: run.runId,
-                claimOwnerId,
-                restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
-                restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
-            })
-                .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to release timer claim for run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`)));
+        }).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to claim timer run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as({ resumed: false }))));
+        if (!claimAndResumeResult.resumed && !claimAndResumeResult.error) {
+            yield* Effect.logDebug(`Skipping timer run ${run.runId}: claim not acquired`);
             return "skipped";
         }
-        const resumePid = spawnResult.right;
+        if (!claimAndResumeResult.resumed) {
+            yield* Effect.logWarning(`[supervisor] failed to resume timer run ${run.runId}: ${claimAndResumeResult.error}`);
+            return "skipped";
+        }
         yield* Effect.logInfo(`Resuming timer-blocked run ${run.runId}${resumePid ? ` with pid ${resumePid}` : ""}`);
         yield* emitEventEffect(options.adapter, {
             type: "RunAutoResumed",
@@ -373,47 +373,43 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
         }
         const claimOwnerId = `supervisor:${options.supervisorId}`;
         const claimHeartbeatAtMs = options.deps.now();
-        const claimed = yield* options.adapter
-            .claimRunForResumeEffect({
-            runId: run.runId,
-            expectedStatus: "waiting-event",
-            expectedRuntimeOwnerId: run.runtimeOwnerId ?? null,
-            expectedHeartbeatAtMs: run.heartbeatAtMs ?? null,
-            staleBeforeMs,
-            claimOwnerId,
-            claimHeartbeatAtMs,
-            requireStale: true,
-        })
-            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to claim approval-decided run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as(false))));
-        if (!claimed) {
-            yield* Effect.logDebug(`Skipping approval-decided run ${run.runId}: claim not acquired`);
-            return "skipped";
-        }
-        const spawnResult = yield* Effect.try({
-            try: () => options.deps.spawnResumeDetached(workflowPath, run.runId, {
+        // Delegates to `@smithers-orchestrator/server`'s `claimAndResumeRun`; see
+        // the comment in `processCandidateEffect` above.
+        let resumePid = null;
+        const claimAndResumeResult = yield* Effect.tryPromise({
+            try: () => claimAndResumeRun(options.adapter, {
+                runId: run.runId,
+                status: "waiting-event",
+                runtimeOwnerId: run.runtimeOwnerId ?? null,
+                heartbeatAtMs: run.heartbeatAtMs ?? null,
+                workflowPath: run.workflowPath,
+            }, {
+                now: claimHeartbeatAtMs,
+                staleBeforeMs,
+                workerId: options.supervisorId,
                 claimOwnerId,
-                claimHeartbeatAtMs,
-                restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
-                restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
-            }),
+                resumeRun: async (job) => {
+                    resumePid = options.deps.spawnResumeDetached(workflowPath, job.runId, {
+                        claimOwnerId: job.claimOwnerId,
+                        claimHeartbeatAtMs: job.claimHeartbeatAtMs,
+                        restoreRuntimeOwnerId: job.restoreRuntimeOwnerId,
+                        restoreHeartbeatAtMs: job.restoreHeartbeatAtMs,
+                    });
+                },
+            }, "approval-decided-resume-required"),
             catch: (cause) => toSmithersError(cause, `resume approval-decided run ${run.runId}`, {
                 code: "PROCESS_SPAWN_FAILED",
                 details: { runId: run.runId, workflowPath },
             }),
-        }).pipe(Effect.either);
-        if (spawnResult._tag === "Left") {
-            yield* Effect.logWarning(`[supervisor] failed to resume approval-decided run ${run.runId}: ${spawnResult.left.message}`);
-            yield* options.adapter
-                .releaseRunResumeClaimEffect({
-                runId: run.runId,
-                claimOwnerId,
-                restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
-                restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
-            })
-                .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to release approval-decided claim for run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`)));
+        }).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to claim approval-decided run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as({ resumed: false }))));
+        if (!claimAndResumeResult.resumed && !claimAndResumeResult.error) {
+            yield* Effect.logDebug(`Skipping approval-decided run ${run.runId}: claim not acquired`);
             return "skipped";
         }
-        const resumePid = spawnResult.right;
+        if (!claimAndResumeResult.resumed) {
+            yield* Effect.logWarning(`[supervisor] failed to resume approval-decided run ${run.runId}: ${claimAndResumeResult.error}`);
+            return "skipped";
+        }
         yield* Effect.logInfo(`Resuming approval-decided run ${run.runId}${resumePid ? ` with pid ${resumePid}` : ""}`);
         yield* emitEventEffect(options.adapter, {
             type: "RunAutoResumed",
