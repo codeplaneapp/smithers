@@ -81,7 +81,7 @@ Open a run's custom browser UI with:
 bunx smithers-orchestrator ui RUN_ID
 ```
 
-If no Gateway is reachable on the default local port, `bunx smithers-orchestrator ui` starts `smithers gateway` automatically and then opens the UI. `smithers gateway` serves the workspace DB and auto-mounts `.smithers/ui/<workflow>.tsx` files for matching discovered workflow ids. Use `bunx smithers-orchestrator ui RUN_ID --no-autostart` to fail fast when no Gateway is already running, or `--gateway <url>` for a remote Gateway.
+`bunx smithers-orchestrator ui` finds the workspace's gateway through its runtime state file (written under the OS temp dir when `smithers gateway` starts) and verifies the answering process serves this workspace before using it, so it never attaches to another project's gateway. When none is running it starts `smithers gateway` automatically (one per workspace: concurrent autostarts race on a lock and share the winner) and then opens the UI. `smithers gateway` serves the workspace DB and auto-mounts `.smithers/ui/<workflow>.tsx` files for matching discovered workflow ids. Manage the daemon with `smithers gateway status` and `smithers gateway stop`. Use `bunx smithers-orchestrator ui RUN_ID --no-autostart` to fail fast when no Gateway is already running, or `--gateway <url>` for a remote Gateway.
 
 ## Troubleshooting
 
@@ -251,11 +251,16 @@ commands[82]:
       stale-threshold,t,string,30s,Heartbeat staleness threshold before resume
       max-concurrent,c,number,3,Max runs resumed per poll
   - name: gateway
-    purpose: Serve the multi-run Gateway RPC/WS control plane for the workspace DB; unlike up --serve, this is not tied to one run
-    flags[3]{name,short,type,default,desc}:
+    purpose: Serve the multi-run Gateway RPC/WS control plane for the workspace DB (one singleton per workspace; a second start refuses); unlike up --serve, this is not tied to one run
+    args[1]{name,type,required,desc}:
+      action,enum,false,Manage the running singleton instead of serving: status | stop
+    flags[6]{name,short,type,default,desc}:
       host,H,string,127.0.0.1,Gateway bind address
-      port,p,number,7331,Gateway port
+      port,p,number,7331,Preferred port (falls back to an ephemeral port when taken; clients discover the real port from the runtime state file)
       backend,,enum,,Workspace storage backend (sqlite|pglite|postgres)
+      auth-token,,string,,Bearer token for HTTP/WS auth (or SMITHERS_API_KEY); required for a non-loopback host
+      mint-token,,boolean,false,Mint a random bearer; require it on every request and record it only in the 0600 runtime state file
+      insecure,,boolean,false,Allow a non-loopback host with NO auth (dangerous)
   - name: monitor
     purpose: Watch a single run, diagnose a stall or failure, and optionally apply the smallest safe self-fix behind an approval gate
     args[1]{name,type,required,desc}:
