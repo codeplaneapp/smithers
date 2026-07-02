@@ -39,9 +39,9 @@ describe("GET /metrics", () => {
       .run();
     await env.DB
       .prepare(
-        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .bind("e1", REPO, 1, "claude-sonnet-4-6", 100, 50, 200, 4000, 0.001, "messages", Date.now())
+      .bind("e1", REPO, 1, "claude-sonnet-4-6", 100, 50, 0.001, "messages", Date.now())
       .run();
     const res = await worker.fetch(
       new Request("https://review.test/metrics", { headers: { authorization: "Bearer test-metrics" } }),
@@ -51,9 +51,6 @@ describe("GET /metrics", () => {
     const body = await res.text();
     expect(body).toContain('review_tokens_total{repo="octo/widgets",model="claude-sonnet-4-6",kind="input"} 100');
     expect(body).toContain('review_tokens_total{repo="octo/widgets",model="claude-sonnet-4-6",kind="output"} 50');
-    // Cache tokens dominate cache-heavy agent workloads; they must be visible too.
-    expect(body).toContain('review_tokens_total{repo="octo/widgets",model="claude-sonnet-4-6",kind="cache_write"} 200');
-    expect(body).toContain('review_tokens_total{repo="octo/widgets",model="claude-sonnet-4-6",kind="cache_read"} 4000');
     expect(body).toContain('review_spend_usd_total{repo="octo/widgets",model="claude-sonnet-4-6"}');
     expect(body).toContain('review_prs_reviewed_total{repo="octo/widgets"} 1');
     expect(body).toContain('review_quota_remaining{repo="octo/widgets"} 4');

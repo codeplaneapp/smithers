@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildQuizPrompt } from "../../src/quiz/buildQuizPrompt";
-import { fenceFor } from "../../src/text/fenceFor";
-import { trimDiff } from "../../src/text/trimDiff";
+import { fenceFor, trimDiff } from "../../src/quiz/promptDiff";
 
 const files = [
   {
@@ -109,7 +108,7 @@ describe("buildQuizPrompt", () => {
   });
 });
 
-describe("fenceFor and trimDiff", () => {
+describe("promptDiff helpers", () => {
   test("trimDiff keeps exactly 20,000 chars untouched", () => {
     const diff = "x".repeat(20_000);
     expect(trimDiff(diff)).toBe(diff);

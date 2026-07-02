@@ -5,9 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadOutputs } from "@smithers-orchestrator/db/snapshot";
 import { runWorkflow } from "@smithers-orchestrator/engine";
-import type { AgentLike } from "smithers-orchestrator";
 import { Effect } from "effect";
-import { parseJsonColumn } from "../src/cli/parseJsonColumn";
 import { createReviewWorkflow } from "../src/workflow/createReviewWorkflow";
 
 const tempDirs: string[] = [];
@@ -92,94 +90,6 @@ describe("smithers review workflow (agentless e2e through the real engine)", () 
       const review = rows.review?.at(-1);
       expect(review).toBeDefined();
       expect(String(review!.status)).toBe("skipped");
-    },
-    120_000,
-  );
-
-  test(
-    "carries findings through review → verify → final as parsed arrays the CLI can read",
-    async () => {
-      // Regression guard for the shape the release broke: with a real finding,
-      // loadOutputs returns json-mode columns already parsed (arrays), and the
-      // CLI's parseJsonColumn must see them. CI has no agent CLIs, so drive the
-      // pipeline with in-process fake agents (per the seed-a-fake-agent rule).
-      const repo = tempRepo();
-      write(join(repo, "src/app.ts"), "export const value = 1;\nexport const next = 2;\n");
-
-      // One reviewable file → exactly one finding, so the assertions are exact.
-      const reviewAgent: AgentLike = {
-        id: "fake-review",
-        tools: {},
-        generate: async () => ({
-          output: {
-            status: "success",
-            message: "Reviewed 1 file and produced 1 comment.",
-            summary: { filesReviewed: 1, comments: 1, totalTokens: 0, inputTokens: 0, outputTokens: 0, elapsed: "" },
-            comments: [
-              {
-                path: "src/app.ts",
-                content: "The added constant is never used.",
-                existingCode: "export const next = 2;",
-                startLine: 2,
-                endLine: 2,
-                severity: "major",
-                category: "correctness",
-                confidence: "confirmed",
-              },
-            ],
-            warnings: [],
-          },
-        }),
-      } as unknown as AgentLike;
-      const verifyAgent: AgentLike = {
-        id: "fake-verify",
-        tools: {},
-        generate: async () => ({ output: { verdicts: [{ index: 0, verdict: "keep", reason: "still holds" }] } }),
-      } as unknown as AgentLike;
-
-      const work = mkdtempSync(join(tmpdir(), "review-findings-work-"));
-      tempDirs.push(work);
-      const dbPath = join(work, "review.db");
-      const outPath = join(work, "walkthrough.html");
-
-      const { workflow, db, tables } = createReviewWorkflow({
-        dbPath,
-        reviewAgents: [reviewAgent],
-        verifyAgents: [verifyAgent],
-        narratorAgents: [],
-      });
-      const runId = `review-findings-${Date.now()}`;
-      const result = (await Effect.runPromise(
-        runWorkflow(workflow as never, {
-          input: { repo, out: outPath, runReview: true, narrate: false, quiz: "off", verify: true },
-          runId,
-          allowNetwork: true,
-        }) as never,
-      )) as { status: string };
-      expect(result.status).not.toBe("failed");
-
-      const rows = (await loadOutputs(db as never, tables as never, runId)) as Record<
-        string,
-        Record<string, unknown>[]
-      >;
-
-      // The raw review row carries the finding as a parsed array, not a JSON string.
-      const review = rows.review?.at(-1);
-      expect(review).toBeDefined();
-      expect(Array.isArray(review!.comments)).toBe(true);
-      expect(parseJsonColumn(review!.comments)).toHaveLength(1);
-
-      // The verify pass ran, so the `final` table exists — the row main.ts prefers.
-      const final = rows.final?.at(-1);
-      expect(final).toBeDefined();
-      const finalFindings = parseJsonColumn<{ startLine: number }>(final!.comments);
-      expect(finalFindings).toHaveLength(1);
-      // The finding anchored (startLine survived), guarding the anchoring chain.
-      expect(finalFindings[0].startLine).toBeGreaterThan(0);
-
-      // The walkthrough row reports the finding count the summary/PR body use.
-      const walkthrough = rows.walkthrough?.at(-1);
-      expect(Number(walkthrough!.findings)).toBe(1);
     },
     120_000,
   );

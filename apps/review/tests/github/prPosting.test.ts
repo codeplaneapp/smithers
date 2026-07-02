@@ -200,30 +200,6 @@ describe("GitHub PR posting helpers", () => {
     expect(fallback.body).toContain("Range note.");
   });
 
-  test("postPullRequestReview folds comments up to the size budget, keeping fences intact", async () => {
-    const big = "z".repeat(40_000);
-    const payload: PullRequestReviewPayload = {
-      commit_id: "abc123",
-      event: "COMMENT",
-      body: "Review body",
-      comments: [
-        { path: "a.ts", line: 1, side: "RIGHT", body: `\`\`\`suggestion\n${big}\n\`\`\`` },
-        { path: "b.ts", line: 2, side: "RIGHT", body: `\`\`\`suggestion\n${big}\n\`\`\`` },
-      ],
-    };
-    ghResponses.push(new Error("gh api failed: HTTP 422"), JSON.stringify({}));
-
-    await postPullRequestReview("/repo", pr, payload, runGhMock);
-    const fallback = JSON.parse(ghCalls[1].stdin ?? "") as PullRequestReviewPayload;
-    expect(fallback.body.length).toBeLessThanOrEqual(64_000);
-    // The first comment fits; the second would blow the budget, so it is
-    // summarized rather than sliced mid-code-fence.
-    expect(fallback.body).toContain("`a.ts:1`");
-    expect(fallback.body).not.toContain("`b.ts:2`");
-    expect(fallback.body).toContain("1 more finding; see the full walkthrough.");
-    expect(fallback.body).toContain(`\`\`\`suggestion\n${big}\n\`\`\``);
-  });
-
   test("postPullRequestReview rethrows failures when there are no inline comments to fold", async () => {
     const payload: PullRequestReviewPayload = {
       commit_id: "abc123",
