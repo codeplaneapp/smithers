@@ -175,6 +175,12 @@
               "workflows/monitor",
               "workflows/eval-author"
             ]
+          },
+          {
+            "group": "System",
+            "pages": [
+              "workflows/init"
+            ]
           }
         ]
       },
