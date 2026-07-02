@@ -50,7 +50,6 @@ describe("RunOptions public type", () => {
           target: "ESNext",
           module: "ESNext",
           moduleResolution: "bundler",
-          baseUrl: ".",
           paths: {
             "@smithers-orchestrator/driver": [
               resolve(REPO_ROOT, "packages/driver/src/index.d.ts"),
