@@ -44,7 +44,7 @@ leave it `auto` to let the workflow decide.
 10. **tickets**: break the work into ordered tickets.
 11. **orchestration**: design and scaffold a real implementation workflow (plus an optional POC when `poc` is set).
 12. **validate**: verify, review, fix blocking issues, and smoke-test the generated workflow before launch.
-13. **launch + monitor**: clear `gate:launch`, run the implementation workflow, and watch it in a monitor loop that polls, reports, and triages.
+13. **launch + monitor**: clear `gate:launch`, run the implementation workflow, and watch it in a monitor loop that polls, reports, and triages. If the monitor loop ends without the build finishing healthy, the workflow pauses at `gate:incomplete` so a human can decide whether to proceed anyway or report the build as incomplete (denying the gate routes to an incomplete-build report instead of continuing).
 14. **review**: independent reviews from multiple agents, synthesized into one verdict.
 15. **polish**: a scan, fix, and verify pass over the result.
 16. **deliver**: gather an evidence report and hand off at `gate:delivery`.

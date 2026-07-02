@@ -161,10 +161,12 @@ function verifyEnv(): Record<string, string> {
 // Agents — Claude Fable plans/reviews, Codex implements (Claude fallback)
 // ---------------------------------------------------------------------------
 
-// Model ids verified live against this account's claude CLI (claude-sonnet-4-7
-// 404s: "may not exist or you may not have access").
+// Model ids verified live against this account's claude CLI. An older
+// unreleased sonnet alias 404s with "may not exist or you may not have
+// access"; claude-sonnet-4-6 and claude-sonnet-5 both work — using
+// claude-sonnet-5.
 const fable = new ClaudeCodeAgent({ model: "claude-fable-5", cwd: REPO });
-const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: REPO });
+const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: REPO });
 const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8", cwd: REPO });
 const codexImpl = new CodexAgent({ model: CODEX_MODEL, cwd: REPO, skipGitRepoCheck: true });
 

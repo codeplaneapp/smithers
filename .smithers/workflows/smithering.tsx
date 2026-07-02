@@ -153,24 +153,41 @@ const IMPL_WORKFLOW = ".smithers/workflows/smithering-impl.tsx";
 
 // ─── Model roster (the "use fable" part) ─────────────────────────────────────
 const FABLE_MODEL = "claude-fable-5";
-const FAST_MODEL = "claude-sonnet-4-7";
+const FABLE_FALLBACK_MODEL = "claude-opus-4-8";
+const FAST_MODEL = "claude-sonnet-5";
 const CODEX_MODEL = "gpt-5.5";
 
 // Orchestrator-grade judgment. Default yolo (skip permission prompts) is intentional:
 // this workflow runs unattended; blast radius is bounded by gates and the
 // no-merge-to-base-branch rule instead.
-const fable = new ClaudeCodeAgent({
-  model: FABLE_MODEL,
-  cwd: process.cwd(),
-  timeoutMs: 30 * 60_000,
-});
+// Fallback array: claude-fable-5 primary, claude-opus-4-8 fallback — degrades
+// gracefully instead of hard-failing the workflow if fable is unavailable.
+const fable = [
+  new ClaudeCodeAgent({
+    model: FABLE_MODEL,
+    cwd: process.cwd(),
+    timeoutMs: 30 * 60_000,
+  }),
+  new ClaudeCodeAgent({
+    model: FABLE_FALLBACK_MODEL,
+    cwd: process.cwd(),
+    timeoutMs: 30 * 60_000,
+  }),
+];
 
 // Same brain, builder duties: writes many files, runs commands, longer leash.
-const fableBuilder = new ClaudeCodeAgent({
-  model: FABLE_MODEL,
-  cwd: process.cwd(),
-  timeoutMs: 60 * 60_000,
-});
+const fableBuilder = [
+  new ClaudeCodeAgent({
+    model: FABLE_MODEL,
+    cwd: process.cwd(),
+    timeoutMs: 60 * 60_000,
+  }),
+  new ClaudeCodeAgent({
+    model: FABLE_FALLBACK_MODEL,
+    cwd: process.cwd(),
+    timeoutMs: 60 * 60_000,
+  }),
+];
 
 // Cross-vendor adversarial reviewer ("codex xhigh"). Read-only sandbox: it judges, it
 // does not touch the tree.

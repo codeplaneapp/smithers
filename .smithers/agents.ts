@@ -28,15 +28,12 @@ export const providers = {
 // fatal (the engine fails the run instead of failing over), so an expired
 // kimi OAuth in a failover chain kills runs. Re-add deliberately if needed.
 //
-// providers.claude (claude-fable-5) is ALSO kept out of the pools as of
-// 2026-06-18: this subscription has no Fable Mythos access, so every call
-// returns "Claude Fable 5 is currently unavailable" tagged error:"rate_limit".
-// Smithers treats rate_limit as transient/retryable (see #324), so leaving it
-// in the chain burns task retries hammering a dead primary before failover and
-// spends real rate budget. Lead with claudeSonnet; re-add providers.claude once
-// Fable 5 access lands.
+// providers.claude (claude-fable-5) works on this subscription as of
+// 2026-07-01 (verified via `claude --model claude-fable-5 -p`) and has been
+// re-added to the "smart" pools as primary, with claudeOpus (claude-opus-4-8)
+// as the in-pool fallback.
 export const agents = {
   cheapFast: [providers.claudeSonnet, providers.codex],
-  smart: [providers.claudeSonnet, providers.codex, providers.codex1, providers.antigravity1],
-  smartTool: [providers.claudeSonnet, providers.codex, providers.codex1, providers.antigravity1],
+  smart: [providers.claude, providers.claudeOpus, providers.codex, providers.codex1, providers.antigravity1],
+  smartTool: [providers.claude, providers.claudeOpus, providers.codex, providers.codex1, providers.antigravity1],
 } as const satisfies Record<string, AgentLike[]>;
