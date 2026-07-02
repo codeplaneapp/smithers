@@ -13,6 +13,7 @@ export const TELEGRAM_SERVICE = "telegram";
 export const TELEGRAM_MESSAGE_EVENT = integrationEventName(TELEGRAM_SERVICE, "message");
 export const TELEGRAM_EDITED_MESSAGE_EVENT = integrationEventName(TELEGRAM_SERVICE, "edited_message");
 export const TELEGRAM_CALLBACK_QUERY_EVENT = integrationEventName(TELEGRAM_SERVICE, "callback_query");
+export const TELEGRAM_WEB_APP_DATA_EVENT = integrationEventName(TELEGRAM_SERVICE, "web_app_data");
 
 const DEFAULT_ALLOWED_UPDATES = ["message", "edited_message", "callback_query"];
 const DEFAULT_POLL_TIMEOUT_SECONDS = 25;
@@ -86,6 +87,33 @@ export function telegramUpdateToEvents(sourceId, update, receivedAtMs) {
     };
     if (update.message) {
         pushMessageEvents(TELEGRAM_MESSAGE_EVENT, update.message);
+        // A reply-keyboard Mini App's Telegram.WebApp.sendData arrives as a
+        // normal message carrying a web_app_data field. Emit an extra,
+        // separately-deduped event so a run can wait specifically for
+        // structured Mini App data (payload = the same Message).
+        if (update.message.web_app_data) {
+            const chatId = update.message?.chat?.id;
+            if (chatId != null) {
+                events.push({
+                    source: sourceId,
+                    eventName: TELEGRAM_WEB_APP_DATA_EVENT,
+                    correlationId: telegramChatCorrelationId(chatId),
+                    payload: update.message,
+                    dedupeKey: `update:${updateId}:webappdata`,
+                    receivedAtMs,
+                });
+                if (update.message.is_topic_message && update.message.message_thread_id != null) {
+                    events.push({
+                        source: sourceId,
+                        eventName: TELEGRAM_WEB_APP_DATA_EVENT,
+                        correlationId: telegramThreadCorrelationId(chatId, update.message.message_thread_id),
+                        payload: update.message,
+                        dedupeKey: `update:${updateId}:webappdata:thread`,
+                        receivedAtMs,
+                    });
+                }
+            }
+        }
     }
     else if (update.edited_message) {
         pushMessageEvents(TELEGRAM_EDITED_MESSAGE_EVENT, update.edited_message);

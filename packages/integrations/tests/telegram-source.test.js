@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { Chunk, Effect, Schedule, Stream } from "effect";
 import { makeDbCursorStore } from "../src/core/CursorStore.js";
-import { makeTelegramSource, TELEGRAM_CALLBACK_QUERY_EVENT, TELEGRAM_EDITED_MESSAGE_EVENT, TELEGRAM_MESSAGE_EVENT, telegramUpdateToEvents } from "../src/telegram/TelegramSource.js";
+import { makeTelegramSource, TELEGRAM_CALLBACK_QUERY_EVENT, TELEGRAM_EDITED_MESSAGE_EVENT, TELEGRAM_MESSAGE_EVENT, TELEGRAM_WEB_APP_DATA_EVENT, telegramUpdateToEvents } from "../src/telegram/TelegramSource.js";
 import { createTestAdapter } from "./helpers.js";
 import { startTelegramFixture } from "./telegram-fixture.js";
 
@@ -65,6 +65,22 @@ describe("telegramUpdateToEvents", () => {
             dedupeKey: "update:13",
         });
         expect(/** @type {any} */ (callback[0].payload).data).toBe("approve");
+    });
+    test("a message carrying web_app_data also emits a web_app_data event", () => {
+        const events = telegramUpdateToEvents("telegram", {
+            update_id: 14,
+            message: {
+                message_id: 88,
+                date: Math.floor(Date.now() / 1000),
+                chat: { id: 42, type: "private" },
+                web_app_data: { data: '{"decision":"approve"}', button_text: "Review" },
+            },
+        }, 123);
+        // Both the generic message event and the dedicated web_app_data event.
+        expect(events.map((event) => event.eventName)).toEqual([TELEGRAM_MESSAGE_EVENT, TELEGRAM_WEB_APP_DATA_EVENT]);
+        const webAppEvent = events.find((event) => event.eventName === TELEGRAM_WEB_APP_DATA_EVENT);
+        expect(webAppEvent).toMatchObject({ correlationId: "chat:42", dedupeKey: "update:14:webappdata" });
+        expect(/** @type {any} */ (webAppEvent?.payload).web_app_data.data).toBe('{"decision":"approve"}');
     });
 });
 

@@ -307,7 +307,12 @@ export function makeTelegramClient(config) {
         ...(options.text ? { text: options.text } : {}),
         ...(options.showAlert ? { show_alert: true } : {}),
     });
-    return { call, sendMessageSmart, editMessageSmart, sendDocument, answerCallbackQuery };
+    /** @type {TelegramClientService["answerWebAppQuery"]} */
+    const answerWebAppQuery = (webAppQueryId, result) => call("answerWebAppQuery", {
+        web_app_query_id: webAppQueryId,
+        result,
+    });
+    return { call, sendMessageSmart, editMessageSmart, sendDocument, answerCallbackQuery, answerWebAppQuery };
 }
 
 /**
