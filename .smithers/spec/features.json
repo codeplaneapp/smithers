@@ -1,0 +1,247 @@
+[
+  {
+    "id": "workflow-authoring",
+    "title": "JSX workflow authoring",
+    "summary": "Author durable workflows as JSX/TSX files (Workflow, Sequence, Parallel, Loop, Task, Approval, Branch, Worktree) with zod-typed outputs via createSmithers. Seeded init pack ships editable workflows under .smithers/workflows.",
+    "status": "fixed",
+    "priority": "p0",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Author workflows",
+    "userValue": "Write a multi-agent plan as a small typed TSX file and run it durably.",
+    "capabilities": [
+      { "title": "Typed outputs", "detail": "createSmithers binds zod/v4 schemas to task outputs and deps." },
+      { "title": "Control flow", "detail": "Sequence, Parallel, Loop with until/maxIterations, Branch, conditional rendering." },
+      { "title": "Compute nodes", "detail": "Function children run real shell/git work inside the durable graph." }
+    ],
+    "tests": ["pnpm -C packages/smithers test", "pnpm -C packages/engine test", "pnpm -C e2e test"],
+    "missing": []
+  },
+  {
+    "id": "cli",
+    "title": "smithers CLI",
+    "summary": "The smithers bin (apps/cli): init, workflow list/run, up, ps, inspect, output, monitor, migrate, gateway, ui, agent management, MCP server. Some read paths have had backend-coupling bugs (sqlite-only reads, camelCase output flags).",
+    "status": "partial",
+    "priority": "p0",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Run & observe",
+    "userValue": "Drive every workflow, run, and agent from one command-line tool.",
+    "capabilities": [
+      { "title": "Run lifecycle", "detail": "workflow run, up, ps, inspect, output, retry-task, resume." },
+      { "title": "Init pack", "detail": "smithers init seeds workflows, skills, agents, and the durable init system workflow." }
+    ],
+    "tests": ["pnpm -C apps/cli test", "pnpm -C e2e test"],
+    "missing": [
+      "CLI read commands have historically been sqlite-coupled; keep pglite/postgres parity covered by e2e for every read command"
+    ]
+  },
+  {
+    "id": "durable-engine",
+    "title": "Durable engine, scheduler, and driver",
+    "summary": "The core control plane: renders the workflow graph, schedules tasks with retries/timeouts/heartbeats, persists every decision to the store, and survives process death. Two-path caveat: decisions live in WorkflowDriver/makeWorkflowSession.decide(), not the legacy engine block.",
+    "status": "fixed",
+    "priority": "p0",
+    "owner": "smithers-maintainers",
+    "tier": "platform",
+    "group": "Run & observe",
+    "userValue": "Long agent runs keep going through crashes, rate limits, and restarts.",
+    "capabilities": [
+      { "title": "Retries & timeouts", "detail": "Per-task retries, timeoutMs, heartbeatTimeoutMs." },
+      { "title": "Deadlock detection", "detail": "DEPENDENCY_DEADLOCK instead of silent hangs on bad deps/needs keys." }
+    ],
+    "tests": ["pnpm -C packages/engine test", "pnpm -C packages/scheduler test", "pnpm -C packages/driver test", "pnpm -C e2e test:faults"],
+    "missing": []
+  },
+  {
+    "id": "agent-adapters",
+    "title": "Agent adapters",
+    "summary": "Adapters for Claude Code, Codex, OpenCode, Pi, Kimi, Amp, and Antigravity CLIs with account providers, pools, and failover. Kimi auth-setup failures are fatal to a run instead of failing over, so kimi stays out of default pools.",
+    "status": "partial",
+    "priority": "p0",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Author workflows",
+    "userValue": "Mix the best model for each step: plan with one agent, implement with another.",
+    "capabilities": [
+      { "title": "Provider pools", "detail": "planning/review/implement pools with ordered failover in .smithers/agents.ts." },
+      { "title": "Accounts", "detail": "smithers agent add|list|remove manages per-account configDirs." }
+    ],
+    "tests": ["pnpm -C packages/agents test"],
+    "missing": [
+      "Kimi auth-setup error should fail over to the next pool agent instead of failing the run"
+    ]
+  },
+  {
+    "id": "gateway-server",
+    "title": "Gateway and server",
+    "summary": "HTTP/WS gateway (packages/server, packages/gateway-client) exposing runs, live events, PTY, approvals, and workflow launch to UIs and remote clients, including shared-DB run attribution and serverless resume/cron tick endpoints.",
+    "status": "partial",
+    "priority": "p0",
+    "owner": "smithers-maintainers",
+    "tier": "platform",
+    "group": "Platform & delivery",
+    "userValue": "Watch and control runs from any UI or remote client over one API.",
+    "capabilities": [
+      { "title": "Live events", "detail": "WebSocket run events power live UIs, including detached runs." },
+      { "title": "Serverless tick", "detail": "Resume/cron tick plus run-lease claims for serverless deployment." }
+    ],
+    "tests": ["pnpm -C packages/server test"],
+    "missing": [
+      "Serverless resume/cron tick and run-lease claims are new; add end-to-end proof beyond unit tests"
+    ]
+  },
+  {
+    "id": "workflow-uis",
+    "title": "Custom workflow UIs (smithers ui)",
+    "summary": "Per-workflow custom UIs under .smithers/ui/*.tsx rendered through gateway-react and components packages, served by the smithers ui command with real-browser e2e harness support.",
+    "status": "fixed",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Run & observe",
+    "userValue": "Give each workflow its own live dashboard without building a web app.",
+    "capabilities": [
+      { "title": "Gateway hooks", "detail": "gateway-react hooks bind UI components to live run state." },
+      { "title": "Seeded UIs", "detail": "Init pack workflows ship pre-built UIs via generated ui sources." }
+    ],
+    "tests": ["pnpm -C packages/gateway-react test", "pnpm -C packages/components test"],
+    "missing": []
+  },
+  {
+    "id": "time-travel-replay",
+    "title": "Time travel and replay",
+    "summary": "Rewind, replay, fork, snapshot, and checkpoint-restore over persisted runs (packages/time-travel plus MCP tools). Core operations work; durability snapshots for agent worktrees are phased in behind a flag.",
+    "status": "partial",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Recover & replay",
+    "userValue": "Step back through a run, fork it, and try a different path without rerunning everything.",
+    "capabilities": [
+      { "title": "Rewind & fork", "detail": "rewind_run, fork_run, replay_run over the persisted event log." },
+      { "title": "Snapshots", "detail": "jj-based durability snapshots (phase 1) behind SMITHERS_DURABILITY_SNAPSHOTS." }
+    ],
+    "tests": ["pnpm -C packages/time-travel test"],
+    "missing": [
+      "Durability snapshots phase 2 (restore in test-only tool context) is not finished"
+    ]
+  },
+  {
+    "id": "crash-recovery-resume",
+    "title": "Crash recovery and resume",
+    "summary": "Runs resume after process death, quota exhaustion, or machine restart; retry-task recovers hard-failed nodes without honoring spent attempts. Editing a running workflow file still hard-fails resume with RESUME_METADATA_MISMATCH by design.",
+    "status": "partial",
+    "priority": "p0",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Recover & replay",
+    "userValue": "Kill the process mid-run and pick up exactly where it stopped.",
+    "capabilities": [
+      { "title": "Resume", "detail": "smithers up/resume restores in-flight runs from the store." },
+      { "title": "Quota recovery", "detail": "retry-task recovers runs that exhausted retries on provider rate limits." }
+    ],
+    "tests": ["pnpm -C e2e test", "pnpm -C e2e test:faults"],
+    "missing": [
+      "Crash-recovery workflow (.smithers/workflows/crash-recovery.tsx) is new and unverified end to end"
+    ]
+  },
+  {
+    "id": "sandbox-vcs",
+    "title": "Sandboxes, worktrees, and VCS",
+    "summary": "Isolated per-task worktrees (jj-first with git fallback), Cloudflare sandbox backend, and VCS plumbing. Chained-worktree workflows can hit jj bookmark conflicts after git commits, forcing the git-worktree fallback.",
+    "status": "partial",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "platform",
+    "group": "Ship & review",
+    "userValue": "Agents work in isolated copies of the repo so parallel work cannot stomp your tree.",
+    "capabilities": [
+      { "title": "Worktree component", "detail": "<Worktree> gives each task an isolated checkout; agents must not pin cwd." },
+      { "title": "Cloud sandbox", "detail": "Cloudflare sandbox backend for remote execution." }
+    ],
+    "tests": ["pnpm -C packages/vcs test", "pnpm -C packages/sandbox test"],
+    "missing": [
+      "jj bookmark conflicts from git commits in chained worktrees need an automated repair path"
+    ]
+  },
+  {
+    "id": "open-code-review",
+    "title": "Open code review",
+    "summary": "The open-code-review workflow backed by apps/review: reviews PRs with real agents, posts findings, and has a metered cloud deployment. Cloud path is blocked on funding the API key.",
+    "status": "partial",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Ship & review",
+    "userValue": "Run an agent review pass over any PR, locally or as a hosted service.",
+    "tests": ["pnpm -C .smithers test", "pnpm -C apps/review test"],
+    "missing": [
+      "Cloud deployment blocked on a funded ANTHROPIC_API_KEY"
+    ]
+  },
+  {
+    "id": "memory",
+    "title": "Agent memory",
+    "summary": "The memory package persists agent memories across runs so workflows can carry durable lessons between sessions.",
+    "status": "partial",
+    "priority": "p2",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Author workflows",
+    "userValue": "Agents remember durable lessons from previous runs.",
+    "tests": ["pnpm -C packages/memory test"],
+    "missing": [
+      "No end-to-end proof that seeded workflows read and write memory across separate runs"
+    ]
+  },
+  {
+    "id": "observability",
+    "title": "Observability",
+    "summary": "Metrics, logging, tracing, and OTLP exporters in apps/observability, exported as smithers-orchestrator/observability. Integrations exist but exporter installation into real deployments is uneven.",
+    "status": "partial",
+    "priority": "p2",
+    "owner": "smithers-maintainers",
+    "tier": "platform",
+    "group": "Platform & delivery",
+    "userValue": "See what every run and agent did in your existing metrics and tracing stack.",
+    "tests": ["pnpm -C apps/observability test"],
+    "missing": [
+      "OTLP exporter is not installed in the reference deployments; prove a real export path"
+    ]
+  },
+  {
+    "id": "docs-pipeline",
+    "title": "Docs pipeline and llms bundles",
+    "summary": "Mintlify docs under docs/ with generated llms-*.txt bundles from a fixed manifest, gated in CI by check-docs and check-llms. Regenerate with pnpm docs:llms after editing docs.",
+    "status": "fixed",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "reference",
+    "group": "Platform & delivery",
+    "userValue": "Humans and agents read the same current docs, bundled for LLM consumption.",
+    "tests": ["pnpm test (check-docs, check-llms gates)"],
+    "missing": []
+  },
+  {
+    "id": "docs-driven-development",
+    "title": "Docs driven development",
+    "summary": "This workflow: a living product spec (.smithers/spec/features.json plus WYSIWYG content) with an audit, spec-update, triage, implement, review improvement loop and a five-tab custom UI.",
+    "status": "partial",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Author workflows",
+    "userValue": "Keep an honest, always-current spec of the product and let agents burn down its gaps.",
+    "capabilities": [
+      { "title": "Build gate", "detail": "bun .smithers/lib/ddd/build.ts validates features.json and regenerates derived docs and UI modules." },
+      { "title": "Improvement loop", "detail": "bootstrap, metaTicket, audit, spec-update, triage, materialize-tickets, work, cycle-review, round-summary." }
+    ],
+    "tests": [],
+    "missing": [
+      "Mermaid diagram preview in the Docs tab",
+      "Image upload target: Crepe ImageBlock needs an asset server; v1 wires ?assetBaseUrl passthrough but ships no asset server (uploads disabled when absent)",
+      "Only work:1 single-agent wave, matching multi's SQLite-fanout caution"
+    ]
+  }
+]
