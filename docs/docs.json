@@ -333,7 +333,8 @@
       {
         "group": "Contributing",
         "pages": [
-          "contributing/checks"
+          "contributing/checks",
+          "contributing/bug-reports"
         ]
       }
         ]

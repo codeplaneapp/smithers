@@ -51,6 +51,7 @@ import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
 import { buildAgentNextSteps } from "./agentNextSteps.js";
+import { runBugCommand } from "./runBugCommand.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
 import {
     assertEvalRunIdsAvailable,
@@ -1589,6 +1590,13 @@ const migrateOptions = z.object({
 });
 const monitorArgs = z.object({
     runId: z.string().optional().describe("Run ID to monitor (default: the most recent active run)"),
+});
+const bugOptions = z.object({
+    run: z.string().optional().describe("Attach this run's workflow name, status, error, and recent events to the report"),
+    title: z.string().optional().describe("Bug title (derived from the run's error when omitted)"),
+    body: z.string().optional().describe("Bug description body"),
+    json: z.boolean().default(false).describe("Print the filed bug id, URL, and payload as JSON"),
+    endpoint: z.string().optional().describe("Bug endpoint URL (default https://bug.smithers.sh/api/bugs; the SMITHERS_BUG_ENDPOINT env var takes precedence)"),
 });
 const monitorOptions = upOptions.extend({
     autofix: z.boolean().default(false).describe("Let the monitor apply the smallest safe self-fix and resume the run"),
@@ -3974,6 +3982,20 @@ const cli = Cli.create({
             return c.error(opts);
         };
         return runMonitorCommand(c, fail);
+    },
+})
+    // =========================================================================
+    // smithers bug
+    // =========================================================================
+    .command("bug", {
+    description: "File a smithers bug report to bug.smithers.sh; with --run it attaches the run's status, error, and last ~50 events (secrets scrubbed).",
+    options: bugOptions,
+    async run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        return runBugCommand(c, fail);
     },
 })
     // =========================================================================
@@ -7581,6 +7603,7 @@ async function main() {
             const results = wireExtraAgents(wiring);
             for (const r of results) {
                 if (r.registered) console.error(`✓ ${r.agent}: ${r.path}`);
+                else if (r.installedPlugin) console.error(`✓ ${r.agent}: ${r.path} (plugin installed)`);
                 else if (Array.isArray(r.linked) && r.linked.length) console.error(`✓ ${r.agent}: ${r.path} (${r.linked.length} skill${r.linked.length === 1 ? "" : "s"})`);
                 else if (r.reason && r.reason !== "not-detected" && r.reason !== "no-source-skills") console.error(`⚠ ${r.agent}: skipped (${r.reason})`);
             }
