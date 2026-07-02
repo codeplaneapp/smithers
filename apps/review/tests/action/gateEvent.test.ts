@@ -28,6 +28,7 @@ describe("gateEvent", () => {
       const d = gateEvent({
         eventName: "pull_request",
         payload: {
+          action: "opened",
           pull_request: {
             number: 1,
             draft: true,
@@ -44,6 +45,7 @@ describe("gateEvent", () => {
       const d = gateEvent({
         eventName: "pull_request",
         payload: {
+          action: "opened",
           pull_request: {
             number: 1,
             draft: false,
@@ -54,6 +56,43 @@ describe("gateEvent", () => {
       });
       expect(d.run).toBe(false);
       if (!d.run) expect(d.reason).toMatch(/fork/i);
+    });
+
+    test("skips actions that do not change the diff", () => {
+      const d = gateEvent({
+        eventName: "pull_request",
+        payload: {
+          action: "labeled",
+          pull_request: {
+            number: 3,
+            draft: false,
+            head: { sha: "abc", repo: { full_name: "octo/widgets" } },
+            base: { repo: { full_name: "octo/widgets" } },
+          },
+        },
+      });
+      expect(d.run).toBe(false);
+      if (!d.run) expect(d.reason).toMatch(/does not change the diff/);
+    });
+
+    test("runs ready_for_review on a non-draft same-repo PR", () => {
+      const d = gateEvent({
+        eventName: "pull_request",
+        payload: {
+          action: "ready_for_review",
+          pull_request: {
+            number: 5,
+            draft: false,
+            head: { sha: "def456", repo: { full_name: "octo/widgets" } },
+            base: { repo: { full_name: "octo/widgets" } },
+          },
+        },
+      });
+      expect(d.run).toBe(true);
+      if (d.run) {
+        expect(d.prNumber).toBe(5);
+        expect(d.headSha).toBe("def456");
+      }
     });
 
     test("rejects payload missing pull_request", () => {

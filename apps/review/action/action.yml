@@ -7,6 +7,10 @@ inputs:
     description: Base URL of the smithers review service.
     required: false
     default: https://review.jjhub.tech
+  quiz:
+    description: "Reviewer comprehension quiz mode: off, auto, or on. Empty uses the service/CLI default."
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -76,6 +80,7 @@ runs:
         GITHUB_EVENT_PATH: ${{ github.event_path }}
         GITHUB_WORKSPACE: ${{ github.workspace }}
         GH_TOKEN: ${{ github.token }}
+        SMITHERS_REVIEW_QUIZ: ${{ inputs.quiz }}
         # Optional BYO-subscription secrets, passed straight through from the
         # caller's job env. runAction picks the engine from whichever is set;
         # absent, inference goes through the metered proxy.

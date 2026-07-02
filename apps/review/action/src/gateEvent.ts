@@ -3,7 +3,10 @@
  * payload? Two events count:
  *
  *   pull_request   non-draft same-repo PR (forks have no secrets and a
- *                  read-only token; skip them rather than fail).
+ *                  read-only token; skip them rather than fail), and only for
+ *                  actions that change the reviewable diff: opened,
+ *                  synchronize, reopened, ready_for_review. Everything else
+ *                  (labeled, edited, assigned, …) skips with a reason.
  *   issue_comment  comment is on a PR, body starts with the magic phrase
  *                  "@smithers review", and the author's association is
  *                  OWNER / MEMBER / COLLABORATOR.
@@ -13,6 +16,7 @@
  */
 const MAGIC_PHRASE = "@smithers review";
 const COLLAB_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const REVIEWABLE_PR_ACTIONS = new Set(["opened", "synchronize", "reopened", "ready_for_review"]);
 
 export type GateInputEvent = "pull_request" | "issue_comment";
 
@@ -41,6 +45,13 @@ export function gateEvent({ eventName, payload }: GateInput): GateDecision {
   const top = obj(payload) ?? {};
 
   if (eventName === "pull_request") {
+    const action = typeof top.action === "string" ? top.action : "";
+    if (!REVIEWABLE_PR_ACTIONS.has(action)) {
+      return {
+        run: false,
+        reason: `pull_request action "${action || "(missing)"}" does not change the diff (reviewed on: opened, synchronize, reopened, ready_for_review)`,
+      };
+    }
     const pr = obj(top.pull_request);
     if (!pr) return { run: false, reason: "pull_request event missing pull_request payload" };
     if (pr.draft === true) return { run: false, reason: "pull request is a draft" };

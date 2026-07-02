@@ -86,6 +86,40 @@ describe("runReview", () => {
     }
   });
 
+  test("appends --quiz <mode> when quiz is set, and omits it otherwise", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
+    const log = join(tmp, "bun-log.json");
+    process.env.SMITHERS_FAKE_BUN_LOG = log;
+    try {
+      await runReview({
+        smithersRoot: tmp,
+        workspace: "/some/workspace",
+        prNumber: 55,
+        inferenceEnv: {},
+        publishUrl: "https://review.test",
+        publishToken: "srs_tok",
+        quiz: "on",
+        bunPath: FAKE_BUN,
+      });
+      let logged = (await Bun.file(log).json()) as { args: string[] };
+      expect(logged.args.slice(-2)).toEqual(["--quiz", "on"]);
+
+      await runReview({
+        smithersRoot: tmp,
+        workspace: "/some/workspace",
+        prNumber: 55,
+        inferenceEnv: {},
+        publishUrl: "https://review.test",
+        publishToken: "srs_tok",
+        bunPath: FAKE_BUN,
+      });
+      logged = (await Bun.file(log).json()) as { args: string[] };
+      expect(logged.args).not.toContain("--quiz");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   test("runs with smithersRoot as cwd, not the workspace", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
     const log = join(tmp, "bun-log.json");

@@ -19,12 +19,17 @@ export interface RunReviewInput {
   publishUrl: string;
   publishToken: string;
   ghToken?: string;
+  /** Reviewer comprehension quiz mode; omitted = the CLI's default. */
+  quiz?: "off" | "auto" | "on";
   bunPath?: string;
+  /** When set, the CLI writes a machine-readable outcome JSON here. */
+  summaryPath?: string;
 }
 
 export async function runReview(input: RunReviewInput): Promise<number> {
   const cliPath = join(input.smithersRoot, "apps", "review", "src", "cli", "main.ts");
   const args = [cliPath, input.workspace, "--pr", String(input.prNumber), "--publish"];
+  if (input.quiz) args.push("--quiz", input.quiz);
 
   return new Promise<number>((resolve, reject) => {
     // cwd must be the smithers checkout, never the workspace: bun reads
@@ -40,6 +45,7 @@ export async function runReview(input: RunReviewInput): Promise<number> {
         SMITHERS_REVIEW_PUBLISH_URL: input.publishUrl,
         SMITHERS_REVIEW_PUBLISH_TOKEN: input.publishToken,
         GH_TOKEN: input.ghToken ?? process.env.GH_TOKEN ?? "",
+        ...(input.summaryPath ? { SMITHERS_REVIEW_SUMMARY_PATH: input.summaryPath } : {}),
       },
     });
     child.on("error", reject);

@@ -23,6 +23,10 @@ export interface SessionPayload {
   plan: { prsPerMonth: number; used: number };
   anthropicBaseUrl: string;
   publishUrl: string;
+  /** Server-side default quiz mode; the action's `quiz` input wins over it. */
+  quiz?: "off" | "auto" | "on";
+  /** Optional quota detail; older servers omit it entirely. */
+  quota?: { remaining?: number; limit?: number; resetsAt?: string };
 }
 
 export type SessionOutcome =
