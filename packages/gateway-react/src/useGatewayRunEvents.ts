@@ -17,14 +17,12 @@ function toFrame(row: GatewayRunEventRow): GatewayEventFrame {
 }
 
 /**
- * Live run-event buffer over the bounded `runEvents` collection
- * (`streamRunEventsResilient` with afterSeq resume). Every `run.heartbeat`
- * collapses to a single reserved-key row in the collection (see
- * `RUN_HEARTBEAT_ROW_KEY`), so heartbeats never accumulate in — or evict real
- * events from — the `maxEvents` ring. They are surfaced separately via
- * `lastHeartbeat` and never enter `events`; the events array holds only real run
- * events, capped to `maxEvents` (most-recent wins). Same return shape the
- * streaming hook had.
+ * Live run-event buffer over the bounded `runEvents` collection. Local mode
+ * refetches after SSE invalidation; multiplayer mode follows the Electric
+ * events shape. Heartbeats remain normal collection rows and are filtered in
+ * this hook: the latest heartbeat is returned as `lastHeartbeat`, while
+ * `events` contains only non-heartbeat frames capped to `maxEvents` with the
+ * most recent rows retained.
  */
 export function useGatewayRunEvents(
   runId: string | undefined,
@@ -43,15 +41,8 @@ export function useGatewayRunEvents(
   );
   const afterSeq = options.afterSeq;
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
-  // Size the underlying ring to hold at least the requested display window so a
-  // large `maxEvents` (e.g. the TUI's 2000) actually retains that much history
-  // instead of being silently clamped to the collection's default cap. Floor at
-  // DEFAULT_COLLECTION_MAX_ROWS so the common (web) path is unchanged. The
-  // registry caches the ring per `(runId, effective maxRows)`, so a small
-  // default subscriber that mounts first no longer pins a later larger one to
-  // the smaller ring — each distinct cap resolves to its own sized collection.
   const collection = runId
-    ? collections.runEvents(runId, Math.max(maxEvents, DEFAULT_COLLECTION_MAX_ROWS))
+    ? collections.runEvents(runId, DEFAULT_COLLECTION_MAX_ROWS)
     : undefined;
   const live = useLiveQuery(
     (q) => (collection ? q.from({ row: collection }) : undefined),

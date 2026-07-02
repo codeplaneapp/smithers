@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import {
   serializeApprovalRow,
   serializeCronRow,
@@ -9,32 +10,52 @@ import {
   serializeScoreRow,
   serializeTicketRow,
 } from "@smithers-orchestrator/gateway/api";
+import { createSmithersPostgres } from "smithers-orchestrator";
 import { mapSmithersElectricRow } from "../../src/data/mapSmithersElectricRow.ts";
 
+const cleanups: Array<() => Promise<void> | void> = [];
+
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) {
+    await cleanup();
+  }
+});
+
+async function rawOne(connection: { query: (query: { text: string; values?: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> }, text: string, values: unknown[]) {
+  const result = await connection.query({ text, values });
+  expect(result.rows).toHaveLength(1);
+  return result.rows[0]!;
+}
+
 describe("Electric row-shape parity", () => {
-  test("maps every Electric-backed REST collection row to the REST serializer shape", () => {
-    const runRow = {
-      run_id: "run-parity",
-      workflow_name: "value",
-      status: "completed",
-      created_at_ms: 1718000000000,
-      started_at_ms: 1718000000100,
-      finished_at_ms: 1718000000200,
-      config_json: JSON.stringify({ gatewayWorkflowKey: "value" }),
-    };
-    const eventRow = {
-      run_id: "run-parity",
-      seq: 7,
+  test("maps raw pglite table rows to the same shape as the REST API serializers", async () => {
+    const api = await createSmithersPostgres({}, { provider: "pglite" });
+    cleanups.push(() => api.close());
+    const adapter = new SmithersDb(api.db);
+    const connection = (api.db as { connection: { query: (query: { text: string; values?: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> } }).connection;
+    const now = 1_718_000_000_000;
+    const runId = "run-parity-real";
+
+    await adapter.insertRun({
+      runId,
+      workflowName: "value",
+      status: "finished",
+      createdAtMs: now,
+      startedAtMs: now + 1,
+      finishedAtMs: now + 2,
+      configJson: JSON.stringify({ gatewayWorkflowKey: "value" }),
+    });
+    await adapter.insertEventWithNextSeq({
+      runId,
+      timestampMs: now + 3,
       type: "node.output",
-      payload_json: JSON.stringify({ nodeId: "task1", value: 42 }),
-      timestamp_ms: 1718000000300,
-    };
-    const approvalRow = {
-      run_id: "run-parity",
-      workflow_key: "value",
-      node_id: "approval",
-      iteration: 0,
-      request_json: JSON.stringify({
+      payloadJson: JSON.stringify({ nodeId: "task1", value: 42 }),
+    });
+    await connection.query({
+      text: `INSERT INTO _smithers_approvals
+        (run_id, node_id, iteration, status, requested_at_ms, request_json, auto_approved)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      values: [runId, "approval", 0, "requested", now + 4, JSON.stringify({
         title: "Approve",
         summary: "Approve the action",
         mode: "manual",
@@ -42,67 +63,67 @@ describe("Electric row-shape parity", () => {
         allowedScopes: ["run:write"],
         allowedUsers: ["user:operator"],
         autoApprove: false,
-      }),
-      requested_at_ms: 1718000000400,
-    };
-    const docRow = {
+      }), 0],
+    });
+    await adapter.upsertDoc({
       path: "docs/readme.md",
       kind: "doc",
       content: "hello",
-      content_hash: "hash-doc",
-      updated_at_ms: 1718000000500,
-    };
-    const ticketRow = {
+      contentHash: "hash-doc",
+      status: "open",
+      updatedAtMs: now + 5,
+      deletedAtMs: null,
+    });
+    await adapter.upsertDoc({
       path: "tickets/t-1.md",
       kind: "ticket",
       content: "fix it",
-      content_hash: "hash-ticket",
-      updated_at_ms: 1718000000600,
-    };
-    const scoreRow = {
-      run_id: "run-parity",
-      node_id: "task1",
-      iteration: 0,
-      attempt: 0,
-      scorer_id: "score:exact",
-      scorer_name: "Exact",
-      source: "eval",
-      score: 1,
-      reason: null,
-      scored_at_ms: 1718000000700,
-      latency_ms: 12,
-      duration_ms: 34,
-    };
-    const memoryRow = {
-      namespace: "workspace",
-      key: "preference",
-      value_json: JSON.stringify({ theme: "plain" }),
-      schema_sig: "sig-memory",
-      created_at_ms: 1718000000800,
-      updated_at_ms: 1718000000900,
-      ttl_ms: null,
-    };
-    const cronRow = {
-      cron_id: "cron-parity",
+      contentHash: "hash-ticket",
+      status: "open",
+      updatedAtMs: now + 6,
+      deletedAtMs: null,
+    });
+    await connection.query({
+      text: `INSERT INTO _smithers_scorers
+        (id, run_id, node_id, iteration, attempt, scorer_id, scorer_name, source, score, reason, scored_at_ms, latency_ms, duration_ms)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      values: ["score-row-1", runId, "task1", 0, 0, "score:exact", "Exact", "eval", 1, null, now + 7, 12, 34],
+    });
+    await connection.query({
+      text: `INSERT INTO _smithers_memory_facts (namespace, key, value_json, schema_sig, created_at_ms, updated_at_ms, ttl_ms)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      values: ["workspace", "preference", JSON.stringify({ theme: "plain" }), "sig-memory", now + 8, now + 9, null],
+    });
+    await adapter.upsertCron({
+      cronId: "cron-parity",
       pattern: "*/5 * * * *",
-      workflow_path: "gateway:value",
-      enabled: 1,
-      created_at_ms: 1718000001000,
-      last_run_at_ms: null,
-      next_run_at_ms: 1718000002000,
-      error_json: null,
-    };
+      workflowPath: "gateway:value",
+      enabled: true,
+      createdAtMs: now + 10,
+      lastRunAtMs: null,
+      nextRunAtMs: now + 20,
+      errorJson: null,
+    });
 
-    expect(mapSmithersElectricRow("runs", runRow)).toEqual(serializeRunRow(runRow));
-    expect(mapSmithersElectricRow("run", runRow)).toEqual(serializeRunRow(runRow));
-    expect(mapSmithersElectricRow("events", eventRow)).toEqual(serializeRunEventRow(eventRow));
-    expect(mapSmithersElectricRow("approvals", approvalRow)).toEqual(serializeApprovalRow(approvalRow));
-    expect(mapSmithersElectricRow("docs", docRow)).toEqual(serializeDocRow(docRow));
-    expect(mapSmithersElectricRow("tickets", ticketRow)).toEqual(serializeTicketRow(ticketRow));
-    expect(mapSmithersElectricRow("scores", scoreRow)).toEqual(serializeScoreRow(scoreRow));
-    expect(mapSmithersElectricRow("memoryFacts", memoryRow)).toEqual(serializeMemoryFactRow(memoryRow));
-    expect(mapSmithersElectricRow("crons", cronRow)).toEqual(serializeCronRow(cronRow));
-  });
+    const apiRun = serializeRunRow(await adapter.getRun(runId) as Record<string, unknown>);
+    const apiEvent = serializeRunEventRow((await adapter.listEvents(runId, -1, 10))[0] as Record<string, unknown>);
+    const apiApproval = serializeApprovalRow((await adapter.listPendingApprovals(runId))[0] as Record<string, unknown>);
+    const apiDoc = serializeDocRow((await adapter.listDocs({ kind: "doc" }))[0] as Record<string, unknown>);
+    const apiTicket = serializeTicketRow((await adapter.listDocs({ kind: "ticket" }))[0] as Record<string, unknown>);
+    const apiScore = serializeScoreRow((await adapter.listScorerResults(runId))[0] as Record<string, unknown>);
+    const apiMemory = serializeMemoryFactRow((await adapter.listMemoryFacts("workspace"))[0] as Record<string, unknown>);
+    const apiCron = serializeCronRow((await adapter.listCrons(false))[0] as Record<string, unknown>);
+
+    expect(mapSmithersElectricRow("runs", await rawOne(connection, "SELECT * FROM _smithers_runs WHERE run_id = $1", [runId]))).toEqual(apiRun);
+    expect(mapSmithersElectricRow("run", await rawOne(connection, "SELECT * FROM _smithers_runs WHERE run_id = $1", [runId]))).toEqual(apiRun);
+    expect(mapSmithersElectricRow("events", await rawOne(connection, "SELECT * FROM _smithers_events WHERE run_id = $1", [runId]))).toEqual(apiEvent);
+    expect(mapSmithersElectricRow("approvals", await rawOne(connection, "SELECT * FROM _smithers_approvals WHERE run_id = $1", [runId]))).toEqual(apiApproval);
+    expect(mapSmithersElectricRow("docs", await rawOne(connection, "SELECT * FROM _smithers_docs WHERE path = $1", ["docs/readme.md"]))).toEqual(apiDoc);
+    expect(mapSmithersElectricRow("tickets", await rawOne(connection, "SELECT * FROM _smithers_docs WHERE path = $1", ["tickets/t-1.md"]))).toEqual(apiTicket);
+    expect(mapSmithersElectricRow("scores", await rawOne(connection, "SELECT * FROM _smithers_scorers WHERE run_id = $1", [runId]))).toEqual(apiScore);
+    expect(mapSmithersElectricRow("memoryFacts", await rawOne(connection, "SELECT * FROM _smithers_memory_facts WHERE namespace = $1 AND key = $2", ["workspace", "preference"]))).toEqual(apiMemory);
+    expect(mapSmithersElectricRow("crons", await rawOne(connection, "SELECT * FROM _smithers_cron WHERE cron_id = $1", ["cron-parity"]))).toEqual(apiCron);
+  }, 120_000);
 
   test("maps output-table rows to the GatewayRunNode row shape used by REST runTree", () => {
     expect(mapSmithersElectricRow("nodes", {

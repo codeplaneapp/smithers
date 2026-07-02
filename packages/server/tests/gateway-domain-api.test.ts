@@ -389,39 +389,102 @@ describe("Gateway REST domain API auth and SSE bounds", () => {
 
   test("SSE coalesces bursts and keeps a bounded replay buffer", async () => {
     const { gateway, baseUrl } = await bootGateway("sqlite");
-    const frames: any[] = [];
     const abort = new AbortController();
     const response = await fetch(`${baseUrl}/v1/api/stream`, {
       headers: { authorization: "Bearer operator-token" },
       signal: abort.signal,
     });
+    expect(response.status).toBe(200);
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    const collect = (async () => {
-      while (frames.length < 3) {
-        const read = await reader.read();
-        if (read.done) break;
+    const collect = async () => {
+      const frames: any[] = [];
+      const quietMs = 175;
+      const started = Date.now();
+      let lastChangeAt = 0;
+      let pendingRead = reader.read();
+      for (;;) {
+        if (lastChangeAt > 0 && Date.now() - lastChangeAt > quietMs) return frames;
+        if (Date.now() - started > 2_000) throw new Error("Timed out collecting coalesced SSE frames");
+        const read = await Promise.race([
+          pendingRead,
+          sleep(25).then(() => null),
+        ]);
+        if (!read) continue;
+        pendingRead = reader.read();
+        if (read.done) return frames;
         buffer += decoder.decode(read.value, { stream: true });
         const parts = buffer.split("\n\n");
         buffer = parts.pop() ?? "";
         for (const part of parts) {
           const event = part.split("\n").find((line) => line.startsWith("event: "))?.slice(7);
           const dataLine = part.split("\n").find((line) => line.startsWith("data: "));
-          if (event === "change" && dataLine) frames.push(JSON.parse(dataLine.slice(6)));
+          if (event === "change" && dataLine) {
+            frames.push(JSON.parse(dataLine.slice(6)));
+            lastChangeAt = Date.now();
+          }
         }
       }
-    })();
+    };
 
-    await Promise.all(Array.from({ length: 5 }, (_, i) => launchRun(baseUrl, "value", { value: i })));
-    await Promise.race([collect, sleep(500)]);
+    const collected = collect();
+    const burst = Array.from({ length: 5 }, () => (gateway as any).queueApiInvalidation(["runs"]));
+    await Promise.all(burst);
+    const frames = await collected;
     abort.abort();
+    expect(frames.length).toBeGreaterThanOrEqual(1);
     expect(frames.length).toBeLessThan(5);
+    expect(frames.some((frame) => Array.isArray(frame.collections) && frame.collections.includes("runs"))).toBe(true);
 
     for (let index = 0; index < 300; index += 1) {
       await (gateway as any).queueApiInvalidation(["runs"]);
     }
     expect((gateway as any).apiStreamFrames.length).toBeLessThanOrEqual(256);
     expect((gateway as any).apiStreamFrameBytes).toBeLessThanOrEqual(64 * 1024);
+  }, 60_000);
+
+  test("SSE slow consumers stay bounded and receive reset before fresh frames", async () => {
+    const { gateway } = await bootGateway("sqlite");
+    const writes: string[] = [];
+    const drainCallbacks: Array<() => void> = [];
+    let writable = false;
+    const subscriber = {
+      id: "slow-consumer",
+      closed: false,
+      flushing: false,
+      needsReset: false,
+      queue: [] as Array<{ text: string; bytes: number }>,
+      queueBytes: 0,
+      res: {
+        write(text: string) {
+          writes.push(text);
+          return writable;
+        },
+        once(event: string, callback: () => void) {
+          if (event === "drain") drainCallbacks.push(callback);
+        },
+      },
+    };
+
+    (gateway as any).sendApiStreamFrame(subscriber, { seq: 1, collections: ["runs"] });
+    for (let seq = 2; seq <= 320; seq += 1) {
+      (gateway as any).sendApiStreamFrame(subscriber, { seq, collections: ["runs"] });
+    }
+
+    expect(subscriber.queue.length).toBeLessThanOrEqual(256);
+    expect(subscriber.queueBytes).toBeLessThanOrEqual(64 * 1024);
+    expect(subscriber.needsReset).toBe(true);
+
+    writable = true;
+    const drain = drainCallbacks.shift();
+    expect(drain).toBeFunction();
+    drain?.();
+
+    const resetIndex = writes.findIndex((text) => text.includes("event: reset"));
+    expect(resetIndex).toBeGreaterThanOrEqual(0);
+    expect(writes.slice(resetIndex + 1).some((text) => text.includes("event: change"))).toBe(true);
+    expect(subscriber.queue.length).toBe(0);
+    expect(subscriber.queueBytes).toBe(0);
   }, 60_000);
 });

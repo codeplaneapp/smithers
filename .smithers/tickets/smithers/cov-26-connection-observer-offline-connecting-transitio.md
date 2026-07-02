@@ -1,16 +1,24 @@
-# Connection observer offline/connecting transitions and reconnectingSince never asserted
+# Obsolete: deleted sync connection observer transitions
 
 > Decomposed from #306 — test-coverage epic (`.smithers/tickets/.epics/0052-audit-test-coverage-gaps.md`)
 > Priority: P2
-> Target: `packages/gateway-react/src/sync/createGatewayCollections.ts:78-101; packages/gateway-react/tests/sync/sync.test.ts:576-628`
+> Status 2026-07-02: **obsolete**. The cited React sync connection observer
+> stack was removed with the legacy sync provider. Replacement connection
+> coverage is tracked through `SmithersDataClient` SSE state and
+> `SmithersCollectionsProvider` local/multiplayer collection creation.
+> Target: `packages/gateway-client/src/data/createSmithersDataClient.ts`;
+> `packages/gateway-react/src/SmithersCollectionsProvider.ts`
 
 ## Task
 
 Add the missing test coverage described below, then make it pass.
 
-**Finding:** Connection observer offline/connecting transitions and reconnectingSince never asserted
+**Finding:** Obsolete sync connection observer transitions
 
-**Detail:** markConnecting/markOffline transitions and reconnectingSince field never asserted
+**Detail:** `markConnecting`, `markOffline`, and `reconnectingSince` belonged to
+the deleted sync observer. Do not add tests for the removed files; add any new
+coverage against real SSE lifecycle behavior and provider creation in the
+replacement TanStack DB collection surface.
 
 ## Rules (non-negotiable — this repo's "No mocks" policy)
 

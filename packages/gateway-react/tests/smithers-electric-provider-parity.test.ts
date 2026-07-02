@@ -19,6 +19,7 @@ import {
   startElectricFixture,
   type ElectricFixture,
 } from "../../electric-proxy/tests/fixtures/electricFixture.ts";
+import { runProviderParitySuite } from "./providerParitySuite.ts";
 
 setDefaultTimeout(240_000);
 
@@ -73,9 +74,45 @@ function cronRow(overrides: Partial<GatewayCronRow> = {}): GatewayCronRow {
   };
 }
 
+function createApprovalWorkflow(api: Awaited<ReturnType<typeof createSmithersPostgres>>) {
+  return api.smithers((ctx: any) => {
+    const selection = ctx.outputMaybe("selection", { nodeId: "pick-plan" });
+    return React.createElement(
+      api.Workflow,
+      { name: "collections-approval" },
+      React.createElement(
+        api.Sequence,
+        null,
+        React.createElement(api.Approval, {
+          id: "pick-plan",
+          mode: "select",
+          output: api.outputs.selection,
+          request: { title: "Pick a plan", summary: "Choose the best option." },
+          options: [
+            { key: "light", label: "Light" },
+            { key: "balanced", label: "Balanced" },
+          ],
+          allowedScopes: ["approve"],
+          allowedUsers: ["user:operator"],
+        }),
+        selection
+          ? React.createElement(
+              api.Task,
+              { id: "record", output: api.outputs.result },
+              { value: selection.selected === "balanced" ? 2 : 1 },
+            )
+          : null,
+      ),
+    );
+  });
+}
+
 async function bootRealElectricGateway(fixture: ElectricFixture) {
   const api = await createSmithersPostgres(
-    { result: z.object({ value: z.number() }) },
+    {
+      result: z.object({ value: z.number() }),
+      selection: z.object({ selected: z.string(), notes: z.string().nullable() }),
+    },
     { provider: "postgres", connectionString: fixture.postgresUrl },
   );
   cleanups.push(() => api.close());
@@ -99,6 +136,7 @@ async function bootRealElectricGateway(fixture: ElectricFixture) {
       ),
     ),
   ));
+  gateway.register("approval", createApprovalWorkflow(api));
   const gatewayServer = await gateway.listen({ port: 0, host: "127.0.0.1" });
   cleanups.push(() => gateway.close());
 
@@ -133,6 +171,19 @@ test.skipIf(!runElectricSuite || !dockerAvailable)("Smithers Electric provider p
 });
 
 describe.skipIf(!runElectricSuite || !dockerAvailable)("Smithers Electric provider parity over real Postgres + Electric + proxy", () => {
+  test("shared provider parity passes over Electric", async () => {
+    const fixture = await startElectricFixture();
+    cleanups.push(() => fixture.teardown());
+    const { apiBaseUrl, electricBaseUrl } = await bootRealElectricGateway(fixture);
+    await runProviderParitySuite({
+      kind: "multiplayer",
+      apiBaseUrl,
+      electricBaseUrl,
+      workspaceId: "workspace-electric-provider-parity-shared",
+      token: "operator-token",
+    });
+  }, 240_000);
+
   test("M2 provider parity passes over Electric and txid matching drops optimism without flicker", async () => {
     const fixture = await startElectricFixture();
     cleanups.push(() => fixture.teardown());
@@ -148,7 +199,7 @@ describe.skipIf(!runElectricSuite || !dockerAvailable)("Smithers Electric provid
         token: "operator-token",
       },
     });
-    const collections = createSmithersCollections(client, queryClient);
+    const collections = await createSmithersCollections(client, queryClient);
     cleanups.push(() => {
       collections.close();
       client.close();

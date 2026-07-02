@@ -1,6 +1,8 @@
 import {
   createCollection,
   type Collection,
+  type ChangeMessageOrDeleteKeyMessage,
+  type CollectionConfig,
   type DeleteMutationFn,
   type InsertMutationFn,
   type UpdateMutationFn,
@@ -35,17 +37,24 @@ import type { SmithersDataClient } from "./SmithersDataClient.ts";
 import type { WorkspaceMode } from "./WorkspaceMode.ts";
 import { createSmithersDataClient } from "./createSmithersDataClient.ts";
 import { mapSmithersElectricRow } from "./mapSmithersElectricRow.ts";
+import { smithersApiInvalidationPrefixes } from "./smithersApiInvalidationPrefixes.ts";
 import { smithersCollectionKeys } from "./smithersCollectionKeys.ts";
-import { smithersElectricCollectionOptions } from "./smithersElectricCollectionOptions.ts";
 import { smithersLocalCollectionOptions } from "./smithersLocalCollectionOptions.ts";
 
 type AnyCollection = Collection<Record<string, unknown>, string | number>;
 type QueryKey = readonly unknown[];
+type SmithersElectricCollectionOptions = typeof import("./smithersElectricCollectionOptions.ts")["smithersElectricCollectionOptions"];
+type NonSingleCollectionConfig<TRow extends object, TKey extends string | number> = CollectionConfig<TRow, TKey> & {
+  schema?: never;
+  singleResult?: never;
+};
 type MutationHandlers<TRow extends object, TKey extends string | number> = {
   onInsert?: (params: { transaction: { mutations: Array<{ key: TKey; modified: TRow; original?: TRow }> } }) => Promise<unknown>;
   onUpdate?: (params: { transaction: { mutations: Array<{ key: TKey; modified: TRow; original: TRow; changes?: Partial<TRow> }> } }) => Promise<unknown>;
   onDelete?: (params: { transaction: { mutations: Array<{ key: TKey; original: TRow }> } }) => Promise<unknown>;
 };
+const RUN_EVENT_COLLECTION_MAX_ROWS = 1_024;
+const RUN_EVENT_API_FETCH_LIMIT = 10_000;
 
 function isClient(value: SmithersDataClient | WorkspaceMode): value is SmithersDataClient {
   return "api" in value;
@@ -59,39 +68,76 @@ function invalidatePrefix(queryClient: QueryClient, key: QueryKey) {
   return queryClient.invalidateQueries({ queryKey: [...key] });
 }
 
-function invalidationPrefixes(name: string): QueryKey[] {
-  switch (name) {
-    case "runs":
-      return [["smithers", "runs"]];
-    case "events":
-      return [["smithers", "events"], ["smithers", "runTree"], ["smithers", "runs"]];
-    case "approvals":
-      return [["smithers", "approvals"]];
-    case "workflows":
-      return [["smithers", "workflows"]];
-    case "docs":
-      return [["smithers", "docs"]];
-    case "prompts":
-      return [["smithers", "prompts"]];
-    case "scores":
-      return [["smithers", "scores"]];
-    case "tickets":
-      return [["smithers", "tickets"]];
-    case "memoryFacts":
-    case "memory_facts":
-      return [["smithers", "memoryFacts"]];
-    case "crons":
-      return [["smithers", "crons"]];
-    case "nodes":
-    case "runTree":
-      return [["smithers", "runTree"]];
-    default:
-      return [["smithers"]];
-  }
-}
-
 function resultKey(row: GatewayRunEventRow) {
   return `${row.runId}:${row.seq}`;
+}
+
+function runEventMaxRows(maxRows: number): number {
+  return Math.min(Math.max(1, Math.floor(maxRows)), RUN_EVENT_COLLECTION_MAX_ROWS);
+}
+
+function boundedRunEventRows(rows: GatewayRunEventRow[], maxRows: number): GatewayRunEventRow[] {
+  if (rows.length <= maxRows) return rows;
+  return [...rows]
+    .sort((left, right) => left.seq - right.seq)
+    .slice(Math.max(0, rows.length - maxRows));
+}
+
+function keyFromDeleteMessage<TRow extends object, TKey extends string | number>(
+  message: ChangeMessageOrDeleteKeyMessage<TRow, TKey>,
+  getKey: (row: TRow) => TKey,
+): TKey | undefined {
+  if ("key" in message && (typeof message.key === "string" || typeof message.key === "number")) return message.key as TKey;
+  if ("value" in message && message.value && typeof message.value === "object") return getKey(message.value as TRow);
+  return undefined;
+}
+
+function withBoundedRunEventSync<TRow extends GatewayRunEventRow, TKey extends string | number>(
+  options: CollectionConfig<TRow, TKey>,
+  maxRows: number,
+): CollectionConfig<TRow, TKey> {
+  const rows = new Map<TKey, TRow>();
+  const evictOverflow = (write: (message: ChangeMessageOrDeleteKeyMessage<TRow, TKey>) => void) => {
+    const overflow = rows.size - maxRows;
+    if (overflow <= 0) return;
+    const oldest = [...rows.entries()]
+      .sort(([, left], [, right]) => left.seq - right.seq)
+      .slice(0, overflow);
+    for (const [key] of oldest) {
+      rows.delete(key);
+      write({ type: "delete", key });
+    }
+  };
+  return {
+    ...options,
+    sync: {
+      ...options.sync,
+      sync(params) {
+        return options.sync.sync({
+          ...params,
+          write(message) {
+            if (message.type === "delete") {
+              const key = keyFromDeleteMessage(message, options.getKey);
+              if (key !== undefined) rows.delete(key);
+              params.write(message);
+              return;
+            }
+            const row = message.value as TRow;
+            rows.set(options.getKey(row), row);
+            params.write(message);
+          },
+          commit() {
+            evictOverflow(params.write);
+            params.commit();
+          },
+          truncate() {
+            rows.clear();
+            params.truncate();
+          },
+        });
+      },
+    },
+  };
 }
 
 function q(value: string): string {
@@ -113,13 +159,18 @@ function txidMatch(result: { txid?: string } | undefined) {
   return { txid, timeout: 10_000 };
 }
 
-export function createSmithersCollections(
-  clientOrMode: SmithersDataClient | WorkspaceMode,
+async function loadSmithersElectricCollectionOptions(): Promise<SmithersElectricCollectionOptions> {
+  const mod = await import("./smithersElectricCollectionOptions.ts");
+  await mod.smithersElectricCollectionOptions.load();
+  return mod.smithersElectricCollectionOptions;
+}
+
+function createSmithersCollectionsWithClient(
+  client: SmithersDataClient,
+  ownsClient: boolean,
   queryClient: QueryClient,
+  electricCollectionOptions?: SmithersElectricCollectionOptions,
 ): SmithersCollections {
-  const client = isClient(clientOrMode)
-    ? clientOrMode
-    : createSmithersDataClient({ mode: clientOrMode });
   const multiplayerMode = client.mode.kind === "multiplayer" ? client.mode : null;
 
   const collections = new Map<string, AnyCollection>();
@@ -128,24 +179,29 @@ export function createSmithersCollections(
     getKey: (row: TRow) => TKey,
     queryFn: () => Promise<TRow[]>,
     mutationHandlers: MutationHandlers<TRow, TKey> = {},
+    eventMaxRows?: number,
   ) => {
     const id = cacheKey(queryKey);
     const existing = collections.get(id);
     if (existing) return existing as unknown as Collection<TRow, TKey>;
-    const collection = createCollection(
-      smithersLocalCollectionOptions<TRow, QueryKey, TKey>({
-        id,
-        queryKey,
-        queryClient,
-        queryFn,
-        getKey,
-        ...(mutationHandlers as Partial<{
-          onInsert: InsertMutationFn<TRow, TKey>;
-          onUpdate: UpdateMutationFn<TRow, TKey>;
-          onDelete: DeleteMutationFn<TRow, TKey>;
-        }>),
-      }),
-    ) as unknown as Collection<TRow, TKey>;
+    const options = smithersLocalCollectionOptions<TRow, QueryKey, TKey>({
+      id,
+      queryKey,
+      queryClient,
+      queryFn,
+      getKey,
+      ...(mutationHandlers as Partial<{
+        onInsert: InsertMutationFn<TRow, TKey>;
+        onUpdate: UpdateMutationFn<TRow, TKey>;
+        onDelete: DeleteMutationFn<TRow, TKey>;
+      }>),
+    });
+    const collectionOptions = (
+      eventMaxRows
+        ? withBoundedRunEventSync(options as unknown as CollectionConfig<GatewayRunEventRow, string>, eventMaxRows)
+        : options
+    ) as unknown as NonSingleCollectionConfig<TRow, TKey>;
+    const collection = createCollection(collectionOptions) as unknown as Collection<TRow, TKey>;
     collections.set(id, collection as unknown as AnyCollection);
     return collection;
   };
@@ -156,22 +212,28 @@ export function createSmithersCollections(
     mapRow: (row: Record<string, unknown>) => TRow,
     where?: string,
     mutationHandlers: MutationHandlers<TRow, TKey> = {},
+    eventMaxRows?: number,
   ) => {
     if (!multiplayerMode) throw new Error("Electric collections require multiplayer mode.");
+    if (!electricCollectionOptions) throw new Error("Electric collection options were not loaded.");
     const id = cacheKey(queryKey);
     const existing = collections.get(id);
     if (existing) return existing as unknown as Collection<TRow, TKey>;
-    const collection = createCollection(
-      smithersElectricCollectionOptions<TRow, TKey>({
-        ...(mutationHandlers as MutationHandlers<TRow, TKey>),
-        id,
-        mode: multiplayerMode,
-        shape,
-        where,
-        getKey,
-        mapRow,
-      }),
-    ) as unknown as Collection<TRow, TKey>;
+    const options = electricCollectionOptions<TRow, TKey>({
+      ...(mutationHandlers as MutationHandlers<TRow, TKey>),
+      id,
+      mode: multiplayerMode,
+      shape,
+      where,
+      getKey,
+      mapRow,
+    });
+    const collectionOptions = (
+      eventMaxRows
+        ? withBoundedRunEventSync(options as unknown as CollectionConfig<GatewayRunEventRow, string>, eventMaxRows)
+        : options
+    ) as unknown as NonSingleCollectionConfig<TRow, TKey>;
+    const collection = createCollection(collectionOptions) as unknown as Collection<TRow, TKey>;
     collections.set(id, collection as unknown as AnyCollection);
     return collection;
   };
@@ -183,9 +245,10 @@ export function createSmithersCollections(
     mapRow: (row: Record<string, unknown>) => TRow,
     where?: string,
     mutationHandlers: MutationHandlers<TRow, TKey> = {},
+    eventMaxRows?: number,
   ) => multiplayerMode
-    ? getOrCreateElectric(queryKey, shape, getKey, mapRow, where, mutationHandlers)
-    : getOrCreateQuery(queryKey, getKey, queryFn, mutationHandlers);
+    ? getOrCreateElectric(queryKey, shape, getKey, mapRow, where, mutationHandlers, eventMaxRows)
+    : getOrCreateQuery(queryKey, getKey, queryFn, mutationHandlers, eventMaxRows);
 
   const invalidate = async (names?: readonly string[]) => {
     if (!names || names.length === 0) {
@@ -194,7 +257,7 @@ export function createSmithersCollections(
     }
     const seen = new Set<string>();
     for (const name of names) {
-      for (const prefix of invalidationPrefixes(name)) {
+      for (const prefix of smithersApiInvalidationPrefixes(name)) {
         const id = cacheKey(prefix);
         if (seen.has(id)) continue;
         seen.add(id);
@@ -277,15 +340,19 @@ export function createSmithersCollections(
         (row) => mapSmithersElectricRow("nodes", row),
         runId ? runWhere(runId) : undefined,
       ),
-    events: (runId: string, maxRows = 1_024) =>
-      getOrCreate<GatewayRunEventRow, string>(
-        smithersCollectionKeys.events(runId, maxRows),
+    events: (runId: string, maxRows = RUN_EVENT_COLLECTION_MAX_ROWS) => {
+      const limit = runEventMaxRows(maxRows);
+      return getOrCreate<GatewayRunEventRow, string>(
+        smithersCollectionKeys.events(runId, limit),
         "events",
         resultKey,
-        () => runId ? client.api.listRunEvents({ runId, limit: Math.min(Math.max(1, maxRows), 1_024) }) : Promise.resolve([]),
+        async () => runId ? boundedRunEventRows(await client.api.listRunEvents({ runId, limit: RUN_EVENT_API_FETCH_LIMIT }), limit) : [],
         (row) => mapSmithersElectricRow("events", row),
         runId ? runWhere(runId) : undefined,
-      ),
+        {},
+        limit,
+      );
+    },
     approvals: (params: ListApprovalsRequest = {}) =>
       getOrCreate<GatewayApprovalRow, string>(
         smithersCollectionKeys.approvals(params),
@@ -303,6 +370,7 @@ export function createSmithersCollections(
                 runId: row.runId,
                 nodeId: row.nodeId,
                 iteration: row.iteration,
+                approved: true,
                 decision: row.decision ?? { approved: true },
               });
             }
@@ -316,6 +384,7 @@ export function createSmithersCollections(
                 runId: row.runId,
                 nodeId: row.nodeId,
                 iteration: row.iteration,
+                approved: false,
                 decision: { approved: false },
               });
             }
@@ -423,23 +492,59 @@ export function createSmithersCollections(
       (row) => mapSmithersElectricRow("nodes", row),
       runId ? runWhere(runId) : undefined,
     ),
-    runEvents: (runId: string, maxRows = 1_024) => getOrCreate<GatewayRunEventRow, string>(
-      smithersCollectionKeys.events(runId, maxRows),
-      "events",
-      resultKey,
-      () => runId ? client.api.listRunEvents({ runId, limit: Math.min(Math.max(1, maxRows), 1_024) }) : Promise.resolve([]),
-      (row) => mapSmithersElectricRow("events", row),
-      runId ? runWhere(runId) : undefined,
-    ),
+    runEvents: (runId: string, maxRows = RUN_EVENT_COLLECTION_MAX_ROWS) => {
+      const limit = runEventMaxRows(maxRows);
+      return getOrCreate<GatewayRunEventRow, string>(
+        smithersCollectionKeys.events(runId, limit),
+        "events",
+        resultKey,
+        async () => runId ? boundedRunEventRows(await client.api.listRunEvents({ runId, limit: RUN_EVENT_API_FETCH_LIMIT }), limit) : [],
+        (row) => mapSmithersElectricRow("events", row),
+        runId ? runWhere(runId) : undefined,
+        {},
+        limit,
+      );
+    },
     invalidate,
     connect,
     close() {
       unsubscribe?.();
       unsubscribe = undefined;
       collections.clear();
-      if (!isClient(clientOrMode)) client.close();
+      if (ownsClient) client.close();
     },
   };
 }
 
 type SubmitApprovalDecision = SubmitApprovalRequest["decision"];
+
+export function createSmithersCollections(
+  clientOrMode: Extract<WorkspaceMode, { kind: "local" }>,
+  queryClient: QueryClient,
+): SmithersCollections;
+export function createSmithersCollections(
+  clientOrMode: Extract<WorkspaceMode, { kind: "multiplayer" }>,
+  queryClient: QueryClient,
+): Promise<SmithersCollections>;
+export function createSmithersCollections(
+  clientOrMode: SmithersDataClient,
+  queryClient: QueryClient,
+): SmithersCollections | Promise<SmithersCollections>;
+export function createSmithersCollections(
+  clientOrMode: SmithersDataClient | WorkspaceMode,
+  queryClient: QueryClient,
+): SmithersCollections | Promise<SmithersCollections> {
+  const ownsClient = !isClient(clientOrMode);
+  const client = ownsClient
+    ? createSmithersDataClient({ mode: clientOrMode })
+    : clientOrMode;
+  if (client.mode.kind !== "multiplayer") {
+    return createSmithersCollectionsWithClient(client, ownsClient, queryClient);
+  }
+  return loadSmithersElectricCollectionOptions()
+    .then((electricCollectionOptions) => createSmithersCollectionsWithClient(client, ownsClient, queryClient, electricCollectionOptions))
+    .catch((error) => {
+      if (ownsClient) client.close();
+      throw error;
+    });
+}

@@ -32,7 +32,9 @@
     "@tanstack/react-query": "5.101.2"
   },
   "devDependencies": {
+    "@smithers-orchestrator/db": "workspace:*",
     "@types/bun": "latest",
+    "smithers-orchestrator": "workspace:*",
     "typescript": "~6.0.3"
   }
 }

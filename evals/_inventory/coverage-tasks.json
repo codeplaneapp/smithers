@@ -2692,17 +2692,6 @@
     "slice": "observability-gateway-server"
   },
   {
-    "id": "sync-query-hook",
-    "feature": "gateway-sync-collections",
-    "area": "authoring",
-    "kind": "authoring",
-    "tier": "weak",
-    "verify": "judge",
-    "task": "Use useSyncQuery with a SyncKey to load data declaratively. Show how refetch() forces a fresh fetch and data is memoized.",
-    "canonicalAnswer": "useSyncQuery",
-    "slice": "observability-gateway-server"
-  },
-  {
     "id": "extension-stream-subscribe",
     "feature": "gateway-extension-rpc",
     "area": "authoring",
@@ -4549,5 +4538,45 @@
     "task": "Pick one of the 100 example workflows from examples/, understand its pattern, and adapt it to solve a different problem in the same domain (e.g., adapt coverage-loop.jsx to improve type coverage instead of test coverage).",
     "notes": "Tests comprehension of workflow patterns and ability to remix examples.",
     "slice": "examples-starters-init"
+  },
+  {
+    "id": "ff-smithers-collections-local-provider",
+    "feature": "SMITHERS_COLLECTIONS_LOCAL_PROVIDER",
+    "area": "gateway-http-api",
+    "kind": "authoring",
+    "tier": "weak",
+    "verify": "judge",
+    "task": "Write a React snippet for a workflow UI that creates a local `WorkspaceMode`, builds `createSmithersCollections(mode, queryClient)`, calls `collections.connect()` for `/v1/api/stream` invalidations, and reads runs plus a per-run node tree through TanStack DB collections.",
+    "canonicalAnswer": "createSmithersCollections({ kind: \"local\", apiBaseUrl }, queryClient); collections.connect(); collections.runs(); collections.runTree(runId)"
+  },
+  {
+    "id": "ff-smithers-collections-multiplayer-provider",
+    "feature": "SMITHERS_COLLECTIONS_MULTIPLAYER_PROVIDER",
+    "area": "gateway-http-api",
+    "kind": "authoring",
+    "tier": "weak",
+    "verify": "judge",
+    "task": "Write a startup snippet for multiplayer Smithers collections using `WorkspaceMode` with `kind: \"multiplayer\"`, `apiBaseUrl`, `electricBaseUrl`, `workspaceId`, and token. It should await collection creation, read memory facts for a namespace, and avoid direct SQL or direct Electric client wiring.",
+    "canonicalAnswer": "await createSmithersCollections({ kind: \"multiplayer\", apiBaseUrl, electricBaseUrl, workspaceId, token }, queryClient); collections.memoryFacts({ namespace })"
+  },
+  {
+    "id": "ff-smithers-api-sse-invalidation",
+    "feature": "SMITHERS_API_SSE_INVALIDATION",
+    "area": "gateway-http-api",
+    "kind": "knowledge",
+    "tier": "weak",
+    "verify": "judge",
+    "task": "A Gateway UI receives `/v1/api/stream` change frames with collection names like `runs`, `run_events`, `nodes`, `node_outputs`, `approvals`, `crons`, `tickets`, and `docs`. Explain how `createSmithersCollections` uses these names to refresh only the affected TanStack DB collections.",
+    "canonicalAnswer": ""
+  },
+  {
+    "id": "ff-smithers-run-events-bounded-collection",
+    "feature": "SMITHERS_RUN_EVENTS_BOUNDED_COLLECTION",
+    "area": "gateway-http-api",
+    "kind": "knowledge",
+    "tier": "weak",
+    "verify": "judge",
+    "task": "How does the current Smithers run-events collection avoid unbounded growth in local and multiplayer modes, and what should a UI do when it wants to display only the latest 50 non-heartbeat events?",
+    "canonicalAnswer": ""
   }
 ]

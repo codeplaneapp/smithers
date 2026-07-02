@@ -161,11 +161,13 @@ export type SubmitApprovalRequest = {
   runId: string;
   nodeId: string;
   iteration?: number;
-  decision: {
-    approved: boolean;
+  approved?: boolean;
+  decision: Record<string, unknown> & {
+    approved?: boolean;
     value?: unknown;
     note?: string;
   };
+  note?: string;
 };
 
 export type SubmitApprovalResponse = {
@@ -689,15 +691,16 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
       runId,
       nodeId,
       iteration,
+      approved: booleanSchema("Whether the approval is granted."),
       decision: objectSchema({
         approved: booleanSchema("Whether the approval is granted."),
         value: anyJsonSchema,
         note: stringSchema("Optional decision note."),
-      }, ["approved"]),
+      }, [], "Approval decision payload.", true),
     }, ["runId", "nodeId", "decision"]),
     responseSchema: objectSchema({ runId, nodeId, iteration, approved: booleanSchema("Whether the approval was granted.") }, ["runId", "nodeId", "iteration", "approved"]),
     errors: ["InvalidRequest", "InvalidInput", "Unauthorized", "Forbidden", "RunNotFound", "AlreadyDecided", "Internal"],
-    exampleRequest: { runId: "run_01", nodeId: "approve", decision: { approved: true, note: "ship it" } },
+    exampleRequest: { runId: "run_01", nodeId: "approve", approved: true, decision: { note: "ship it" } },
     exampleResponse: { runId: "run_01", nodeId: "approve", iteration: 0, approved: true },
   },
   {
