@@ -6,6 +6,7 @@ import {
   useGatewayNodeOutput,
   useGatewayRun,
   useGatewayRunEvents,
+  useGatewayRunTree,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
 
@@ -155,7 +156,7 @@ function eventInfo(ev: unknown): EventInfo {
   const inner = isRecord(frame.payload) ? frame.payload : {};
   const nodePayload = isRecord(inner.payload) ? inner.payload : {};
   const nodeId = asString(nodePayload.nodeId) ?? asString(inner.nodeId) ?? asString(frame.nodeId) ?? "";
-  const type = asString(inner.event) ?? asString(frame.type) ?? asString(nodePayload.state) ?? "";
+  const type = asString(inner.event) ?? asString(frame.event) ?? asString(frame.type) ?? asString(nodePayload.state) ?? "";
   const seq = typeof inner.seq === "number" ? inner.seq : typeof frame.seq === "number" ? frame.seq : 0;
   return { nodeId, type, seq };
 }
@@ -170,6 +171,24 @@ function buildNodeStatus(events: unknown[]): Record<string, StageState> {
     if (cls) map[nodeId] = cls;
   }
   return map;
+}
+
+function eventTypeFromNodeStatus(status: string | undefined): string {
+  if (status === "ok") return "node.finished";
+  if (status === "running") return "node.started";
+  if (status === "failed" || status === "cancelled") return "node.failed";
+  return "";
+}
+
+function eventsFromRunTree(nodes: ReadonlyArray<Record<string, unknown>>): unknown[] {
+  return nodes
+    .map((node, index) => {
+      const nodeId = asString(node.id) ?? asString(node.nodeId) ?? "";
+      const event = eventTypeFromNodeStatus(asString(node.status));
+      if (!nodeId || !event) return null;
+      return { seq: index + 1, event, payload: { nodeId } };
+    })
+    .filter(Boolean) as unknown[];
 }
 
 type TicketProgress = {
@@ -471,11 +490,14 @@ function App() {
 
   const runDetail = useGatewayRun(activeRunId);
   const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const runTree = useGatewayRunTree(activeRunId);
   const manifestOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "manifest", iteration: 0 });
 
   const tickets = useMemo(() => extractManifest(manifestOut.data), [manifestOut.data]);
   const events = stream.events ?? [];
-  const nodeStatus = useMemo(() => buildNodeStatus(events), [events]);
+  const treeEvents = useMemo(() => eventsFromRunTree(runTree.nodes as ReadonlyArray<Record<string, unknown>>), [runTree.nodes]);
+  const displayEvents = events.length > 0 ? events : treeEvents;
+  const nodeStatus = useMemo(() => buildNodeStatus(displayEvents), [displayEvents]);
 
   const progressByTicket = useMemo(() => {
     const map: Record<string, TicketProgress> = {};
@@ -555,7 +577,7 @@ function App() {
           {!hasRun ? (
             <div className="launch-form" data-testid="ship-empty">
               <h2>Ship a ticket queue</h2>
-              <p>Each ticket runs research → plan → implement → validate → review in its own worktree, then commits and merges to the base branch — serially, so the branch advances one ticket at a time.</p>
+              <p>Each ticket runs research → plan → implement → validate → review in its own worktree, then commits and merges to the base branch serially, so the branch advances one ticket at a time.</p>
               <input className="prompt dir" value={ticketsDir} onChange={(e) => setTicketsDir(e.currentTarget.value)} placeholder="Tickets directory" data-testid="ship-ticketsdir" />
               <div className="field"><label>Base branch</label><input className="prompt" style={{ width: 160 }} value={baseBranch} onChange={(e) => setBaseBranch(e.currentTarget.value)} /></div>
               <div className="field"><label>Test-driven (tests first)</label><input type="checkbox" checked={tdd} onChange={(e) => setTdd(e.currentTarget.checked)} /></div>
@@ -596,7 +618,7 @@ function App() {
         {/* ── selected ticket detail ────────────────────────────────── */}
         <div className="col mid">
           {hasRun && selectedTicket ? (
-            <TicketDetail runId={activeRunId} ticket={selectedTicket} events={events} />
+            <TicketDetail runId={activeRunId} ticket={selectedTicket} events={displayEvents} />
           ) : (
             <div className="empty" data-testid="ship-detail-empty">{hasRun ? "Select a ticket to watch its research → merge detail." : "Launch a run to watch tickets ship."}</div>
           )}

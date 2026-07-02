@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
+import { request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -53,11 +54,25 @@ async function waitForHealth(timeoutMs: number): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      if ((await fetch(`${base}/health`)).ok) return true;
+      if (await healthOk()) return true;
     } catch {}
     await new Promise((r) => setTimeout(r, 250));
   }
   return false;
+}
+function healthOk(): Promise<boolean> {
+  return new Promise((resolveOk) => {
+    const req = request(`${base}/health`, { method: "GET", timeout: 2_000 }, (res) => {
+      res.resume();
+      resolveOk((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300);
+    });
+    req.on("error", () => resolveOk(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolveOk(false);
+    });
+    req.end();
+  });
 }
 async function loadChromium() {
   const pkg = "playwright";

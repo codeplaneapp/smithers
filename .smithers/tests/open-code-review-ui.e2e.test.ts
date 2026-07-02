@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { request } from "node:http";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -39,11 +40,25 @@ async function waitForHealth(timeoutMs = 60_000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      if ((await fetch(`${base}/health`)).ok) return true;
+      if (await healthOk()) return true;
     } catch {}
     await new Promise((r) => setTimeout(r, 250));
   }
   return false;
+}
+function healthOk(): Promise<boolean> {
+  return new Promise((resolveOk) => {
+    const req = request(`${base}/health`, { method: "GET", timeout: 2_000 }, (res) => {
+      res.resume();
+      resolveOk((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300);
+    });
+    req.on("error", () => resolveOk(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolveOk(false);
+    });
+    req.end();
+  });
 }
 // Resolve a Chromium with an installed browser binary. CI runs `pnpm test`
 // without `playwright install`, so the browser is often absent — skip rather

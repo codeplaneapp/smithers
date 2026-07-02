@@ -1,6 +1,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -136,11 +137,26 @@ async function waitForHealth(timeoutMs = 30_000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      if ((await fetch(`${base}/health`)).ok) return true;
+      if (await healthOk()) return true;
     } catch {}
     await new Promise((r) => setTimeout(r, 200));
   }
   return false;
+}
+
+function healthOk(): Promise<boolean> {
+  return new Promise((resolveOk) => {
+    const req = request(`${base}/health`, { method: "GET", timeout: 2_000 }, (res) => {
+      res.resume();
+      resolveOk((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300);
+    });
+    req.on("error", () => resolveOk(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolveOk(false);
+    });
+    req.end();
+  });
 }
 
 async function loadChromium() {

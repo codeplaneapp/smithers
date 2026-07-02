@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -67,6 +68,7 @@ let binDir = "";
 let proc: ChildProcess | undefined;
 let port = 0;
 let base = "";
+let childOutput = "";
 
 function findOpenPort(): Promise<number> {
   return new Promise((resolvePort, reject) => {
@@ -84,11 +86,26 @@ async function waitForHealth(timeoutMs: number): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      if ((await fetch(`${base}/health`)).ok) return true;
+      if (await healthOk()) return true;
     } catch {}
     await new Promise((r) => setTimeout(r, 300));
   }
   return false;
+}
+
+function healthOk(): Promise<boolean> {
+  return new Promise((resolveOk) => {
+    const req = request(`${base}/health`, { method: "GET", timeout: 2_000 }, (res) => {
+      res.resume();
+      resolveOk((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300);
+    });
+    req.on("error", () => resolveOk(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolveOk(false);
+    });
+    req.end();
+  });
 }
 
 async function loadChromium() {
@@ -111,18 +128,31 @@ beforeAll(async () => {
   symlinkSync(realNodeModules, join(tempRepo, "node_modules"), "dir");
   writeFileSync(join(tempRepo, "package.json"), JSON.stringify({ name: "ship-pipeline-run-e2e", type: "module" }) + "\n");
 
-  // The repo's standard fake `claude` binary: echoes the JSON payload back in the
-  // turn_end envelope the ClaudeCodeAgent parses.
+  // The repo's standard fake agent binaries: echo the JSON payload back in the
+  // envelopes the workflow's Claude and Codex agents parse.
   binDir = mkdtempSync(join(tmpdir(), "ship-pipeline-bin-"));
   const claudeSrc = [
     `#!${process.execPath}`,
+    `const args = process.argv.slice(2);`,
+    `if (args.join(" ") === "auth status") { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) + "\\n"); process.exit(0); }`,
     `const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}";`,
     `process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n" }] } }) + "\\n");`,
     ``,
   ].join("\n");
   writeFileSync(join(binDir, "claude"), claudeSrc);
   chmodSync(join(binDir, "claude"), 0o755);
-
+  const codexSrc = [
+    `#!${process.execPath}`,
+    `const fs = require("node:fs");`,
+    `const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}";`,
+    `const args = process.argv.slice(2);`,
+    `const outputIndex = args.indexOf("--output-last-message");`,
+    `if (outputIndex >= 0 && args[outputIndex + 1]) fs.writeFileSync(args[outputIndex + 1], "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n", "utf8");`,
+    `process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");`,
+    ``,
+  ].join("\n");
+  writeFileSync(join(binDir, "codex"), codexSrc);
+  chmodSync(join(binDir, "codex"), 0o755);
   port = await findOpenPort();
   base = `http://127.0.0.1:${port}`;
 
@@ -131,17 +161,26 @@ beforeAll(async () => {
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH}`,
+      SMITHERS_TEST_AGENT_PATH: `${binDir}:${process.env.PATH}`,
       SMITHERS_FAKE_AGENT_RESPONSE: FAKE_RESPONSE,
       ANTHROPIC_API_KEY: "",
       UG_PORT: String(port),
       UG_RUN_ID: RUN_ID,
     },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  proc.stdout?.on("data", (chunk) => {
+    childOutput += String(chunk);
+  });
+  proc.stderr?.on("data", (chunk) => {
+    childOutput += String(chunk);
   });
 
   // The fixture executes the whole pipeline (worktree + per-stage) BEFORE it
   // listens, so health coming up means the real run already completed.
-  expect(await waitForHealth(180_000)).toBe(true);
+  if (!(await waitForHealth(180_000))) {
+    throw new Error(`ship-pipeline fixture did not become healthy:\n${childOutput.slice(-8_000)}`);
+  }
 }, 200_000);
 
 afterAll(() => {
