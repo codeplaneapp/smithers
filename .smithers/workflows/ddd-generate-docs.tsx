@@ -144,9 +144,32 @@ export function kickoffBugScan(root: string = ROOT, enabled = true) {
   if (!enabled) {
     return { launched: false, bugScanRunId: "", summary: "Bug scan disabled by input (runBugScan=false)." };
   }
+  return kickoffBugScanAfterGate(root, enabled, { buildPassed: true, reviewApproved: true });
+}
+
+export function kickoffBugScanAfterGate(
+  root: string = ROOT,
+  enabled = true,
+  gate: { buildPassed?: boolean; reviewApproved?: boolean } = {},
+) {
+  if (!enabled) {
+    return { launched: false, bugScanRunId: "", summary: "Bug scan disabled by input (runBugScan=false)." };
+  }
+  const blockers = [
+    gate.buildPassed === false ? "the generated spec build failed" : "",
+    gate.reviewApproved === false ? "the generated spec review was not approved" : "",
+  ].filter(Boolean);
+  if (blockers.length > 0) {
+    return {
+      launched: false,
+      bugScanRunId: "",
+      summary: `Bug scan blocked because ${blockers.join(" and ")}.`,
+    };
+  }
   try {
     const out = execFileSync("smithers", ["workflow", "run", "ddd-bug-scan", "--detach"], {
       cwd: root,
+      env: process.env,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       maxBuffer: 4 * 1024 * 1024,
@@ -224,8 +247,18 @@ ${JSON.stringify(deps.build, null, 2)}
 ${SPEC_RULES}`}
         </Task>
 
-        <Task id="kickoff-bug-scan" output={outputs.kickoff} dependsOn={["review"]}>
-          {async () => kickoffBugScan(ROOT, runBugScan)}
+        <Task
+          id="kickoff-bug-scan"
+          output={outputs.kickoff}
+          dependsOn={["build", "review"]}
+          deps={{ build: outputs.build, review: outputs.review }}
+        >
+          {(deps: any) =>
+            kickoffBugScanAfterGate(ROOT, runBugScan, {
+              buildPassed: deps.build?.passed === true,
+              reviewApproved: deps.review?.approved === true,
+            })
+          }
         </Task>
       </Sequence>
     </Workflow>

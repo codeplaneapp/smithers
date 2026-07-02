@@ -13,8 +13,10 @@ import {
 import {
   extractMaterializedTickets,
   extractTriage,
-  ticketsFromTriage,
+  mergeTickets,
+  specIsStub,
   toRunRows,
+  workflowUiHref,
 } from "../ui/docs-driven-development.tsx";
 
 function frame(seq: number, event: string, payload: Record<string, unknown>): EventFrame {
@@ -77,8 +79,71 @@ describe("DDD UI parser contracts", () => {
     expect(materialized).toEqual([
       { path: "tickets/one", kind: "ticket", status: "todo", content: "# One", updated_at_ms: 42, updatedAtMs: 42 },
     ]);
+  });
 
-    expect(ticketsFromTriage("run 1", triage)[0]?.content).toContain("Task type: e2e");
+  test("mergeTickets keeps gateway precedence and dedupes by path across materialized and backlog rows", () => {
+    const gateway = [
+      { path: "tickets/shared.md", kind: "ticket", status: "in-progress", content: "# Gateway" },
+      { path: "tickets/gateway.md", kind: "ticket", status: "todo", content: "# Gateway Only" },
+    ];
+    const materialized = [
+      { path: "tickets/shared.md", kind: "ticket", status: "todo", content: "# Materialized" },
+      { path: "tickets/materialized.md", kind: "ticket", status: "todo", content: "# Materialized Only" },
+    ];
+    const backlog = [
+      { path: "tickets/materialized.md", kind: "feature", status: "todo", content: "# Backlog Duplicate" },
+      { path: "tickets/backlog.md", kind: "feature", status: "todo", content: "# Backlog Only" },
+      { path: "", kind: "ticket", status: "todo", content: "# Ignored" },
+    ];
+
+    expect(mergeTickets(gateway, materialized, backlog).map((ticket) => `${ticket.path}:${ticket.content}`)).toEqual([
+      "tickets/shared.md:# Gateway",
+      "tickets/gateway.md:# Gateway Only",
+      "tickets/materialized.md:# Materialized Only",
+      "tickets/backlog.md:# Backlog Only",
+    ]);
+  });
+
+  test("extractTriage drops invalid JSON, non-arrays, object rows, and slotless entries", () => {
+    expect(extractTriage({ row: { selected: "{" } })).toEqual([]);
+    expect(extractTriage({ row: { selected: JSON.stringify({ slot: 1 }) } })).toEqual([]);
+    expect(extractTriage({ row: { selected: [{ slot: 0, title: "ignored" }, null, "bad"] } })).toEqual([]);
+  });
+
+  test("extractMaterializedTickets accepts camelCase and snake_case updated timestamps", () => {
+    expect(extractMaterializedTickets({
+      row: {
+        tickets: [
+          { path: "tickets/camel.md", content: "# Camel", updatedAtMs: 11, kind: "review", status: "open" },
+          { path: "tickets/snake.md", content: "# Snake", updated_at_ms: 22 },
+        ],
+      },
+    })).toEqual([
+      { path: "tickets/camel.md", content: "# Camel", updatedAtMs: 11, kind: "review", status: "open" },
+      { path: "tickets/snake.md", content: "# Snake", updated_at_ms: 22, updatedAtMs: 22, kind: "ticket", status: "todo" },
+    ]);
+  });
+
+  test("toRunRows handles arrays, nested run lists, direct objects, and empty ids", () => {
+    expect(toRunRows([{ id: "r1" }, { runId: "r2" }, { id: "" }, { workflowKey: "missing" }]))
+      .toEqual([{ id: "r1", runId: "r1" }, { runId: "r2" }]);
+    expect(toRunRows({ runs: [{ id: "r3" }, null, { runId: "" }] })).toEqual([{ id: "r3", runId: "r3" }]);
+    expect(toRunRows({ id: "not-a-list" })).toEqual([]);
+    expect(toRunRows(null)).toEqual([]);
+  });
+
+  test("specIsStub flags empty and seeded-only specs; workflowUiHref targets sibling workflow UIs", () => {
+    expect(specIsStub([])).toBe(true);
+    expect(specIsStub([{ id: "docs-driven-development" }])).toBe(true);
+    expect(specIsStub([{ id: "cli" }])).toBe(false);
+    expect(specIsStub([{ id: "docs-driven-development" }, { id: "cli" }])).toBe(false);
+
+    expect(workflowUiHref("create-workflow", "run-1", "/workflows/docs-driven-development"))
+      .toBe("/workflows/create-workflow?runId=run-1");
+    expect(workflowUiHref("create-workflow", "run/2", "/gw/base/workflows/docs-driven-development"))
+      .toBe("/gw/base/workflows/create-workflow?runId=run%2F2");
+    expect(workflowUiHref("ddd generate/docs", "run ?&", "/workflows/docs-driven-development"))
+      .toBe("/workflows/ddd%20generate%2Fdocs?runId=run%20%3F%26");
   });
 
   test("chatLineFromFrame handles public dotted events, top-level event frames, and legacy engine events", () => {

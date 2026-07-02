@@ -49,8 +49,8 @@ function filesFromDiffHints(diffHints: string[] = []): string[] {
     new Set(
       diffHints
         .flatMap((hint) => hint.split(/\s+/))
+        .map((part) => part.replace(/^[("'`]+/, "").replace(/[",.;:)`]+$/, ""))
         .filter((part) => /^(packages|apps|docs|e2e|scripts|skills|\.smithers|package\.json)/.test(part))
-        .map((part) => part.replace(/[",]$/, "")),
     ),
   );
 }
@@ -83,7 +83,7 @@ export function triageCandidates(features: Feature[], max = 8): TriageCandidate[
     .slice(0, max);
 }
 
-function parseMax(argv: string[]): number {
+export function parseMax(argv: string[]): number {
   const args = argv.filter((arg) => arg !== "--");
   const index = args.indexOf("--max");
   if (index >= 0 && args[index + 1]) {

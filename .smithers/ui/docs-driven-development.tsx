@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
@@ -14,10 +14,12 @@ import { docsContent } from "./ddd-docsContent.generated";
 import { crepeThemeCss } from "./crepeTheme.generated";
 import { ticketsBacklog } from "./ddd-ticketsBacklog.generated";
 import {
+  ErrorBanner,
   FeatureDetail,
   asArray,
   asString,
   assetBaseFromUrl,
+  features,
   isRecord,
   makeAssetUrl,
   normalizeMarkdownForDirty,
@@ -38,6 +40,8 @@ import { AuditTab } from "./ddd-AuditTab";
 import { LiveTab } from "./ddd-LiveTab";
 import { TicketsTab } from "./ddd-TicketsTab";
 import { FeaturesTab } from "./ddd-FeaturesTab";
+import { StartPane, type LaunchState } from "./ddd-StartPane";
+import { Tutorial, shouldShowTutorial } from "./ddd-Tutorial";
 
 export type TriageItem = {
   slot: number;
@@ -80,47 +84,6 @@ export function extractTriage(value: unknown): TriageItem[] {
       acceptance: strings(item.acceptance),
     }))
     .filter((item) => item.slot > 0);
-}
-
-export function ticketSlug(value: unknown): string {
-  return asString(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80) || "ticket";
-}
-
-export function ticketMarkdownFor(runId: string | undefined, item: TriageItem): string {
-  const list = (title: string, values: string[]) =>
-    values.length ? `\n## ${title}\n\n${values.map((value) => `- ${value}`).join("\n")}\n` : "";
-
-  return [
-    `# ${item.title || item.featureId || `Triage slot ${item.slot}`}`,
-    "",
-    "Status: todo",
-    `Run: ${runId ?? "current"}`,
-    `Slot: ${item.slot}`,
-    `Feature: ${item.featureId}`,
-    `Agent: ${item.agent}`,
-    `Task type: ${item.taskType}`,
-    "",
-    "## Reason",
-    "",
-    item.reason || "No reason recorded.",
-    list("Files", item.files),
-    list("Tests", item.tests),
-    list("Acceptance", item.acceptance),
-  ].join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-}
-
-export function ticketsFromTriage(runId: string | undefined, triage: TriageItem[]): TicketRow[] {
-  return triage.map((item) => ({
-    path: `docs-driven-development--${ticketSlug(runId ?? "current")}--${String(item.slot).padStart(2, "0")}-${ticketSlug(item.featureId || item.title)}`,
-    kind: "ticket",
-    status: "todo",
-    updatedAtMs: Date.now(),
-    content: ticketMarkdownFor(runId, item),
-  }));
 }
 
 export function extractMaterializedTickets(value: unknown): TicketRow[] {
@@ -185,18 +148,40 @@ function docPathForHref(href: string): string | undefined {
   return target?.kind === "doc" ? target.path : undefined;
 }
 
+/**
+ * The spec is a stub when it is empty or only carries the seeded
+ * docs-driven-development record: nothing real to render yet, so the Start
+ * pane becomes the landing view.
+ */
+export function specIsStub(specFeatures: ReadonlyArray<{ id: string }>): boolean {
+  if (specFeatures.length === 0) return true;
+  return specFeatures.length === 1 && specFeatures[0]!.id === "docs-driven-development";
+}
+
+/** Same-origin href to a sibling workflow's run UI (served by the same gateway). */
+export function workflowUiHref(workflowKey: string, runId: string, pathname: string = window.location.pathname): string {
+  const base = pathname.replace(/\/workflows\/[^/]*$/, "");
+  return `${base}/workflows/${encodeURIComponent(workflowKey)}?runId=${encodeURIComponent(runId)}`;
+}
+
 function App() {
   const runId = runIdFromUrl();
   const assetBase = assetBaseFromUrl();
   const assetUrl = makeAssetUrl(assetBase);
+  const stub = specIsStub(features);
+  const firstProductDoc = docsContent.find((doc) => doc.level === "product") ?? docsContent[0];
 
   const [activeTab, setActiveTab] = useState<TabKey>("features");
-  const [selectedPath, setSelectedPath] = useState(docsContent[0]?.path ?? "");
+  const [selectedPath, setSelectedPath] = useState(firstProductDoc?.path ?? "");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [launchedRunId, setLaunchedRunId] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [pickedRunId, setPickedRunId] = useState<string | undefined>(undefined);
   const [activeFeature, setActiveFeature] = useState<{ feature: Feature; note?: string } | null>(null);
+  const [showStart, setShowStart] = useState(stub);
+  const [showTutorial, setShowTutorial] = useState(shouldShowTutorial());
+  const [createRun, setCreateRun] = useState<LaunchState>({ runId: null, error: null });
+  const [generateRun, setGenerateRun] = useState<LaunchState>({ runId: null, error: null });
 
   // ---- every gateway hook is called unconditionally, at the top, never behind
   //      a ??/&&/ternary/loop (short-circuiting a hook crashes React). ----
@@ -214,6 +199,9 @@ function App() {
   const triageOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "triage", iteration: 0 });
   const materializedTicketsOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "materialize-tickets", iteration: 0 });
   const roundSummaryOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "round-summary", iteration: 0 });
+  // Follows the Start pane's generate-docs run: its kickoff node reports the
+  // detached bug-scan run id.
+  const kickoffOut = useGatewayNodeOutput({ runId: generateRun.runId ?? undefined, nodeId: "kickoff-bug-scan", iteration: 0 });
 
   const runsState = useGatewayRuns({ filter: { limit: 100 } });
   const runDetail = useGatewayRun(liveRunId);
@@ -230,6 +218,17 @@ function App() {
     return () => window.clearInterval(id);
   }, [refetchRuns]);
 
+  const kickoffRow = rowOf(kickoffOut.data);
+  const bugScanRunId = asString(kickoffRow?.bugScanRunId ?? kickoffRow?.bug_scan_run_id);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !generateRun.runId || bugScanRunId) return;
+    const id = window.setInterval(() => {
+      void kickoffOut.refetch();
+    }, 1_000);
+    return () => window.clearInterval(id);
+  }, [generateRun.runId, bugScanRunId, kickoffOut.refetch]);
+
   // ---- derived (no hooks below this line) ----
   const bootstrap = rowOf(bootstrapOut.data);
   const metaTicket = rowOf(metaTicketOut.data);
@@ -238,18 +237,23 @@ function App() {
   const summary = rowOf(roundSummaryOut.data);
   const triage = extractTriage(triageOut.data);
   const materializedTickets = extractMaterializedTickets(materializedTicketsOut.data);
+  const bugScanSummary = bugScanRunId ? "" : asString(kickoffRow?.summary);
 
   const runs = toRunRows(runsState.data).filter((run) => isDocsDrivenRun(run, liveRunId));
   const runStatus = asString(rowOf(runDetail.data)?.status) || undefined;
   const gatewayTickets = (ticketsState.data ?? []) as unknown as TicketRow[];
   // The full backlog (one ticket per gap, derived from features.json) is the
-  // baseline; live gateway tickets + this round's materialized/triage tickets
-  // overlay on top (mergeTickets keeps the first occurrence per path).
+  // baseline; live gateway tickets + this round's materialized tickets overlay
+  // on top (mergeTickets keeps the first occurrence per path). Tickets the run
+  // actually materialized are the only run-time source: synthesizing tickets
+  // client-side from triage output duplicated them with a second shape.
   const backlogTickets = ticketsBacklog as unknown as TicketRow[];
-  const tickets = mergeTickets(gatewayTickets, materializedTickets, ticketsFromTriage(liveRunId, triage), backlogTickets);
+  const tickets = mergeTickets(gatewayTickets, materializedTickets, backlogTickets);
   const events = (runEvents.events ?? []) as unknown as EventFrame[];
 
+  // Only product docs are editable; technical docs are derived and read-only.
   const changedFiles = docsContent
+    .filter((doc) => doc.level === "product")
     .map((doc) => ({ path: doc.path, beforeMarkdown: doc.content, afterMarkdown: drafts[doc.path] ?? doc.content }))
     .filter((doc) => normalizeMarkdownForDirty(doc.beforeMarkdown) !== normalizeMarkdownForDirty(doc.afterMarkdown));
   const changedPaths = changedFiles.map((doc) => doc.path);
@@ -292,11 +296,15 @@ function App() {
     void actions
       .launchRun({
         workflow: "docs-driven-development",
-        input: { maxAgents: 1, runImplementation: false, implementationApproved: false, metaTicket: payload },
+        input: { maxAgents: 1, maxRounds: 1, runImplementation: false, implementationApproved: false, metaTicket: payload },
       })
       .then((result: unknown) => {
         const nextRunId = isRecord(result) ? asString(result.runId) : "";
-        setLaunchedRunId(nextRunId || "queued");
+        if (!nextRunId) {
+          setLaunchError("The gateway accepted the request but did not return a run id. Try dispatching again.");
+          return;
+        }
+        setLaunchedRunId(nextRunId);
         if (nextRunId) {
           setPickedRunId(nextRunId);
           setActiveTab("live");
@@ -305,6 +313,65 @@ function App() {
       .catch((error: unknown) => {
         setLaunchError(error instanceof Error ? error.message : String(error));
       });
+  }
+
+  function launchCreateApp(description: string) {
+    setCreateRun({ runId: null, error: null });
+    void actions
+      .launchRun({
+        workflow: "create-workflow",
+        input: {
+          prompt:
+            `Create a workflow that scaffolds and iteratively builds this new app, docs-first: ${description}\n` +
+            "The workflow must maintain .smithers/spec/features.json for the new app as it builds (honest statuses, " +
+            "gaps recorded in missing[]), so docs-driven-development can run over it from day one.",
+        },
+      })
+      .then((result: unknown) => {
+        const nextRunId = isRecord(result) ? asString(result.runId) : "";
+        setCreateRun(
+          nextRunId
+            ? { runId: nextRunId, error: null }
+            : { runId: null, error: "The gateway accepted the request but did not return a run id. Try again." },
+        );
+      })
+      .catch((error: unknown) => {
+        setCreateRun({ runId: null, error: error instanceof Error ? error.message : String(error) });
+      });
+  }
+
+  function launchGenerateDocs() {
+    setGenerateRun({ runId: null, error: null });
+    void actions
+      .launchRun({ workflow: "ddd-generate-docs", input: {} })
+      .then((result: unknown) => {
+        const nextRunId = isRecord(result) ? asString(result.runId) : "";
+        setGenerateRun(
+          nextRunId
+            ? { runId: nextRunId, error: null }
+            : { runId: null, error: "The gateway accepted the request but did not return a run id. Try again." },
+        );
+        if (nextRunId) setPickedRunId(nextRunId);
+      })
+      .catch((error: unknown) => {
+        setGenerateRun({ runId: null, error: error instanceof Error ? error.message : String(error) });
+      });
+  }
+
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const key = event.key;
+    if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(key)) return;
+    event.preventDefault();
+    const nextIndex =
+      key === "Home" ? 0 :
+      key === "End" ? TABS.length - 1 :
+      key === "ArrowRight" ? (index + 1) % TABS.length :
+      (index - 1 + TABS.length) % TABS.length;
+    const next = TABS[nextIndex]!;
+    setActiveTab(next.key);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>(`[data-testid="ddd-tab-${next.key}"]`)?.focus();
+    });
   }
 
   return (
@@ -322,10 +389,23 @@ function App() {
           {assetBase ? (
             <a className="button" href={assetBase} target="_blank" rel="noreferrer">Assets</a>
           ) : null}
+          <button type="button" className="button" data-testid="ddd-open-start" onClick={() => setShowStart(true)}>
+            + New
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            data-testid="ddd-open-tutorial"
+            aria-label="Open the guided tutorial"
+            title="Guided tutorial"
+            onClick={() => setShowTutorial(true)}
+          >
+            ?
+          </button>
         </div>
       </header>
 
-      <nav className="tabbar" role="tablist" data-testid="ddd-tabbar">
+      <nav className="tabbar" role="tablist" data-testid="ddd-tabbar" hidden={showStart}>
         {TABS.map((tab) => {
           const count =
             tab.key === "specs" ? changedPaths.length :
@@ -337,9 +417,11 @@ function App() {
               type="button"
               role="tab"
               aria-selected={activeTab === tab.key}
+              tabIndex={activeTab === tab.key ? 0 : -1}
               className={activeTab === tab.key ? "tab is-active" : "tab"}
               data-testid={`ddd-tab-${tab.key}`}
               onClick={() => setActiveTab(tab.key)}
+              onKeyDown={(event) => onTabKeyDown(event, TABS.findIndex((item) => item.key === tab.key))}
             >
               {tab.label}
               {count ? <span className="count">{count}</span> : null}
@@ -349,12 +431,36 @@ function App() {
       </nav>
 
       <div className="content">
-        <div hidden={activeTab !== "features"} className="pane">
+        <ErrorBanner
+          title="Gateway data issue"
+          errors={[
+            runsState.error,
+            runDetail.error,
+            runTree.error,
+            ticketsState.error,
+          ]}
+        />
+
+        {showStart ? (
+          <StartPane
+            stub={stub}
+            onClose={stub ? null : () => setShowStart(false)}
+            onCreateApp={launchCreateApp}
+            onGenerateDocs={launchGenerateDocs}
+            createState={createRun}
+            generateState={generateRun}
+            bugScanRunId={bugScanRunId}
+            bugScanSummary={bugScanSummary}
+            workflowUiHref={workflowUiHref}
+          />
+        ) : null}
+
+        <div hidden={showStart || activeTab !== "features"} className="pane">
           <FeaturesTab onOpenFeature={(feature) => setActiveFeature({ feature })} />
         </div>
 
         {/* Specs owns layout-measuring components (Crepe); mount only when active. */}
-        {activeTab === "specs" ? (
+        {!showStart && activeTab === "specs" ? (
           <SpecsTab
             docs={docsContent}
             drafts={drafts}
@@ -369,7 +475,7 @@ function App() {
           />
         ) : null}
 
-        <div hidden={activeTab !== "audit"} className="pane">
+        <div hidden={showStart || activeTab !== "audit"} className="pane">
           <AuditTab
             audit={audit}
             bootstrap={bootstrap}
@@ -381,7 +487,7 @@ function App() {
           />
         </div>
 
-        <div hidden={activeTab !== "live"} className="pane">
+        <div hidden={showStart || activeTab !== "live"} className="pane">
           <LiveTab
             runs={runs}
             runsLoading={runsState.loading}
@@ -390,12 +496,13 @@ function App() {
             runStatus={runStatus}
             runTree={runTree}
             events={events}
+            eventsError={runEvents.error}
             streaming={runEvents.streaming}
             assetBase={assetBase}
           />
         </div>
 
-        <div hidden={activeTab !== "tickets"} className="pane">
+        <div hidden={showStart || activeTab !== "tickets"} className="pane">
           <TicketsTab tickets={tickets} loading={ticketsState.loading} />
         </div>
       </div>
@@ -409,10 +516,12 @@ function App() {
           onOpenDoc={openDoc}
         />
       ) : null}
+
+      <Tutorial open={showTutorial} onClose={() => setShowTutorial(false)} />
     </main>
   );
 }
 
-if (typeof document !== "undefined") {
+if (typeof document !== "undefined" && document.getElementById("root")) {
   createGatewayReactRoot(<App />);
 }

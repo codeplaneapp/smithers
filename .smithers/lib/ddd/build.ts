@@ -9,8 +9,12 @@ import { validateFeatures } from "./validateFeatures.ts";
 
 try {
   const root = dddRoot();
-  const features = validateFeatures(root);
-  console.log(`ddd build: validated ${features.length} features.`);
+  const features = validateFeatures(root, { allowMissing: true });
+  console.log(
+    features.length === 0
+      ? "ddd build: no features.json yet, using empty starter spec."
+      : `ddd build: validated ${features.length} features.`,
+  );
   const docs = generateSpecDocs(root);
   console.log(`ddd build: generated ${docs} derived feature docs.`);
   const { docs: docEntries, tickets } = generateUiModules(root);

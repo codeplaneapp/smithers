@@ -4,18 +4,25 @@ import { z } from "zod/v4";
 import { dddRoot } from "./dddRoot.ts";
 import { type Feature, featuresSchema } from "./featuresSchema.ts";
 
+export type ValidateFeaturesOptions = {
+  /** Missing features.json means "new repo": return an empty spec instead of failing. */
+  allowMissing?: boolean;
+};
+
 /**
  * Reproducible gate for docs-driven-development: features.json is the spec
  * source of truth, so validate it against the shared schema and assert ids are
  * unique. Throws with a readable message on any failure.
  */
-export function validateFeatures(root: string = dddRoot()): Feature[] {
+export function validateFeatures(root: string = dddRoot(), options: ValidateFeaturesOptions = {}): Feature[] {
   const featuresPath = resolve(root, ".smithers/spec/features.json");
 
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(featuresPath, "utf8"));
   } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+    if (options.allowMissing && code === "ENOENT") return [];
     throw new Error(
       `could not read/parse ${featuresPath}: ${error instanceof Error ? error.message : String(error)}`,
     );

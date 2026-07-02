@@ -1,4 +1,5 @@
 /** @jsxImportSource react */
+import { useState } from "react";
 import { MarkdownEditor, SpecFileTree, formatStatus, resolveDocLink, type DocsContentEntry } from "./ddd-shared";
 
 export type SpecsTabProps = {
@@ -18,11 +19,19 @@ export function docIsTechnical(doc: Pick<DocsContentEntry, "level"> | undefined)
   return doc?.level === "technical";
 }
 
+function docSearchBlob(doc: DocsContentEntry): string {
+  return [doc.path, doc.title, doc.level, doc.content].filter(Boolean).join(" ").toLowerCase();
+}
+
 export function SpecsTab(props: SpecsTabProps) {
   const { docs, drafts, selectedPath, assetBase, changedPaths, launchedRunId, launchError } = props;
-  const productDocs = docs.filter((doc) => !docIsTechnical(doc));
-  const technicalDocs = docs.filter(docIsTechnical);
-  const selectedDoc = docs.find((doc) => doc.path === selectedPath) ?? productDocs[0] ?? docs[0];
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const productDocsAll = docs.filter((doc) => !docIsTechnical(doc));
+  const technicalDocsAll = docs.filter(docIsTechnical);
+  const productDocs = productDocsAll.filter((doc) => !needle || docSearchBlob(doc).includes(needle));
+  const technicalDocs = technicalDocsAll.filter((doc) => !needle || docSearchBlob(doc).includes(needle));
+  const selectedDoc = docs.find((doc) => doc.path === selectedPath) ?? productDocsAll[0] ?? docs[0];
   const selectedTechnical = docIsTechnical(selectedDoc);
   const draftValue = selectedDoc ? drafts[selectedDoc.path] ?? selectedDoc.content : "";
   const currentDirty = !!selectedDoc && changedPaths.includes(selectedDoc.path);
@@ -38,24 +47,42 @@ export function SpecsTab(props: SpecsTabProps) {
   return (
     <div className="specs pane" data-testid="ddd-specs-tab">
       <div className="specs-tree">
+        <label className="doc-tree-search">
+          <span>Search docs</span>
+          <input
+            className="search-input"
+            type="search"
+            value={query}
+            data-testid="ddd-doc-search"
+            placeholder="Path, title, content"
+            onInput={(event) => setQuery(event.currentTarget.value)}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+          />
+        </label>
         <div className="tree-section">
-          <span className="tree-section-title">Product docs</span>
+          <span className="tree-section-title">
+            Product docs <span className="count">{productDocs.length}{needle ? ` of ${productDocsAll.length}` : ""}</span>
+          </span>
           {productDocs.length > 0 ? (
-            <SpecFileTree files={productDocs} selectedPath={selectedPath} onSelect={props.onSelectPath} />
+            <SpecFileTree files={productDocs} selectedPath={selectedPath} changedPaths={changedPaths} onSelect={props.onSelectPath} />
           ) : (
-            <p className="tree-empty">No product docs yet.</p>
+            <p className="tree-empty">{needle ? "No product docs match." : "No product docs yet."}</p>
           )}
         </div>
-        <details className="tree-section technical-docs" data-testid="ddd-technical-docs">
+        <details className="tree-section technical-docs" data-testid="ddd-technical-docs" open={needle.length > 0 || selectedTechnical}>
           <summary className="tree-section-title tree-section-toggle">
-            Technical docs (for agents) <span className="count">{technicalDocs.length}</span>
+            Technical docs (for agents) <span className="count">{technicalDocs.length}{needle ? ` of ${technicalDocsAll.length}` : ""}</span>
           </summary>
           <p className="agent-docs-callout" data-testid="ddd-agent-docs-callout">
             Generated, low-level reference docs. We recommend asking your agent to read these instead of reading
             them yourself, e.g. "Read .smithers/spec/content/features/cli.md and close the gap it describes."
             Stay on the product docs; your agent works down here.
           </p>
-          <SpecFileTree files={technicalDocs} selectedPath={selectedPath} onSelect={props.onSelectPath} />
+          {technicalDocs.length > 0 ? (
+            <SpecFileTree files={technicalDocs} selectedPath={selectedPath} changedPaths={changedPaths} onSelect={props.onSelectPath} />
+          ) : (
+            <p className="tree-empty">{needle ? "No technical docs match." : "No technical docs yet."}</p>
+          )}
         </details>
       </div>
       <div className="specs-main">

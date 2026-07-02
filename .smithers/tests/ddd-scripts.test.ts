@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectAuditInputs } from "../lib/ddd/auditInputs.ts";
-import { dddRoot } from "../lib/ddd/dddRoot.ts";
+import { dddRoot, dddRootOrCwd } from "../lib/ddd/dddRoot.ts";
 import { validateFeatures } from "../lib/ddd/validateFeatures.ts";
 import { generateSpecDocs } from "../lib/ddd/generateSpecDocs.ts";
-import { generateUiModules } from "../lib/ddd/generateUiModules.ts";
-import { triageCandidates } from "../lib/ddd/triageCandidates.ts";
+import { docLevelOf, generateUiModules } from "../lib/ddd/generateUiModules.ts";
+import { parseMax, triageCandidates } from "../lib/ddd/triageCandidates.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const realBuildScript = resolve(here, "../lib/ddd/build.ts");
@@ -82,6 +82,46 @@ describe("DDD scripts and build gate", () => {
     expect(parsed?.missing).toEqual([]);
   });
 
+  test("missing features.json is a starter spec only when explicitly allowed", () => {
+    const root = tempRoot();
+    const nested = join(root, ".smithers/lib/ddd");
+    mkdirSync(nested, { recursive: true });
+
+    expect(dddRoot(nested)).toBe(root);
+    expect(() => validateFeatures(root)).toThrow("could not read/parse");
+    expect(validateFeatures(root, { allowMissing: true })).toEqual([]);
+
+    expect(generateSpecDocs(root)).toBe(0);
+    expect(generateUiModules(root)).toEqual({ docs: 1, tickets: 0 });
+    const featuresModule = readFileSync(join(root, ".smithers/ui/ddd-features.generated.ts"), "utf8");
+    expect(featuresModule).toContain("export const featuresData = [];");
+  });
+
+  test("validateFeatures rejects nested strict schema errors and empty required nested strings", () => {
+    const root = tempRoot();
+
+    writeFeatures(root, [
+      feature({
+        capabilities: [{ title: "Launch", detail: "Runs workflows.", extra: true }],
+      }),
+    ]);
+    expect(() => validateFeatures(root)).toThrow("Unrecognized key");
+
+    writeFeatures(root, [
+      feature({
+        links: [{ label: "", href: "overview.md" }],
+      }),
+    ]);
+    expect(() => validateFeatures(root)).toThrow("Too small");
+
+    writeFeatures(root, [
+      feature({
+        endpoints: [{ method: "GET", path: "" }],
+      }),
+    ]);
+    expect(() => validateFeatures(root)).toThrow("Too small");
+  });
+
   test("dddRoot discovers the root from nested cwd and fails clearly outside a DDD repo", () => {
     const root = tempRoot();
     writeFeatures(root, [feature()]);
@@ -136,6 +176,37 @@ describe("DDD scripts and build gate", () => {
     expect(rich).toContain("- Add browser e2e proof");
   });
 
+  test("generateSpecDocs escapes markdown and formats commands, paths, and tricky link destinations", () => {
+    const root = tempRoot();
+    writeFeatures(root, [
+      feature({
+        id: "escaping",
+        title: "# [Escaped]_`Title`",
+        owner: "docs_[owner]",
+        summary: "Run smithers workflow run ddd-generate-docs, pnpm -C e2e test, and open .smithers/spec/features.json.",
+        userValue: "Use `literal` and [brackets]_safely.",
+        capabilities: [{ title: "# Cap_[A]", detail: "Fix packages/server/src/index.ts.", status: "partial" }],
+        endpoints: [{ method: "GET", path: "/runs", doc: "reference/api docs).md#runs", note: "call /v1/api/runs" }],
+        links: [{ label: "Read [API]", href: "reference/api docs).md#runs" }],
+        missing: ["Heading # stays text with [link]_markers"],
+      }),
+    ]);
+
+    generateSpecDocs(root);
+
+    const doc = readFileSync(join(root, ".smithers/spec/content/features/escaping.md"), "utf8");
+    expect(doc).toContain("# \\[Escaped\\]\\_\\`Title\\`");
+    expect(doc).toContain("**Owner:** docs\\_\\[owner\\]");
+    expect(doc).toContain("`smithers workflow run ddd-generate-docs`");
+    expect(doc).toContain("`pnpm -C e2e test`");
+    expect(doc).toContain("`.smithers/spec/features.json`");
+    expect(doc).toContain("Use \\`literal\\` and \\[brackets\\]\\_safely.");
+    expect(doc).toContain("### Cap\\_\\[A\\] (Partial)");
+    expect(doc).toContain("- `GET /runs` - call /v1/api/runs ([docs](reference/api%20docs%29.md#runs))");
+    expect(doc).toContain("- [Read \\[API\\]](reference/api%20docs%29.md#runs)");
+    expect(doc).toContain("- Heading # stays text with \\[link\\]\\_markers");
+  });
+
   test("generateUiModules bundles docs, workflow source, and inferred backlog tickets with truncated slugs", () => {
     const root = tempRoot();
     mkdirSync(join(root, ".smithers/spec/content/reference"), { recursive: true });
@@ -178,11 +249,46 @@ describe("DDD scripts and build gate", () => {
     expect(ticketsModule).toContain('"kind": "fix"');
     expect(ticketsModule).toContain('"kind": "review"');
     expect(ticketsModule).toContain('"kind": "feature"');
+    expect(ticketsModule).toContain('"featureId": "broken-p0"');
+    expect(ticketsModule).toContain('"featureTitle": "Broken P0"');
     expect(ticketsModule).toContain("tickets/long-gap--01-add-support-very-very-very-very-very-very-very-very-very-ver.md");
     expect(ticketsModule).not.toContain("ignored");
 
     const workflowModule = readFileSync(join(root, ".smithers/ui/ddd-workflowSource.generated.ts"), "utf8");
     expect(workflowModule).toContain("export default null");
+  });
+
+  test("generateUiModules classifies nested docs, defaults open missing lists, and tolerates missing workflow source", () => {
+    const root = tempRoot();
+    mkdirSync(join(root, ".smithers/spec/content/product/deep"), { recursive: true });
+    mkdirSync(join(root, ".smithers/spec/content/reference/deep"), { recursive: true });
+    writeFileSync(join(root, ".smithers/spec/content/product/deep/guide.md"), "# Product Guide\n");
+    writeFileSync(join(root, ".smithers/spec/content/reference/deep/api.md"), "# API Guide\n");
+    writeFeatures(root, [
+      feature({ id: "open-no-gaps", title: "Open No Gaps", status: "partial", missing: [] }),
+      feature({ id: "done-no-gaps", title: "Done No Gaps", status: "fixed", missing: [] }),
+    ]);
+
+    expect(docLevelOf("overview.md")).toBe("product");
+    expect(docLevelOf("product/deep/guide.md")).toBe("product");
+    expect(docLevelOf("features/open-no-gaps.md")).toBe("technical");
+    expect(docLevelOf("reference/deep/api.md")).toBe("technical");
+
+    generateSpecDocs(root);
+    expect(generateUiModules(root)).toEqual({ docs: 5, tickets: 1 });
+
+    const docsModule = readFileSync(join(root, ".smithers/ui/ddd-docsContent.generated.ts"), "utf8");
+    expect(docsModule).toContain('"path": "product/deep/guide.md"');
+    expect(docsModule).toContain('"level": "product"');
+    expect(docsModule).toContain('"path": "reference/deep/api.md"');
+    expect(docsModule).toContain('"level": "technical"');
+
+    const ticketsModule = readFileSync(join(root, ".smithers/ui/ddd-ticketsBacklog.generated.ts"), "utf8");
+    expect(ticketsModule).toContain("Close the partial status of Open No Gaps with direct proof.");
+    expect(ticketsModule).not.toContain("Done No Gaps");
+
+    const workflowModule = readFileSync(join(root, ".smithers/ui/ddd-workflowSource.generated.ts"), "utf8");
+    expect(workflowModule).toContain('export const workflowSource = "";');
   });
 
   test("collectAuditInputs is sorted, deduped, and omits files over the 256KB cap", () => {
@@ -227,7 +333,40 @@ describe("DDD scripts and build gate", () => {
     expect(candidates[2]?.acceptance).toEqual(["Move alpha from missing-tests only after direct proof is attached."]);
   });
 
+  test("triageCandidates cleans path punctuation and parseMax falls back on invalid values", () => {
+    const candidates = triageCandidates([
+      feature({
+        id: "punctuation",
+        title: "Punctuation",
+        status: "broken",
+        priority: "p0",
+        diffHints: ['See "packages/a/src/a.ts", (.smithers/ui/x.tsx); docs/a.md. not/a/path'],
+      }) as any,
+    ], 1);
+
+    expect(candidates[0]?.files).toEqual(["packages/a/src/a.ts", ".smithers/ui/x.tsx", "docs/a.md"]);
+    expect(parseMax([])).toBe(8);
+    expect(parseMax(["--", "--max", "3"])).toBe(3);
+    expect(parseMax(["--max", "0"])).toBe(8);
+    expect(parseMax(["--max", "not-a-number"])).toBe(8);
+  });
+
+  test("dddRootOrCwd falls back to the resolved start directory outside a DDD repo", () => {
+    const outside = mkdtempSync(join(tmpdir(), "ddd-root-fallback-"));
+    tempDirs.push(outside);
+    const nested = join(outside, "nested");
+    mkdirSync(nested, { recursive: true });
+
+    expect(dddRootOrCwd(nested)).toBe(resolve(nested));
+  });
+
   test("build.ts propagates failures and writes generated artifacts on success from a temp filesystem", () => {
+    const missingRoot = tempRoot();
+    const missing = spawnSync("bun", [realBuildScript], { cwd: missingRoot, encoding: "utf8" });
+    expect(missing.status).toBe(0);
+    expect(missing.stdout).toContain("empty starter spec");
+    expect(existsSync(join(missingRoot, ".smithers/ui/ddd-features.generated.ts"))).toBe(true);
+
     const root = tempRoot();
     writeFeatures(root, [feature({ status: "not-real" })]);
 

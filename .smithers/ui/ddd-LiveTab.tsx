@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { UseGatewayRunTreeResult } from "smithers-orchestrator/gateway-react";
 import {
+  ErrorBanner,
   WorkflowSource,
   asArray,
   asString,
@@ -62,6 +63,7 @@ export type LiveTabProps = {
   runStatus: string | undefined;
   runTree: UseGatewayRunTreeResult;
   events: EventFrame[];
+  eventsError?: Error;
   streaming: boolean;
   assetBase: string | undefined;
 };
@@ -80,9 +82,11 @@ function mergeEvents(history: EventFrame[], live: EventFrame[]): EventFrame[] {
 // history endpoint, so we render live-streamed events only.
 function usePersistedRunEvents(assetBase: string | undefined, runId: string | undefined) {
   const [events, setEvents] = useState<EventFrame[]>([]);
+  const [error, setError] = useState<Error | undefined>();
   useEffect(() => {
     let alive = true;
     setEvents([]);
+    setError(undefined);
     if (!assetBase || !runId) return;
     const url = `${assetBase}/run-events?runId=${encodeURIComponent(runId)}&limit=1000`;
     fetch(url)
@@ -95,13 +99,16 @@ function usePersistedRunEvents(assetBase: string | undefined, runId: string | un
         setEvents(rows);
       })
       .catch(() => {
-        if (alive) setEvents([]);
+        if (alive) {
+          setEvents([]);
+          setError(new Error("Saved run events could not be loaded from the asset server."));
+        }
       });
     return () => {
       alive = false;
     };
   }, [assetBase, runId]);
-  return events;
+  return { events, error };
 }
 
 function Node({ node }: { node: RunNode }) {
@@ -125,7 +132,7 @@ function Node({ node }: { node: RunNode }) {
 export function LiveTab(props: LiveTabProps) {
   const { runs, runsLoading, selectedRunId, runTree, events, streaming } = props;
   const persistedEvents = usePersistedRunEvents(props.assetBase, selectedRunId);
-  const allEvents = useMemo(() => mergeEvents(persistedEvents, events), [persistedEvents, events]);
+  const allEvents = useMemo(() => mergeEvents(persistedEvents.events, events), [persistedEvents.events, events]);
   const chatLines = useMemo(() => buildChatLines(allEvents), [allEvents]);
 
   return (
@@ -158,6 +165,11 @@ export function LiveTab(props: LiveTabProps) {
           <section className="card"><p>Select a run to see its chat log, the smithers script, and the live node tree.</p></section>
         ) : (
           <>
+            <ErrorBanner
+              title="Live data issue"
+              errors={[props.eventsError, runTree.error, persistedEvents.error]}
+            />
+
             <section className="card" data-testid="ddd-run-tree">
               <div className="card-head">
                 <h2>Run node tree</h2>

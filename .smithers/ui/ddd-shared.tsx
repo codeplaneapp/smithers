@@ -1,7 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useRef } from "react";
-import { Crepe } from "@milkdown/crepe";
-import featuresJson from "../spec/features.json";
+import { featuresData } from "./ddd-features.generated";
 import { workflowSource, workflowSourcePath } from "./ddd-workflowSource.generated";
 import type { DocsContentEntry } from "./ddd-docsContent.generated";
 
@@ -71,7 +70,7 @@ export type TicketRow = Record<string, unknown> & {
   updatedAtMs?: number;
 };
 
-export const features = featuresJson as unknown as Feature[];
+export const features = featuresData as unknown as Feature[];
 
 export const statusLabels: Record<FeatureStatus, string> = {
   fixed: "Fixed",
@@ -180,6 +179,25 @@ export function fmtTime(ms: number | undefined): string {
   } catch {
     return "";
   }
+}
+
+export function errorMessage(error: unknown): string {
+  if (!error) return "";
+  if (error instanceof Error) return error.message;
+  return asString(error);
+}
+
+export function ErrorBanner({ title, errors }: { title: string; errors: unknown[] }) {
+  const messages = [...new Set(errors.map(errorMessage).map((message) => message.trim()).filter(Boolean))];
+  if (messages.length === 0) return null;
+  return (
+    <section className="error-banner" role="alert" data-testid="ddd-error-banner">
+      <strong>{title}</strong>
+      {messages.map((message, index) => (
+        <p key={`${title}:${index}`}>{message}</p>
+      ))}
+    </section>
+  );
 }
 
 export function normalizeMarkdownForDirty(markdown: string): string {
@@ -544,45 +562,55 @@ export function MarkdownEditor({
   const onLinkClickRef = useRef(onLinkClick);
   onLinkClickRef.current = onLinkClick;
   const useTextareaFallback =
-    typeof navigator !== "undefined" && /happy-dom|jsdom/i.test(navigator.userAgent);
+    typeof window === "undefined" ||
+    typeof document === "undefined" ||
+    !document?.createElement ||
+    (typeof navigator !== "undefined" && /happy-dom|jsdom|bun/i.test(navigator.userAgent));
 
   useEffect(() => {
     if (useTextareaFallback) return;
     const host = hostRef.current;
     if (!host) return;
     const base = assetBase;
-    const crepe = new Crepe({
-      root: host,
-      defaultValue: initialValue,
-      // No asset server in v1: only wire Crepe's image upload when the page was
-      // opened with ?assetBaseUrl.
-      featureConfigs: base
-        ? {
-            [Crepe.Feature.ImageBlock]: {
-              onUpload: (file) => uploadAsset(base, file),
-              blockOnUpload: (file) => uploadAsset(base, file),
-            },
-          }
-        : {},
-    });
+    let cancelled = false;
+    let crepe: { destroy: () => unknown } | null = null;
     let userEdited = false;
     const markUserEdited = () => {
       userEdited = true;
     };
-    host.addEventListener("beforeinput", markUserEdited, true);
-    host.addEventListener("input", markUserEdited, true);
-    host.addEventListener("keydown", markUserEdited, true);
-    host.addEventListener("paste", markUserEdited, true);
-    host.addEventListener("drop", markUserEdited, true);
-    crepe.on((listener) => {
-      listener.markdownUpdated((_ctx, markdown) => {
-        if (!userEdited) {
-          return;
-        }
-        onChangeRef.current(markdown);
+
+    void import("@milkdown/crepe").then(({ Crepe }) => {
+      if (cancelled) return;
+      const editor = new Crepe({
+        root: host,
+        defaultValue: initialValue,
+        // No asset server in v1: only wire Crepe's image upload when the page was
+        // opened with ?assetBaseUrl.
+        featureConfigs: base
+          ? {
+              [Crepe.Feature.ImageBlock]: {
+                onUpload: (file) => uploadAsset(base, file),
+                blockOnUpload: (file) => uploadAsset(base, file),
+              },
+            }
+          : {},
       });
+      crepe = editor;
+      host.addEventListener("beforeinput", markUserEdited, true);
+      host.addEventListener("input", markUserEdited, true);
+      host.addEventListener("keydown", markUserEdited, true);
+      host.addEventListener("paste", markUserEdited, true);
+      host.addEventListener("drop", markUserEdited, true);
+      editor.on((listener: { markdownUpdated: (callback: (_ctx: unknown, markdown: string) => void) => void }) => {
+        listener.markdownUpdated((_ctx, markdown) => {
+          if (!userEdited) {
+            return;
+          }
+          onChangeRef.current(markdown);
+        });
+      });
+      void editor.create();
     });
-    void crepe.create();
 
     // Crepe renders links as plain <a href> that, when clicked, would navigate
     // the browser to the raw relative href (e.g. features/runs.md) against the
@@ -610,13 +638,14 @@ export function MarkdownEditor({
     host.addEventListener("click", onClick, true);
 
     return () => {
+      cancelled = true;
       host.removeEventListener("beforeinput", markUserEdited, true);
       host.removeEventListener("input", markUserEdited, true);
       host.removeEventListener("keydown", markUserEdited, true);
       host.removeEventListener("paste", markUserEdited, true);
       host.removeEventListener("drop", markUserEdited, true);
       host.removeEventListener("click", onClick, true);
-      void crepe.destroy();
+      void crepe?.destroy();
     };
     // Re-initialise only when the selected doc or asset host changes; live edits
     // flow through the listener, not by recreating the editor.
@@ -663,10 +692,12 @@ function buildTree(paths: string[]): TreeDir {
 function TreeDirView({
   dir,
   selectedPath,
+  dirtyPaths,
   onSelect,
 }: {
   dir: TreeDir;
   selectedPath: string;
+  dirtyPaths: ReadonlySet<string>;
   onSelect: (path: string) => void;
 }) {
   return (
@@ -675,21 +706,26 @@ function TreeDirView({
         <details className="tree-dir" key={child.path} open>
           <summary className="tree-dir-name">{child.name}</summary>
           <div className="tree-children">
-            <TreeDirView dir={child} selectedPath={selectedPath} onSelect={onSelect} />
+            <TreeDirView dir={child} selectedPath={selectedPath} dirtyPaths={dirtyPaths} onSelect={onSelect} />
           </div>
         </details>
       ))}
-      {dir.files.map((path) => (
-        <button
-          key={path}
-          type="button"
-          className={path === selectedPath ? "tree-file is-active" : "tree-file"}
-          data-testid="ddd-tree-file"
-          onClick={() => onSelect(path)}
-        >
-          {path.split("/").at(-1)}
-        </button>
-      ))}
+      {dir.files.map((path) => {
+        const dirty = dirtyPaths.has(path);
+        return (
+          <button
+            key={path}
+            type="button"
+            className={`${path === selectedPath ? "tree-file is-active" : "tree-file"}${dirty ? " is-dirty" : ""}`}
+            data-testid="ddd-tree-file"
+            title={path}
+            onClick={() => onSelect(path)}
+          >
+            <span className="tree-file-name">{path.split("/").at(-1)}</span>
+            {dirty ? <span className="tree-dirty" aria-label="Unsaved changes" title="Unsaved changes" /> : null}
+          </button>
+        );
+      })}
     </>
   );
 }
@@ -702,16 +738,19 @@ function TreeDirView({
 export function SpecFileTree({
   files,
   selectedPath,
+  changedPaths = [],
   onSelect,
 }: {
   files: ReadonlyArray<{ path: string }>;
   selectedPath: string;
+  changedPaths?: ReadonlyArray<string>;
   onSelect: (path: string) => void;
 }) {
   const root = buildTree(files.map((file) => file.path));
+  const dirtyPaths = new Set(changedPaths);
   return (
     <div className="tree" data-testid="ddd-spec-tree">
-      <TreeDirView dir={root} selectedPath={selectedPath} onSelect={onSelect} />
+      <TreeDirView dir={root} selectedPath={selectedPath} dirtyPaths={dirtyPaths} onSelect={onSelect} />
     </div>
   );
 }
@@ -807,6 +846,15 @@ export function FeatureDetail({
 }) {
   const media = assetUrl(feature.gif) ?? assetUrl(feature.image);
   const tier = feature.tier ?? "feature";
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <section className="modal" role="dialog" aria-modal="true" data-testid="ddd-feature-detail" onClick={(event) => event.stopPropagation()}>
@@ -815,7 +863,7 @@ export function FeatureDetail({
             <span className="eyebrow">{feature.id}{feature.group ? ` · ${feature.group}` : ""}</span>
             <h2>{feature.title}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
+          <button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
         </div>
         <div className="meta-row">
           <span className={`badge ${statusClass(feature.status)}`}>{statusLabels[feature.status] ?? feature.status}</span>
@@ -903,7 +951,7 @@ export const styles = [
   ".button:hover { background:var(--hover); }",
   ".button.primary { border-color:color-mix(in srgb,var(--brand) 40%,transparent); background:color-mix(in srgb,var(--brand) 10%,var(--surface)); color:var(--brand); font-weight:650; }",
   ".button.primary:hover { background:color-mix(in srgb,var(--brand) 16%,var(--surface)); }",
-  ".button.primary:focus-visible { outline:none; box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 25%,transparent); }",
+  ".button:focus-visible,.icon-button:focus-visible,.tab:focus-visible,.tree-file:focus-visible,.run-row:focus-visible,.finding:focus-visible,.feature-card.is-clickable:focus-visible,.ticket-row:focus-visible,.doc-link:focus-visible,.tree-dir-name:focus-visible,.tree-section-toggle:focus-visible { outline:none; border-color:color-mix(in srgb,var(--brand) 50%,transparent); box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent); }",
   ".button:disabled { cursor:not-allowed; opacity:.45; }",
   ".icon-button { width:32px; min-height:32px; padding:0; border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:6px; cursor:pointer; }",
   ".tabbar { min-width:0; display:flex; align-items:center; gap:6px; padding:8px 14px; border-bottom:1px solid var(--border); background:var(--surface); overflow-x:auto; scrollbar-width:thin; }",
@@ -911,7 +959,8 @@ export const styles = [
   ".tab:hover { color:var(--text); }",
   ".tab.is-active { background:color-mix(in srgb,var(--brand) 12%,transparent); border-color:color-mix(in srgb,var(--brand) 30%,transparent); color:var(--brand); }",
   ".tab .count { font-family:ui-monospace,monospace; font-size:10px; color:var(--muted); }",
-  ".content { min-width:0; min-height:0; overflow:hidden; }",
+  ".content { position:relative; min-width:0; min-height:0; overflow:hidden; }",
+  ".content > .error-banner { position:absolute; top:10px; left:50%; transform:translateX(-50%); width:min(720px,calc(100% - 24px)); z-index:50; }",
   ".content > [hidden] { display:none; }",
   ".pane { height:100%; min-width:0; min-height:0; }",
   // Specs tab
@@ -923,7 +972,9 @@ export const styles = [
   ".tree-dir-name { cursor:pointer; color:var(--muted); font-weight:650; font-size:12px; padding:4px 6px; border-radius:6px; list-style:revert; }",
   ".tree-dir-name:hover { color:var(--text); background:var(--hover-subtle); }",
   ".tree-children { display:grid; gap:2px; padding-left:12px; }",
-  ".tree-file { border:1px solid transparent; background:transparent; color:var(--text); text-align:left; border-radius:6px; padding:4px 8px; cursor:pointer; font-size:12px; font-family:ui-monospace,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
+  ".tree-file { min-width:0; border:1px solid transparent; background:transparent; color:var(--text); text-align:left; border-radius:6px; padding:4px 8px; cursor:pointer; font-size:12px; font-family:ui-monospace,monospace; display:flex; align-items:center; gap:6px; overflow:hidden; white-space:nowrap; }",
+  ".tree-file-name { min-width:0; overflow:hidden; text-overflow:ellipsis; }",
+  ".tree-dirty { flex:none; width:7px; height:7px; border-radius:999px; background:var(--warn); box-shadow:0 0 0 2px color-mix(in srgb,var(--warn) 18%,transparent); }",
   ".tree-file:hover { background:var(--hover); }",
   ".tree-file.is-active { background:color-mix(in srgb,var(--blue) 16%,transparent); border-color:color-mix(in srgb,var(--blue) 35%,transparent); color:var(--text); }",
   ".specs-main { min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr) auto; }",
@@ -936,6 +987,9 @@ export const styles = [
   ".crepe-host .milkdown { height:100%; }",
   ".empty { padding:24px; }",
   ".meta-status { display:flex; align-items:center; gap:10px; padding:10px 14px; border-top:1px solid var(--line); color:var(--muted); }",
+  ".error-banner { min-width:0; display:grid; gap:4px; border:1px solid color-mix(in srgb,var(--danger) 55%,transparent); border-radius:8px; padding:10px 12px; background:color-mix(in srgb,var(--danger) 9%,var(--surface)); color:var(--text); box-shadow:0 10px 32px rgb(var(--shadow-rgb) / 0.12); }",
+  ".error-banner strong { color:var(--danger); font-size:12px; }",
+  ".error-banner p { color:var(--text); font-size:12px; overflow-wrap:anywhere; }",
   // generic scroll column
   ".scroll { height:100%; min-width:0; overflow:auto; padding:14px; display:grid; align-content:start; gap:12px; }",
   ".card { min-width:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; display:grid; gap:8px; box-shadow:0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 8px 24px rgb(var(--shadow-rgb) / 0.06); }",
@@ -1030,11 +1084,43 @@ export const styles = [
   ".ticket-detail-body { display:grid; gap:10px; }",
   ".ticket-section { display:grid; gap:6px; }",
   ".ticket-section h3 { margin:0; font-size:12px; }",
+  ".ticket-meta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; }",
+  ".ticket-meta { min-width:0; border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--hover-subtle); display:grid; gap:3px; }",
+  ".ticket-meta span { color:var(--text-muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; font-weight:650; }",
+  ".ticket-meta strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--text); }",
   ".modal-backdrop { position:fixed; inset:0; background:rgb(var(--shadow-rgb) / 0.5); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px); display:grid; place-items:center; padding:20px; z-index:60; overflow:hidden; }",
   ".modal { width:min(760px,calc(100vw - 40px)); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; display:grid; gap:13px; box-shadow:0 24px 80px rgb(var(--shadow-rgb) / 0.2); }",
   ".modal-head { min-width:0; display:flex; align-items:start; justify-content:space-between; gap:12px; }",
   ".modal-head > div { min-width:0; }",
   ".modal-head h2 { overflow-wrap:anywhere; }",
+  // docs tree sections: product docs first-class, technical docs behind a menu
+  ".badge.muted { color:var(--text-muted); }",
+  ".tree-section { padding:6px 8px 2px; display:grid; gap:2px; }",
+  ".doc-tree-search { display:grid; gap:4px; padding:10px 10px 6px; color:var(--text-muted); font-size:11px; font-weight:650; }",
+  ".tree-section .tree { padding:2px 0; }",
+  ".tree-section-title { display:flex; align-items:center; gap:6px; color:var(--text-muted); font-size:10px; font-weight:650; text-transform:uppercase; letter-spacing:.06em; padding:4px 6px; }",
+  ".tree-section-toggle { cursor:pointer; border-radius:6px; list-style:revert; }",
+  ".tree-section-toggle:hover { color:var(--text); background:var(--hover-subtle); }",
+  ".tree-section-title .count { font-family:ui-monospace,monospace; font-size:10px; }",
+  ".tree-empty { padding:4px 6px; font-size:11px; }",
+  ".agent-docs-callout { margin:4px 6px 6px; padding:8px 10px; font-size:11px; line-height:1.5; color:var(--text-muted); border:1px solid color-mix(in srgb,var(--brand) 30%,transparent); border-radius:8px; background:color-mix(in srgb,var(--brand) 7%,var(--surface)); }",
+  ".technical-doc-view { max-height:none; height:100%; border:0; border-radius:0; }",
+  // start pane (the way in: create a new app / generate docs from code)
+  ".start.scroll { max-width:960px; margin:0 auto; width:100%; }",
+  ".start-intro p { max-width:64ch; }",
+  ".start-textarea { min-height:88px; height:auto; padding:8px 10px; resize:vertical; font:inherit; line-height:1.45; }",
+  ".start-actions { display:flex; align-items:center; gap:8px; }",
+  ".start-status { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12px; }",
+  // guided tutorial overlay
+  ".tutorial-backdrop { position:fixed; inset:0; background:rgb(var(--shadow-rgb) / 0.5); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px); display:grid; place-items:center; padding:20px; z-index:70; }",
+  ".tutorial-card { width:min(620px,calc(100vw - 40px)); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; display:grid; gap:12px; box-shadow:0 24px 80px rgb(var(--shadow-rgb) / 0.2); }",
+  ".tutorial-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }",
+  ".tutorial-title { font-size:16px; }",
+  ".tutorial-body { color:var(--text); line-height:1.55; }",
+  ".tutorial-sample { max-height:220px; }",
+  ".tutorial-hint { font-size:12px; color:var(--text-muted); border-left:3px solid color-mix(in srgb,var(--brand) 45%,transparent); padding-left:10px; }",
+  ".tutorial-actions { display:flex; align-items:center; justify-content:space-between; gap:10px; }",
+  ".tutorial-steps-nav { display:flex; align-items:center; gap:8px; }",
   "@media (max-width: 980px) { .specs,.live { grid-template-columns:1fr; } .specs-tree,.runlist { border-right:0; border-bottom:1px solid var(--border); max-height:220px; } }",
   "@media (max-width: 620px) { .shell { height:100dvh; } .top { align-items:flex-start; flex-wrap:wrap; padding:10px 12px; gap:10px; } .title { flex-wrap:wrap; gap:8px; } h1 { width:100%; } .actions { width:100%; justify-content:flex-start; } .tabbar { padding:8px 10px; } .scroll { padding:10px; } .card { padding:12px; } .card-head { align-items:flex-start; flex-wrap:wrap; } .stats,.grid2 { grid-template-columns:1fr; } .feature-grid,.cap-grid { grid-template-columns:minmax(0,1fr); } .filters { grid-template-columns:1fr; } .editor-bar { align-items:flex-start; flex-wrap:wrap; } .editor-title { width:100%; } .dispatch-actions { width:100%; display:grid; grid-template-columns:1fr; } .button { width:100%; } .specs-tree,.runlist { max-height:190px; } .slot-title { align-items:flex-start; } .modal-backdrop { padding:10px; place-items:start center; } .modal { width:calc(100vw - 20px); max-height:calc(100dvh - 20px); padding:14px; } }",
 ].join("\n");

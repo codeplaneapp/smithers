@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * First-launch guided tutorial, told over a canned hello-world app so the user
@@ -110,15 +110,32 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 
 export function Tutorial({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [step, setStep] = useState(0);
-  if (!open) return null;
-  const current = TUTORIAL_STEPS[Math.min(step, TUTORIAL_STEPS.length - 1)]!;
-  const last = step >= TUTORIAL_STEPS.length - 1;
+  const nextRef = useRef<HTMLButtonElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   function finish() {
     markTutorialDone();
     setStep(0);
     onClose();
   }
+
+  useEffect(() => {
+    if (!open) return;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    nextRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") finish();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      previousFocusRef.current?.focus?.();
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+  const current = TUTORIAL_STEPS[Math.min(step, TUTORIAL_STEPS.length - 1)]!;
+  const last = step >= TUTORIAL_STEPS.length - 1;
 
   return (
     <div className="tutorial-backdrop" data-testid="ddd-tutorial" role="dialog" aria-modal="true" aria-label="Guided tutorial">
@@ -145,6 +162,7 @@ export function Tutorial({ open, onClose }: { open: boolean; onClose: () => void
               Back
             </button>
             <button
+              ref={nextRef}
               type="button"
               className="button primary"
               data-testid="ddd-tutorial-next"

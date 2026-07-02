@@ -106,6 +106,8 @@ const materializedTicketsSchema = z.object({
   tickets: z.array(z.object({
     path: z.string(),
     kind: z.string().default("ticket"),
+    featureId: z.string().default(""),
+    featureTitle: z.string().default(""),
     content: z.string(),
     status: z.string().default("todo"),
     updatedAtMs: z.number().default(0),
@@ -266,6 +268,7 @@ export function ticketMarkdownFor(runId: string, item: any): string {
     `Run: ${runId}`,
     `Slot: ${item.slot ?? ""}`,
     `Feature: ${item.featureId ?? ""}`,
+    item.featureTitle ? `Feature title: ${item.featureTitle}` : "",
     `Agent: ${item.agent ?? ""}`,
     `Task type: ${item.taskType ?? item.task_type ?? ""}`,
     "",
@@ -275,7 +278,7 @@ export function ticketMarkdownFor(runId: string, item: any): string {
     list("Files", item.files),
     list("Tests", item.tests),
     list("Acceptance", item.acceptance),
-  ].join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  ].filter((line) => line !== "").join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
 export function materializeTriageTickets(runId: string, triage: any) {
@@ -283,11 +286,15 @@ export function materializeTriageTickets(runId: string, triage: any) {
   mkdirSync(directory, { recursive: true });
   const now = Date.now();
   const selected = Array.isArray(triage?.selected) ? triage.selected : [];
+  const featureTitles = featureTitleById();
   const tickets = selected.map((item: any) => {
-    const path = ticketPathFor(runId, item);
-    const content = ticketMarkdownFor(runId, item);
+    const featureId = String(item.featureId ?? item.feature_id ?? "");
+    const featureTitle = String(item.featureTitle ?? item.feature_title ?? featureTitles.get(featureId) ?? "");
+    const enriched = { ...item, featureId, featureTitle };
+    const path = ticketPathFor(runId, enriched);
+    const content = ticketMarkdownFor(runId, enriched);
     writeFileSync(`${directory}/${path}.md`, content);
-    return { path, kind: "ticket", content, status: "todo", updatedAtMs: now };
+    return { path, kind: "ticket", featureId, featureTitle, content, status: "todo", updatedAtMs: now };
   });
   return {
     created: tickets.length,
@@ -297,6 +304,15 @@ export function materializeTriageTickets(runId: string, triage: any) {
       ? `Materialized ${tickets.length} triage ticket(s) into ${directory}.`
       : "No triage selections were available to materialize.",
   };
+}
+
+function featureTitleById(): Map<string, string> {
+  try {
+    const rows = JSON.parse(readFileSync(`${ROOT}/.smithers/spec/features.json`, "utf8")) as Array<{ id?: string; title?: string }>;
+    return new Map(rows.map((row): [string, string] => [String(row.id ?? ""), String(row.title ?? "")]).filter(([id]) => id));
+  } catch {
+    return new Map();
+  }
 }
 
 export function triageReady(ctx: any): boolean {

@@ -11,6 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
 const workflowPath = resolve(here, "../workflows/docs-driven-development.tsx");
 const uiEntry = resolve(here, "../ui/docs-driven-development.tsx");
+const agentsDir = resolve(repoRoot, ".smithers/agents");
 
 export type DddFixtureRepo = {
   root: string;
@@ -18,15 +19,36 @@ export type DddFixtureRepo = {
   cleanup: () => void;
 };
 
+export async function withDddProcessEnvLock<T>(body: () => Promise<T>): Promise<T> {
+  const key = "__smithersDddProcessEnvLock";
+  const state = globalThis as typeof globalThis & Record<typeof key, Promise<void> | undefined>;
+  const previous = state[key] ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  state[key] = previous.then(() => current);
+  await previous;
+  try {
+    return await body();
+  } finally {
+    release();
+  }
+}
+
 export function createDddFixtureRepo(): DddFixtureRepo {
   const root = mkdtempSync(join(tmpdir(), "ddd-run-e2e-"));
   const binDir = mkdtempSync(join(tmpdir(), "ddd-run-bin-"));
 
   mkdirSync(join(root, ".smithers"), { recursive: true });
+  mkdirSync(join(root, ".smithers/agents"), { recursive: true });
+  cpSync(resolve(repoRoot, ".smithers/agents.ts"), join(root, ".smithers/agents.ts"));
+  writeFileSync(join(root, ".smithers/agents/index.ts"), 'export { agents, providers } from "../agents.ts";\n');
   cpSync(resolve(repoRoot, ".smithers/lib/ddd"), join(root, ".smithers/lib/ddd"), { recursive: true });
   mkdirSync(join(root, ".smithers/spec/content"), { recursive: true });
   mkdirSync(join(root, ".smithers/specs"), { recursive: true });
   mkdirSync(join(root, ".smithers/workflows"), { recursive: true });
+  cpSync(agentsDir, join(root, ".smithers/agents"), { recursive: true });
   writeFileSync(join(root, ".smithers/spec/features.json"), `${JSON.stringify([
     {
       id: "docs-driven-development",
@@ -140,38 +162,41 @@ export function fakeAgentResponse(summary: string) {
 }
 
 export async function runDddWorkflow(repo: DddFixtureRepo, runId: string, input: Record<string, unknown>) {
-  const previousCwd = process.cwd();
-  const previousPath = process.env.PATH;
-  const previousCodex = process.env.SMITHERS_FAKE_CODEX_RESPONSE;
-  const previousClaude = process.env.SMITHERS_FAKE_CLAUDE_RESPONSE;
-  const previousTestAgentPath = process.env.SMITHERS_TEST_AGENT_PATH;
-  process.chdir(repo.root);
-  process.env.PATH = `${repo.binDir}:${process.env.PATH ?? ""}`;
-  process.env.SMITHERS_TEST_AGENT_PATH = process.env.PATH;
-  process.env.SMITHERS_FAKE_CODEX_RESPONSE = fakeAgentResponse("codex fake output");
-  process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = fakeAgentResponse("claude fake output");
+  return withDddProcessEnvLock(async () => {
+    const previousCwd = process.cwd();
+    const previousPath = process.env.PATH;
+    const previousCodex = process.env.SMITHERS_FAKE_CODEX_RESPONSE;
+    const previousClaude = process.env.SMITHERS_FAKE_CLAUDE_RESPONSE;
+    const previousTestAgentPath = process.env.SMITHERS_TEST_AGENT_PATH;
+    process.chdir(repo.root);
+    process.env.PATH = `${repo.binDir}:${process.env.PATH ?? ""}`;
+    process.env.SMITHERS_TEST_AGENT_PATH = process.env.PATH;
+    process.env.SMITHERS_FAKE_CODEX_RESPONSE = fakeAgentResponse("codex fake output");
+    process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = fakeAgentResponse("claude fake output");
 
-  try {
-    const mod = await import(`${workflowPath}?run=${encodeURIComponent(runId)}-${Date.now()}-${Math.random()}`);
-    const gateway = new Gateway({ heartbeatMs: 50 });
-    gateway.register("docs-driven-development", (mod as { default: Parameters<typeof gateway.register>[1] }).default, {
-      ui: { entry: uiEntry, title: "Docs Driven Development" },
-    });
-    const auth = { triggeredBy: "e2e", scopes: ["*"], role: "operator", tokenId: null };
-    await gateway.startRun("docs-driven-development", input, auth as Parameters<typeof gateway.startRun>[2], runId, { resume: false });
-    const inflight = gateway.inflightRuns.get(runId);
-    if (inflight) await inflight;
-    return gateway;
-  } finally {
-    process.chdir(previousCwd);
-    process.env.PATH = previousPath;
-    if (previousCodex === undefined) delete process.env.SMITHERS_FAKE_CODEX_RESPONSE;
-    else process.env.SMITHERS_FAKE_CODEX_RESPONSE = previousCodex;
-    if (previousClaude === undefined) delete process.env.SMITHERS_FAKE_CLAUDE_RESPONSE;
-    else process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = previousClaude;
-    if (previousTestAgentPath === undefined) delete process.env.SMITHERS_TEST_AGENT_PATH;
-    else process.env.SMITHERS_TEST_AGENT_PATH = previousTestAgentPath;
-  }
+    try {
+      const tempWorkflowPath = join(repo.root, ".smithers/workflows/docs-driven-development.tsx");
+      const mod = await import(`${tempWorkflowPath}?run=${encodeURIComponent(runId)}-${Date.now()}-${Math.random()}`);
+      const gateway = new Gateway({ heartbeatMs: 50 });
+      gateway.register("docs-driven-development", (mod as { default: Parameters<typeof gateway.register>[1] }).default, {
+        ui: { entry: uiEntry, title: "Docs Driven Development" },
+      });
+      const auth = { triggeredBy: "e2e", scopes: ["*"], role: "operator", tokenId: null };
+      await gateway.startRun("docs-driven-development", input, auth as Parameters<typeof gateway.startRun>[2], runId, { resume: false });
+      const inflight = gateway.inflightRuns.get(runId);
+      if (inflight) await inflight;
+      return gateway;
+    } finally {
+      process.chdir(previousCwd);
+      process.env.PATH = previousPath;
+      if (previousCodex === undefined) delete process.env.SMITHERS_FAKE_CODEX_RESPONSE;
+      else process.env.SMITHERS_FAKE_CODEX_RESPONSE = previousCodex;
+      if (previousClaude === undefined) delete process.env.SMITHERS_FAKE_CLAUDE_RESPONSE;
+      else process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = previousClaude;
+      if (previousTestAgentPath === undefined) delete process.env.SMITHERS_TEST_AGENT_PATH;
+      else process.env.SMITHERS_TEST_AGENT_PATH = previousTestAgentPath;
+    }
+  });
 }
 
 export function createConnectionContext() {

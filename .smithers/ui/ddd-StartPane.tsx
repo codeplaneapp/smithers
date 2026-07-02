@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import { useState } from "react";
+import type { FormEvent } from "react";
 
 export type LaunchState = { runId: string | null; error: string | null };
 
@@ -13,6 +14,8 @@ export type StartPaneProps = {
   generateState: LaunchState;
   /** Detached bug-scan run id once ddd-generate-docs reports its kickoff. */
   bugScanRunId: string;
+  /** Kickoff summary when the scan was blocked or failed instead of launched. */
+  bugScanSummary?: string;
   /** Same-origin href to another workflow's run UI (e.g. create-workflow). */
   workflowUiHref: (workflowKey: string, runId: string) => string;
 };
@@ -40,6 +43,25 @@ function LaunchStatus({ state, label, href }: { state: LaunchState; label: strin
   );
 }
 
+function BugScanStatus({ runId, summary }: { runId: string; summary?: string }) {
+  if (runId) {
+    return (
+      <p className="start-status" data-testid="ddd-start-bug-scan">
+        <span className="badge ok">Bug scan</span> Async scan running as <span className="pill">{runId}</span>;
+        confirmed findings appear in Tickets.
+      </p>
+    );
+  }
+  if (!summary) return null;
+  const failed = /failed|blocked|not approved/i.test(summary);
+  return (
+    <p className="start-status" data-testid="ddd-start-bug-scan-blocked">
+      <span className={`badge ${failed ? "bad" : "warn"}`}>{failed ? "Bug scan blocked" : "Bug scan"}</span>
+      {summary}
+    </p>
+  );
+}
+
 /**
  * The way in. Two honest entries: scaffold a brand-new app (via the
  * create-workflow authoring workflow, which builds the app's builder workflow)
@@ -49,6 +71,7 @@ function LaunchStatus({ state, label, href }: { state: LaunchState; label: strin
 export function StartPane(props: StartPaneProps) {
   const [description, setDescription] = useState("");
   const canCreate = description.trim().length >= 8;
+  const updateDescription = (event: FormEvent<HTMLTextAreaElement>) => setDescription(event.currentTarget.value);
 
   return (
     <div className="start pane scroll" data-testid="ddd-start-pane">
@@ -82,7 +105,8 @@ export function StartPane(props: StartPaneProps) {
             placeholder="A CLI that turns a folder of markdown notes into a searchable static site…"
             value={description}
             rows={4}
-            onChange={(event) => setDescription(event.target.value)}
+            onInput={updateDescription}
+            onChange={updateDescription}
           />
           <div className="start-actions">
             <button
@@ -122,12 +146,7 @@ export function StartPane(props: StartPaneProps) {
             </button>
           </div>
           <LaunchStatus state={props.generateState} label="ddd-generate-docs is reading your repo." />
-          {props.bugScanRunId ? (
-            <p className="start-status" data-testid="ddd-start-bug-scan">
-              <span className="badge ok">Bug scan</span> Async scan running as <span className="pill">{props.bugScanRunId}</span>;
-              confirmed findings appear in Tickets.
-            </p>
-          ) : null}
+          <BugScanStatus runId={props.bugScanRunId} summary={props.bugScanSummary} />
         </section>
       </div>
     </div>

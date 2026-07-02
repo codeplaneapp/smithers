@@ -83,6 +83,7 @@ function codeRanges(value: string): Array<{ start: number; end: number }> {
   const patterns = [
     /\bbun\s+[^\s,)]+/g,
     /\bpnpm(?:\s+-C\s+[^\s,)]+)?(?:\s+[^\s,)]+)+/g,
+    /\bsmithers\s+workflow\s+run\s+[A-Za-z0-9._~:/?#@!$&'*+=-]+/g,
     /\bsmithers(?:\s+(?:init|workflow|list|run|up|ps|inspect|output|monitor|migrate|gateway|ui|agent|add|remove|retry-task|resume|approve|deny|alerts|cron|memory|usage|down|cancel|hijack|logs|events|openapi|optimize|eval|scores|snapshot|snapshots|restore|replay|fork|rewind|signal|why|human|ask|chat|token|tree|docs|docs-full))+/g,
     /(?:^|(?<=[\s(]))(?:\.smithers|apps|packages|docs|e2e|scripts|skills)\/[A-Za-z0-9._~:/?#@!$&'*+,;=-]+/g,
     /\bfeatures\.json\b/g,
@@ -198,7 +199,7 @@ function featureDoc(feature: Feature): string {
 }
 
 export function generateSpecDocs(root: string = dddRoot()): number {
-  const features = validateFeatures(root);
+  const features = validateFeatures(root, { allowMissing: true });
   const contentDir = resolve(root, ".smithers/spec/content");
   const featuresDir = resolve(contentDir, "features");
 

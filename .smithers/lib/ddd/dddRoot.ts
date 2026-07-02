@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 
 /**
  * Resolve the repo root for docs-driven-development scripts. Starts at
  * process.cwd() (or the given directory) and walks up until it finds
- * `.smithers/spec/features.json`, so the scripts work when invoked from the
- * repo root, from `.smithers/`, or from any subdirectory.
+ * `.smithers/spec/features.json` or the DDD pack itself, so the scripts work
+ * before the spec has been generated.
  */
 export function dddRoot(start: string = process.cwd()): string {
   const found = findDddRoot(start);
@@ -28,9 +28,28 @@ export function dddRootOrCwd(start: string = process.cwd()): string {
 function findDddRoot(start: string): string | null {
   let dir = resolve(start);
   for (;;) {
-    if (existsSync(resolve(dir, ".smithers/spec/features.json"))) return dir;
+    if (isDddRoot(dir)) return dir;
+    if (basename(dir) === ".smithers" && isDddPackDir(dir)) return dirname(dir);
     const parent = dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
+}
+
+function isDddRoot(dir: string): boolean {
+  return (
+    existsSync(resolve(dir, ".smithers/spec/features.json")) ||
+    existsSync(resolve(dir, ".smithers/spec/content")) ||
+    existsSync(resolve(dir, ".smithers/lib/ddd/build.ts")) ||
+    existsSync(resolve(dir, ".smithers/workflows/docs-driven-development.tsx"))
+  );
+}
+
+function isDddPackDir(dir: string): boolean {
+  return (
+    existsSync(resolve(dir, "spec/features.json")) ||
+    existsSync(resolve(dir, "spec/content")) ||
+    existsSync(resolve(dir, "lib/ddd/build.ts")) ||
+    existsSync(resolve(dir, "workflows/docs-driven-development.tsx"))
+  );
 }

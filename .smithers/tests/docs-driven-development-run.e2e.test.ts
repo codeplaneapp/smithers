@@ -69,10 +69,13 @@ describe("docs-driven-development real workflow run", () => {
 
     const materialized = await nodeOutput(gateway, connection, runId, "materialize-tickets");
     expect(materialized.row.created).toBe(1);
+    expect(materialized.row.tickets[0].featureId).toBe("docs-driven-development");
+    expect(materialized.row.tickets[0].featureTitle).toBe("Docs driven development");
     expect(materialized.row.tickets[0].content).toContain("Prove DDD workflow execution");
     const ticketPath = join(repo.root, ".smithers/tickets/docs-driven-development--ddd-run-fallback--01-docs-driven-development.md");
     expect(existsSync(ticketPath)).toBe(true);
     expect(readFileSync(ticketPath, "utf8")).toContain("Task type: e2e");
+    expect(readFileSync(ticketPath, "utf8")).toContain("Feature title: Docs driven development");
 
     const work = await nodeOutput(gateway, connection, runId, "work:1");
     expect(work.row.summary).toBe("codex fake output");
@@ -91,7 +94,7 @@ describe("docs-driven-development real workflow run", () => {
     expect(["finished", "success"]).toContain(String(run.payload.status));
   }, 120_000);
 
-  test("captures editor metaTicket payload and skips work when implementation approval is withheld", async () => {
+  test("captures editor metaTicket payload and pauses before work when implementation approval is withheld", async () => {
     const repo = createDddFixtureRepo();
     repos.push(repo);
 
@@ -139,8 +142,12 @@ describe("docs-driven-development real workflow run", () => {
     expect(work.ok).toBe(false);
     expect(work.error?.code).toBe("NodeNotFound");
 
-    const summary = await nodeOutput(gateway, connection, runId, "round-summary");
-    expect(summary.row.status).toBe("partial");
-    expect(summary.row.remaining).toEqual([]);
+    const summary = await gatewayRequest(gateway, connection, "getNodeOutput", { runId, nodeId: "round-summary", iteration: 0 });
+    expect(summary.ok).toBe(false);
+    expect(summary.error?.code).toBe("NodeNotFound");
+
+    const run = await gatewayRequest(gateway, connection, "runs.get", { runId });
+    expect(run.ok).toBe(true);
+    expect(["waiting", "waiting-approval", "paused", "running"]).toContain(String(run.payload.status));
   }, 120_000);
 });

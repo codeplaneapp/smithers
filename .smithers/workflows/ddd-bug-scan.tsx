@@ -77,6 +77,7 @@ export function bugTicketMarkdown(runId: string, finding: any): string {
     `Kind: fix`,
     `Severity: ${finding.severity ?? "minor"}`,
     `Feature: ${finding.featureId ?? ""}`,
+    finding.featureTitle ? `Feature title: ${finding.featureTitle}` : "",
     `File: ${finding.file ?? ""}`,
     "",
     "## Evidence",
@@ -86,7 +87,7 @@ export function bugTicketMarkdown(runId: string, finding: any): string {
     "## Suggested fix",
     "",
     String(finding.suggestedFix || "Not specified."),
-  ].join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  ].filter((line) => line !== "").join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
 /**
@@ -100,22 +101,33 @@ export function fileBugTickets(runId: string, confirmed: any[], root: string = R
   mkdirSync(directory, { recursive: true });
   const ticketPaths: string[] = [];
   let skippedExisting = 0;
+  const featureTitles = new Map<string, string>();
+  const featuresPath = resolve(root, ".smithers/spec/features.json");
+  try {
+    const features = JSON.parse(readFileSync(featuresPath, "utf8")) as Array<Record<string, any>>;
+    for (const feature of features) featureTitles.set(String(feature.id ?? ""), String(feature.title ?? ""));
+  } catch {
+    // Tickets still carry the finding even when the spec cannot be read.
+  }
 
   for (const finding of confirmed) {
+    const enrichedFinding = {
+      ...finding,
+      featureTitle: finding.featureTitle ?? featureTitles.get(String(finding.featureId ?? "")) ?? "",
+    };
     const name = `ddd-bug-scan--${bugSlug(finding.file || finding.featureId || "repo")}--${bugSlug(finding.title || finding.id)}.md`;
     const full = resolve(directory, name);
     if (existsSync(full)) {
       skippedExisting += 1;
       continue;
     }
-    writeFileSync(full, bugTicketMarkdown(runId, finding));
+    writeFileSync(full, bugTicketMarkdown(runId, enrichedFinding));
     ticketPaths.push(name);
   }
 
   // Record each confirmed bug as a missing[] gap on its feature so the spec
   // stays the source of truth and the generated backlog includes it.
   const featuresUpdated: string[] = [];
-  const featuresPath = resolve(root, ".smithers/spec/features.json");
   try {
     const features = JSON.parse(readFileSync(featuresPath, "utf8")) as Array<Record<string, any>>;
     for (const finding of confirmed) {

@@ -30,9 +30,25 @@ function uniqueTicketValues(tickets: TicketRow[], field: "kind" | "status"): str
 }
 
 type TicketSection = { title: string; body: string[]; items: string[] };
+type TicketDetail = { metadata: Record<string, string>; sections: TicketSection[] };
 
-function ticketDetailSections(content: string): TicketSection[] {
+const METADATA_ORDER = ["Status", "Kind", "Severity", "Run", "Slot", "Agent", "Task type", "Feature", "Feature title", "Feature status", "File"];
+
+function parseMetadataLine(line: string): Array<[string, string]> {
+  const entries: Array<[string, string]> = [];
+  for (const part of line.split(/\s+·\s+/)) {
+    const match = part.match(/^([A-Za-z][A-Za-z ]+):\s*(.*)$/);
+    if (!match) continue;
+    const key = match[1]!.trim();
+    const value = match[2]!.trim();
+    if (value) entries.push([key, value]);
+  }
+  return entries;
+}
+
+function ticketDetail(content: string): TicketDetail {
   const sections: TicketSection[] = [];
+  const metadata: Record<string, string> = {};
   let current: TicketSection | null = null;
   for (const rawLine of content.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -43,20 +59,65 @@ function ticketDetailSections(content: string): TicketSection[] {
       sections.push(current);
       continue;
     }
-    if (!current) continue;
+    if (!current) {
+      for (const [key, value] of parseMetadataLine(line)) metadata[key] = value;
+      continue;
+    }
     if (line.startsWith("- ")) current.items.push(line.slice(2).trim());
     else if (!/^[A-Za-z][A-Za-z ]+:\s*/.test(line)) current.body.push(line);
   }
-  return sections;
+  return { metadata, sections };
+}
+
+function metadataEntries(metadata: Record<string, string>): Array<[string, string]> {
+  const known = METADATA_ORDER.filter((key) => metadata[key]).map((key): [string, string] => [key, metadata[key]!]);
+  const rest = Object.entries(metadata)
+    .filter(([key]) => !METADATA_ORDER.includes(key))
+    .sort(([left], [right]) => left.localeCompare(right));
+  return [...known, ...rest];
+}
+
+function metadataForTicket(ticket: TicketRow): Record<string, string> {
+  const detail = ticketDetail(asString(ticket.content));
+  const metadata = { ...detail.metadata };
+  const featureId = asString(ticket.featureId);
+  const featureTitle = asString(ticket.featureTitle);
+  if (featureId && !metadata.Feature) metadata.Feature = featureId;
+  if (featureTitle && !metadata["Feature title"]) metadata["Feature title"] = featureTitle;
+  if (asString(ticket.kind) && !metadata.Kind) metadata.Kind = asString(ticket.kind);
+  if (asString(ticket.status) && !metadata.Status) metadata.Status = asString(ticket.status);
+  return metadata;
+}
+
+function ticketFeatureLabel(ticket: TicketRow, metadata: Record<string, string> = metadataForTicket(ticket)): string {
+  return asString(ticket.featureTitle) || metadata["Feature title"] || metadata.Feature || asString(ticket.featureId);
+}
+
+function ticketFileLabel(metadata: Record<string, string>): string {
+  return metadata.File ?? "";
 }
 
 function TicketDetailBody({ ticket }: { ticket: TicketRow }) {
   const content = asString(ticket.content);
-  const sections = ticketDetailSections(content);
-  if (sections.length === 0) return <p>No detail recorded for this ticket.</p>;
+  const detail = ticketDetail(content);
+  const entries = metadataEntries(metadataForTicket(ticket));
+  if (detail.sections.length === 0 && entries.length === 0) return <p>No detail recorded for this ticket.</p>;
   return (
     <div className="ticket-detail-body">
-      {sections.map((section) => (
+      {entries.length ? (
+        <section className="ticket-section">
+          <h3>Details</h3>
+          <div className="ticket-meta-grid">
+            {entries.map(([key, value]) => (
+              <div className="ticket-meta" key={key}>
+                <span>{key}</span>
+                <strong title={value}>{key === "Status" ? formatStatus(value) : value}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {detail.sections.map((section) => (
         <section className="ticket-section" key={section.title}>
           <h3>{section.title}</h3>
           {section.body.map((line, index) => <p key={`${section.title}:body:${index}`}>{line}</p>)}
@@ -72,7 +133,9 @@ function TicketDetailBody({ ticket }: { ticket: TicketRow }) {
 }
 
 function TicketModal({ ticket, onClose }: { ticket: TicketRow; onClose: () => void }) {
-  const featureTitle = asString(ticket.featureTitle) || asString(ticket.featureId);
+  const metadata = metadataForTicket(ticket);
+  const featureTitle = ticketFeatureLabel(ticket, metadata);
+  const file = ticketFileLabel(metadata);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -93,6 +156,7 @@ function TicketModal({ ticket, onClose }: { ticket: TicketRow; onClose: () => vo
         <div className="meta-row">
           {ticket.status ? <span className={`badge ${statusClass(asString(ticket.status))}`}>{formatStatus(asString(ticket.status))}</span> : null}
           {featureTitle ? <span className="pill">{featureTitle}</span> : null}
+          {file ? <span className="pill ticket-path" title={file}>{file}</span> : null}
           <span className="pill ticket-path" title={ticket.path}>{ticket.path}</span>
           {ticket.updatedAtMs ? <span className="pill">{fmtTime(ticket.updatedAtMs)}</span> : null}
         </div>
@@ -160,6 +224,11 @@ export function TicketsTab(props: TicketsTabProps) {
         </div>
         {filteredTickets.length ? (
           filteredTickets.map((ticket) => (
+            (() => {
+              const metadata = metadataForTicket(ticket);
+              const feature = ticketFeatureLabel(ticket, metadata);
+              const file = ticketFileLabel(metadata);
+              return (
             <button
               type="button"
               className="slot ticket-row"
@@ -173,10 +242,14 @@ export function TicketsTab(props: TicketsTabProps) {
               </div>
               <div className="meta-row">
                 <span className="pill">{ticket.kind ?? "ticket"}</span>
+                {feature ? <span className="pill">{feature}</span> : null}
+                {file ? <span className="pill ticket-path" title={file}>{file}</span> : null}
                 <span className="pill ticket-path" title={ticket.path}>{ticket.path}</span>
                 {ticket.updatedAtMs ? <span className="pill">{fmtTime(ticket.updatedAtMs)}</span> : null}
               </div>
             </button>
+              );
+            })()
           ))
         ) : (
           <p>{loading ? "Loading tickets…" : filtersActive ? "No tickets match the current filters." : "No tickets yet. Triage should materialize selected work into tickets before agents run."}</p>
