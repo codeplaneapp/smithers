@@ -4,6 +4,14 @@
 > Builds on `.smithers/specs/cloud-execution-engineering.md` (Part 5: Freestyle
 > Provider) — this spec specializes it to plue as the infra control plane.
 
+> **STATUS: shipped & verified end-to-end 2026-07-01.** `run-on-plue` executed
+> `plue-demo-child.tsx` on a real plue Freestyle VM (workspace
+> 2cda524e, repo alice/smoke-test) and returned `claudeAnswer:"4"` +
+> `codexAnswer:"Paris"` — BOTH agents produced real output on plue infra. Proof
+> runs: run-1782960686557 (finished) and run-1782960898698. Only operator step
+> left: `npm login && npm publish` of the `plue` package (repo + release binaries
+> already live at github.com/roninjin10/plue-cli @ v0.1.0).
+
 ## Goal
 
 A smithers workflow (`run-on-plue`) that takes **any smithers workflow script**
