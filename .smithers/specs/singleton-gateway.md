@@ -166,6 +166,137 @@ Why this bites:
     protocol does not match, refuses with a message naming both versions
     and the fix (`smithers gateway stop` + restart, or `smithers update`).
 
+## Production-readiness decisions (added 2026-07-02)
+
+Context: users report smithers **breaking when multiple workflows run at
+once**. This is the concrete failure the singleton owner exists to fix, not a
+future nicety. The audit (2026-07-02) confirmed the mechanism. On the default
+sqlite backend, concurrent runs are correctness-safe (WAL, per-event
+`BEGIN IMMEDIATE` seq allocation, `busy_timeout=30000`, jittered write-retry),
+but the code's own comments attribute those settings to fighting
+`SQLITE_IOERR_VNODE` under multi-process WAL contention on macOS
+(`packages/smithers/src/create.js:379-390`); heavy concurrency exhausts the
+retry budget and surfaces as intermittent write failures. On pglite it is
+worse: cross-process event-seq allocation serializes only under an in-process
+promise mutex keyed on the client object, so two processes collide on the
+`(run_id, seq)` primary key and `insertIgnore` silently drops an event
+(`packages/db/src/adapter.js:2334-2360`), and a second `PGlite.create` against
+the same data dir is invalid. Several cross-process races are latent regardless
+of backend (run-creation TOCTOU on `up --run-id`, unguarded `updateRun`, cron
+double-fire). The singleton daemon removes cross-process contention by making
+one process the only writer. Decisions 14-19 make that daemon production-grade.
+
+14. **Idle spin-down is a first-class requirement.** An autostarted daemon
+    must exit on its own when it has nothing left to do, so users are not left
+    with orphaned forever-daemons (today it lives until `gateway stop`, SIGTERM,
+    or reboot; no idle path exists anywhere). "Nothing to do" = zero in-flight
+    or parked runs AND zero attached clients (WS connections plus recent HTTP
+    RPC within a short window) AND no due-soon gateway-registered cron or
+    durable timer before the next idle check. Design: track last-activity on
+    both the WS connection set (`this.connections`, already present) and every
+    `handleHttpRpc` call; an interval (default 60s, `SMITHERS_GATEWAY_IDLE_MS`
+    override, `0` disables) checks the three conditions and, when all idle,
+    re-claims the autostart lock and re-checks atomically before calling the
+    graceful-shutdown path, so a client attaching mid-decision is never
+    stranded. Crons and durable timers count as activity: a daemon that owns a
+    schedule does not idle-exit and silently stop firing it (a daemon with
+    only schedules and no clients is a deliberate, documented "keep-alive"
+    reason surfaced by `gateway status`). An explicitly launched
+    `smithers gateway` (foreground/service) never idle-exits; only autostarted
+    daemons do. Manual `--linger`/`--idle-timeout` flags override the default.
+
+15. **50 concurrent runs is a supported, tested scale target.** The daemon must
+    execute at least 50 concurrent workflow runs without event loss, cross-run
+    corruption, unbounded memory, or fd exhaustion, proven by a real (no-mocks)
+    test in CI. Concretely this forces: (a) admission control on `launchRun`
+    (a daemon-wide concurrency semaphore with a bounded queue; today `startRun`
+    runs immediately with no cap, `packages/server/src/gateway.js`), because
+    50 runs times the per-run task cap of 4 (`DEFAULT_MAX_CONCURRENCY`,
+    `packages/engine/src/engine.js:849`) times ~3 pipe fds per agent subprocess
+    plus one `caffeinate` child per run exceeds the macOS default 256-fd soft
+    limit at roughly 21 runs; (b) freeing per-run in-memory event windows on
+    run completion (`runEventWindows` is inserted but never deleted,
+    `gateway.js:1334` + trim at `:1842`, a lifetime-of-daemon leak at up to
+    10k frames per run); (c) bounding `AgentTraceCollector.events`, which
+    retains every raw stdout chunk until node end
+    (`packages/engine/src/AgentTraceCollector.js:91`); (d) a runId to
+    subscriber index so `broadcastEvent` stops scanning every connection per
+    event (`gateway.js:3752`); (e) one `caffeinate` for the daemon, not one per
+    run. See the concurrency test in the test doctrine below.
+
+16. **Local security is not optional once the daemon owns execution.** An
+    unauthenticated daemon exposes `launchRun` (real compute and shell), so
+    the following are required before autostart may default to running an
+    exposed server: (a) **Host-header validation / DNS-rebinding defense** on
+    every HTTP and WS request (today nothing inspects `req.headers.host` and
+    the Origin allow-list treats empty as allow, `gateway.js:3400-3440`, so a
+    malicious web page can reach the loopback daemon as a same-origin target
+    and call `launchRun`); accept only `localhost`/`127.0.0.1`/`[::1]` Host
+    values or require auth unconditionally. (b) **The pglite socket must not
+    publish the raw Postgres wire protocol with a passwordless superuser on
+    loopback** (`PGLiteSocketServer` binds `127.0.0.1` with
+    `postgres://postgres@...` and no password, `create.js:576-585`); any local
+    process or other local user can `psql` straight into the store, bypassing
+    the gateway and the single-owner invariant. Gate it behind a
+    per-boot password or bind only when the daemon itself needs it. (c) **Never
+    send bearer credentials to an endpoint that failed identity verification**
+    (the legacy port-7331 fallback attaches the env bearer to an
+    identity-less server, `index.js:2442-2481`). (d) **Per-uid runtime
+    directory with ownership/mode verification** (state lives in a predictable
+    shared `<tmpdir>/smithers-gateway` path with no stat/uid check on read,
+    `gateway-runtime.js:71-125`, so on a multi-user box a hostile user can
+    plant a state file and harvest the victim's env bearer). Use
+    `XDG_RUNTIME_DIR` when set and verify owner+mode before trusting contents.
+    (e) **Timing-safe token comparison** for parity with the webhook path that
+    already uses `timingSafeEqual` (`gateway.js:3440` vs `:1269`).
+
+17. **Crash recovery and daemon supervision.** Folding scheduler and supervisor
+    into the daemon (G4) makes it a single point of failure, so it needs a
+    recovery story, not just graceful shutdown. Requirements: (a) on daemon
+    start, reconcile runs left `running` with stale heartbeats from a prior
+    crash (resume or fail-loud, never leave them wedged); this is the same
+    resume path G4 uses for parked runs but must not presume a graceful prior
+    exit. (b) `gateway stop` must use the retrying, transient-aware health
+    probe that discovery uses, not a single 1.5s fetch that clears the
+    write-once state file on any blip and orphans a live daemon
+    (`index.js:2622-2626`). (c) The daemon writes to a discoverable, rotated
+    log file recorded in the state file and surfaced by `gateway status` (today
+    autostart uses `stdio:'ignore'` and all boot output, including the minted
+    token line, is discarded, `index.js:2399-2404`), so "why is this daemon
+    running/wedged" is answerable. (d) `smithers gateway ls` enumerates
+    daemons across workspaces for the current uid (today status/stop resolve
+    only cwd, so N projects yield N invisible daemons). (e) A daemon whose
+    workspace directory was deleted must still be stoppable. (f) The
+    version/protocol handshake of decision 13 must be enforced client-side,
+    not merely advertised, so an old never-exiting daemon after `npm update`
+    fails loud instead of serving stale engine and UI code
+    (`gateway-runtime.js` verifies `workspaceRoot` only today).
+
+18. **The `SMITHERS_NO_DAEMON` / `--no-daemon` escape hatch (decision 11) is a
+    hard prerequisite, implemented before any further daemonization.** It does
+    not exist in code today (zero matches across the CLI/server/smithers
+    packages), yet `smithers monitor` already background-spawns
+    `smithers ui <runId>`, which would autostart daemons inside CI, sandboxes,
+    and containers. The env var and flag force the embedded engine and direct
+    store access for every command, fail loud (not silent-fallback) when a
+    daemon should be reachable but is not, and are honored by autostart before
+    G2 routes any read through a daemon.
+
+19. **Concurrency-correctness fixes ship regardless of milestone sequencing.**
+    These are latent data-integrity bugs today and are fixed as standalone,
+    test-first commits on main without waiting for the daemon: (a) the
+    non-bun-sqlite `claimRunForResume` branch UPDATEs `claimed_at_ms` /
+    `claimed_by` columns that no DDL anywhere creates, breaking claims on
+    Cloudflare-class backends (`packages/db/src/adapter.js`, columns exist only
+    in that one file); (b) run-creation TOCTOU where two `up --run-id X`
+    processes both pass the getRun-then-`insertIgnore` guard and both believe
+    they own the run; (c) `updateRun` has no ownership guard, so any process can
+    overwrite any run's status/owner/cancel flags; (d) cron double-fire because
+    both the CLI scheduler and the gateway scheduler are read-then-act-then-
+    update with no atomic claim; (e) pglite/postgres cross-process event-seq
+    collision (decision context above). Where a fix needs an owner-guarded
+    write, it uses the CAS pattern `claimRunForResume` already establishes.
+
 ## Milestones
 
 Each lands green (typecheck + package tests + affected e2e) and is committed
@@ -255,6 +386,29 @@ matters.
   `deployment/*`, the rpc pages, skills, and `pnpm docs:llms` (CI gates on
   check-docs/check-llms).
 
+### G6: production hardening (decisions 14-18)
+
+Sequences independently of G2-G4 where it can; the escape hatch (18) and the
+concurrency-correctness fixes (19) land first as they gate everything else.
+
+- Escape hatch `SMITHERS_NO_DAEMON` / `--no-daemon`, honored by autostart,
+  fail-loud when a daemon is expected but unreachable (decision 18).
+- Concurrency-correctness commits (decision 19), each test-first and standalone.
+- Idle spin-down: last-activity tracking on WS + HTTP RPC, the three-condition
+  idle check, atomic re-claim-before-shutdown, keep-alive on owned schedules,
+  `--idle-timeout`/`--linger` overrides (decision 14).
+- Scale hardening: `launchRun` admission-control semaphore + bounded queue,
+  free `runEventWindows` on completion, bound `AgentTraceCollector`, runId to
+  subscriber index for `broadcastEvent`, one daemon-level `caffeinate`
+  (decision 15).
+- Security: Host-header/DNS-rebinding defense, pglite socket auth, no-bearer-to-
+  unverified-endpoint, per-uid runtime dir with owner/mode checks, timing-safe
+  token compare (decision 16).
+- Recovery/ops: start-time reconcile of crash-orphaned runs, transient-aware
+  `gateway stop`, rotated daemon log file in state + `status`,
+  `gateway ls`, stoppable deleted-workspace daemon, enforced version/protocol
+  handshake (decision 17).
+
 ## Test doctrine
 
 No mocks anywhere: real gateways on real ports, real stores, fake agents
@@ -264,6 +418,34 @@ tests. Every gateway-routed command keeps a golden test asserting exit code
 and output parity with the direct path. Backend-parameterized suites
 (sqlite + pglite; postgres behind `SMITHERS_TEST_PG_URL`) for anything that
 touches the store, per the pluggable-db testing bar.
+
+**50-concurrent-runs test (decision 15), two layers matching existing homes:**
+
+- Per-PR, in-process: `packages/server/tests/gateway-load-50-runs.test.jsx`,
+  cloned from the existing 3-run `gateway-shared-db.test.jsx` + the RPC harness
+  in `gateway-concurrent-rpc.test.ts`. One `new Gateway()`, one registered
+  workflow, launch 50 runs through the real `launchRun` RPC via
+  `gateway.routeRequest`, literal-output tasks (no subprocess) so it is fast
+  and CI-safe. Parameterized sqlite + pglite; postgres behind
+  `SMITHERS_TEST_PG_URL`.
+- e2e, real processes: `e2e/faults/case32-load-50-concurrent-runs.test.ts`,
+  real `Gateway.listen({port:0})`, HTTP `launchRun`, a workflow whose tasks use
+  a fake agent binary (`writeFakeClaudeBinary` + `SMITHERS_FAKE_AGENT_RESPONSE`
+  from `e2e-helpers.js`) so each step actually spawns a subprocess, exercising
+  the fd/process dimension. Full 50x4-subprocess variant gated
+  `SMITHERS_E2E_SOAK=1`; a 50-run / 1-agent-node variant stays per-PR.
+
+Assertions, each mapped to a decision-15 hazard: all 50 reach `finished`
+within budget; per run the event seqs are contiguous from 0 and no run holds
+another run's node ids (no loss, no cross-run corruption); zero spurious
+`BackpressureDisconnect` on 5 cross-run subscribers; RSS ceiling and p95
+launch-to-finished latency enforced via new `e2e/budgets/{memory,latency}.json`
+keys (the memory budget must catch the `runEventWindows` leak, that is the
+point); fd and child-process count sampled at peak stay under budget with zero
+orphaned agent processes after completion; `gateway.close()` mid-load settles
+all inflight without unhandled rejection. A spin-down test (decision 14) asserts
+an autostarted daemon with no clients, no runs, and no due schedules exits
+within the idle window, and that one with an owned cron does not.
 
 ## Out of scope
 
