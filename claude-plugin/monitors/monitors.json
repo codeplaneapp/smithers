@@ -1,0 +1,7 @@
+[
+  {
+    "name": "smithers-runs",
+    "command": "bunx smithers-orchestrator claude monitor",
+    "description": "Streams notable Smithers run transitions (approval pending, human request, finished/failed/stalled) into the session as notifications. Exits silently in projects without a Smithers store."
+  }
+]

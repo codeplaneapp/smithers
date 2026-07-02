@@ -1,6 +1,6 @@
 ---
 name: smithers
-description: "Drive Smithers, a durable control plane for long-running coding agents, from Claude Code. Use when the user wants multi-step, long-running, crash-safe, or human-in-the-loop agent work ('orchestrate agents', 'run a workflow', 'implement this and review it', 'keep iterating until tests pass', 'plan then build') or anything needing retries, approvals, replay, or evals across multiple AI steps. YOU (Claude) run Smithers on the user's behalf; it is not a GUI the human clicks. HARD RULE 1, run long-running / multi-step / background work through a durable Smithers workflow, NOT through the native Workflow tool, Task/Agent subagents, or /loop. HARD RULE 2, every workflow you create or run MUST get a live custom UI at .smithers/ui/<key>.tsx (built with gateway-react) and you MUST launch it with `smithers ui` so the human can watch."
+description: "Drive Smithers, a durable control plane for long-running coding agents, from Claude Code. Use when the user wants multi-step, long-running, crash-safe, or human-in-the-loop agent work ('orchestrate agents', 'run a workflow', 'implement this and review it', 'keep iterating until tests pass', 'plan then build') or anything needing retries, approvals, replay, or evals across multiple AI steps. YOU (Claude) run Smithers on the user's behalf; it is not a GUI the human clicks. HARD RULE 1, run long-running / multi-step / background work through a durable Smithers workflow, NOT through Task/Agent subagents, /loop, or hand-written native Workflow scripts; the native Workflow tool has exactly ONE sanctioned use, launching the plugin's smithers-run.mjs mirror so the run shows live in /workflows. HARD RULE 2, every workflow you create or run MUST get a live custom UI at .smithers/ui/<key>.tsx (built with gateway-react) and you MUST launch it with `smithers ui` so the human can watch. HARD RULE 3, when creating or editing workflow code, ALWAYS use https://smithers.sh/llms-full.txt as the API reference (fetch it first)."
 ---
 
 # Smithers (from Claude Code)
@@ -24,7 +24,7 @@ multi-step, runs in the background, or can fail and need a retry, **run a durabl
 Smithers workflow. Do NOT hand-roll the orchestration with Claude Code's own
 multi-agent machinery.** Specifically, for that class of work do not reach for:
 
-- the native **Workflow** tool,
+- a hand-written script for the native **Workflow** tool,
 - the **Task** / **Agent** subagent fan-out (spawning your own worker agents),
 - **`/loop`** or any self-scheduled / ScheduleWakeup-style re-prompting loop.
 
@@ -33,18 +33,67 @@ no persisted steps, no resume after a crash, no automatic retry, no approval
 gate, no replay, no eval history. Smithers gives you all of that for free because
 every node's output is written to a durable store the instant it finishes.
 
+**The one sanctioned use of the native Workflow tool is the mirror.** The plugin
+ships a generic script, `workflows/smithers-run.mjs` (the SessionStart context
+announces its absolute path), that launches or attaches to a Smithers run and
+mirrors it live into Claude Code's `/workflows` tree. The durable work always
+runs in the Smithers engine; the mirror is a view. Never write your own Workflow
+scripts for durable work, and never re-implement the mirror inline.
+
 The mapping:
 
 - "fan out N workers" → one Smithers workflow with N nodes (or an array agent).
 - "loop until tests pass" → a Smithers loop/retry node, not `/loop`.
 - "do this in the background and check on it later" → `run_workflow` (detached) +
-  `watch_run` / `smithers inspect --watch`, not a self-wakeup.
+  the /workflows mirror, not a self-wakeup.
 - "plan, then build, then review" → one workflow with `plan` → `build` → `review`
   nodes, not three chained Task calls.
 
 The native tools are fine for a short, single-shot lookup that finishes inside
 this turn (a quick search, reading a few files). The instant the work is durable,
 multi-step, or backgroundable, it belongs in a Smithers workflow.
+
+## The /workflows mirror (default-on live view)
+
+Every Smithers run you start from Claude Code gets a live `/workflows` mirror,
+with zero per-workflow setup:
+
+1. **Launch + mirror in one step.** Invoke the native Workflow tool with the
+   plugin's mirror script (path from the SessionStart context; fallback: glob
+   `~/.claude/plugins/**/smithers*/workflows/smithers-run.mjs`):
+
+   ```
+   Workflow({
+     scriptPath: "<plugin>/workflows/smithers-run.mjs",
+     args: { workflow: "<workflow-id>", input: { ... } }
+   })
+   ```
+
+   The script starts the detached run itself (`smithers workflow run --detach`),
+   logs the runId, then mirrors the run: phases from the workflow's real
+   containers, one row per node, outputs on completion, approval banners.
+
+2. **Attach to an existing run** with `args: { runId: "<run-id>" }` — after a
+   session restart, when the user asks about a run you did not start, or when
+   the SessionStart context reports non-terminal runs.
+
+3. **The mirror is a view, not the run.** Stopping the mirror workflow never
+   stops the Smithers run; re-attach anytime. To actually stop a run, use
+   `cancel_run` / `smithers cancel <runId>`.
+
+4. **It scales itself.** Data-dependent fan-outs and loop iterations appear as
+   they materialize; very large runs collapse to per-phase summaries; a
+   continued run (continue-as-new) is followed automatically.
+
+5. **React to what it surfaces.** When the mirror (or the background monitor)
+   reports a pending approval or human request, relay it to the human in plain
+   language, collect the decision, and resolve it yourself (`resolve_approval`,
+   `smithers approve`). When it reports a failure, run `smithers autopsy
+   <runId>` and report findings.
+
+The mirror consumes the versioned `smithers claude tick` / `smithers claude
+node-wait` CLI protocol; if it reports a contract mismatch, update both the
+plugin and `smithers-orchestrator`, then re-attach.
 
 ## You drive it, the human does not
 
@@ -81,8 +130,9 @@ every workflow you build:
    hand-writing: `smithers workflow run create-workflow --prompt "..."` (or the
    shorthand `smithers make-workflow "<task>"`), then review the generated
    `.tsx` with the user.
-3. **Proactively offer to visualize, every time.** Suggest ways to *see* the
-   workflow and the run: `smithers graph <file>.tsx` (renders the graph without
+3. **Proactively offer to visualize, every time.** The `/workflows` mirror is
+   the default view (it is already live if you launched through it; attach one
+   if not). Also suggest: `smithers graph <file>.tsx` (renders the graph without
    executing), `smithers tree <run-id>` (live node tree),
    `smithers up <file>.tsx --interactive` or
    `smithers workflow run <id> --interactive` (the TUI monitor), the custom
@@ -93,19 +143,30 @@ every workflow you build:
 ## The core loop
 
 1. `list_workflows` — see what exists (each reports `key`, `hasUi`, `uiPath`).
-2. Author or pick a workflow at `.smithers/workflows/<key>.tsx`.
+2. Author or pick a workflow at `.smithers/workflows/<key>.tsx` — **always fetch
+   https://smithers.sh/llms-full.txt first and write against it** (see below).
 3. **Author its UI at `.smithers/ui/<key>.tsx`** (mandatory — see below).
-4. `run_workflow` (or `smithers run <key>`) → returns a `runId`.
-5. **`smithers ui <runId>`** — opens the live UI in the human's browser.
-6. `watch_run` / `smithers inspect --watch <runId>` — observe; clear gates with
-   `resolve_approval`; feed failures back in; report evidence.
+4. **Launch through the mirror**: Workflow tool + `smithers-run.mjs` with
+   `args: { workflow: "<key>", input: { ... } }`. The run starts detached in the
+   Smithers engine and appears live in `/workflows`; the mirror logs the runId.
+5. **`smithers ui <runId>`** — also open the custom UI in the human's browser.
+6. Watch the mirror; clear gates the moment the mirror or monitor surfaces them
+   (`resolve_approval`); feed failures back in (`smithers autopsy <runId>`);
+   report evidence from the mirror's return value.
 
 A suspend on an approval gate is **waiting**, not failure (the CLI exits non-zero,
 code 3, on suspend — that is expected). Node output rows are snake_case and array
 fields are JSON strings.
 
-For the full API at any time, run `bunx smithers-orchestrator docs-full` (prints
-the complete `llms-full.txt`) or `bunx smithers-orchestrator ask "<question>"`.
+## Workflow authoring reference (hard rule)
+
+**ALWAYS use https://smithers.sh/llms-full.txt as the API reference for
+workflows.** Before you create or edit any `.smithers/workflows/*.tsx` file,
+fetch that URL (WebFetch) and write against what it says — it is the complete,
+current contract for components, agents, schemas, deps/needs, loops, approvals,
+and outputs. Do not write workflow code from memory. Offline fallback:
+`bunx smithers-orchestrator docs-full` prints the same bundle; targeted
+questions: `bunx smithers-orchestrator ask "<question>"`.
 
 ---
 
