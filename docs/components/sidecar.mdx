@@ -274,10 +274,10 @@ function mergeDependsOn(dependsOn, depNodeIds) {
  * @param {any} ctx
  * @param {DepsSpec | undefined} deps
  * @param {Record<string, string> | undefined} needs
- * @param {boolean | undefined} optional
+ * @param {boolean | undefined} depsOptional
  * @returns {Record<string, unknown> | null}
  */
-function resolveDeps(ctx, deps, needs, optional) {
+function resolveDeps(ctx, deps, needs, depsOptional) {
     if (!deps)
         return Object.create(null);
     const keys = Object.keys(deps);
@@ -289,7 +289,11 @@ function resolveDeps(ctx, deps, needs, optional) {
         const nodeId = needs?.[key] ?? key;
         const value = ctx.outputMaybe(target, { nodeId });
         if (value === undefined) {
-            if (optional)
+            // Optional deps mode: omit unresolved keys instead of deferring the
+            // whole task. Used when the task is already gated by `needs`/`dependsOn`
+            // and upstream tasks may legitimately fail (continueOnFail) without
+            // producing an output row.
+            if (depsOptional)
                 continue;
             return null;
         }
