@@ -162,6 +162,7 @@ const API_STREAM_REPLAY_BYTES = 64 * 1024;
 const API_STREAM_OUTBOUND_QUEUE_LIMIT = 256;
 const API_STREAM_OUTBOUND_BYTES = 64 * 1024;
 const API_COLLECTION_NAME_SET = new Set(apiCollectionNames);
+const RUN_EVENT_WINDOW_RETAINED_RUN_LIMIT = 1_000;
 const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "continued"]);
 export const GATEWAY_RPC_MAX_PAYLOAD_BYTES = DEFAULT_MAX_BODY_BYTES;
 export const GATEWAY_RPC_MAX_DEPTH = 32;
@@ -1542,6 +1543,8 @@ export class Gateway {
     apiStreamPendingCollections = new Set();
     apiStreamPendingResolvers = [];
     apiStreamFlushTimer = null;
+    runEventSubscriberCounts = new Map();
+    terminalRunEventWindows = new Map();
     /** Absolute active subscriber count per runId (gauge source of truth). */
     devtoolsSubscriberCounts = new Map();
     /** Flagged subscriber IDs that should force a snapshot on their next emit. */
@@ -2016,6 +2019,59 @@ export class Gateway {
     }
     /**
    * @param {string} runId
+   * @returns {number}
+   */
+    getRunEventSubscriberCount(runId) {
+        return this.runEventSubscriberCounts.get(runId) ?? 0;
+    }
+    /**
+   * @param {string} runId
+   */
+    deleteRunEventWindow(runId) {
+        this.runEventWindows.delete(runId);
+        this.outOfProcessEventBridgeLastFedSeq.delete(runId);
+    }
+    /**
+   * @param {string} runId
+   * @returns {boolean}
+   */
+    releaseTerminalRunEventWindow(runId) {
+        if (!this.terminalRunEventWindows.has(runId)) {
+            return false;
+        }
+        if (this.getRunEventSubscriberCount(runId) > 0) {
+            return false;
+        }
+        this.deleteRunEventWindow(runId);
+        this.terminalRunEventWindows.delete(runId);
+        return true;
+    }
+    /**
+   * @param {string} runId
+   */
+    markRunEventWindowTerminal(runId) {
+        this.terminalRunEventWindows.delete(runId);
+        this.terminalRunEventWindows.set(runId, nowMs());
+        this.releaseTerminalRunEventWindow(runId);
+        this.enforceRunEventWindowLimit();
+    }
+    enforceRunEventWindowLimit() {
+        if (this.runEventWindows.size <= RUN_EVENT_WINDOW_RETAINED_RUN_LIMIT) {
+            return;
+        }
+        for (const runId of this.terminalRunEventWindows.keys()) {
+            if (this.runEventWindows.size <= RUN_EVENT_WINDOW_RETAINED_RUN_LIMIT) {
+                return;
+            }
+            if (this.getRunEventSubscriberCount(runId) > 0) {
+                continue;
+            }
+            this.deleteRunEventWindow(runId);
+            this.terminalRunEventWindows.delete(runId);
+        }
+    }
+    /**
+   * @param {string} runId
    * @returns {{ nextSeq: number; window: Array<Record<string, unknown>> }}
    */
     getRunEventWindow(runId) {
@@ -2052,6 +2108,7 @@ export class Gateway {
         while (state.window.length > this.eventWindowSize) {
             state.window.shift();
         }
+        this.enforceRunEventWindowLimit();
         return frame;
     }
     /**
@@ -2088,6 +2145,8 @@ export class Gateway {
             flushPending: false,
             backpressureDisconnected: false,
         });
+        const previous = this.runEventSubscriberCounts.get(runId) ?? 0;
+        this.runEventSubscriberCounts.set(runId, previous + 1);
         return () => this.unregisterRunEventSubscriber(connection, streamId);
     }
     /**
@@ -2101,6 +2160,16 @@ export class Gateway {
         }
         clearInterval(stream.heartbeat);
         connection.runEventStreams?.delete(streamId);
+        const previous = this.runEventSubscriberCounts.get(stream.runId) ?? 0;
+        const nextCount = Math.max(0, previous - 1);
+        if (nextCount === 0) {
+            this.runEventSubscriberCounts.delete(stream.runId);
+        }
+        else {
+            this.runEventSubscriberCounts.set(stream.runId, nextCount);
+        }
+        this.releaseTerminalRunEventWindow(stream.runId);
+        this.enforceRunEventWindowLimit();
     }
     /**
    * @param {ConnectionState} connection
@@ -3594,7 +3663,7 @@ export class Gateway {
         }
         if (terminal) {
             this.outOfProcessEventBridgeDrainedRuns.add(runId);
-            this.outOfProcessEventBridgeLastFedSeq.delete(runId);
+            this.markRunEventWindowTerminal(runId);
         }
     }
     async syncRegisteredSchedules() {
@@ -4562,6 +4631,12 @@ export class Gateway {
                 }
             }
         }
+        if (event === "run.completed" && runId) {
+            const status = asString(asObject(payload)?.status) ?? "";
+            if (TERMINAL_RUN_STATUSES.has(status)) {
+                this.markRunEventWindowTerminal(runId);
+            }
+        }
         emitGatewayLog("debug", "Gateway event broadcast", {
             event,
             stateVersion: this.stateVersion,
@@ -5133,6 +5208,25 @@ export class Gateway {
     }
     /**
    * @param {SmithersEvent} event
+   * @returns {string | null}
+   */
+    terminalRunIdFromSmithersEvent(event) {
+        switch (event.type) {
+            case "RunFinished":
+            case "RunFailed":
+            case "RunCancelled":
+            case "RunContinuedAsNew":
+                return typeof event.runId === "string" ? event.runId : null;
+            case "RunStatusChanged":
+                return typeof event.runId === "string" && TERMINAL_RUN_STATUSES.has(String(event.status))
+                    ? event.runId
+                    : null;
+            default:
+                return null;
+        }
+    }
+    /**
+   * @param {SmithersEvent} event
    */
     handleSmithersEvent(event) {
         // Invalidate devtools baselines before we broadcast the jump event so
@@ -5143,9 +5237,17 @@ export class Gateway {
         }
         const mapped = this.mapEvent(event);
         if (!mapped) {
+            const terminalRunId = this.terminalRunIdFromSmithersEvent(event);
+            if (terminalRunId) {
+                this.markRunEventWindowTerminal(terminalRunId);
+            }
             return;
         }
         this.broadcastEvent(mapped.event, mapped.payload);
+        const terminalRunId = this.terminalRunIdFromSmithersEvent(event);
+        if (terminalRunId) {
+            this.markRunEventWindowTerminal(terminalRunId);
+        }
     }
     /**
    * @param {SmithersEvent} event
@@ -5677,10 +5779,11 @@ export class Gateway {
                 this.registerRunEventSubscriber(connection, streamId, runId);
                 queueMicrotask(() => {
                     void (async () => {
-                        const state = this.getRunEventWindow(runId);
-                        const window = [...state.window];
+                        const state = this.runEventWindows.get(runId);
+                        const window = [...(state?.window ?? [])];
+                        const nextSeq = state?.nextSeq ?? currentSeq;
                         if (typeof afterSeq === "number") {
-                            const firstSeq = window.length > 0 ? Number(window[0].seq) : state.nextSeq + 1;
+                            const firstSeq = window.length > 0 ? Number(window[0].seq) : nextSeq + 1;
                             if (window.length > 0 && afterSeq < firstSeq - 1) {
                                 const snapshot = await this.buildRunSnapshot(runId);
                                 this.sendRunGapResync(connection, streamId, runId, afterSeq + 1, firstSeq - 1, snapshot);
