@@ -1147,6 +1147,9 @@ importers:
       '@smithers-orchestrator/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
+      '@smithers-orchestrator/ui-styleguide':
+        specifier: workspace:*
+        version: link:../ui-styleguide
     devDependencies:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
@@ -1472,9 +1475,6 @@ importers:
       '@smithers-orchestrator/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@smithers-orchestrator/gateway-ui':
-        specifier: workspace:*
-        version: link:../gateway-ui
       '@smithers-orchestrator/observability':
         specifier: workspace:*
         version: link:../../apps/observability
@@ -1487,6 +1487,9 @@ importers:
       '@smithers-orchestrator/time-travel':
         specifier: workspace:*
         version: link:../time-travel
+      '@smithers-orchestrator/ui-styleguide':
+        specifier: workspace:*
+        version: link:../ui-styleguide
       cron-parser:
         specifier: ^5.6.1
         version: 5.6.1
@@ -1723,6 +1726,8 @@ importers:
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
+
+  packages/ui-styleguide: {}
 
   packages/usage:
     dependencies:

@@ -31,7 +31,8 @@
   },
   "dependencies": {
     "@smithers-orchestrator/gateway-client": "workspace:*",
-    "@smithers-orchestrator/gateway-react": "workspace:*"
+    "@smithers-orchestrator/gateway-react": "workspace:*",
+    "@smithers-orchestrator/ui-styleguide": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.0.0",
