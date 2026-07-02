@@ -58,14 +58,17 @@ Why this bites:
 
 2. **Delegation walks up from cwd.** When argv carries an explicit workflow
    path, the existing nearest-install walk from that path stays. Otherwise
-   the bin walks up from cwd (same boundary semantics as
-   `findSmithersAnchorDir`: directories at or above `$HOME` are excluded
-   when cwd is under `$HOME`), checking at each level
-   `.smithers/node_modules/smithers-orchestrator` first, then
+   the bin walks up from cwd to the filesystem root (the same unbounded
+   walk as `findLocalPackDir` and tsx/bunx; `findSmithersAnchorDir`'s HOME
+   bound is a DB-placement rule, not a code-resolution rule), checking at
+   each level `.smithers/node_modules/smithers-orchestrator` first, then
    `node_modules/smithers-orchestrator` (a project that depends on
-   smithers-orchestrator directly delegates too). First hit wins. The
-   realpath self-guard stays. `.mdx` joins the workflow-path extension set.
-   The bin stays dependency-free (node builtins only).
+   smithers-orchestrator directly delegates too). First hit wins; reaching
+   `$HOME` and finding `~/.smithers/node_modules` delegates to the global
+   pack's pinned runtime, consistent with `resolvePackDirs` serving
+   `~/.smithers` workflows. The realpath self-guard stays. `.mdx` joins the
+   workflow-path extension set. The bin stays dependency-free (node
+   builtins only).
 
 3. **Workspace identity on the wire.** `GET /health` and the WS `hello`
    gain `{workspaceRoot, backend, pid, version, startedAtMs}`. A client

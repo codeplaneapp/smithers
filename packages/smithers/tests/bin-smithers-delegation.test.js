@@ -188,23 +188,23 @@ function scaffoldPackInstall(root) {
 }
 
 describe("findNearestLocalSmithersCli", () => {
-    test("returns null when nothing is installed anywhere", () => {
+    test("returns null when nothing is installed in any ancestor", () => {
         const tmp = makeTmp();
         const deep = join(tmp, "a", "b");
         mkdirSync(deep, { recursive: true });
-        expect(findNearestLocalSmithersCli(deep, undefined)).toBeNull();
+        expect(findNearestLocalSmithersCli(deep)).toBeNull();
     });
 
     test("finds the pack install in cwd itself", () => {
         const tmp = makeTmp();
         const binFile = scaffoldPackInstall(tmp);
-        expect(findNearestLocalSmithersCli(tmp, undefined)).toBe(binFile);
+        expect(findNearestLocalSmithersCli(tmp)).toBe(binFile);
     });
 
     test("finds the project node_modules install in cwd itself", () => {
         const tmp = makeTmp();
         const binFile = scaffoldLocalInstall(tmp);
-        expect(findNearestLocalSmithersCli(tmp, undefined)).toBe(binFile);
+        expect(findNearestLocalSmithersCli(tmp)).toBe(binFile);
     });
 
     test("walks up from a project subdirectory to the pack install", () => {
@@ -212,7 +212,7 @@ describe("findNearestLocalSmithersCli", () => {
         const deep = join(tmp, "src", "nested");
         mkdirSync(deep, { recursive: true });
         const binFile = scaffoldPackInstall(tmp);
-        expect(findNearestLocalSmithersCli(deep, undefined)).toBe(binFile);
+        expect(findNearestLocalSmithersCli(deep)).toBe(binFile);
     });
 
     test("walks up from a project subdirectory to the project node_modules install", () => {
@@ -220,14 +220,14 @@ describe("findNearestLocalSmithersCli", () => {
         const deep = join(tmp, "src", "nested");
         mkdirSync(deep, { recursive: true });
         const binFile = scaffoldLocalInstall(tmp);
-        expect(findNearestLocalSmithersCli(deep, undefined)).toBe(binFile);
+        expect(findNearestLocalSmithersCli(deep)).toBe(binFile);
     });
 
     test("pack install wins over project node_modules at the same level", () => {
         const tmp = makeTmp();
         scaffoldLocalInstall(tmp);
         const packBin = scaffoldPackInstall(tmp);
-        expect(findNearestLocalSmithersCli(tmp, undefined)).toBe(packBin);
+        expect(findNearestLocalSmithersCli(tmp)).toBe(packBin);
     });
 
     test("nearer project install wins over a farther pack install", () => {
@@ -236,45 +236,15 @@ describe("findNearestLocalSmithersCli", () => {
         mkdirSync(inner, { recursive: true });
         scaffoldPackInstall(tmp);
         const innerBin = scaffoldLocalInstall(inner);
-        expect(findNearestLocalSmithersCli(inner, undefined)).toBe(innerBin);
+        expect(findNearestLocalSmithersCli(inner)).toBe(innerBin);
     });
 
-    test("always checks the starting directory even at or outside HOME", () => {
+    test("a farther pack install still wins over nothing nearer", () => {
         const tmp = makeTmp();
-        const binFile = scaffoldPackInstall(tmp);
-        // cwd IS "home": today's cwd/.smithers behavior must keep working.
-        expect(findNearestLocalSmithersCli(tmp, tmp)).toBe(binFile);
-    });
-
-    test("does not walk to ancestors at or above HOME", () => {
-        const tmp = makeTmp();
-        const home = join(tmp, "home");
-        const project = join(home, "project");
-        mkdirSync(project, { recursive: true });
-        // Install lives at HOME level; a walk from inside the project must not
-        // pick it up (matching findSmithersAnchorDir's boundary).
-        scaffoldPackInstall(home);
-        expect(findNearestLocalSmithersCli(project, home)).toBeNull();
-    });
-
-    test("walks within HOME up to the project root", () => {
-        const tmp = makeTmp();
-        const home = join(tmp, "home");
-        const project = join(home, "project");
-        const deep = join(project, "src");
+        const deep = join(tmp, "apps", "web", "src");
         mkdirSync(deep, { recursive: true });
-        const binFile = scaffoldPackInstall(project);
-        expect(findNearestLocalSmithersCli(deep, home)).toBe(binFile);
-    });
-
-    test("stops walking once outside HOME when cwd started inside it", () => {
-        const tmp = makeTmp();
-        const home = join(tmp, "home");
-        const project = join(home, "project");
-        mkdirSync(project, { recursive: true });
-        // Install above HOME must never be found from inside HOME.
-        scaffoldPackInstall(tmp);
-        expect(findNearestLocalSmithersCli(project, home)).toBeNull();
+        const binFile = scaffoldPackInstall(tmp);
+        expect(findNearestLocalSmithersCli(deep)).toBe(binFile);
     });
 });
 

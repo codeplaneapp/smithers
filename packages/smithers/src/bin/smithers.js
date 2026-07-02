@@ -27,7 +27,7 @@ function delegateToLocalCliIfPresent() {
     const workflowLocalBin = workflowPath
         ? findNearestWorkflowLocalCli(cwd, workflowPath)
         : null;
-    const localBin = workflowLocalBin ?? findNearestLocalSmithersCli(cwd, process.env.HOME);
+    const localBin = workflowLocalBin ?? findNearestLocalSmithersCli(cwd);
     if (!localBin)
         return false;
     const selfPath = realpathSync(fileURLToPath(import.meta.url));
