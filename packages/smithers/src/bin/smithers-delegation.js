@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, parse, resolve } from "node:path";
+import { dirname, isAbsolute, parse, relative, resolve } from "node:path";
 
 const WORKFLOW_PATH_COMMANDS = new Set([
     "up",
@@ -9,7 +9,7 @@ const WORKFLOW_PATH_COMMANDS = new Set([
     "revert",
     "timetravel",
 ]);
-const WORKFLOW_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".mts"]);
+const WORKFLOW_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".mts", ".mdx"]);
 
 /**
  * @param {string} value
@@ -94,5 +94,48 @@ export function findNearestWorkflowLocalCli(cwd, workflowPath) {
         if (parent === current)
             return null;
         current = parent;
+    }
+}
+
+/**
+ * @param {string} parent
+ * @param {string} child
+ */
+function isStrictlyInside(parent, child) {
+    const rel = relative(parent, child);
+    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+/**
+ * Walk upward from `cwd` and return the nearest project-local smithers bin,
+ * the way tsx/bunx resolve the nearest node_modules. At each level the
+ * workflow pack's install (`.smithers/node_modules`) wins over the project's
+ * own `node_modules` dependency. The starting directory is always checked
+ * (so `~/.smithers` installs keep working when cwd IS the home directory);
+ * ancestors are consulted only while strictly inside $HOME, matching
+ * findSmithersAnchorDir's project-root boundary. Without $HOME the walk
+ * continues to the filesystem root.
+ *
+ * @param {string} cwd
+ * @param {string | undefined} home
+ */
+export function findNearestLocalSmithersCli(cwd, home) {
+    const resolvedHome = home ? resolve(home) : undefined;
+    let current = resolve(cwd);
+    let isStart = true;
+    while (true) {
+        if (!isStart && resolvedHome && !isStrictlyInside(resolvedHome, current))
+            return null;
+        const packBin = resolveLocalSmithersBinJs(resolve(current, ".smithers"));
+        if (packBin)
+            return packBin;
+        const projectBin = resolveLocalSmithersBinJs(current);
+        if (projectBin)
+            return projectBin;
+        const parent = dirname(current);
+        if (parent === current)
+            return null;
+        current = parent;
+        isStart = false;
     }
 }
