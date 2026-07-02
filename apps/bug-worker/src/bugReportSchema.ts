@@ -8,9 +8,9 @@ import { z } from "zod";
 export const bugReportSchema = z
   .object({
     title: z.string().min(1).max(500),
-    body: z.string().optional(),
-    smithersVersion: z.string().optional(),
-    platform: z.record(z.string(), z.unknown()).optional(),
-    run: z.record(z.string(), z.unknown()).optional(),
+    body: z.string().nullish(),
+    smithersVersion: z.string().nullish(),
+    platform: z.record(z.string(), z.unknown()).nullish(),
+    run: z.record(z.string(), z.unknown()).nullish(),
   })
   .loose();

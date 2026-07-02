@@ -57,6 +57,16 @@ describe("bug worker", () => {
     expect(record.report.extraLooseField).toBe(true);
   });
 
+  test("null optional fields accepted (smithers bug sends run: null without --run)", async () => {
+    const worker = createBugWorker();
+    const env = makeEnv();
+    const res = await worker.fetch(
+      postBug({ title: "report without a run", body: null, smithersVersion: null, platform: null, run: null }),
+      env,
+    );
+    expect(res.status).toBe(201);
+  });
+
   test("invalid payload (missing title) rejected 400", async () => {
     const worker = createBugWorker();
     const res = await worker.fetch(postBug({ body: "no title" }), makeEnv());

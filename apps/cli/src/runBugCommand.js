@@ -212,7 +212,7 @@ export async function runBugCommand(c, fail) {
                 error: runError,
                 events: gathered.events,
             }
-            : null,
+            : undefined,
     }));
     try {
         const response = await fetch(endpoint, {
