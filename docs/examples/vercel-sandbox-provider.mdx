@@ -62,7 +62,7 @@ Return a `diffBundle` (a Smithers diff-bundle object) from the provider for file
 
 ## Dependency and auth
 
-`@vercel/sandbox` is an **optional peer dependency** — install it yourself (`pnpm add @vercel/sandbox`) in the project that wires up the provider. It is never a dependency of any core Smithers package (`packages/sandbox`, `packages/server`, etc.), matching the same pattern as the [Freestyle sandbox provider](/examples/freestyle-sandbox-provider).
+`@vercel/sandbox` is an **optional peer dependency**. Install it yourself (`pnpm add @vercel/sandbox`) in the project that wires up the provider. It is never a dependency of any core Smithers package (`packages/sandbox`, `packages/server`, etc.), matching the same pattern as the [Freestyle sandbox provider](/examples/freestyle-sandbox-provider).
 
 Authentication is handled entirely by the SDK, not by this provider:
 
