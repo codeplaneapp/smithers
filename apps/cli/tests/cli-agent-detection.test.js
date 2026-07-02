@@ -167,6 +167,7 @@ describe("detectAvailableAgents", () => {
         expect(active).toContain("cheapFast: [\n    providers.opencode,");
         expect(active).toContain("smart: [\n    providers.opencode,");
         expect(active).toContain("smartTool: [\n    providers.opencode,");
+        expect(active).toContain("review: [\n    providers.opencode,");
         expect(active).not.toContain("openrouter: createOpenRouterAgent()");
     });
     test("generated agents.ts can use OpenClaw as a workflow agent without local scaffolding", () => {
@@ -184,6 +185,7 @@ describe("detectAvailableAgents", () => {
         expect(source).toContain("cheapFast: [\n    providers.openclaw,");
         expect(source).toContain("smart: [\n    providers.openclaw,");
         expect(source).toContain("smartTool: [\n    providers.openclaw,");
+        expect(source).toContain("review: [\n    providers.openclaw,");
         expect(source).not.toContain("./agents/openclaw");
     });
     test("Antigravity detects agy plus antigravity-cli config", () => {

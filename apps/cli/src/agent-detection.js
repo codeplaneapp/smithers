@@ -288,6 +288,7 @@ const TIER_PREFERENCES = {
     cheapFast: { order: ["claudeSonnet", "kimi", "vibe", "antigravity", "openclaw", "pi"], maxSize: 2 },
     smart: { order: ["claude", "claudeOpus", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
     smartTool: { order: ["claude", "claudeOpus", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
+    review: { order: ["claude", "claudeOpus", "claudeSonnet", "amp", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
 };
 const REQUIRED_DEFAULT_TIERS = ["smart", "smartTool"];
 const CONSTRUCTORS = {
@@ -935,6 +936,7 @@ function generateAccountsAgentsTs(accounts, env) {
     poolLines.push(`  smart: [${membersForFamilies("claude", "codex").map((m) => `providers.${m}`).join(", ")}],`);
     poolLines.push(`  smartTool: [${membersForFamilies("claude", "codex").map((m) => `providers.${m}`).join(", ")}],`);
     poolLines.push(`  cheapFast: [${membersForFamilies("kimi", "antigravity", "codex", "claude").slice(0, 2).map((m) => `providers.${m}`).join(", ")}],`);
+    poolLines.push(`  review: [${membersForFamilies("claude", "codex").slice(0, 3).map((m) => `providers.${m}`).join(", ")}],`);
     return [
         "// smithers-source: generated",
         "// Source of truth: ~/.smithers/accounts.json (managed via `smithers agent add|list|remove`)",

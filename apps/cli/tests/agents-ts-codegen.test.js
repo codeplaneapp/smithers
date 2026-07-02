@@ -51,6 +51,7 @@ describe("generateAgentsTs (account-driven)", () => {
         // Smart pools lead with subscription Claude so failover is not on the hot path.
         expect(generated).toMatch(/smart:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*providers\.codexWork,/);
         expect(generated).toMatch(/smartTool:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*providers\.codexWork,/);
+        expect(generated).toMatch(/review:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*providers\.codexWork,/);
     });
 
     test("path.join(homedir(), ...) is used for paths under $HOME", () => {
@@ -122,15 +123,17 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(uncommented(generated)).not.toMatch(/smartTool:\s*\[\s*providers\.codex/);
     });
 
-    test("detection smart pools fall back to OpenRouter for opencode-only", () => {
+    test("detection smart pools use OpenCode when it is the only preserved CLI provider", () => {
         const env = newSmithersHome();
         const generated = generateAgentsTs(env, {
             preserveProviderIds: ["opencode"],
         });
-        expect(generated).toContain("openrouter: createOpenRouterAgent()");
-        expect(generated).toMatch(/smart:\s*\[\s*providers\.openrouter,/);
-        expect(generated).toMatch(/smartTool:\s*\[\s*providers\.openrouter,/);
+        const active = uncommented(generated);
         expect(generated).toContain("opencode: OpenCodeAgent");
+        expect(active).not.toContain("openrouter: createOpenRouterAgent()");
+        expect(active).toMatch(/smart:\s*\[\s*providers\.opencode,/);
+        expect(active).toMatch(/smartTool:\s*\[\s*providers\.opencode,/);
+        expect(active).toMatch(/review:\s*\[\s*providers\.opencode,/);
     });
 
     test("preserves generated detection providers when adding accounts in a different shell", () => {
@@ -176,7 +179,7 @@ describe("generateAgentsTs (account-driven)", () => {
         // In every pool that has both, the real account must precede the keyless
         // OpenRouter default (which throws until OPENROUTER_API_KEY is set), so
         // attempt 1 hits the paid account, not a guaranteed throw.
-        for (const pool of ["smart", "smartTool", "cheapFast"]) {
+        for (const pool of ["smart", "smartTool", "cheapFast", "review"]) {
             const match = regenerated.match(new RegExp(`${pool}:\\s*\\[([^\\]]*)\\]`));
             expect(match).toBeTruthy();
             const members = match[1];
@@ -236,6 +239,7 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain("// export { CodexAgent } from \"./agents/codex\";");
         expect(active).toContain("smart: [\n    providers.openrouter,");
         expect(active).toContain("smartTool: [\n    providers.openrouter,");
+        expect(active).toContain("review: [\n    providers.openrouter,");
         expect(active).not.toContain("providers.claude");
         expect(active).not.toContain("providers.codex");
     });

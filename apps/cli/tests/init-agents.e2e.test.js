@@ -47,6 +47,7 @@ test("smithers init prefers Claude when only a Claude CLI signal is available", 
     expect(agentsSource).toMatch(/cheapFast:\s*\[\s*providers\.claudeSonnet,/);
     expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,/);
     expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,/);
+    expect(agentsSource).toMatch(/review:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,/);
     expect(uncommented(agentsSource)).not.toContain("providers.codex");
 });
 test("smithers init includes Codex implementation roles when Codex plus OPENAI_API_KEY are available", () => {
@@ -67,6 +68,7 @@ test("smithers init includes Codex implementation roles when Codex plus OPENAI_A
     expect(agentsSource).toMatch(/cheapFast:\s*\[\s*providers\.codex,/);
     expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.codex,/);
     expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.codex,/);
+    expect(agentsSource).toMatch(/review:\s*\[\s*providers\.codex,/);
     expect(agentsSource).toContain("smart: Smithers would normally suggest Claude Code here");
     expect(agentsSource).toContain("cheapFast: Smithers would normally suggest Kimi here");
 });
@@ -87,6 +89,7 @@ test("smithers init uses OpenCode for OpenCode-only credentials", () => {
     expect(active).toMatch(/cheapFast:\s*\[\s*providers\.opencode,/);
     expect(active).toMatch(/smart:\s*\[\s*providers\.opencode,/);
     expect(active).toMatch(/smartTool:\s*\[\s*providers\.opencode,/);
+    expect(active).toMatch(/review:\s*\[\s*providers\.opencode,/);
     expect(active).not.toContain("openrouter: createOpenRouterAgent()");
 });
 test("smithers init can use OpenClaw as the only workflow agent", () => {
@@ -106,6 +109,7 @@ test("smithers init can use OpenClaw as the only workflow agent", () => {
     expect(agentsSource).toMatch(/cheapFast:\s*\[\s*providers\.openclaw,/);
     expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.openclaw,/);
     expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.openclaw,/);
+    expect(agentsSource).toMatch(/review:\s*\[\s*providers\.openclaw,/);
     expect(uncommented(agentsSource)).not.toContain("providers.claude");
     expect(uncommented(agentsSource)).not.toContain("providers.codex");
 });
@@ -132,6 +136,7 @@ test("smithers init orders role chains correctly when multiple local agent CLIs 
     expect(agentsSource).toMatch(/cheapFast:\s*\[\s*providers\.claudeSonnet,\s*providers\.antigravity,/);
     expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,\s*providers\.codex,/);
     expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,\s*providers\.codex,/);
+    expect(agentsSource).toMatch(/review:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,\s*providers\.claudeSonnet,/);
     expect(uncommented(agentsSource)).not.toContain("providers.gemini");
 });
 test("smithers init emits OpenRouter default when no usable agents are detected", () => {
@@ -151,6 +156,7 @@ test("smithers init emits OpenRouter default when no usable agents are detected"
     expect(agentsSource).toContain("//   codex: CodexAgent,");
     expect(active).toContain("smart: [\n    providers.openrouter,");
     expect(active).toContain("smartTool: [\n    providers.openrouter,");
+    expect(active).toContain("review: [\n    providers.openrouter,");
 });
 
 test("smithers init comments out a CLI that is present but not authenticated", () => {
