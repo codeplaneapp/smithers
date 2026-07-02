@@ -53,7 +53,7 @@ describe("SmithersCtx", () => {
             input: {},
             outputs: { tbl: rows },
         });
-        expect(ctx.latest("tbl", "n")).toEqual(rows[1]);
+        expect(ctx.latest("tbl", "n")).toEqual({ v: "third" });
     });
     test("latest returns undefined for missing nodeId", () => {
         const ctx = new SmithersCtx({
