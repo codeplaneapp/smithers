@@ -50,6 +50,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | [CLI Agents](/integrations/cli-agents) |
 | `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | [SDK Agents](/integrations/sdk-agents) |
 | `@smithers-orchestrator/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | [CLI Agents](/integrations/cli-agents), [SDK Agents](/integrations/sdk-agents) |
+| `@smithers-orchestrator/bug-worker` | Private Cloudflare Worker behind `bug.smithers.sh` that receives `smithers bug` reports and stores them in KV | [CLI Overview](/cli/overview) |
 | `@smithers-orchestrator/components` | JSX workflow components such as `Task`, `Workflow`, `Approval`, `Sandbox`, `Timer`, `Signal`, and control-flow components | [Components](/how-it-works) |
 | `@smithers-orchestrator/control-plane` | Durable organization, project, team, billing, usage, secret-reference, and audit primitives for hosted deployments | [Control Plane](/deployment/control-plane) |
 | `@smithers-orchestrator/db` | SQLite/Drizzle adapter, table setup, run-state derivation, schema helpers, and output tables | [Data Model](/reference/types), [Run State](/runtime/run-state) |

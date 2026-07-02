@@ -263,6 +263,14 @@ commands[81]:
       require-approval,,boolean,true,"With --autofix, pause for a human approval gate before any fix"
       stale-minutes,,number,15,Treat a non-terminal run idle past this many minutes as stuck
       ui,,boolean,true,Auto-open the monitored run's own custom UI when its workflow has one (use --no-ui to skip)
+  - name: bug
+    purpose: File a smithers bug report to bug.smithers.sh; with --run it attaches the run's workflow, status, error, and last ~50 events with secrets scrubbed
+    flags[5]{name,short,type,default,desc}:
+      run,,string,,Attach this run's workflow name, status, error, and recent events to the report
+      title,,string,,Bug title (derived from the run's error when omitted)
+      body,,string,,Bug description body
+      json,,boolean,false,Print the filed bug id, URL, and payload as JSON
+      endpoint,,string,https://bug.smithers.sh/api/bugs,Bug endpoint URL; the SMITHERS_BUG_ENDPOINT env var takes precedence
   - name: ps
     purpose: List active, paused, and recently completed runs
     flags[5]{name,short,type,default,desc}:
