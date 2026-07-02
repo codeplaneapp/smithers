@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
 	buildRemoteProjectFiles,
+	buildSeedAgentAuthArgs,
 	mapRemoteRunResult,
 	parseSshCommand,
+	REMOTE_AUTH_PREFIX,
 	sanitizeWorkspaceName,
 } from "./plue-provider.ts";
 
@@ -74,6 +76,42 @@ describe("buildRemoteProjectFiles", () => {
 			orchestratorVersion: "0.26.1",
 		});
 		expect(JSON.parse(files["input.json"])).toEqual({});
+	});
+});
+
+describe("REMOTE_AUTH_PREFIX", () => {
+	test("sources the seeded claude-env.sh before exporting PATH", () => {
+		expect(REMOTE_AUTH_PREFIX).toBe(
+			'[ -f ~/.smithers/claude-env.sh ] && . ~/.smithers/claude-env.sh; export PATH="$HOME/.bun/bin:$PATH"; ',
+		);
+	});
+
+	test("never embeds a plaintext API key", () => {
+		expect(REMOTE_AUTH_PREFIX).not.toMatch(/ANTHROPIC_API_KEY|OPENAI_API_KEY|sk-/);
+	});
+});
+
+describe("buildSeedAgentAuthArgs", () => {
+	test("builds the plue workspace exec seed-agent-auth argv", () => {
+		const args = buildSeedAgentAuthArgs("ws-123", "alice/smoke-test");
+		expect(args).toEqual([
+			"workspace",
+			"exec",
+			"ws-123",
+			"--repo",
+			"alice/smoke-test",
+			"--seed-agent-auth",
+			"claude,codex",
+			"--timeout",
+			"60",
+			"--command",
+			"true",
+		]);
+	});
+
+	test("never embeds a plaintext API key or token", () => {
+		const args = buildSeedAgentAuthArgs("ws-456", "acme/repo");
+		expect(args.join(" ")).not.toMatch(/ANTHROPIC_API_KEY|OPENAI_API_KEY|sk-/);
 	});
 });
 

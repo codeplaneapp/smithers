@@ -280,6 +280,37 @@ const DEFAULT_POLL_INTERVAL_MS = 5_000;
 const DEFAULT_BOOT_TIMEOUT_MS = 6 * 60_000;
 const REMOTE_DIR = "/home/developer/smithers-plue-run";
 
+/**
+ * Prefix every remote run command with this so it picks up the Claude OAuth
+ * env staged by `plue workspace exec --seed-agent-auth` (if present) ahead
+ * of bun/agent binaries on PATH. Verified end-to-end in a live VM: plain
+ * ANTHROPIC_API_KEY / OPENAI_API_KEY env vars are unreliable (a dead API key
+ * shadows a working subscription OAuth token; `codex exec` ignores
+ * OPENAI_API_KEY entirely), so agent auth is seeded via the plue CLI's own
+ * mechanism instead of injected as plaintext env vars.
+ */
+export const REMOTE_AUTH_PREFIX =
+	'[ -f ~/.smithers/claude-env.sh ] && . ~/.smithers/claude-env.sh; export PATH="$HOME/.bun/bin:$PATH"; ';
+
+/** Build the argv for the `plue workspace exec --seed-agent-auth` call that
+ * stages Claude + Codex auth on the remote VM. Never pass secrets on this
+ * command line — it only names the agents to seed. */
+export function buildSeedAgentAuthArgs(workspaceId: string, repo: string): string[] {
+	return [
+		"workspace",
+		"exec",
+		workspaceId,
+		"--repo",
+		repo,
+		"--seed-agent-auth",
+		"claude,codex",
+		"--timeout",
+		"60",
+		"--command",
+		"true",
+	];
+}
+
 export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): SandboxProvider {
 	const plueBin = options.plueBin ?? process.env.PLUE_BIN ?? "plue";
 	const orchestratorVersion = options.orchestratorVersion ?? DEFAULT_ORCHESTRATOR_VERSION;
@@ -361,13 +392,16 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 		request.heartbeat({ stage: "bootstrap-done" });
 	}
 
+	// Extra env overrides (options.env) travel as a 0600 file on the remote
+	// VM, never as plain env params on any logged command line. Agent auth
+	// itself (Claude / Codex) is NOT seeded here — see seedAgentAuth below,
+	// which delegates to the plue CLI's own OAuth-first auth-seeding
+	// (verified end-to-end in a live VM: plain ANTHROPIC_API_KEY /
+	// OPENAI_API_KEY env vars fail on hosts without API credits / with codex
+	// exec ignoring OPENAI_API_KEY).
 	async function writeRemoteEnvFile(target: SshTarget, extraEnv: Record<string, string>): Promise<string> {
 		const envPath = `${REMOTE_DIR}/.env.plue-run`;
-		const lines = Object.entries({
-			ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
-			OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "",
-			...extraEnv,
-		})
+		const lines = Object.entries(extraEnv)
 			.filter(([, value]) => value.length > 0)
 			.map(([key, value]) => `${key}=${value}`);
 		const b64 = Buffer.from(lines.join("\n"), "utf8").toString("base64");
@@ -376,6 +410,22 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 			`mkdir -p ${REMOTE_DIR} && echo '${b64}' | base64 -d > ${envPath} && chmod 600 ${envPath}`,
 		);
 		return envPath;
+	}
+
+	/**
+	 * Seed Claude + Codex auth into the workspace via the plue CLI itself
+	 * (never via plain ANTHROPIC_API_KEY / OPENAI_API_KEY env vars, which are
+	 * unreliable: an API key without credits shadows a working subscription
+	 * OAuth token for Claude, and `codex exec` ignores OPENAI_API_KEY
+	 * entirely). This stages `~/.smithers/claude-env.sh` and
+	 * `~/.codex/auth.json` (mode 0600) on the remote VM. Never log this
+	 * command's output — treat it as sensitive.
+	 */
+	async function seedAgentAuth(workspaceId: string, request: SandboxProviderRequest): Promise<void> {
+		request.heartbeat({ stage: "seeding-agent-auth", workspaceId });
+		await execFileAsync(plueBin, buildSeedAgentAuthArgs(workspaceId, options.repo), {
+			timeout: 90_000,
+		});
 	}
 
 	return {
@@ -405,6 +455,7 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 				const target = parseSshCommand(view.ssh?.command ?? "");
 
 				await bootstrap(target, request);
+				await seedAgentAuth(workspaceId, request);
 
 				const files = buildRemoteProjectFiles({
 					scriptSource: input.scriptSource,
@@ -421,7 +472,7 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 				request.heartbeat({ stage: "bun-install", workspaceId });
 				await runSsh(
 					target,
-					`export PATH="$HOME/.bun/bin:$PATH"; cd ${REMOTE_DIR} && bun install`,
+					`${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && bun install`,
 					{ timeout: 5 * 60_000 },
 				);
 
@@ -431,7 +482,7 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 				try {
 					const { stdout, stderr } = await runSsh(
 						target,
-						`export PATH="$HOME/.bun/bin:$PATH"; cd ${REMOTE_DIR} && set -a && . ${envPath} && set +a && bunx --bun smithers-orchestrator@${orchestratorVersion} up ${input.scriptName} --input "$(cat input.json)" -d`,
+						`${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && set -a && . ${envPath} && set +a && bunx --bun smithers-orchestrator@${orchestratorVersion} up ${input.scriptName} --input "$(cat input.json)" -d`,
 						{ timeout: request.toolTimeoutMs || 25 * 60_000 },
 					);
 					logTail = `${stdout}\n${stderr}`.slice(-8_000);
@@ -449,7 +500,7 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 
 				const { stdout: inspectStdout } = await runSsh(
 					target,
-					`export PATH="$HOME/.bun/bin:$PATH"; cd ${REMOTE_DIR} && bunx --bun smithers-orchestrator@${orchestratorVersion} inspect --format json`,
+					`${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && bunx --bun smithers-orchestrator@${orchestratorVersion} inspect --format json`,
 					{ timeout: 60_000 },
 				).catch((error) => ({ stdout: "", stderr: (error as Error).message }));
 
