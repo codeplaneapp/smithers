@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { basename, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSmithers } from "smithers-orchestrator";
-import { Sandbox } from "@smithers/components";
+import { Sandbox } from "@smithers-orchestrator/components";
 import { z } from "zod/v4";
 import { createPlueSandboxProvider } from "../lib/plue-provider.ts";
 
