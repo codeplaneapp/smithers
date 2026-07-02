@@ -158,31 +158,29 @@ export async function runBugCommand(c, fail) {
     /** @type {{ run: any; events: any[] } | undefined} */
     let gathered;
     if (runId) {
+        /** @type {unknown} */
+        let runReadError;
         try {
             gathered = await gatherRun(runId);
         }
         catch (err) {
-            // A missing/unreadable workspace DB must not lose a hand-written
-            // report; degrade to a run-less payload when the user gave us text.
+            runReadError = err;
+        }
+        if (!gathered) {
+            const reason = runReadError
+                ? `Could not read run ${runId}: ${runReadError?.message ?? String(runReadError)}`
+                : `Run not found: ${runId}`;
+            // A missing run / unreadable workspace DB must not lose a
+            // hand-written report; degrade to a run-less payload when the user
+            // gave us text, refuse otherwise.
             if (!c.options.title && !c.options.body) {
                 return fail({
-                    code: "BUG_REPORT_RUN_UNREADABLE",
-                    message: `Could not read run ${runId}: ${err?.message ?? String(err)}`,
+                    code: runReadError ? "BUG_REPORT_RUN_UNREADABLE" : "RUN_NOT_FOUND",
+                    message: reason,
                     exitCode: 4,
                 });
             }
-            process.stderr.write(`[smithers] could not read run ${runId} (${err?.message ?? String(err)}); filing without run details\n`);
-        }
-        if (runId && gathered === undefined && (c.options.title || c.options.body)) {
-            // fall through run-less when the run row simply does not exist
-            process.stderr.write(`[smithers] run not found: ${runId}; filing without run details\n`);
-        }
-        else if (gathered === undefined) {
-            return fail({
-                code: "RUN_NOT_FOUND",
-                message: `Run not found: ${runId}`,
-                exitCode: 4,
-            });
+            process.stderr.write(`[smithers] ${reason}; filing without run details\n`);
         }
     }
     const runError = gathered ? runErrorMessage(gathered.run.errorJson) : null;
@@ -229,12 +227,10 @@ export async function runBugCommand(c, fail) {
         const data = await response.json().catch(() => ({}));
         const id = typeof data?.id === "string" ? data.id : undefined;
         const url = typeof data?.url === "string" ? data.url : undefined;
-        if (c.options.json || c.format === "json") {
-            if (c.options.json) {
-                process.stdout.write(`${JSON.stringify({ id, url, endpoint, payload }, null, 2)}\n`);
-            }
+        if (c.options.json) {
+            process.stdout.write(`${JSON.stringify({ id, url, endpoint, payload }, null, 2)}\n`);
         }
-        else {
+        else if (c.format !== "json") {
             console.log(`Filed bug${id ? ` ${id}` : ""}${url ? `: ${url}` : ""}`);
         }
         return c.ok({ id, url, endpoint });
