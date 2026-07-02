@@ -515,6 +515,14 @@ function parseDiffText(diffText: string): DiffRecord[] {
     }
     if (!current) continue;
     if (line.startsWith("Binary files ")) current.isBinary = true;
+    if (line.startsWith("new file mode ")) {
+      current.isNew = true;
+      current.oldPath = "/dev/null";
+    }
+    if (line.startsWith("deleted file mode ")) {
+      current.isDeleted = true;
+      current.newPath = "/dev/null";
+    }
     if (/^--- \/dev\/null$/.test(line) || /^--- a\/dev\/null$/.test(line)) current.isNew = true;
     if (/^\+\+\+ \/dev\/null$/.test(line) || /^\+\+\+ b\/dev\/null$/.test(line)) {
       current.isDeleted = true;
