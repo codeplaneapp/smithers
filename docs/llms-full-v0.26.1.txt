@@ -3942,7 +3942,7 @@ type SandboxProps = {
   input?: unknown;
 
   provider?: unknown; // runtime accepts a provider object or registered provider id
-  runtime?: "bubblewrap" | "docker" | "codeplane"; // legacy local transports
+  runtime?: "bubblewrap" | "docker" | "codeplane" | "cloudflare"; // legacy local transports plus provider-backed Cloudflare
 
   allowNetwork?: boolean;
   reviewDiffs?: boolean; // default true
@@ -4259,7 +4259,7 @@ For most workflows, use sibling sandboxes under a `Parallel` or `MergeQueue` ins
 
 ## Built-in local transports
 
-When `provider` is omitted, Smithers uses the legacy local transport path. `runtime` may be `"bubblewrap"`, `"docker"`, or `"codeplane"`. If `runtime` is omitted, the local path defaults to `"bubblewrap"`.
+When `provider` is omitted, Smithers uses the legacy local transport path. `runtime` may be `"bubblewrap"`, `"docker"`, or `"codeplane"`. `"cloudflare"` is provider-backed; use it with `createCloudflareSandboxProvider()` from `smithers-orchestrator/cloudflare`. If `runtime` is omitted, the local path defaults to `"bubblewrap"`.
 
 Unknown runtimes now fail closed. Docker is not silently replaced by bubblewrap when Docker is unavailable.
 
@@ -6984,7 +6984,7 @@ type SupervisorProps = {
 type ContinueAsNewProps = { state?: unknown };
 
 // Sandbox
-type SandboxRuntime = "bubblewrap" | "docker" | "codeplane";
+type SandboxRuntime = "bubblewrap" | "docker" | "codeplane" | "cloudflare";
 type SandboxEgressConfig = {
   env?: Record<string, string>;
   httpProxy?: string;
@@ -8021,6 +8021,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/gateway-react` | `./src/gateway-react.js` | React hooks and providers for gateway-backed UIs |
 | `smithers-orchestrator/gateway-ui` | `./src/gateway-ui.js` | Prebuilt React components for gateway-backed UIs (`RunList`, `RunTree`, `ApprovalPanel`, and more) |
 | `smithers-orchestrator/sandbox` | `./src/sandbox.js` | Sandbox provider contracts, bundles, and execution helpers |
+| `smithers-orchestrator/cloudflare` | `./src/cloudflare.js` | Cloudflare Workers helpers: Sandbox provider, Durable Object SQLite descriptor, and D1 descriptor |
 | `smithers-orchestrator/jsx-runtime` | `./src/jsx-runtime.js` | JSX runtime (auto-resolved by `jsxImportSource`) |
 | `smithers-orchestrator/jsx-dev-runtime` | `./src/jsx-runtime.js` | JSX dev runtime (auto-resolved in dev mode) |
 | `smithers-orchestrator/tools` | `./src/tools.js` | Tool sandbox: `defineTool`, `read`, `grep`, `bash`, `edit`, `write` |
@@ -8045,6 +8046,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 |---|---|---|
 | `smithers-orchestrator` | Public facade for workflow authoring, components, agents, tools, server helpers, memory, OpenAPI tools, scorers, and JSX runtime setup | This page, Types |
 | `@smithers-orchestrator/cli` | CLI entrypoint, MCP server, local workflow pack, account registry commands, DevTools commands, cron, alerts, and server commands | CLI Overview, MCP Server |
+| `@smithers-orchestrator/cloudflare` | Cloudflare Workers integration: Sandbox SDK provider, Durable Object SQLite descriptor, and D1 descriptor | Sandbox, Server |
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | CLI Agents |
 | `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | SDK Agents |
 | `@smithers-orchestrator/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | CLI Agents, SDK Agents |

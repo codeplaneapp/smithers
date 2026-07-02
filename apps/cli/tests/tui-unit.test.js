@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+    buildApprovalLines,
     buildDetachedUpArgs,
+    buildNextStepsLines,
+    customUiExists,
+    fetchCard,
     buildTuiMonitorEnv,
     buildWorkflowPickerOptions,
     childFailurePromise,
@@ -356,6 +363,107 @@ describe("tui helpers", () => {
 
         expect(result.state).toBe("succeeded");
         expect(printed).toEqual([{ label: "Friendly Task", text: "hello" }]);
+    });
+
+    test("buildApprovalLines carries the exact approve command", () => {
+        expect(buildApprovalLines("run-1", [])).toEqual([]);
+        expect(buildApprovalLines("run-1", null)).toEqual([]);
+
+        // One pending gate: approve auto-detects the node, so no --node.
+        const [single] = buildApprovalLines("run-1", [{ nodeId: "wf:gate" }]).map(stripAnsi);
+        expect(single).toBe("approval needed (gate) · smithers approve run-1");
+
+        // Several pending gates: each line pins its node via --node.
+        const many = buildApprovalLines("run-1", [{ nodeId: "a" }, { nodeId: "b" }]).map(stripAnsi);
+        expect(many).toEqual([
+            "approval needed (a) · smithers approve run-1 --node a",
+            "approval needed (b) · smithers approve run-1 --node b",
+        ]);
+    });
+
+    test("buildNextStepsLines suggests ui, graph, tree, and create-workflow", () => {
+        const lines = buildNextStepsLines({
+            runId: "run-1",
+            workflowId: "hello",
+            entryFile: "/wf/hello.tsx",
+            uiExists: false,
+        });
+        expect(lines[0]).toContain("smithers ui run-1");
+        expect(lines[0]).toContain(".smithers/ui/hello.tsx");
+        expect(lines).toContainEqual(expect.stringContaining("smithers graph /wf/hello.tsx"));
+        expect(lines).toContainEqual(expect.stringContaining("smithers tree run-1"));
+        expect(lines).toContainEqual(expect.stringContaining("smithers workflow run create-workflow"));
+
+        // With a custom UI present the ui line stops suggesting authoring one.
+        const withUi = buildNextStepsLines({ runId: "run-1", workflowId: "hello", uiExists: true });
+        expect(withUi[0]).toContain("custom UI");
+        expect(withUi[0]).not.toContain(".smithers/ui/hello.tsx");
+        // No entryFile: the graph suggestion is omitted rather than malformed.
+        expect(withUi.some((l) => l.includes("smithers graph"))).toBe(false);
+        // No em-dashes anywhere in operator-facing guidance.
+        for (const line of [...lines, ...withUi]) expect(line).not.toContain("—");
+    });
+
+    test("customUiExists resolves the .smithers/ui/<workflowId>.tsx convention", () => {
+        const cwd = mkdtempSync(join(tmpdir(), "smithers-tui-ui-"));
+        mkdirSync(join(cwd, ".smithers", "ui"), { recursive: true });
+        writeFileSync(join(cwd, ".smithers", "ui", "hello.tsx"), "export default null;\n");
+        expect(customUiExists("hello", cwd)).toBe(true);
+        expect(customUiExists("missing", cwd)).toBe(false);
+        expect(customUiExists(undefined, cwd)).toBe(false);
+    });
+
+    test("fetchCard surfaces pending approvals and the custom-UI footer", async () => {
+        const adapter = {
+            async getRun() {
+                return runRow("running");
+            },
+            async listNodes() {
+                return [];
+            },
+            async listPendingApprovals() {
+                return [{ nodeId: "wf:gate" }];
+            },
+        };
+        const card = await fetchCard(adapter, "run-terminal", "Name", "prompt", { uiExists: true });
+        expect(card.approvalLines.map(stripAnsi)).toEqual(["approval needed (gate) · smithers approve run-terminal"]);
+        expect(card.footer).toContain("smithers ui run-terminal");
+    });
+
+    test("fetchCard tolerates adapters without listPendingApprovals", async () => {
+        const card = await fetchCard(adapterForStatuses(["running"]), "run-terminal", "Name", "prompt");
+        expect(card.approvalLines).toEqual([]);
+        expect(card.footer).not.toContain("smithers ui");
+    });
+
+    test("streamRun collapses consecutive FrameCommitted events into one card render", async () => {
+        let renders = 0;
+        let eventsDrained = false;
+        const adapter = {
+            async getRun() {
+                return runRow(eventsDrained ? "finished" : "running");
+            },
+            async listNodes() {
+                return [];
+            },
+            async listEvents() {
+                if (eventsDrained) return [];
+                eventsDrained = true;
+                return [1, 2, 3].map((seq) => ({ seq, type: "FrameCommitted", payloadJson: "{}" }));
+            },
+        };
+
+        const result = await streamRun(adapter, "run-frames", "Frames", "prompt", {
+            intervalMs: 1,
+            renderCard() {
+                renders += 1;
+            },
+        });
+
+        expect(result.state).toBe("succeeded");
+        // Initial card + ONE render for the whole 3-frame batch (which already
+        // shows the terminal state, so no extra final render) — not one per frame.
+        expect(renders).toBe(2);
     });
 
     test("childFailurePromise resolves when the detached run exits", async () => {

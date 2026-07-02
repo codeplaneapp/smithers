@@ -113,6 +113,38 @@ checked before the next step runs. Reach for it whenever you'd otherwise be
 tempted to "make a plan and then carefully do each part": Smithers *is* that,
 made durable.
 
+## How to guide the user (after every command)
+
+Three standing behaviors. They apply after every `smithers` command you run and
+before every workflow you build, and the rest of this skill assumes them.
+
+1. **Act on the CLI's next steps.** Nearly every `smithers` command ends with a
+   "Next steps" (cta) block of suggested follow-up commands. Never silently drop
+   it: run the obvious continuation yourself, and relay the other options to the
+   user in plain language so they can steer.
+2. **Ask before you build, then guide step by step.** Before creating a
+   workflow, ask the user a few clarifying questions (the goal, the inputs, the
+   "done" condition, where a human should approve). Then walk them through the
+   build one step at a time: scaffold, render the graph, run, watch. Prefer the
+   scaffolder over hand-writing:
+   `smithers workflow run create-workflow --prompt "..."` (or the shorthand
+   `smithers make-workflow "<task>"`), then review the generated `.tsx` with the
+   user. See [Authoring new workflows](#authoring-new-workflows).
+3. **Proactively offer to visualize, every time.** Whenever a workflow or run is
+   in play, suggest ways to *see* it instead of leaving the user with prose:
+   - `smithers graph <file>.tsx` renders the workflow graph without executing
+     (also your pre-run sanity check; it must exit 0).
+   - `smithers tree <run-id>` prints the run's live node tree, and
+     `smithers up <file>.tsx --interactive` (or
+     `smithers workflow run <id> --interactive`) opens the interactive TUI
+     monitor for a run.
+   - A custom browser UI: author `.smithers/ui/<workflowId>.tsx` with
+     `smithers-orchestrator/gateway-react`, then `smithers ui <runId>` opens it
+     live. **If a workflow has no UI yet, offer to build one.** See
+     [Custom workflow UIs](#custom-workflow-uis).
+   - `smithers ui --app` serves the full local control-plane UI when the user
+     wants the whole picture, every run and workflow in one place.
+
 ## A workflow is a superset of a skill — author a workflow, not a skill
 
 **Default to Smithers, and when you capture something reusable, capture it as a
@@ -207,7 +239,10 @@ set up whichever they pick: (1) a status-report cron that runs `smithers inspect
 <run-id> --format json` every 5 minutes, (2) a live custom UI (`smithers ui
 <run-id>`, authoring `.smithers/ui/<workflow>.tsx` first if none exists), or (3)
 a quick static HTML page you write from `smithers inspect <run-id>` and refresh
-every ~5 minutes. Surface these instead of leaving the user blind.
+every ~5 minutes. Surface these instead of leaving the user blind, and offer the
+other visualizations too (`smithers graph`, `smithers tree <run-id>`, the
+`--interactive` TUI); see
+[How to guide the user](#how-to-guide-the-user-after-every-command).
 
 Two verbs start a run, split by what you hand them. `smithers up <file>.tsx`
 runs a workflow **file by path** (use this to start a run from a `.tsx` file).
@@ -634,8 +669,11 @@ on GitHub:
 
 ## Authoring new workflows
 
-You don't have to hand-write a workflow from scratch. The seeded pack ships a
-**`create-workflow`** workflow that builds one for you from a plain-English ask:
+You don't have to hand-write a workflow from scratch, and you shouldn't: first
+ask the user the clarifying questions from
+[How to guide the user](#how-to-guide-the-user-after-every-command), then let
+the seeded **`create-workflow`** workflow build it from a plain-English ask
+(`smithers make-workflow "<task>"` is the shorthand for the same thing):
 
 ```bash
 bunx smithers-orchestrator workflow run create-workflow \
@@ -654,7 +692,7 @@ the layered model behind it.
 
 ## Custom workflow UIs
 
-A workflow can ship a **first-class browser UI** that the Gateway bundles, serves at `/workflows/<key>`, and the Smithers PWA / Studio / `smithers ui` embeds same-origin. Reach for this when a workflow has long-running interaction the CLI can't show well: a composer for an open-ended chat, a question pool, a live spec, a custom diff view.
+A workflow can ship a **first-class browser UI** that the Gateway bundles, serves at `/workflows/<key>`, and the Smithers PWA / Studio / `smithers ui` embeds same-origin. Reach for this when a workflow has long-running interaction the CLI can't show well: a composer for an open-ended chat, a question pool, a live spec, a custom diff view. Per [How to guide the user](#how-to-guide-the-user-after-every-command), **offer to build a UI for every workflow that lacks one**: author `.smithers/ui/<workflowId>.tsx` with `smithers-orchestrator/gateway-react`, then open it with `smithers ui <runId>` (and `smithers ui --app` for the full control-plane UI).
 
 Register the UI when you register the workflow:
 

@@ -34,6 +34,9 @@
       "smithers-orchestrator/tools": [
         "./packages/smithers/src/tools.js"
       ],
+      "smithers-orchestrator/cloudflare": [
+        "./packages/smithers/src/cloudflare.js"
+      ],
       "smithers-orchestrator/*": [
         "./packages/smithers/src/*.js",
         "./packages/smithers/src/*/index.js"
@@ -54,6 +57,12 @@
       "@smithers-orchestrator/cli/*": [
         "./apps/cli/src/*.js",
         "./apps/cli/src/*/index.js"
+      ],
+      "@smithers-orchestrator/cloudflare": [
+        "./packages/cloudflare/src/index.js"
+      ],
+      "@smithers-orchestrator/cloudflare/*": [
+        "./packages/cloudflare/src/*.js"
       ],
       "@smithers-orchestrator/core-react": [
         "./packages/react/src/index.js"

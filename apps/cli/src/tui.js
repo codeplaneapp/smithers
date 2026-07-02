@@ -1,7 +1,7 @@
 import { intro, log, outro, select, spinner, text, confirm, isCancel, cancel } from "@clack/prompts";
 import pc from "picocolors";
 import { spawn } from "node:child_process";
-import { closeSync, openSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { discoverWorkflows, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
@@ -28,6 +28,7 @@ export { formatStreamText } from "./tui-format.js";
  * @property {string} prompt
  * @property {string} [highlight]
  * @property {RunCardStep[]} steps
+ * @property {string[]} [approvalLines] - prominent pending-approval lines (see buildApprovalLines)
  * @property {string} footer
  */
 
@@ -332,6 +333,64 @@ function shortId(runId) {
 }
 
 /**
+ * Format pending approvals as prominent card lines carrying the EXACT command
+ * to resolve each one. With a single pending gate `smithers approve <runId>`
+ * auto-detects the node; with several, each line pins its node via `--node`.
+ *
+ * @param {string} runId
+ * @param {{ nodeId?: string }[] | null | undefined} approvals
+ * @returns {string[]}
+ */
+export function buildApprovalLines(runId, approvals) {
+    if (!Array.isArray(approvals) || approvals.length === 0) return [];
+    return approvals.map((a) => {
+        const nodeId = a?.nodeId ? String(a.nodeId) : "";
+        const cmd = approvals.length > 1 && nodeId
+            ? `smithers approve ${runId} --node ${nodeId}`
+            : `smithers approve ${runId}`;
+        const node = nodeId ? ` ${pc.dim(`(${displayNode(nodeId)})`)}` : "";
+        return `${pc.yellow("approval needed")}${node} ${pc.dim("·")} ${pc.bold(cmd)}`;
+    });
+}
+
+/**
+ * Build the post-run next-step guidance printed when the interactive session
+ * ends, phrased for an agent operator to relay ("Suggest to the user:").
+ *
+ * @param {{ runId: string; workflowId?: string; entryFile?: string; uiExists?: boolean }} opts
+ * @returns {string[]}
+ */
+export function buildNextStepsLines({ runId, workflowId, entryFile, uiExists }) {
+    const lines = [];
+    if (uiExists) {
+        lines.push(`smithers ui ${runId}  (open this run in its custom UI)`);
+    } else if (workflowId) {
+        lines.push(`smithers ui ${runId}  (open this run in the inspector; author .smithers/ui/${workflowId}.tsx for a custom UI)`);
+    } else {
+        lines.push(`smithers ui ${runId}  (open this run in the inspector)`);
+    }
+    if (entryFile) lines.push(`smithers graph ${entryFile}  (visualize the workflow graph)`);
+    lines.push(`smithers tree ${runId}  (inspect the run tree)`);
+    lines.push("smithers workflow run create-workflow  (build a new workflow)");
+    return lines;
+}
+
+/**
+ * Whether a custom `smithers ui` surface exists for this workflow id at the
+ * `.smithers/ui/<workflowId>.tsx` convention (mirrors index.js resolution).
+ * @param {string | undefined} workflowId
+ * @param {string} [cwd]
+ */
+export function customUiExists(workflowId, cwd = process.cwd()) {
+    if (!workflowId) return false;
+    try {
+        return existsSync(resolve(cwd, ".smithers", "ui", `${workflowId}.tsx`));
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Render a single run as a clack-native status card.
  * @param {RunCardModel} model
  */
@@ -353,6 +412,10 @@ export function renderRunCard(model) {
         log.message(padRow(pc.reset(label), s.color(s.label)), { symbol: s.symbol });
     }
 
+    for (const line of model.approvalLines ?? []) {
+        log.message(line, { symbol: pc.yellow("⏸") });
+    }
+
     outro(pc.dim(model.footer));
 }
 
@@ -362,9 +425,11 @@ export function renderRunCard(model) {
  * @param {string} runId
  * @param {string} name
  * @param {string} promptText
+ * @param {{ uiExists?: boolean }} [opts] - `uiExists`: a custom `smithers ui` surface
+ *   exists for this workflow, so the footer advertises the exact command to open it.
  * @returns {Promise<RunCardModel | null>}
  */
-export async function fetchCard(adapter, runId, name, promptText) {
+export async function fetchCard(adapter, runId, name, promptText, opts = {}) {
     const run = await adapter.getRun(runId);
     if (!run) return null;
     const view = await computeRunStateFromRow(adapter, run).catch(() => ({ state: run.status }));
@@ -373,13 +438,27 @@ export async function fetchCard(adapter, runId, name, promptText) {
         label: n.label ?? n.nodeId,
         status: NODE_STATUS[n.state] ?? "pending",
     }));
+    // Pending approvals are the ONE thing the operator must act on for the run
+    // to make progress, so they get prominent lines with the exact command.
+    let approvals = [];
+    if (typeof adapter.listPendingApprovals === "function") {
+        try {
+            approvals = await adapter.listPendingApprovals(runId);
+        } catch {
+            approvals = [];
+        }
+    }
+    const footer = opts.uiExists
+        ? `crash-safe · resumes from the last persisted step · custom UI: smithers ui ${runId}`
+        : "crash-safe · resumes from the last persisted step";
     return {
         name: run.workflowName ?? name,
         shortId: shortId(runId),
         state: view.state,
         prompt: promptText,
         steps: steps.length ? steps : [{ label: "starting…", status: "pending" }],
-        footer: "crash-safe · resumes from the last persisted step",
+        approvalLines: buildApprovalLines(runId, approvals),
+        footer,
     };
 }
 
@@ -567,7 +646,7 @@ function terminateDetachedChild(child) {
  * @param {string} runId
  * @param {string} name
  * @param {string} promptText
- * @param {{ intervalMs?: number; childFailure?: Promise<Error>; renderCard?: (card: RunCardModel) => void; printLine?: (color: (text: string) => string, label: string, text: string) => void }} [opts]
+ * @param {{ intervalMs?: number; childFailure?: Promise<Error>; uiExists?: boolean; renderCard?: (card: RunCardModel) => void; printLine?: (color: (text: string) => string, label: string, text: string) => void }} [opts]
  * @returns {Promise<{ state: string | undefined; error?: Error }>}
  */
 export async function streamRun(adapter, runId, name, promptText, opts = {}) {
@@ -588,7 +667,7 @@ export async function streamRun(adapter, runId, name, promptText, opts = {}) {
     let lastState;
     let lastRenderedState;
     const renderCurrentCard = async () => {
-        const card = await fetchCard(adapter, runId, name, promptText);
+        const card = await fetchCard(adapter, runId, name, promptText, { uiExists: opts.uiExists });
         if (!card) return;
         renderCard(card);
         lastRenderedState = card.state;
@@ -613,21 +692,33 @@ export async function streamRun(adapter, runId, name, promptText, opts = {}) {
             }
 
             const events = await adapter.listEvents(runId, lastSeq, 500);
+            // The card is rendered from the LIVE DB, so consecutive FrameCommitted
+            // events in one batch would print identical duplicate cards. Collapse a
+            // frame run into one render; a stream line in between resets the guard
+            // so the card still re-appears after interleaved output.
+            let renderedForFrame = false;
             for (const ev of events) {
                 lastSeq = Number(ev.seq);
                 if (ev.type === "FrameCommitted") {
-                    await renderCurrentCard();
+                    if (!renderedForFrame) {
+                        await renderCurrentCard();
+                        renderedForFrame = true;
+                    }
                     continue;
                 }
                 if (ev.type === "NodeFinished") {
                     const out = await loadOutputLine(adapter, runId, ev, outputTables);
-                    if (out) printLine(colorFor(out.nodeId), labels.get(out.nodeId) ?? displayNode(out.nodeId), out.text);
+                    if (out) {
+                        printLine(colorFor(out.nodeId), labels.get(out.nodeId) ?? displayNode(out.nodeId), out.text);
+                        renderedForFrame = false;
+                    }
                     continue;
                 }
                 const parsed = parseAgentEvent(ev) ?? parseNodeOutputEvent(ev);
                 if (parsed?.text && !isCompletedToolPhase(parsed.text)) {
                     const label = labels.get(parsed.nodeId) ?? displayNode(parsed.nodeId);
                     printLine(colorFor(parsed.nodeId), label, parsed.text);
+                    renderedForFrame = false;
                 }
             }
 
@@ -750,7 +841,7 @@ export async function promptForField(field, prompts = { select, confirm, text })
     const isInteger = types.includes("integer");
     const isBoolean = types.includes("boolean");
     const suffix = field.required ? "" : pc.dim(" (optional)");
-    const message = `${field.name}${suffix}${field.description ? ` — ${pc.dim(field.description)}` : ""}`;
+    const message = `${field.name}${suffix}${field.description ? ` ${pc.dim(field.description)}` : ""}`;
     const skipOption = { value: OMIT_FIELD, label: pc.dim("(leave unset)") };
 
     if (Array.isArray(field.enum) && field.enum.length > 0) {
@@ -1145,7 +1236,7 @@ export async function gatewayGetRun(base, runId, token, opts = {}) {
     // so fail fast with an accurate message instead of stalling the whole budget.
     if (res.status === 401 || res.status === 403) {
         throw new GatewayProbeError(
-            `Gateway at ${base} rejected auth (${res.status}) — check --token/SMITHERS_TOKEN/SMITHERS_API_KEY.`,
+            `Gateway at ${base} rejected auth (${res.status}); check --token/SMITHERS_TOKEN/SMITHERS_API_KEY.`,
             false,
         );
     }
@@ -1166,7 +1257,7 @@ export async function gatewayGetRun(base, runId, token, opts = {}) {
         // 200 status: still treat it as the fast-fail auth case.
         if (code === "Unauthorized" || code === "Forbidden") {
             throw new GatewayProbeError(
-                `Gateway at ${base} rejected auth (${code}) — check --token/SMITHERS_TOKEN/SMITHERS_API_KEY.`,
+                `Gateway at ${base} rejected auth (${code}); check --token/SMITHERS_TOKEN/SMITHERS_API_KEY.`,
                 false,
             );
         }
@@ -1612,7 +1703,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
                 terminateDetachedChild(child);
                 return fail({
                     code: "TUI_MONITOR_FAILED",
-                    message: `The run monitor failed to start: ${supervised.monitorError.message}. Run started — reattach with \`smithers-mon ${runId}\` or see ${logFile}.`,
+                    message: `The run monitor failed to start: ${supervised.monitorError.message}. Run started; reattach with \`smithers-mon ${runId}\` or see ${logFile}.`,
                     exitCode: 1,
                     runId,
                     logFile,
@@ -1637,7 +1728,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
                 if (code === null && signal) {
                     return fail({
                         code: "TUI_MONITOR_CRASHED",
-                        message: `The run monitor was killed by ${signal}. Run started — see ${logFile}.`,
+                        message: `The run monitor was killed by ${signal}. Run started; see ${logFile}.`,
                         exitCode: 1,
                         runId,
                         logFile,
@@ -1645,11 +1736,42 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
                 }
                 return fail({
                     code: "TUI_MONITOR_FAILED",
-                    message: `The run monitor exited with code ${code}. Run started — see ${logFile}.`,
+                    message: `The run monitor exited with code ${code}. Run started; see ${logFile}.`,
                     exitCode: code ?? 1,
                     runId,
                     logFile,
                 });
+            }
+            // Clean monitor quit: print the run's final status, any approval that
+            // still blocks it (with the exact command), and next-step guidance so
+            // the operator knows what to do after the full-screen view is gone.
+            let finalState;
+            let pendingApprovals = [];
+            try {
+                const finalRun = await db.adapter.getRun(runId);
+                if (finalRun) {
+                    const view = await computeRunStateFromRow(db.adapter, finalRun).catch(() => ({ state: finalRun.status }));
+                    finalState = view.state;
+                }
+                if (typeof db.adapter.listPendingApprovals === "function") {
+                    pendingApprovals = await db.adapter.listPendingApprovals(runId);
+                }
+            } catch { }
+            if (finalState) {
+                const badge = (STATE_BADGE[finalState] ?? pc.dim)(String(finalState).toUpperCase());
+                log.message(`Run ${pc.dim(runId)} ${pc.dim("·")} ${badge}`);
+            }
+            for (const line of buildApprovalLines(runId, pendingApprovals)) {
+                log.message(line, { symbol: pc.yellow("⏸") });
+            }
+            log.message(pc.bold("Suggest to the user:"));
+            for (const line of buildNextStepsLines({
+                runId,
+                workflowId: workflow.id,
+                entryFile: workflow.entryFile,
+                uiExists: customUiExists(workflow.id),
+            })) {
+                log.message(pc.dim("  ") + line);
             }
         } else {
             // No silent fallback: the full-screen monitor is the interactive
@@ -1658,7 +1780,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
             terminateDetachedChild(child);
             return fail({
                 code: "TUI_MONITOR_UNAVAILABLE",
-                message: `The run monitor package (@smithers-orchestrator/tui) could not be resolved, so the full-screen monitor can't launch. Run started — reattach with \`smithers-mon ${runId}\` or see ${logFile}.`,
+                message: `The run monitor package (@smithers-orchestrator/tui) could not be resolved, so the full-screen monitor can't launch. Run started; reattach with \`smithers-mon ${runId}\` or see ${logFile}.`,
                 exitCode: 1,
                 runId,
                 logFile,

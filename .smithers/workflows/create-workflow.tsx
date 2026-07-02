@@ -18,6 +18,7 @@ import DocumentPrompt from "../prompts/create-workflow-document.mdx";
 const WORKFLOWS_DIR = ".smithers/workflows";
 const PROMPTS_DIR = ".smithers/prompts";
 const SKILLS_DIR = ".smithers/skills";
+const UI_DIR = ".smithers/ui";
 
 const inputSchema = z.object({
   prompt: z
@@ -49,6 +50,21 @@ const clarifiedSpecSchema = z.looseObject({
   loops: z.array(z.string()).default([]).describe("Where it should iterate until a condition holds."),
   humanGates: z.array(z.string()).default([]).describe("Where a human approval / question belongs."),
   successCriteria: z.array(z.string()).default([]),
+  ui: z
+    .string()
+    .default("")
+    .describe("Desired custom UI / visualization for runs of this workflow (panels, live signals)."),
+  clarifyingQuestions: z
+    .array(
+      z.object({
+        question: z.string(),
+        assumption: z.string().describe("The default assumed if the user does not answer."),
+      }),
+    )
+    .default([])
+    .describe(
+      "Numbered questions put to the user (via ask-human when available, otherwise surfaced at the approval gate), each with the assumption used if unanswered.",
+    ),
   openQuestions: z.array(z.string()).default([]).describe("Anything ambiguous the author should resolve."),
 });
 
@@ -105,6 +121,15 @@ const designSchema = z.looseObject({
   prompts: z.array(z.string()).default([]).describe(".mdx prompt files to author alongside the workflow."),
   triggers: z.array(z.string()).default([]),
   humanGates: z.array(z.string()).default([]),
+  ui: z
+    .object({
+      path: z.string().describe(".smithers/ui/<workflowName>.tsx"),
+      summary: z.string().describe("What the custom run UI shows."),
+      panels: z.array(z.string()).default([]).describe("Panels / sections and the node outputs they read."),
+    })
+    .nullable()
+    .default(null)
+    .describe("Plan for the custom gateway-react workflow UI. Required unless the user explicitly declined one."),
   rationale: z.string().default(""),
 });
 
@@ -124,7 +149,7 @@ const scaffoldSchema = z.looseObject({
     .array(
       z.object({
         path: z.string(),
-        kind: z.enum(["workflow", "prompt", "component", "agents", "skill", "other"]).default("other"),
+        kind: z.enum(["workflow", "prompt", "component", "agents", "skill", "ui", "other"]).default("other"),
       }),
     )
     .default([]),
@@ -158,6 +183,17 @@ const outputSchema = z.object({
   fileCount: z.number().default(0).describe("How many files were written."),
   verified: z.boolean().default(false).describe("Whether the new workflow's graph renders cleanly."),
   skillPath: z.string().nullable().default(null).describe("Agent skill doc written for the new workflow."),
+  uiFile: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("Path to the scaffolded custom workflow UI, if one was written."),
+  nextSteps: z
+    .array(z.string())
+    .default([])
+    .describe(
+      "Copy-pasteable commands the operator should suggest to the user next: run it, visualize it, open the custom UI, iterate.",
+    ),
 });
 
 const { Workflow, Task, Sequence, Branch, Loop, Approval, smithers, outputs } = createSmithers({
@@ -192,6 +228,7 @@ export default smithers((ctx) => {
   const workflowName =
     scaffold?.workflowName ?? design?.workflowName ?? clarify?.name ?? ctx.input.name ?? "new-workflow";
   const workflowFile = `${WORKFLOWS_DIR}/${workflowName}.tsx`;
+  const uiFile = `${UI_DIR}/${workflowName}.tsx`;
 
   // Verify-loop bookkeeping: re-render `until` against the latest verify output.
   const verifyOutputs = ctx.outputs.verify ?? [];
@@ -251,6 +288,7 @@ export default smithers((ctx) => {
               provisioning={provision}
               workflowsDir={WORKFLOWS_DIR}
               promptsDir={PROMPTS_DIR}
+              uiDir={UI_DIR}
             />
           </Task>
         ) : null}
@@ -264,7 +302,12 @@ export default smithers((ctx) => {
               output={outputs.approval}
               request={{
                 title: `Approve design for "${workflowName}"`,
-                summary: design?.summary ?? "Review the proposed workflow design before scaffolding.",
+                summary: [
+                  design?.summary ?? "Review the proposed workflow design before scaffolding.",
+                  ...(clarify?.clarifyingQuestions ?? []).map(
+                    (q, i) => `Q${i + 1}: ${q.question} (assumed: ${q.assumption})`,
+                  ),
+                ].join("\n"),
               }}
             />
           }
@@ -284,6 +327,7 @@ export default smithers((ctx) => {
               provisioning={provision}
               workflowsDir={WORKFLOWS_DIR}
               promptsDir={PROMPTS_DIR}
+              uiDir={UI_DIR}
             />
           </Task>
         ) : null}
@@ -294,17 +338,32 @@ export default smithers((ctx) => {
             <Sequence>
               <Task id="verify" output={outputs.verify}>
                 {async () => {
-                  const command = `bunx smithers-orchestrator graph ${workflowFile}`;
+                  const errors: string[] = [];
+                  const graphCmd = `bunx smithers-orchestrator graph ${workflowFile}`;
                   const res = await $`bunx smithers-orchestrator graph ${workflowFile}`.nothrow().quiet();
-                  const passed = res.exitCode === 0;
-                  const errText = `${res.stderr?.toString() ?? ""}\n${res.stdout?.toString() ?? ""}`.trim();
+                  if (res.exitCode !== 0) {
+                    const errText = `${res.stderr?.toString() ?? ""}\n${res.stdout?.toString() ?? ""}`.trim();
+                    errors.push(`[graph] ${errText.slice(0, 6000)}`);
+                  }
+                  // If a custom UI was scaffolded, it must at least transpile.
+                  const uiExists = await Bun.file(uiFile).exists();
+                  let command = graphCmd;
+                  if (uiExists) {
+                    command = `${graphCmd} && bun build --no-bundle ${uiFile}`;
+                    const uiRes = await $`bun build --no-bundle ${uiFile}`.nothrow().quiet();
+                    if (uiRes.exitCode !== 0) {
+                      const uiErr = `${uiRes.stderr?.toString() ?? ""}\n${uiRes.stdout?.toString() ?? ""}`.trim();
+                      errors.push(`[ui] ${uiFile}: ${uiErr.slice(0, 6000)}`);
+                    }
+                  }
+                  const passed = errors.length === 0;
                   return {
                     passed,
                     command,
-                    errors: passed ? [] : [errText.slice(0, 6000)],
+                    errors,
                     notes: passed
-                      ? `${workflowName} loads and its graph renders without executing.`
-                      : `graph render failed for ${workflowName} — see errors.`,
+                      ? `${workflowName} loads, its graph renders without executing${uiExists ? `, and ${uiFile} transpiles` : ""}.`
+                      : `verification failed for ${workflowName}; see errors.`,
                   };
                 }}
               </Task>
@@ -325,6 +384,8 @@ export default smithers((ctx) => {
                       design={design}
                       workflowsDir={WORKFLOWS_DIR}
                       promptsDir={PROMPTS_DIR}
+                      uiDir={UI_DIR}
+                      uiFile={uiFile}
                     />
                   </Task>
                 }
@@ -336,8 +397,14 @@ export default smithers((ctx) => {
 
         {/* 7 — Document the new workflow so future agents know how to run it. */}
         {proceed && verifyPassed ? (
-          <Task id="document" output={outputs.document} agent={agents.cheapFast}>
-            <DocumentPrompt workflowName={workflowName} design={design} skillsDir={SKILLS_DIR} />
+          <Task id="document" output={outputs.document} agent={agents.smartTool}>
+            <DocumentPrompt
+              workflowName={workflowName}
+              design={design}
+              skillsDir={SKILLS_DIR}
+              workflowFile={workflowFile}
+              uiFile={uiFile}
+            />
           </Task>
         ) : null}
 
@@ -345,16 +412,33 @@ export default smithers((ctx) => {
             something meaningful. Runs last in the sequence on every exit path. */}
         {clarify ? (
           <Task id="output" output={outputs.output}>
-            {() => ({
-              workflow: workflowName,
-              workflowFile,
-              status: terminalStatus,
-              summary: terminalSummary,
-              filesWritten,
-              fileCount: filesWritten.length,
-              verified: verifyPassed,
-              skillPath: documentation?.skillPath ?? null,
-            })}
+            {() => {
+              const uiWritten = filesWritten.includes(uiFile);
+              const nextSteps =
+                terminalStatus === "built"
+                  ? [
+                      `smithers workflow run ${workflowName} --prompt "<your input>"  # or: smithers up ${workflowFile}`,
+                      `bunx smithers-orchestrator graph ${workflowFile}  # print the graph; add --interactive for the TUI`,
+                      ...(uiWritten ? [`smithers ui <runId>  # open the custom UI in ${uiFile} for a run`] : []),
+                      `smithers workflow run create-workflow --prompt "iterate on ${workflowName}: <what to change>"  # iterate`,
+                    ]
+                  : [
+                      `smithers inspect <runId>  # review why the run stopped at status "${terminalStatus}"`,
+                      `smithers workflow run create-workflow --prompt "retry building ${workflowName}"`,
+                    ];
+              return {
+                workflow: workflowName,
+                workflowFile,
+                status: terminalStatus,
+                summary: terminalSummary,
+                filesWritten,
+                fileCount: filesWritten.length,
+                verified: verifyPassed,
+                skillPath: documentation?.skillPath ?? null,
+                uiFile: uiWritten ? uiFile : null,
+                nextSteps,
+              };
+            }}
           </Task>
         ) : null}
       </Sequence>

@@ -2,7 +2,7 @@ import { Entity, ShardingConfig } from "@effect/cluster";
 import * as Rpc from "@effect/rpc/Rpc";
 import { Context, Effect, Layer, Schema } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-const SandboxRuntimeSchema = Schema.Literal("bubblewrap", "docker", "codeplane");
+const SandboxRuntimeSchema = Schema.Literal("bubblewrap", "docker", "codeplane", "cloudflare");
 const SandboxEnvSchema = Schema.Record({
     key: Schema.String,
     value: Schema.String,

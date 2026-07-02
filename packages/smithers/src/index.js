@@ -187,7 +187,7 @@ export { AnthropicAgent, OpenAIAgent, HermesAgent, HermesCliAgent, AmpAgent, Ant
 // VCS
 export { runJj, getJjPointer, revertToJjPointer, isJjRepo, workspaceAdd, workspaceList, workspaceClose, } from "@smithers-orchestrator/vcs/jj";
 // Core API
-export { createSmithers, createSmithersPostgres } from "./create.js";
+export { createSmithers, createSmithersCloudflare, createSmithersPostgres } from "./create.js";
 export { openSmithersBackend } from "./openSmithersBackend.js";
 export { openSmithersStore } from "./openSmithersStore.js";
 export { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";

@@ -12,6 +12,7 @@ import {
 } from "./dialect.js";
 import {
     runSmithersSchemaMigrations,
+    runSmithersSchemaInitSqliteAsync,
     runSmithersSchemaInitPostgres,
 } from "./schema-migrations.js";
 import { camelToSnake } from "./utils/camelToSnake.js";
@@ -19,6 +20,16 @@ import { camelToSnake } from "./utils/camelToSnake.js";
 /** @typedef {import("./SqlMessageStorageEventHistoryQuery.ts").SqlMessageStorageEventHistoryQuery} SqlMessageStorageEventHistoryQuery */
 /**
  * @typedef {string | number | bigint | boolean | Uint8Array | null | undefined} SqliteParam
+ */
+/**
+ * @typedef {{
+ *   dialect: "sqlite";
+ *   driver: "external-sqlite" | "cloudflare-sqlite";
+ *   queryAllRaw: (statement: string, params?: ReadonlyArray<unknown>) => ReadonlyArray<Record<string, unknown>> | Promise<ReadonlyArray<Record<string, unknown>>>;
+ *   queryValuesRaw?: (statement: string, params?: ReadonlyArray<unknown>) => ReadonlyArray<ReadonlyArray<unknown>> | Promise<ReadonlyArray<ReadonlyArray<unknown>>>;
+ *   execute?: (statement: string, params?: ReadonlyArray<unknown>) => unknown | Promise<unknown>;
+ *   transaction?: <T>(operation: () => T | Promise<T>) => T | Promise<T>;
+ * }} ExternalSqliteDescriptor
  */
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
@@ -538,6 +549,18 @@ function resolveSqliteDatabase(db) {
     return candidate;
 }
 /**
+ * @param {unknown} db
+ * @returns {db is ExternalSqliteDescriptor}
+ */
+function isExternalSqliteDescriptor(db) {
+    return Boolean(db &&
+        typeof db === "object" &&
+        /** @type {any} */ (db).dialect === SQLITE &&
+        (/** @type {any} */ (db).driver === "external-sqlite" ||
+            /** @type {any} */ (db).driver === "cloudflare-sqlite") &&
+        typeof /** @type {any} */ (db).queryAllRaw === "function");
+}
+/**
  * @param {Database} sqlite
  * @returns {Connection}
  */
@@ -611,6 +634,87 @@ function makeSqlClientEffect(sqlite) {
  */
 function makeSqlClientLayer(sqlite) {
     return Layer.scoped(SqlClient.SqlClient, makeSqlClientEffect(sqlite));
+}
+/**
+ * @param {ExternalSqliteDescriptor} descriptor
+ * @returns {Connection}
+ */
+function createExternalSqliteConnection(descriptor) {
+    /**
+   * @param {string} statement
+   * @param {ReadonlyArray<unknown>} params
+   * @param {(<A extends object>(rows: ReadonlyArray<A>) => ReadonlyArray<A>) | undefined} [transformRows]
+   */
+    const run = (statement, params, transformRows) => Effect.tryPromise({
+        try: async () => {
+            const rows = await descriptor.queryAllRaw(statement, params);
+            return transformRows ? transformRows(rows) : rows;
+        },
+        catch: (cause) => new SqlError({
+            cause,
+            message: formatSqlErrorMessage("SQLite", "external statement", statement, cause),
+        }),
+    });
+    return {
+        execute: (statement, params, transformRows) => run(statement, params, transformRows),
+        executeRaw: (statement, params) => {
+            if (descriptor.execute) {
+                return Effect.tryPromise({
+                    try: async () => {
+                        const result = await descriptor.execute?.(statement, params);
+                        return Array.isArray(result) ? result : [];
+                    },
+                    catch: (cause) => new SqlError({
+                        cause,
+                        message: formatSqlErrorMessage("SQLite", "external execute", statement, cause),
+                    }),
+                });
+            }
+            return run(statement, params, undefined);
+        },
+        executeValues: (statement, params) => Effect.tryPromise({
+            try: async () => {
+                if (descriptor.queryValuesRaw) {
+                    return await descriptor.queryValuesRaw(statement, params);
+                }
+                const rows = await descriptor.queryAllRaw(statement, params);
+                return rows.map((row) => Object.values(row));
+            },
+            catch: (cause) => new SqlError({
+                cause,
+                message: formatSqlErrorMessage("SQLite", "external values statement", statement, cause),
+            }),
+        }),
+        executeUnprepared: (statement, params, transformRows) => run(statement, params, transformRows),
+        executeStream: (statement, params, transformRows) => Stream.fromIterableEffect(run(statement, params, transformRows)),
+    };
+}
+/**
+ * @param {ExternalSqliteDescriptor} descriptor
+ * @returns {Effect.Effect<SqlClient.SqlClient, never>}
+ */
+function makeExternalSqliteClientEffect(descriptor) {
+    const compiler = Statement.makeCompilerSqlite(camelToSnake);
+    const connection = createExternalSqliteConnection(descriptor);
+    return Effect.gen(function* () {
+        const semaphore = yield* Effect.makeSemaphore(1);
+        const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
+        const transactionAcquirer = Effect.uninterruptibleMask((restore) => Effect.as(Effect.zipRight(restore(semaphore.take(1)), Effect.tap(Effect.scope, (scope) => Scope.addFinalizer(scope, semaphore.release(1)))), connection));
+        const reactivity = yield* Reactivity.make;
+        return yield* SqlClient.make({
+            acquirer,
+            compiler,
+            transactionAcquirer,
+            spanAttributes: [[ATTR_DB_SYSTEM_NAME, "sqlite"]],
+            transformRows: transformRowKeys,
+        }).pipe(Effect.provideService(Reactivity.Reactivity, reactivity));
+    });
+}
+/**
+ * @param {ExternalSqliteDescriptor} descriptor
+ */
+function makeExternalSqliteClientLayer(descriptor) {
+    return Layer.scoped(SqlClient.SqlClient, makeExternalSqliteClientEffect(descriptor));
 }
 /**
  * @param {SqliteParam} value
@@ -708,26 +812,42 @@ export class SqlMessageStorage {
     sqlite;
     /** @type {import("./dialect.js").Dialect} */
     dialect;
+    /** @type {"bun-sqlite" | "postgres" | "external-sqlite" | "cloudflare-sqlite"} */
+    driverKind;
     /** @type {object | null} */
     pgConn;
+    /** @type {ExternalSqliteDescriptor | null} */
+    externalSqlite;
     // TODO(Phase 8): Keep this per-DB runtime until the unified runtime can
     // inject a scoped SqlClient without rebuilding the per-connection semaphore.
     runtime;
     tableColumnsCache = new Map();
     /**
-   * @param {BunSQLiteDatabase<any> | Database | { dialect: "postgres"; connection: object }} db
+   * @param {BunSQLiteDatabase<any> | Database | { dialect: "postgres"; connection: object } | ExternalSqliteDescriptor} db
    */
     constructor(db) {
         if (db && typeof db === "object" && /** @type {any} */ (db).dialect === POSTGRES) {
             this.dialect = POSTGRES;
+            this.driverKind = "postgres";
             this.pgConn = /** @type {any} */ (db).connection;
             this.sqlite = null;
+            this.externalSqlite = null;
             this.runtime = ManagedRuntime.make(makePostgresSqlClientLayer(this.pgConn));
+        }
+        else if (isExternalSqliteDescriptor(db)) {
+            this.dialect = SQLITE;
+            this.driverKind = db.driver;
+            this.sqlite = null;
+            this.pgConn = null;
+            this.externalSqlite = db;
+            this.runtime = ManagedRuntime.make(makeExternalSqliteClientLayer(db));
         }
         else {
             this.dialect = SQLITE;
+            this.driverKind = "bun-sqlite";
             this.sqlite = resolveSqliteDatabase(db);
             this.pgConn = null;
+            this.externalSqlite = null;
             this.runtime = ManagedRuntime.make(makeSqlClientLayer(this.sqlite));
         }
     }
@@ -740,7 +860,7 @@ export class SqlMessageStorage {
         if (cached) {
             return cached;
         }
-        if (this.dialect === POSTGRES) {
+        if (this.dialect === POSTGRES || this.driverKind !== "bun-sqlite") {
             // A fresh PostgreSQL schema has no historical column drift to defend
             // against, and PRAGMA is unavailable. Returning null tells
             // filterKnownColumns to skip filtering, so a genuinely missing column
@@ -793,6 +913,16 @@ export class SqlMessageStorage {
                     createIndexStatements: CREATE_INDEX_STATEMENTS,
                 }),
                 catch: (cause) => new SqlError({ cause, message: "Failed to initialize Postgres schema" }),
+            });
+        }
+        if (this.externalSqlite) {
+            const externalSqlite = this.externalSqlite;
+            return Effect.tryPromise({
+                try: () => runSmithersSchemaInitSqliteAsync(externalSqlite, {
+                    createTableStatements: CREATE_TABLE_STATEMENTS,
+                    createIndexStatements: CREATE_INDEX_STATEMENTS,
+                }),
+                catch: (cause) => new SqlError({ cause, message: "Failed to initialize SQLite schema" }),
             });
         }
         const sqlite = this.sqlite;
@@ -909,6 +1039,17 @@ export class SqlMessageStorage {
    */
     deleteWhere(table, whereSql, params = []) {
         return this.execute(`DELETE FROM ${quoteIdentifier(table)} WHERE ${whereSql}`, params);
+    }
+    /**
+   * @template A
+   * @param {() => A | Promise<A>} operation
+   * @returns {Promise<A>}
+   */
+    async transaction(operation) {
+        if (this.externalSqlite?.transaction) {
+            return await this.externalSqlite.transaction(operation);
+        }
+        return await operation();
     }
     /**
    * @param {string} runId

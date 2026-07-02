@@ -1,5 +1,6 @@
 import { z } from "incur";
 import { buildStarterGallery, findStarterRecipe, renderStarterGallery } from "./starter-gallery.js";
+import { buildAgentNextSteps } from "./agentNextSteps.js";
 
 export const startersArgs = z.object({
     id: z.string().optional().describe("Starter ID or alias"),
@@ -34,10 +35,12 @@ export function runStartersCommand(c, fail) {
         workflow: c.options.workflow,
         tag: c.options.tag,
     });
+    const nextSteps = buildAgentNextSteps({});
     const explicitFormat = process.argv.some((arg) => arg === "--format" || arg.startsWith("--format="));
     if (explicitFormat || c.format === "json" || c.format === "jsonl") {
-        return c.ok(gallery);
+        return c.ok(gallery, { cta: nextSteps });
     }
     process.stdout.write(`${renderStarterGallery(gallery)}\n`);
+    process.stdout.write(`\n${nextSteps.description}\n`);
     return undefined;
 }

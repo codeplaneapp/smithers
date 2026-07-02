@@ -16,7 +16,7 @@ type SandboxProps = {
   input?: unknown;
 
   provider?: unknown; // runtime accepts a provider object or registered provider id
-  runtime?: "bubblewrap" | "docker" | "codeplane"; // legacy local transports
+  runtime?: "bubblewrap" | "docker" | "codeplane" | "cloudflare"; // legacy local transports plus provider-backed Cloudflare
 
   allowNetwork?: boolean;
   reviewDiffs?: boolean; // default true
@@ -334,7 +334,7 @@ For most workflows, use sibling sandboxes under a `Parallel` or `MergeQueue` ins
 
 ## Built-in local transports
 
-When `provider` is omitted, Smithers uses the legacy local transport path. `runtime` may be `"bubblewrap"`, `"docker"`, or `"codeplane"`. If `runtime` is omitted, the local path defaults to `"bubblewrap"`.
+When `provider` is omitted, Smithers uses the legacy local transport path. `runtime` may be `"bubblewrap"`, `"docker"`, or `"codeplane"`. `"cloudflare"` is provider-backed; use it with `createCloudflareSandboxProvider()` from `smithers-orchestrator/cloudflare`. If `runtime` is omitted, the local path defaults to `"bubblewrap"`.
 
 Unknown runtimes now fail closed. Docker is not silently replaced by bubblewrap when Docker is unavailable.
 

@@ -50,6 +50,7 @@ import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
+import { buildAgentNextSteps } from "./agentNextSteps.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
 import {
     assertEvalRunIdsAvailable,
@@ -372,6 +373,49 @@ function pauseCtas(status, runId) {
     if (status === "waiting-timer")
         return [{ command: `why ${runId}`, description: "Explain the timer wait" }];
     return [];
+}
+/**
+ * Merge a command's own ctas with the shared agent next-steps guidance
+ * (buildAgentNextSteps), deduplicating by command string so no suggestion
+ * appears twice.
+ * @param {Parameters<typeof buildAgentNextSteps>[0]} context
+ * @param {{ command: string; description?: string }[]} [ownCommands]
+ * @param {string} [ownDescription]
+ */
+function withAgentNextSteps(context, ownCommands = [], ownDescription) {
+    const next = buildAgentNextSteps(context);
+    const seen = new Set(ownCommands.map((cmd) => cmd.command));
+    return {
+        description: ownDescription
+            ? `${ownDescription}\n\n${next.description}`
+            : next.description,
+        commands: [
+            ...ownCommands,
+            ...next.commands.filter((cmd) => !seen.has(cmd.command)),
+        ],
+    };
+}
+/**
+ * Devtools commands (tree/rewind/snapshots) own stdout and must keep stderr
+ * clean on success, so their agent guidance is appended to the human render
+ * only. Callers must skip this in --json mode (machine-parsed stdout) and for
+ * machine-consumable payloads like `diff` patches and `output` rows.
+ * @param {Parameters<typeof buildAgentNextSteps>[0]} context
+ */
+function writeAgentNextStepsHuman(context) {
+    try {
+        const next = buildAgentNextSteps(context);
+        const lines = [
+            next.description,
+            "",
+            "Next commands:",
+            ...next.commands.map((cmd) => `  smithers ${cmd.command}   # ${cmd.description}`),
+        ];
+        process.stdout.write(`\n${lines.join("\n")}\n`);
+    }
+    catch {
+        // Guidance must never break the command.
+    }
 }
 /**
  * @param {SmithersWorkflow<any>} workflow
@@ -1425,9 +1469,14 @@ async function buildInspectSnapshot(adapter, runId) {
             description: `Run finished with ${failedChildKeys.length} failed ${failedChildKeys.length === 1 ? "child" : "children"}; inspect`,
         });
     }
+    const nextSteps = withAgentNextSteps({
+        runId,
+        workflowId: r.workflowPath ? workflowIdFromPath(r.workflowPath) : (r.workflowName ?? undefined),
+    }, ctaCommands);
     return {
         result,
-        ctaCommands,
+        ctaCommands: nextSteps.commands,
+        ctaDescription: nextSteps.description,
         status: r.status,
     };
 }
@@ -1964,17 +2013,23 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             const monitorCommands = monitorHasUi
                 ? [{ command: `ui ${effectiveRunId}`, description: "Open the live workflow UI" }]
                 : [];
+            // The monitoring guidance already covers the custom-UI suggestion,
+            // so the shared next steps skip it here (omitUi) to avoid repeats.
+            const backgroundCta = withAgentNextSteps({
+                workflowId: monitorWorkflowId,
+                workflowFile: workflowPath,
+                runId: effectiveRunId,
+                hasUi: monitorHasUi,
+                omitUi: true,
+            }, [
+                ...monitorCommands,
+                { command: `logs ${effectiveRunId}`, description: "Tail run logs" },
+                { command: `chat ${effectiveRunId} --follow`, description: "Watch agent chat" },
+                { command: `ps`, description: "List all runs" },
+                { command: `inspect ${effectiveRunId}`, description: "Inspect run state" },
+            ], `${monitoring.text}\n\nOperate the run:`);
             return c.ok({ runId: effectiveRunId, logFile, pid: child.pid, monitoring }, {
-                cta: {
-                    description: `${monitoring.text}\n\nOperate the run:`,
-                    commands: [
-                        ...monitorCommands,
-                        { command: `logs ${effectiveRunId}`, description: "Tail run logs" },
-                        { command: `chat ${effectiveRunId} --follow`, description: "Watch agent chat" },
-                        { command: `ps`, description: "List all runs" },
-                        { command: `inspect ${effectiveRunId}`, description: "Inspect run state" },
-                    ],
-                },
+                cta: backgroundCta,
             });
         }
         if (options.hot) {
@@ -2201,18 +2256,19 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             });
             process.exitCode = formatStatusExitCode(result.status);
             return c.ok(summarizeRunResult(result), {
-                cta: result.runId ? {
-                    description: isWaitingStatus(result.status)
-                        ? "Run is paused (exit 3 = awaiting a decision, not a failure). Next steps:"
-                        : "Next steps:",
-                    commands: [
-                        ...pauseCtas(result.status, result.runId),
-                        ...getWorkflowFollowUpCtas(workflowPath),
-                        { command: `inspect ${result.runId}`, description: "Inspect run state" },
-                        { command: `logs ${result.runId}`, description: "View run logs" },
-                        { command: `chat ${result.runId}`, description: "View agent chat" },
-                    ],
-                } : undefined,
+                cta: result.runId ? withAgentNextSteps({
+                    workflowId: workflowIdFromPath(workflowPath),
+                    workflowFile: workflowPath,
+                    runId: result.runId,
+                }, [
+                    ...pauseCtas(result.status, result.runId),
+                    ...getWorkflowFollowUpCtas(workflowPath),
+                    { command: `inspect ${result.runId}`, description: "Inspect run state" },
+                    { command: `logs ${result.runId}`, description: "View run logs" },
+                    { command: `chat ${result.runId}`, description: "View agent chat" },
+                ], isWaitingStatus(result.status)
+                    ? "Run is paused (exit 3 = awaiting a decision, not a failure). Next steps:"
+                    : "Next steps:") : undefined,
             });
         }
         const result = await Effect.runPromise(runWorkflow(workflow, {
@@ -2234,18 +2290,19 @@ async function executeUpCommand(c, workflowPath, options, fail) {
         }));
         process.exitCode = formatStatusExitCode(result.status);
         return c.ok(summarizeRunResult(result), {
-            cta: result.runId ? {
-                description: isWaitingStatus(result.status)
-                    ? "Run is paused (exit 3 = awaiting a decision, not a failure). Next steps:"
-                    : "Next steps:",
-                commands: [
-                    ...pauseCtas(result.status, result.runId),
-                    ...getWorkflowFollowUpCtas(workflowPath),
-                    { command: `inspect ${result.runId}`, description: "Inspect run state" },
-                    { command: `logs ${result.runId}`, description: "View run logs" },
-                    { command: `chat ${result.runId}`, description: "View agent chat" },
-                ],
-            } : undefined,
+            cta: result.runId ? withAgentNextSteps({
+                workflowId: workflowIdFromPath(workflowPath),
+                workflowFile: workflowPath,
+                runId: result.runId,
+            }, [
+                ...pauseCtas(result.status, result.runId),
+                ...getWorkflowFollowUpCtas(workflowPath),
+                { command: `inspect ${result.runId}`, description: "Inspect run state" },
+                { command: `logs ${result.runId}`, description: "View run logs" },
+                { command: `chat ${result.runId}`, description: "View agent chat" },
+            ], isWaitingStatus(result.status)
+                ? "Run is paused (exit 3 = awaiting a decision, not a failure). Next steps:"
+                : "Next steps:") : undefined,
         });
     }
     catch (err) {
@@ -2361,7 +2418,14 @@ async function runUiCommand(c) {
         const url = `${base}${summary.uiPath}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
         if (c.options.open) openInBrowser(url);
         console.log(`${c.options.open ? "Opening" : "UI URL:"} ${url}`);
-        return c.ok({ opened: c.options.open, url, runId: runId ?? null, workflow: workflowKey });
+        return c.ok({ opened: c.options.open, url, runId: runId ?? null, workflow: workflowKey }, {
+            cta: buildAgentNextSteps({
+                workflowId: workflowKey,
+                runId: runId ?? undefined,
+                hasUi: true,
+                uiOpened: true,
+            }),
+        });
     }
     catch (err) {
         return fail("UI_OPEN_FAILED", err?.message ?? String(err));
@@ -2565,6 +2629,8 @@ const workflowCli = Cli.create({
         const workflows = discoverWorkflows(process.cwd());
         return c.ok({
             workflows: c.options.system ? workflows : workflows.filter((workflow) => !workflow.system),
+        }, {
+            cta: buildAgentNextSteps({}),
         });
     },
 })
@@ -2590,7 +2656,13 @@ const workflowCli = Cli.create({
             return c.error(opts);
         };
         try {
-            return c.ok(createWorkflowFile(c.args.name, process.cwd(), { global: c.options.global }));
+            const created = createWorkflowFile(c.args.name, process.cwd(), { global: c.options.global });
+            return c.ok(created, {
+                cta: buildAgentNextSteps({
+                    workflowId: c.args.name,
+                    workflowFile: created?.entryFile ?? created?.path,
+                }),
+            });
         }
         catch (err) {
             if (err instanceof SmithersError) {
@@ -2619,6 +2691,11 @@ const workflowCli = Cli.create({
             workflow,
             inputSchema,
             skillPreview: renderWorkflowSkill(workflow, { root: process.cwd(), inputSchema }),
+        }, {
+            cta: buildAgentNextSteps({
+                workflowId: workflow.id,
+                workflowFile: workflow.entryFile,
+            }),
         });
     },
 })
@@ -4177,7 +4254,14 @@ const cli = Cli.create({
                 }
                 const rows = await buildPsRows(adapter, c.options.limit, c.options.status);
                 const ctaCommands = buildPsCtaCommands(rows);
-                return c.ok({ runs: rows }, ctaCommands.length > 0 ? { cta: { commands: ctaCommands } } : undefined);
+                return c.ok({ runs: rows }, rows.length > 0
+                    ? {
+                        cta: withAgentNextSteps({
+                            runId: rows[0].id,
+                            workflowId: workflowIdFromPath(rows[0].workflow ?? ""),
+                        }, ctaCommands),
+                    }
+                    : (ctaCommands.length > 0 ? { cta: { commands: ctaCommands } } : undefined));
             }
             finally {
                 cleanup();
@@ -4730,13 +4814,10 @@ const cli = Cli.create({
                 workflowName: "chat",
                 agent: c.options.agent,
             }, {
-                cta: {
-                    description: "Next steps:",
-                    commands: [
-                        { command: `hijack ${result.runId}`, description: "Open the chat session" },
-                        { command: `inspect ${result.runId}`, description: "Inspect run state" },
-                    ],
-                },
+                cta: withAgentNextSteps({ runId: result.runId, workflowId: "chat" }, [
+                    { command: `hijack ${result.runId}`, description: "Open the chat session" },
+                    { command: `inspect ${result.runId}`, description: "Inspect run state" },
+                ], "Next steps:"),
             });
         }
         catch (err) {
@@ -4940,7 +5021,7 @@ const cli = Cli.create({
                     return c.ok(undefined);
                 }
                 const snapshot = await buildInspectSnapshot(adapter, c.args.runId);
-                return c.ok(snapshot.result, { cta: { commands: snapshot.ctaCommands } });
+                return c.ok(snapshot.result, { cta: { description: snapshot.ctaDescription, commands: snapshot.ctaCommands } });
             }
             finally {
                 cleanup();
@@ -5031,26 +5112,24 @@ const cli = Cli.create({
                     expandTools: c.options.tools,
                 });
                 return c.ok(rendered, {
-                    cta: {
-                        commands: [
-                            {
-                                command: `inspect ${c.options.runId}`,
-                                description: "Inspect overall run state",
-                            },
-                            {
-                                command: `chat ${c.options.runId}`,
-                                description: "View agent chat for this run",
-                            },
-                            {
-                                command: `node ${c.args.nodeId} -r ${c.options.runId} --attempts`,
-                                description: "Expand every attempt",
-                            },
-                            {
-                                command: `node ${c.args.nodeId} -r ${c.options.runId} --tools`,
-                                description: "Expand tool payloads",
-                            },
-                        ],
-                    },
+                    cta: withAgentNextSteps({ runId: c.options.runId }, [
+                        {
+                            command: `inspect ${c.options.runId}`,
+                            description: "Inspect overall run state",
+                        },
+                        {
+                            command: `chat ${c.options.runId}`,
+                            description: "View agent chat for this run",
+                        },
+                        {
+                            command: `node ${c.args.nodeId} -r ${c.options.runId} --attempts`,
+                            description: "Expand every attempt",
+                        },
+                        {
+                            command: `node ${c.args.nodeId} -r ${c.options.runId} --tools`,
+                            description: "Expand tool payloads",
+                        },
+                    ]),
                 });
             }
             finally {
@@ -5092,9 +5171,7 @@ const cli = Cli.create({
                     return c.ok(diagnosis);
                 }
                 return c.ok(renderWhyDiagnosisHuman(diagnosis), {
-                    cta: {
-                        commands: diagnosisCtaCommands(diagnosis),
-                    },
+                    cta: withAgentNextSteps({ runId: c.args.runId }, diagnosisCtaCommands(diagnosis)),
                 });
             }
             finally {
@@ -5948,7 +6025,13 @@ const cli = Cli.create({
                     seen.add(value);
                 }
                 return value;
-            })));
+            })), {
+                cta: buildAgentNextSteps({
+                    workflowId: workflowIdFromPath(c.args.workflow),
+                    workflowFile: c.args.workflow,
+                    runId: c.options.runId,
+                }),
+            });
         }
         catch (err) {
             return fail({ code: "GRAPH_FAILED", message: err?.message ?? String(err), exitCode: 1 });
@@ -5978,6 +6061,8 @@ const cli = Cli.create({
                     json: c.options.json,
                     stdout: c.options.json ? { write: writeStdoutSync } : process.stdout,
                 });
+                if (result.exitCode === 0 && !c.options.json)
+                    writeAgentNextStepsHuman({ runId: c.args.runId });
                 return result.exitCode;
             } finally {
                 cleanup();
@@ -6318,7 +6403,9 @@ const cli = Cli.create({
                     reason: r.reason ?? "—",
                     source: r.source,
                 }));
-                return c.ok({ scores: rows });
+                return c.ok({ scores: rows }, {
+                    cta: buildAgentNextSteps({ runId: c.args.runId }),
+                });
             }
             finally {
                 cleanup();
@@ -6393,6 +6480,12 @@ const cli = Cli.create({
                     parentFrame: c.options.frame,
                     vcsRestored: result.vcsRestored,
                     status: runResult.status,
+                }, {
+                    cta: buildAgentNextSteps({
+                        workflowId: workflowIdFromPath(c.args.workflow),
+                        workflowFile: c.args.workflow,
+                        runId: result.runId,
+                    }),
                 });
             }
             finally {
@@ -6469,6 +6562,8 @@ const cli = Cli.create({
                     stdout: process.stdout,
                     stderr: process.stderr,
                 });
+                if (result.exitCode === 0 && !c.options.json)
+                    writeAgentNextStepsHuman({ runId: c.args.runId });
                 return result.exitCode;
             } finally {
                 cleanup();
@@ -6582,6 +6677,8 @@ const cli = Cli.create({
                     stdout: process.stdout,
                     stderr: process.stderr,
                 });
+                if (result.exitCode === 0 && !c.options.json)
+                    writeAgentNextStepsHuman({ runId: c.args.runId });
                 return result.exitCode;
             } finally {
                 cleanup();
@@ -6648,6 +6745,12 @@ const cli = Cli.create({
                         parentFrame: c.options.frame,
                         started: true,
                         status: runResult.status,
+                    }, {
+                        cta: buildAgentNextSteps({
+                            workflowId: workflowIdFromPath(c.args.workflow),
+                            workflowFile: c.args.workflow,
+                            runId: result.runId,
+                        }),
                     });
                 }
                 return c.ok({
@@ -6655,6 +6758,15 @@ const cli = Cli.create({
                     parentRunId: c.options.runId,
                     parentFrame: c.options.frame,
                     started: false,
+                }, {
+                    cta: withAgentNextSteps({
+                        workflowId: workflowIdFromPath(c.args.workflow),
+                        workflowFile: c.args.workflow,
+                        runId: result.runId,
+                    }, [{
+                            command: `fork ${c.args.workflow} -r ${c.options.runId} -f ${c.options.frame} --run`,
+                            description: "Fork again and start the forked run immediately",
+                        }]),
                 });
             }
             finally {
@@ -6695,7 +6807,9 @@ const cli = Cli.create({
                     else {
                         console.log(formatTimelineForTui(tree));
                     }
-                    return c.ok({ timeline: formatTimelineAsJson(tree) });
+                    return c.ok({ timeline: formatTimelineAsJson(tree) }, {
+                        cta: buildAgentNextSteps({ runId: c.args.runId }),
+                    });
                 }
                 const timeline = await buildTimeline(adapter, c.args.runId);
                 const tree = { timeline, children: [] };
@@ -6706,7 +6820,9 @@ const cli = Cli.create({
                 else {
                     console.log(formatTimelineForTui(tree));
                 }
-                return c.ok({ timeline: formatTimelineAsJson(tree) });
+                return c.ok({ timeline: formatTimelineAsJson(tree) }, {
+                    cta: buildAgentNextSteps({ runId: c.args.runId }),
+                });
             }
             finally {
                 cleanup();

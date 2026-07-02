@@ -34,6 +34,10 @@ export function layerForSandboxRuntime(runtime) {
             return makeSandboxTransportLayer(DockerSandboxExecutorLive);
         case "codeplane":
             return makeSandboxTransportLayer(CodeplaneSandboxExecutorLive);
+        case "cloudflare":
+            throw new SmithersError("INVALID_INPUT", "Sandbox runtime \"cloudflare\" requires a provider from smithers-orchestrator/cloudflare, e.g. createCloudflareSandboxProvider().", {
+                runtime,
+            });
         case "bubblewrap":
             return makeSandboxTransportLayer(BubblewrapSandboxExecutorLive);
         default:
@@ -47,7 +51,7 @@ export function layerForSandboxRuntime(runtime) {
  * @returns {SandboxRuntime}
  */
 export function resolveSandboxRuntime(requested) {
-    if (requested !== "docker" && requested !== "codeplane" && requested !== "bubblewrap") {
+    if (requested !== "docker" && requested !== "codeplane" && requested !== "bubblewrap" && requested !== "cloudflare") {
         throw new SmithersError("INVALID_INPUT", `Unsupported sandbox runtime: ${String(requested)}`, {
             runtime: requested,
         });

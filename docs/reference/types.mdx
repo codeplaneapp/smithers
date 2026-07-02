@@ -988,7 +988,7 @@ type SupervisorProps = {
 type ContinueAsNewProps = { state?: unknown };
 
 // Sandbox
-type SandboxRuntime = "bubblewrap" | "docker" | "codeplane";
+type SandboxRuntime = "bubblewrap" | "docker" | "codeplane" | "cloudflare";
 type SandboxEgressConfig = {
   env?: Record<string, string>;
   httpProxy?: string;

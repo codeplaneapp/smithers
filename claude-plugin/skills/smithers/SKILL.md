@@ -65,6 +65,31 @@ workflow, **use your tools right now**: write `.smithers/workflows/<key>.tsx`,
 write `.smithers/ui/<key>.tsx`, and run the `smithers` CLI / MCP tools. Do not
 paste the workflow as a code block and stop. The files on disk are the answer.
 
+## After every command: guide the user
+
+Three standing behaviors, applied after every `smithers` command and before
+every workflow you build:
+
+1. **Act on the CLI's next steps.** Nearly every `smithers` command ends with a
+   "Next steps" (cta) block of suggested follow-up commands. Never silently
+   drop it: run the obvious continuation yourself and relay the other options
+   to the user in plain language.
+2. **Ask before you build, then guide step by step.** Before creating a
+   workflow, ask the user a few clarifying questions (goal, inputs, "done"
+   condition, where a human should approve), then walk them through the build:
+   scaffold, render the graph, run, watch. Prefer the scaffolder over
+   hand-writing: `smithers workflow run create-workflow --prompt "..."` (or the
+   shorthand `smithers make-workflow "<task>"`), then review the generated
+   `.tsx` with the user.
+3. **Proactively offer to visualize, every time.** Suggest ways to *see* the
+   workflow and the run: `smithers graph <file>.tsx` (renders the graph without
+   executing), `smithers tree <run-id>` (live node tree),
+   `smithers up <file>.tsx --interactive` or
+   `smithers workflow run <id> --interactive` (the TUI monitor), the custom
+   browser UI (`.smithers/ui/<key>.tsx` + `smithers ui <runId>`, mandatory per
+   the hard rule below), and `smithers ui --app` for the full local
+   control-plane UI. If a workflow has no UI yet, build one.
+
 ## The core loop
 
 1. `list_workflows` — see what exists (each reports `key`, `hasUi`, `uiPath`).

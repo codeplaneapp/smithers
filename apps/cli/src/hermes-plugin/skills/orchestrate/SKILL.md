@@ -41,6 +41,32 @@ language, collect their decision, and resolve it yourself with `smithers_approve
 / `smithers_deny` / `smithers_human_answer`. Never tell the human to run a
 Smithers command.
 
+## After every command: guide the user
+
+Three standing behaviors, applied after every Smithers tool call or `smithers`
+CLI command and before every workflow you build:
+
+1. **Act on the next steps.** Smithers commands and tool results end with a
+   "Next steps" (cta) block of suggested follow-ups. Never silently drop it:
+   run the obvious continuation yourself and relay the other options to the
+   human in plain language.
+2. **Ask before you build, then guide step by step.** Before creating a
+   workflow, ask the human a few clarifying questions (goal, inputs, "done"
+   condition, where a human should approve), then walk them through the build:
+   scaffold, render the graph, run, watch. Prefer the scaffolder over
+   hand-writing: `smithers_run(workflow="create-workflow", prompt="...")` (from
+   the CLI: `smithers workflow run create-workflow --prompt "..."`, shorthand
+   `smithers make-workflow "<task>"`), then review the generated `.tsx` with
+   the human.
+3. **Proactively offer to visualize, every time.** Suggest ways to *see* the
+   workflow and the run: `smithers graph <file>.tsx` (renders the graph without
+   executing), `smithers tree <run-id>` (live node tree), the `--interactive`
+   TUI monitor (`smithers workflow run <id> --interactive`), the custom browser
+   UI (author `.smithers/ui/<workflowId>.tsx` with
+   `smithers-orchestrator/gateway-react`, open with `smithers ui <runId>`), and
+   `smithers ui --app` for the full local control-plane UI. If a workflow has
+   no UI yet, offer to build one. See "Keep the human in the picture" below.
+
 ## Optimize workflows the way you'd optimize a skill
 
 Treat every workflow as improvable with real teeth, not vibes: write an eval

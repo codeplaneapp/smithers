@@ -55,7 +55,7 @@ declare const SANDBOX_BUNDLE_OUTPUT_MAX_STRING_LENGTH: number;
 type SandboxBundleManifest = SandboxBundleManifest$1;
 type ValidatedSandboxBundle = ValidatedSandboxBundle$1;
 
-type SandboxRuntime$1 = "bubblewrap" | "docker" | "codeplane";
+type SandboxRuntime$1 = "bubblewrap" | "docker" | "codeplane" | "cloudflare";
 
 type SandboxPortMapping = {
     host: number;

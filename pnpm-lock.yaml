@@ -54,6 +54,9 @@ importers:
       '@smithers-orchestrator/cli':
         specifier: workspace:*
         version: link:apps/cli
+      '@smithers-orchestrator/cloudflare':
+        specifier: workspace:*
+        version: link:packages/cloudflare
       '@smithers-orchestrator/components':
         specifier: workspace:*
         version: link:packages/components
@@ -703,6 +706,26 @@ importers:
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
+
+  packages/cloudflare:
+    dependencies:
+      '@smithers-orchestrator/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+    devDependencies:
+      '@smithers-orchestrator/db':
+        specifier: workspace:*
+        version: link:../db
+      '@types/bun':
+        specifier: latest
+        version: 1.3.14
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+    optionalDependencies:
+      '@cloudflare/sandbox':
+        specifier: ^0.12.3
+        version: 0.12.3
 
   packages/components:
     dependencies:
@@ -1451,6 +1474,9 @@ importers:
       '@smithers-orchestrator/cli':
         specifier: workspace:*
         version: link:../../apps/cli
+      '@smithers-orchestrator/cloudflare':
+        specifier: workspace:*
+        version: link:../cloudflare
       '@smithers-orchestrator/components':
         specifier: workspace:*
         version: link:../components
@@ -1864,9 +1890,26 @@ packages:
     resolution: {integrity: sha512-EYlRokl8szrP9Z25qT5aepMdBjzBvHF9ZEhzIiUBc9guz/T31EqRgvD0QSgZcpE93xiwrr+OkB4nz0BZyF6fSA==}
     engines: {node: '>= 20.12.0'}
 
+  '@cloudflare/containers@0.3.7':
+    resolution: {integrity: sha512-DM9dm3FnIBSyiSJ1FLavKwl/lk3oAmTaynCzZQ9pZR0ncRPquSxkxd8Nu2MFILxmDDsPkxKsSNEh9mHHMty4Fw==}
+
   '@cloudflare/kv-asset-handler@0.5.0':
     resolution: {integrity: sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==}
     engines: {node: '>=22.0.0'}
+
+  '@cloudflare/sandbox@0.12.3':
+    resolution: {integrity: sha512-4yx+PtBCZBrS3eZteefwBfGOm+8MTZahLH8/fG/qsvqoNflzno9780FsM6HZf02gGuoDy+s9jQrXbg/h5gEvgw==}
+    peerDependencies:
+      '@openai/agents': ^0.3.3
+      '@opencode-ai/sdk': ^1.1.40
+      '@xterm/xterm': '>=5.0.0'
+    peerDependenciesMeta:
+      '@openai/agents':
+        optional: true
+      '@opencode-ai/sdk':
+        optional: true
+      '@xterm/xterm':
+        optional: true
 
   '@cloudflare/unenv-preset@2.16.1':
     resolution: {integrity: sha512-ECxObrMfyTl5bhQf/lZCXwo5G6xX9IAUo+nDMKK4SZ8m4Jvvxp52vilxyySSWh2YTZz8+HQ07qGH/2rEom1vDw==}
@@ -4653,6 +4696,9 @@ packages:
   call-bound@1.0.4:
     resolution: {integrity: sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==}
     engines: {node: '>= 0.4'}
+
+  capnweb@0.8.0:
+    resolution: {integrity: sha512-BK/TuXUiyfLSKsmjojn70yN7oYG/JJzoURZ3tckjg5Zj2KcygPm0A5jyOlswK7SYB4f0Gh9tt+RZ132b80iLfA==}
 
   ccount@2.0.1:
     resolution: {integrity: sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg==}
@@ -7847,7 +7893,18 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
+  '@cloudflare/containers@0.3.7':
+    optional: true
+
   '@cloudflare/kv-asset-handler@0.5.0': {}
+
+  '@cloudflare/sandbox@0.12.3':
+    dependencies:
+      '@cloudflare/containers': 0.3.7
+      aws4fetch: 1.0.20
+      capnweb: 0.8.0
+      hono: 4.12.27
+    optional: true
 
   '@cloudflare/unenv-preset@2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260630.1)':
     dependencies:
@@ -10758,6 +10815,9 @@ snapshots:
     dependencies:
       call-bind-apply-helpers: 1.0.2
       get-intrinsic: 1.3.0
+
+  capnweb@0.8.0:
+    optional: true
 
   ccount@2.0.1: {}
 

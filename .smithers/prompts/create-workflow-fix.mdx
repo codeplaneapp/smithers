@@ -1,18 +1,22 @@
-# Fix the workflow until its graph renders
+# Fix the workflow until it verifies
 
-The new workflow failed to render its graph. `smithers graph` loads the module
-(catching TypeScript / import / JSX errors) and renders one frame without
-executing it (catching structural errors). Read the error, fix the files, and
-make it load. You have file + shell tools.
+The new workflow failed verification. Verification runs two real checks:
+`smithers graph` loads the workflow module (catching TypeScript / import / JSX
+errors) and renders one frame without executing it (catching structural errors),
+and, when a custom UI file exists, `bun build --no-bundle` transpiles it. Read
+the errors, fix the files, and make both pass. You have file + shell tools.
 
 ## Workflow
 
 - Name: {props.workflowName}
 - Entry file: {props.workflowFile}
+- Custom UI file (checked only if it exists): {props.uiFile}
 
 ## Verify command that failed
 
-`bunx smithers-orchestrator graph {props.workflowFile}`
+`bunx smithers-orchestrator graph {props.workflowFile}` plus, if the UI file
+exists, `bun build --no-bundle {props.uiFile}`. Errors below are prefixed
+`[graph]` or `[ui]` so you know which check failed.
 
 ## Errors
 
@@ -24,23 +28,32 @@ make it load. You have file + shell tools.
 
 ## How to fix
 
-1. Read the entry file and any prompt/component files it imports.
+1. Read the entry file, any prompt/component files it imports, and (for `[ui]`
+   errors) the UI file.
 2. Map the error to a cause. Common ones:
-   - **Import / module not found** — a prompt or component path is wrong, or a
+   - **Import / module not found**: a prompt or component path is wrong, or a
      named export doesn't exist. Check `{props.promptsDir}` and `../components`.
-   - **Type / schema error** — a `<Task output={outputs.x}>` doesn't match its
+   - **Type / schema error**: a `<Task output={outputs.x}>` doesn't match its
      Zod schema, or a destructured component (`Branch`, `Loop`, `Approval`) was
      never pulled out of `createSmithers(...)`.
-   - **JSX / structural** — a conditional renders the wrong child type, a node id
+   - **JSX / structural**: a conditional renders the wrong child type, a node id
      is duplicated, or a control-flow component is missing a required prop
      (`Loop` needs `until`; `Approval` needs `request`).
+   - **MDX parse errors**: bare JSX-like examples in prose inside an `.mdx`
+     prompt; wrap them in backticks or fenced code blocks.
+   - **UI transpile errors**: wrong JSX pragma (must be
+     `/** @jsxImportSource react */`), bad import from
+     `smithers-orchestrator/gateway-react`, or plain TypeScript mistakes.
+     Compare against `{props.uiDir}/vcs.tsx`.
 3. Make the smallest change that fixes the error without abandoning the design.
    If the docs would help, run `bunx smithers-orchestrator docs` or
    `bunx smithers-orchestrator ask "<question>"`.
-4. Re-run `bunx smithers-orchestrator graph {props.workflowFile}` yourself to
-   confirm it now exits 0 before you finish.
+4. Re-run the failing command(s) yourself and confirm exit 0 before you finish:
+   `bunx smithers-orchestrator graph {props.workflowFile}` and, if the UI file
+   exists, `bun build --no-bundle {props.uiFile} > /dev/null`.
 
-Do not delete the workflow or stub it out to "pass" — fix the real problem.
+Do not delete the workflow or the UI, and do not stub either out to "pass".
+Fix the real problem.
 
 ## Output
 

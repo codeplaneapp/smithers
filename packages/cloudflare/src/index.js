@@ -1,0 +1,328 @@
+export const CLOUDFLARE_SANDBOX_PROVIDER_ID = "cloudflare-sandbox";
+
+const DEFAULT_WORKDIR = "/workspace";
+const DEFAULT_REQUEST_FILE = ".smithers/sandbox-request.json";
+const DEFAULT_RESULT_FILE = ".smithers/sandbox-result.json";
+
+/**
+ * @param {string} path
+ * @returns {string}
+ */
+function dirname(path) {
+	const index = path.lastIndexOf("/");
+	return index <= 0 ? "/" : path.slice(0, index);
+}
+
+/**
+ * @param {string} workdir
+ * @param {string} path
+ * @returns {string}
+ */
+function absolutePath(workdir, path) {
+	return path.startsWith("/") ? path : `${workdir.replace(/\/+$/g, "")}/${path.replace(/^\/+/g, "")}`;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Record<string, unknown>[]}
+ */
+function rowsFromSqlCursor(value) {
+	if (!value) return [];
+	if (Array.isArray(value)) return /** @type {Record<string, unknown>[]} */ (value);
+	if (typeof /** @type {{ toArray?: unknown }} */ (value).toArray === "function") {
+		return /** @type {{ toArray: () => Record<string, unknown>[] }} */ (value).toArray();
+	}
+	return [];
+}
+
+/**
+ * @param {unknown} value
+ * @returns {unknown[][]}
+ */
+function valuesFromSqlCursor(value) {
+	if (!value) return [];
+	if (typeof /** @type {{ raw?: unknown }} */ (value).raw === "function") {
+		const raw = /** @type {{ raw: () => Iterable<unknown[]> }} */ (value).raw();
+		return Array.from(raw);
+	}
+	return rowsFromSqlCursor(value).map((row) => Object.values(row));
+}
+
+/**
+ * Build a Smithers SQLite descriptor backed by a SQLite Durable Object storage
+ * instance (`ctx.storage`) or its `ctx.storage.sql` handle.
+ *
+ * @param {{ sql?: { exec: (statement: string, ...params: unknown[]) => unknown }; transaction?: <T>(operation: () => T | Promise<T>) => T | Promise<T> } | { exec: (statement: string, ...params: unknown[]) => unknown }} storage
+ */
+export function createCloudflareDurableObjectSqliteDescriptor(storage) {
+	const sql = "sql" in storage && storage.sql ? storage.sql : storage;
+	const transaction = "transaction" in storage && typeof storage.transaction === "function"
+		? storage.transaction.bind(storage)
+		: undefined;
+	return {
+		dialect: "sqlite",
+		driver: "cloudflare-sqlite",
+		queryAllRaw(statement, params = []) {
+			return rowsFromSqlCursor(sql.exec(statement, ...params));
+		},
+		queryValuesRaw(statement, params = []) {
+			return valuesFromSqlCursor(sql.exec(statement, ...params));
+		},
+		execute(statement, params = []) {
+			sql.exec(statement, ...params);
+			return [];
+		},
+		transaction,
+	};
+}
+
+/**
+ * Build a Smithers SQLite descriptor backed by a Cloudflare D1 database.
+ *
+ * @param {{ prepare: (statement: string) => { bind: (...params: unknown[]) => { all: () => Promise<{ results?: Record<string, unknown>[] }>; raw?: () => Promise<unknown[][]>; run: () => Promise<unknown> } } } }} database
+ */
+export function createCloudflareD1SqliteDescriptor(database) {
+	return {
+		dialect: "sqlite",
+		driver: "cloudflare-sqlite",
+		async queryAllRaw(statement, params = []) {
+			const result = await database.prepare(statement).bind(...params).all();
+			return result.results ?? [];
+		},
+		async queryValuesRaw(statement, params = []) {
+			const prepared = database.prepare(statement).bind(...params);
+			if (typeof prepared.raw === "function") {
+				return await prepared.raw();
+			}
+			const result = await prepared.all();
+			return (result.results ?? []).map((row) => Object.values(row));
+		},
+		async execute(statement, params = []) {
+			await database.prepare(statement).bind(...params).run();
+			return [];
+		},
+		async transaction(operation) {
+			return await operation();
+		},
+	};
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+async function readFileContent(value) {
+	if (typeof value === "string") return value;
+	if (!value || typeof value !== "object") return "";
+	const content = /** @type {{ content?: unknown }} */ (value).content;
+	if (typeof content === "string") return content;
+	if (content instanceof Uint8Array) return new TextDecoder().decode(content);
+	if (content instanceof ReadableStream) {
+		const chunks = [];
+		const reader = content.getReader();
+		while (true) {
+			const next = await reader.read();
+			if (next.done) break;
+			chunks.push(next.value);
+		}
+		return new TextDecoder().decode(await new Blob(chunks).arrayBuffer());
+	}
+	return "";
+}
+
+/**
+ * @returns {Promise<(binding: unknown, sandboxId: string, options?: Record<string, unknown>) => unknown>}
+ */
+async function resolveCloudflareGetSandbox() {
+	const mod = await import("@cloudflare/sandbox");
+	if (typeof mod.getSandbox !== "function") {
+		throw new Error("@cloudflare/sandbox does not export getSandbox().");
+	}
+	return mod.getSandbox;
+}
+
+/**
+ * @param {string} command
+ * @returns {string}
+ */
+function normalizeCommand(command) {
+	const trimmed = command.trim();
+	if (!trimmed) throw new Error("Cloudflare sandbox command must not be empty.");
+	return trimmed;
+}
+
+/**
+ * Builds a Smithers SandboxProvider backed by Cloudflare Sandbox SDK.
+ *
+ * @param {{
+ *   binding?: unknown | ((request: import("@smithers-orchestrator/sandbox").SandboxProviderRequest) => unknown);
+ *   getSandbox?: (binding: unknown, sandboxId: string, options?: Record<string, unknown>) => any;
+ *   id?: string;
+ *   sandboxId?: (request: import("@smithers-orchestrator/sandbox").SandboxProviderRequest) => string;
+ *   sandboxOptions?: Record<string, unknown>;
+ *   keepAlive?: boolean;
+ *   workdir?: string;
+ *   command?: string;
+ *   env?: Record<string, string>;
+ *   setupFiles?: Record<string, { content: string; encoding?: "utf-8" | "base64" }>;
+ *   execution?: "exec" | "process";
+ *   cleanup?: "destroy" | "keep";
+ * }} options
+ * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
+ */
+export function createCloudflareSandboxProvider(options = {}) {
+	const id = options.id ?? CLOUDFLARE_SANDBOX_PROVIDER_ID;
+	const workdir = options.workdir ?? DEFAULT_WORKDIR;
+	const command = normalizeCommand(options.command ?? "node /workspace/run-smithers-sandbox.js");
+	const cleanup = options.cleanup ?? "destroy";
+	const active = new Map();
+
+	return {
+		id,
+		async run(request) {
+			const getSandbox = options.getSandbox ?? await resolveCloudflareGetSandbox();
+			const binding = typeof options.binding === "function" ? options.binding(request) : options.binding;
+			if (!binding) {
+				throw new Error("Cloudflare sandbox provider requires a Durable Object binding.");
+			}
+			const remoteSandboxId = options.sandboxId?.(request) ?? `${request.runId}-${request.sandboxId}`;
+			const sandbox = getSandbox(binding, remoteSandboxId, {
+				enableDefaultSession: false,
+				...(options.sandboxOptions ?? {}),
+				keepAlive: options.keepAlive ?? options.sandboxOptions?.keepAlive,
+			});
+			active.set(`${request.runId}:${request.sandboxId}`, sandbox);
+			request.heartbeat({ sandboxId: request.sandboxId, stage: "cloudflare-sandbox-created", remoteSandboxId });
+
+			if (typeof sandbox.mkdir === "function") {
+				await sandbox.mkdir(workdir).catch(() => {});
+				await sandbox.mkdir(absolutePath(workdir, ".smithers")).catch(() => {});
+			}
+			for (const [path, file] of Object.entries(options.setupFiles ?? {})) {
+				const target = absolutePath(workdir, path);
+				if (typeof sandbox.mkdir === "function") {
+					await sandbox.mkdir(dirname(target)).catch(() => {});
+				}
+				await sandbox.writeFile(target, file.content, { encoding: file.encoding ?? "utf-8" });
+			}
+
+			const requestPath = absolutePath(workdir, DEFAULT_REQUEST_FILE);
+			const resultPath = absolutePath(workdir, DEFAULT_RESULT_FILE);
+			await sandbox.writeFile(requestPath, JSON.stringify({
+				runId: request.runId,
+				sandboxId: request.sandboxId,
+				input: request.input,
+				config: request.config,
+			}));
+
+			const env = {
+				...(options.env ?? {}),
+				SMITHERS_SANDBOX_REQUEST_PATH: requestPath,
+				SMITHERS_SANDBOX_RESULT_PATH: resultPath,
+			};
+			if (options.execution === "process") {
+				const process = await sandbox.startProcess(command, {
+					cwd: workdir,
+					env,
+					timeout: request.toolTimeoutMs,
+				});
+				return {
+					status: "finished",
+					output: {
+						processId: process.id,
+						pid: process.pid,
+						status: process.status,
+					},
+					remoteRunId: remoteSandboxId,
+					workspaceId: remoteSandboxId,
+					containerId: remoteSandboxId,
+				};
+			}
+
+			const result = await sandbox.exec(command, {
+				cwd: workdir,
+				env,
+				timeout: request.toolTimeoutMs,
+			});
+			const stdout = String(result.stdout ?? "").trim();
+			if (!result.success && Number(result.exitCode ?? 1) !== 0) {
+				throw new Error(`Cloudflare sandbox command "${command}" exited with code ${result.exitCode ?? 1}: ${result.stderr || stdout}`);
+			}
+			const rawResult = stdout.startsWith("{")
+				? stdout
+				: await readFileContent(await sandbox.readFile(resultPath));
+			const parsed = JSON.parse(rawResult);
+			if ("bundlePath" in parsed) {
+				return {
+					...parsed,
+					remoteRunId: parsed.remoteRunId ?? remoteSandboxId,
+					workspaceId: parsed.workspaceId ?? remoteSandboxId,
+					containerId: parsed.containerId ?? remoteSandboxId,
+				};
+			}
+			return {
+				...parsed,
+				remoteRunId: parsed.remoteRunId ?? parsed.runId ?? remoteSandboxId,
+				workspaceId: parsed.workspaceId ?? remoteSandboxId,
+				containerId: parsed.containerId ?? remoteSandboxId,
+			};
+		},
+		async cleanup(request) {
+			const key = `${request.runId}:${request.sandboxId}`;
+			const sandbox = active.get(key);
+			active.delete(key);
+			if (!sandbox || cleanup !== "destroy") return;
+			if (typeof sandbox.destroy === "function") {
+				await sandbox.destroy();
+			}
+		},
+	};
+}
+
+/**
+ * Test helper that implements the subset of the Cloudflare Sandbox SDK used by
+ * `createCloudflareSandboxProvider`.
+ *
+ * @param {(args: { command: string; request: { runId: string; sandboxId: string; input?: unknown; config?: unknown }; files: Map<string, string> }) => import("@smithers-orchestrator/sandbox").SandboxProviderResult | Promise<import("@smithers-orchestrator/sandbox").SandboxProviderResult>} handler
+ */
+export function createMockCloudflareSandboxEnvironment(handler) {
+	const sandboxes = new Map();
+	const getSandbox = (_binding, sandboxId) => {
+		if (sandboxes.has(sandboxId)) return sandboxes.get(sandboxId);
+		const files = new Map();
+		let destroyed = false;
+		const sandbox = {
+			id: sandboxId,
+			files,
+			get destroyed() {
+				return destroyed;
+			},
+			async mkdir() {},
+			async writeFile(path, content) {
+				files.set(path, String(content));
+			},
+			async readFile(path) {
+				return { content: files.get(path) ?? "" };
+			},
+			async exec(command) {
+				if (destroyed) throw new Error(`Mock Cloudflare sandbox "${sandboxId}" is destroyed.`);
+				const requestEntry = [...files.entries()].find(([path]) => path.endsWith(DEFAULT_REQUEST_FILE));
+				const request = JSON.parse(requestEntry?.[1] ?? "{}");
+				const result = await handler({ command, request, files });
+				const resultPath = [...files.keys()].find((path) => path.endsWith(DEFAULT_RESULT_FILE)) ??
+					absolutePath(DEFAULT_WORKDIR, DEFAULT_RESULT_FILE);
+				files.set(resultPath, JSON.stringify(result));
+				return { success: true, exitCode: 0, stdout: "", stderr: "" };
+			},
+			async startProcess(command) {
+				return { id: `${sandboxId}:process`, pid: 1, command, status: "running" };
+			},
+			async destroy() {
+				destroyed = true;
+			},
+		};
+		sandboxes.set(sandboxId, sandbox);
+		return sandbox;
+	};
+	return { binding: {}, getSandbox, sandboxes };
+}

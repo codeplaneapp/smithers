@@ -346,7 +346,7 @@ type SandboxVolumeMount$1 = {
     readonly?: boolean;
 };
 
-type SandboxRuntime$1 = "bubblewrap" | "docker" | "codeplane";
+type SandboxRuntime$1 = "bubblewrap" | "docker" | "codeplane" | "cloudflare";
 
 type SandboxEgressConfig$1 = {
     env?: Record<string, string>;

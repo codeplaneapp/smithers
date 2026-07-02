@@ -69,6 +69,11 @@
       "import": "./src/control-plane.js",
       "default": "./src/control-plane.js"
     },
+    "./cloudflare": {
+      "types": "./src/cloudflare.d.ts",
+      "import": "./src/cloudflare.js",
+      "default": "./src/cloudflare.js"
+    },
     "./jsx-runtime": {
       "types": "./src/jsx-runtime.d.ts",
       "import": "./src/jsx-runtime.js",
@@ -103,6 +108,7 @@
     "@mdx-js/esbuild": "^3.1.1",
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/cli": "workspace:*",
+    "@smithers-orchestrator/cloudflare": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/control-plane": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",

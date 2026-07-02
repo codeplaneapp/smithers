@@ -563,6 +563,29 @@ function getPersistedBooleanColumnNames(client, tableName) {
     }
 }
 /**
+ * @param {ReturnType<typeof getSqlMessageStorage>} storage
+ * @returns {boolean}
+ */
+function isBunSqliteStorage(storage) {
+    return storage.dialect !== POSTGRES && storage.driverKind === "bun-sqlite";
+}
+/**
+ * @param {ReturnType<typeof getSqlMessageStorage>} storage
+ * @param {string} tableName
+ * @returns {Promise<string[]>}
+ */
+async function getPersistedBooleanColumnNamesAsync(storage, tableName) {
+    try {
+        const rows = await storage.queryAllRaw(`SELECT column_name FROM _smithers_output_schema_columns WHERE table_name = ? AND kind = 'boolean'`, [tableName]);
+        return rows
+            .map((row) => row.column_name)
+            .filter((name) => typeof name === "string");
+    }
+    catch {
+        return [];
+    }
+}
+/**
  * @param {unknown} db
  * @returns {{ run: (sql: string) => unknown; query: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => Record<string, unknown> | null | undefined; all: () => Array<Record<string, unknown>> }; exec: (sql: string) => unknown; $client?: unknown }}
  */
@@ -659,7 +682,7 @@ export class SmithersDb {
                 }),
             });
             return yield* self.read(`raw query ${validatedQuery.slice(0, 20)}`, () => {
-                if (self.internalStorage.dialect === POSTGRES) {
+                if (!isBunSqliteStorage(self.internalStorage)) {
                     return self.internalStorage.queryAllRaw(validatedQuery, params);
                 }
                 const client = self.db.session.client;
@@ -678,7 +701,7 @@ export class SmithersDb {
         this.transactionOwnerThread = state.ownerThread;
         this.transactionTail = state.tail;
         return (state.depth > 0 &&
-            state.ownerThread === currentFiberThread);
+            (state.ownerThread === currentFiberThread || state.ownerThread === "*"));
     }
     /**
    * @template A
@@ -816,6 +839,35 @@ export class SmithersDb {
             const releaseTurn = yield* self.acquireTransactionTurn();
             const transactionState = getSqliteTransactionState(resolveSqliteClientKey(self.db));
             const start = performance.now();
+            if (typeof self.internalStorage.transaction === "function" && !isBunSqliteStorage(self.internalStorage) && self.internalStorage.dialect !== POSTGRES) {
+                return yield* Effect.tryPromise({
+                    try: async () => {
+                        transactionState.depth += 1;
+                        transactionState.ownerThread = "*";
+                        self.transactionDepth = transactionState.depth;
+                        self.transactionOwnerThread = transactionState.ownerThread;
+                        self.transactionTail = transactionState.tail;
+                        try {
+                            return await self.internalStorage.transaction(() => Effect.runPromise(operation));
+                        }
+                        finally {
+                            transactionState.depth = Math.max(0, transactionState.depth - 1);
+                            if (transactionState.depth === 0) {
+                                transactionState.ownerThread = null;
+                            }
+                            self.transactionDepth = transactionState.depth;
+                            self.transactionOwnerThread = transactionState.ownerThread;
+                            self.transactionTail = transactionState.tail;
+                            releaseTurn();
+                            await Effect.runPromise(Metric.update(dbTransactionDuration, performance.now() - start));
+                        }
+                    },
+                    catch: (cause) => toSmithersError(cause, label, {
+                        code: "DB_WRITE_FAILED",
+                        details: { writeGroup, phase: "transaction" },
+                    }),
+                });
+            }
             return yield* Effect.gen(function* () {
                 const isPostgres = self.internalStorage.dialect === POSTGRES;
                 const client = isPostgres ? null : yield* self.getSqliteTransactionClient();
@@ -1081,6 +1133,29 @@ export class SmithersDb {
                     ])
                     .then((rows) => rows.length > 0);
             }
+            if (!isBunSqliteStorage(this.internalStorage)) {
+                return this.internalStorage
+                    .queryAllRaw(`UPDATE _smithers_runs
+           SET claimed_at_ms = ?, claimed_by = ?
+           WHERE run_id = ?
+             AND status = ?
+             AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
+             AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
+             AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
+             AND (claimed_at_ms IS NULL OR claimed_at_ms <= ?)
+           RETURNING run_id`, [
+                        params.claimHeartbeatAtMs,
+                        params.claimOwnerId,
+                        params.runId,
+                        expectedStatus,
+                        params.expectedRuntimeOwnerId,
+                        params.expectedHeartbeatAtMs,
+                        requireStale ? 1 : 0,
+                        params.staleBeforeMs,
+                        params.staleBeforeMs,
+                    ])
+                    .then((rows) => rows.length > 0);
+            }
             const client = this.db.session.client;
             client
                 .query(`UPDATE _smithers_runs
@@ -1125,27 +1200,45 @@ export class SmithersDb {
             }
             const assignments = patchEntries.map(([key]) => `${camelToSnake(key)} = ?`);
             const setArgs = patchEntries.map(([, value]) => value);
+            const hasClaimGuard = Object.prototype.hasOwnProperty.call(params, "expectedClaimedBy") ||
+                Object.prototype.hasOwnProperty.call(params, "expectedClaimedAtMs");
             if (this.internalStorage.dialect === POSTGRES) {
                 // Null-safe heartbeat compare (see claimRunForResume): IS NOT
                 // DISTINCT FROM keeps the bigint param from being coerced to int4
                 // by an int4 `-1` sentinel.
+                const claimWhere = hasClaimGuard
+                    ? `AND COALESCE(claimed_by, '') = COALESCE(?, '')
+               AND (claimed_at_ms IS NOT DISTINCT FROM ?)`
+                    : "";
+                const claimArgs = hasClaimGuard
+                    ? [params.expectedClaimedBy ?? null, params.expectedClaimedAtMs ?? null]
+                    : [];
                 return this.internalStorage
                     .queryAllRaw(`UPDATE _smithers_runs
              SET ${assignments.join(", ")}
              WHERE run_id = ?
-               AND runtime_owner_id = ?
+               AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
                AND (heartbeat_at_ms IS NOT DISTINCT FROM ?)
-             RETURNING run_id`, [...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs])
+               ${claimWhere}
+             RETURNING run_id`, [...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs, ...claimArgs])
                     .then((rows) => rows.length > 0);
             }
+            const claimWhere = hasClaimGuard
+                ? `AND COALESCE(claimed_by, '') = COALESCE(?, '')
+             AND COALESCE(claimed_at_ms, -1) = COALESCE(?, -1)`
+                : "";
+            const claimArgs = hasClaimGuard
+                ? [params.expectedClaimedBy ?? null, params.expectedClaimedAtMs ?? null]
+                : [];
             const client = this.db.session.client;
             client
                 .query(`UPDATE _smithers_runs
            SET ${assignments.join(", ")}
            WHERE run_id = ?
-             AND runtime_owner_id = ?
-             AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)`)
-                .run(...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs);
+             AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
+             AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
+             ${claimWhere}`)
+                .run(...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs, ...claimArgs);
             return this.internalStorage
                 .queryOne("SELECT changes() AS count")
                 .then((row) => Number(row?.count ?? 0) > 0);
@@ -1219,7 +1312,7 @@ export class SmithersDb {
             ? ["runId", "nodeId", "iteration"]
             : ["runId", "nodeId"];
         return this.write(`upsert output ${tableName}`, () => {
-            if (this.internalStorage.dialect === POSTGRES) {
+            if (!isBunSqliteStorage(this.internalStorage)) {
                 return this.internalStorage.upsert(tableName, values, conflictColumns);
             }
             return this.db
@@ -1247,8 +1340,8 @@ export class SmithersDb {
    */
     deleteOutputRow(tableName, key) {
         return this.write(`delete output ${tableName}`, () => {
-            if (this.internalStorage.dialect === POSTGRES) {
-                // PostgreSQL output tables are created from the Zod schema with
+            if (!isBunSqliteStorage(this.internalStorage)) {
+                // External output tables are created from the Zod schema with
                 // snake_case run_id/node_id/iteration columns, so no PRAGMA-based
                 // column discovery is needed.
                 const escapedPg = tableName.replaceAll(`"`, `""`);
@@ -1337,11 +1430,18 @@ export class SmithersDb {
     getRawNodeOutput(tableName, runId, nodeId) {
         return runnableEffect(this.read(`get raw node output ${tableName}`, () => {
             const escaped = tableName.replaceAll(`"`, `""`);
-            if (this.internalStorage.dialect === POSTGRES) {
-                const boolColumns = getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName));
+            if (!isBunSqliteStorage(this.internalStorage)) {
+                const tableBoolColumns = this.internalStorage.dialect === POSTGRES
+                    ? getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName))
+                    : [];
                 return this.internalStorage
                     .queryOneRaw(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`, [runId, nodeId])
-                    .then((row) => coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
+                    .then(async (row) => coerceRawBooleanColumns(row ?? null, [
+                    ...tableBoolColumns,
+                    ...(this.internalStorage.dialect === POSTGRES
+                        ? []
+                        : await getPersistedBooleanColumnNamesAsync(this.internalStorage, tableName)),
+                ]) ?? null);
             }
             const client = this.db.session.client;
             const boolColumns = [
@@ -1372,6 +1472,11 @@ export class SmithersDb {
                     .queryOneRaw(`SELECT 1 AS one FROM information_schema.tables WHERE table_name = ? LIMIT 1`, [tableName])
                     .then((row) => row != null);
             }
+            if (!isBunSqliteStorage(this.internalStorage)) {
+                return this.internalStorage
+                    .queryOneRaw(`SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`, [tableName])
+                    .then((row) => row != null);
+            }
             const client = this.db.session.client;
             const stmt = client.query(`SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`);
             return Promise.resolve(stmt.get(tableName) != null);
@@ -1380,11 +1485,18 @@ export class SmithersDb {
     getRawNodeOutputForIteration(tableName, runId, nodeId, iteration) {
         return runnableEffect(this.read(`get raw node output ${tableName} iteration ${iteration}`, () => {
             const escaped = tableName.replaceAll(`"`, `""`);
-            if (this.internalStorage.dialect === POSTGRES) {
-                const boolColumns = getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName));
+            if (!isBunSqliteStorage(this.internalStorage)) {
+                const tableBoolColumns = this.internalStorage.dialect === POSTGRES
+                    ? getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName))
+                    : [];
                 return this.internalStorage
                     .queryOneRaw(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? AND iteration = ? LIMIT 1`, [runId, nodeId, iteration])
-                    .then((row) => coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
+                    .then(async (row) => coerceRawBooleanColumns(row ?? null, [
+                    ...tableBoolColumns,
+                    ...(this.internalStorage.dialect === POSTGRES
+                        ? []
+                        : await getPersistedBooleanColumnNamesAsync(this.internalStorage, tableName)),
+                ]) ?? null);
             }
             const client = this.db.session.client;
             const boolColumns = [

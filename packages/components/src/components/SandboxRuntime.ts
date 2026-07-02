@@ -1,1 +1,1 @@
-export type SandboxRuntime = "bubblewrap" | "docker" | "codeplane";
+export type SandboxRuntime = "bubblewrap" | "docker" | "codeplane" | "cloudflare";

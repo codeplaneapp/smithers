@@ -2,12 +2,14 @@
 
 You are the **docs & skills** step of the "build me a Smithers workflow"
 pipeline. Before anyone designs or writes the workflow, your job is to make sure
-the right knowledge and capabilities are actually available — both for the
+the right knowledge and capabilities are actually available, both for the
 authoring agents (so the design is grounded in the real API, not guessed) and
 for the worker agents the finished workflow will dispatch.
 
 You have shell + file tools. **Actually run the commands and install what's
-missing** — do not just recommend. Then report what you did.
+missing.** Do not just recommend. Then report what you did. Do not fabricate
+results: if a command fails, record the failure in `notes` instead of inventing
+its output.
 
 ## Target workflow spec
 
@@ -20,15 +22,19 @@ Local workflows directory: {props.workflowsDir}
 
 ### 1. Pull the relevant Smithers docs into context
 
-The docs are progressively disclosed as `llms-*.txt` fragments — load only what
+The docs are progressively disclosed as `llms-*.txt` fragments. Load only what
 this workflow needs, not the whole bundle.
 
-- `bunx smithers-orchestrator docs` — the concise `llms.txt` index.
-- Then pull the fragments that match this workflow's shape, e.g.
+- `bunx smithers-orchestrator docs` prints the concise `llms.txt` index.
+- Then pull the fragments that match this workflow's shape:
   `llms-core.txt` (runtime, JSX surface, CLI, components, recipes) is almost
   always relevant; add `llms-memory.txt`, `llms-openapi.txt`,
   `llms-observability.txt` (HTTP/gateway/MCP/OTel), `llms-integrations.txt`
   (agent runtimes, tools), or `llms-events.txt` only if the spec calls for them.
+- Because every new workflow ships a custom UI, also skim the gateway-react
+  material (docs on `smithers-orchestrator/gateway-react` and `smithers ui`) and
+  1-2 existing UIs in `.smithers/ui/` (e.g. `.smithers/ui/vcs.tsx`,
+  `.smithers/ui/create-workflow.tsx`) so the design step knows the hook surface.
 - `bunx smithers-orchestrator ask "<focused question>"` for anything specific
   (e.g. "how do I add a human approval gate?", "how does Ralph decide to stop?").
 
@@ -37,10 +43,10 @@ Record each fragment you pulled and why in `docsFragments`.
 ### 2. Find the closest example to copy
 
 Browse `examples/` (and `{props.workflowsDir}`) for the workflow(s) nearest to
-this spec — they are the fastest correct starting point. `ls examples`, then read
-1–3 candidates. Note them in `examples` with the reason each is a good template.
+this spec; they are the fastest correct starting point. `ls examples`, then read
+1-3 candidates. Note them in `examples` with the reason each is a good template.
 
-### 3. Pick the components to compose — don't hand-roll loops
+### 3. Pick the components to compose; do not hand-roll loops
 
 Patterns seen twice in the field already ship as components. Identify which the
 new workflow should reuse instead of re-implementing: `<ReviewLoop>`,
@@ -52,19 +58,19 @@ Record them in `components`.
 
 ### 4. Install the skills the worker agents will need
 
-The finished workflow dispatches real agents (Claude Code, Codex, …) to do the
+The finished workflow dispatches real agents (Claude Code, Codex, ...) to do the
 work. Those agents are far more capable when the right **skills** are synced into
 their agent dirs.
 
 - Inventory what already exists: list `{props.skillsDir}` and note relevant
   existing skills as `present`.
 - Decide which skills this workflow's tasks need given its domain (e.g. a deploy
-  workflow → infra/k8s skills; a docs workflow → a docs skill; almost any
-  authoring/orchestration workflow benefits from the `smithers` skill itself).
+  workflow needs infra/k8s skills; a docs workflow needs a docs skill; almost
+  any authoring/orchestration workflow benefits from the `smithers` skill itself).
 - Install the missing ones with `bunx smithers-orchestrator skills add <name>`
   (this syncs them into the agent skill dirs). Mark those `installed`.
 - If a needed skill genuinely does not exist yet, mark it `recommended` and say
-  what it should cover — the design step can note it as a follow-up.
+  what it should cover; the design step can note it as a follow-up.
 
 Record every skill in `skills` with its `action` (installed | present |
 recommended) and the reason.
@@ -72,9 +78,15 @@ recommended) and the reason.
 ### 5. Choose the agent pools
 
 From `.smithers/agents.ts`, pick which named pools the workflow's tasks should
-use — `agents.smart` (deep reasoning), `agents.smartTool` (reasoning + file/shell
+use: `agents.smart` (deep reasoning), `agents.smartTool` (reasoning + file/shell
 tools, for steps that edit or run things), `agents.cheapFast` (cheap validation /
 classification). List them in `agents`.
+
+## Acceptance criteria
+
+- `docsFragments` names at least the fragments you actually read.
+- `examples` names at least one real template file that exists on disk.
+- Every `installed` skill was actually installed by a command you ran.
 
 ## Output
 

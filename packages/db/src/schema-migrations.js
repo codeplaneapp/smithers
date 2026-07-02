@@ -777,6 +777,36 @@ export function runSmithersSchemaMigrations(sqlite, context) {
 }
 
 /**
+ * Initialize a SQLite-compatible async storage backend with the current Smithers
+ * schema. This is intentionally narrower than the bun:sqlite migration runner:
+ * Cloudflare Durable Object SQLite is normally provisioned fresh per namespace,
+ * and its SQL API is not a bun:sqlite client. The statements are idempotent, so
+ * repeated boots converge without relying on driver-specific PRAGMA helpers.
+ *
+ * @param {{ execute: (statement: string, params?: readonly unknown[]) => Promise<unknown> | unknown }} storage
+ * @param {{
+ *   createTableStatements: readonly string[];
+ *   createIndexStatements: readonly string[];
+ * }} context
+ */
+export async function runSmithersSchemaInitSqliteAsync(storage, context) {
+    try {
+        await storage.execute("PRAGMA foreign_keys = ON");
+    }
+    catch {
+        // Some SQLite-compatible edge runtimes reject PRAGMA writes. The schema
+        // DDL below is still safe and idempotent.
+    }
+    await storage.execute(MIGRATION_TABLE_SQL);
+    for (const statement of context.createTableStatements) {
+        await storage.execute(statement);
+    }
+    for (const statement of [...context.createIndexStatements, ...EXTRA_INDEX_STATEMENTS]) {
+        await storage.execute(statement);
+    }
+}
+
+/**
  * Run one Postgres schema migration inside an Effect span so OTLP-backed
  * runtimes can attribute long DDL steps and log-only runtimes still get a
  * structured event.

@@ -12,10 +12,10 @@ import React from "react";
 import { createSmithersContext, SmithersContext as GlobalSmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { Approval as BaseApproval, Workflow as BaseWorkflow, Task as BaseTask, Sequence as BaseSequence, Parallel as BaseParallel, MergeQueue as BaseMergeQueue, Branch as BaseBranch, Loop as BaseLoop, Ralph as BaseRalph, ContinueAsNew as BaseContinueAsNew, continueAsNew as baseContinueAsNew, Worktree as BaseWorktree, Sandbox as BaseSandbox, Signal as BaseSignal, Timer as BaseTimer, } from "@smithers-orchestrator/components";
 import { zodToTable } from "@smithers-orchestrator/db/zodToTable";
-import { zodToCreateTableSQL, syncZodTableSchema, syncZodTableSchemaPostgres } from "@smithers-orchestrator/db/zodToCreateTableSQL";
+import { zodToCreateTableSQL, zodSchemaColumns, syncZodTableSchema, syncZodTableSchemaPostgres } from "@smithers-orchestrator/db/zodToCreateTableSQL";
 import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { POSTGRES } from "@smithers-orchestrator/db/dialect";
+import { POSTGRES, SQLITE, quoteIdentifier } from "@smithers-orchestrator/db/dialect";
 import { resolve, join } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertZodV4 } from "@smithers-orchestrator/errors/assertZodV4";
@@ -451,6 +451,99 @@ export function createSmithers(schemas, opts) {
         });
     }
     return api;
+}
+/**
+ * @param {ReturnType<import("@smithers-orchestrator/db/sql-message-storage").getSqlMessageStorage>} storage
+ * @param {string} tableName
+ * @param {import("zod").ZodObject<any>} schema
+ * @param {{ isInput?: boolean }} [opts]
+ */
+async function syncZodTableSchemaStorage(storage, tableName, schema, opts) {
+    await storage.execute(zodToCreateTableSQL(tableName, schema, { ...opts, dialect: SQLITE }));
+    if (!opts?.isInput) {
+        try {
+            await storage.execute(`CREATE TABLE IF NOT EXISTS _smithers_output_schema_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, PRIMARY KEY (table_name, column_name))`);
+            for (const { name, kind } of zodSchemaColumns(schema)) {
+                await storage.execute(`INSERT INTO _smithers_output_schema_columns (table_name, column_name, kind) VALUES (?, ?, ?) ON CONFLICT(table_name, column_name) DO UPDATE SET kind = excluded.kind`, [tableName, name, kind]);
+            }
+        }
+        catch {
+            // Metadata is best-effort; the physical output table remains the source of truth.
+        }
+    }
+    const quotedTable = quoteIdentifier(tableName);
+    let existing;
+    try {
+        existing = await storage.queryAllRaw(`PRAGMA table_info(${quotedTable})`);
+    }
+    catch {
+        return;
+    }
+    const have = new Set(existing
+        .map((row) => row?.name)
+        .filter((name) => typeof name === "string"));
+    for (const { name, sqliteType } of zodSchemaColumns(schema)) {
+        if (have.has(name))
+            continue;
+        try {
+            await storage.execute(`ALTER TABLE ${quotedTable} ADD COLUMN ${quoteIdentifier(name)} ${sqliteType}`);
+        }
+        catch {
+            // Concurrent boot, or the column was added after the PRAGMA snapshot.
+        }
+    }
+}
+/**
+ * Cloudflare-native SQLite backend for Workers/Durable Objects. Pass a descriptor
+ * produced by `createCloudflareDurableObjectSqliteDescriptor()` or
+ * `createCloudflareD1SqliteDescriptor()` from `smithers-orchestrator/cloudflare`.
+ *
+ * @template {Record<string, import("zod").ZodObject<any>>} Schemas
+ * @param {Schemas} schemas
+ * @param {CreateSmithersOptions & { db: unknown; close?: () => Promise<void> | void }} opts
+ * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & { close?: () => Promise<void> }>}
+ */
+export async function createSmithersCloudflare(schemas, opts) {
+    if (!opts?.db) {
+        throw new SmithersError("INVALID_INPUT", "createSmithersCloudflare() requires a Cloudflare SQLite descriptor in opts.db.");
+    }
+    const { tables, drizzleSchema, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas } = prepareSmithersTables(schemas);
+    const baseDescriptor = /** @type {Record<string, unknown>} */ (opts.db);
+    const descriptor = { ...baseDescriptor, schema: drizzleSchema };
+    const adapter = new SmithersDb(descriptor);
+    await adapter.internalStorage.ensureSchema();
+    if (schemas.input) {
+        await syncZodTableSchemaStorage(adapter.internalStorage, "input", schemas.input, { isInput: true });
+    }
+    else {
+        await adapter.internalStorage.execute(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
+        const cols = await adapter.internalStorage.queryAllRaw(`PRAGMA table_info("input")`).catch(() => []);
+        const hasPayload = cols.some((col) => col?.name === "payload");
+        if (!hasPayload) {
+            await adapter.internalStorage.execute(`ALTER TABLE "input" ADD COLUMN payload TEXT`).catch(() => {});
+        }
+    }
+    for (const [name, zodSchema] of Object.entries(schemas)) {
+        if (name === "input")
+            continue;
+        await syncZodTableSchemaStorage(adapter.internalStorage, camelToSnake(name), zodSchema);
+    }
+    const { api } = buildSmithersApi({
+        db: descriptor,
+        tables,
+        schemaRegistry,
+        outputs,
+        zodToKeyName,
+        ambiguousZodSchemas,
+        opts,
+        inputSchema: schemas.input,
+    });
+    return {
+        ...api,
+        close: opts.close ? async () => {
+            await opts.close?.();
+        } : undefined,
+    };
 }
 /**
  * PostgreSQL/PGlite-backed equivalent of {@link createSmithers}. Asynchronous

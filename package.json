@@ -37,6 +37,11 @@
       "import": "./packages/sandbox/src/index.js",
       "default": "./packages/sandbox/src/index.js"
     },
+    "./cloudflare": {
+      "types": "./packages/smithers/src/cloudflare.d.ts",
+      "import": "./packages/smithers/src/cloudflare.js",
+      "default": "./packages/smithers/src/cloudflare.js"
+    },
     "./control-plane": "./packages/smithers/src/control-plane.js"
   },
   "engines": {
@@ -117,6 +122,7 @@
     "@smithers-orchestrator/agent-eliza": "workspace:*",
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/cli": "workspace:*",
+    "@smithers-orchestrator/cloudflare": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/control-plane": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
