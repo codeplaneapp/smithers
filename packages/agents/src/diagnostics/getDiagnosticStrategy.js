@@ -27,10 +27,11 @@ import { join } from "node:path";
 function checkCliInstalled(command, agentId) {
     return {
         id: "cli_installed",
-        run: async () => {
+        run: async (ctx) => {
             const start = performance.now();
             const result = spawnSync("which", [command], {
                 stdio: ["pipe", "pipe", "pipe"],
+                env: ctx.env,
             });
             const elapsed = performance.now() - start;
             const binaryPath = result.stdout?.toString("utf8").trim();
