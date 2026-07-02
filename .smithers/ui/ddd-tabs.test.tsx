@@ -15,8 +15,8 @@ import { join } from "node:path";
 import { act, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createSmithers, Gateway } from "smithers-orchestrator";
-import { SmithersGatewayClient, createSmithersGatewayTransport } from "@smithers-orchestrator/gateway-client";
-import { SmithersGatewayProvider, SyncProvider, createGatewayCollections } from "smithers-orchestrator/gateway-react";
+import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
+import { SmithersGatewayProvider } from "smithers-orchestrator/gateway-react";
 import { z } from "zod/v4";
 import type { Feature, TicketRow } from "./ddd-shared";
 
@@ -334,14 +334,9 @@ async function mountAppWithGateway(
     fetch: Bun.fetch as typeof fetch,
     WebSocket: globalThis.WebSocket,
   });
-  const collections = createGatewayCollections({
-    client: createSmithersGatewayTransport(client, { streamHealthyAfterMs: 50 }),
-  });
   const harness = await mount(
     <SmithersGatewayProvider client={client}>
-      <SyncProvider client={collections}>
-        <App {...appProps} />
-      </SyncProvider>
+      <App {...appProps} />
     </SmithersGatewayProvider>,
   );
   return { ...harness, gateway, base };
