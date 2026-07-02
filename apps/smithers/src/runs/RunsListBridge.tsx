@@ -11,7 +11,7 @@ function asString(value: unknown): string | undefined {
 /**
  * Bridge the live `runs` gateway collection into the runs LIST store (§3.A of
  * docs/p1a-plan.md). The Zustand store can't call React hooks, so this tiny
- * component — mounted inside `<SyncProvider>` in `main.tsx` — calls
+ * component mounted inside `SmithersCollectionsProvider` in `main.tsx` calls
  * `useGatewayRuns()` and pushes the mapped rows into the store on every change.
  *
  * The list surface (`RunsCard`/`RunsCanvas`) reads `useRunsListStore().runs`

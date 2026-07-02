@@ -630,6 +630,7 @@ export function proxyRouteKindFor(pathname: string): ProxyRouteKind {
     return "platform";
   }
   if (pathname.startsWith("/v1/rpc")) return "gateway_rpc";
+  if (pathname.startsWith("/v1/api")) return "gateway_http";
   if (pathname === "/health" || pathname.startsWith("/workflows")) return "gateway_http";
   if (pathname === "/api/chat") return "chat";
   if (pathname === "/metrics") return "metrics";

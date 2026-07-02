@@ -111,7 +111,7 @@ browserTest("Open Code Review UI renders a real workflow run", async () => {
     const errors: string[] = [];
     page.on("pageerror", (err: Error) => errors.push(err.message));
 
-    await page.goto(`${base}/workflows/open-code-review?runId=${RUN_ID}`, { waitUntil: "networkidle" });
+    await page.goto(`${base}/workflows/open-code-review?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="open-code-review-ui"]', { timeout: 20_000 });
 
     await page.waitForFunction(

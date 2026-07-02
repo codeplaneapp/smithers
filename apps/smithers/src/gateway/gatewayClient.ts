@@ -4,9 +4,10 @@ import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
  * The app's single gateway client.
  *
  * This is a LOCAL-ONLY UI: it always talks to a `smithers gateway` running on
- * the same origin (Vite proxies `/v1/rpc` + `/health` to `127.0.0.1:7331` in
- * dev; in production the gateway/static server serves this bundle from its own
- * origin). There is no auth, no CSRF, no token — the gateway binds loopback.
+ * the same origin (Vite proxies `/v1/api`, `/v1/rpc`, and `/health` to
+ * `127.0.0.1:7331` in dev; in production the gateway/static server serves this
+ * bundle from its own origin). There is no auth, no CSRF, no token — the gateway
+ * binds loopback.
  *
  * The only transport concern we layer over the SDK is the WebSocket upgrade
  * path: the SDK opens the WS at the RPC base path, but the dev proxy only marks

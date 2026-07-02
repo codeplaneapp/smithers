@@ -23,7 +23,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
  * envelope: the frame's `event` is the literal string `"run.event"` and its
  * `payload` is `{ streamId, seq, event, payload }` — the engine event name under
  * `payload.event` and its data under `payload.payload`
- * (see `createSmithersGatewayTransport` → `eventRows`). Some callers/tests pass
+ * (see the gateway events REST serializer). Some callers/tests pass
  * the flat engine event straight through (`{ event, payload }`). Normalize both
  * into `{ name, payload }`. The unwrap only triggers when the outer payload has a
  * string `event` field, so a flat payload like `{ nodeId, text }` passes through

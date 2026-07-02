@@ -93,6 +93,7 @@ storm.
 function SmithersGatewayProvider(props: {
   client?: SmithersGatewayClient;
   options?: SmithersGatewayClientOptions;
+  mode?: WorkspaceMode;
   children?: ReactNode;
 }): ReactElement;
 ```
@@ -105,29 +106,30 @@ function SmithersGatewayProvider(props: {
   Client config (`baseUrl`, `token`, …) used to construct a client when none is
   passed.
 </ParamField>
+<ParamField path="mode" type="WorkspaceMode">
+  Optional local or multiplayer collection mode. When omitted, local mode uses
+  the client's base URL.
+</ParamField>
 <ParamField path="children" type="ReactNode" />
 
 <Note>
-The bare provider mounts only the on-demand context, which feeds
-`useGatewayActions`, `useGatewayNodeOutput`, and `useGatewayRpc`. The live
-collection hooks (`useGatewayRun`, `useGatewayRuns`, …) also need a
-[`SyncProvider`](#syncprovider). Use [`createGatewayReactRoot`](#creategatewayreactroot)
-to mount both at once.
+The provider mounts both the raw `SmithersGatewayClient` context and the
+TanStack DB collection provider. The live hooks and action hooks all work inside
+this one provider.
 </Note>
 
-**Source** [`SmithersGatewayProvider.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/SmithersGatewayProvider.ts) · **Tests** [`SmithersGatewayProvider.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/SmithersGatewayProvider.test.ts) · **See also** [`SyncProvider`](#syncprovider)
+**Source** [`SmithersGatewayProvider.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/SmithersGatewayProvider.ts) · **Tests** [`SmithersGatewayProvider.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/SmithersGatewayProvider.test.ts)
 
 ### createGatewayReactRoot
 
-Mount a full custom UI in one call. Builds a client, a `GatewayCollections`
-registry, and renders your element inside **both** the gateway provider and a
-[`SyncProvider`](#syncprovider), so every hook on this page works. This is what
-a gateway-served `ui` entry uses.
+Mount a full custom UI in one call. Builds a client, mounts
+`SmithersGatewayProvider`, creates the TanStack DB collection registry, and
+renders your element. This is what a gateway-served `ui` entry uses.
 
 ```ts
 function createGatewayReactRoot(
   element: ReactElement,
-  options?: SmithersGatewayClientOptions & { rootId?: string },
+  options?: SmithersGatewayClientOptions & { rootId?: string; mode?: WorkspaceMode },
 ): SmithersGatewayClient;
 ```
 
@@ -136,7 +138,7 @@ function createGatewayReactRoot(
 </ParamField>
 <ParamField path="options" type="SmithersGatewayClientOptions & { rootId?: string }">
   Client options plus `rootId` (the DOM element id to mount into; default
-  `"root"`). Throws if the element is not found.
+  `"root"`) and optional `mode`. Throws if the element is not found.
 </ParamField>
 
 <ResponseField name="SmithersGatewayClient" type="object">
@@ -159,6 +161,49 @@ function useSmithersGateway(): SmithersGatewayClient;
 ```
 
 **Source** [`useSmithersGateway.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useSmithersGateway.ts) · **See also** [Gateway Client](/reference/gateway-client)
+
+### SmithersCollectionsProvider
+
+Advanced provider for supplying a custom `WorkspaceMode`, `SmithersDataClient`,
+or `QueryClient`. Most apps get this automatically from
+[`SmithersGatewayProvider`](#smithersgatewayprovider).
+
+```tsx
+function SmithersCollectionsProvider(props: {
+  mode?: WorkspaceMode;
+  client?: SmithersDataClient;
+  queryClient?: QueryClient;
+  children?: ReactNode;
+}): ReactElement;
+```
+
+<ParamField path="mode" type="WorkspaceMode">
+  Local mode uses the Gateway REST API and SSE invalidation. Multiplayer mode
+  uses Electric shapes for reads and the domain API for writes.
+</ParamField>
+<ParamField path="client" type="SmithersDataClient">
+  Pre-built data client. Takes precedence over `mode`.
+</ParamField>
+<ParamField path="queryClient" type="QueryClient">
+  TanStack Query client. A default client is created when omitted.
+</ParamField>
+
+**Source** [`SmithersCollectionsProvider.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/SmithersCollectionsProvider.ts)
+
+### useSmithersCollections
+
+Read the TanStack DB collection registry and data client from context. Use this
+for custom `useLiveQuery` reads.
+
+```ts
+function useSmithersCollections(): {
+  client: SmithersDataClient;
+  collections: SmithersCollections;
+  queryClient: QueryClient;
+};
+```
+
+**Source** [`useSmithersCollections.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useSmithersCollections.ts) · **See also** [Sync](/guides/sync)
 
 ### useGatewayConnectionStatus
 
@@ -530,222 +575,35 @@ await submitApproval({ runId: RUN_ID, nodeId: NODE_ID, approved: true });
 
 ### useGatewayMutation
 
-Typed mutation for a single RPC by name, with optimistic updates, rollback, and
-invalidate-on-success. Wires the runner to `registry.rpc(method, vars)`.
+Typed mutation helper for supported domain writes. It calls the same domain API
+as `useGatewayActions`, then invalidates the collection registry.
 
 ```ts
-function useGatewayMutation<TVars extends Record<string, unknown>, TData = unknown>(
+function useGatewayMutation<TVariables = Record<string, unknown>, TData = unknown>(
   method: string,
-  options?: SyncMutationOptions<TVars, TData>,
-): UseSyncMutationResult<TVars, TData>;
-```
-
-<ParamField path="method" type="string" required>
-  The RPC method to call.
-</ParamField>
-<ParamField path="options" type="SyncMutationOptions<TVars, TData>">
-  `onMutate` / `onSuccess` / `onError` callbacks and `invalidate` keys. See
-  [`useSyncMutation`](#usesyncmutation).
-</ParamField>
-<ResponseField name="UseSyncMutationResult<TVars, TData>" type="object">
-  `{ mutate, mutateSafe, status, isLoading, data, error, reset }`. See
-  [`useSyncMutation`](#usesyncmutation).
-</ResponseField>
-
-**Source** [`useGatewayMutation.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/sync/useGatewayMutation.ts) · **See also** [`useSyncMutation`](#usesyncmutation)
-
-## Declarative Sync SDK
-
-The lower layer the typed hooks are built on: a `GatewayCollections` registry of
-TanStack DB collections plus generic query / mutation / subscription hooks keyed
-by an arbitrary `SyncKey`. Use it for resources the typed hooks do not cover.
-
-### SyncProvider
-
-Wrap a subtree with a `GatewayCollections` registry so descendants can call
-`useSyncQuery`, `useSyncMutation`, `useSyncSubscription`, and the live typed
-hooks against the same collections.
-
-```tsx
-function SyncProvider(props: {
-  client: GatewayCollections;
-  children?: ReactNode;
-}): ReactElement;
-```
-
-<ParamField path="client" type="GatewayCollections" required>
-  The registry, usually from [`createGatewayCollections`](#creategatewaycollections).
-</ParamField>
-<ParamField path="children" type="ReactNode" />
-
-**Source** [`SyncProvider.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/sync/SyncProvider.ts) · **See also** [`createGatewayReactRoot`](#creategatewayreactroot)
-
-### createGatewayCollections
-
-Build the registry: one collection per gateway resource over an instrumented
-transport, plus the generic query/stream collections the sync hooks resolve on
-demand. `createGatewayReactRoot` calls this for you.
-
-```ts
-function createGatewayCollections(
-  options: CreateGatewayCollectionsOptions,
-): GatewayCollections;
-```
-
-<ParamField path="options" type="CreateGatewayCollectionsOptions" required>
-  <Expandable title="CreateGatewayCollectionsOptions">
-    <ParamField path="client" type="SyncTransport" required>
-      The instrumented transport (e.g. `createSmithersGatewayTransport(client)`).
-    </ParamField>
-    <ParamField path="onAuthError" type="(error: Error) => void">
-      Top-level auth bailout.
-    </ParamField>
-    <ParamField path="listGcTime" type="number" default="300000">
-      GC time (ms) for the pollable list/query collections.
-    </ParamField>
-    <ParamField path="persistence" type="{ store: GatewayCollectionStore }">
-      Opt-in client-side persistence so pollable lists hydrate from cache on
-      reload (no fetch flash). Per-run streamed collections are never persisted.
-    </ParamField>
-    <ParamField path="syncSource" type='"gateway" | "electric"' default='"gateway"'>
-      Which source backs the pollable collections. `electric` (cloud mode)
-      requires an `electric` config and only re-routes collections with an
-      Electric twin.
-    </ParamField>
-    <ParamField path="electric" type="ElectricCollectionConfig">
-      Electric shape transport config, required when `syncSource: "electric"`.
-    </ParamField>
-  </Expandable>
-</ParamField>
-
-<ResponseField name="GatewayCollections" type="object">
-  The registry. Owns `runs` / `run` / `approvals` / … collections plus `rpc`,
-  `invalidate`, `query`, `stream`, `connect`, and `reset`. Handed to
-  [`SyncProvider`](#syncprovider).
-</ResponseField>
-
-**Source** [`createGatewayCollections.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/sync/createGatewayCollections.ts) · **Tests** [`sync.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/sync/sync.test.ts)
-
-### useSyncQuery
-
-Declarative fetch over the registry. Concurrent components with the same `key`
-share one collection and one in-flight fetch.
-
-```ts
-function useSyncQuery<T>(
-  key: SyncKey,
-  fetcher: () => Promise<T>,
-  options?: { enabled?: boolean; staleTimeMs?: number },
-): UseSyncQueryResult<T>;
-```
-
-<ParamField path="key" type="SyncKey" required>
-  Cache key; identical keys multiplex onto one collection.
-</ParamField>
-<ParamField path="fetcher" type="() => Promise<T>" required>
-  Runs on subscribe and on `refetch`.
-</ParamField>
-<ParamField path="options.enabled" type="boolean" default="true">
-  Skip subscribe + fetch.
-</ParamField>
-<ParamField path="options.staleTimeMs" type="number">
-  Treat cached data as fresh for this long.
-</ParamField>
-<ResponseField name="UseSyncQueryResult<T>" type="object">
-  `{ data, error, status, isLoading, isRefreshing, refetch }`, where `status` is
-  `"idle" | "loading" | "success" | "error"`.
-</ResponseField>
-
-**Source** [`useSyncQuery.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/sync/useSyncQuery.ts) · **Tests** [`sync.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/sync/sync.test.ts)
-
-### useSyncMutation
-
-Mutation with optimistic updates and invalidate-on-success. `runner` performs
-the write; `onMutate` may stage an optimistic value and return a rollback
-context for `onError`.
-
-```ts
-function useSyncMutation<TVars, TData, TContext = unknown>(
-  runner: (vars: TVars) => Promise<TData>,
-  options?: SyncMutationOptions<TVars, TData, TContext>,
-): UseSyncMutationResult<TVars, TData>;
-```
-
-<ParamField path="runner" type="(vars: TVars) => Promise<TData>" required>
-  Performs the write, typically `registry.rpc(method, vars)`.
-</ParamField>
-<ParamField path="options" type="SyncMutationOptions<TVars, TData, TContext>">
-  <Expandable title="SyncMutationOptions">
-    <ParamField path="onMutate" type="(vars, registry) => TContext | Promise<TContext>">
-      Stage optimistic state; return a rollback context.
-    </ParamField>
-    <ParamField path="onSuccess" type="(data, vars, context, registry) => void | Promise<void>" />
-    <ParamField path="onError" type="(error, vars, context, registry) => void | Promise<void>" />
-    <ParamField path="invalidate" type="ReadonlyArray<SyncKey>">
-      Keys (or prefixes) to invalidate after success.
-    </ParamField>
-  </Expandable>
-</ParamField>
-<ResponseField name="UseSyncMutationResult<TVars, TData>" type="object">
-  <Expandable title="members">
-    <ResponseField name="mutate" type="(vars) => Promise<TData>">
-      Run the mutation; throws on failure.
-    </ResponseField>
-    <ResponseField name="mutateSafe" type="(vars) => Promise<TData | undefined>">
-      Like `mutate` but swallows errors and returns `undefined`.
-    </ResponseField>
-    <ResponseField name="status" type='"idle" | "loading" | "success" | "error"' />
-    <ResponseField name="isLoading" type="boolean" />
-    <ResponseField name="data" type="TData | undefined" />
-    <ResponseField name="error" type="Error | undefined" />
-    <ResponseField name="reset" type="() => void">
-      Return to the idle state.
-    </ResponseField>
-  </Expandable>
-</ResponseField>
-
-**Source** [`useSyncMutation.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/sync/useSyncMutation.ts) · **Tests** [`sync.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/sync/sync.test.ts)
-
-### useSyncSubscription
-
-Subscribe to a streaming source through a bounded collection. Returns the
-rolling buffer of frames; older frames drop off the front past `maxFrames`. N
-components on the same key share one upstream socket.
-
-```ts
-function useSyncSubscription(
-  key: SyncKey,
-  scope: string,
-  params: unknown,
-  options?: { enabled?: boolean; maxFrames?: number },
+  options?: { invalidate?: readonly unknown[] },
 ): {
-  frames: ReadonlyArray<SyncStreamFrame>;
-  last: SyncStreamFrame | undefined;
-  dropped: number;
+  mutate: (variables: TVariables) => Promise<TData>;
+  mutateSafe: (variables: TVariables) => Promise<TData | undefined>;
+  isLoading: boolean;
+  error: Error | undefined;
 };
 ```
 
-<ParamField path="key" type="SyncKey" required>
-  Cache key; identical keys multiplex onto one socket.
+<ParamField path="method" type="string" required>
+  One of the supported domain mutations: `launchRun`, `resumeRun`, `cancelRun`,
+  `hijackRun`, `rewindRun`, `submitApproval`, `submitSignal`, `cronCreate`,
+  `cronDelete`, `cronRun`, `createTicket`, `updateTicket`, or `deleteTicket`.
 </ParamField>
-<ParamField path="scope" type="string" required>
-  The stream scope (e.g. a run-event channel).
-</ParamField>
-<ParamField path="params" type="unknown" required>
-  Stream params.
-</ParamField>
-<ParamField path="options.enabled" type="boolean" default="true">
-  Drop the subscription when false.
-</ParamField>
-<ParamField path="options.maxFrames" type="number" default="200">
-  Bounded buffer size.
+<ParamField path="options.invalidate" type="readonly unknown[]">
+  Reserved for compatibility. Successful mutations invalidate the collection
+  registry.
 </ParamField>
 <ResponseField name="result" type="object">
-  `{ frames, last, dropped }`: the bounded buffer, its newest frame, and the
-  count dropped off the front.
+  `{ mutate, mutateSafe, isLoading, error }`.
 </ResponseField>
 
-**Source** [`useSyncSubscription.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/sync/useSyncSubscription.ts) · **Tests** [`sync.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/tests/sync/sync.test.ts)
+**Source** [`useGatewayMutation.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayMutation.ts) · **See also** [`useGatewayActions`](#usegatewayactions)
 
 ## Type exports
 
@@ -754,17 +612,18 @@ These types are exported from the same subpath for typing your own components.
 <ResponseField name="GatewayAsyncState<T>" type="type">
   The shared data-hook return shape. See [above](#gatewayasyncstate).
 </ResponseField>
-<ResponseField name="CreateGatewayCollectionsOptions" type="type">
-  Options for [`createGatewayCollections`](#creategatewaycollections).
+<ResponseField name="SmithersCollectionsContextValue" type="type">
+  `{ client, collections, queryClient }` from
+  [`useSmithersCollections`](#usesmitherscollections).
 </ResponseField>
-<ResponseField name="GatewayCollections" type="type">
-  The registry handed to [`SyncProvider`](#syncprovider).
+<ResponseField name="GatewayConnectionState" type="type">
+  Connection state used by [`useGatewayConnectionStatus`](#usegatewayconnectionstatus).
 </ResponseField>
 
 ```ts
 import type {
-  CreateGatewayCollectionsOptions,
-  GatewayCollections,
+  SmithersCollectionsContextValue,
+  GatewayConnectionStatus,
 } from "smithers-orchestrator/gateway-react";
 // GatewayAsyncState<T> is generic; see its section above for the full shape.
 ```

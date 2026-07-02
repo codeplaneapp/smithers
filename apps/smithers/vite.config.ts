@@ -9,12 +9,12 @@ import { readLocalVcsSnapshot } from "./src/vcs/localAdapter";
  * `http://127.0.0.1:7331`). It never reaches a cloud backend — there is no
  * auth, no jjhub/Plue REST, no Electric, no Cloudflare worker.
  *
- * The browser calls same-origin paths (`/v1/rpc/*`, `/health`, `/workflows`);
- * in dev Vite proxies them to the gateway, and in production the gateway (or
- * the `smithers ui` static server) serves this bundle from the same origin so
- * the same-origin calls land directly on the gateway. The WS upgrade goes to
- * `/v1/rpc` (see `src/gateway/gatewayClient.ts`), which the proxy upgrades with
- * `ws: true`; the gateway accepts a WS upgrade on any path.
+ * The browser calls same-origin paths (`/v1/api/*`, `/v1/rpc/*`, `/health`,
+ * `/workflows`). In dev Vite proxies them to the gateway, and in production the
+ * gateway (or the `smithers ui` static server) serves this bundle from the same
+ * origin so the same-origin calls land directly on the gateway. The WS upgrade
+ * goes to `/v1/rpc` (see `src/gateway/gatewayClient.ts`), which the proxy
+ * upgrades with `ws: true`; the gateway accepts a WS upgrade on any path.
  */
 const gatewayTarget = process.env.SMITHERS_GATEWAY_PROXY_TARGET ?? "http://127.0.0.1:7331";
 // The local concierge server owns `/api/chat` (the chat backend).
@@ -82,6 +82,7 @@ export default defineConfig({
     port: 5180,
     strictPort: false,
     proxy: {
+      "/v1/api": { target: gatewayTarget, changeOrigin: true },
       "/v1/rpc": { target: gatewayTarget, changeOrigin: true, ws: true },
       "/health": { target: gatewayTarget, changeOrigin: true },
       "/workflows": { target: gatewayTarget, changeOrigin: true },
@@ -94,6 +95,7 @@ export default defineConfig({
     port: 4180,
     strictPort: false,
     proxy: {
+      "/v1/api": { target: gatewayTarget, changeOrigin: true },
       "/v1/rpc": { target: gatewayTarget, changeOrigin: true, ws: true },
       "/health": { target: gatewayTarget, changeOrigin: true },
       "/workflows": { target: gatewayTarget, changeOrigin: true },

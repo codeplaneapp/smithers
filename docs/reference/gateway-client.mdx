@@ -25,10 +25,12 @@ import {
   SmithersGatewayClient,
   SmithersGatewayConnection,
   GatewayRpcError,
-  createSmithersGatewayTransport,
   gatewayBackoffDelay,
-  createGatewayCollection,
-  gatewayKeys,
+  createSmithersCollections,
+  createSmithersDataClient,
+  smithersCollectionKeys,
+  type WorkspaceMode,
+  type SmithersCollections,
 } from "smithers-orchestrator/gateway-client";
 ```
 
@@ -208,39 +210,6 @@ try {
 
 **Source** [`GatewayRpcError.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/src/GatewayRpcError.ts) · **Tests** [`gateway-client.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/tests/gateway-client.test.ts)
 
-## createSmithersGatewayTransport
-
-Adapts a `SmithersGatewayClient` into the narrow `SyncTransport` that
-[`createGatewayCollection`](#collections) and the React provider consume. RPC is
-wired straight through; `streamRunEvents` uses the resilient generator,
-`streamDevTools` the plain one. Unknown stream scopes throw, so a typo surfaces
-loudly instead of stalling.
-
-```ts
-const transport = createSmithersGatewayTransport(client, {
-  streamHealthyAfterMs: 1000,
-});
-```
-
-<ParamField path="client" type="SmithersGatewayClient" required>
-  The client whose RPC and streams the transport forwards.
-</ParamField>
-<ParamField path="options" type="CreateSmithersGatewayTransportOptions">
-  <Expandable title="CreateSmithersGatewayTransportOptions">
-    <ParamField path="streamHealthyAfterMs" type="number">
-      `healthyAfterMs` passed to the run-event resilient generator before backoff
-      resets.
-    </ParamField>
-  </Expandable>
-</ParamField>
-
-<ResponseField name="SyncTransport" type="object">
-  `{ rpc(method, params, options?), stream(scope, params, options) }`. `scope` is
-  `"streamRunEvents"` or `"streamDevTools"`; both require `params.runId`.
-</ResponseField>
-
-**Source** [`createSmithersGatewayTransport.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/src/sync/createSmithersGatewayTransport.ts) · **Tests** [`sync`](https://github.com/smithersai/smithers/tree/main/packages/gateway-client/tests/sync)
-
 ## gatewayBackoffDelay
 
 Exponential backoff with full jitter for one 0-based attempt. The resilient
@@ -281,102 +250,84 @@ const delayMs = gatewayBackoffDelay(attempt, { baseMs: 250, maxMs: 10_000 });
 
 **Source** [`gatewayBackoffDelay.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/src/gatewayBackoffDelay.ts) · **Tests** [`gatewayBackoffDelay.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/tests/gatewayBackoffDelay.test.ts)
 
-## Collections
+## createSmithersCollections
 
-`createGatewayCollection` builds a TanStack DB `CollectionConfig` backed by a
-`SyncTransport`: it loads an initial RPC payload, then keeps the collection live
-off a stream (or by refetching on each frame). `gatewayKeys` produces the stable
-cache keys so two consumers of the same data never disagree on the key.
+Builds the TanStack DB collection registry. Local mode uses the Gateway REST
+domain API plus `/v1/api/stream` SSE invalidation. Multiplayer mode uses
+Electric shapes from `electricBaseUrl` for reads and keeps the same domain API
+write path.
 
 ```ts
-import { createCollection } from "@tanstack/db";
+import { QueryClient } from "@tanstack/react-query";
 
-const runs = createCollection(
-  createGatewayCollection<GatewayRunRow>({
-    key: gatewayKeys.runs(),
-    client: transport,
-    getKey: (row) => row.runId,
-    method: "listRuns",
-  }),
-);
+const queryClient = new QueryClient();
+const mode: WorkspaceMode = {
+  kind: "local",
+  apiBaseUrl: "http://127.0.0.1:7331",
+};
+const collections = createSmithersCollections(mode, queryClient);
 ```
 
-<ParamField path="config" type="GatewayCollectionConfig<TRow, TKey>" required>
-  <Expandable title="GatewayCollectionConfig">
-    <ParamField path="key" type="SyncKey" required>
-      Cache key for the collection. Use a [`gatewayKeys`](#gatewaykeys) factory.
-    </ParamField>
-    <ParamField path="client" type="SyncTransport" required>
-      Transport from [`createSmithersGatewayTransport`](#createsmithersgatewaytransport).
-    </ParamField>
-    <ParamField path="getKey" type="(row) => TKey" required>
-      Extracts each row's primary key.
-    </ParamField>
-    <ParamField path="method" type="string">
-      RPC method for the initial load (and for refetch-driven streams).
-    </ParamField>
-    <ParamField path="params" type="unknown">
-      Params passed to `method`.
-    </ParamField>
-    <ParamField path="rows" type="(payload) => Iterable<TRow>">
-      Maps an RPC payload to rows. Defaults to the payload itself (array or single
-      object).
-    </ParamField>
-    <ParamField path="stream" type="object">
-      Live-stream config: `scope`, `params`, `afterSeq`, one of
-      `frameToWrites` / `frameToRows` / `refetchOnFrame`, plus bounds
-      (`maxRows`, `maxBufferedFrames`), `reconnectOnGracefulEnd`, and `backoff`.
-    </ParamField>
-    <ParamField path="compare" type="(a, b) => number">
-      Stable ordering for the collection.
-    </ParamField>
-    <ParamField path="onError / onAuthError" type="(error: Error) => void">
-      Error callbacks; `onAuthError` fires on 401/403-class failures.
-    </ParamField>
-    <ParamField path="onInsert / onUpdate / onDelete" type="handler">
-      Optimistic mutation handlers forwarded to TanStack DB.
-    </ParamField>
-  </Expandable>
+<ParamField path="mode" type="WorkspaceMode" required>
+  `{ kind: "local", apiBaseUrl, token? }` or `{ kind: "multiplayer",
+  apiBaseUrl, electricBaseUrl, workspaceId, token? }`.
+</ParamField>
+<ParamField path="queryClient" type="QueryClient" required>
+  The TanStack Query client used by QueryCollection and invalidation.
 </ParamField>
 
-<ResponseField name="CollectionConfig<TRow, TKey>" type="object">
-  A config to hand to TanStack DB's `createCollection`. Its `id` is the
-  fingerprint of `key`.
+<ResponseField name="SmithersCollections" type="object">
+  Registry methods include `runs`, `run`, `runTree`, `events`, `approvals`,
+  `workflows`, `docs`, `prompts`, `scores`, `tickets`, `memoryFacts`, `crons`,
+  `nodes`, and `runEvents`, plus `connect`, `invalidate`, and `close`.
 </ResponseField>
 
-### gatewayKeys
+**Source** [`createSmithersCollections.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/src/data/createSmithersCollections.ts) · **Tests** [`smithers-collections`](https://github.com/smithersai/smithers/tree/main/packages/gateway-client/tests)
 
-Typed cache-key factories for the known gateway reads and streams. Each returns a
-`readonly` `SyncKey` tuple.
+## createSmithersDataClient
+
+Creates the domain API client that collection mutation handlers call. Reads and
+writes target `/v1/api/*`; `stream.subscribe` opens `/v1/api/stream` and emits
+`change`, `reset`, and `heartbeat` invalidation events.
 
 ```ts
-gatewayKeys.runs();                 // ["gateway:listRuns", {}]
-gatewayKeys.run(RUN_ID);            // ["gateway:getRun", { runId }]
-gatewayKeys.runEvents(RUN_ID);      // ["gateway:streamRunEvents", { runId }]
-gatewayKeys.nodeOutput(RUN_ID, NODE_ID);
+const dataClient = createSmithersDataClient({
+  mode: { kind: "local", apiBaseUrl: "http://127.0.0.1:7331" },
+});
+
+const runs = await dataClient.api.listRuns({ filter: { limit: 20 } });
+const ack = await dataClient.api.cancelRun({ runId: runs[0]?.runId ?? "" });
 ```
 
-<ResponseField name="gatewayKeys" type="object">
-  Factories include `workflows`, `runs`, `run`, `approvals`, `nodeOutput`,
-  `nodeDiff`, `cronList`, `memoryFacts`, `prompts`, `scores`, `tickets`,
-  `devtoolsSnapshot`, `runEvents`, and `devtools`.
+<ParamField path="options.mode" type="WorkspaceMode" required>
+  Workspace mode and auth token.
+</ParamField>
+<ParamField path="options.fetch" type="typeof fetch">
+  Fetch override for tests or custom runtimes.
+</ParamField>
+<ParamField path="options.EventSource" type="typeof EventSource">
+  SSE implementation override. When omitted, the client falls back to streaming
+  `fetch`.
+</ParamField>
+
+<ResponseField name="SmithersDataClient" type="object">
+  `{ mode, api, stream, close }`. The `api` object covers run lifecycle,
+  approvals, signals, crons, docs, prompts, memory facts, scores, tickets, node
+  output, node diffs, and schema signatures.
 </ResponseField>
 
-**Source** [`createGatewayCollection.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/src/sync/createGatewayCollection.ts) · [`gatewayKeys.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-client/src/sync/gatewayKeys.ts) · **Tests** [`sync`](https://github.com/smithersai/smithers/tree/main/packages/gateway-client/tests/sync)
+## Collection keys and row types
 
-## Sync internals
+`smithersCollectionKeys` contains the TanStack Query keys used by the registry.
+The row types are exported from the same package, including `GatewayRunRow`,
+`GatewayRunSummaryRow`, `GatewayRunEventRow`, `GatewayRunNode`,
+`GatewayApprovalRow`, `GatewayWorkflowRow`, `GatewayCronRow`,
+`GatewayMemoryFactRow`, `GatewayScoreRow`, `GatewayTicketRow`, and
+`GatewayPromptRow`.
 
-<Note>
-The subpath also exports lower-level building blocks used to assemble the
-collections above: `electricCollectionDefs` / `gatewayCollectionDefs` (the
-registry of known collections), `flattenGatewayRunNode` /
-`snapshotToGatewayRunNode` / `reconcileSnapshotNodes` (run-tree shaping),
-`syncKeyFingerprint` / `syncKeyMatches` (key hashing + prefix match),
-`syncBackoffDelay`, the Electric source (`createElectricCollection`), and the row
-types (`GatewayRunRow`, `GatewayRunNode`, `GatewayApprovalRow`, …). They are
-implementation surface for custom transports and rarely needed directly. See the
-[package source](https://github.com/smithersai/smithers/tree/main/packages/gateway-client/src/sync).
-</Note>
+Run-tree helpers remain public for custom inspectors:
+`flattenGatewayRunNode`, `snapshotToGatewayRunNode`, and
+`reconcileSnapshotNodes`.
 
 ---
 

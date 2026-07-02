@@ -50,7 +50,7 @@ SmithersGatewayClient({
 
 **Auth token (as built)**: the gateway enables token auth whenever `SMITHERS_API_KEY` (or a `--auth-token`) is set, after which it rejects unauthenticated RPC/WS calls (though `/health` still answers). So `gatewayConfig.ts` resolves a bearer token (in priority order: `--token` arg, then `SMITHERS_TOKEN`, then `SMITHERS_API_KEY`) and `index.tsx` threads it consistently through: the `SmithersGatewayClient` (`token` → HTTP `Authorization` header + WS `auth.token`), the `/health` probe, and - when it autostarts a local gateway - the spawned `gateway --auth-token <token>`. When no token is configured, a loopback gateway with no auth stays token-free.
 
-**No OPFS / navigator persistence.** `createGatewayPersistence` calls `navigator.*` APIs that do not exist in Bun. Pass no `persistence` option to `createGatewayCollections`. The in-memory sync backend (no-persistence path) works correctly headless.
+**No OPFS / navigator persistence.** The TUI mounts the local Smithers collection provider without browser-only persistence. The in-memory QueryCollection path works correctly headless.
 
 **No `createGatewayReactRoot`.** That helper wraps `react-dom/client` and is for browser contexts. Use `@opentui/react`'s `createRoot` directly.
 
