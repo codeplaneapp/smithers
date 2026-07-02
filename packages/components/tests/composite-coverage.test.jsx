@@ -270,7 +270,7 @@ describe("composite component expansion coverage", () => {
     test("Panel covers direct agent/config panelists and moderation strategies", async () => {
         expect(Panel({ skipIf: true })).toBeNull();
 
-        const voteResult = await render(
+        const voteResult = await renderWithOutputs(
             <Panel
                 id="panel"
                 panelists={[agent, { agent: otherAgent, role: "security" }]}
@@ -282,6 +282,7 @@ describe("composite component expansion coverage", () => {
             >
                 review this
             </Panel>,
+            {},
         );
         expect(voteResult.tasks.map((task) => task.nodeId)).toEqual([
             "panel-panelist-0",
@@ -290,7 +291,7 @@ describe("composite component expansion coverage", () => {
         ]);
         expect(voteResult.tasks[2].prompt).toContain("Strategy: VOTE");
 
-        const consensusResult = await render(
+        const consensusResult = await renderWithOutputs(
             <Panel
                 id="consensus"
                 panelists={[{ agent, label: "one" }]}
@@ -299,12 +300,13 @@ describe("composite component expansion coverage", () => {
                 moderatorOutput="moderator_out"
                 strategy="consensus"
             />,
+            {},
         );
         expect(consensusResult.tasks[1].prompt).toContain("Strategy: CONSENSUS");
     });
 
     test("Panel supports failover-chain panelists and per-task options", async () => {
-        const result = await render(
+        const result = await renderWithOutputs(
             <Panel
                 id="rp"
                 panelists={[[agent, otherAgent], agent]}
@@ -317,6 +319,7 @@ describe("composite component expansion coverage", () => {
             >
                 review this
             </Panel>,
+            {},
         );
         expect(result.tasks.map((task) => task.nodeId)).toEqual([
             "rp-panelist-0",
@@ -335,6 +338,72 @@ describe("composite component expansion coverage", () => {
         expect(result.tasks[0].heartbeatTimeoutMs).toBe(500);
         expect(result.tasks[1].continueOnFail).toBe(true);
         expect(result.tasks[2].timeoutMs).toBe(2000);
+    });
+
+    test("Panel moderator prompt includes resolved panelist outputs, not just the strategy text", async () => {
+        const result = await renderWithOutputs(
+            <Panel
+                id="panel"
+                panelists={[
+                    { agent, role: "security" },
+                    { agent: otherAgent, role: "perf" },
+                ]}
+                moderator={agent}
+                panelistOutput="panel_out"
+                moderatorOutput="moderator_out"
+                strategy="synthesize"
+            >
+                review this
+            </Panel>,
+            {
+                panel_out: [
+                    { nodeId: "panel-security", iteration: 0, verdict: "looks safe" },
+                    { nodeId: "panel-perf", iteration: 0, verdict: "no regressions" },
+                ],
+            },
+        );
+
+        const moderatorTask = result.tasks.find((task) => task.nodeId === "panel-moderator");
+        expect(moderatorTask).toBeDefined();
+        expect(moderatorTask.prompt).toContain("looks safe");
+        expect(moderatorTask.prompt).toContain("no regressions");
+        expect(moderatorTask.prompt).toContain("Synthesize the following panelist outputs");
+    });
+
+    test("Panel moderator does not deadlock when a panelist fails (continueOnFail, no output row)", async () => {
+        const result = await renderWithOutputs(
+            <Panel
+                id="panel"
+                panelists={[
+                    { agent, role: "security" },
+                    { agent: otherAgent, role: "perf" },
+                ]}
+                moderator={agent}
+                panelistOutput="panel_out"
+                moderatorOutput="moderator_out"
+                strategy="synthesize"
+                panelistTaskProps={{ continueOnFail: true }}
+            >
+                review this
+            </Panel>,
+            {
+                // Only the "security" panelist produced output; "perf" failed and
+                // wrote no row (as continueOnFail tasks do on failure).
+                panel_out: [
+                    { nodeId: "panel-security", iteration: 0, verdict: "looks safe" },
+                ],
+            },
+        );
+
+        // The moderator task must still render (not defer to null) despite the
+        // missing panelist output.
+        const moderatorTask = result.tasks.find((task) => task.nodeId === "panel-moderator");
+        expect(moderatorTask).toBeDefined();
+        expect(moderatorTask.prompt).toContain("looks safe");
+        // The moderator is still gated on both panelists via `needs`/dependsOn.
+        expect(new Set(moderatorTask.dependsOn)).toEqual(
+            new Set(["panel-security", "panel-perf"]),
+        );
     });
 
     test("Debate, ReviewLoop, Optimizer, and ScanFixVerify expand their loops", async () => {
