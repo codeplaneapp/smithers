@@ -1,6 +1,5 @@
 /** @jsxImportSource react */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import mermaid from "mermaid";
 import { featuresData } from "./ddd-features.generated";
 import { workflowSource, workflowSourcePath, workflowSources } from "./ddd-workflowSource.generated";
 import type { DocsContentEntry } from "./ddd-docsContent.generated";
@@ -1409,9 +1408,11 @@ function MermaidPreview({ code, index }: { code: string; index: number }) {
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined") return;
     let alive = true;
-    void Promise.resolve()
-      .then(() => {
+    const load = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<any>;
+    void load("mermaid")
+      .then((module) => {
         if (!alive) return;
+        const mermaid = module.default ?? module;
         mermaid.initialize?.({ startOnLoad: false, securityLevel: "strict", theme: "neutral" });
         return mermaid.render?.(`ddd-mermaid-${index}-${hashText(code)}`, code);
       })
