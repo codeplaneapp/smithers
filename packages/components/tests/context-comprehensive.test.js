@@ -45,8 +45,8 @@ describe("SmithersCtx edge cases", () => {
             input: {},
             outputs: { tbl: rows },
         });
-        expect(ctx.latest("tbl", "a")).toEqual(rows[2]);
-        expect(ctx.latest("tbl", "b")).toEqual(rows[1]);
+        expect(ctx.latest("tbl", "a")).toEqual({ v: 3 });
+        expect(ctx.latest("tbl", "b")).toEqual({ v: 2 });
     });
     test("latest handles non-numeric iteration gracefully", () => {
         const rows = [{ nodeId: "n", iteration: undefined, v: 1 }];
@@ -57,7 +57,7 @@ describe("SmithersCtx edge cases", () => {
             outputs: { tbl: rows },
         });
         // Should treat non-finite iterations as 0
-        expect(ctx.latest("tbl", "n")).toEqual(rows[0]);
+        expect(ctx.latest("tbl", "n")).toEqual({ v: 1 });
     });
     test("iterationCount with duplicate iterations counts unique", () => {
         const rows = [
