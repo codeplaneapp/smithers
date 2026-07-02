@@ -70,7 +70,7 @@ export function launchPostFailureAutopsy({
         entryFile = resolveWorkflow("post-failure", cwd, env).entryFile;
     }
     catch {
-        safeWrite(write, `[smithers] Run failed. Investigate it with: smithers workflow run post-failure --input '{"targetRunId":"${failedRunId}"}' (the post-failure workflow is not installed — run \`smithers init\` to get automatic autopsies)\n`);
+        safeWrite(write, `[smithers] Run failed. Investigate it with: smithers workflow run post-failure --input '{"targetRunId":"${failedRunId}"}' (the post-failure workflow is not installed — \`smithers init\` installs it for automatic autopsies)\n`);
         return { launched: false, reason: "not-installed" };
     }
     const autopsyRunId = `post-failure-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
