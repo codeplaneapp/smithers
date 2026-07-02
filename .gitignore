@@ -118,3 +118,6 @@ workflows/*.db-wal
 
 # Alchemy IaC local state
 .alchemy/
+
+# smithers ui scratch workspaces
+packages/server/.smithers-root-landing-ui-*/
