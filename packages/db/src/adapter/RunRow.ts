@@ -18,4 +18,6 @@ export type RunRow = {
   vcsRevision: string | null;
   errorJson: string | null;
   configJson: string | null;
+  claimedAtMs: number | null;
+  claimedBy: string | null;
 };

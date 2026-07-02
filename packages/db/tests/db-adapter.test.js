@@ -663,55 +663,64 @@ describe("SmithersDb adapter", () => {
         await adapter.insertRun(runRow("stale-finished", "finished", {
             heartbeatAtMs: now - 60_000,
         }));
+        await adapter.insertRun(runRow("stale-claimed", "running", {
+            heartbeatAtMs: now - 60_000,
+            claimedAtMs: now,
+            claimedBy: "supervisor:active",
+        }));
         const stale = await adapter.listStaleRunningRuns(now - 30_000);
         const ids = stale.map((row) => row.runId);
         expect(ids).toContain("stale-running");
         expect(ids).not.toContain("fresh-running");
         expect(ids).not.toContain("stale-finished");
+        expect(ids).not.toContain("stale-claimed");
     });
-    test("claimRunForResume succeeds only once for the same stale snapshot", async () => {
+    test("claimResumableRuns succeeds only once for the same stale run", async () => {
         const { adapter } = createTestDb();
         await adapter.insertRun(runRow("claim-once", "running", {
             runtimeOwnerId: "pid:999:owner",
             heartbeatAtMs: now - 60_000,
         }));
-        const first = await adapter.claimRunForResume({
-            runId: "claim-once",
-            expectedRuntimeOwnerId: "pid:999:owner",
-            expectedHeartbeatAtMs: now - 60_000,
-            staleBeforeMs: now - 30_000,
-            claimOwnerId: "supervisor:a",
-            claimHeartbeatAtMs: now,
-        });
-        const second = await adapter.claimRunForResume({
-            runId: "claim-once",
-            expectedRuntimeOwnerId: "pid:999:owner",
-            expectedHeartbeatAtMs: now - 60_000,
-            staleBeforeMs: now - 30_000,
-            claimOwnerId: "supervisor:b",
-            claimHeartbeatAtMs: now + 1,
-        });
-        expect(first).toBe(true);
-        expect(second).toBe(false);
+        const [first, second] = await Promise.all([
+            adapter.claimResumableRuns(now, 30_000, "supervisor:a", 10),
+            adapter.claimResumableRuns(now, 30_000, "supervisor:b", 10),
+        ]);
+        expect(first.length + second.length).toBe(1);
         const run = await adapter.getRun("claim-once");
-        expect(run?.runtimeOwnerId).toBe("supervisor:a");
-        expect(run?.heartbeatAtMs).toBe(now);
+        expect(run?.runtimeOwnerId).toBe("pid:999:owner");
+        expect(run?.heartbeatAtMs).toBe(now - 60_000);
+        expect(["supervisor:a", "supervisor:b"]).toContain(run?.claimedBy);
+        expect(run?.claimedAtMs).toBe(now);
     });
-    test("releaseRunResumeClaim restores runtime owner and heartbeat", async () => {
+    test("claimResumableRuns reclaims an expired run lease", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertRun(runRow("claim-expired", "running", {
+            runtimeOwnerId: "pid:999:owner",
+            heartbeatAtMs: now - 60_000,
+            claimedAtMs: now - 60_000,
+            claimedBy: "supervisor:crashed",
+        }));
+        const claimed = await adapter.claimResumableRuns(now, 30_000, "supervisor:recover", 10);
+        expect(claimed.map((row) => row.runId)).toEqual(["claim-expired"]);
+        const run = await adapter.getRun("claim-expired");
+        expect(run?.claimedBy).toBe("supervisor:recover");
+        expect(run?.claimedAtMs).toBe(now);
+        expect(run?.runtimeOwnerId).toBe("pid:999:owner");
+    });
+    test("releaseRunClaim clears run lease columns", async () => {
         const { adapter } = createTestDb();
         await adapter.insertRun(runRow("claim-release", "running", {
-            runtimeOwnerId: "supervisor:a",
-            heartbeatAtMs: now,
+            runtimeOwnerId: "pid:123:owner",
+            heartbeatAtMs: now - 5000,
+            claimedAtMs: now,
+            claimedBy: "supervisor:a",
         }));
-        await adapter.releaseRunResumeClaim({
-            runId: "claim-release",
-            claimOwnerId: "supervisor:a",
-            restoreRuntimeOwnerId: "pid:123:owner",
-            restoreHeartbeatAtMs: now - 5000,
-        });
+        await adapter.releaseRunClaim("claim-release");
         const run = await adapter.getRun("claim-release");
         expect(run?.runtimeOwnerId).toBe("pid:123:owner");
         expect(run?.heartbeatAtMs).toBe(now - 5000);
+        expect(run?.claimedAtMs).toBeNull();
+        expect(run?.claimedBy).toBeNull();
     });
     test("requestRunCancel sets cancelRequestedAtMs", async () => {
         const { adapter } = createTestDb();

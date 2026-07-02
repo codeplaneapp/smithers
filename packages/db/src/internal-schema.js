@@ -19,6 +19,8 @@ export const smithersRuns = sqliteTable("_smithers_runs", {
     vcsRevision: text("vcs_revision"),
     errorJson: text("error_json"),
     configJson: text("config_json"),
+    claimedAtMs: integer("claimed_at_ms"),
+    claimedBy: text("claimed_by"),
 });
 export const smithersNodes = sqliteTable("_smithers_nodes", {
     runId: text("run_id").notNull(),

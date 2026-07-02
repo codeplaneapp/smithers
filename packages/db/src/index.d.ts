@@ -161,6 +161,8 @@ type RunRow$1 = {
     vcsRevision: string | null;
     errorJson: string | null;
     configJson: string | null;
+    claimedAtMs: number | null;
+    claimedBy: string | null;
 };
 
 type RunAncestryRow$1 = {
@@ -573,6 +575,14 @@ declare class SmithersDb {
    */
     listStaleRunningRuns(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$1>;
     /**
+   * @param {number} nowMs
+   * @param {number} leaseMs
+   * @param {string} workerId
+   * @param {number} [limit]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    claimResumableRuns(nowMs: number, leaseMs: number, workerId: string, limit?: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
    * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
@@ -587,6 +597,11 @@ declare class SmithersDb {
         requireStale?: boolean;
     }): RunnableEffect<boolean, SmithersError$1>;
     /**
+   * @param {string} runId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    releaseRunClaim(runId: string): RunnableEffect<void, SmithersError$1>;
+    /**
    * @param {{ runId: string; claimOwnerId: string; restoreRuntimeOwnerId: string | null; restoreHeartbeatAtMs: number | null; }} params
    * @returns {RunnableEffect<void, SmithersError>}
    */
@@ -597,13 +612,15 @@ declare class SmithersDb {
         restoreHeartbeatAtMs: number | null;
     }): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {{ runId: string; expectedRuntimeOwnerId: string; expectedHeartbeatAtMs: number | null; patch: Record<string, unknown>; }} params
+   * @param {{ runId: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; expectedClaimedBy?: string | null; expectedClaimedAtMs?: number | null; patch: Record<string, unknown>; }} params
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
     updateClaimedRun(params: {
         runId: string;
-        expectedRuntimeOwnerId: string;
+        expectedRuntimeOwnerId: string | null;
         expectedHeartbeatAtMs: number | null;
+        expectedClaimedBy?: string | null;
+        expectedClaimedAtMs?: number | null;
         patch: Record<string, unknown>;
     }): RunnableEffect<boolean, SmithersError$1>;
     /**
@@ -1153,10 +1170,23 @@ declare class SmithersDb {
    */
     listStaleRunningRunsEffect(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$1>;
     /**
+   * @param {Parameters<SmithersDb["claimResumableRuns"]>[0]} nowMs
+   * @param {Parameters<SmithersDb["claimResumableRuns"]>[1]} leaseMs
+   * @param {Parameters<SmithersDb["claimResumableRuns"]>[2]} workerId
+   * @param {Parameters<SmithersDb["claimResumableRuns"]>[3]} limit
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    claimResumableRunsEffect(nowMs: Parameters<SmithersDb["claimResumableRuns"]>[0], leaseMs: Parameters<SmithersDb["claimResumableRuns"]>[1], workerId: Parameters<SmithersDb["claimResumableRuns"]>[2], limit?: Parameters<SmithersDb["claimResumableRuns"]>[3]): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
    * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
     claimRunForResumeEffect(params: Parameters<SmithersDb["claimRunForResume"]>[0]): RunnableEffect<boolean, SmithersError$1>;
+    /**
+   * @param {Parameters<SmithersDb["releaseRunClaim"]>[0]} runId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    releaseRunClaimEffect(runId: Parameters<SmithersDb["releaseRunClaim"]>[0]): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {Parameters<SmithersDb["releaseRunResumeClaim"]>[0]} params
    * @returns {RunnableEffect<void, SmithersError>}

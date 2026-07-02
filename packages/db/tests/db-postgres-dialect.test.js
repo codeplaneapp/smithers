@@ -235,6 +235,35 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(await adapter.getRawNodeOutputForIteration("pg_adapter_output", "run-pg", "node", 0)).toBeNull();
     });
 
+    test("SmithersDb claims resumable runs atomically on postgres", async () => {
+        const adapter = new SmithersDb(new Database(":memory:"));
+        adapter.internalStorage = storage;
+        adapter.db = { _: { fullSchema: {} } };
+
+        const now = 1_717_000_000_000;
+        const runId = "pg-resume-claim";
+        await adapter.insertRun({
+            runId,
+            workflowName: "demo",
+            workflowPath: "/tmp/pg-resume-claim.tsx",
+            status: "running",
+            createdAtMs: now - 120_000,
+            heartbeatAtMs: now - 60_000,
+            runtimeOwnerId: "pid:999:owner",
+        });
+
+        const [first, second] = await Promise.all([
+            adapter.claimResumableRuns(now, 30_000, "pg-worker-a", 10),
+            adapter.claimResumableRuns(now, 30_000, "pg-worker-b", 10),
+        ]);
+
+        expect(first.length + second.length).toBe(1);
+        const row = await adapter.getRun(runId);
+        expect(["pg-worker-a", "pg-worker-b"]).toContain(row?.claimedBy);
+        expect(row?.claimedAtMs).toBe(now);
+        expect(row?.runtimeOwnerId).toBe("pid:999:owner");
+    });
+
     test("insertEventWithNextSeq allocates gapless seqs under concurrency on the postgres fallback path", async () => {
         // Force the non-bun:sqlite fallback branch: internalStorage is postgres
         // and `db` exposes no sqlite exec/query/run client. Without the

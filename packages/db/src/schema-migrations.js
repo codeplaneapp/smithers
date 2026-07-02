@@ -799,6 +799,51 @@ function buildMigrations(context) {
                 return { table: "_smithers_cron", addedColumns };
             },
         },
+        {
+            id: "0020_add_run_lease_columns",
+            name: "Add run claim/lease columns for concurrency-safe serverless resumes",
+            checksum: "packages/db/migrations/0020_add_run_lease_columns.sql",
+            isApplied: (sqlite) => {
+                if (!tableExists(sqlite, "_smithers_runs")) {
+                    return true;
+                }
+                const columns = tableColumnNames(sqlite, "_smithers_runs");
+                return columns.has("claimed_at_ms") && columns.has("claimed_by");
+            },
+            isAppliedPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_runs"))) {
+                    return true;
+                }
+                const columns = await tableColumnNamesPostgres(pgConn, "_smithers_runs");
+                return columns.has("claimed_at_ms") && columns.has("claimed_by");
+            },
+            up: (sqlite) => {
+                if (!tableExists(sqlite, "_smithers_runs")) {
+                    return { table: "_smithers_runs", skipped: "table_absent" };
+                }
+                const addedColumns = [];
+                if (addColumnIfMissing(sqlite, "_smithers_runs", "claimed_at_ms", "claimed_at_ms INTEGER")) {
+                    addedColumns.push("claimed_at_ms");
+                }
+                if (addColumnIfMissing(sqlite, "_smithers_runs", "claimed_by", "claimed_by TEXT")) {
+                    addedColumns.push("claimed_by");
+                }
+                return { table: "_smithers_runs", addedColumns };
+            },
+            upPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_runs"))) {
+                    return { table: "_smithers_runs", skipped: "table_absent" };
+                }
+                const addedColumns = [];
+                if (await addColumnIfMissingPostgres(pgConn, "_smithers_runs", "claimed_at_ms", "claimed_at_ms INTEGER")) {
+                    addedColumns.push("claimed_at_ms");
+                }
+                if (await addColumnIfMissingPostgres(pgConn, "_smithers_runs", "claimed_by", "claimed_by TEXT")) {
+                    addedColumns.push("claimed_by");
+                }
+                return { table: "_smithers_runs", addedColumns };
+            },
+        },
     ];
 }
 

@@ -72,7 +72,9 @@ const CREATE_TABLE_STATEMENTS = [
     vcs_root TEXT,
     vcs_revision TEXT,
     error_json TEXT,
-    config_json TEXT
+    config_json TEXT,
+    claimed_at_ms INTEGER,
+    claimed_by TEXT
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_nodes (
     run_id TEXT NOT NULL,

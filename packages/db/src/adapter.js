@@ -1045,8 +1045,88 @@ export class SmithersDb {
            FROM _smithers_runs
            WHERE status = 'running'
              AND (heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
+             AND (claimed_at_ms IS NULL OR claimed_at_ms <= ?)
            ORDER BY COALESCE(heartbeat_at_ms, 0) ASC
-           LIMIT ?`, [staleBeforeMs, limit]));
+           LIMIT ?`, [staleBeforeMs, staleBeforeMs, limit]));
+    }
+    /**
+   * Atomically claim resumable runs for a short-lived resume tick. Mirrors
+   * claimDueCrons: first read a bounded set of candidate primary keys, then
+   * claim each one with an atomic UPDATE ... RETURNING guarded by the same due
+   * and lease-expiry predicates.
+   *
+   * A run is resumable when it is either running with a stale heartbeat, or
+   * waiting-event with a stale heartbeat and a decided approval / answered
+   * human request still attached to a pending node.
+   * @param {number} nowMs
+   * @param {number} leaseMs
+   * @param {string} workerId
+   * @param {number} [limit]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    claimResumableRuns(nowMs, leaseMs, workerId, limit = 100) {
+        return this.write("claim resumable runs", async () => {
+            const staleBeforeMs = nowMs - leaseMs;
+            const candidateWhere = `(
+             (
+               status = 'running'
+               AND (heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
+             )
+             OR (
+               status = 'waiting-event'
+               AND (heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
+               AND (
+                 EXISTS (
+                   SELECT 1
+                   FROM _smithers_approvals a
+                   JOIN _smithers_nodes n
+                     ON a.run_id = n.run_id
+                    AND a.node_id = n.node_id
+                    AND a.iteration = n.iteration
+                   WHERE a.run_id = _smithers_runs.run_id
+                     AND a.status IN ('approved', 'denied')
+                     AND n.state = 'pending'
+                 )
+                 OR EXISTS (
+                   SELECT 1
+                   FROM _smithers_human_requests h
+                   JOIN _smithers_nodes n
+                     ON h.run_id = n.run_id
+                    AND h.node_id = n.node_id
+                    AND h.iteration = n.iteration
+                   WHERE h.run_id = _smithers_runs.run_id
+                     AND h.status = 'answered'
+                     AND n.state = 'pending'
+                 )
+               )
+             )
+           )
+           AND (claimed_at_ms IS NULL OR claimed_at_ms <= ?)`;
+            const candidates = await this.internalStorage.queryAll(`SELECT run_id
+         FROM _smithers_runs
+         WHERE ${candidateWhere}
+         ORDER BY COALESCE(heartbeat_at_ms, 0) ASC, created_at_ms ASC
+         LIMIT ?`, [staleBeforeMs, staleBeforeMs, staleBeforeMs, limit]);
+            const claimed = [];
+            for (const candidate of candidates) {
+                const rows = await this.internalStorage.queryAll(`UPDATE _smithers_runs
+           SET claimed_at_ms = ?, claimed_by = ?
+           WHERE run_id = ?
+             AND ${candidateWhere}
+           RETURNING *`, [
+                    nowMs,
+                    workerId,
+                    candidate.runId,
+                    staleBeforeMs,
+                    staleBeforeMs,
+                    staleBeforeMs,
+                ]);
+                if (rows.length > 0) {
+                    claimed.push(rows[0]);
+                }
+            }
+            return claimed;
+        });
     }
     /**
    * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
@@ -1063,20 +1143,22 @@ export class SmithersDb {
                 // bigint column directly so Postgres infers bigint.
                 return this.internalStorage
                     .queryAllRaw(`UPDATE _smithers_runs
-             SET runtime_owner_id = ?, heartbeat_at_ms = ?
+             SET claimed_at_ms = ?, claimed_by = ?
              WHERE run_id = ?
                AND status = ?
                AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
                AND (heartbeat_at_ms IS NOT DISTINCT FROM ?)
                AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
+               AND (claimed_at_ms IS NULL OR claimed_at_ms <= ?)
              RETURNING run_id`, [
-                        params.claimOwnerId,
                         params.claimHeartbeatAtMs,
+                        params.claimOwnerId,
                         params.runId,
                         expectedStatus,
                         params.expectedRuntimeOwnerId,
                         params.expectedHeartbeatAtMs,
                         requireStale ? 1 : 0,
+                        params.staleBeforeMs,
                         params.staleBeforeMs,
                     ])
                     .then((rows) => rows.length > 0);
@@ -1084,36 +1166,35 @@ export class SmithersDb {
             const client = this.db.session.client;
             client
                 .query(`UPDATE _smithers_runs
-           SET runtime_owner_id = ?, heartbeat_at_ms = ?
+           SET claimed_at_ms = ?, claimed_by = ?
            WHERE run_id = ?
              AND status = ?
              AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
              AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
-             AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)`)
-                .run(params.claimOwnerId, params.claimHeartbeatAtMs, params.runId, expectedStatus, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs, requireStale ? 1 : 0, params.staleBeforeMs);
+             AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
+             AND (claimed_at_ms IS NULL OR claimed_at_ms <= ?)`)
+                .run(params.claimHeartbeatAtMs, params.claimOwnerId, params.runId, expectedStatus, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs, requireStale ? 1 : 0, params.staleBeforeMs, params.staleBeforeMs);
             return this.internalStorage
                 .queryOne("SELECT changes() AS count")
                 .then((row) => Number(row?.count ?? 0) > 0);
         });
     }
     /**
+   * @param {string} runId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    releaseRunClaim(runId) {
+        return this.write(`release run claim ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", { claimedAtMs: null, claimedBy: null }, "run_id = ?", [runId]));
+    }
+    /**
    * @param {{ runId: string; claimOwnerId: string; restoreRuntimeOwnerId: string | null; restoreHeartbeatAtMs: number | null; }} params
    * @returns {RunnableEffect<void, SmithersError>}
    */
     releaseRunResumeClaim(params) {
-        return this.write(`release stale run claim ${params.runId}`, () => {
-            return this.internalStorage.execute(`UPDATE _smithers_runs
-         SET runtime_owner_id = ?, heartbeat_at_ms = ?
-         WHERE run_id = ? AND runtime_owner_id = ?`, [
-                params.restoreRuntimeOwnerId,
-                params.restoreHeartbeatAtMs,
-                params.runId,
-                params.claimOwnerId,
-            ]);
-        });
+        return this.releaseRunClaim(params.runId);
     }
     /**
-   * @param {{ runId: string; expectedRuntimeOwnerId: string; expectedHeartbeatAtMs: number | null; patch: Record<string, unknown>; }} params
+   * @param {{ runId: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; expectedClaimedBy?: string | null; expectedClaimedAtMs?: number | null; patch: Record<string, unknown>; }} params
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
     updateClaimedRun(params) {
@@ -1125,27 +1206,45 @@ export class SmithersDb {
             }
             const assignments = patchEntries.map(([key]) => `${camelToSnake(key)} = ?`);
             const setArgs = patchEntries.map(([, value]) => value);
+            const hasClaimGuard = Object.prototype.hasOwnProperty.call(params, "expectedClaimedBy") ||
+                Object.prototype.hasOwnProperty.call(params, "expectedClaimedAtMs");
             if (this.internalStorage.dialect === POSTGRES) {
                 // Null-safe heartbeat compare (see claimRunForResume): IS NOT
                 // DISTINCT FROM keeps the bigint param from being coerced to int4
                 // by an int4 `-1` sentinel.
+                const claimWhere = hasClaimGuard
+                    ? `AND COALESCE(claimed_by, '') = COALESCE(?, '')
+               AND (claimed_at_ms IS NOT DISTINCT FROM ?)`
+                    : "";
+                const claimArgs = hasClaimGuard
+                    ? [params.expectedClaimedBy ?? null, params.expectedClaimedAtMs ?? null]
+                    : [];
                 return this.internalStorage
                     .queryAllRaw(`UPDATE _smithers_runs
              SET ${assignments.join(", ")}
              WHERE run_id = ?
-               AND runtime_owner_id = ?
+               AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
                AND (heartbeat_at_ms IS NOT DISTINCT FROM ?)
-             RETURNING run_id`, [...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs])
+               ${claimWhere}
+             RETURNING run_id`, [...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs, ...claimArgs])
                     .then((rows) => rows.length > 0);
             }
+            const claimWhere = hasClaimGuard
+                ? `AND COALESCE(claimed_by, '') = COALESCE(?, '')
+             AND COALESCE(claimed_at_ms, -1) = COALESCE(?, -1)`
+                : "";
+            const claimArgs = hasClaimGuard
+                ? [params.expectedClaimedBy ?? null, params.expectedClaimedAtMs ?? null]
+                : [];
             const client = this.db.session.client;
             client
                 .query(`UPDATE _smithers_runs
            SET ${assignments.join(", ")}
            WHERE run_id = ?
-             AND runtime_owner_id = ?
-             AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)`)
-                .run(...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs);
+             AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
+             AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
+             ${claimWhere}`)
+                .run(...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs, ...claimArgs);
             return this.internalStorage
                 .queryOne("SELECT changes() AS count")
                 .then((row) => Number(row?.count ?? 0) > 0);
@@ -2853,11 +2952,28 @@ export class SmithersDb {
         return this.listStaleRunningRuns(staleBeforeMs, limit);
     }
     /**
+   * @param {Parameters<SmithersDb["claimResumableRuns"]>[0]} nowMs
+   * @param {Parameters<SmithersDb["claimResumableRuns"]>[1]} leaseMs
+   * @param {Parameters<SmithersDb["claimResumableRuns"]>[2]} workerId
+   * @param {Parameters<SmithersDb["claimResumableRuns"]>[3]} limit
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    claimResumableRunsEffect(nowMs, leaseMs, workerId, limit = 100) {
+        return this.claimResumableRuns(nowMs, leaseMs, workerId, limit);
+    }
+    /**
    * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
     claimRunForResumeEffect(params) {
         return this.claimRunForResume(params);
+    }
+    /**
+   * @param {Parameters<SmithersDb["releaseRunClaim"]>[0]} runId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    releaseRunClaimEffect(runId) {
+        return this.releaseRunClaim(runId);
     }
     /**
    * @param {Parameters<SmithersDb["releaseRunResumeClaim"]>[0]} params
