@@ -58,6 +58,16 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
   output: outputSchema,
 });
 
+// The CLI's own module directory when this workflow runs through the smithers
+// CLI (`smithers init` / `workflow run`), so the import below always resolves
+// the exact code that launched the run; the package specifier is the fallback
+// for runs the CLI did not launch. A computed specifier keeps `tsc` from
+// failing the pack typecheck (the CLI ships no type declarations to packs).
+const cliModule = (name: string) =>
+  process.env.SMITHERS_CLI_SRC_DIR
+    ? `${process.env.SMITHERS_CLI_SRC_DIR}/${name}.js`
+    : `@smithers-orchestrator/cli/${name}`;
+
 export default smithers((ctx) => {
   const force = ctx.input.force ?? false;
   const refreshSkills = ctx.input.refreshSkills ?? true;
@@ -67,9 +77,13 @@ export default smithers((ctx) => {
   return (
     <Workflow name="init">
       <Sequence>
-        <Task id="install-pack" output={outputs.pack}>
+        {/* retries=0: a deterministic scaffold either works or it never will
+            (e.g. unresolvable import) — the engine's default infinite compute
+            retries would hang the CLI instead of letting it fall back to the
+            imperative path. */}
+        <Task id="install-pack" output={outputs.pack} retries={0}>
           {async () => {
-            const { initWorkflowPack } = await import("@smithers-orchestrator/cli/workflow-pack");
+            const { initWorkflowPack } = await import(cliModule("workflow-pack"));
             const result = initWorkflowPack({ force, skipInstall });
             return {
               written: result.writtenFiles.length,
@@ -79,13 +93,13 @@ export default smithers((ctx) => {
           }}
         </Task>
         {pack ? (
-          <Task id="refresh-skills" output={outputs.skills}>
+          <Task id="refresh-skills" output={outputs.skills} retries={0}>
             {async () => {
               if (!refreshSkills) {
                 return { refreshed: false, detail: "skipped (refreshSkills=false)" };
               }
               const { refreshCuratedSkills, formatRefreshNotice } = await import(
-                "@smithers-orchestrator/cli/refreshCuratedSkills"
+                cliModule("refreshCuratedSkills")
               );
               const result = refreshCuratedSkills({});
               return { refreshed: true, detail: formatRefreshNotice(result) || "up to date" };

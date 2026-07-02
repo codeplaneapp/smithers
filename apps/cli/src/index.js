@@ -107,6 +107,12 @@ async function loadWorkflowAsync(path) {
 /**
  * @param {string} path
  */
+// Advertise this CLI's module directory to workflows launched by it. System
+// workflows (the seeded `init`) import CLI internals through this so they
+// always run the exact code that launched them, instead of depending on
+// `@smithers-orchestrator/cli` being resolvable from the pack's node_modules.
+process.env.SMITHERS_CLI_SRC_DIR ??= dirname(fileURLToPath(import.meta.url));
+
 function loadWorkflowEffect(path) {
     return Effect.tryPromise({
         try: () => loadWorkflowAsync(path),

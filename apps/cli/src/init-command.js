@@ -120,11 +120,22 @@ async function runDurableReinit(options) {
         if (!workflow) return null;
         ensureSmithersTables(workflow.db);
         const runId = crypto.randomUUID();
-        const result = await Effect.runPromise(runWorkflow(workflow, {
-            input: { force: options.force ?? false, skipInstall: options.skipInstall ?? false },
-            runId,
-            workflowPath: entryFile,
-        }));
+        let result;
+        try {
+            result = await Effect.runPromise(runWorkflow(workflow, {
+                input: { force: options.force ?? false, skipInstall: options.skipInstall ?? false },
+                runId,
+                workflowPath: entryFile,
+            }));
+        }
+        finally {
+            // Close the workflow's DB handle so `smithers init` exits promptly
+            // instead of the open sqlite handle keeping the event loop alive.
+            const close = workflow.close ?? workflow.db?.close;
+            if (typeof close === "function") {
+                await close.call(workflow.close ? workflow : workflow.db);
+            }
+        }
         return {
             durable: true,
             workflow: "init",

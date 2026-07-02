@@ -6,7 +6,7 @@
 // that forget a UI fail here instead of silently shipping without one.
 
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { createExecutableDir, writeFakeCodexBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
@@ -42,8 +42,11 @@ test("every canonical init workflow ships with a custom UI", () => {
         const workflowsDir = join(smithersRoot, "workflows");
         const uiDir = join(smithersRoot, "ui");
 
+        // System workflows (internal plumbing like `init`) are hidden from all
+        // default listings, so they intentionally ship without a custom UI.
         const workflowKeys = writtenFiles
             .filter((f) => f.startsWith(workflowsDir) && f.endsWith(".tsx"))
+            .filter((f) => !/^\/\/\s*smithers-system:\s*true\b/m.test(readFileSync(f, "utf8")))
             .map((f) => relative(workflowsDir, f).replace(/\.tsx$/, ""));
 
         const uiKeys = new Set(

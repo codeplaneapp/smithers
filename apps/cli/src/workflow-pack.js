@@ -160,6 +160,9 @@ function renderPackageJson(versions) {
             react: versions.reactVersion,
             "react-dom": versions.reactDomVersion,
             "smithers-orchestrator": smithersSpec,
+            // The seeded `init` system workflow imports the CLI's pack
+            // scaffolding functions to make re-init a durable run.
+            "@smithers-orchestrator/cli": smithersSpec,
             zod: versions.zodVersion,
         },
         devDependencies: {
@@ -186,7 +189,8 @@ function renderTsconfig() {
             noEmit: true,
             strict: true,
             skipLibCheck: true,
-            baseUrl: ".",
+            // No baseUrl: TS 6 deprecates it (TS5101) and `paths` resolves
+            // relative to this tsconfig without it.
             paths: {
                 "~/*": ["./*"],
             },
