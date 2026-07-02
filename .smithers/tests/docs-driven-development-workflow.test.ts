@@ -249,4 +249,18 @@ describe("docs-driven-development workflow guards", () => {
     expect(done.status).toBe("done");
     expect(done.fixed).toEqual(["gateway: proved"]);
   });
+
+  test("workflow prompt contracts preserve bounded reads, feature fields, and running-source guardrails", () => {
+    const source = readFileSync(workflowPath, "utf8");
+
+    expect(source).toContain('Start with "bun .smithers/lib/ddd/auditInputs.ts"');
+    expect(source).toContain("Do not recursively read .smithers/executions or .smithers/pg");
+    expect(source).toContain("PRESERVE the organization fields on every record");
+    expect(source).toContain("tier, group, userValue, capabilities, endpoints, links");
+    expect(source).toContain("every link href must resolve to an existing content file");
+    expect(source).toContain("do not recursively start another docs-driven-development workflow");
+    expect(source).toContain("NEVER edit the orchestration source of THIS running workflow");
+    expect(source).toContain(".smithers/workflows/docs-driven-development.tsx and .smithers/lib/ddd/*.ts are OFF-LIMITS");
+    expect(source).toContain("record it precisely in your summary");
+  });
 });

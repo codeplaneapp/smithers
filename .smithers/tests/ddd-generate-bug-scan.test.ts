@@ -3,6 +3,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rm
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { withDddProcessEnvLock } from "./docsDrivenDevelopmentRunFixture.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
@@ -45,11 +46,16 @@ function writeFeatures(root: string, value: unknown) {
 }
 
 function writeExecutable(path: string, source: string) {
-  writeFileSync(path, `#!${process.execPath}\n${source}\n`);
+  writeFileSync(path, `#!/usr/bin/env node\n${source}\n`);
   chmodSync(path, 0o755);
 }
 
-function writeShellExecutable(path: string, source: string) {
+function writeSmithersExecutable(path: string, output: "run" | "no-id" | "fail") {
+  const source = output === "run"
+    ? 'printf "started run-abc-123\\n"'
+    : output === "no-id"
+      ? 'printf "queued without id\\n"'
+      : 'printf "boom\\n" >&2\nexit 7';
   writeFileSync(path, `#!/bin/sh\n${source}\n`);
   chmodSync(path, 0o755);
 }
@@ -109,9 +115,8 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     const root = tempRoot();
     const binDir = mkdtempSync(join(tmpdir(), "ddd-bugscan-bin-"));
     tempDirs.push(binDir);
-    const previousPath = process.env.PATH;
     const smithersPath = join(binDir, "smithers");
-    const { kickoffBugScan, kickoffBugScanAfterGate } = await generateModule();
+    const { kickoffBugScan, kickoffBugScanAfterGate, resolveExecutable } = await generateModule();
 
     expect(kickoffBugScan(root, false)).toEqual({
       launched: false,
@@ -129,28 +134,32 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
       summary: "Bug scan blocked because the generated spec review was not approved.",
     });
 
-    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    try {
-      writeShellExecutable(smithersPath, 'printf "started run-abc-123\\n"');
-      expect(kickoffBugScan(root, true)).toEqual({
-        launched: true,
-        bugScanRunId: "run-abc-123",
-        summary: "Detached bug scan launched: run-abc-123.",
-      });
+    await withDddProcessEnvLock(async () => {
+      const previousPath = process.env.PATH;
+      process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+      try {
+        writeSmithersExecutable(smithersPath, "run");
+        expect(resolveExecutable("smithers", process.env.PATH)).toBe(smithersPath);
+        expect(kickoffBugScan(root, true)).toEqual({
+          launched: true,
+          bugScanRunId: "run-abc-123",
+          summary: "Detached bug scan launched: run-abc-123.",
+        });
 
-      writeShellExecutable(smithersPath, 'printf "queued without id\\n"');
-      const withoutId = kickoffBugScan(root, true);
-      expect(withoutId.launched).toBe(true);
-      expect(withoutId.bugScanRunId).toBe("");
-      expect(withoutId.summary).toContain("run id not parsed");
+        writeSmithersExecutable(smithersPath, "no-id");
+        const withoutId = kickoffBugScan(root, true);
+        expect(withoutId.launched).toBe(true);
+        expect(withoutId.bugScanRunId).toBe("");
+        expect(withoutId.summary).toContain("run id not parsed");
 
-      writeShellExecutable(smithersPath, 'printf "boom\\n" >&2\nexit 7');
-      const failed = kickoffBugScan(root, true);
-      expect(failed.launched).toBe(false);
-      expect(failed.summary).toContain("Bug scan launch failed:");
-    } finally {
-      process.env.PATH = previousPath;
-    }
+        writeSmithersExecutable(smithersPath, "fail");
+        const failed = kickoffBugScan(root, true);
+        expect(failed.launched).toBe(false);
+        expect(failed.summary).toContain("Bug scan launch failed:");
+      } finally {
+        process.env.PATH = previousPath;
+      }
+    });
   });
 
   test("bugSlug and bugTicketMarkdown provide fallback, truncation, and default fields", async () => {
@@ -229,7 +238,11 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     ], root);
     expect(unknown.created).toBe(1);
     expect(unknown.featuresUpdated).toEqual([]);
+    expect(unknown.ticketCreationPassed).toBe(true);
+    expect(unknown.specUpdatePassed).toBe(true);
     expect(unknown.buildPassed).toBe(true);
+    expect(unknown.ticketErrors).toEqual([]);
+    expect(unknown.specErrors).toEqual([]);
 
     const none = fileBugTickets("run-none", [], root);
     expect(none.created).toBe(0);
@@ -242,7 +255,13 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     ], root);
     expect(unreadable.created).toBe(1);
     expect(unreadable.featuresUpdated).toEqual([]);
+    expect(unreadable.ticketCreationPassed).toBe(true);
+    expect(unreadable.specUpdatePassed).toBe(false);
     expect(unreadable.buildPassed).toBe(false);
+    expect(unreadable.specErrors.join("\n")).toContain("Failed to read");
+    expect(unreadable.specErrors.join("\n")).toContain("features.json");
+    expect(unreadable.buildErrors.join("\n")).toContain("Spec build failed");
+    expect(unreadable.summary).toContain("spec update error");
 
     writeFeatures(root, [{ id: "bad", title: "Bad", summary: "Bad", status: "not-real", priority: "p0", owner: "product" }]);
     const invalidBuild = fileBugTickets("run-invalid", [
@@ -250,7 +269,28 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     ], root);
     expect(invalidBuild.created).toBe(1);
     expect(invalidBuild.featuresUpdated).toEqual(["bad"]);
+    expect(invalidBuild.specUpdatePassed).toBe(true);
     expect(invalidBuild.buildPassed).toBe(false);
+    expect(invalidBuild.buildErrors.join("\n")).toContain("Spec build failed");
+    expect(invalidBuild.summary).toContain("build FAILED");
+  });
+
+  test("fileBugTickets reports ticket creation errors separately from spec updates", async () => {
+    const root = tempRoot();
+    writeFileSync(join(root, ".smithers/tickets"), "not a directory");
+    const { fileBugTickets } = await bugScanModule();
+
+    const result = fileBugTickets("run-ticket-error", [
+      { id: "bug-ticket", title: "Ticket path is blocked", severity: "major", featureId: "known-feature", file: "packages/ticket.ts" },
+    ], root);
+
+    expect(result.created).toBe(0);
+    expect(result.ticketCreationPassed).toBe(false);
+    expect(result.ticketErrors.join("\n")).toContain("ticket");
+    expect(result.specUpdatePassed).toBe(true);
+    expect(result.featuresUpdated).toEqual(["known-feature"]);
+    expect(result.buildPassed).toBe(true);
+    expect(result.summary).toContain("ticket creation error");
   });
 
   test("fileBugTickets is idempotent when ticket files preexist but feature state is stale", async () => {
@@ -344,6 +384,7 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     expect(result.skippedExisting).toBe(1);
     expect(result.featuresUpdated.sort()).toEqual(["broken-build-feature", "known-feature"]);
     expect(result.buildPassed).toBe(false);
+    expect(result.buildErrors.join("\n")).toContain("Spec build failed");
     expect(result.summary).toContain("build FAILED");
 
     const ticketFiles = result.ticketPaths.filter((path) => path.includes("duplicate-gap"));
@@ -352,5 +393,26 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     const known = features.find((feature: any) => feature.id === "known-feature");
     expect(known.status).toBe("broken");
     expect(known.missing).toEqual(["Bug (major): Duplicate gap [packages/server/src/duplicate.ts]"]);
+  });
+
+  test("generate-docs and bug-scan prompt contracts keep DDD safe and bounded", () => {
+    const generateSource = readFileSync(generateWorkflowPath, "utf8");
+    const bugScanSource = readFileSync(bugScanWorkflowPath, "utf8");
+
+    expect(generateSource).toContain("never recursive dumps");
+    expect(generateSource).toContain("never blindly replace records or drop their fields");
+    expect(generateSource).toContain("preserve tier, group, userValue, capabilities, endpoints, and links");
+    expect(generateSource).toContain("run \"bun .smithers/lib/ddd/build.ts\"");
+    expect(generateSource).toContain("Set approved=true only when the spec is honest and the build passes");
+    expect(generateSource).toContain("Do not edit running orchestration files for this DDD surface");
+    expect(generateSource).toContain(".smithers/workflows/ddd-generate-docs.tsx");
+    expect(generateSource).toContain(".smithers/workflows/ddd-bug-scan.tsx");
+    expect(generateSource).toContain(".smithers/workflows/docs-driven-development.tsx");
+
+    expect(bugScanSource).toContain("READ-ONLY: do not modify any file");
+    expect(bugScanSource).toContain('Start with "bun .smithers/lib/ddd/auditInputs.ts"');
+    expect(bugScanSource).toContain("Do not recursively read .smithers/executions or .smithers/pg");
+    expect(bugScanSource).toContain("Default to rejected when uncertain");
+    expect(bugScanSource).toContain("Do not launch docs-driven-development, ddd-generate-docs, or another ddd-bug-scan");
   });
 });

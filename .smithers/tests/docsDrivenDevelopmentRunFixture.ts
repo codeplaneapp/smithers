@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,17 +73,37 @@ export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFi
 
   mkdirSync(join(root, ".smithers"), { recursive: true });
   mkdirSync(join(root, ".smithers/agents"), { recursive: true });
-  cpSync(resolve(repoRoot, ".smithers/agents.ts"), join(root, ".smithers/agents.ts"));
-  writeFileSync(join(root, ".smithers/agents/index.ts"), 'export { agents, providers } from "../agents.ts";\n');
   cpSync(resolve(repoRoot, ".smithers/lib/ddd"), join(root, ".smithers/lib/ddd"), { recursive: true });
   mkdirSync(join(root, ".smithers/spec/content"), { recursive: true });
   mkdirSync(join(root, ".smithers/specs"), { recursive: true });
   mkdirSync(join(root, ".smithers/workflows"), { recursive: true });
   cpSync(agentsDir, join(root, ".smithers/agents"), { recursive: true });
+  writeFixtureAgents(root, binDir);
   writeFileSync(join(root, ".smithers/spec/features.json"), `${JSON.stringify(options.features ?? [dddFixtureFeature()], null, 2)}\n`);
   writeFileSync(join(root, ".smithers/spec/content/overview.md"), "# Overview\n\nInitial DDD overview.\n");
   writeFileSync(join(root, ".smithers/specs/docs-driven-development.md"), "# Docs Driven Development\n");
-  cpSync(workflowPath, join(root, ".smithers/workflows/docs-driven-development.tsx"));
+  const agentPath = `${binDir}:${process.env.PATH ?? ""}`;
+  const workflowSource = readFileSync(workflowPath, "utf8").replace(
+    `import { providers } from "../agents";`,
+    [
+      `import { type AgentLike, ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";`,
+      `const fixtureAgentEnv = { PATH: ${JSON.stringify(agentPath)}, SMITHERS_TEST_AGENT_PATH: ${JSON.stringify(agentPath)} };`,
+      `const providers = {`,
+      `  claude: new ClaudeCodeAgent({ model: "claude-fable-5", env: fixtureAgentEnv }),`,
+      `  claudeSonnet: new ClaudeCodeAgent({ model: "claude-sonnet-4-6", env: fixtureAgentEnv }),`,
+      `  codex: new CodexAgent({ model: "gpt-5.5", skipGitRepoCheck: true, env: fixtureAgentEnv }),`,
+      `} as const;`,
+      `const agents = {`,
+      `  cheapFast: [providers.claudeSonnet, providers.codex],`,
+      `  smart: [providers.claude, providers.claudeSonnet, providers.codex],`,
+      `  smartTool: [providers.claude, providers.claudeSonnet, providers.codex],`,
+      `  planning: [providers.claude],`,
+      `  review: [providers.claude],`,
+      `  implement: [providers.codex],`,
+      `} as const satisfies Record<string, AgentLike[]>;`,
+    ].join("\n"),
+  );
+  writeFileSync(join(root, ".smithers/workflows/docs-driven-development.tsx"), workflowSource);
   symlinkSync(resolve(repoRoot, "node_modules"), join(root, "node_modules"), "dir");
   writeFileSync(join(root, "package.json"), JSON.stringify({ name: "ddd-run-e2e", type: "module" }) + "\n");
   writeFileSync(join(root, ".gitignore"), "node_modules/\n.smithers/tickets/\nsmithers.db*\n");
@@ -107,9 +127,39 @@ export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFi
   };
 }
 
+function writeFixtureAgents(root: string, binDir: string) {
+  const agentPath = `${binDir}:${process.env.PATH ?? ""}`;
+  writeFileSync(join(root, ".smithers/agents.ts"), `import { type AgentLike, ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
+
+const env = {
+  PATH: ${JSON.stringify(agentPath)},
+  SMITHERS_TEST_AGENT_PATH: ${JSON.stringify(agentPath)},
+  ...(process.env.SMITHERS_FAKE_AGENT_RESPONSE ? { SMITHERS_FAKE_AGENT_RESPONSE: process.env.SMITHERS_FAKE_AGENT_RESPONSE } : {}),
+  ...(process.env.SMITHERS_FAKE_CODEX_RESPONSE ? { SMITHERS_FAKE_CODEX_RESPONSE: process.env.SMITHERS_FAKE_CODEX_RESPONSE } : {}),
+  ...(process.env.SMITHERS_FAKE_CLAUDE_RESPONSE ? { SMITHERS_FAKE_CLAUDE_RESPONSE: process.env.SMITHERS_FAKE_CLAUDE_RESPONSE } : {}),
+  ...(process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE ? { SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE: process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE } : {}),
+};
+export const providers = {
+  claude: new ClaudeCodeAgent({ model: "claude-fable-5", env }),
+  claudeSonnet: new ClaudeCodeAgent({ model: "claude-sonnet-4-6", env }),
+  codex: new CodexAgent({ model: "gpt-5.5", skipGitRepoCheck: true, env }),
+} as const;
+
+export const agents = {
+  cheapFast: [providers.claudeSonnet, providers.codex],
+  smart: [providers.claude, providers.claudeSonnet, providers.codex],
+  smartTool: [providers.claude, providers.claudeSonnet, providers.codex],
+  planning: [providers.claude],
+  review: [providers.claude],
+  implement: [providers.codex],
+} as const satisfies Record<string, AgentLike[]>;
+`);
+  writeFileSync(join(root, ".smithers/agents/index.ts"), 'export { agents, providers } from "../agents.ts";\n');
+}
+
 function writeFakeAgents(binDir: string) {
   const claudeSrc = [
-    `#!${process.execPath}`,
+    `#!/usr/bin/env node`,
     `const fs = require("node:fs");`,
     `const args = process.argv.slice(2);`,
     `if (args.join(" ") === "auth status") { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) + "\\n"); process.exit(0); }`,
@@ -131,7 +181,7 @@ function writeFakeAgents(binDir: string) {
   chmodSync(join(binDir, "claude"), 0o755);
 
   const codexSrc = [
-    `#!${process.execPath}`,
+    `#!/usr/bin/env node`,
     `const fs = require("node:fs");`,
     `const args = process.argv.slice(2);`,
     `function promptText() { try { return args.join("\\n") + "\\n" + fs.readFileSync(0, "utf8"); } catch { return args.join("\\n"); } }`,
@@ -251,8 +301,22 @@ export async function runDddWorkflow(
       });
       const auth = { triggeredBy: "e2e", scopes: ["*"], role: "operator", tokenId: null };
       await gateway.startRun("docs-driven-development", input, auth as Parameters<typeof gateway.startRun>[2], runId, { resume: false });
-      const inflight = gateway.inflightRuns.get(runId);
-      if (inflight) await inflight;
+      let inflight = gateway.inflightRuns.get(runId);
+      for (let attempt = 0; !inflight && attempt < 50; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        inflight = gateway.inflightRuns.get(runId);
+      }
+      if (inflight) {
+        await inflight;
+      } else {
+        for (let attempt = 0; attempt < 2400; attempt += 1) {
+          const response = await gatewayRequest(gateway, createConnectionContext(), "runs.list", { limit: 100 });
+          const rows = (response.ok && Array.isArray(response.payload) ? response.payload : []) as Array<Record<string, unknown>>;
+          const status = rows.find((row) => row.runId === runId)?.status;
+          if (status === "finished" || status === "failed" || status === "canceled") break;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
       return gateway;
     },
     options,

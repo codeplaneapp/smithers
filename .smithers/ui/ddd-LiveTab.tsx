@@ -49,7 +49,6 @@ function LiveLog({ events, streaming }: { events: EventFrame[]; streaming: boole
     event: string;
     node: string;
     detail: string;
-    raw?: string;
   }>;
   const endRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -71,12 +70,6 @@ function LiveLog({ events, streaming }: { events: EventFrame[]; streaming: boole
                 {line.node ? <span className="livelog-node">{line.node}</span> : null}
                 {line.detail ? <span className="livelog-detail">{line.detail}</span> : null}
               </div>
-              {line.raw ? (
-                <details className="livelog-debug">
-                  <summary>debug</summary>
-                  <pre>{line.raw}</pre>
-                </details>
-              ) : null}
             </div>
           ))}
           <div ref={endRef} />

@@ -152,7 +152,7 @@ const { Workflow, smithers, outputs } = createSmithers({
   summary: summarySchema,
 });
 
-const CONTEXT = `
+export const CONTEXT = `
 This workflow is called docs-driven-development.
 
 Goal:

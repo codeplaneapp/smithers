@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, relative, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { dddRoot } from "./dddRoot.ts";
 import type { Feature } from "./featuresSchema.ts";
 import { validateFeatures } from "./validateFeatures.ts";
@@ -46,6 +47,14 @@ function collectMarkdown(dir: string): string[] {
 
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "gap";
+}
+
+function shortHash(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 8);
+}
+
+function backlogTicketPath(feature: Feature, index: number, gap: string): string {
+  return `tickets/${feature.id}--${String(index).padStart(2, "0")}-${slug(gap)}-${shortHash(`${feature.id}\0${index}\0${gap}`)}.md`;
 }
 
 function inferKind(item: string, feature: Feature): string {
@@ -112,7 +121,7 @@ export function generateUiModules(root: string = dddRoot()): { docs: number; tic
     if (gaps.length === 0) {
       const gap = `Close the ${feature.status} status of ${feature.title} with direct proof.`;
       tickets.push({
-        path: `tickets/${feature.id}--01-${slug(feature.status)}.md`,
+        path: backlogTicketPath(feature, 1, gap),
         kind: inferKind(gap, feature),
         status: "todo",
         priority: feature.priority,
@@ -126,7 +135,7 @@ export function generateUiModules(root: string = dddRoot()): { docs: number; tic
     gaps.forEach((gap, i) => {
       const kind = inferKind(gap, feature);
       tickets.push({
-        path: `tickets/${feature.id}--${String(i + 1).padStart(2, "0")}-${slug(gap)}.md`,
+        path: backlogTicketPath(feature, i + 1, gap),
         kind,
         status: "todo",
         priority: feature.priority,

@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import mermaid from "mermaid";
 import { featuresData } from "./ddd-features.generated";
 import { workflowSource, workflowSourcePath, workflowSources } from "./ddd-workflowSource.generated";
 import type { DocsContentEntry } from "./ddd-docsContent.generated";
@@ -292,6 +293,11 @@ export function isTerminalRunStatus(status: string | undefined): boolean {
   return ["done", "finished", "success", "ok", "complete", "completed", "failed", "failure", "error", "cancelled", "canceled", "skipped"].includes(normalized);
 }
 
+export function isFailedTerminalRunStatus(status: string | undefined): boolean {
+  const normalized = normalizeStatus(status);
+  return ["failed", "failure", "error", "cancelled", "canceled"].includes(normalized);
+}
+
 export function fmtTime(ms: number | undefined): string {
   if (!ms || !Number.isFinite(ms)) return "";
   try {
@@ -426,6 +432,88 @@ export function useDialogFocusTrap({
 
 export function normalizeMarkdownForDirty(markdown: string): string {
   return markdown.replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").trimEnd();
+}
+
+export type DraftChangedFile = { path: string; beforeMarkdown: string; afterMarkdown: string };
+
+export type DraftReconciliationResult = {
+  nextDrafts: Record<string, string>;
+  appliedPaths: string[];
+  clearedPaths: string[];
+  retainedPaths: string[];
+  updatedPaths: string[];
+};
+
+export type DraftRunNotice = {
+  runId: string;
+  state: "applied" | "retained" | "not-applied" | "failed";
+  clearedPaths: string[];
+  retainedPaths: string[];
+  updatedPaths: string[];
+  summary: string;
+};
+
+export function normalizeSpecDocPath(path: unknown): string {
+  return asString(path)
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.?\/*/, "")
+    .replace(/^smithers\/spec\/content\//, ".smithers/spec/content/")
+    .replace(/^\.smithers\/spec\/content\//, "")
+    .replace(/^spec\/content\//, "");
+}
+
+export function changedFilesFromMetaTicket(metaTicket: unknown): DraftChangedFile[] {
+  const row = rowOf(metaTicket);
+  return asArray(row?.changedFiles ?? row?.changed_files)
+    .filter(isRecord)
+    .map((file) => ({
+      path: normalizeSpecDocPath(file.path),
+      beforeMarkdown: asString(file.beforeMarkdown ?? file.before_markdown),
+      afterMarkdown: asString(file.afterMarkdown ?? file.after_markdown),
+    }))
+    .filter((file) => file.path.length > 0);
+}
+
+export function updatedDocPathsFromSpec(spec: unknown): string[] {
+  const row = rowOf(spec);
+  return strings(row?.updatedFiles ?? row?.updated_files)
+    .map(normalizeSpecDocPath)
+    .filter((path) => path.length > 0);
+}
+
+export function reconcileDraftsAfterRun(
+  drafts: Record<string, string>,
+  changedFiles: ReadonlyArray<DraftChangedFile>,
+  updatedFiles: ReadonlyArray<string>,
+): DraftReconciliationResult {
+  const updated = new Set(updatedFiles.map(normalizeSpecDocPath).filter(Boolean));
+  const nextDrafts = { ...drafts };
+  const appliedPaths: string[] = [];
+  const clearedPaths: string[] = [];
+  const retainedPaths: string[] = [];
+
+  for (const file of changedFiles) {
+    const path = normalizeSpecDocPath(file.path);
+    if (!path) continue;
+    if (updated.has(path)) appliedPaths.push(path);
+    const currentDraft = drafts[path];
+    if (currentDraft === undefined) continue;
+    if (updated.has(path) && normalizeMarkdownForDirty(currentDraft) === normalizeMarkdownForDirty(file.afterMarkdown)) {
+      delete nextDrafts[path];
+      clearedPaths.push(path);
+    } else {
+      retainedPaths.push(path);
+    }
+  }
+
+  return {
+    nextDrafts,
+    appliedPaths: [...new Set(appliedPaths)],
+    clearedPaths: [...new Set(clearedPaths)],
+    retainedPaths: [...new Set(retainedPaths)],
+    updatedPaths: [...updated],
+  };
 }
 
 const SPEC_DRAFTS_STORAGE_KEY = "smithers.ddd.specDrafts.v1";
@@ -833,19 +921,11 @@ function summarizeEventValue(value: unknown): string {
   return shortText(asString(value));
 }
 
-function safeDebugJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return asString(value);
-  }
-}
-
 /**
  * Generic one-line view of any run event for the live log (the `smithers up
  * --interactive` style feed). Renders every public event, not just agent text.
  */
-export function logLineFromFrame(frame: EventFrame): { seq: number; event: string; node: string; detail: string; raw?: string } | null {
+export function logLineFromFrame(frame: EventFrame): { seq: number; event: string; node: string; detail: string } | null {
   const env = frameEnvelope(frame);
   if (!env) return null;
   const { event, payload } = env;
@@ -883,8 +963,7 @@ export function logLineFromFrame(frame: EventFrame): { seq: number; event: strin
     detail = [formatStatus(asString(payload.status)), shortText(asString(payload.message), 180)].filter(Boolean).join(" · ") || summarizeStructured(payload);
   }
 
-  const raw = safeDebugJson({ event, payload });
-  return { seq: finiteSeq(frame.seq), event, node, detail: shortText(detail, 260), raw };
+  return { seq: finiteSeq(frame.seq), event, node, detail: shortText(detail, 260) };
 }
 
 export function ListBlock({ title, items }: { title: string; items: string[] }) {
@@ -1408,21 +1487,19 @@ function MermaidPreview({ code, index }: { code: string; index: number }) {
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined") return;
     let alive = true;
-    const load = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<any>;
-    void load("mermaid")
-      .then((module) => {
-        if (!alive) return;
-        const mermaid = module.default ?? module;
-        mermaid.initialize?.({ startOnLoad: false, securityLevel: "strict", theme: "neutral" });
-        return mermaid.render?.(`ddd-mermaid-${index}-${hashText(code)}`, code);
-      })
-      .then((result) => {
-        if (!alive || !result) return;
-        setSvg(asString(result.svg ?? result));
-      })
-      .catch(() => {
-        if (alive) setFailed(true);
-      });
+    try {
+      mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "neutral" });
+      void Promise.resolve(mermaid.render(`ddd-mermaid-${index}-${hashText(code)}`, code))
+        .then((result) => {
+          if (!alive || !result) return;
+          setSvg(asString(typeof result === "string" ? result : result.svg));
+        })
+        .catch(() => {
+          if (alive) setFailed(true);
+        });
+    } catch {
+      if (alive) setFailed(true);
+    }
     return () => {
       alive = false;
     };
@@ -1661,7 +1738,7 @@ export const styles = [
   "body { margin:0; background:var(--bg); color:var(--text); font-size:13px; overflow:hidden; }",
   "button { font:inherit; }",
   ".shell { height:100vh; width:100%; max-width:100vw; overflow:hidden; display:grid; grid-template-rows:auto auto 1fr; }",
-  ".top { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border-bottom:1px solid var(--border); background:var(--surface-glass-strong); -webkit-backdrop-filter:blur(18px) saturate(180%); backdrop-filter:blur(18px) saturate(180%); }",
+  ".top { position:relative; z-index:80; min-width:0; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border-bottom:1px solid var(--border); background:var(--surface-glass-strong); -webkit-backdrop-filter:blur(18px) saturate(180%); backdrop-filter:blur(18px) saturate(180%); }",
   ".title { display:flex; align-items:center; gap:12px; min-width:0; flex:1 1 auto; }",
   "h1 { margin:0; font-size:15px; font-weight:650; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
   "h2 { margin:0; font-size:12px; font-weight:650; }",
@@ -1675,6 +1752,12 @@ export const styles = [
   ".badge.warn { color:var(--warn); border-color:color-mix(in srgb,var(--warn),transparent 45%); }",
   ".badge.bad { color:var(--bad); border-color:color-mix(in srgb,var(--bad),transparent 45%); }",
   ".actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }",
+  ".new-menu-wrap { position:relative; display:inline-flex; }",
+  ".new-menu { position:absolute; top:calc(100% + 8px); right:0; width:min(360px,calc(100vw - 24px)); z-index:55; display:grid; gap:10px; padding:12px; background:var(--surface); border:1px solid var(--border); border-radius:8px; box-shadow:0 18px 56px rgb(var(--shadow-rgb) / 0.18); }",
+  ".new-menu-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }",
+  ".new-menu-divider { height:1px; background:var(--border); margin:2px 0; }",
+  ".new-menu .button { width:100%; }",
+  ".new-menu .start-status { margin-top:-2px; }",
   ".button { border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:6px; min-height:32px; padding:0 12px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:6px; }",
   ".button:hover { background:var(--hover); }",
   ".button.primary { border-color:color-mix(in srgb,var(--brand) 40%,transparent); background:color-mix(in srgb,var(--brand) 10%,var(--surface)); color:var(--brand); font-weight:650; }",
@@ -1808,9 +1891,6 @@ export const styles = [
   ".livelog-event { color:var(--blue); flex:none; }",
   ".livelog-node { color:var(--warn); flex:none; }",
   ".livelog-detail { color:var(--code-text); min-width:0; }",
-  ".livelog-debug { margin-left:18px; color:var(--text-faint); }",
-  ".livelog-debug summary { cursor:pointer; font-size:10px; }",
-  ".livelog-debug pre { margin:4px 0 6px; max-height:180px; overflow:auto; white-space:pre-wrap; color:var(--code-text); }",
   ".chat { display:grid; gap:8px; }",
   ".chat-line { min-width:0; border:1px solid var(--border); border-left:3px solid var(--border-strong); border-radius:8px; padding:8px 10px; background:var(--surface); }",
   ".chat-line .who { color:var(--blue); font-family:ui-monospace,monospace; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }",
@@ -1887,6 +1967,9 @@ export const styles = [
   ".start-textarea { min-height:88px; height:auto; padding:8px 10px; resize:vertical; font:inherit; line-height:1.45; }",
   ".start-actions { display:flex; align-items:center; gap:8px; }",
   ".start-status { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12px; }",
+  ".draft-run-state { align-items:flex-start; flex-wrap:wrap; }",
+  ".draft-run-state .button { margin-left:auto; flex:none; }",
+  ".draft-run-state strong { color:var(--text); }",
   // guided tutorial overlay
   ".tutorial-backdrop { position:fixed; inset:0; background:rgb(var(--shadow-rgb) / 0.5); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px); display:grid; place-items:center; padding:20px; z-index:70; }",
   ".tutorial-card { width:min(620px,calc(100vw - 40px)); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; display:grid; gap:12px; box-shadow:0 24px 80px rgb(var(--shadow-rgb) / 0.2); }",
@@ -1899,5 +1982,5 @@ export const styles = [
   ".tutorial-actions { display:flex; align-items:center; justify-content:space-between; gap:10px; }",
   ".tutorial-steps-nav { display:flex; align-items:center; gap:8px; }",
   "@media (max-width: 980px) { .specs,.live { grid-template-columns:1fr; } .specs-tree,.runlist { border-right:0; border-bottom:1px solid var(--border); max-height:220px; } }",
-  "@media (max-width: 620px) { .shell { height:100dvh; } .top { align-items:flex-start; flex-wrap:wrap; padding:10px 12px; gap:10px; } .title { flex-wrap:wrap; gap:8px; } h1 { width:100%; } .actions { width:100%; justify-content:flex-start; } .tabbar { padding:8px 10px; } .scroll { padding:10px; } .card { padding:12px; } .card-head { align-items:flex-start; flex-wrap:wrap; } .stats,.grid2 { grid-template-columns:1fr; } .feature-grid,.cap-grid { grid-template-columns:minmax(0,1fr); } .filters { grid-template-columns:1fr; } .editor-bar { align-items:flex-start; flex-wrap:wrap; } .editor-title { width:100%; } .dispatch-actions { width:100%; display:grid; grid-template-columns:1fr; } .button { width:100%; } .specs-tree,.runlist { max-height:190px; } .slot-title { align-items:flex-start; } .modal-backdrop { padding:10px; place-items:start center; } .modal { width:calc(100vw - 20px); max-height:calc(100dvh - 20px); padding:14px; } }",
+  "@media (max-width: 620px) { .shell { height:100dvh; } .top { align-items:flex-start; flex-wrap:wrap; padding:10px 12px; gap:10px; } .title { flex-wrap:wrap; gap:8px; } h1 { width:100%; } .actions { width:100%; justify-content:flex-start; } .new-menu-wrap { width:100%; } .new-menu { left:0; right:auto; width:calc(100vw - 24px); } .tabbar { padding:8px 10px; } .scroll { padding:10px; } .card { padding:12px; } .card-head { align-items:flex-start; flex-wrap:wrap; } .stats,.grid2 { grid-template-columns:1fr; } .feature-grid,.cap-grid { grid-template-columns:minmax(0,1fr); } .filters { grid-template-columns:1fr; } .editor-bar { align-items:flex-start; flex-wrap:wrap; } .editor-title { width:100%; } .dispatch-actions { width:100%; display:grid; grid-template-columns:1fr; } .button { width:100%; } .specs-tree,.runlist { max-height:190px; } .slot-title { align-items:flex-start; } .modal-backdrop { padding:10px; place-items:start center; } .modal { width:calc(100vw - 20px); max-height:calc(100dvh - 20px); padding:14px; } }",
 ].join("\n");

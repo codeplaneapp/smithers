@@ -369,7 +369,7 @@ describe("DDD UI parser contracts", () => {
     ]);
   });
 
-  test("logLineFromFrame skips heartbeats and keeps noisy payloads behind debug JSON", () => {
+  test("logLineFromFrame skips heartbeats and summarizes noisy payloads without raw JSON", () => {
     expect(logLineFromFrame(frame(1, "run.heartbeat", { status: "ok" }))).toBeNull();
     expect(logLineFromFrame(frame(2, "task.heartbeat", { status: "ok" }))).toBeNull();
 
@@ -382,7 +382,7 @@ describe("DDD UI parser contracts", () => {
     expect(line?.node).toBe("work:1");
     expect(line?.detail.length).toBeLessThanOrEqual(260);
     expect(line?.detail).not.toContain("{");
-    expect(line?.raw).toContain("\"nodeId\": \"work:1\"");
+    expect(line).not.toHaveProperty("raw");
   });
 
   test("logLineFromFrame summarizes structured task output into counts and status", () => {

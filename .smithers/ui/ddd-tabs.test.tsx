@@ -22,14 +22,15 @@ import type { Feature, TicketRow } from "./ddd-shared";
 
 const { docsContent } = await import("./ddd-docsContent.generated");
 const { ticketsBacklog } = await import("./ddd-ticketsBacklog.generated");
-const { FeatureDetail, MarkdownEditor, MarkdownPreview, SpecFileTree, buildChatLines, features, formatCount, formatTicketKind, loadSpecDrafts, saveSpecDrafts, uploadAsset, useDialogFocusTrap } = await import("./ddd-shared");
+const { FeatureDetail, MarkdownEditor, MarkdownPreview, SpecFileTree, buildChatLines, changedFilesFromMetaTicket, features, formatCount, formatTicketKind, loadSpecDrafts, reconcileDraftsAfterRun, saveSpecDrafts, updatedDocPathsFromSpec, uploadAsset, useDialogFocusTrap } = await import("./ddd-shared");
 const { FeaturesTab } = await import("./ddd-FeaturesTab");
 const { SpecsTab } = await import("./ddd-SpecsTab");
 const { AuditTab } = await import("./ddd-AuditTab");
 const { TicketsTab } = await import("./ddd-TicketsTab");
 const { LiveTab } = await import("./ddd-LiveTab");
-const { StartPane } = await import("./ddd-StartPane");
-const { App } = await import("./docs-driven-development");
+const { NewEntryMenu, StartPane } = await import("./ddd-StartPane");
+const { App, builderWorkflowName, createWorkflowPromptForApp } = await import("./docs-driven-development");
+type AppProps = Parameters<typeof App>[0];
 const {
   Tutorial,
   markTutorialDone,
@@ -54,11 +55,13 @@ const tempDirs: string[] = [];
 
 afterEach(async () => {
   while (harnesses.length > 0) await harnesses.pop()!.unmount();
+  await new Promise((resolve) => setTimeout(resolve, 50));
   while (gateways.length > 0) {
     try {
       await gateways.pop()!.close();
     } catch {}
   }
+  await new Promise((resolve) => setTimeout(resolve, 250));
   while (servers.length > 0) {
     await new Promise<void>((resolve) => servers.pop()!.close(() => resolve()));
   }
@@ -189,10 +192,21 @@ function makeStaticWorkflow(name: string, dbPath: string, delayMs = 0) {
   const row = z.object({
     summary: z.string().default(""),
     status: z.string().default("partial"),
+    source: z.string().default(""),
+    docPath: z.string().default(""),
+    changedFiles: z.array(z.any()).default([]),
+    beforeMarkdown: z.string().default(""),
+    afterMarkdown: z.string().default(""),
+    updatedFiles: z.array(z.string()).default([]),
+    featureIds: z.array(z.string()).default([]),
+    broken: z.array(z.string()).default([]),
+    partial: z.array(z.string()).default([]),
+    missingE2E: z.array(z.string()).default([]),
+    missingDocs: z.array(z.string()).default([]),
     selected: z.array(z.any()).default([]),
     tickets: z.array(z.any()).default([]),
     approved: z.boolean().default(true),
-  });
+  }).passthrough();
   const { smithers, Workflow: W, Task: T, outputs } = createSmithers({
     bootstrap: row,
     metaTicket: row,
@@ -222,19 +236,25 @@ function makeStaticWorkflow(name: string, dbPath: string, delayMs = 0) {
       <T id="bootstrap" output={outputs.bootstrap}>
         {{ summary: "bootstrap ok", status: "done" }}
       </T>
-      <T id="metaTicket" output={outputs.metaTicket} dependsOn={["bootstrap"]}>
-        {{
-          summary: "meta ok",
-          status: "done",
-          source: (ctx.input as any).metaTicket?.source ?? "",
-          docPath: (ctx.input as any).metaTicket?.docPath ?? "",
+      <T id="metaTicket" output={outputs.metaTicket}>
+        {async () => {
+          const ticket = (ctx.input as any).metaTicket ?? {};
+          return {
+            summary: "meta ok",
+            status: "done",
+            source: ticket.source ?? "",
+            docPath: ticket.docPath ?? "",
+            changedFiles: ticket.changedFiles ?? [],
+            beforeMarkdown: ticket.beforeMarkdown ?? "",
+            afterMarkdown: ticket.afterMarkdown ?? "",
+          };
         }}
+      </T>
+      <T id="spec-update" output={outputs.spec}>
+        {{ summary: "spec ok", status: "ready", updatedFiles: ["overview.md"] }}
       </T>
       <T id="audit" output={outputs.audit} dependsOn={["metaTicket"]}>
         {{ summary: "audit ok", status: "done", featureIds: ["docs-driven-development"], broken: [], partial: [], missingE2E: [], missingDocs: [] }}
-      </T>
-      <T id="spec-update" output={outputs.spec} dependsOn={["audit"]}>
-        {{ summary: "spec ok", status: "ready" }}
       </T>
       <T id="triage" output={outputs.triage} dependsOn={["spec-update"]}>
         {{
@@ -273,7 +293,10 @@ function makeStaticWorkflow(name: string, dbPath: string, delayMs = 0) {
   ));
 }
 
-async function mountAppWithGateway(pathname = "/workflows/docs-driven-development"): Promise<Harness & { gateway: Gateway; base: string }> {
+async function mountAppWithGateway(
+  pathname = "/workflows/docs-driven-development",
+  appProps: AppProps = {},
+): Promise<Harness & { gateway: Gateway; base: string }> {
   const root = mkdtempSync(join(tmpdir(), "ddd-app-unit-"));
   tempDirs.push(root);
   const gateway = new Gateway({ heartbeatMs: 50 });
@@ -281,13 +304,26 @@ async function mountAppWithGateway(pathname = "/workflows/docs-driven-developmen
   gateway.register("docs-driven-development", makeStaticWorkflow("docs-driven-development", join(root, "ddd.db"), 50) as Parameters<typeof gateway.register>[1], {
     ui: { entry: "docs-driven-development.tsx", title: "Docs Driven Development" },
   });
+  gateway.register("create-workflow", makeStaticWorkflow("create-workflow", join(root, "create.db")) as Parameters<typeof gateway.register>[1]);
   gateway.register("ddd-generate-docs", makeStaticWorkflow("ddd-generate-docs", join(root, "generate.db")) as Parameters<typeof gateway.register>[1]);
   gateway.register("ddd-bug-scan", makeStaticWorkflow("ddd-bug-scan", join(root, "bug.db")) as Parameters<typeof gateway.register>[1]);
   gateway.register("other-workflow", makeStaticWorkflow("other-workflow", join(root, "other.db")) as Parameters<typeof gateway.register>[1]);
-  await gateway.startRun("docs-driven-development", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "url-run", { resume: false });
-  await gateway.inflightRuns.get("url-run");
-  await gateway.startRun("other-workflow", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "other-run", { resume: false });
-  await gateway.inflightRuns.get("other-run");
+  if (pathname.includes("url-run")) {
+    await gateway.startRun("docs-driven-development", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "url-run", { resume: false });
+    await gateway.inflightRuns.get("url-run");
+  }
+  if (pathname.includes("generate-run")) {
+    await gateway.startRun("ddd-generate-docs", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "generate-run", { resume: false });
+    await gateway.inflightRuns.get("generate-run");
+  }
+  if (pathname.includes("bug-run")) {
+    await gateway.startRun("ddd-bug-scan", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "bug-run", { resume: false });
+    await gateway.inflightRuns.get("bug-run");
+  }
+  if (pathname.includes("other-run")) {
+    await gateway.startRun("other-workflow", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "other-run", { resume: false });
+    await gateway.inflightRuns.get("other-run");
+  }
   await gateway.listen({ port: 0, host: "127.0.0.1" });
   const address = (gateway as unknown as { server: Server }).server.address() as AddressInfo;
   const base = `http://127.0.0.1:${address.port}`;
@@ -304,7 +340,7 @@ async function mountAppWithGateway(pathname = "/workflows/docs-driven-developmen
   const harness = await mount(
     <SmithersGatewayProvider client={client}>
       <SyncProvider client={collections}>
-        <App />
+        <App {...appProps} />
       </SyncProvider>
     </SmithersGatewayProvider>,
   );
@@ -317,6 +353,41 @@ describe("DDD tabs and components", () => {
     await waitFor(() => expect(app.container.querySelector('[data-testid="docs-driven-development-ui"]')).toBeTruthy());
     expect(text(app.container.querySelector('[data-testid="ddd-run-id"]') as HTMLElement)).toContain("workflow");
     expect(app.container.querySelector('[data-testid="ddd-features-tab"]')).toBeTruthy();
+    await act(async () => (app.container.querySelector('[data-testid="ddd-open-start"]') as HTMLButtonElement).click());
+    expect(app.container.querySelector('[data-testid="ddd-new-menu"]')).toBeTruthy();
+    expect(app.container.querySelector('[data-testid="ddd-start-pane"]')).toBeFalsy();
+    expect(app.container.querySelector('[data-testid="ddd-features-tab"]')).toBeTruthy();
+  }, 60_000);
+
+  test("App mounted with stub generated spec starts in the non-dismissible Start pane and keeps launch wiring", async () => {
+    const stubDocs = [{
+      path: "overview.md",
+      title: "Overview",
+      level: "product" as const,
+      content: "# Overview\n\nSeeded starter doc.\n",
+    }];
+    const app = await mountAppWithGateway(
+      "/workflows/docs-driven-development?tutorial=off",
+      { specFeatures: [], specDocs: stubDocs, ticketsBacklogData: [] },
+    );
+
+    await waitFor(() => expect(app.container.querySelector('[data-testid="docs-driven-development-ui"]')).toBeTruthy());
+    expect(app.container.querySelector('[data-testid="ddd-start-pane"]')).toBeTruthy();
+    expect(app.container.querySelector('[data-testid="ddd-tutorial"]')).toBeFalsy();
+    expect(app.container.querySelector('[data-testid="ddd-tabbar"]')?.hasAttribute("hidden")).toBe(true);
+    expect(app.container.querySelector('[data-testid="ddd-start-pane"] button[aria-label="Close"]')).toBeFalsy();
+
+    const createButton = app.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement;
+    expect(createButton.disabled).toBe(true);
+    await act(async () => setInputValue(app.container.querySelector('[data-testid="ddd-start-description"]') as HTMLTextAreaElement, "Build a stub-mode app"));
+    expect(createButton.disabled).toBe(false);
+    await act(async () => createButton.click());
+    await waitFor(() => expect(text(app.container.querySelector('[data-testid="ddd-start-launched"]') as HTMLElement)).toContain("create-workflow"), 10_000);
+
+    await act(async () => (app.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).click());
+    await waitFor(() => expect(text(app.container.querySelector('[data-testid="ddd-start-generate-run"]') as HTMLElement)).toContain("ddd-generate-docs"), 10_000);
+    expect(app.container.querySelector('[data-testid="ddd-start-pane"]')).toBeTruthy();
+    expect(app.container.querySelector('[data-testid="ddd-tabbar"]')?.hasAttribute("hidden")).toBe(true);
   }, 60_000);
 
   test("App mounts with real gateway-react state, navigates tabs, handles drafts, and suppresses duplicate launches", async () => {
@@ -403,11 +474,18 @@ describe("DDD tabs and components", () => {
           .map((node) => node.getAttribute("title"));
         expect(runTitles).toContain(launchedRunId);
       }, 10_000);
+      await waitFor(() => expect(loadSpecDrafts(docsContent)[productDoc.path]).toBeUndefined(), 30_000);
+      await act(async () => (app.container.querySelector('[data-testid="ddd-tab-specs"]') as HTMLButtonElement).click());
+      await waitFor(() => {
+        expect(text(app.container.querySelector('[data-testid="ddd-draft-run-state"]') as HTMLElement)).toContain("Applied");
+        expect((app.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(true);
+      });
+      expect(beforeUnloadRemoves.length).toBeGreaterThanOrEqual(2);
     } finally {
       window.addEventListener = originalAdd;
       window.removeEventListener = originalRemove;
     }
-  }, 60_000);
+  }, 120_000);
 
   test("App includes the active non-DDD URL run and falls back to sibling DDD workflow source", async () => {
     const other = await mountAppWithGateway("/workflows/other-workflow?runId=other-run&tutorial=off");
@@ -844,6 +922,35 @@ describe("DDD tabs and components", () => {
       />,
     );
     expect(text(harness.container)).toContain("Drafts stay local until the agent applies them.");
+
+    let reloads = 0;
+    await harness.render(
+      <SpecsTab
+        docs={[productDoc]}
+        drafts={{}}
+        selectedPath={productDoc.path}
+        assetBase={undefined}
+        changedPaths={[]}
+        launchedRunId="run-dispatched"
+        launchError={null}
+        draftRunNotice={{
+          runId: "run-dispatched",
+          state: "applied",
+          clearedPaths: [productDoc.path],
+          retainedPaths: [],
+          updatedPaths: [productDoc.path],
+          summary: "reported 1 applied draft and cleared matching local state. Reload to load regenerated docs.",
+        }}
+        onSelectPath={() => undefined}
+        onDraftChange={() => undefined}
+        onDiscardDrafts={(paths) => discarded.push(paths)}
+        onDispatch={() => undefined}
+        onReload={() => { reloads += 1; }}
+      />,
+    );
+    expect(text(harness.container.querySelector('[data-testid="ddd-draft-run-state"]') as HTMLElement)).toContain("Applied");
+    await act(async () => (harness.container.querySelector('[data-testid="ddd-draft-run-reload"]') as HTMLButtonElement).click());
+    expect(reloads).toBe(1);
   });
 
   test("SpecsTab resets the active markdown editor when the current draft is discarded", async () => {
@@ -928,6 +1035,32 @@ describe("DDD tabs and components", () => {
     saveSpecDrafts({});
     expect(loadSpecDrafts(docsContent)).toEqual({});
     window.localStorage.clear();
+  });
+
+  test("draft reconciliation clears only applied matching drafts and preserves newer local edits", () => {
+    const changedFiles = changedFilesFromMetaTicket({
+      changedFiles: [
+        { path: ".smithers/spec/content/overview.md", beforeMarkdown: "# Old\n", afterMarkdown: "# Applied\n" },
+        { path: "product/guide.md", beforeMarkdown: "# Guide\n", afterMarkdown: "# Guide applied\n" },
+        { path: "product/not-updated.md", beforeMarkdown: "# Old\n", afterMarkdown: "# New\n" },
+      ],
+    });
+    const updatedPaths = updatedDocPathsFromSpec({ updated_files: [".smithers/spec/content/overview.md", "product/guide.md"] });
+    const result = reconcileDraftsAfterRun(
+      {
+        "overview.md": "# Applied\n",
+        "product/guide.md": "# Guide applied\nNewer local note\n",
+        "product/not-updated.md": "# New\n",
+      },
+      changedFiles,
+      updatedPaths,
+    );
+
+    expect(result.clearedPaths).toEqual(["overview.md"]);
+    expect(result.retainedPaths.sort()).toEqual(["product/guide.md", "product/not-updated.md"]);
+    expect(result.appliedPaths.sort()).toEqual(["overview.md", "product/guide.md"]);
+    expect(result.nextDrafts["overview.md"]).toBeUndefined();
+    expect(result.nextDrafts["product/guide.md"]).toContain("Newer local note");
   });
 
   test("SpecsTab tucks technical docs behind a menu, renders them read-only, and keeps per-file dispatch disabled", async () => {
@@ -1141,11 +1274,14 @@ describe("DDD tabs and components", () => {
     const search = harness.container.querySelector('[data-testid="ddd-doc-search"]') as HTMLInputElement;
     await act(async () => setInputValue(search, technicalDoc.path.split("/").at(-1) ?? technicalDoc.path));
     expect(text(harness.container)).toContain("No product docs match.");
+    await waitFor(() => expect(selected).toEqual([technicalDoc.path]));
+    expect(harness.container.querySelector('[data-testid="ddd-technical-doc-view"]')).toBeTruthy();
+    expect(text(harness.container.querySelector(".editor-title") as HTMLElement)).toContain(technicalDoc.path);
     const techButton = [...harness.container.querySelectorAll('[data-testid="ddd-tree-file"]')]
       .find((button) => text(button).includes(technicalDoc.path.split("/").at(-1) ?? technicalDoc.path)) as HTMLButtonElement;
     expect(techButton).toBeTruthy();
     await act(async () => techButton.click());
-    expect(selected).toEqual([technicalDoc.path]);
+    expect(selected).toEqual([technicalDoc.path, technicalDoc.path]);
   });
 
   test("SpecsTab keeps dispatch-all disabled for technical-only changes", async () => {
@@ -1651,6 +1787,43 @@ describe("DDD tabs and components", () => {
     expect(labels).toEqual(["Status", "Kind", "Alpha", "Zoo"]);
   });
 
+  test("NewEntryMenu launches compact create and generate actions for existing specs", async () => {
+    const created: string[] = [];
+    let generateCount = 0;
+    let open = true;
+    const harness = await mount(
+      <NewEntryMenu
+        open={open}
+        onOpenChange={(next) => { open = next; }}
+        onCreateApp={(description) => created.push(description)}
+        onGenerateDocs={() => { generateCount += 1; }}
+        createState={{ runId: null, error: null }}
+        generateState={{ runId: null, error: null }}
+        bugScanRunId=""
+        workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
+      />,
+    );
+
+    expect(harness.container.querySelector('[data-testid="ddd-new-menu"]')).toBeTruthy();
+    expect((harness.container.querySelector('[data-testid="ddd-new-create-launch"]') as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => setInputValue(harness.container.querySelector('[data-testid="ddd-new-description"]') as HTMLTextAreaElement, "  Build a compact app  "));
+    await act(async () => (harness.container.querySelector('[data-testid="ddd-new-create-launch"]') as HTMLButtonElement).click());
+    await act(async () => (harness.container.querySelector('[data-testid="ddd-new-generate-launch"]') as HTMLButtonElement).click());
+    expect(created).toEqual(["Build a compact app"]);
+    expect(generateCount).toBe(1);
+
+    await act(async () => (harness.container.querySelector('button[aria-label="Close new menu"]') as HTMLButtonElement).click());
+    expect(open).toBe(false);
+  });
+
+  test("builderWorkflowName creates deterministic build workflow names from descriptions", () => {
+    expect(builderWorkflowName("A markdown notes search app")).toBe("build-a-markdown-notes-search-app");
+    expect(builderWorkflowName("!!!")).toBe("build-app");
+    expect(builderWorkflowName("x".repeat(80))).toBe(`build-${"x".repeat(48)}`);
+    expect(createWorkflowPromptForApp("A markdown notes search app")).toContain("workflow named build-a-markdown-notes-search-app");
+    expect(createWorkflowPromptForApp("A markdown notes search app")).toContain("file slug must be exactly build-a-markdown-notes-search-app");
+  });
+
   test("StartPane validates trimmed descriptions, hides close in stub mode, and launches with trimmed text", async () => {
     const created: string[] = [];
     let generateCount = 0;
@@ -2112,6 +2285,8 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain("live duplicate wins");
     expect(text(harness.container)).toContain("live assistant line");
     expect(text(harness.container)).not.toContain("persisted duplicate should be replaced");
+    expect(harness.container.querySelector(".livelog-debug")).toBeFalsy();
+    expect(text(harness.container.querySelector('[data-testid="ddd-live-log"]') as HTMLElement)).not.toContain('"nodeId"');
 
     await act(async () => ([...harness.container.querySelectorAll(".run-row")]
       .find((row) => text(row).includes("run-2")) as HTMLButtonElement).click());

@@ -2,7 +2,7 @@
 // One ticket per open gap (features.json broken/partial/missing* + each missing[] item).
 export const ticketsBacklog: { path: string; kind: string; status: string; priority: string; updatedAtMs: number; featureId: string; featureTitle: string; content: string }[] = [
   {
-    "path": "tickets/cli--01-cli-read-commands-have-historically-been-sqlite-coupled-keep.md",
+    "path": "tickets/cli--01-cli-read-commands-have-historically-been-sqlite-coupled-keep-117bb72e.md",
     "kind": "e2e",
     "status": "todo",
     "priority": "p0",
@@ -12,7 +12,7 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# CLI read commands have historically been sqlite-coupled; keep pglite/postgres parity covered by e2e for every read command\n\nFeature: smithers CLI (cli)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\nCLI read commands have historically been sqlite-coupled; keep pglite/postgres parity covered by e2e for every read command\n"
   },
   {
-    "path": "tickets/agent-adapters--01-kimi-auth-setup-error-should-fail-over-to-the-next-pool-agen.md",
+    "path": "tickets/agent-adapters--01-kimi-auth-setup-error-should-fail-over-to-the-next-pool-agen-b3f81de3.md",
     "kind": "fix",
     "status": "todo",
     "priority": "p0",
@@ -22,7 +22,7 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# Kimi auth-setup error should fail over to the next pool agent instead of failing the run\n\nFeature: Agent adapters (agent-adapters)\nStatus: todo · Kind: fix · Priority: P0 · Feature status: partial\n\n## Gap\n\nKimi auth-setup error should fail over to the next pool agent instead of failing the run\n"
   },
   {
-    "path": "tickets/gateway-server--01-serverless-resume-cron-tick-and-run-lease-claims-are-new-add.md",
+    "path": "tickets/gateway-server--01-serverless-resume-cron-tick-and-run-lease-claims-are-new-add-314dd71b.md",
     "kind": "e2e",
     "status": "todo",
     "priority": "p0",
@@ -32,7 +32,7 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# Serverless resume/cron tick and run-lease claims are new; add end-to-end proof beyond unit tests\n\nFeature: Gateway and server (gateway-server)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\nServerless resume/cron tick and run-lease claims are new; add end-to-end proof beyond unit tests\n"
   },
   {
-    "path": "tickets/time-travel-replay--01-durability-snapshots-phase-2-restore-in-test-only-tool-conte.md",
+    "path": "tickets/time-travel-replay--01-durability-snapshots-phase-2-restore-in-test-only-tool-conte-a5fb08ea.md",
     "kind": "e2e",
     "status": "todo",
     "priority": "p1",
@@ -42,7 +42,7 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# Durability snapshots phase 2 (restore in test-only tool context) is not finished\n\nFeature: Time travel and replay (time-travel-replay)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\nDurability snapshots phase 2 (restore in test-only tool context) is not finished\n"
   },
   {
-    "path": "tickets/crash-recovery-resume--01-crash-recovery-workflow-.smithers-workflows-crash-recovery.t.md",
+    "path": "tickets/crash-recovery-resume--01-crash-recovery-workflow-.smithers-workflows-crash-recovery.t-c6a9a1a9.md",
     "kind": "fix",
     "status": "todo",
     "priority": "p0",
@@ -52,7 +52,7 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# Crash-recovery workflow (.smithers/workflows/crash-recovery.tsx) is new and unverified end to end\n\nFeature: Crash recovery and resume (crash-recovery-resume)\nStatus: todo · Kind: fix · Priority: P0 · Feature status: partial\n\n## Gap\n\nCrash-recovery workflow (.smithers/workflows/crash-recovery.tsx) is new and unverified end to end\n"
   },
   {
-    "path": "tickets/sandbox-vcs--01-jj-bookmark-conflicts-from-git-commits-in-chained-worktrees-.md",
+    "path": "tickets/sandbox-vcs--01-jj-bookmark-conflicts-from-git-commits-in-chained-worktrees--e4b1808b.md",
     "kind": "issue",
     "status": "todo",
     "priority": "p1",
@@ -62,7 +62,7 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# jj bookmark conflicts from git commits in chained worktrees need an automated repair path\n\nFeature: Sandboxes, worktrees, and VCS (sandbox-vcs)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\njj bookmark conflicts from git commits in chained worktrees need an automated repair path\n"
   },
   {
-    "path": "tickets/open-code-review--01-cloud-deployment-blocked-on-a-funded-anthropic_api_key.md",
+    "path": "tickets/open-code-review--01-cloud-deployment-blocked-on-a-funded-anthropic_api_key-91f7f3e4.md",
     "kind": "issue",
     "status": "todo",
     "priority": "p1",
@@ -72,7 +72,7 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# Cloud deployment blocked on a funded ANTHROPIC_API_KEY\n\nFeature: Open code review (open-code-review)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nCloud deployment blocked on a funded ANTHROPIC_API_KEY\n"
   },
   {
-    "path": "tickets/memory--01-no-end-to-end-proof-that-seeded-workflows-read-and-write-mem.md",
+    "path": "tickets/memory--01-no-end-to-end-proof-that-seeded-workflows-read-and-write-mem-4ebc23d9.md",
     "kind": "e2e",
     "status": "todo",
     "priority": "p2",
@@ -82,7 +82,7 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# No end-to-end proof that seeded workflows read and write memory across separate runs\n\nFeature: Agent memory (memory)\nStatus: todo · Kind: e2e · Priority: P2 · Feature status: partial\n\n## Gap\n\nNo end-to-end proof that seeded workflows read and write memory across separate runs\n"
   },
   {
-    "path": "tickets/observability--01-otlp-exporter-is-not-installed-in-the-reference-deployments-.md",
+    "path": "tickets/observability--01-otlp-exporter-is-not-installed-in-the-reference-deployments--66b3fd93.md",
     "kind": "issue",
     "status": "todo",
     "priority": "p2",
@@ -92,7 +92,7 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "content": "# OTLP exporter is not installed in the reference deployments; prove a real export path\n\nFeature: Observability (observability)\nStatus: todo · Kind: issue · Priority: P2 · Feature status: partial\n\n## Gap\n\nOTLP exporter is not installed in the reference deployments; prove a real export path\n"
   },
   {
-    "path": "tickets/docs-driven-development--01-image-upload-target-crepe-imageblock-needs-an-asset-server-v.md",
+    "path": "tickets/docs-driven-development--01-image-upload-target-crepe-imageblock-needs-an-asset-server-v-51e77423.md",
     "kind": "issue",
     "status": "todo",
     "priority": "p1",

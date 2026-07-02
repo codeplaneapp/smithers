@@ -318,7 +318,7 @@ export function TicketsTab(props: TicketsTabProps) {
           ) : null}
         </div>
         {filteredTickets.length ? (
-          filteredTickets.map((ticket) => (
+          filteredTickets.map((ticket, index) => (
             (() => {
               const metadata = metadataForTicket(ticket);
               const feature = ticketFeatureLabel(ticket, metadata);
@@ -329,7 +329,7 @@ export function TicketsTab(props: TicketsTabProps) {
             <button
               type="button"
               className={`slot ticket-row risk-${ticketRiskClass(priority, severity)}`}
-              key={ticket.path}
+              key={`${ticket.path}:${index}`}
               data-testid="ddd-ticket"
               onClick={() => setSelected(ticket)}
             >

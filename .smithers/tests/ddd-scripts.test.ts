@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,10 @@ import { docLevelOf, generateUiModules } from "../lib/ddd/generateUiModules.ts";
 import { parseMax, triageCandidates } from "../lib/ddd/triageCandidates.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(here, "../..");
 const realBuildScript = resolve(here, "../lib/ddd/build.ts");
+const realDddLib = resolve(here, "../lib/ddd");
+const realNodeModules = resolve(repoRoot, "node_modules");
 const tempDirs: string[] = [];
 
 afterEach(() => {
@@ -48,6 +51,11 @@ function writeFeatures(root: string, features: unknown) {
   writeJson(join(root, ".smithers/spec/features.json"), features);
 }
 
+function installDddPack(root: string) {
+  cpSync(realDddLib, join(root, ".smithers/lib/ddd"), { recursive: true });
+  symlinkSync(realNodeModules, join(root, "node_modules"), "dir");
+}
+
 function markdownPaths(root: string, dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir).sort()) {
@@ -56,6 +64,22 @@ function markdownPaths(root: string, dir: string): string[] {
     else if (entry.endsWith(".md")) out.push(relative(root, full).replaceAll("\\", "/"));
   }
   return out;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function spawnBuild(args: string[], cwd: string) {
+  const stdoutPath = join(cwd, `.ddd-build-${Date.now()}-${Math.random().toString(16).slice(2)}.out`);
+  const stderrPath = `${stdoutPath}.err`;
+  const command = `${[process.execPath, ...args].map(shellQuote).join(" ")} > ${shellQuote(stdoutPath)} 2> ${shellQuote(stderrPath)}`;
+  const result = spawnSync("/bin/sh", ["-c", command], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
+  const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
+  rmSync(stdoutPath, { force: true });
+  rmSync(stderrPath, { force: true });
+  return { ...result, stdout, stderr };
 }
 
 describe("DDD scripts and build gate", () => {
@@ -233,7 +257,7 @@ describe("DDD scripts and build gate", () => {
     expect(doc).toContain("- Heading # stays text with \\[link\\]\\_markers");
   });
 
-  test("generateUiModules bundles docs, workflow source, and inferred backlog tickets with truncated slugs", () => {
+  test("generateUiModules bundles docs, workflow source, and inferred backlog tickets with hashed slugs", () => {
     const root = tempRoot();
     mkdirSync(join(root, ".smithers/spec/content/reference"), { recursive: true });
     mkdirSync(join(root, ".smithers/workflows"), { recursive: true });
@@ -287,11 +311,33 @@ describe("DDD scripts and build gate", () => {
     expect(ticketsModule).toContain('"featureId": "fixed-with-gap"');
     expect(ticketsModule).toContain('"featureTitle": "Broken P0"');
     expect(ticketsModule).toContain("Bug (major): Regression still reproduces");
-    expect(ticketsModule).toContain("tickets/long-gap--01-add-support-very-very-very-very-very-very-very-very-very-ver.md");
+    expect(ticketsModule).toContain("tickets/long-gap--01-add-support-very-very-very-very-very-very-very-very-very-ver-3caa6e3f.md");
     expect(ticketsModule).not.toContain("ignored");
 
     const workflowModule = readFileSync(join(root, ".smithers/ui/ddd-workflowSource.generated.ts"), "utf8");
     expect(workflowModule).toContain("export default null");
+  });
+
+  test("generateUiModules keeps backlog ticket paths unique when long gap slugs collide", () => {
+    const root = tempRoot();
+    const sharedPrefix = "These two long gaps share the exact same first sixty characters before alpha suffix ";
+    writeFeatures(root, [
+      feature({
+        id: "collision-gap",
+        title: "Collision Gap",
+        status: "partial",
+        priority: "p0",
+        missing: [`${sharedPrefix.repeat(2)}A`, `${sharedPrefix.repeat(2)}B`],
+      }),
+    ]);
+    generateSpecDocs(root);
+
+    expect(generateUiModules(root)).toEqual({ docs: 2, tickets: 2 });
+    const ticketsModule = readFileSync(join(root, ".smithers/ui/ddd-ticketsBacklog.generated.ts"), "utf8");
+    expect(ticketsModule).toContain("tickets/collision-gap--01-these-two-long-gaps-share-the-exact-same-first-sixty-charact-936d5a11.md");
+    expect(ticketsModule).toContain("tickets/collision-gap--02-these-two-long-gaps-share-the-exact-same-first-sixty-charact-496512f3.md");
+    const paths = [...ticketsModule.matchAll(/"path": "([^"]+)"/g)].map((match) => match[1]);
+    expect(new Set(paths).size).toBe(paths.length);
   });
 
   test("generateUiModules classifies nested docs, defaults open missing lists, and tolerates missing workflow source", () => {
@@ -628,7 +674,7 @@ describe("DDD scripts and build gate", () => {
 
   test("build.ts propagates failures and writes generated artifacts on success from a temp filesystem", () => {
     const missingRoot = tempRoot();
-    const missing = spawnSync("bun", [realBuildScript], { cwd: missingRoot, encoding: "utf8" });
+    const missing = spawnBuild([realBuildScript], missingRoot);
     expect(missing.status).toBe(0);
     expect(missing.stdout).toContain("empty starter spec");
     expect(existsSync(join(missingRoot, ".smithers/ui/ddd-features.generated.ts"))).toBe(true);
@@ -636,7 +682,7 @@ describe("DDD scripts and build gate", () => {
     const root = tempRoot();
     writeFeatures(root, [feature({ status: "not-real" })]);
 
-    const failed = spawnSync("bun", [realBuildScript], { cwd: root, encoding: "utf8" });
+    const failed = spawnBuild([realBuildScript], root);
     expect(failed.status).not.toBe(0);
     expect(existsSync(join(root, ".smithers/ui/ddd-docsContent.generated.ts"))).toBe(false);
 
@@ -646,5 +692,28 @@ describe("DDD scripts and build gate", () => {
     expect(existsSync(join(root, ".smithers/spec/content/features/built.md"))).toBe(true);
     expect(existsSync(join(root, ".smithers/ui/ddd-docsContent.generated.ts"))).toBe(true);
     expect(existsSync(join(root, ".smithers/ui/ddd-ticketsBacklog.generated.ts"))).toBe(true);
+  });
+
+  test("required build gate runs from .smithers cwd, writes under repo root, and leaves no UI modules on schema failure", () => {
+    const starterRoot = tempRoot();
+    installDddPack(starterRoot);
+    const starter = spawnBuild(["lib/ddd/build.ts"], join(starterRoot, ".smithers"));
+
+    expect(starter.status).toBe(0);
+    expect(starter.stdout).toContain("empty starter spec");
+    expect(existsSync(join(starterRoot, ".smithers/ui/ddd-features.generated.ts"))).toBe(true);
+    expect(existsSync(join(starterRoot, ".smithers/.smithers/ui/ddd-features.generated.ts"))).toBe(false);
+    expect(readFileSync(join(starterRoot, ".smithers/ui/ddd-features.generated.ts"), "utf8")).toContain("export const featuresData = [];");
+
+    const invalidRoot = tempRoot();
+    installDddPack(invalidRoot);
+    writeFeatures(invalidRoot, [feature({ id: "schema-failure", status: "not-real" })]);
+    const failed = spawnBuild(["lib/ddd/build.ts"], join(invalidRoot, ".smithers"));
+
+    expect(failed.status).not.toBe(0);
+    expect(failed.stderr).toContain("features.json does not match the schema");
+    expect(existsSync(join(invalidRoot, ".smithers/ui/ddd-features.generated.ts"))).toBe(false);
+    expect(existsSync(join(invalidRoot, ".smithers/ui/ddd-docsContent.generated.ts"))).toBe(false);
+    expect(existsSync(join(invalidRoot, ".smithers/spec/content/features/schema-failure.md"))).toBe(false);
   });
 });

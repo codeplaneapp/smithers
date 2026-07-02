@@ -1,9 +1,9 @@
 /** @jsxImportSource smithers-orchestrator */
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { request } from "node:http";
+import { createServer as createHttpServer, request } from "node:http";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { existsSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSmithers, type Gateway } from "smithers-orchestrator";
@@ -12,6 +12,7 @@ import { ticketsBacklog } from "../ui/ddd-ticketsBacklog.generated";
 import {
   createConnectionContext,
   createDddFixtureRepo,
+  dddFixtureFeature,
   fakeAgentResponse,
   gatewayRequest,
   nodeOutput,
@@ -44,6 +45,16 @@ const BROWSER_SKIP_REASON = CHROMIUM
   ? ""
   : "Chromium executable not available; browser-only DDD UI test skipped while no-browser Gateway smoke still runs.";
 const browserTest = CHROMIUM ? test : test.skip;
+
+async function launchChromiumOrSkip() {
+  if (!CHROMIUM) return null;
+  try {
+    return await CHROMIUM.launch({ headless: true });
+  } catch (error) {
+    console.warn(`Chromium launch failed; skipping browser-only DDD UI assertion: ${String(error)}`);
+    return null;
+  }
+}
 
 let repo: DddFixtureRepo | undefined;
 let gateway: Gateway | undefined;
@@ -128,11 +139,107 @@ function makeBugScanWorkflow(dbPath: string) {
   ));
 }
 
-async function waitForNewDddRun(before: Set<string>, timeoutMs = 60_000): Promise<string> {
+async function localAssetServer() {
+  const uploads: Array<{ path: string; filename: string; body: string }> = [];
+  const server = createHttpServer((req, res) => {
+    res.setHeader("access-control-allow-origin", "*");
+    res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
+    res.setHeader("access-control-allow-headers", "content-type,x-filename");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (req.method === "POST" && req.url === "/upload") {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on("end", () => {
+        uploads.push({
+          path: req.url ?? "",
+          filename: String(req.headers["x-filename"] ?? ""),
+          body: Buffer.concat(chunks).toString("utf8"),
+        });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ url: "/evidence/uploaded-proof.png" }));
+      });
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("asset server");
+  });
+  await new Promise<void>((resolveServer, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolveServer());
+  });
+  const address = server.address();
+  const assetBase = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+  return {
+    assetBase,
+    uploads,
+    close: () => new Promise<void>((resolveClose) => server.close(() => resolveClose())),
+  };
+}
+
+async function waitForUploads(uploads: unknown[], count: number, timeoutMs = 30_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (uploads.length >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`timed out waiting for ${count} asset upload(s)`);
+}
+
+function writeFakeSmithersCli(binDir: string) {
+  writeFileSync(join(binDir, "smithers"), [
+    `#!${process.execPath}`,
+    `const fs = require("node:fs");`,
+    `const runId = "run-ddd-bugscan-real-ui";`,
+    `const args = process.argv.slice(2);`,
+    `fs.appendFileSync("smithers-cli-calls.jsonl", JSON.stringify({ args }) + "\\n");`,
+    `async function main() {`,
+    `  if (args.join(" ") !== "workflow run ddd-bug-scan --detach") {`,
+    `    process.stderr.write("unexpected smithers args: " + args.join(" ") + "\\n");`,
+    `    process.exit(2);`,
+    `  }`,
+    `  const base = process.env.SMITHERS_GATEWAY_BASE;`,
+    `  if (base) {`,
+    `    const response = await fetch(base.replace(/\\/+$/, "") + "/v1/rpc/launchRun", {`,
+    `      method: "POST",`,
+    `      headers: { "content-type": "application/json" },`,
+    `      body: JSON.stringify({ workflow: "ddd-bug-scan", input: { maxFindings: 1, useClaudeForPlanning: false }, options: { runId } }),`,
+    `    });`,
+    `    if (!response.ok) { process.stderr.write("gateway launch failed " + response.status + "\\n"); process.exit(3); }`,
+    `    const frame = await response.json();`,
+    `    if (!frame.ok) { process.stderr.write(JSON.stringify(frame.error) + "\\n"); process.exit(4); }`,
+    `  }`,
+    `  process.stdout.write("detached " + runId + "\\n");`,
+    `}`,
+    `main().catch((error) => { process.stderr.write(String(error && error.stack || error) + "\\n"); process.exit(5); });`,
+    ``,
+  ].join("\n"));
+  chmodSync(join(binDir, "smithers"), 0o755);
+}
+
+async function registerRealDddSiblingWorkflows(targetGateway: Gateway, targetRepo: DddFixtureRepo) {
+  cpSync(resolve(repoRoot, ".smithers/workflows/ddd-generate-docs.tsx"), join(targetRepo.root, ".smithers/workflows/ddd-generate-docs.tsx"));
+  cpSync(resolve(repoRoot, ".smithers/workflows/ddd-bug-scan.tsx"), join(targetRepo.root, ".smithers/workflows/ddd-bug-scan.tsx"));
+  const previousCwd = process.cwd();
+  process.chdir(targetRepo.root);
+  try {
+    const generate = await import(`${join(targetRepo.root, ".smithers/workflows/ddd-generate-docs.tsx")}?ui-real=${Date.now()}-${Math.random()}`);
+    const bugScan = await import(`${join(targetRepo.root, ".smithers/workflows/ddd-bug-scan.tsx")}?ui-real=${Date.now()}-${Math.random()}`);
+    targetGateway.register("ddd-generate-docs", (generate as { default: Parameters<typeof targetGateway.register>[1] }).default);
+    targetGateway.register("ddd-bug-scan", (bugScan as { default: Parameters<typeof targetGateway.register>[1] }).default);
+  } finally {
+    process.chdir(previousCwd);
+  }
+}
+
+async function waitForNewDddRun(before: Set<string>, timeoutMs = 60_000, targetGateway: Gateway = gateway!): Promise<string> {
   const started = Date.now();
   const connection = createConnectionContext();
   while (Date.now() - started < timeoutMs) {
-    const response = await gatewayRequest(gateway!, connection, "runs.list", { limit: 50 });
+    const response = await gatewayRequest(targetGateway, connection, "runs.list", { limit: 50 });
     if (response.ok) {
       const rows = Array.isArray(response.payload) ? response.payload as Array<Record<string, unknown>> : [];
       const found = rows.find((row) => row.workflowKey === "docs-driven-development" && typeof row.runId === "string" && !before.has(row.runId));
@@ -143,12 +250,32 @@ async function waitForNewDddRun(before: Set<string>, timeoutMs = 60_000): Promis
   throw new Error("timed out waiting for launched docs-driven-development run");
 }
 
-async function waitForNode(runId: string, nodeId: string, timeoutMs = 60_000) {
+async function waitForNewWorkflowRun(
+  workflowKey: string,
+  before: Set<string>,
+  timeoutMs = 60_000,
+  targetGateway: Gateway = gateway!,
+): Promise<string> {
+  const started = Date.now();
+  const connection = createConnectionContext();
+  while (Date.now() - started < timeoutMs) {
+    const response = await gatewayRequest(targetGateway, connection, "runs.list", { limit: 100 });
+    if (response.ok) {
+      const rows = Array.isArray(response.payload) ? response.payload as Array<Record<string, unknown>> : [];
+      const found = rows.find((row) => row.workflowKey === workflowKey && typeof row.runId === "string" && !before.has(row.runId));
+      if (found?.runId) return String(found.runId);
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`timed out waiting for launched ${workflowKey} run`);
+}
+
+async function waitForNode(runId: string, nodeId: string, timeoutMs = 60_000, targetGateway: Gateway = gateway!) {
   const started = Date.now();
   const connection = createConnectionContext();
   while (Date.now() - started < timeoutMs) {
     try {
-      const output = await nodeOutput(gateway!, connection, runId, nodeId);
+      const output = await nodeOutput(targetGateway, connection, runId, nodeId);
       if (output && typeof output === "object" && (output as { row?: unknown }).row) return output;
     } catch {}
     await new Promise((r) => setTimeout(r, 250));
@@ -225,19 +352,8 @@ async function expectFeatureSummariesClamped(page: any, label: string) {
   if (result.truncated === 0) throw new Error(`${label} did not exercise a long clamped feature summary`);
 }
 
-function enterFixtureExecutionEnv(): () => void {
-  const previousCwd = process.cwd();
-  const previousPath = process.env.PATH;
-  const previousCodex = process.env.SMITHERS_FAKE_CODEX_RESPONSE;
-  const previousClaude = process.env.SMITHERS_FAKE_CLAUDE_RESPONSE;
-  const previousByNode = process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE;
-  const previousTestAgentPath = process.env.SMITHERS_TEST_AGENT_PATH;
-  process.chdir(repo!.root);
-  process.env.PATH = `${repo!.binDir}:${process.env.PATH ?? ""}`;
-  process.env.SMITHERS_TEST_AGENT_PATH = process.env.PATH;
-  process.env.SMITHERS_FAKE_CODEX_RESPONSE = fakeAgentResponse("codex fake output");
-  process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = fakeAgentResponse("claude fake output");
-  process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE = JSON.stringify({
+function browserAgentResponses() {
+  return {
     audit: fakeAgentResponse("browser launched audit", {
       partial: ["docs-driven-development"],
       notes: ["browser launched audit note for docs-driven-development"],
@@ -263,7 +379,25 @@ function enterFixtureExecutionEnv(): () => void {
       blockingFindings: [],
       inefficiencies: [],
     }),
-  });
+  };
+}
+
+function enterFixtureExecutionEnvFor(targetRepo: DddFixtureRepo, options: { gatewayBase?: string } = {}): () => void {
+  const previousCwd = process.cwd();
+  const previousPath = process.env.PATH;
+  const previousCodex = process.env.SMITHERS_FAKE_CODEX_RESPONSE;
+  const previousClaude = process.env.SMITHERS_FAKE_CLAUDE_RESPONSE;
+  const previousByNode = process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE;
+  const previousTestAgentPath = process.env.SMITHERS_TEST_AGENT_PATH;
+  const previousGatewayBase = process.env.SMITHERS_GATEWAY_BASE;
+  process.chdir(targetRepo.root);
+  process.env.PATH = `${targetRepo.binDir}:${process.env.PATH ?? ""}`;
+  process.env.SMITHERS_TEST_AGENT_PATH = process.env.PATH;
+  process.env.SMITHERS_FAKE_CODEX_RESPONSE = fakeAgentResponse("codex fake output");
+  process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = fakeAgentResponse("claude fake output");
+  process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE = JSON.stringify(browserAgentResponses());
+  if (options.gatewayBase) process.env.SMITHERS_GATEWAY_BASE = options.gatewayBase;
+  else delete process.env.SMITHERS_GATEWAY_BASE;
   return () => {
     process.chdir(previousCwd);
     if (previousPath === undefined) delete process.env.PATH;
@@ -276,13 +410,28 @@ function enterFixtureExecutionEnv(): () => void {
     else process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE = previousByNode;
     if (previousTestAgentPath === undefined) delete process.env.SMITHERS_TEST_AGENT_PATH;
     else process.env.SMITHERS_TEST_AGENT_PATH = previousTestAgentPath;
+    if (previousGatewayBase === undefined) delete process.env.SMITHERS_GATEWAY_BASE;
+    else process.env.SMITHERS_GATEWAY_BASE = previousGatewayBase;
   };
+}
+
+function enterFixtureExecutionEnv(): () => void {
+  return enterFixtureExecutionEnvFor(repo!);
+}
+
+async function runDddWorkflowWithUiEnv(targetRepo: DddFixtureRepo, runId: string, input: Record<string, unknown>) {
+  const restoreEnv = enterFixtureExecutionEnvFor(targetRepo);
+  try {
+    return await runDddWorkflow(targetRepo, runId, input);
+  } finally {
+    restoreEnv();
+  }
 }
 
 beforeAll(async () => {
   if (!CHROMIUM) return;
   repo = createDddFixtureRepo();
-  gateway = await runDddWorkflow(repo, RUN_ID, {
+  gateway = await runDddWorkflowWithUiEnv(repo, RUN_ID, {
     maxAgents: 1,
     maxRounds: 1,
     useClaudeForPlanning: false,
@@ -342,7 +491,7 @@ test("DDD UI no-browser smoke covers Gateway data contracts and the browser skip
   const localRepo = createDddFixtureRepo();
   let localGateway: Gateway | undefined;
   try {
-    localGateway = await runDddWorkflow(localRepo, "ddd-ui-no-browser-run", {
+    localGateway = await runDddWorkflowWithUiEnv(localRepo, "ddd-ui-no-browser-run", {
       maxAgents: 1,
       maxRounds: 1,
       useClaudeForPlanning: false,
@@ -415,8 +564,151 @@ test("DDD UI no-browser smoke covers Gateway data contracts and the browser skip
   }
 }, 120_000);
 
+browserTest("DDD UI generate-docs and asset upload use real workflow contracts", async () => {
+  const localRepo = createDddFixtureRepo({
+    features: [
+      dddFixtureFeature(),
+      {
+        id: "operator-console",
+        title: "Operator console",
+        summary: "Browse and dispatch DDD work from the UI.",
+        status: "partial",
+        priority: "p1",
+        owner: "product",
+        tier: "feature",
+        group: "Ship & review",
+        userValue: "Launch docs work from the browser.",
+        capabilities: [],
+        endpoints: [],
+        links: [{ label: "Overview", href: "overview.md" }],
+        tests: [],
+        observability: [],
+        debug: [],
+        architecture: [],
+        changes: [],
+        diffHints: [".smithers/ui/docs-driven-development.tsx"],
+        missing: ["Prove real generate-docs launch from the UI."],
+      },
+    ],
+  });
+  let localGateway: Gateway | undefined;
+  let localBase = "";
+  const assetServer = await localAssetServer();
+  const browser = await launchChromiumOrSkip();
+  if (!browser) return;
+  try {
+    writeFakeSmithersCli(localRepo.binDir);
+    localGateway = await runDddWorkflowWithUiEnv(localRepo, "ddd-ui-real-seed", {
+      maxAgents: 1,
+      maxRounds: 1,
+      useClaudeForPlanning: false,
+      runImplementation: true,
+      implementationApproved: true,
+    });
+    await registerRealDddSiblingWorkflows(localGateway, localRepo);
+    const localPort = await findOpenPort();
+    localBase = `http://127.0.0.1:${localPort}`;
+    await localGateway.listen({ port: localPort, host: "127.0.0.1" });
+
+    const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", (err: Error) => errors.push(err.message));
+    await page.goto(
+      `${localBase}/workflows/docs-driven-development?runId=ddd-ui-real-seed&tutorial=off&assetBaseUrl=${encodeURIComponent(assetServer.assetBase)}`,
+      { waitUntil: "networkidle" },
+    );
+    await page.waitForSelector('[data-testid="docs-driven-development-ui"]', { timeout: 30_000 });
+    const assetsHref = await page.locator("header .actions a.button", { hasText: "Assets" }).getAttribute("href");
+    expect(assetsHref).toBe(assetServer.assetBase);
+
+    const beforeRunsResponse = await gatewayRequest(localGateway, createConnectionContext(), "runs.list", { limit: 100 });
+    const beforeRuns = new Set<string>(
+      ((Array.isArray(beforeRunsResponse.payload) ? beforeRunsResponse.payload : []) as Array<{ runId?: unknown }>)
+        .map((row) => (typeof row.runId === "string" ? row.runId : ""))
+        .filter((runId): runId is string => runId.length > 0),
+    );
+
+    await withDddProcessEnvLock(async () => {
+      const restoreEnv = enterFixtureExecutionEnvFor(localRepo, { gatewayBase: localBase });
+      try {
+        await page.click('[data-testid="ddd-open-start"]');
+        const generateSelector = await page.locator('[data-testid="ddd-start-generate-launch"]').count()
+          ? '[data-testid="ddd-start-generate-launch"]'
+          : '[data-testid="ddd-new-generate-launch"]';
+        await page.click(generateSelector);
+        const generateRunId = await waitForNewWorkflowRun("ddd-generate-docs", beforeRuns, 60_000, localGateway!);
+        await waitForNode(generateRunId, "kickoff-bug-scan", 60_000, localGateway!);
+        await waitForNode("run-ddd-bugscan-real-ui", "file-tickets", 60_000, localGateway!);
+      } finally {
+        restoreEnv();
+      }
+    });
+
+    await page.waitForSelector('[data-testid="ddd-start-bug-scan"], [data-testid="ddd-new-menu"] [data-testid="ddd-start-bug-scan"]', { timeout: 30_000 });
+    const bugScanText = await page.locator('[data-testid="ddd-start-bug-scan"]').first().textContent();
+    expect(bugScanText).toContain("run-ddd-bugscan-real-ui");
+    const bugScanHref = await page.locator('[data-testid="ddd-start-bug-scan"] a').first().getAttribute("href");
+    expect(bugScanHref).toContain("/workflows/ddd-bug-scan?runId=run-ddd-bugscan-real-ui");
+    expect(assetServer.uploads).toEqual([]);
+
+    const cliCalls = await Bun.file(join(localRepo.root, "smithers-cli-calls.jsonl")).text();
+    expect(cliCalls).toContain('"workflow","run","ddd-bug-scan","--detach"');
+    expect(existsSync(join(localRepo.root, ".smithers/ui/ddd-docsContent.generated.ts"))).toBe(true);
+
+    await page.keyboard.press("Escape");
+    const beforeDocsRunsResponse = await gatewayRequest(localGateway, createConnectionContext(), "runs.list", { limit: 100 });
+    const beforeDocsRuns = new Set<string>(
+      ((Array.isArray(beforeDocsRunsResponse.payload) ? beforeDocsRunsResponse.payload : []) as Array<{ runId?: unknown }>)
+        .map((row) => (typeof row.runId === "string" ? row.runId : ""))
+        .filter((runId): runId is string => runId.length > 0),
+    );
+
+    await page.click('[data-testid="ddd-tab-specs"]');
+    await page.waitForSelector('[data-testid="ddd-editor"] [contenteditable="true"]', { timeout: 30_000 });
+    const editable = page.locator('[data-testid="ddd-editor"] [contenteditable="true"]').first();
+    await editable.click();
+    await page.evaluate(() => {
+      const target = document.querySelector('[data-testid="ddd-editor"] [contenteditable="true"]');
+      if (!target) throw new Error("missing editable DDD editor");
+      const data = new DataTransfer();
+      data.items.add(new File(["image-bytes"], "proof.png", { type: "image/png" }));
+      target.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
+    });
+    await page.waitForFunction(
+      () => (document.body.textContent ?? "").includes("Unsaved") &&
+        !(document.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement | null)?.disabled,
+      undefined,
+      { timeout: 30_000 },
+    );
+    await waitForUploads(assetServer.uploads, 1);
+    expect(assetServer.uploads).toEqual([{ path: "/upload", filename: "proof.png", body: "image-bytes" }]);
+
+    await withDddProcessEnvLock(async () => {
+      const restoreEnv = enterFixtureExecutionEnvFor(localRepo, { gatewayBase: localBase });
+      try {
+        await page.click('[data-testid="ddd-dispatch-file"]');
+        const docsRunId = await waitForNewDddRun(beforeDocsRuns, 60_000, localGateway!);
+        const metaTicket = await waitForNode(docsRunId, "metaTicket", 60_000, localGateway!);
+        expect(metaTicket.row.changedFiles[0].afterMarkdown).toContain("/evidence/uploaded-proof.png");
+      } finally {
+        restoreEnv();
+      }
+    });
+
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+    try {
+      await localGateway?.close();
+    } catch {}
+    await assetServer.close();
+    localRepo.cleanup();
+  }
+}, 180_000);
+
 browserTest("DDD UI renders and drives a live Gateway without fabricated RPC", async () => {
-  const browser = await CHROMIUM.launch({ headless: true });
+  const browser = await launchChromiumOrSkip();
+  if (!browser) return;
   try {
     const page = await browser.newPage();
     const errors: string[] = [];
@@ -427,23 +719,32 @@ browserTest("DDD UI renders and drives a live Gateway without fabricated RPC", a
     expect(await page.locator('[data-testid="ddd-tutorial"]').count()).toBe(0);
 
     await page.click('[data-testid="ddd-open-start"]');
-    await page.waitForSelector('[data-testid="ddd-start-pane"]', { timeout: 20_000 });
-    const createButton = page.locator('[data-testid="ddd-start-create-launch"]');
+    await page.waitForSelector('[data-testid="ddd-new-menu"], [data-testid="ddd-start-pane"]', { timeout: 20_000 });
+    const hasStartPane = await page.locator('[data-testid="ddd-start-pane"]').count();
+    const descriptionSelector = hasStartPane ? '[data-testid="ddd-start-description"]' : '[data-testid="ddd-new-description"]';
+    const createButton = page.locator(hasStartPane ? '[data-testid="ddd-start-create-launch"]' : '[data-testid="ddd-new-create-launch"]');
+    const createStatusSelector = hasStartPane ? "ddd-start-launched" : "ddd-new-create-run";
+    const generateSelector = hasStartPane ? '[data-testid="ddd-start-generate-launch"]' : '[data-testid="ddd-new-generate-launch"]';
+    const closeSelector = hasStartPane ? '[data-testid="ddd-start-pane"] button[aria-label="Close"]' : '[data-testid="ddd-new-menu"] button[aria-label="Close new menu"]';
     expect(await createButton.evaluate((button: HTMLButtonElement) => button.disabled)).toBe(true);
-    await page.fill('[data-testid="ddd-start-description"]', "   Build a browser-tested notes app   ");
+    await page.fill(descriptionSelector, "   Build a browser-tested notes app   ");
     expect(await createButton.evaluate((button: HTMLButtonElement) => button.disabled)).toBe(false);
     await createButton.click();
     await page.waitForFunction(
-      () => (document.querySelector('[data-testid="ddd-start-launched"]')?.textContent ?? "").includes("create-workflow"),
-      undefined,
+      (testId: string) => (document.querySelector(`[data-testid="${testId}"]`)?.textContent ?? "").includes("create-workflow"),
+      createStatusSelector,
       { timeout: 20_000 },
     );
 
-    await page.click('[data-testid="ddd-start-generate-launch"]');
+    await page.click(generateSelector);
     await page.waitForSelector('[data-testid="ddd-start-bug-scan"]', { timeout: 30_000 });
     expect(await page.locator('[data-testid="ddd-start-bug-scan"]').textContent()).toContain("bug-scan-ui-run");
 
-    await page.click('[data-testid="ddd-start-pane"] button[aria-label="Close"]');
+    await page.click(closeSelector);
+    if (!hasStartPane) {
+      await page.waitForSelector('[data-testid="ddd-new-menu"]', { state: "hidden", timeout: 20_000 });
+    }
+
     await page.click('[data-testid="ddd-tab-specs"]');
     await page.waitForSelector('[data-testid="ddd-specs-tab"]', { timeout: 20_000 });
     await page.waitForSelector('[data-testid="ddd-editor"]', { timeout: 20_000 });
@@ -681,9 +982,13 @@ browserTest("DDD UI renders and drives a live Gateway without fabricated RPC", a
       await page.waitForSelector('[data-testid="docs-driven-development-ui"]', { timeout: 30_000 });
 
       await page.click('[data-testid="ddd-open-start"]');
-      await page.waitForSelector('[data-testid="ddd-start-pane"]', { timeout: 20_000 });
-      await page.fill('[data-testid="ddd-start-description"]', "Build a failure-path notes app");
-      const missingCreateButton = page.locator('[data-testid="ddd-start-create-launch"]');
+      await page.waitForSelector('[data-testid="ddd-new-menu"], [data-testid="ddd-start-pane"]', { timeout: 20_000 });
+      const hasStartPane = await page.locator('[data-testid="ddd-start-pane"]').count();
+      const descriptionSelector = hasStartPane ? '[data-testid="ddd-start-description"]' : '[data-testid="ddd-new-description"]';
+      const missingCreateButton = page.locator(hasStartPane ? '[data-testid="ddd-start-create-launch"]' : '[data-testid="ddd-new-create-launch"]');
+      const missingGenerateButton = page.locator(hasStartPane ? '[data-testid="ddd-start-generate-launch"]' : '[data-testid="ddd-new-generate-launch"]');
+      const closeSelector = hasStartPane ? '[data-testid="ddd-start-pane"] button[aria-label="Close"]' : '[data-testid="ddd-new-menu"] button[aria-label="Close new menu"]';
+      await page.fill(descriptionSelector, "Build a failure-path notes app");
       await missingCreateButton.click();
       await page.waitForFunction(
         () => (document.querySelector('[data-testid="ddd-start-error"]')?.textContent ?? "").includes("create-workflow"),
@@ -692,7 +997,6 @@ browserTest("DDD UI renders and drives a live Gateway without fabricated RPC", a
       );
       expect(await missingCreateButton.evaluate((button: HTMLButtonElement) => button.disabled)).toBe(false);
 
-      const missingGenerateButton = page.locator('[data-testid="ddd-start-generate-launch"]');
       await missingGenerateButton.click();
       await page.waitForFunction(
         () => [...document.querySelectorAll('[data-testid="ddd-start-error"]')]
@@ -702,7 +1006,10 @@ browserTest("DDD UI renders and drives a live Gateway without fabricated RPC", a
       );
       expect(await missingGenerateButton.evaluate((button: HTMLButtonElement) => button.disabled)).toBe(false);
 
-      await page.click('[data-testid="ddd-start-pane"] button[aria-label="Close"]');
+      await page.click(closeSelector);
+      if (!hasStartPane) {
+        await page.waitForSelector('[data-testid="ddd-new-menu"]', { state: "hidden", timeout: 20_000 });
+      }
       await page.click('[data-testid="ddd-tab-specs"]');
       await page.waitForSelector('[data-testid="ddd-specs-tab"]', { timeout: 20_000 });
       await page.waitForSelector('[data-testid="ddd-editor"] [contenteditable="true"]', { timeout: 20_000 });

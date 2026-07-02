@@ -33,9 +33,8 @@ function tempRepo() {
   mkdirSync(join(root, ".smithers/spec/content"), { recursive: true });
   mkdirSync(join(root, ".smithers/agents"), { recursive: true });
   cpSync(realDddLib, join(root, ".smithers/lib/ddd"), { recursive: true });
-  cpSync(resolve(here, "../agents.ts"), join(root, ".smithers/agents.ts"));
-  writeFileSync(join(root, ".smithers/agents/index.ts"), 'export { agents, providers } from "../agents.ts";\n');
   cpSync(realAgents, join(root, ".smithers/agents"), { recursive: true });
+  writeFixtureAgents(root, binDir);
   mkdirSync(join(root, ".smithers/workflows"), { recursive: true });
   cpSync(workflowPath, join(root, ".smithers/workflows/ddd-bug-scan.tsx"));
   symlinkSync(realNodeModules, join(root, "node_modules"), "dir");
@@ -55,9 +54,60 @@ function tempRepo() {
   return { root, binDir };
 }
 
+function writeFixtureAgents(root: string, binDir: string) {
+  writeFileSync(join(root, ".smithers/agents.ts"), `import { appendFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { type AgentLike } from "smithers-orchestrator";
+
+const fixtureBinDir = ${JSON.stringify(binDir)};
+
+class FixtureAgent implements AgentLike {
+  id: string;
+  model: string;
+  engine: "claude" | "codex";
+  supportsNativeStructuredOutput = false;
+
+  constructor(engine: "claude" | "codex", model: string, id: string) {
+    this.engine = engine;
+    this.model = model;
+    this.id = id;
+  }
+
+  async preflight() {}
+
+  async generate(args: any = {}) {
+    const root = args.rootDir ?? process.cwd();
+    const prompt = typeof args.prompt === "string" ? args.prompt : JSON.stringify(args.messages ?? []);
+    const payloadPath = join(fixtureBinDir, this.engine + "-response.json");
+    const payload = JSON.parse(readFileSync(payloadPath, "utf8"));
+    appendFileSync(join(root, this.engine + "-calls.jsonl"), JSON.stringify({ args: ["--model", this.model], prompt, payload }) + "\\n");
+    const text = "\\u0060\\u0060\\u0060json\\n" + JSON.stringify(payload) + "\\n\\u0060\\u0060\\u0060\\n";
+    return { text, response: { modelId: this.model, messages: [{ role: "assistant", content: [{ type: "text", text }] }] } };
+  }
+}
+
+export const providers = {
+  claude: new FixtureAgent("claude", "claude-fable-5", "fixture-claude"),
+  claudeSonnet: new FixtureAgent("claude", "claude-sonnet-4-6", "fixture-claude-sonnet"),
+  codex: new FixtureAgent("codex", "gpt-5.5", "fixture-codex"),
+} as const;
+
+export const agents = {
+  cheapFast: [providers.claudeSonnet, providers.codex],
+  smart: [providers.claude, providers.claudeSonnet, providers.codex],
+  smartTool: [providers.claude, providers.claudeSonnet, providers.codex],
+  planning: [providers.claude],
+  review: [providers.claude],
+  implement: [providers.codex],
+} as const satisfies Record<string, AgentLike[]>;
+`);
+  writeFileSync(join(root, ".smithers/agents/index.ts"), 'export { agents, providers } from "../agents.ts";\n');
+}
+
 function writeFakeCodex(binDir: string, payload: unknown) {
+  writeFileSync(join(binDir, "codex-response.json"), `${JSON.stringify(payload)}\n`);
   writeFileSync(join(binDir, "codex"), [
-    `#!${process.execPath}`,
+    `#!/usr/bin/env node`,
     `const fs = require("node:fs");`,
     `const payload = process.env.SMITHERS_FAKE_CODEX_RESPONSE ?? ${JSON.stringify(JSON.stringify(payload))};`,
     `const args = process.argv.slice(2);`,
@@ -72,8 +122,9 @@ function writeFakeCodex(binDir: string, payload: unknown) {
 }
 
 function writeFakeClaude(binDir: string, payload: unknown) {
+  writeFileSync(join(binDir, "claude-response.json"), `${JSON.stringify(payload)}\n`);
   writeFileSync(join(binDir, "claude"), [
-    `#!${process.execPath}`,
+    `#!/usr/bin/env node`,
     `const fs = require("node:fs");`,
     `const args = process.argv.slice(2);`,
     `if (args.join(" ") === "auth status") { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) + "\\n"); process.exit(0); }`,

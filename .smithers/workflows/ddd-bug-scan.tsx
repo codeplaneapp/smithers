@@ -46,7 +46,12 @@ const ticketsSchema = z.object({
   skippedExisting: z.number().int().min(0).default(0),
   ticketPaths: z.array(z.string()).default([]),
   featuresUpdated: z.array(z.string()).default([]),
+  ticketCreationPassed: z.boolean().default(true),
+  specUpdatePassed: z.boolean().default(true),
   buildPassed: z.boolean().default(false),
+  ticketErrors: z.array(z.string()).default([]),
+  specErrors: z.array(z.string()).default([]),
+  buildErrors: z.array(z.string()).default([]),
   summary: z.string().default(""),
 });
 
@@ -92,6 +97,29 @@ export function bugTicketMarkdown(runId: string, finding: any): string {
   ].filter((line) => line !== "").join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
+function readableError(error: unknown): string {
+  const anyError = error as { message?: unknown; stderr?: unknown; stdout?: unknown; status?: unknown };
+  const parts = [
+    anyError?.message ? String(anyError.message) : error instanceof Error ? error.message : String(error),
+    anyError?.stderr ? String(anyError.stderr).trim() : "",
+    anyError?.stdout ? String(anyError.stdout).trim() : "",
+  ].filter(Boolean);
+  const message = [...new Set(parts)].join("\n").trim();
+  return message.length > 2000 ? `${message.slice(0, 2000).trimEnd()}...` : message;
+}
+
+function readFeatureRows(featuresPath: string): { features: Array<Record<string, any>>; error: string } {
+  try {
+    const parsed = JSON.parse(readFileSync(featuresPath, "utf8"));
+    return {
+      features: Array.isArray(parsed) ? parsed as Array<Record<string, any>> : [],
+      error: Array.isArray(parsed) ? "" : `${featuresPath} did not contain a JSON array.`,
+    };
+  } catch (error) {
+    return { features: [], error: `Failed to read ${featuresPath}: ${readableError(error)}` };
+  }
+}
+
 /**
  * Materialize confirmed findings as tickets and features.json gaps, then
  * rebuild the derived docs so the UI backlog picks them up. Dedupe: a finding
@@ -100,21 +128,27 @@ export function bugTicketMarkdown(runId: string, finding: any): string {
  */
 export function fileBugTickets(runId: string, confirmed: any[], root: string = ROOT) {
   const directory = resolve(root, ".smithers/tickets");
-  mkdirSync(directory, { recursive: true });
+  const ticketErrors: string[] = [];
+  const specErrors: string[] = [];
+  const buildErrors: string[] = [];
+  try {
+    mkdirSync(directory, { recursive: true });
+  } catch (error) {
+    ticketErrors.push(`Failed to create ticket directory ${directory}: ${readableError(error)}`);
+  }
   const ticketPaths: string[] = [];
   let skippedExisting = 0;
   const featureMeta = new Map<string, { title: string; priority: string }>();
   const featuresPath = resolve(root, ".smithers/spec/features.json");
-  try {
-    const features = JSON.parse(readFileSync(featuresPath, "utf8")) as Array<Record<string, any>>;
-    for (const feature of features) {
-      featureMeta.set(String(feature.id ?? ""), {
-        title: String(feature.title ?? ""),
-        priority: String(feature.priority ?? ""),
-      });
-    }
-  } catch {
-    // Tickets still carry the finding even when the spec cannot be read.
+  const initialFeatures = readFeatureRows(featuresPath);
+  if (initialFeatures.error) {
+    specErrors.push(initialFeatures.error);
+  }
+  for (const feature of initialFeatures.features) {
+    featureMeta.set(String(feature.id ?? ""), {
+      title: String(feature.title ?? ""),
+      priority: String(feature.priority ?? ""),
+    });
   }
 
   for (const finding of confirmed) {
@@ -129,15 +163,23 @@ export function fileBugTickets(runId: string, confirmed: any[], root: string = R
       skippedExisting += 1;
       continue;
     }
-    writeFileSync(full, bugTicketMarkdown(runId, enrichedFinding));
-    ticketPaths.push(name);
+    try {
+      writeFileSync(full, bugTicketMarkdown(runId, enrichedFinding));
+      ticketPaths.push(name);
+    } catch (error) {
+      ticketErrors.push(`Failed to write ticket ${name}: ${readableError(error)}`);
+    }
   }
 
   // Record each confirmed bug as a missing[] gap on its feature so the spec
   // stays the source of truth and the generated backlog includes it.
   const featuresUpdated: string[] = [];
-  try {
-    const features = JSON.parse(readFileSync(featuresPath, "utf8")) as Array<Record<string, any>>;
+  const updateFeatures = readFeatureRows(featuresPath);
+  if (updateFeatures.error && !specErrors.includes(updateFeatures.error)) {
+    specErrors.push(updateFeatures.error);
+  }
+  if (!updateFeatures.error) {
+    const features = updateFeatures.features;
     for (const finding of confirmed) {
       const feature = features.find((f) => f.id === finding.featureId);
       if (!feature) continue;
@@ -155,10 +197,13 @@ export function fileBugTickets(runId: string, confirmed: any[], root: string = R
       if (changed && !featuresUpdated.includes(feature.id)) featuresUpdated.push(feature.id);
     }
     if (featuresUpdated.length > 0) {
-      writeFileSync(featuresPath, `${JSON.stringify(features, null, 2)}\n`);
+      try {
+        writeFileSync(featuresPath, `${JSON.stringify(features, null, 2)}\n`);
+      } catch (error) {
+        specErrors.push(`Failed to write ${featuresPath}: ${readableError(error)}`);
+        featuresUpdated.length = 0;
+      }
     }
-  } catch {
-    // No readable spec: tickets alone still carry the findings.
   }
 
   let buildPassed = false;
@@ -170,29 +215,43 @@ export function fileBugTickets(runId: string, confirmed: any[], root: string = R
       maxBuffer: 32 * 1024 * 1024,
     });
     buildPassed = true;
-  } catch {
+  } catch (error) {
     buildPassed = false;
+    buildErrors.push(`Spec build failed: ${readableError(error)}`);
   }
 
+  const ticketCreationPassed = ticketErrors.length === 0;
+  const specUpdatePassed = specErrors.length === 0;
+  const failureSummary = [
+    ticketErrors.length ? `${ticketErrors.length} ticket creation error(s)` : "",
+    specErrors.length ? `${specErrors.length} spec update error(s)` : "",
+    buildErrors.length ? buildErrors[0] : "",
+  ].filter(Boolean).join("; ");
   return {
     created: ticketPaths.length,
     skippedExisting,
     ticketPaths,
     featuresUpdated,
+    ticketCreationPassed,
+    specUpdatePassed,
     buildPassed,
+    ticketErrors,
+    specErrors,
+    buildErrors,
     summary:
       confirmed.length === 0
-        ? "No confirmed findings; nothing filed."
-        : `Filed ${ticketPaths.length} ticket(s) (${skippedExisting} already existed), updated ${featuresUpdated.length} feature record(s), build ${buildPassed ? "passed" : "FAILED"}.`,
+        ? `No confirmed findings; nothing filed.${failureSummary ? ` ${failureSummary}` : ""}`
+        : `Filed ${ticketPaths.length} ticket(s) (${skippedExisting} already existed), updated ${featuresUpdated.length} feature record(s), build ${buildPassed ? "passed" : "FAILED"}.${failureSummary ? ` ${failureSummary}` : ""}`,
   };
 }
 
-const SCAN_RULES = `
+export const SCAN_RULES = `
 Rules:
 - READ-ONLY: do not modify any file. Your job is finding and evidencing, not fixing.
 - Start with "bun .smithers/lib/ddd/auditInputs.ts" for the bounded product-surface file list, then read targeted files. Do not recursively read .smithers/executions or .smithers/pg.
 - A finding needs concrete evidence: the exact file and line behavior, the input that breaks it, or the failing command. "This looks suspicious" is not a finding.
 - featureId must be an id from .smithers/spec/features.json when the bug belongs to a tracked feature, else "".
+- Do not launch docs-driven-development, ddd-generate-docs, or another ddd-bug-scan from inside this scan.
 - Do not print secrets or tokens.
 `;
 

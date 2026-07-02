@@ -3,8 +3,8 @@
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { delimiter, resolve } from "node:path";
 import { z } from "zod/v4";
 import { providers } from "../agents";
 import { dddRootOrCwd } from "../lib/ddd/dddRoot.ts";
@@ -136,6 +136,15 @@ export function runSpecBuild(root: string = ROOT): { passed: boolean; summary: s
   }
 }
 
+function commandErrorMessage(error: unknown): string {
+  const anyError = error as { message?: unknown; stderr?: unknown; stdout?: unknown };
+  return [
+    anyError?.message ? String(anyError.message) : error instanceof Error ? error.message : String(error),
+    anyError?.stderr ? String(anyError.stderr).trim() : "",
+    anyError?.stdout ? String(anyError.stdout).trim() : "",
+  ].filter(Boolean).join("\n").slice(0, 2000);
+}
+
 /**
  * Launch the detached bug scan. Uses the CLI so the scan is its own durable,
  * resumable run that outlives this workflow.
@@ -167,13 +176,8 @@ export function kickoffBugScanAfterGate(
     };
   }
   try {
-    const out = execFileSync("smithers", ["workflow", "run", "ddd-bug-scan", "--detach"], {
-      cwd: root,
-      env: process.env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      maxBuffer: 4 * 1024 * 1024,
-    });
+    const smithersBin = resolveExecutable("smithers", process.env.PATH);
+    const out = execFileCapture(commandForExecutable(smithersBin, ["workflow", "run", "ddd-bug-scan", "--detach"]), root);
     const match = out.match(/run[-_][a-z0-9-]+/i);
     return {
       launched: true,
@@ -183,17 +187,70 @@ export function kickoffBugScanAfterGate(
         : "Detached bug scan launched (run id not parsed from CLI output).",
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { launched: false, bugScanRunId: "", summary: `Bug scan launch failed: ${message.slice(0, 2000)}` };
+    return { launched: false, bugScanRunId: "", summary: `Bug scan launch failed: ${commandErrorMessage(error)}` };
   }
 }
 
-const SPEC_RULES = `
+export function resolveExecutable(name: string, pathValue: string | undefined): string {
+  if (name.includes("/") || name.includes("\\")) return name;
+  for (const dir of (pathValue ?? "").split(delimiter)) {
+    if (!dir) continue;
+    const full = resolve(dir, name);
+    if (existsSync(full)) return full;
+  }
+  return name;
+}
+
+function commandForExecutable(bin: string, args: string[]): { bin: string; args: string[] } {
+  try {
+    const firstLine = readFileSync(bin, "utf8").split(/\r?\n/, 1)[0] ?? "";
+    if (firstLine.includes("/bin/sh") || firstLine.includes("/usr/bin/env sh")) {
+      return { bin: "/bin/sh", args: [bin, ...args] };
+    }
+  } catch {
+    // Fall through to executing the resolved binary directly.
+  }
+  return { bin, args };
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function execFileCapture(command: { bin: string; args: string[] }, cwd: string): string {
+  const captureDir = resolve(cwd, ".smithers/docs-driven-development/tmp");
+  mkdirSync(captureDir, { recursive: true });
+  const base = resolve(captureDir, `bug-scan-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const stdoutPath = `${base}.out`;
+  const stderrPath = `${base}.err`;
+  const shellCommand = `${[command.bin, ...command.args].map(shellQuote).join(" ")} > ${shellQuote(stdoutPath)} 2> ${shellQuote(stderrPath)}`;
+  try {
+    execFileSync("/bin/sh", ["-c", shellCommand], {
+      cwd,
+      env: process.env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
+  } catch (error) {
+    const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
+    const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
+    throw new Error([commandErrorMessage(error), stderr.trim(), stdout.trim()].filter(Boolean).join("\n"));
+  } finally {
+    rmSync(stdoutPath, { force: true });
+    rmSync(stderrPath, { force: true });
+  }
+}
+
+export const SPEC_RULES = `
 Spec rules:
 - .smithers/spec/features.json is the structured source of truth, validated by .smithers/lib/ddd/featuresSchema.ts (strict zod). Required per record: id (kebab-case), title, summary, status (fixed|partial|broken|missing-tests|missing), priority (p0|p1|p2), owner. Organization: tier (feature|platform|reference), group (an END-USER JOURNEY like "Author workflows", not a team), userValue. Evidence ledger arrays: tests, observability, debug, architecture, changes, diffHints, missing.
 - Statuses reflect PROOF, not hope. A feature is "fixed" only when its tests exist and pass. If you cannot verify, use partial/missing-tests and record the gap in missing[].
+- When updating existing records, preserve tier, group, userValue, capabilities, endpoints, and links unless the repo proves a specific correction.
 - .smithers/spec/content/features/<id>.md are DERIVED (regenerated by bun .smithers/lib/ddd/build.ts; never hand-edit). .smithers/spec/content/overview.md is the editable product overview; content/product/*.md are optional extra human-level docs.
 - After editing, run "bun .smithers/lib/ddd/build.ts" from the repo root and keep features.json valid.
+- Do not edit running orchestration files for this DDD surface (.smithers/workflows/ddd-generate-docs.tsx, .smithers/workflows/ddd-bug-scan.tsx, .smithers/workflows/docs-driven-development.tsx); record workflow/script bugs instead.
 - Do not print secrets or tokens.
 `;
 
@@ -247,15 +304,20 @@ ${JSON.stringify(deps.build, null, 2)}
 ${SPEC_RULES}`}
         </Task>
 
+        <Task id="post-review-build" output={outputs.build} dependsOn={["review"]}>
+          {async () => runSpecBuild()}
+        </Task>
+
         <Task
           id="kickoff-bug-scan"
           output={outputs.kickoff}
-          dependsOn={["build", "review"]}
-          deps={{ build: outputs.build, review: outputs.review }}
+          dependsOn={["post-review-build", "review"]}
+          needs={{ postReviewBuild: "post-review-build" }}
+          deps={{ postReviewBuild: outputs.build, review: outputs.review }}
         >
           {(deps: any) =>
             kickoffBugScanAfterGate(ROOT, runBugScan, {
-              buildPassed: deps.build?.passed === true,
+              buildPassed: deps.postReviewBuild?.passed === true,
               reviewApproved: deps.review?.approved === true,
             })
           }

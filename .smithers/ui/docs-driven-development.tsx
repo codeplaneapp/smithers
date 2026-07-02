@@ -20,21 +20,26 @@ import {
   asArray,
   asString,
   assetBaseFromUrl,
+  changedFilesFromMetaTicket,
   errorMessage,
   features,
   isRecord,
+  isFailedTerminalRunStatus,
   makeAssetUrl,
   loadSpecDrafts,
   isTerminalRunStatus,
   normalizeMarkdownForDirty,
+  reconcileDraftsAfterRun,
   resolveDocLink,
   rowOf,
   saveSpecDrafts,
   runIdFromUrl,
   strings,
   styles,
+  updatedDocPathsFromSpec,
   type EventFrame,
   type AuditRow,
+  type DraftRunNotice,
   type Feature,
   type RunSummaryRow,
   type TabKey,
@@ -45,7 +50,7 @@ import { AuditTab } from "./ddd-AuditTab";
 import { LiveTab } from "./ddd-LiveTab";
 import { TicketsTab } from "./ddd-TicketsTab";
 import { FeaturesTab } from "./ddd-FeaturesTab";
-import { StartPane, type LaunchState } from "./ddd-StartPane";
+import { NewEntryMenu, StartPane, type LaunchState } from "./ddd-StartPane";
 import { Tutorial, shouldShowTutorial } from "./ddd-Tutorial";
 
 export type TriageItem = {
@@ -163,10 +168,10 @@ const TABS: { key: TabKey; label: string }[] = [
  * to a bundled docsContent path so clicking a cross-link opens the shared doc in
  * the Docs tab. Content lives under .smithers/spec/content.
  */
-function docPathForHref(href: string): string | undefined {
+function docPathForHref(href: string, specDocs = docsContent): string | undefined {
   // Feature links are authored relative to the content root; resolveDocLink also
   // handles ../ traversal and #anchors via the shared resolver.
-  const target = resolveDocLink("", href, (path) => docsContent.some((doc) => doc.path === path));
+  const target = resolveDocLink("", href, (path) => specDocs.some((doc) => doc.path === path));
   return target?.kind === "doc" ? target.path : undefined;
 }
 
@@ -191,18 +196,46 @@ export function workflowKeyFromPathname(pathname: string = typeof window === "un
   return match ? decodeURIComponent(match[1]!) : "";
 }
 
-export function App() {
+function slugForWorkflowName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "app";
+}
+
+export function builderWorkflowName(description: string): string {
+  return `build-${slugForWorkflowName(description)}`;
+}
+
+export function createWorkflowPromptForApp(description: string): string {
+  const workflowName = builderWorkflowName(description);
+  return (
+    `Create a workflow named ${workflowName} that scaffolds and iteratively builds this new app, docs-first: ${description}\n` +
+    `The workflow id and file slug must be exactly ${workflowName}.\n` +
+    "The workflow must maintain .smithers/spec/features.json for the new app as it builds (honest statuses, " +
+    "gaps recorded in missing[]), so docs-driven-development can run over it from day one."
+  );
+}
+
+export type AppProps = {
+  specFeatures?: Feature[];
+  specDocs?: typeof docsContent;
+  ticketsBacklogData?: TicketRow[];
+};
+
+export function App({
+  specFeatures = features,
+  specDocs = docsContent,
+  ticketsBacklogData = ticketsBacklog as unknown as TicketRow[],
+}: AppProps = {}) {
   const runId = runIdFromUrl();
   const assetBase = assetBaseFromUrl();
   const assetUrl = makeAssetUrl(assetBase);
-  const stub = specIsStub(features);
-  const firstProductDoc = docsContent.find((doc) => doc.level === "product") ?? docsContent[0];
+  const stub = specIsStub(specFeatures);
+  const firstProductDoc = specDocs.find((doc) => doc.level === "product") ?? specDocs[0];
   const pageWorkflowKey = workflowKeyFromPathname();
 
   const [activeTab, setActiveTab] = useState<TabKey>("features");
   const [selectedPath, setSelectedPath] = useState(firstProductDoc?.path ?? "");
   const initialDraftsRef = useRef<Record<string, string> | null>(null);
-  if (initialDraftsRef.current === null) initialDraftsRef.current = loadSpecDrafts(docsContent);
+  if (initialDraftsRef.current === null) initialDraftsRef.current = loadSpecDrafts(specDocs);
   const [drafts, setDrafts] = useState<Record<string, string>>(() => initialDraftsRef.current ?? {});
   const [editorResetVersions, setEditorResetVersions] = useState<Record<string, number>>({});
   const [recoveredDraftPaths, setRecoveredDraftPaths] = useState<string[]>(() => Object.keys(initialDraftsRef.current ?? {}));
@@ -215,10 +248,13 @@ export function App() {
   const [showTutorial, setShowTutorial] = useState(shouldShowTutorial());
   const [createRun, setCreateRun] = useState<LaunchState>({ runId: null, error: null });
   const [generateRun, setGenerateRun] = useState<LaunchState>({ runId: null, error: null });
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const [draftRunNotice, setDraftRunNotice] = useState<DraftRunNotice | null>(null);
   const [observedMaterializedTickets, setObservedMaterializedTickets] = useState<TicketRow[]>([]);
   const dispatchLaunchInFlight = useRef(false);
   const createLaunchInFlight = useRef(false);
   const generateLaunchInFlight = useRef(false);
+  const reconciledDraftRunRef = useRef("");
 
   // ---- every gateway hook is called unconditionally, at the top, never behind
   //      a ??/&&/ternary/loop (short-circuiting a hook crashes React). ----
@@ -230,7 +266,7 @@ export function App() {
   const liveRunId = pickedRunId ?? launchedRunId ?? runId;
 
   // Only product docs are editable; technical docs are derived and read-only.
-  const changedFiles = docsContent
+  const changedFiles = specDocs
     .filter((doc) => doc.level === "product")
     .map((doc) => ({ path: doc.path, beforeMarkdown: doc.content, afterMarkdown: drafts[doc.path] ?? doc.content }))
     .filter((doc) => normalizeMarkdownForDirty(doc.beforeMarkdown) !== normalizeMarkdownForDirty(doc.afterMarkdown));
@@ -326,7 +362,7 @@ export function App() {
     asString(selectedRun?.workflowKey ?? selectedRun?.workflowName ?? selectedRun?.workflow) ||
     activeRunWorkflowKey;
   const expectsDddNodeOutputs = selectedWorkflowKey === "docs-driven-development";
-  const runStatus = asString(runDetailRow?.status) || undefined;
+  const runStatus = asString(runDetailRow?.status) || asString(selectedRun?.status) || undefined;
   const refetchDddNodeOutputs = useCallback(() => {
     return Promise.all([
       bootstrapOut.refetch(),
@@ -385,7 +421,7 @@ export function App() {
   // on top (mergeTickets keeps the first occurrence per path). Tickets the run
   // actually materialized are the only run-time source: synthesizing tickets
   // client-side from triage output duplicated them with a second shape.
-  const backlogTickets = ticketsBacklog as unknown as TicketRow[];
+  const backlogTickets = ticketsBacklogData;
   const materializedTicketsKey = materializedTickets
     .map((ticket) => {
       const content = asString(ticket.content ?? "");
@@ -426,10 +462,79 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [liveRunId, latestRunEventSeq, refetchDddNodeOutputs, runDetail.refetch, refetchRuns]);
 
+  const dispatchedDraftFiles = changedFilesFromMetaTicket(metaTicket);
+  const specUpdatedPaths = updatedDocPathsFromSpec(spec);
+  const dispatchedDddRun =
+    !!launchedRunId &&
+    liveRunId === launchedRunId &&
+    selectedWorkflowKey === "docs-driven-development";
+  const canReconcileDispatchedDraftRun =
+    dispatchedDddRun &&
+    (Boolean(spec) || isTerminalRunStatus(runStatus));
+  const draftReconciliationSignature = [
+    launchedRunId,
+    runStatus,
+    asString(spec?.status),
+    dispatchedDraftFiles.map((file) => `${file.path}:${file.afterMarkdown.length}`).join("|"),
+    specUpdatedPaths.join("|"),
+  ].join("::");
+  useEffect(() => {
+    if (!canReconcileDispatchedDraftRun || !launchedRunId || dispatchedDraftFiles.length === 0) return;
+    if (!spec && !isFailedTerminalRunStatus(runStatus)) return;
+    if (reconciledDraftRunRef.current === draftReconciliationSignature) return;
+    reconciledDraftRunRef.current = draftReconciliationSignature;
+
+    const reconciliation = reconcileDraftsAfterRun(drafts, dispatchedDraftFiles, specUpdatedPaths);
+    if (reconciliation.clearedPaths.length > 0) {
+      setDrafts(reconciliation.nextDrafts);
+      setEditorResetVersions((current) => {
+        const next = { ...current };
+        for (const path of reconciliation.clearedPaths) next[path] = (next[path] ?? 0) + 1;
+        return next;
+      });
+      setRecoveredDraftPaths((current) => current.filter((path) => !reconciliation.clearedPaths.includes(path)));
+    }
+
+    const failed = isFailedTerminalRunStatus(runStatus);
+    const state: DraftRunNotice["state"] = failed
+      ? "failed"
+      : reconciliation.retainedPaths.length > 0
+        ? "retained"
+        : reconciliation.appliedPaths.length > 0
+          ? "applied"
+          : "not-applied";
+    const summary = failed
+      ? "finished before the docs update could be confirmed. Local drafts were kept."
+      : reconciliation.clearedPaths.length > 0
+        ? `reported ${reconciliation.clearedPaths.length} applied draft${reconciliation.clearedPaths.length === 1 ? "" : "s"} and cleared matching local state. Reload to load regenerated docs.`
+        : reconciliation.retainedPaths.length > 0
+          ? "reported an update, but newer local draft text was kept. Reload after saving or discarding local edits."
+          : reconciliation.appliedPaths.length > 0
+            ? "reported the docs update. Reload to load regenerated docs."
+            : "finished without reporting an update to the dispatched doc. Local drafts were kept.";
+    setDraftRunNotice({
+      runId: launchedRunId,
+      state,
+      clearedPaths: reconciliation.clearedPaths,
+      retainedPaths: reconciliation.retainedPaths,
+      updatedPaths: reconciliation.updatedPaths,
+      summary,
+    });
+  }, [
+    canReconcileDispatchedDraftRun,
+    launchedRunId,
+    runStatus,
+    spec,
+    drafts,
+    dispatchedDraftFiles,
+    specUpdatedPaths,
+    draftReconciliationSignature,
+  ]);
+
   // ---- derived values below this point must not call hooks. ----
 
   function updateDraft(path: string, markdown: string) {
-    const original = docsContent.find((doc) => doc.path === path)?.content ?? "";
+    const original = specDocs.find((doc) => doc.path === path)?.content ?? "";
     setDrafts((current) => {
       if (normalizeMarkdownForDirty(markdown) === normalizeMarkdownForDirty(original)) {
         const next = { ...current };
@@ -457,7 +562,7 @@ export function App() {
   }
 
   function openDoc(href: string) {
-    const path = docPathForHref(href);
+    const path = docPathForHref(href, specDocs);
     if (!path) return;
     setSelectedPath(path);
     setActiveTab("specs");
@@ -470,8 +575,9 @@ export function App() {
     if (files.length === 0) return;
     dispatchLaunchInFlight.current = true;
     setLaunchError(null);
+    setDraftRunNotice(null);
     setLaunchPending(true);
-    const primary = docsContent.find((doc) => doc.path === files[0]!.path);
+    const primary = specDocs.find((doc) => doc.path === files[0]!.path);
     const payload = {
       title: files.length === 1 ? `Docs change: ${files[0]!.path}` : `Docs change: ${files.length} markdown files`,
       source: "smithers-ui-milkdown-editor",
@@ -516,10 +622,7 @@ export function App() {
       .launchRun({
         workflow: "create-workflow",
         input: {
-          prompt:
-            `Create a workflow that scaffolds and iteratively builds this new app, docs-first: ${description}\n` +
-            "The workflow must maintain .smithers/spec/features.json for the new app as it builds (honest statuses, " +
-            "gaps recorded in missing[]), so docs-driven-development can run over it from day one.",
+          prompt: createWorkflowPromptForApp(description),
         },
       })
       .then((result: unknown) => {
@@ -536,6 +639,10 @@ export function App() {
       .finally(() => {
         createLaunchInFlight.current = false;
       });
+  }
+
+  function reloadDocsUi() {
+    if (typeof window !== "undefined") window.location.reload();
   }
 
   function launchGenerateDocs() {
@@ -593,9 +700,23 @@ export function App() {
           {assetBase ? (
             <a className="button" href={assetBase} target="_blank" rel="noreferrer">Assets</a>
           ) : null}
-          <button type="button" className="button" data-testid="ddd-open-start" onClick={() => setShowStart(true)}>
-            + New
-          </button>
+          {stub ? (
+            <button type="button" className="button" data-testid="ddd-open-start" onClick={() => setShowStart(true)}>
+              + New
+            </button>
+          ) : (
+            <NewEntryMenu
+              open={newMenuOpen}
+              onOpenChange={setNewMenuOpen}
+              onCreateApp={launchCreateApp}
+              onGenerateDocs={launchGenerateDocs}
+              createState={createRunLiveState}
+              generateState={generateRunLiveState}
+              bugScanRunId={bugScanRunId}
+              bugScanSummary={bugScanSummary}
+              workflowUiHref={workflowUiHref}
+            />
+          )}
           <button
             type="button"
             className="icon-button"
@@ -656,6 +777,7 @@ export function App() {
             bugScanRunId={bugScanRunId}
             bugScanSummary={bugScanSummary}
             workflowUiHref={workflowUiHref}
+            onReload={reloadDocsUi}
           />
         ) : null}
 
@@ -666,7 +788,7 @@ export function App() {
         {/* Specs owns layout-measuring components (Crepe); mount only when active. */}
         {!showStart && activeTab === "specs" ? (
           <SpecsTab
-            docs={docsContent}
+            docs={specDocs}
             drafts={drafts}
             selectedPath={selectedPath}
             assetBase={assetBase}
@@ -676,10 +798,12 @@ export function App() {
             launchError={launchError}
             recoveredPaths={recoveredDraftPaths.filter((path) => changedPaths.includes(path))}
             editorResetKey={editorResetVersions[selectedPath] ?? 0}
+            draftRunNotice={draftRunNotice}
             onSelectPath={setSelectedPath}
             onDraftChange={updateDraft}
             onDiscardDrafts={discardDrafts}
             onDispatch={dispatchAgents}
+            onReload={reloadDocsUi}
           />
         ) : null}
 

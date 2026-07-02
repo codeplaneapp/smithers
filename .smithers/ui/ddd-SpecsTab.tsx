@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
-import { useState } from "react";
-import { MarkdownEditor, MarkdownPreview, SpecFileTree, formatStatus, resolveDocLink, type DocsContentEntry } from "./ddd-shared";
+import { useEffect, useMemo, useState } from "react";
+import { MarkdownEditor, MarkdownPreview, SpecFileTree, formatStatus, resolveDocLink, type DocsContentEntry, type DraftRunNotice } from "./ddd-shared";
 
 export type SpecsTabProps = {
   docs: DocsContentEntry[];
@@ -13,10 +13,12 @@ export type SpecsTabProps = {
   launchError: string | null;
   recoveredPaths?: string[];
   editorResetKey?: number;
+  draftRunNotice?: DraftRunNotice | null;
   onSelectPath: (path: string) => void;
   onDraftChange: (path: string, markdown: string) => void;
   onDiscardDrafts?: (paths: string[]) => void;
   onDispatch: (paths: string[]) => void;
+  onReload?: () => void;
 };
 
 export function docIsTechnical(doc: Pick<DocsContentEntry, "level"> | undefined): boolean {
@@ -28,7 +30,7 @@ function docSearchBlob(doc: DocsContentEntry): string {
 }
 
 export function SpecsTab(props: SpecsTabProps) {
-  const { docs, drafts, selectedPath, assetBase, changedPaths, launchPending = false, launchedRunId, launchError, recoveredPaths = [], editorResetKey = 0 } = props;
+  const { docs, drafts, selectedPath, assetBase, changedPaths, launchPending = false, launchedRunId, launchError, recoveredPaths = [], editorResetKey = 0, draftRunNotice } = props;
   const [query, setQuery] = useState("");
   const [technicalView, setTechnicalView] = useState<"preview" | "source">("preview");
   const needle = query.trim().toLowerCase();
@@ -36,7 +38,11 @@ export function SpecsTab(props: SpecsTabProps) {
   const technicalDocsAll = docs.filter(docIsTechnical);
   const productDocs = productDocsAll.filter((doc) => !needle || docSearchBlob(doc).includes(needle));
   const technicalDocs = technicalDocsAll.filter((doc) => !needle || docSearchBlob(doc).includes(needle));
-  const selectedDoc = docs.find((doc) => doc.path === selectedPath) ?? productDocsAll[0] ?? docs[0];
+  const visibleDocs = useMemo(() => [...productDocs, ...technicalDocs], [productDocs, technicalDocs]);
+  const selectedDoc = needle
+    ? visibleDocs.find((doc) => doc.path === selectedPath) ?? visibleDocs[0]
+    : docs.find((doc) => doc.path === selectedPath) ?? productDocsAll[0] ?? docs[0];
+  const renderedSelectedPath = selectedDoc?.path ?? selectedPath;
   const selectedTechnical = docIsTechnical(selectedDoc);
   const draftValue = selectedDoc ? drafts[selectedDoc.path] ?? selectedDoc.content : "";
   const currentDirty = !!selectedDoc && changedPaths.includes(selectedDoc.path);
@@ -48,6 +54,12 @@ export function SpecsTab(props: SpecsTabProps) {
   const dispatchAllLabel = launchPending
     ? "Dispatching changes..."
     : `Dispatch all changes${dispatchableChangedPaths.length ? ` (${dispatchableChangedPaths.length})` : ""}`;
+
+  useEffect(() => {
+    if (!needle || visibleDocs.length === 0) return;
+    if (visibleDocs.some((doc) => doc.path === selectedPath)) return;
+    props.onSelectPath(visibleDocs[0]!.path);
+  }, [needle, selectedPath, visibleDocs, props.onSelectPath]);
 
   // An in-spec markdown link (e.g. "features/x.md", "../overview.md") opens
   // that doc in the tree rather than navigating the browser to a dead URL.
@@ -77,7 +89,7 @@ export function SpecsTab(props: SpecsTabProps) {
             Product docs <span className="count">{productDocs.length}{needle ? ` of ${productDocsAll.length}` : ""}</span>
           </span>
           {productDocs.length > 0 ? (
-            <SpecFileTree files={productDocs} selectedPath={selectedPath} changedPaths={changedPaths} onSelect={props.onSelectPath} />
+            <SpecFileTree files={productDocs} selectedPath={renderedSelectedPath} changedPaths={changedPaths} onSelect={props.onSelectPath} />
           ) : (
             <p className="tree-empty">{needle ? "No product docs match." : "No product docs yet."}</p>
           )}
@@ -92,7 +104,7 @@ export function SpecsTab(props: SpecsTabProps) {
             Stay on the product docs; your agent works down here.
           </p>
           {technicalDocs.length > 0 ? (
-            <SpecFileTree files={technicalDocs} selectedPath={selectedPath} changedPaths={changedPaths} onSelect={props.onSelectPath} />
+            <SpecFileTree files={technicalDocs} selectedPath={renderedSelectedPath} changedPaths={changedPaths} onSelect={props.onSelectPath} />
           ) : (
             <p className="tree-empty">{needle ? "No technical docs match." : "No technical docs yet."}</p>
           )}
@@ -195,7 +207,7 @@ export function SpecsTab(props: SpecsTabProps) {
             />
           )
         ) : (
-          <p className="empty">No narrative docs found under .smithers/spec/content.</p>
+          <p className="empty">{needle ? "No docs match the current search. Clear the filter to return to the selected document." : "No narrative docs found under .smithers/spec/content."}</p>
         )}
 
         {launchedRunId || launchError ? (
@@ -216,6 +228,26 @@ export function SpecsTab(props: SpecsTabProps) {
             <span>{recoveredPaths.length} local draft{recoveredPaths.length === 1 ? "" : "s"} restored from this browser.</span>
             <button type="button" className="button" onClick={() => props.onDiscardDrafts?.(recoveredPaths)}>
               Discard recovered
+            </button>
+          </div>
+        ) : null}
+        {draftRunNotice ? (
+          <div className="meta-status draft-run-state" data-testid="ddd-draft-run-state">
+            <span className={`badge ${draftRunNotice.state === "failed" ? "bad" : draftRunNotice.state === "not-applied" || draftRunNotice.state === "retained" ? "warn" : "ok"}`}>
+              {draftRunNotice.state === "failed"
+                ? "Run failed"
+                : draftRunNotice.state === "applied"
+                  ? "Applied"
+                  : draftRunNotice.state === "retained"
+                    ? "Applied with local edits"
+                    : "Not applied"}
+            </span>
+            <span>
+              <strong>Run {draftRunNotice.runId}</strong>{" "}
+              {draftRunNotice.summary}
+            </span>
+            <button type="button" className="button" data-testid="ddd-draft-run-reload" onClick={props.onReload}>
+              Reload docs
             </button>
           </div>
         ) : null}

@@ -7,18 +7,22 @@ import { generateSpecDocs } from "./generateSpecDocs.ts";
 import { generateUiModules } from "./generateUiModules.ts";
 import { validateFeatures } from "./validateFeatures.ts";
 
+function log(message: string) {
+  process.stdout.write(`${message}\n`);
+}
+
 try {
   const root = dddRoot();
   const features = validateFeatures(root, { allowMissing: true });
-  console.log(
+  log(
     features.length === 0
       ? "ddd build: no features.json yet, using empty starter spec."
       : `ddd build: validated ${features.length} features.`,
   );
   const docs = generateSpecDocs(root);
-  console.log(`ddd build: generated ${docs} derived feature docs.`);
+  log(`ddd build: generated ${docs} derived feature docs.`);
   const { docs: docEntries, tickets } = generateUiModules(root);
-  console.log(`ddd build: generated UI modules (${docEntries} docs entries, ${tickets} backlog tickets).`);
+  log(`ddd build: generated UI modules (${docEntries} docs entries, ${tickets} backlog tickets).`);
 } catch (error) {
   console.error(`ddd build failed: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
