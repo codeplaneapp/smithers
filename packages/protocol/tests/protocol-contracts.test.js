@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { DEVTOOLS_PROTOCOL_VERSION } from "../src/devtools.js";
 import {
   DEVTOOLS_ERROR_CODES,
@@ -10,10 +12,111 @@ import {
   NODE_OUTPUT_ERROR_CODES,
 } from "../src/errors/index.js";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const protocolRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = resolve(protocolRoot, "../..");
+
+const ERROR_CODE_CONTRACTS = [
+  {
+    alias: "DevToolsErrorCode",
+    declaration: "DEVTOOLS_ERROR_CODES",
+    relativePath: "src/errors/DevToolsErrorCode.ts",
+    runtime: DEVTOOLS_ERROR_CODES,
+  },
+  {
+    alias: "NodeOutputErrorCode",
+    declaration: "NODE_OUTPUT_ERROR_CODES",
+    relativePath: "src/errors/NodeOutputErrorCode.ts",
+    runtime: NODE_OUTPUT_ERROR_CODES,
+  },
+  {
+    alias: "NodeDiffErrorCode",
+    declaration: "NODE_DIFF_ERROR_CODES",
+    relativePath: "src/errors/NodeDiffErrorCode.ts",
+    runtime: NODE_DIFF_ERROR_CODES,
+  },
+  {
+    alias: "JumpToFrameErrorCode",
+    declaration: "JUMP_TO_FRAME_ERROR_CODES",
+    relativePath: "src/errors/JumpToFrameErrorCode.ts",
+    runtime: JUMP_TO_FRAME_ERROR_CODES,
+  },
+];
 
 function expectNoDuplicates(values) {
   expect(new Set(values).size).toBe(values.length);
+}
+
+function readSourceFile(relativePath) {
+  const absolutePath = resolve(protocolRoot, relativePath);
+  return ts.createSourceFile(
+    relativePath,
+    readFileSync(absolutePath, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+}
+
+function stringLiteralMember(node) {
+  if (!ts.isLiteralTypeNode(node)) return null;
+  return ts.isStringLiteral(node.literal) ? node.literal.text : null;
+}
+
+function unionMembers(node) {
+  const members = ts.isUnionTypeNode(node) ? node.types : [node];
+  return members.map((member) => {
+    const value = stringLiteralMember(member);
+    if (value === null) {
+      throw new Error(`Unsupported error-code member: ${member.getText()}`);
+    }
+    return value;
+  });
+}
+
+function membersForTypeAlias(relativePath, alias) {
+  const sourceFile = readSourceFile(relativePath);
+  let members = null;
+  sourceFile.forEachChild((node) => {
+    if (ts.isTypeAliasDeclaration(node) && node.name.text === alias) {
+      members = unionMembers(node.type);
+    }
+  });
+  if (!members) throw new Error(`Missing ${alias} in ${relativePath}`);
+  return members;
+}
+
+function tupleLiteralMembers(node) {
+  if (ts.isTypeOperatorNode(node) && node.operator === ts.SyntaxKind.ReadonlyKeyword) {
+    return tupleLiteralMembers(node.type);
+  }
+  if (!ts.isTupleTypeNode(node)) return null;
+  return node.elements.map((element) => {
+    const member = ts.isNamedTupleMember(element) ? element.type : element;
+    const value = stringLiteralMember(member);
+    if (value === null) {
+      throw new Error(`Unsupported declaration member: ${member.getText()}`);
+    }
+    return value;
+  });
+}
+
+function membersForDeclarationTuple(declaration) {
+  const sourceFile = readSourceFile("src/index.d.ts");
+  let members = null;
+  function visit(node) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === declaration &&
+      node.type
+    ) {
+      members = tupleLiteralMembers(node.type);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  if (!members) throw new Error(`Missing ${declaration} in src/index.d.ts`);
+  return members;
 }
 
 describe("protocol runtime constants", () => {
@@ -122,6 +225,18 @@ describe("protocol runtime constants", () => {
     expectNoDuplicates(NODE_OUTPUT_ERROR_CODES);
     expectNoDuplicates(NODE_DIFF_ERROR_CODES);
     expectNoDuplicates(JUMP_TO_FRAME_ERROR_CODES);
+  });
+
+  test("type aliases match runtime error code lists", () => {
+    for (const contract of ERROR_CODE_CONTRACTS) {
+      expect(membersForTypeAlias(contract.relativePath, contract.alias)).toEqual(contract.runtime);
+    }
+  });
+
+  test("public declaration tuples match runtime error code lists", () => {
+    for (const contract of ERROR_CODE_CONTRACTS) {
+      expect(membersForDeclarationTuple(contract.declaration)).toEqual(contract.runtime);
+    }
   });
 
   test("run lookup failures use consistent code spelling", () => {
