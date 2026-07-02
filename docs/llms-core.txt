@@ -2064,7 +2064,7 @@ If no Gateway is reachable on the default local port, `bunx smithers-orchestrato
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[81]:
+commands[82]:
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -2234,6 +2234,14 @@ commands[81]:
       require-approval,,boolean,true,"With --autofix, pause for a human approval gate before any fix"
       stale-minutes,,number,15,Treat a non-terminal run idle past this many minutes as stuck
       ui,,boolean,true,Auto-open the monitored run's own custom UI when its workflow has one (use --no-ui to skip)
+  - name: bug
+    purpose: File a smithers bug report to bug.smithers.sh; with --run it attaches the run's workflow, status, error, and last ~50 events with secrets scrubbed
+    flags[5]{name,short,type,default,desc}:
+      run,,string,,Attach this run's workflow name, status, error, and recent events to the report
+      title,,string,,Bug title (derived from the run's error when omitted)
+      body,,string,,Bug description body
+      json,,boolean,false,Print the filed bug id, URL, and payload as JSON
+      endpoint,,string,https://bug.smithers.sh/api/bugs,Bug endpoint URL; the SMITHERS_BUG_ENDPOINT env var takes precedence
   - name: ps
     purpose: List active, paused, and recently completed runs
     flags[5]{name,short,type,default,desc}:
@@ -2591,7 +2599,7 @@ commands[81]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[32]{name,short,type,default,desc}:
+    flags[33]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2622,6 +2630,7 @@ commands[81]:
       insecure,,boolean,false,Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run; dangerous)
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
+      post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted
       interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (falls back to inline streaming)
   - name: workflow.path
@@ -8038,6 +8047,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | [CLI Agents](/integrations/cli-agents) |
 | `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | [SDK Agents](/integrations/sdk-agents) |
 | `@smithers-orchestrator/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | [CLI Agents](/integrations/cli-agents), [SDK Agents](/integrations/sdk-agents) |
+| `@smithers-orchestrator/bug-worker` | Private Cloudflare Worker behind `bug.smithers.sh` that receives `smithers bug` reports and stores them in KV | [CLI Overview](/cli/overview) |
 | `@smithers-orchestrator/components` | JSX workflow components such as `Task`, `Workflow`, `Approval`, `Sandbox`, `Timer`, `Signal`, and control-flow components | [Components](/how-it-works) |
 | `@smithers-orchestrator/control-plane` | Durable organization, project, team, billing, usage, secret-reference, and audit primitives for hosted deployments | [Control Plane](/deployment/control-plane) |
 | `@smithers-orchestrator/db` | SQLite/Drizzle adapter, table setup, run-state derivation, schema helpers, and output tables | [Data Model](/reference/types), [Run State](/runtime/run-state) |

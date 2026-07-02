@@ -43,7 +43,8 @@
             "group": "How-to guides",
             "pages": [
               "guide/talk-to-your-agent",
-              "guide/watch-and-steer"
+              "guide/watch-and-steer",
+              "guide/post-failure"
             ]
           },
           {

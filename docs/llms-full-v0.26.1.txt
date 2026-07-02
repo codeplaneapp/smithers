@@ -2084,7 +2084,7 @@ If no Gateway is reachable on the default local port, `bunx smithers-orchestrato
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[81]:
+commands[82]:
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -2254,6 +2254,14 @@ commands[81]:
       require-approval,,boolean,true,"With --autofix, pause for a human approval gate before any fix"
       stale-minutes,,number,15,Treat a non-terminal run idle past this many minutes as stuck
       ui,,boolean,true,Auto-open the monitored run's own custom UI when its workflow has one (use --no-ui to skip)
+  - name: bug
+    purpose: File a smithers bug report to bug.smithers.sh; with --run it attaches the run's workflow, status, error, and last ~50 events with secrets scrubbed
+    flags[5]{name,short,type,default,desc}:
+      run,,string,,Attach this run's workflow name, status, error, and recent events to the report
+      title,,string,,Bug title (derived from the run's error when omitted)
+      body,,string,,Bug description body
+      json,,boolean,false,Print the filed bug id, URL, and payload as JSON
+      endpoint,,string,https://bug.smithers.sh/api/bugs,Bug endpoint URL; the SMITHERS_BUG_ENDPOINT env var takes precedence
   - name: ps
     purpose: List active, paused, and recently completed runs
     flags[5]{name,short,type,default,desc}:
@@ -2611,7 +2619,7 @@ commands[81]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[32]{name,short,type,default,desc}:
+    flags[33]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2642,6 +2650,7 @@ commands[81]:
       insecure,,boolean,false,Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run; dangerous)
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
+      post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted
       interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (falls back to inline streaming)
   - name: workflow.path
@@ -8050,6 +8059,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | CLI Agents |
 | `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | SDK Agents |
 | `@smithers-orchestrator/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | CLI Agents, SDK Agents |
+| `@smithers-orchestrator/bug-worker` | Private Cloudflare Worker behind `bug.smithers.sh` that receives `smithers bug` reports and stores them in KV | CLI Overview |
 | `@smithers-orchestrator/components` | JSX workflow components such as `Task`, `Workflow`, `Approval`, `Sandbox`, `Timer`, `Signal`, and control-flow components | Components |
 | `@smithers-orchestrator/control-plane` | Durable organization, project, team, billing, usage, secret-reference, and audit primitives for hosted deployments | Control Plane |
 | `@smithers-orchestrator/db` | SQLite/Drizzle adapter, table setup, run-state derivation, schema helpers, and output tables | Data Model, Run State |
@@ -11566,7 +11576,7 @@ export default smithers((ctx) => (
 ## Available agents
 
 ```toon
-agents[11]{class,cli,modelDefault,hijack,notes}:
+agents[12]{class,cli,modelDefault,hijack,notes}:
   ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
   AntigravityAgent,agy,CLI default,native session id,Google Antigravity CLI
@@ -11578,9 +11588,10 @@ agents[11]{class,cli,modelDefault,hijack,notes}:
   AmpAgent,amp,CLI default,thread id,Amp CLI (--execute headless mode)
   VibeAgent,vibe,CLI default,headless session id,Mistral Vibe CLI
   OpenCodeAgent,opencode,CLI default,not yet,OpenCode CLI (opencode run --format json)
+  OpenClawAgent,openclaw,CLI default,not yet,OpenClaw gateway-backed agent CLI (openclaw agent --message)
 ```
 
-CLI binaries must be on `PATH`: `claude`, `codex`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`.
+CLI binaries must be on `PATH`: `claude`, `codex`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
@@ -11999,6 +12010,29 @@ injector, lifecycle hooks, a bundled skill, and approval buttons) when you run
 so Hermes can drive Smithers as its durable control plane. See the
 Hermes & Eliza page.
 
+`OpenClawAgent` wraps the OpenClaw gateway-backed agent CLI via
+`openclaw agent --message <prompt> --json`. Key additions: `agent`, `session`,
+`workspace`, `json`, and `continueSession`. A per-call `resumeSession` emits
+`--session <id>`, so Smithers can route retries or continuations into the right
+OpenClaw conversation when the installed CLI supports sessions.
+
+```ts
+import { OpenClawAgent } from "smithers-orchestrator";
+new OpenClawAgent({
+  agent?: string;
+  session?: string;
+  workspace?: string;
+  json?: boolean;
+  continueSession?: boolean;
+});
+```
+
+Smithers also installs a native OpenClaw plugin when you run
+`bunx smithers-orchestrator mcp add --agent openclaw`. The plugin adds Smithers
+workflow tools, a bundled orchestration skill, and eval/optimization tools that
+encourage OpenClaw to turn repeated work into reusable, measured workflows. See
+OpenClaw.
+
 `AmpAgent` wraps the Amp CLI in `--execute` headless mode. Key additions: `visibility`, `mcpConfig`, `dangerouslyAllowAll`.
 
 ```ts
@@ -12051,7 +12085,12 @@ Smithers persists the native session or conversation id on each task event. On h
 | `ForgeAgent` | `forge --conversation-id` |
 | `AmpAgent` | `amp threads continue` |
 
-On clean exit the workflow resumes in detached mode. Vibe and OpenCode stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Vibe and OpenCode is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See How it works → Durability and resume.
+On clean exit the workflow resumes in detached mode. Vibe, OpenCode, and
+OpenClaw stream capture and headless session continuation are documented above,
+but native `bunx smithers-orchestrator hijack` support for Vibe, OpenCode, and
+OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack
+launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover.
+See How it works → Durability and resume.
 
 ## Notes
 
