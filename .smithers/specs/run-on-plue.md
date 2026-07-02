@@ -106,11 +106,28 @@ smithers script than the runner script).
   (`--emit-result`-style: run `up`, then read the run output via
   `smithers inspect --format json` remotely or a wrapper that writes
   result.json). No new plue API needed for v1.
-- **Auth policy**: per-exec env injection over SSH — `ANTHROPIC_API_KEY`
-  (ClaudeCodeAgent clears it but honors `ANTHROPIC_AUTH_TOKEN`; plue's
-  poc/claude-in-freestyle proved `ANTHROPIC_AUTH_TOKEN` env works) and
-  `OPENAI_API_KEY` + optional `~/.codex/auth.json` seed (0600). Nothing baked
-  into snapshots or persisted.
+- **Auth policy (VERIFIED IN A LIVE VM 2026-07-01 — this exact recipe is
+  MANDATORY for the provider; plain API-key env FAILS on this host):**
+  - claude: `ANTHROPIC_API_KEY` authenticates but this account has NO API
+    credits ("Credit balance is too low"). The working path is subscription
+    OAuth: extract the token locally from the macOS keychain (service
+    `Claude Code-credentials` → JSON field `claudeAiOauth.accessToken`; plue's
+    `loadClaudeOAuthAccessTokenFromKeychain` in `commands_workspace.go` is the
+    reference) and export it in the VM as `CLAUDE_CODE_OAUTH_TOKEN`. With that,
+    `claude -p '...'` returns real completions in the VM (verified).
+  - codex: `codex exec` does NOT honor `OPENAI_API_KEY` env on this setup
+    (401 "Missing bearer"). The working path is seeding the local
+    `~/.codex/auth.json` into the VM at `~/.codex/auth.json` (0600) over SSH
+    stdin. With that, `codex exec --skip-git-repo-check` returns real
+    completions in the VM (verified, 1651 tokens).
+  - Bootstrap verified in the VM: `curl -fsSL https://bun.sh/install | bash`
+    then `bun i -g @anthropic-ai/claude-code @openai/codex` under user
+    `developer` works (bun 1.3.14, claude 2.1.198, codex 0.142.5); binaries
+    land in `~/.bun/bin` which must be prepended to PATH for remote commands.
+  - Secrets travel ONLY over SSH stdin into 0600 files (e.g. `~/.agent-env`
+    sourced by the run command); never on command lines you log, never in
+    heartbeats, never in snapshots. The provider should support overriding via
+    options.env but default to this keychain/auth.json extraction on darwin.
 - **Non-interactive v1**: `<Sandbox reviewDiffs={false}>` (default is
   fail-closed diff review); no approvals inside the remote child.
 - **Prod reality**: live hosted API is `https://api.jjhub.tech` (health ok);
