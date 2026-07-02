@@ -9,6 +9,7 @@ import { readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync,
 import { Effect, Fiber } from "effect";
 import { Cli, z } from "incur";
 import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
+import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smithers-orchestrator/engine/workflow-hash";
 import { mdxPlugin } from "./mdx-plugin.js";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
 import { signalRun } from "@smithers-orchestrator/engine/signals";
@@ -7136,12 +7137,16 @@ const cli = Cli.create({
                     return fail(parsedOverrides.error);
                 const inputOverrides = parsedOverrides.value;
                 const resetNodes = c.options.resetNode ? [c.options.resetNode] : undefined;
+                const resolvedForkWorkflowPath = resolve(c.args.workflow);
                 const result = await forkRun(adapter, {
                     parentRunId: c.options.runId,
                     frameNo: c.options.frame,
                     inputOverrides,
                     resetNodes,
                     branchLabel: c.options.label,
+                    workflowPath: resolvedForkWorkflowPath,
+                    workflowHash: await readWorkflowGraphHash(resolvedForkWorkflowPath),
+                    entryWorkflowHash: await readWorkflowEntryHash(resolvedForkWorkflowPath),
                 });
                 process.stderr.write(`[smithers] Forked run ${result.runId} from ${c.options.runId}:${c.options.frame}\n`);
                 if (c.options.run) {
