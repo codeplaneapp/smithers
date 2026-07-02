@@ -10,6 +10,8 @@ It provides:
 - A bundled `smithers-orchestrate` skill that steers OpenClaw toward reusable,
   eval-backed workflows instead of repeated ad-hoc turns.
 - A prompt hook that surfaces the Smithers operating policy and live run status.
+- A static non-technical marketing page in `site/` for introducing OpenClaw's
+  workflow loop.
 
 Smithers installs this plugin as part of:
 

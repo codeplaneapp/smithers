@@ -70,7 +70,7 @@ test("smithers init includes Codex implementation roles when Codex plus OPENAI_A
     expect(agentsSource).toContain("smart: Smithers would normally suggest Claude Code here");
     expect(agentsSource).toContain("cheapFast: Smithers would normally suggest Kimi here");
 });
-test("smithers init falls back to OpenRouter for OpenCode-only credentials", () => {
+test("smithers init uses OpenCode for OpenCode-only credentials", () => {
     const repo = createTempRepo();
     const binDir = createExecutableDir();
     writeFakeOpenCodeBinary(binDir);
@@ -82,10 +82,12 @@ test("smithers init falls back to OpenRouter for OpenCode-only credentials", () 
     });
     expect(result.exitCode).toBe(0);
     const agentsSource = repo.read(".smithers/agents.ts");
+    const active = uncommented(agentsSource);
     expect(agentsSource).toContain("opencode: OpenCodeAgent");
-    expect(agentsSource).toContain("openrouter: createOpenRouterAgent()");
-    expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.openrouter,/);
-    expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.openrouter,/);
+    expect(active).toMatch(/cheapFast:\s*\[\s*providers\.opencode,/);
+    expect(active).toMatch(/smart:\s*\[\s*providers\.opencode,/);
+    expect(active).toMatch(/smartTool:\s*\[\s*providers\.opencode,/);
+    expect(active).not.toContain("openrouter: createOpenRouterAgent()");
 });
 test("smithers init can use OpenClaw as the only workflow agent", () => {
     const repo = createTempRepo();

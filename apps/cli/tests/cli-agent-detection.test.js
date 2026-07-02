@@ -31,6 +31,13 @@ describe("detectAvailableAgents", () => {
         };
     }
 
+    function uncommented(source) {
+        return source
+            .split("\n")
+            .filter((line) => !line.trimStart().startsWith("//"))
+            .join("\n");
+    }
+
     function writeLoggedOutClaudeBinary(binDir) {
         writeExecutable(binDir, "claude", [
             `#!${process.execPath}`,
@@ -146,7 +153,7 @@ describe("detectAvailableAgents", () => {
         expect(openclaw.hasAuthSignal).toBe(true);
         expect(openclaw.usable).toBe(true);
     });
-    test("generated agents.ts falls back to OpenRouter for OpenCode-only defaults", () => {
+    test("generated agents.ts uses OpenCode for OpenCode-only defaults", () => {
         const home = tempHome();
         const binDir = createExecutableDir();
         writeFakeOpenCodeBinary(binDir);
@@ -155,9 +162,12 @@ describe("detectAvailableAgents", () => {
         const source = generateAgentsTs(envWithPath(home, binDir), {
             cwd: home,
         });
-        expect(source).toContain("openrouter: createOpenRouterAgent()");
-        expect(source).toContain("smart: [\n    providers.openrouter,");
-        expect(source).toContain("smartTool: [\n    providers.openrouter,");
+        const active = uncommented(source);
+        expect(active).toContain("opencode: OpenCodeAgent");
+        expect(active).toContain("cheapFast: [\n    providers.opencode,");
+        expect(active).toContain("smart: [\n    providers.opencode,");
+        expect(active).toContain("smartTool: [\n    providers.opencode,");
+        expect(active).not.toContain("openrouter: createOpenRouterAgent()");
     });
     test("generated agents.ts can use OpenClaw as a workflow agent without local scaffolding", () => {
         const home = tempHome();
