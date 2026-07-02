@@ -24,6 +24,18 @@ export type GatewayOptions = {
    */
   workspaceRoot?: string;
   /**
+   * Identity advertised on `GET /health`, the `health` RPC, and the WS hello
+   * (together with `workspaceRoot`, the process pid, and the listen time).
+   * Clients use it to verify they reached the gateway for the workspace they
+   * resolved locally instead of trusting whichever process owns the port.
+   */
+  identity?: {
+    /** Storage backend the workspace store resolved to (sqlite | pglite | postgres). */
+    backend?: string;
+    /** smithers-orchestrator package version serving this gateway. */
+    version?: string;
+  };
+  /**
    * Built-in browser console for operators. Set to false to disable it.
    * @default { path: "/console" }
    */

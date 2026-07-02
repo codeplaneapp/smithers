@@ -1,5 +1,5 @@
 import { expect, onTestFinished, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -122,6 +122,35 @@ test("bin shim keeps workflow-pack commands on the .smithers local CLI", () => {
 
     expect(delegated.label).toBe("smithers");
     expect(delegated.args).toEqual(["workflow", "run", "implement", "--prompt", "hello"]);
+});
+
+test("bin shim delegates from a project subdirectory (upward walk)", () => {
+    const root = createProjectWithLocalBins();
+    const subdir = join(root, "apps", "web", "src");
+    ensureDir(subdir);
+    const delegated = runBin(subdir, ["ps"]);
+
+    // .smithers/node_modules wins over the project-root node_modules.
+    expect(delegated.label).toBe("smithers");
+    expect(delegated.args).toEqual(["ps"]);
+    // realpath both sides: on macOS tmpdir is /var -> /private/var.
+    expect(realpathSync(delegated.cwd)).toBe(realpathSync(subdir));
+});
+
+test("bin shim delegates to a project's own node_modules dependency", () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-bin-delegation-dep-"));
+    onTestFinished(() => {
+        rmSync(dir, { recursive: true, force: true });
+    });
+    // No .smithers pack at all: the project depends on smithers-orchestrator
+    // directly, like a repo using the SDK.
+    installFakeSmithersPackage(dir, "project-dep");
+    const subdir = join(dir, "src");
+    ensureDir(subdir);
+    const delegated = runBin(subdir, ["ps"]);
+
+    expect(delegated.label).toBe("project-dep");
+    expect(delegated.args).toEqual(["ps"]);
 });
 
 test("bin shim ignores a bare .bin/smithers shell shim with no local package (regression)", () => {

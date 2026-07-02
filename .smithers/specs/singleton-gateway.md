@@ -76,12 +76,15 @@ Why this bites:
    `workspaceRoot` matches the workspace it resolved locally, and treats a
    mismatch exactly like no gateway.
 
-4. **Runtime state file: `.smithers/run/gateway.json`.** Written by the
-   daemon after `listen()` succeeds, mode 0600 (dir 0700, gitignored):
-   `{pid, host, port, url, token, workspaceRoot, backend, version,
-   protocol, startedAtMs}`. Discovery = read file, verify pid alive, verify
-   `/health` identity, use the token. Stale file (dead pid, identity
-   mismatch, connection refused) is deleted and treated as absent.
+4. **Runtime state file outside the repo.** The daemon writes
+   `<tmpdir>/smithers-gateway/<sha256(workspaceRoot)>.json` after `listen()`
+   succeeds, mode 0600 (dir 0700): `{pid, host, port, url, token,
+   workspaceRoot, backend, version, protocol, startedAtMs}`. Keeping it out
+   of `.smithers/` sidesteps stale-`.gitignore` packs committing a token,
+   and it dies with the machine like the pids it records. Discovery = read
+   file, verify pid alive, verify `/health` identity, use the token. Stale
+   state (dead pid, identity mismatch, connection refused) is deleted and
+   treated as absent. `smithers gateway status` prints the path.
 
 5. **Singleton enforcement via claim-then-verify.** A starting daemon
    creates `gateway.json.lock` with `O_EXCL`. On `EEXIST` it probes the
@@ -97,15 +100,19 @@ Why this bites:
    (library bug fix). Clients resolve the port from the state file;
    `SMITHERS_GATEWAY_URL` / `--gateway` still override everything.
 
-7. **Auth defaults to a minted token.** The autostarted singleton always
-   mints a random bearer and records it only in the state file. Explicit
-   `smithers gateway` keeps its current flags; it gains `--mint-token`
-   (default on for the singleton path, opt-out `--no-token` for scripted
-   local use). CLI clients (`ui`, `gui`, TUI monitor, future gateway-backed
-   commands) read the token from the state file and send it. The browser
-   console URL is printed with the token attached. The `~/.smithers` token
-   store stays the broker for issued grants; wiring `smithers gateway` to
-   accept store-issued grants is a follow-up, out of scope here.
+7. **Auth converges on a minted token, sequenced behind UI token
+   injection.** `smithers gateway` gains `--mint-token`: mint a random
+   bearer, record it only in the state file, require it on every request.
+   CLI clients read the token from the state file (or `SMITHERS_TOKEN` /
+   `SMITHERS_API_KEY`) and send it; `smithers ui` learns the bearer header
+   either way. Minting cannot default ON until the gateway injects the
+   token into the workflow-UI bundles it serves (today a custom UI in the
+   browser has no way to obtain it; `SmithersGatewayProvider` only takes an
+   explicit `options.token`), so: G1 ships the flag plus client-side bearer
+   support, G2 ships UI token injection and flips the autostart default to
+   minted. The `~/.smithers` token store stays the broker for issued
+   grants; wiring `smithers gateway` to accept store-issued grants is a
+   follow-up, out of scope here.
 
 8. **CLI transport is the gateway domain API.** Read and control commands
    route through `/v1/api/*` (tanstack-db-sync-engine M1) plus the routes
@@ -184,15 +191,17 @@ after its M1 or absorb it if that work stalls.
 
 - `EADDRINUSE` rejection in `Gateway.listen` + ephemeral-port fallback in
   the CLI (decision 6).
-- Identity in `/health` and hello (decision 3); the gateway learns its
-  `workspaceRoot`/`backend`/`version` from options passed by the CLI.
-- State file + lock + 0600 token mint (decisions 4, 5, 7). Init pack's
-  `.smithers/.gitignore` gains `run/`.
+- Identity in `/health`, the `health` RPC, and hello (decision 3); the
+  gateway learns `backend`/`version` from options passed by the CLI,
+  `workspaceRoot` from the existing option.
+- Runtime state file + lock + `--mint-token` (decisions 4, 5, 7).
 - `smithers gateway status|stop`; `smithers gateway` refuses a second start
   against a healthy singleton.
-- `smithers ui`/`gui`/TUI discovery order: explicit `--gateway` /
+- `smithers ui`/`gui` discovery order: explicit `--gateway` /
   `SMITHERS_GATEWAY_URL` > state file (verified) > claim + autostart + poll
-  state file. All of them send the bearer.
+  state file. Bearer sent when a token is known (state file,
+  `SMITHERS_TOKEN`, `SMITHERS_API_KEY`). The TUI monitor keeps its
+  `SMITHERS_GATEWAY_URL` pin and moves to state-file discovery in G2.
 
 Acceptance: two concurrent autostarts yield one daemon and two working
 clients; a second project autostarts on a different port and neither client

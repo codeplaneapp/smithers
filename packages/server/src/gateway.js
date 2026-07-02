@@ -1415,6 +1415,21 @@ export class Gateway {
         this.workspaceRoot = options.workspaceRoot
             ? resolve(options.workspaceRoot)
             : null;
+        this.identity = options.identity ?? null;
+    }
+    /**
+   * Identity block advertised on `GET /health`, the `health` RPC, and the WS
+   * hello. Lets a client verify it reached the gateway for the workspace it
+   * resolved locally instead of trusting whichever process owns the port.
+   */
+    buildIdentity() {
+        return {
+            workspaceRoot: this.workspaceRoot,
+            backend: this.identity?.backend ?? null,
+            version: this.identity?.version ?? null,
+            pid: process.pid,
+            startedAtMs: this.startedAtMs,
+        };
     }
     /**
    * @returns {GatewayUiMount[]}
@@ -2472,6 +2487,7 @@ export class Gateway {
                     protocol: this.protocol,
                     features: this.features,
                     stateVersion: this.stateVersion,
+                    identity: this.buildIdentity(),
                 });
             }
             if ((req.method ?? "GET") === "GET" && (req.url ?? "/") === "/metrics") {
@@ -2556,16 +2572,29 @@ export class Gateway {
                 this.handleSocket(ws, req);
             });
         });
-        await new Promise((resolve) => {
+        await new Promise((resolve, reject) => {
+            // Without this, EADDRINUSE (and any other bind failure) surfaces as
+            // an unhandled 'error' event that crashes the process; callers must
+            // be able to catch it and retry on another port.
+            const onError = (error) => reject(error);
+            server.once("error", onError);
+            const onListening = () => {
+                server.removeListener("error", onError);
+                resolve(undefined);
+            };
             if (options.path !== undefined) {
-                server.listen(options.path, () => resolve());
+                server.listen(options.path, onListening);
                 return;
             }
             if (options.host === undefined) {
-                server.listen(options.port ?? 7331, () => resolve());
+                server.listen(options.port ?? 7331, onListening);
                 return;
             }
-            server.listen(options.port ?? 7331, options.host, () => resolve());
+            server.listen(options.port ?? 7331, options.host, onListening);
+        });
+        // Post-listen socket errors must not crash the daemon either.
+        server.on("error", (error) => {
+            console.warn(`[gateway] http server error: ${error instanceof Error ? error.message : String(error)}`);
         });
         this.server = server;
         this.wsServer = wsServer;
@@ -3306,6 +3335,7 @@ export class Gateway {
         const hello = {
             protocol: this.protocol,
             features: this.features,
+            identity: this.buildIdentity(),
             policy: { heartbeatMs: this.heartbeatMs },
             auth: {
                 sessionToken: connection.sessionToken,
@@ -4570,6 +4600,7 @@ export class Gateway {
                     features: this.features,
                     stateVersion: this.stateVersion,
                     uptimeMs: nowMs() - this.startedAtMs,
+                    identity: this.buildIdentity(),
                 });
             case "runs.list":
             case "listRuns": {

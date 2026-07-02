@@ -32,6 +32,7 @@ import { buildAgentAskRequestRow, isHumanRequestPastTimeout, validateHumanReques
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { assertMaxBytes, assertMaxStringLength } from "@smithers-orchestrator/db/input-bounds";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
+import { canonicalWorkspacePath, claimGatewayAutostartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, mintGatewayToken, readGatewayRuntimeState, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, formatAskHumanResolveHelp, parseChoices, resolveAskHumanContext, } from "./ask-human.js";
 import { chatAttemptKey, formatChatAttemptHeader, formatChatBlock, parseAgentEvent, parseChatAttemptMeta, parseNodeOutputEvent, selectChatAttempts, } from "./chat.js";
 import { buildHijackLaunchSpec, isNativeHijackCandidate, launchHijackSession, resolveHijackCandidate, waitForHijackCandidate, } from "./hijack.js";
@@ -1576,11 +1577,15 @@ const superviseOptions = z.object({
     staleThreshold: z.string().default("30s").describe("Heartbeat staleness threshold before resume"),
     maxConcurrent: z.number().int().min(1).default(3).describe("Max runs resumed per poll"),
 });
+const gatewayArgs = z.object({
+    action: z.enum(["status", "stop"]).optional().describe("Manage the workspace's singleton gateway instead of serving one: status | stop"),
+});
 const gatewayOptions = z.object({
     host: z.string().default("127.0.0.1").describe("Gateway bind address"),
-    port: z.number().int().min(1).default(7331).describe("Gateway port"),
+    port: z.number().int().min(1).default(7331).describe("Preferred gateway port (falls back to an ephemeral port when taken; clients discover the real port from the runtime state file)"),
     backend: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Workspace storage backend"),
     authToken: z.string().optional().describe("Bearer token for HTTP/WS auth (or set SMITHERS_API_KEY); required to bind a non-loopback --host"),
+    mintToken: z.boolean().default(false).describe("Mint a random bearer token, require it on every request, and record it only in the 0600 runtime state file"),
     insecure: z.boolean().default(false).describe("Allow binding a non-loopback --host with NO auth (exposes a full-control, unauthenticated control plane — dangerous)"),
 });
 const migrateOptions = z.object({
@@ -2346,42 +2351,117 @@ function titleizeWorkflowId(id) {
         .trim()
         .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
-// Start a local Gateway (the `smithers gateway` command) detached and wait for
-// it to answer /health. Used by `smithers ui` so launching a UI is one command.
-async function autoStartGateway(port) {
-    const host = "127.0.0.1";
-    const base = `http://${host}:${port}`;
+/**
+ * Resolve the workspace root a gateway (or gateway client) should serve:
+ * the nearest local .smithers pack's parent, else the directory holding the
+ * nearest smithers.db. Returns undefined when neither exists.
+ *
+ * @param {string} [cwd]
+ * @returns {string | undefined}
+ */
+function resolveGatewayWorkspace(cwd = process.cwd()) {
+    const localPackDir = resolvePackDirs(cwd).find((dir) => dir.scope === "local")?.packDir;
+    if (localPackDir)
+        return dirname(localPackDir);
     try {
-        const child = spawn(process.argv[0], [process.argv[1], "gateway", "--host", host, "--port", String(port)], {
+        return dirname(findSmithersDb(cwd));
+    }
+    catch {
+        return undefined;
+    }
+}
+/**
+ * Ensure the workspace's singleton gateway is running and return how to
+ * reach it. Discovery first (runtime state file, verified against pid and
+ * /health workspace identity); otherwise claim the per-workspace autostart
+ * lock, spawn a detached `smithers gateway`, and wait for its state file.
+ * A racing client that loses the lock just waits for the winner's daemon.
+ *
+ * @param {string} workspace
+ * @param {number} preferredPort
+ * @returns {Promise<{ base: string; token: string | null; started: boolean } | null>}
+ */
+async function ensureWorkspaceGateway(workspace, preferredPort) {
+    const discovered = await discoverWorkspaceGateway(workspace);
+    if (discovered) {
+        return { base: discovered.state.url, token: discovered.state.token, started: false };
+    }
+    const lock = claimGatewayAutostartLock(workspace);
+    if (!lock) {
+        const awaited = await waitForWorkspaceGateway(workspace);
+        return awaited ? { base: awaited.state.url, token: awaited.state.token, started: false } : null;
+    }
+    try {
+        const child = spawn(process.argv[0], [process.argv[1], "gateway", "--host", "127.0.0.1", "--port", String(preferredPort)], {
             stdio: "ignore",
             detached: true,
+            cwd: workspace,
         });
         child.unref();
         child.on("error", () => { });
     }
     catch {
-        return false;
+        lock.release();
+        return null;
     }
-    // Gateway boot loads + compiles every workspace workflow before it listens,
-    // so allow generous time for /health to come up.
-    for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 500));
-        const ok = await fetch(`${base}/health`).then((res) => res.ok, () => false);
-        if (ok)
-            return true;
+    try {
+        // Gateway boot loads + compiles every workspace workflow before it
+        // listens, so allow generous time for the state file to appear.
+        const awaited = await waitForWorkspaceGateway(workspace);
+        return awaited ? { base: awaited.state.url, token: awaited.state.token, started: true } : null;
     }
-    return false;
+    finally {
+        lock.release();
+    }
 }
 async function runUiCommand(c) {
-    const base = (c.options.gateway ?? `http://127.0.0.1:${c.options.port}`).replace(/\/+$/, "");
     const fail = (code, message) => c.error({ code, message, exitCode: 1 });
-    let reachable = await fetch(`${base}/health`).then((r) => r.ok, () => false);
-    if (!reachable && c.options.autostart && !c.options.gateway) {
-        process.stderr.write(`[smithers] No Gateway at ${base}; starting one (smithers gateway --port ${c.options.port})…\n`);
-        reachable = await autoStartGateway(c.options.port);
+    const workspace = c.options.gateway ? undefined : resolveGatewayWorkspace();
+    let base = c.options.gateway ? c.options.gateway.replace(/\/+$/, "") : null;
+    let token = process.env.SMITHERS_TOKEN || process.env.SMITHERS_API_KEY || null;
+    let reachable = false;
+    if (base) {
+        // Explicitly pinned gateway: the user chose it, probe it as-is.
+        reachable = await fetch(`${base}/health`).then((r) => r.ok, () => false);
+    }
+    else if (workspace) {
+        // The workspace's singleton, via the runtime state file (verified
+        // against the pid and the /health workspace identity).
+        const discovered = await discoverWorkspaceGateway(workspace);
+        if (discovered) {
+            base = discovered.state.url;
+            token = discovered.state.token ?? token;
+            reachable = true;
+        }
+    }
+    if (!reachable && !base) {
+        // Legacy probe: a gateway started by an older CLI or the SDK on the
+        // conventional port, with no runtime state file. Refuse an identity
+        // MISMATCH so another project's gateway is never silently attached.
+        const legacyBase = `http://127.0.0.1:${c.options.port}`;
+        const health = await fetch(`${legacyBase}/health`).then((r) => (r.ok ? r.json() : null), () => null);
+        if (health) {
+            const advertised = health?.identity?.workspaceRoot;
+            if (!advertised || !workspace || canonicalWorkspacePath(advertised) === canonicalWorkspacePath(workspace)) {
+                base = legacyBase;
+                reachable = true;
+            }
+            else {
+                process.stderr.write(`[smithers] Ignoring the gateway at ${legacyBase}: it serves ${advertised}, not ${workspace}.\n`);
+            }
+        }
+    }
+    if (!reachable && c.options.autostart && workspace) {
+        process.stderr.write(`[smithers] No gateway for ${workspace}; starting one (smithers gateway)…\n`);
+        const ensured = await ensureWorkspaceGateway(workspace, c.options.port);
+        if (ensured) {
+            base = ensured.base;
+            token = ensured.token ?? token;
+            reachable = true;
+        }
     }
     if (!reachable) {
-        return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable at ${base}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.`);
+        return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable${base ? ` at ${base}` : " for this workspace"}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.`);
     }
     // `--app`: serve the FULL local Smithers UI (apps/smithers) instead of a
     // single workflow-run UI. Build the bundle if needed, then serve it from a
@@ -2392,7 +2472,10 @@ async function runUiCommand(c) {
     const rpc = async (method, params = {}) => {
         const res = await fetch(`${base}/v1/rpc/${method}`, {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: {
+                "content-type": "application/json",
+                ...(token ? { authorization: `Bearer ${token}` } : {}),
+            },
             body: JSON.stringify(params),
         });
         const frame = await res.json().catch(() => null);
@@ -2495,12 +2578,73 @@ async function runFullUiCommand(c, base, fail) {
 }
 const GATEWAY_LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"]);
 
+async function runGatewayStatusCommand(c) {
+    const workspace = resolveGatewayWorkspace();
+    if (!workspace) {
+        return c.error({ code: "CLI_DB_NOT_FOUND", message: "No workspace found: no .smithers/ pack or smithers.db in this directory or any parent. Run `smithers init` first.", exitCode: 1 });
+    }
+    const { stateFile } = gatewayRuntimePaths(workspace);
+    const discovered = await discoverWorkspaceGateway(workspace);
+    if (!discovered) {
+        return c.ok({ running: false, workspace, stateFile }, {
+            cta: { commands: [{ command: "gateway", description: "Start the workspace gateway" }] },
+        });
+    }
+    const { state, identity } = discovered;
+    return c.ok({
+        running: true,
+        workspace,
+        url: state.url,
+        pid: state.pid,
+        port: state.port,
+        backend: identity.backend ?? state.backend ?? null,
+        version: identity.version ?? state.version ?? null,
+        auth: state.token ? "token" : "none",
+        startedAtMs: state.startedAtMs,
+        stateFile,
+    });
+}
+async function runGatewayStopCommand(c) {
+    const workspace = resolveGatewayWorkspace();
+    if (!workspace) {
+        return c.error({ code: "CLI_DB_NOT_FOUND", message: "No workspace found: no .smithers/ pack or smithers.db in this directory or any parent.", exitCode: 1 });
+    }
+    const state = readGatewayRuntimeState(workspace);
+    if (!state) {
+        return c.ok({ stopped: false, running: false, workspace });
+    }
+    // Verify pid AND identity before signalling: a recycled pid, or a state
+    // file describing a dead daemon, must never get a SIGTERM aimed at it.
+    const identity = await verifyGatewayHealthIdentity(state.url, workspace);
+    if (!identity || identity.pid !== state.pid) {
+        clearGatewayRuntimeState(workspace, state.pid);
+        return c.ok({ stopped: false, running: false, workspace, cleanedStaleState: true });
+    }
+    try {
+        process.kill(state.pid, "SIGTERM");
+    }
+    catch (error) {
+        return c.error({ code: "GATEWAY_STOP_FAILED", message: `Could not signal gateway pid ${state.pid}: ${error?.message ?? String(error)}`, exitCode: 1 });
+    }
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+        if (!(await verifyGatewayHealthIdentity(state.url, workspace)))
+            break;
+        await new Promise((r) => setTimeout(r, 200));
+    }
+    if (await verifyGatewayHealthIdentity(state.url, workspace)) {
+        return c.error({ code: "GATEWAY_STOP_TIMEOUT", message: `Gateway pid ${state.pid} did not shut down within 10s. Inspect it (or kill -9 ${state.pid}) manually.`, exitCode: 1 });
+    }
+    clearGatewayRuntimeState(workspace, state.pid);
+    return c.ok({ stopped: true, workspace, pid: state.pid });
+}
 async function runGatewayCommand(options) {
     // The Gateway control plane can launch/cancel/inspect EVERY run in the
     // workspace. Without an auth config it authenticates every request as
     // role=operator scopes=["*"]. Refuse to publish that to the network: a
     // non-loopback bind requires a token (or an explicit --insecure override).
-    const authToken = options.authToken ?? process.env.SMITHERS_API_KEY;
+    const explicitToken = options.authToken ?? (process.env.SMITHERS_API_KEY || undefined);
+    const authToken = explicitToken ?? (options.mintToken ? mintGatewayToken() : undefined);
     const isLoopback = GATEWAY_LOOPBACK_HOSTS.has(options.host);
     if (!isLoopback && !authToken && !options.insecure) {
         throw new SmithersError("GATEWAY_INSECURE_BIND", `Refusing to bind the Gateway to non-loopback host "${options.host}" without authentication — this would expose a full-control, unauthenticated control plane to the network. Set --auth-token <token> (or SMITHERS_API_KEY), bind to 127.0.0.1, or pass --insecure to override.`, { host: options.host });
@@ -2514,6 +2658,13 @@ async function runGatewayCommand(options) {
         ? resolve(localWorkspace, "smithers.db")
         : findSmithersDb(process.cwd());
     const workspace = localWorkspace ?? dirname(dbPath);
+    // Singleton: one gateway owns a workspace. A healthy incumbent (verified
+    // by pid + /health workspace identity, not just "something owns the
+    // port") means this start is a mistake — point at it instead.
+    const incumbent = await discoverWorkspaceGateway(workspace);
+    if (incumbent) {
+        throw new SmithersError("GATEWAY_ALREADY_RUNNING", `A gateway for this workspace is already running: pid ${incumbent.state.pid} at ${incumbent.state.url}. Use it, or stop it first with \`smithers gateway stop\`.`, { workspace, pid: incumbent.state.pid, url: incumbent.state.url });
+    }
     process.chdir(workspace);
     if (options.backend) {
         process.env.SMITHERS_BACKEND = options.backend;
@@ -2522,7 +2673,13 @@ async function runGatewayCommand(options) {
         import("@smithers-orchestrator/server/gateway"),
         import("smithers-orchestrator"),
     ]);
-    const gateway = new Gateway({ heartbeatMs: 15_000, ...(auth ? { auth } : {}) });
+    const identityBackend = options.backend ?? process.env.SMITHERS_BACKEND ?? readBackendMarkerForCwd(workspace) ?? "sqlite";
+    const gateway = new Gateway({
+        heartbeatMs: 15_000,
+        workspaceRoot: workspace,
+        identity: { backend: identityBackend, version: readPackageVersion() },
+        ...(auth ? { auth } : {}),
+    });
     const workspaceApi = await openSmithersBackend({}, {
         backend: options.backend,
         cwd: workspace,
@@ -2562,14 +2719,47 @@ async function runGatewayCommand(options) {
         gateway.register("workspace", workspaceWorkflow);
         workflows.push("workspace");
     }
-    const server = await gateway.listen({ host: options.host, port: options.port });
+    let server;
+    try {
+        server = await gateway.listen({ host: options.host, port: options.port });
+    }
+    catch (error) {
+        if (error?.code !== "EADDRINUSE")
+            throw error;
+        // Something else owns the preferred port. If a healthy gateway for
+        // THIS workspace raced past the singleton check, defer to it;
+        // otherwise take an ephemeral port — clients discover the real port
+        // from the runtime state file, not by assuming 7331.
+        const raced = await discoverWorkspaceGateway(workspace);
+        if (raced) {
+            throw new SmithersError("GATEWAY_ALREADY_RUNNING", `A gateway for this workspace is already running: pid ${raced.state.pid} at ${raced.state.url}.`, { workspace, pid: raced.state.pid, url: raced.state.url });
+        }
+        process.stderr.write(`[smithers] Port ${options.port} is taken (by a different workspace or process); using an ephemeral port instead.\n`);
+        server = await gateway.listen({ host: options.host, port: 0 });
+    }
     const address = server.address();
     const port = address && typeof address === "object" ? address.port : options.port;
     const url = `http://${options.host}:${port}`;
+    const runtimeStateFile = writeGatewayRuntimeState(workspace, {
+        pid: process.pid,
+        host: options.host,
+        port,
+        url,
+        token: authToken ?? null,
+        workspaceRoot: canonicalWorkspacePath(workspace),
+        backend: identityBackend,
+        version: readPackageVersion(),
+        protocol: gateway.protocol ?? null,
+        startedAtMs: Date.now(),
+    });
     process.stderr.write(`[smithers] Gateway listening on ${url}\n`);
     process.stderr.write(`[smithers] Workspace: ${workspace}\n`);
     process.stderr.write(`[smithers] Database: ${dbPath}\n`);
     process.stderr.write(`[smithers] Registered workflows: ${workflows.join(", ")}\n`);
+    process.stderr.write(`[smithers] Runtime state: ${runtimeStateFile}\n`);
+    if (auth && !explicitToken && authToken) {
+        process.stderr.write(`[smithers] Minted bearer token: ${authToken}\n`);
+    }
     process.stderr.write(auth
         ? `[smithers] Auth: token required (Authorization: Bearer <token>)\n`
         : `[smithers] Auth: NONE — bound to loopback ${options.host}; do not expose this port\n`);
@@ -2584,6 +2774,12 @@ async function runGatewayCommand(options) {
             }, 5000);
             if (typeof deadline.unref === "function")
                 deadline.unref();
+            try {
+                clearGatewayRuntimeState(workspace, process.pid);
+            }
+            catch {
+                // Discovery cleans a stale state file up on the next probe.
+            }
             gateway.close()
                 .catch((error) => {
                 process.stderr.write(`[smithers] Gateway shutdown error: ${error?.message ?? String(error)}\n`);
@@ -4020,7 +4216,8 @@ const cli = Cli.create({
     // smithers gateway
     // =========================================================================
     .command("gateway", {
-    description: "Serve the multi-run Gateway RPC/WS control plane for the workspace DB; unlike up --serve, this is not tied to one run.",
+    description: "Serve the multi-run Gateway RPC/WS control plane for the workspace DB; unlike up --serve, this is not tied to one run. `smithers gateway status|stop` manages the workspace's running singleton.",
+    args: gatewayArgs,
     options: gatewayOptions,
     alias: { host: "H", port: "p" },
     async run(c) {
@@ -4029,6 +4226,12 @@ const cli = Cli.create({
             return c.error(opts);
         };
         try {
+            if (c.args.action === "status") {
+                return await runGatewayStatusCommand(c);
+            }
+            if (c.args.action === "stop") {
+                return await runGatewayStopCommand(c);
+            }
             await runGatewayCommand(c.options);
             // The Gateway is a long-running server: by the time runGatewayCommand
             // resolves it has already been shut down (SIGINT/SIGTERM) and written
