@@ -52,6 +52,7 @@ describe("gateway — Host-header / DNS-rebinding defense", () => {
             "localhost",
             "[::1]:7331",
             "[::1]",
+            "::1",
             "127.0.0.1",
             "sub.localhost:7331",
             "127.5.5.5:9999",
@@ -91,7 +92,7 @@ describe("gateway — Host-header / DNS-rebinding defense", () => {
 
     test("isHostAllowed matcher: loopback accepted, everything else rejected (unauthenticated)", () => {
         const gateway = makeGateway({});
-        for (const host of ["127.0.0.1", "127.0.0.1:7331", "localhost:80", "[::1]:7331", "x.localhost"]) {
+        for (const host of ["127.0.0.1", "127.0.0.1:7331", "localhost:80", "[::1]:7331", "[::1]", "::1", "x.localhost"]) {
             expect(gateway.isHostAllowed(req(host))).toBe(true);
         }
         for (const host of ["evil.com", "evil.com:7331", "10.0.0.5:7331", "notlocalhost.com", "127.0.0.1.evil.com"]) {

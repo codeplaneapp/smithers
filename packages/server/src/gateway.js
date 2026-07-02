@@ -442,11 +442,15 @@ function isLoopbackHost(hostHeader) {
         host = end >= 0 ? host.slice(1, end) : host.slice(1);
     }
     else {
-        // Strip a trailing :port (only when it is actually numeric, so a bare
-        // IPv6 literal without brackets is not mangled).
-        const colon = host.lastIndexOf(":");
-        if (colon >= 0 && /^\d+$/.test(host.slice(colon + 1))) {
-            host = host.slice(0, colon);
+        // Strip a trailing :port ONLY when there is a single colon. An
+        // unbracketed multi-colon host is a bare IPv6 literal (e.g. "::1"): a
+        // real port always requires brackets ("[::1]:80"), so a lone
+        // last-colon heuristic would mangle it (":1" read as a port).
+        const firstColon = host.indexOf(":");
+        if (firstColon >= 0
+            && firstColon === host.lastIndexOf(":")
+            && /^\d+$/.test(host.slice(firstColon + 1))) {
+            host = host.slice(0, firstColon);
         }
     }
     return (host === "localhost"
