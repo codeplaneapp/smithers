@@ -8107,6 +8107,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/gateway-react` | React hooks and root helpers for Gateway-backed UIs | Gateway |
 | `@smithers-orchestrator/gateway-ui` | Prebuilt React components for Gateway-backed UIs, built on the gateway-react hooks | Gateway UI Components |
 | `@smithers-orchestrator/graph` | Framework-neutral workflow graph model, XML nodes, task descriptors, and graph snapshots | Planner Internals, Types |
+| `@smithers-orchestrator/integrations` | External webhook and polling event sources, cursor storage, signature verification, and delivery helpers for workflow integrations | Integrations, Server |
 | `@smithers-orchestrator/jj-darwin-arm64` | Vendored jj (Jujutsu) binary for darwin-arm64; auto-installed as an optional dependency of `@smithers-orchestrator/vcs`, not depended on directly | VCS Guide |
 | `@smithers-orchestrator/jj-darwin-x64` | Vendored jj (Jujutsu) binary for darwin-x64; auto-installed as an optional dependency of `@smithers-orchestrator/vcs`, not depended on directly | VCS Guide |
 | `@smithers-orchestrator/jj-linux-arm64` | Vendored jj (Jujutsu) binary for linux-arm64; auto-installed as an optional dependency of `@smithers-orchestrator/vcs`, not depended on directly | VCS Guide |

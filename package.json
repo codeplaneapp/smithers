@@ -136,6 +136,7 @@
     "@smithers-orchestrator/gateway-react": "workspace:*",
     "@smithers-orchestrator/gateway-ui": "workspace:*",
     "@smithers-orchestrator/graph": "workspace:*",
+    "@smithers-orchestrator/integrations": "workspace:*",
     "@smithers-orchestrator/memory": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/openapi": "workspace:*",
