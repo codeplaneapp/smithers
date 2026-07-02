@@ -76,6 +76,31 @@ describe("smithers restore", () => {
         expect(out.get()).toContain("Restored");
     });
 
+    test("reuses a preselected target without listing checkpoints again", async () => {
+        const reverted = [];
+        const out = capture();
+        const r = await runRestoreOnce({
+            adapter: {
+                async listWorkspaceCheckpoints() {
+                    throw new Error("checkpoint list should not be read");
+                },
+            },
+            runId: "r1",
+            nodeId: "n1",
+            target: cps[0],
+            stdout: out,
+            stderr: capture(),
+            revert: async (commitId, cwd) => {
+                reverted.push([commitId, cwd]);
+                return { success: true };
+            },
+        });
+
+        expect(r.exitCode).toBe(0);
+        expect(reverted).toEqual([["c0", "/wt"]]);
+        expect(out.get()).toContain("checkpoint #0");
+    });
+
     test("missing checkpoint exits non-zero with a message", async () => {
         const err = capture();
         const r = await runRestoreOnce({

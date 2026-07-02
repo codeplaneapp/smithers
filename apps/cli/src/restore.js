@@ -53,6 +53,7 @@ export function pickTargetCheckpoint(checkpoints, sel) {
  *   nodeId: string,
  *   iteration?: number,
  *   seq?: number,
+ *   target?: Record<string, any>,
  *   stdout: { write: (s: string) => void },
  *   stderr: { write: (s: string) => void },
  *   revert?: (commitId: string, cwd: string) => Promise<{ success: boolean, error?: string }>,
@@ -63,8 +64,8 @@ export async function runRestoreOnce(opts) {
     const { adapter, runId, nodeId, iteration, seq, stdout, stderr } = opts;
     const revert = opts.revert ?? defaultRevert;
 
-    const checkpoints = await adapter.listWorkspaceCheckpoints(runId);
-    const target = pickTargetCheckpoint(checkpoints, { nodeId, iteration, seq });
+    const target = opts.target ??
+        pickTargetCheckpoint(await adapter.listWorkspaceCheckpoints(runId), { nodeId, iteration, seq });
     if (!target) {
         stderr.write(`No matching durability checkpoint for run ${runId} node ${nodeId}${seq !== undefined ? ` seq ${seq}` : ""}\n`);
         return { exitCode: 1 };
