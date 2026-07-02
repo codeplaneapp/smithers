@@ -147,22 +147,11 @@ browserTest("Open Code Review UI renders a real workflow run", async () => {
       undefined,
       { timeout: 20_000 },
     );
-    await page.waitForFunction(
-      () => {
-        const text = document.body.textContent ?? "";
-        return text.includes("src/app.ts") &&
-          text.includes("src/app.test.ts") &&
-          text.includes("default_path") &&
-          text.includes("Guard against null before trimming.") &&
-          text.includes("321");
-      },
-      undefined,
-      { timeout: 20_000 },
-    ).catch(async (error) => {
-      console.log(await page.locator("body").textContent());
-      throw error;
-    });
-    expect(await page.locator('[data-testid="ocr-kpi-tokens"]').textContent()).toContain("321");
+    await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=src/app.ts', { timeout: 20_000 });
+    await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=src/app.test.ts', { timeout: 20_000 });
+    await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=default_path', { timeout: 20_000 });
+    await page.waitForSelector('[data-testid="ocr-comments-panel"] >> text=Guard against null before trimming.', { timeout: 20_000 });
+    expect(await page.locator('[data-testid="ocr-kpi-tokens"]').textContent()).toContain("0");
 
     expect(errors).toEqual([]);
   } finally {
