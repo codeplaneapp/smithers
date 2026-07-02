@@ -14,9 +14,6 @@ import { extname, join, relative, resolve, sep } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 import { Effect, Metric } from "effect";
 import { WebSocketServer } from "ws";
-import { resolveSchema, runWorkflow } from "@smithers-orchestrator/engine";
-import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
-import { signalRun } from "@smithers-orchestrator/engine/signals";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { captureTxid, createTxidCapture, isRealPostgresAdapter, runWithTxidCapture } from "@smithers-orchestrator/db/captureTxid";
 import { getSmithersSchemaSignature } from "@smithers-orchestrator/db/getSmithersSchemaSignature";
@@ -155,6 +152,8 @@ const RUN_EVENT_HEARTBEAT_MS = 1_000;
 const RUN_EVENT_STREAM_OUTBOUND_QUEUE_LIMIT = 1_000;
 const RUN_EVENT_STREAM_WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
 const RUN_EVENT_STREAM_DRAIN_RETRY_MS = 10;
+const RUN_EVENT_WINDOW_RETAINED_RUN_LIMIT = 1_000;
+const RUN_EVENT_TERMINAL_WINDOW_GRACE_MS = 1_000;
 const API_STREAM_COALESCE_MS = 50;
 const API_STREAM_HEARTBEAT_MS = 15_000;
 const API_STREAM_REPLAY_LIMIT = 256;
@@ -162,8 +161,6 @@ const API_STREAM_REPLAY_BYTES = 64 * 1024;
 const API_STREAM_OUTBOUND_QUEUE_LIMIT = 256;
 const API_STREAM_OUTBOUND_BYTES = 64 * 1024;
 const API_COLLECTION_NAME_SET = new Set(apiCollectionNames);
-const RUN_EVENT_WINDOW_RETAINED_RUN_LIMIT = 1_000;
-const RUN_EVENT_TERMINAL_WINDOW_GRACE_MS = 1_000;
 const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "continued"]);
 export const GATEWAY_RPC_MAX_PAYLOAD_BYTES = DEFAULT_MAX_BODY_BYTES;
 export const GATEWAY_RPC_MAX_DEPTH = 32;
@@ -175,6 +172,25 @@ export const GATEWAY_RPC_INPUT_MAX_BYTES = GATEWAY_RPC_MAX_PAYLOAD_BYTES;
 export const GATEWAY_RPC_INPUT_MAX_DEPTH = GATEWAY_RPC_MAX_DEPTH;
 const GATEWAY_METHOD_NAME_PATTERN = /^[a-z][a-zA-Z0-9]*(?:\.[a-z][a-zA-Z0-9]*)*$/;
 const GATEWAY_UI_ASSET_PREFIX = "__smithers_ui";
+
+let engineRuntimePromise = null;
+let engineApprovalsPromise = null;
+let engineSignalsPromise = null;
+
+function loadEngineRuntime() {
+    engineRuntimePromise ??= import("@smithers-orchestrator/engine");
+    return engineRuntimePromise;
+}
+
+function loadEngineApprovals() {
+    engineApprovalsPromise ??= import("@smithers-orchestrator/engine/approvals");
+    return engineApprovalsPromise;
+}
+
+function loadEngineSignals() {
+    engineSignalsPromise ??= import("@smithers-orchestrator/engine/signals");
+    return engineSignalsPromise;
+}
 
 /**
  * @param {string} value
@@ -1523,6 +1539,7 @@ export class Gateway {
     operatorUi;
     uiApp;
     defaults;
+    routes;
     /**
      * Absolute workspace root for disk-backed registry reads (e.g. the
      * `listPrompts` RPC, which walks `<workspaceRoot>/.smithers/prompts/`).
@@ -1537,6 +1554,9 @@ export class Gateway {
     inflightRuns = new Map();
     devtoolsSubscribers = new Map();
     runEventWindows = new Map();
+    runEventSubscriberCounts = new Map();
+    terminalRunEventWindows = new Map();
+    terminalRunEventWindowTimers = new Map();
     apiStreamSeq = 0;
     apiStreamFrames = [];
     apiStreamFrameBytes = 0;
@@ -1544,9 +1564,6 @@ export class Gateway {
     apiStreamPendingCollections = new Set();
     apiStreamPendingResolvers = [];
     apiStreamFlushTimer = null;
-    runEventSubscriberCounts = new Map();
-    terminalRunEventWindows = new Map();
-    terminalRunEventWindowTimers = new Map();
     /** Absolute active subscriber count per runId (gauge source of truth). */
     devtoolsSubscriberCounts = new Map();
     /** Flagged subscriber IDs that should force a snapshot on their next emit. */
@@ -1615,6 +1632,7 @@ export class Gateway {
             ? DEFAULT_REQUEST_TIMEOUT
             : Math.floor(assertPositiveFiniteInteger("requestTimeout", Number(options.requestTimeout)));
         this.auth = options.auth;
+        this.routes = typeof options.routes === "function" ? options.routes : null;
         this.ui = resolveGatewayUiConfig(options.ui, "/");
         this.operatorUi = resolveDefaultOperatorUiConfig(options.operatorUi);
         this.uiApp = createGatewayUiApp({
@@ -3240,6 +3258,7 @@ export class Gateway {
             };
             const delivered = [];
             for (const runId of matchedRunIds) {
+                const { signalRun } = await loadEngineSignals();
                 const signal = await Effect.runPromise(signalRun(adapter, runId, signalConfig.name, signalPayload, {
                     correlationId,
                     receivedBy: triggeredBy,
@@ -3317,6 +3336,7 @@ export class Gateway {
             webhook: options?.webhook,
             ui,
             system: Boolean(options?.system),
+            entryFile: options?.entryFile,
         });
         // Startup recovery: any audit row left in `in_progress` from a prior
         // crash is flipped to `partial` and the associated run is flagged as
@@ -3385,6 +3405,9 @@ export class Gateway {
                 return this.handleHttpRpc(req, res);
             }
             if (await this.handleUiHttp(req, res)) {
+                return;
+            }
+            if (this.routes && await this.routes(req, res, { gateway: this, url })) {
                 return;
             }
             if ((req.method ?? "GET") === "GET" && url.pathname === "/") {
@@ -3512,6 +3535,10 @@ export class Gateway {
             clearInterval(this.schedulerTimer);
             this.schedulerTimer = null;
         }
+        for (const timer of this.terminalRunEventWindowTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.terminalRunEventWindowTimers.clear();
         if (this.apiStreamFlushTimer) {
             clearTimeout(this.apiStreamFlushTimer);
             this.apiStreamFlushTimer = null;
@@ -3527,10 +3554,6 @@ export class Gateway {
             catch { }
         }
         this.apiStreamSubscribers.clear();
-        for (const timer of this.terminalRunEventWindowTimers.values()) {
-            clearTimeout(timer);
-        }
-        this.terminalRunEventWindowTimers.clear();
         // Durability seam teardown: close every `_smithers_docs` file-watcher
         // (`fs.watch` handles) started via `watchTicketsDirectory`, so a closed
         // gateway never leaks watchers (e.g. across e2e boots or test runs).
@@ -3919,10 +3942,18 @@ export class Gateway {
             }
             auth.subscribeConnection.subscribedRuns.add(runId);
         }
+        const { runWorkflow } = await loadEngineRuntime();
         const runPromise = Effect.runPromise(runWorkflow(entry.workflow, {
             runId,
             input,
             resume: options?.resume,
+            // The registered entry's source file. On resume this is what lets
+            // the engine recompute the durability hashes and match the run's
+            // recorded metadata — without it a gateway-driven resume (approval
+            // decided from a monitor while the detached engine is parked) fails
+            // RESUME_METADATA_MISMATCH ("module graph unavailable") and the run
+            // stays waiting forever.
+            ...(entry.entryFile ? { workflowPath: entry.entryFile } : {}),
             maxConcurrency: options?.maxConcurrency,
             allowNetwork: options?.allowNetwork,
             maxOutputBytes: options?.maxOutputBytes,
@@ -4018,6 +4049,12 @@ export class Gateway {
             return;
         }
     }
+    /**
+   * @param {string} runId
+   * @param {string} workflowKey
+   * @param {SmithersDb} adapter
+   * @param {RunStartAuthContext} auth
+   */
     resumeRunInBackground(runId, workflowKey, adapter, auth) {
         void this.resumeRunIfNeeded(runId, workflowKey, adapter, auth).catch((error) => {
             emitGatewayEffect(Effect.all([
@@ -4698,9 +4735,38 @@ export class Gateway {
             this.adapterCache = new Map();
         }
         let adapter = this.adapterCache.get(workflow.db);
-        if (!adapter) {
-            adapter = new SmithersDb(workflow.db);
-            this.adapterCache.set(workflow.db, adapter);
+        if (adapter) {
+            return adapter;
+        }
+        // Separately-loaded workflow modules each open their OWN handle to the
+        // SAME store (an init pack registers ~90 workflows → ~90 drizzle objects
+        // over one smithers.db), so object identity alone dedupes nothing. Key
+        // on the store's identity too — the sqlite filename (or pglite data
+        // dir) — so cross-workflow readers (buildSnapshot,
+        // listRunsAcrossWorkflows, the out-of-process event bridge) iterate each
+        // STORE once, not once per registered workflow. Without this a WS
+        // `connect` (whose hello inlines buildSnapshot) scans the same DB ~90×
+        // and starves the handshake on a workspace-sized gateway.
+        if (!this.adapterByStore) {
+            this.adapterByStore = new Map();
+        }
+        const client = workflow.db?.$client;
+        const storeKey = typeof client?.filename === "string" && client.filename.length > 0
+            ? `sqlite:${client.filename}`
+            : typeof client?.dataDir === "string" && client.dataDir.length > 0
+                ? `pglite:${client.dataDir}`
+                : null;
+        if (storeKey) {
+            adapter = this.adapterByStore.get(storeKey);
+            if (adapter) {
+                this.adapterCache.set(workflow.db, adapter);
+                return adapter;
+            }
+        }
+        adapter = new SmithersDb(workflow.db);
+        this.adapterCache.set(workflow.db, adapter);
+        if (storeKey) {
+            this.adapterByStore.set(storeKey, adapter);
         }
         return adapter;
     }
@@ -6243,9 +6309,11 @@ export class Gateway {
                     }
                 }
                 if (approved) {
+                    const { approveNode } = await loadEngineApprovals();
                     await Effect.runPromise(approveNode(resolved.adapter, runId, nodeId, iteration, note, connection.userId ?? undefined, decision));
                 }
                 else {
+                    const { denyNode } = await loadEngineApprovals();
                     await Effect.runPromise(denyNode(resolved.adapter, runId, nodeId, iteration, note, connection.userId ?? undefined, decision));
                 }
                 this.resumeRunInBackground(runId, resolved.workflowKey, resolved.adapter, {
@@ -6269,6 +6337,7 @@ export class Gateway {
                 if (!resolved) {
                     return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
                 }
+                const { signalRun } = await loadEngineSignals();
                 const delivered = await Effect.runPromise(signalRun(resolved.adapter, runId, signalName, params.data ?? params.payload ?? {}, {
                     correlationId: asString(params.correlationId) ?? correlationKey,
                     receivedBy: connection.userId,
@@ -6304,6 +6373,7 @@ export class Gateway {
                 if (!resolved) {
                     return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
                 }
+                const { resolveSchema } = await loadEngineRuntime();
                 const inputTable = resolveSchema(resolved.workflow.db).input;
                 if (!inputTable) {
                     return responseError(frame.id, "MISSING_INPUT_TABLE", "Schema must include input table");

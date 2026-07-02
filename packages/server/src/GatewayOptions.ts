@@ -2,6 +2,7 @@ import type { GatewayAuthConfig } from "./GatewayAuthConfig.js";
 import type { GatewayDefaults } from "./GatewayDefaults.js";
 import type { GatewayOperatorUiConfig } from "./GatewayOperatorUiConfig.js";
 import type { GatewayUiConfig } from "./GatewayUiConfig.js";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 export type GatewayOptions = {
   protocol?: number;
@@ -9,6 +10,20 @@ export type GatewayOptions = {
   heartbeatMs?: number;
   auth?: GatewayAuthConfig;
   ui?: GatewayUiConfig;
+  /**
+   * Optional host-owned HTTP fallback. The Gateway still owns its native
+   * /health, /metrics, /workflows, /v1/rpc, /rpc, websocket, webhook, and UI
+   * routes; this hook runs before the built-in 404 so an embedding app can
+   * serve product-specific HTTP surfaces from the same listener without
+   * standing up Express or a second server.
+   *
+   * Return true after writing the response, false to let Gateway continue.
+   */
+  routes?: (
+    req: IncomingMessage,
+    res: ServerResponse,
+    context: { gateway: unknown; url: URL },
+  ) => boolean | Promise<boolean>;
   /**
    * Absolute path to the workspace root — the directory that holds the
    * `.smithers/` registry (workflows, prompts, components) and `smithers.db`.

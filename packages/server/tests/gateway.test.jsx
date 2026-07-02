@@ -324,11 +324,14 @@ describe("Gateway", () => {
     });
     test("performs the connect handshake, enforces scopes, and exposes health", async () => {
         const dbPath = makeDbPath("token");
+        const workspaceRoot = join(tmpdir(), `smithers-gateway-identity-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         dbPaths.push(dbPath);
         gateway = new Gateway({
             protocol: 1,
             features: ["approvals", "streaming", "runs"],
             heartbeatMs: 100,
+            workspaceRoot,
+            identity: { backend: "sqlite", version: "1.2.3" },
             auth: {
                 mode: "token",
                 tokens: {
@@ -353,11 +356,19 @@ describe("Gateway", () => {
         expect(hello.payload.snapshot.runs).toEqual([]);
         expect(hello.payload.snapshot.approvals).toEqual([]);
         expect(hello.payload.auth.userId).toBe("user:will");
+        expect(hello.payload.identity).toMatchObject({
+            workspaceRoot,
+            backend: "sqlite",
+            version: "1.2.3",
+            pid: process.pid,
+        });
+        expect(typeof hello.payload.identity.startedAtMs).toBe("number");
         const { client: viewer } = await connectGateway(port, "viewer-token");
         const health = await viewer.request("health");
         expect(health.ok).toBe(true);
         expect(health.payload.protocol).toBe(1);
         expect(health.payload.features).toEqual(["approvals", "streaming", "runs"]);
+        expect(health.payload.identity).toEqual(hello.payload.identity);
         const forbidden = await viewer.request("runs.create", {
             workflow: "basic",
             input: { value: 2 },

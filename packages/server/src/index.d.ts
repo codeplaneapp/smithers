@@ -1,5 +1,6 @@
 import * as _smithers_orchestrator_db_adapter_RunRow from '@smithers-orchestrator/db/adapter/RunRow';
 import * as node_http from 'node:http';
+import { IncomingMessage as IncomingMessage$1, ServerResponse as ServerResponse$2 } from 'node:http';
 import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
 import * as _smithers_orchestrator_components_SmithersWorkflow from '@smithers-orchestrator/components/SmithersWorkflow';
 import { SmithersWorkflow as SmithersWorkflow$1 } from '@smithers-orchestrator/components/SmithersWorkflow';
@@ -245,6 +246,19 @@ type GatewayOptions$1 = {
     auth?: GatewayAuthConfig$1;
     ui?: GatewayUiConfig$1;
     /**
+     * Optional host-owned HTTP fallback. The Gateway still owns its native
+     * /health, /metrics, /workflows, /v1/rpc, /rpc, websocket, webhook, and UI
+     * routes; this hook runs before the built-in 404 so an embedding app can
+     * serve product-specific HTTP surfaces from the same listener without
+     * standing up Express or a second server.
+     *
+     * Return true after writing the response, false to let Gateway continue.
+     */
+    routes?: (req: IncomingMessage$1, res: ServerResponse$2, context: {
+        gateway: unknown;
+        url: URL;
+    }) => boolean | Promise<boolean>;
+    /**
      * Absolute path to the workspace root — the directory that holds the
      * `.smithers/` registry (workflows, prompts, components) and `smithers.db`.
      *
@@ -258,6 +272,18 @@ type GatewayOptions$1 = {
      * case where the gateway boots from the workspace root.
      */
     workspaceRoot?: string;
+    /**
+     * Identity advertised on `GET /health`, the `health` RPC, and the WS hello
+     * (together with `workspaceRoot`, the process pid, and the listen time).
+     * Clients use it to verify they reached the gateway for the workspace they
+     * resolved locally instead of trusting whichever process owns the port.
+     */
+    identity?: {
+        /** Storage backend the workspace store resolved to (sqlite | pglite | postgres). */
+        backend?: string;
+        /** smithers-orchestrator package version serving this gateway. */
+        version?: string;
+    };
     /**
      * Built-in browser console for operators. Set to false to disable it.
      * @default { path: "/console" }
@@ -314,6 +340,17 @@ type ConnectRequest$1 = {
 type HelloResponse$1 = {
     protocol: number;
     features: string[];
+    /**
+     * Which workspace/process answered, so clients can verify they reached the
+     * gateway they resolved locally (see also `GET /health`).
+     */
+    identity: {
+        workspaceRoot: string | null;
+        backend: string | null;
+        version: string | null;
+        pid: number;
+        startedAtMs: number;
+    };
     policy: {
         heartbeatMs: number;
     };
@@ -336,6 +373,15 @@ type GatewayRegisterOptions$1 = {
     ui?: GatewayUiConfig$1;
     /** Internal plumbing workflow (e.g. init): excluded from default `listWorkflows` results unless the caller opts in via `filter.includeSystem`. */
     system?: boolean;
+    /**
+     * Absolute path of the workflow source file this entry was loaded from.
+     * Threaded into `runWorkflow` as `workflowPath` so gateway-hosted runs record
+     * real durability metadata (entry/module-graph hashes) — and, critically, so
+     * the gateway can RESUME a parked run started elsewhere (e.g. a detached CLI
+     * run paused at an approval gate): without a path the resume computes no
+     * hashes and the engine rejects it with RESUME_METADATA_MISMATCH.
+     */
+    entryFile?: string;
 };
 
 type EventFrame$1 = {
@@ -589,6 +635,10 @@ declare class Gateway {
     operatorUi: ResolvedGatewayUiConfig | null;
     uiApp: hono.Hono<hono_types.BlankEnv, hono_types.BlankSchema, "/">;
     defaults: GatewayDefaults$1 | undefined;
+    routes: ((req: node_http.IncomingMessage, res: node_http.ServerResponse, context: {
+        gateway: unknown;
+        url: URL;
+    }) => boolean | Promise<boolean>) | null;
     /**
      * Absolute workspace root for disk-backed registry reads (e.g. the
      * `listPrompts` RPC, which walks `<workspaceRoot>/.smithers/prompts/`).
@@ -646,6 +696,22 @@ declare class Gateway {
     outOfProcessEventBridgeDrainedRuns: Set<any>;
     stateVersion: number;
     startedAtMs: number;
+    identity: {
+        backend?: string;
+        version?: string;
+    } | null;
+    /**
+   * Identity block advertised on `GET /health`, the `health` RPC, and the WS
+   * hello. Lets a client verify it reached the gateway for the workspace it
+   * resolved locally instead of trusting whichever process owns the port.
+   */
+    buildIdentity(): {
+        workspaceRoot: string | null;
+        backend: string | null;
+        version: string | null;
+        pid: number;
+        startedAtMs: number;
+    };
     /**
    * @returns {GatewayUiMount[]}
    */
@@ -1000,7 +1066,13 @@ declare class Gateway {
    * @param {RunStartAuthContext} auth
    */
     resumeRunIfNeeded(runId: string, workflowKey: string, adapter: SmithersDb$4, auth: RunStartAuthContext): Promise<void>;
-    resumeRunInBackground(runId: any, workflowKey: any, adapter: any, auth: any): void;
+    /**
+   * @param {string} runId
+   * @param {string} workflowKey
+   * @param {SmithersDb} adapter
+   * @param {RunStartAuthContext} auth
+   */
+    resumeRunInBackground(runId: string, workflowKey: string, adapter: SmithersDb$4, auth: RunStartAuthContext): void;
     /**
    * @param {WebSocket} ws
    * @param {IncomingMessage} req
@@ -1109,6 +1181,7 @@ declare class Gateway {
    */
     adapterForWorkflow(workflow: SmithersWorkflow): SmithersDb$4;
     adapterCache: Map<any, any> | undefined;
+    adapterByStore: Map<any, any> | undefined;
     /**
    * Resolve the true gateway workflow key for a stored run row. A run started
    * THROUGH the gateway records its key in config; a run started elsewhere (e.g.
@@ -1127,8 +1200,9 @@ declare class Gateway {
     }, registeredKeys: Set<string>, fallbackKey: string): string;
     /**
    * @param {string} [status]
+   * @param {string} [workflow]
    */
-    listRunsAcrossWorkflows(limit?: number, status?: string): Promise<any[]>;
+    listRunsAcrossWorkflows(limit?: number, status?: string, workflow?: string): Promise<any[]>;
     /**
    * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
    * by namespace+key, not per-run), so iterate each DISTINCT workflow DB exactly
