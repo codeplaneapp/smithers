@@ -426,6 +426,36 @@ function asString(value) {
     return typeof value === "string" ? value : undefined;
 }
 /**
+ * Whether an HTTP `Host` header names a loopback interface. Used for the
+ * DNS-rebinding defense (spec decision 16a): a page at evil.com rebound to
+ * 127.0.0.1 sends `Host: evil.com`, so requiring a loopback Host rejects it
+ * even when the Origin check is permissive. Handles an optional :port and
+ * IPv6 brackets, and treats `*.localhost` and the whole 127/8 block as loopback.
+ * @param {string} hostHeader
+ * @returns {boolean}
+ */
+function isLoopbackHost(hostHeader) {
+    let host = hostHeader.trim().toLowerCase();
+    if (host.startsWith("[")) {
+        // Bracketed IPv6, e.g. "[::1]:7331" or "[::1]".
+        const end = host.indexOf("]");
+        host = end >= 0 ? host.slice(1, end) : host.slice(1);
+    }
+    else {
+        // Strip a trailing :port (only when it is actually numeric, so a bare
+        // IPv6 literal without brackets is not mangled).
+        const colon = host.lastIndexOf(":");
+        if (colon >= 0 && /^\d+$/.test(host.slice(colon + 1))) {
+            host = host.slice(0, colon);
+        }
+    }
+    return (host === "localhost"
+        || host === "::1"
+        || host === "::ffff:127.0.0.1"
+        || host.endsWith(".localhost")
+        || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host));
+}
+/**
  * @param {unknown} value
  * @returns {number | undefined}
  */
@@ -3442,17 +3472,18 @@ export class Gateway {
             // `handleUpgrade` opens the socket — otherwise a drive-by page could
             // open and hold connections (consuming maxConnections) by never
             // sending the `connect` RPC. (#446)
-            if (!this.isOriginAllowed(req)) {
+            if (!this.isOriginAllowed(req) || !this.isHostAllowed(req)) {
                 emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
                     kind: "auth",
                     transport: "ws",
                 }));
-                emitGatewayLog("warning", "Gateway WS upgrade rejected: origin not allowed", {
+                emitGatewayLog("warning", "Gateway WS upgrade rejected: origin or host not allowed", {
                     transport: "ws",
                     remoteAddress: req.socket.remoteAddress ?? null,
                     origin: asString(req.headers.origin) ?? null,
+                    host: asString(req.headers.host) ?? null,
                 }, "gateway:connect");
-                const body = "Origin is not allowed\n";
+                const body = "Origin or host is not allowed\n";
                 // end() (not write()+destroy()) so the response is flushed to the
                 // peer before the socket closes — a bare destroy can RST away the
                 // unsent bytes, leaving the client with no status.
@@ -4305,11 +4336,48 @@ export class Gateway {
         return !origin || allowedOrigins.includes(origin);
     }
     /**
+   * DNS-rebinding defense (spec decision 16a). An unauthenticated daemon grants
+   * operator scope to every request, so a browser page at a name rebound to
+   * 127.0.0.1 could drive `launchRun` (real compute/shell). Browsers send the
+   * rebound name in `Host`, so requiring a loopback `Host` closes the hole even
+   * when the Origin allow-list is empty (permissive). Only the unauthenticated
+   * path is gated: with auth configured the token is the gate and a remote
+   * client legitimately sends a non-loopback Host. `SMITHERS_GATEWAY_TRUST_ANY_HOST=1`
+   * opts out for an explicit `--insecure` remote bind. A missing/empty Host
+   * (non-browser CLI, HTTP/1.0) is not a rebinding vector and is allowed.
+   * @param {IncomingMessage} req
+   * @returns {boolean}
+   */
+    isHostAllowed(req) {
+        if (this.auth) {
+            return true;
+        }
+        const trustAnyHost = process.env.SMITHERS_GATEWAY_TRUST_ANY_HOST;
+        if (trustAnyHost === "1" || trustAnyHost === "true") {
+            return true;
+        }
+        const host = asString(req.headers.host);
+        if (host === undefined || host === "") {
+            return true;
+        }
+        return isLoopbackHost(host);
+    }
+    /**
    * @param {IncomingMessage} req
    * @param {string | null} token
    * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
    */
     async authenticateRequest(req, token) {
+        // DNS-rebinding defense (spec decision 16a), enforced BEFORE the
+        // unauthenticated operator grant below — otherwise a rebound browser
+        // page reaches an unauthenticated daemon as an implicit operator.
+        if (!this.isHostAllowed(req)) {
+            return {
+                ok: false,
+                code: "UNAUTHORIZED",
+                message: "Host is not allowed",
+            };
+        }
         if (!this.auth) {
             return {
                 ok: true,
