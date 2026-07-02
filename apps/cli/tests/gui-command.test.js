@@ -184,6 +184,33 @@ test("bare directory shortcut opens through the Gateway UI surface", async () =>
     ]);
 }, 30_000);
 
+test("gui on a workspace with zero runs fails NO_RUNS with actionable next steps (#13)", async () => {
+    const repo = createTempRepo();
+    repo.write("workspace/.gitkeep", "\n");
+    const gateway = await startFakeGateway((method, params) => {
+        if (method === "listWorkflows") {
+            return rpcResponse([]);
+        }
+        if (method === "listRuns") {
+            return rpcResponse([]);
+        }
+        throw new Error(`Unexpected RPC ${method} ${JSON.stringify(params)}`);
+    });
+
+    const result = await runSmithersAsync(["gui", "workspace", "--gateway", gateway.base, "--no-open"], {
+        cwd: repo.dir,
+        format: "json",
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.json).toMatchObject({ code: "NO_RUNS" });
+    // The message must tell a fresh-workspace user what to actually do, with
+    // commands that parse as written.
+    expect(result.json.message).toContain("smithers up <workflow.tsx>");
+    expect(result.json.message).toContain("--workflow <id>");
+    expect(result.json.message).toContain("smithers ui --app");
+}, 30_000);
+
 test("gui preserves directory validation before opening the Gateway UI", () => {
     const repo = createTempRepo();
 

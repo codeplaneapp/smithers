@@ -38,6 +38,30 @@ describe("conflicting / invalid flag combinations", () => {
         expect(all).toContain("--resume-claim-heartbeat");
     });
 
+    test("gateway --port rejects values above 65535 during flag validation", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["gateway", "--port", "99999"], {
+            cwd: repo.dir,
+            format: null,
+        });
+        const all = `${result.stdout}\n${result.stderr}`;
+        expect(result.exitCode).not.toBe(0);
+        expect(all).toContain("65535");
+        expect(all).not.toContain("ERR_SOCKET_BAD_PORT");
+    });
+
+    test("up --serve --port rejects values above 65535 during flag validation", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["up", "fake-workflow.tsx", "--serve", "--port", "99999"], {
+            cwd: repo.dir,
+            format: null,
+        });
+        const all = `${result.stdout}\n${result.stderr}`;
+        expect(result.exitCode).not.toBe(0);
+        expect(all).toContain("65535");
+        expect(all).not.toContain("ERR_SOCKET_BAD_PORT");
+    });
+
     test("unknown subcommand exits non-zero", () => {
         const repo = createTempRepo();
         const result = runSmithers(["totally-not-a-real-subcommand"], {
@@ -252,5 +276,65 @@ describe("--annotations streaming via stdin", () => {
             "live-ui",
             "html-page",
         ]);
+    });
+});
+
+describe("machine-output requests never invite interactive mode (#19)", () => {
+    test("up --interactive --format json fails INTERACTIVE_REQUIRES_TTY naming the format conflict", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["up", "--interactive"], { cwd: repo.dir, format: "json" });
+        expect(result.exitCode).toBe(4);
+        expect(result.json.code).toBe("INTERACTIVE_REQUIRES_TTY");
+        expect(result.json.message).toContain("--format json/jsonl");
+    });
+
+    test("up --format json with no workflow yields a pure-JSON WORKFLOW_REQUIRED envelope", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["up"], { cwd: repo.dir, format: "json" });
+        expect(result.exitCode).toBe(4);
+        // stdout must be a single parseable JSON document: no clack bytes.
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.code).toBe("WORKFLOW_REQUIRED");
+    });
+});
+
+describe("missing required inputs surface friendly messages, not raw zod prose (#12)", () => {
+    test("missing required positional: `inspect` names the argument and points at --help", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["inspect"], { cwd: repo.dir, format: "json" });
+        expect(result.exitCode).toBe(4);
+        expect(result.json.code).toBe("VALIDATION_ERROR");
+        expect(result.json.message).toContain("Missing required argument <runId>");
+        expect(result.json.message).toContain("smithers inspect --help");
+        expect(result.json.message).not.toContain("received undefined");
+        // The structured fieldErrors contract (path/missing) stays intact for
+        // machine consumers (same shape init.e2e.test.js pins for invalid values).
+        expect(result.json.fieldErrors).toHaveLength(1);
+        expect(result.json.fieldErrors[0]).toMatchObject({ path: "runId", missing: true });
+    });
+
+    test("missing required options: `retry-task` names --run-id and --node-id in kebab-case", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["retry-task", "fake.tsx"], { cwd: repo.dir, format: "json" });
+        expect(result.exitCode).toBe(4);
+        expect(result.json.code).toBe("VALIDATION_ERROR");
+        expect(result.json.message).toContain("Missing required option --run-id");
+        expect(result.json.message).toContain("Missing required option --node-id");
+        expect(result.json.message).toContain("smithers retry-task --help");
+        expect(result.json.fieldErrors.map((fe) => fe.path).sort()).toEqual(["nodeId", "runId"]);
+    });
+
+    test("invalid (non-missing) values keep incur's original message", () => {
+        const repo = createTempRepo();
+        // Same contract init.e2e.test.js pins: an invalid enum value is not a
+        // missing input, so the raw "Invalid input" phrasing must survive.
+        const result = runSmithers(["init", "--template", "does-not-exist", "--no-install"], {
+            cwd: repo.dir,
+            format: "json",
+        });
+        expect(result.exitCode).toBe(4);
+        expect(result.json.code).toBe("VALIDATION_ERROR");
+        expect(result.json.message).toContain("Invalid input");
+        expect(result.json.message).not.toContain("Missing required");
     });
 });

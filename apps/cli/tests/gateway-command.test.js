@@ -1,11 +1,11 @@
 import { expect, onTestFinished, test } from "bun:test";
-import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { basename, join, resolve } from "node:path";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
 import { createTempRepo, runSmithers, writeTestWorkflow } from "../../../packages/smithers/tests/e2e-helpers.js";
-import { gatewayRuntimePaths, readGatewayRuntimeState } from "../src/gateway-runtime.js";
+import { gatewayRuntimePaths, readGatewayRuntimeState, writeGatewayRuntimeState } from "../src/gateway-runtime.js";
 
 const CLI_ENTRY = resolve(import.meta.dir, "..", "src", "index.js");
 
@@ -23,13 +23,29 @@ function makeStateDirEnv() {
  * @param {string[]} [extraArgs]
  */
 async function startGateway(repo, env, extraArgs = []) {
+    const gateway = spawnGateway(repo, env, extraArgs);
+    await waitFor(() => gateway.stderr().includes("Gateway listening on"), 20_000);
+    return gateway;
+}
+
+/**
+ * Spawn a long-running `smithers gateway` without waiting for startup.
+ *
+ * @param {{ dir: string }} repo
+ * @param {Record<string, string>} env
+ * @param {string[]} [extraArgs]
+ */
+function spawnGateway(repo, env, extraArgs = []) {
     const child = spawn(process.execPath, ["run", CLI_ENTRY, "gateway", ...extraArgs], {
         cwd: repo.dir,
         env: { ...process.env, ...env },
         stdio: ["ignore", "pipe", "pipe"],
     });
+    let stdout = "";
     let stderr = "";
+    child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     const closePromise = new Promise((resolvePromise) => child.once("close", resolvePromise));
     onTestFinished(async () => {
@@ -37,15 +53,56 @@ async function startGateway(repo, env, extraArgs = []) {
             await stopProcess(child, closePromise);
         }
     });
-    await waitFor(() => stderr.includes("Gateway listening on"), 20_000);
-    return { child, closePromise, stderr: () => stderr };
+    return { child, closePromise, stdout: () => stdout, stderr: () => stderr };
 }
 
-async function findOpenPort() {
+/**
+ * Spawn a one-shot smithers command and capture stdout/stderr.
+ *
+ * @param {string[]} args
+ * @param {{ cwd: string; env?: Record<string, string> }} options
+ */
+function spawnSmithers(args, options) {
+    const child = spawn(process.execPath, ["run", CLI_ENTRY, ...args], {
+        cwd: options.cwd,
+        env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", ...options.env },
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const closePromise = new Promise((resolvePromise) => child.once("close", resolvePromise));
+    onTestFinished(async () => {
+        if (child.exitCode === null && !child.killed) {
+            await stopProcess(child, closePromise);
+        }
+    });
+    return { child, closePromise, stdout: () => stdout, stderr: () => stderr };
+}
+
+function writeBasicUi(repo) {
+    repo.write(".smithers/ui/basic.tsx", [
+        "import React from \"react\";",
+        "",
+        "export default function BasicUi() {",
+        "  return <main>Basic UI</main>;",
+        "}",
+        "",
+    ].join("\n"));
+}
+
+function writeWorkspacePack(repo) {
+    repo.write(".smithers/smithers.config.ts", "export default {};\n");
+}
+
+async function findOpenPort(host = "127.0.0.1") {
     const server = createServer();
     await new Promise((resolvePromise, reject) => {
         server.once("error", reject);
-        server.listen(0, "127.0.0.1", resolvePromise);
+        server.listen(0, host, resolvePromise);
     });
     const address = server.address();
     await new Promise((resolvePromise) => server.close(resolvePromise));
@@ -75,6 +132,54 @@ async function stopProcess(child, closePromise) {
         child.kill("SIGKILL");
         await closePromise;
     }
+}
+
+function parseEnvelope(stdout) {
+    const trimmed = stdout.trim();
+    if (!trimmed) {
+        throw new Error(`Expected a JSON envelope on stdout but got nothing. stdout=${JSON.stringify(stdout)}`);
+    }
+    const candidates = [trimmed];
+    const lastObjectStart = trimmed.lastIndexOf("\n{");
+    if (lastObjectStart >= 0) candidates.push(trimmed.slice(lastObjectStart + 1));
+    const firstObjectStart = trimmed.indexOf("{");
+    if (firstObjectStart > 0) candidates.push(trimmed.slice(firstObjectStart));
+    for (const candidate of candidates) {
+        try {
+            return JSON.parse(candidate);
+        }
+        catch { }
+    }
+    throw new Error(`Could not parse a JSON envelope from stdout. stdout=${JSON.stringify(stdout)}`);
+}
+
+function listenerPidsOnPort(port) {
+    const result = spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
+        encoding: "utf8",
+    });
+    return (result.stdout ?? "")
+        .split(/\s+/)
+        .map((pid) => Number(pid))
+        .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+}
+
+async function stopGatewayOnPort(port) {
+    const pids = listenerPidsOnPort(port);
+    for (const pid of pids) {
+        try {
+            process.kill(pid, "SIGTERM");
+        }
+        catch { }
+    }
+    if (pids.length === 0) return;
+    await waitFor(() => listenerPidsOnPort(port).length === 0, 2_000).catch(() => {
+        for (const pid of pids) {
+            try {
+                process.kill(pid, "SIGKILL");
+            }
+            catch { }
+        }
+    });
 }
 
 test("gateway help distinguishes the multi-run Gateway from up --serve", () => {
@@ -171,52 +276,303 @@ test("gateway refuses a routable LAN host with no auth", () => {
 // Singleton lifecycle (spec: .smithers/specs/singleton-gateway.md, G1): the
 // daemon records where it listens in a per-workspace runtime state file;
 // `status` reports it, a second start refuses, `stop` tears it down.
-test("gateway writes runtime state, enforces the singleton, and status/stop manage it", async () => {
+for (const backend of ["sqlite", "pglite"]) {
+    test(`gateway writes runtime state, enforces the singleton, and status/stop manage it (${backend})`, async () => {
+        const repo = createTempRepo();
+        if (backend === "sqlite") {
+            writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+        }
+        else {
+            writeWorkspacePack(repo);
+        }
+        const { stateDir, env } = makeStateDirEnv();
+        const stateEnv = { ...process.env, SMITHERS_GATEWAY_STATE_DIR: stateDir };
+        const port = await findOpenPort();
+        const backendArgs = backend === "sqlite" ? [] : ["--backend", backend];
+
+        const gateway = await startGateway(repo, env, ["--port", String(port), ...backendArgs]);
+        const state = readGatewayRuntimeState(repo.dir, stateEnv);
+        expect(state?.port).toBe(port);
+        expect(state?.pid).toBe(gateway.child.pid);
+        expect(state?.backend).toBe(backend);
+        expect(state?.token).toBeNull();
+        expect(gateway.stderr()).toContain("Runtime state:");
+        expect(gateway.stderr()).toContain(`Registered workflows: ${backend === "sqlite" ? "basic" : "workspace"}`);
+
+        // /health advertises the workspace identity clients verify against.
+        const health = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(3_000) }).then((r) => r.json());
+        expect(health.identity.pid).toBe(gateway.child.pid);
+        expect(health.identity.backend).toBe(backend);
+        expect(existsSync(health.identity.workspaceRoot)).toBe(true);
+
+        // Second start against a healthy incumbent refuses.
+        const second = runSmithers(["gateway", "--port", String(await findOpenPort()), ...backendArgs], {
+            cwd: repo.dir,
+            format: "json",
+            env,
+            timeoutMs: 30_000,
+        });
+        expect(second.exitCode).not.toBe(0);
+        expect(`${second.stdout}\n${second.stderr}`).toContain("already running");
+
+        // status reports the running daemon.
+        const status = runSmithers(["gateway", "status"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
+        expect(status.exitCode).toBe(0);
+        expect(status.json?.running).toBe(true);
+        expect(status.json?.pid).toBe(gateway.child.pid);
+        expect(status.json?.backend).toBe(backend);
+
+        // stop tears it down and clears the state file.
+        const stop = runSmithers(["gateway", "stop"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
+        expect(stop.exitCode).toBe(0);
+        expect(stop.json?.stopped).toBe(true);
+        await gateway.closePromise;
+        expect(readGatewayRuntimeState(repo.dir, stateEnv)).toBeNull();
+
+        const statusAfter = runSmithers(["gateway", "status"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
+        expect(statusAfter.exitCode).toBe(0);
+        expect(statusAfter.json?.running).toBe(false);
+    }, 90_000);
+}
+
+test("concurrent ui autostarts converge on one workspace gateway", async () => {
     const repo = createTempRepo();
     writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+    writeBasicUi(repo);
     const { stateDir, env } = makeStateDirEnv();
-    const port = await findOpenPort();
-
-    const gateway = await startGateway(repo, env, ["--port", String(port)]);
     const stateEnv = { ...process.env, SMITHERS_GATEWAY_STATE_DIR: stateDir };
-    const state = readGatewayRuntimeState(repo.dir, stateEnv);
-    expect(state?.port).toBe(port);
-    expect(state?.pid).toBe(gateway.child.pid);
-    expect(state?.token).toBeNull();
-    expect(gateway.stderr()).toContain("Runtime state:");
+    const port = await findOpenPort();
+    let state;
+    try {
+        const args = ["ui", "--workflow", "basic", "--port", String(port), "--no-open", "--format", "json"];
+        const first = spawnSmithers(args, { cwd: repo.dir, env });
+        const second = spawnSmithers(args, { cwd: repo.dir, env });
+        const results = await Promise.all([first, second].map(async (client) => {
+            const exitCode = await client.closePromise;
+            return {
+                exitCode,
+                stdout: client.stdout(),
+                stderr: client.stderr(),
+                json: exitCode === 0 ? parseEnvelope(client.stdout()) : null,
+            };
+        }));
+        for (const result of results) {
+            expect(result.exitCode).toBe(0);
+            expect(result.json?.opened).toBe(false);
+            expect(result.json?.workflow).toBe("basic");
+        }
+        state = await waitFor(() => readGatewayRuntimeState(repo.dir, stateEnv), 60_000);
+        expect(state?.port).toBeGreaterThan(0);
+        expect(state?.pid).toBeGreaterThan(0);
+        const expectedStateFile = basename(gatewayRuntimePaths(repo.dir, stateEnv).stateFile);
+        expect(readdirSync(stateDir).filter((name) => name.endsWith(".json"))).toEqual([expectedStateFile]);
+        const listenerPids = await waitFor(() => {
+            const pids = listenerPidsOnPort(state.port);
+            return pids.length === 1 ? pids : null;
+        }, 10_000);
+        expect(listenerPids).toEqual([state.pid]);
+        const urls = results.map((result) => result.json?.url);
+        expect(new Set(urls)).toEqual(new Set([`${state.url}/workflows/basic`]));
+        for (const url of urls) {
+            const health = await fetch(`${new URL(url).origin}/health`, { signal: AbortSignal.timeout(3_000) }).then((r) => r.json());
+            expect(health.identity.pid).toBe(state.pid);
+        }
+    }
+    finally {
+        const latest = state ?? readGatewayRuntimeState(repo.dir, stateEnv);
+        if (latest?.port) {
+            runSmithers(["gateway", "stop"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
+            await stopGatewayOnPort(latest.port);
+        }
+        else {
+            await stopGatewayOnPort(port);
+        }
+    }
+}, 120_000);
 
-    // /health advertises the workspace identity clients verify against.
-    const health = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(3_000) }).then((r) => r.json());
-    expect(health.identity.pid).toBe(gateway.child.pid);
-    expect(existsSync(health.identity.workspaceRoot)).toBe(true);
+test("ui autostart keeps two workspaces isolated on different ports", async () => {
+    const firstRepo = createTempRepo();
+    const secondRepo = createTempRepo();
+    for (const repo of [firstRepo, secondRepo]) {
+        writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+        writeBasicUi(repo);
+    }
+    const { env } = makeStateDirEnv();
+    const stateEnv = { ...process.env, ...env };
+    const port = await findOpenPort();
+    let firstState;
+    let secondState;
+    try {
+        const args = ["ui", "--workflow", "basic", "--port", String(port), "--no-open"];
+        const first = runSmithers(args, { cwd: firstRepo.dir, format: "json", env, timeoutMs: 60_000 });
+        expect(first.exitCode).toBe(0);
+        firstState = readGatewayRuntimeState(firstRepo.dir, stateEnv);
+        expect(firstState).not.toBeNull();
+        expect(first.json?.url).toBe(`${firstState.url}/workflows/basic`);
 
-    // Second start against a healthy incumbent refuses.
-    const second = runSmithers(["gateway", "--port", String(await findOpenPort())], {
+        const second = runSmithers(args, { cwd: secondRepo.dir, format: "json", env, timeoutMs: 60_000 });
+        expect(second.exitCode).toBe(0);
+        secondState = readGatewayRuntimeState(secondRepo.dir, stateEnv);
+        expect(secondState).not.toBeNull();
+        expect(second.json?.url).toBe(`${secondState.url}/workflows/basic`);
+        expect(secondState.port).not.toBe(firstState.port);
+        expect(secondState.pid).not.toBe(firstState.pid);
+
+        const firstHealth = await fetch(`${firstState.url}/health`, { signal: AbortSignal.timeout(3_000) }).then((r) => r.json());
+        const secondHealth = await fetch(`${secondState.url}/health`, { signal: AbortSignal.timeout(3_000) }).then((r) => r.json());
+        expect(firstHealth.identity.workspaceRoot).toBe(firstState.workspaceRoot);
+        expect(secondHealth.identity.workspaceRoot).toBe(secondState.workspaceRoot);
+    }
+    finally {
+        for (const [repo, state] of [[firstRepo, firstState], [secondRepo, secondState]]) {
+            if (state?.port) {
+                runSmithers(["gateway", "stop"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
+                await stopGatewayOnPort(state.port);
+            }
+        }
+    }
+}, 120_000);
+
+test("gateway stop removes a stale runtime state file for a dead daemon", async () => {
+    const repo = createTempRepo();
+    writeWorkspacePack(repo);
+    const { stateDir, env } = makeStateDirEnv();
+    const stateEnv = { ...process.env, SMITHERS_GATEWAY_STATE_DIR: stateDir };
+    const port = await findOpenPort();
+    writeGatewayRuntimeState(repo.dir, {
+        pid: 999999999,
+        host: "127.0.0.1",
+        port,
+        url: `http://127.0.0.1:${port}`,
+        token: null,
+        workspaceRoot: repo.dir,
+        backend: "sqlite",
+        version: "0.0.0-test",
+        protocol: 1,
+        startedAtMs: Date.now(),
+    }, stateEnv);
+
+    const result = runSmithers(["gateway", "stop"], {
         cwd: repo.dir,
         format: "json",
         env,
         timeoutMs: 30_000,
     });
-    expect(second.exitCode).not.toBe(0);
-    expect(`${second.stdout}\n${second.stderr}`).toContain("already running");
+    expect(result.exitCode).toBe(0);
+    expect(result.json?.cleanedStaleState).toBe(true);
+    expect(result.json?.running).toBe(false);
+    expect(readGatewayRuntimeState(repo.dir, stateEnv)).toBeNull();
+}, 30_000);
 
-    // status reports the running daemon.
+test("gateway records a bracketed IPv6 loopback URL in runtime state", async () => {
+    const repo = createTempRepo();
+    writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+    const { stateDir, env } = makeStateDirEnv();
+    let port;
+    try {
+        port = await findOpenPort("::1");
+    }
+    catch {
+        return;
+    }
+    const gateway = await startGateway(repo, env, ["--host", "::1", "--port", String(port)]);
+    const stateEnv = { ...process.env, SMITHERS_GATEWAY_STATE_DIR: stateDir };
+    const state = readGatewayRuntimeState(repo.dir, stateEnv);
+    expect(state?.url).toBe(`http://[::1]:${port}`);
+    expect(new URL(state.url).hostname).toBe("[::1]");
+    const health = await fetch(state.url + "/health", { signal: AbortSignal.timeout(3_000) }).then((r) => r.json());
+    expect(health.identity.pid).toBe(gateway.child.pid);
     const status = runSmithers(["gateway", "status"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
     expect(status.exitCode).toBe(0);
     expect(status.json?.running).toBe(true);
-    expect(status.json?.pid).toBe(gateway.child.pid);
-
-    // stop tears it down and clears the state file.
     const stop = runSmithers(["gateway", "stop"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
     expect(stop.exitCode).toBe(0);
-    expect(stop.json?.stopped).toBe(true);
     await gateway.closePromise;
-    expect(readGatewayRuntimeState(repo.dir, stateEnv)).toBeNull();
-
-    const statusAfter = runSmithers(["gateway", "status"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
-    expect(statusAfter.exitCode).toBe(0);
-    expect(statusAfter.json?.running).toBe(false);
 }, 60_000);
+
+test("concurrent gateway starts serialize before workflow boot and only one daemon survives", async () => {
+    const repo = createTempRepo();
+    writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+    const { stateDir, env } = makeStateDirEnv();
+    const firstPort = await findOpenPort();
+    let secondPort = await findOpenPort();
+    while (secondPort === firstPort) {
+        secondPort = await findOpenPort();
+    }
+    const first = spawnGateway(repo, env, ["--port", String(firstPort)]);
+    const second = spawnGateway(repo, env, ["--port", String(secondPort)]);
+    const gateways = [first, second];
+    try {
+        await waitFor(() => {
+            const listening = gateways.filter((gateway) => gateway.stderr().includes("Gateway listening on"));
+            const closed = gateways.filter((gateway) => gateway.child.exitCode !== null);
+            return listening.length >= 1 && listening.length + closed.length >= 2;
+        }, 60_000);
+        const listening = gateways.filter((gateway) => gateway.stderr().includes("Gateway listening on"));
+        const live = gateways.filter((gateway) => gateway.child.exitCode === null);
+        expect(listening).toHaveLength(1);
+        expect(live).toHaveLength(1);
+        const winner = listening[0];
+        const loser = gateways.find((gateway) => gateway !== winner);
+        expect(loser).toBeDefined();
+        if (!loser)
+            throw new Error("Expected one losing gateway process");
+        expect(`${loser.stdout()}\n${loser.stderr()}`).toContain("already");
+        const state = readGatewayRuntimeState(repo.dir, { ...process.env, SMITHERS_GATEWAY_STATE_DIR: stateDir });
+        expect(state).not.toBeNull();
+        if (!state)
+            throw new Error("Expected runtime state for winning gateway");
+        expect(state.pid).toBe(winner.child.pid);
+        expect([firstPort, secondPort]).toContain(state.port);
+        const health = await fetch(`${state.url}/health`, { signal: AbortSignal.timeout(3_000) }).then((r) => r.json());
+        expect(health.identity.pid).toBe(winner.child.pid);
+    }
+    finally {
+        for (const gateway of gateways) {
+            if (gateway.child.exitCode === null && !gateway.child.killed) {
+                await stopProcess(gateway.child, gateway.closePromise);
+            }
+        }
+    }
+}, 90_000);
+
+test("gateway stop refuses an untrusted runtime state directory", () => {
+    if (typeof process.getuid !== "function")
+        return;
+    const repo = createTempRepo();
+    writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+    const { stateDir, env } = makeStateDirEnv();
+    const { stateFile } = gatewayRuntimePaths(repo.dir, { ...process.env, SMITHERS_GATEWAY_STATE_DIR: stateDir });
+    writeFileSync(stateFile, `${JSON.stringify({
+        pid: process.pid,
+        host: "127.0.0.1",
+        port: 1,
+        url: "http://127.0.0.1:1",
+        token: null,
+        workspaceRoot: repo.dir,
+        backend: "sqlite",
+        version: "0.0.0-test",
+        protocol: 1,
+        startedAtMs: Date.now(),
+    })}\n`, { mode: 0o600 });
+    chmodSync(stateDir, 0o777);
+    onTestFinished(() => {
+        try {
+            chmodSync(stateDir, 0o700);
+        }
+        catch {
+            // The shared temp-dir cleanup may already have removed it.
+        }
+    });
+    const result = runSmithers(["gateway", "stop"], {
+        cwd: repo.dir,
+        format: "json",
+        env,
+        timeoutMs: 30_000,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("GATEWAY_STATE_UNTRUSTED");
+}, 30_000);
 
 // Decision 6: the preferred port being taken by ANOTHER process must not
 // crash the daemon (EADDRINUSE used to surface as an unhandled 'error'
@@ -257,6 +613,7 @@ test("gateway --mint-token requires the minted bearer", async () => {
     const stateEnv = { ...process.env, SMITHERS_GATEWAY_STATE_DIR: stateDir };
     const state = readGatewayRuntimeState(repo.dir, stateEnv);
     expect(state?.token).toHaveLength(64);
+    await waitFor(() => gateway.stderr().includes("Minted bearer token"));
     expect(gateway.stderr()).toContain("Minted bearer token");
 
     const { stateFile } = gatewayRuntimePaths(repo.dir, stateEnv);

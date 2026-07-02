@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
@@ -213,6 +215,85 @@ describe("CLI --json stdout contract", () => {
                 });
                 expectStdoutJsonObject(entry.label, result);
             }
+        }
+        finally {
+            sqlite.close();
+        }
+    }, 120_000);
+
+    test("devtools commands honour the global --format json: one JSON document on success (#7)", async () => {
+        const repo = createTempRepo();
+        const { sqlite, adapter } = openRepoDb(repo);
+        try {
+            await seedJsonContractFixture(repo, adapter, sqlite);
+            const cases = [
+                { label: "tree --format json", args: ["tree", "json-run"] },
+                { label: "output --format json", args: ["output", "json-run", "node-a"] },
+                { label: "diff --format json", args: ["diff", "json-run", "node-a"] },
+                { label: "snapshots --format json", args: ["snapshots", "json-run"] },
+                { label: "rewind --format json", args: ["rewind", "json-run", "0", "--yes"] },
+            ];
+            for (const entry of cases) {
+                // runSmithers appends `--format json` when format is set.
+                const result = runSmithers(entry.args, { cwd: repo.dir, format: "json" });
+                if (result.exitCode !== 0) {
+                    throw new Error(`${entry.label} exited ${result.exitCode}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+                }
+                // The whole stdout must be exactly ONE parseable JSON document:
+                // no trailing `[]`, no `{"cta": ...}`, no human guidance.
+                expect(result.stdout.trim().length, `${entry.label} stdout should contain JSON`).toBeGreaterThan(0);
+                try {
+                    JSON.parse(result.stdout);
+                }
+                catch (error) {
+                    throw new Error(`${entry.label} stdout is not a single JSON document:\n${result.stdout}`, { cause: error });
+                }
+            }
+        }
+        finally {
+            sqlite.close();
+        }
+    }, 120_000);
+
+    test("devtools failures under --format json put a structured {code, message} on stdout (#7)", async () => {
+        const repo = createTempRepo();
+        const { sqlite, adapter } = openRepoDb(repo);
+        try {
+            await seedJsonContractFixture(repo, adapter, sqlite);
+            const result = runSmithers(["output", "bogus-run-id", "node-a"], {
+                cwd: repo.dir,
+                format: "json",
+            });
+            expect(result.exitCode).not.toBe(0);
+            const parsed = JSON.parse(result.stdout);
+            expect(parsed.code).toBe("RunNotFound");
+            expect(typeof parsed.message).toBe("string");
+            expect(parsed.message.length).toBeGreaterThan(0);
+            // The human rendering stays on stderr.
+            expect(result.stderr).toContain("RunNotFound");
+        }
+        finally {
+            sqlite.close();
+        }
+    }, 120_000);
+
+    test("ps CTA derives the workflow id from the path, not the display name (#26)", async () => {
+        const repo = createTempRepo();
+        const { sqlite, adapter } = openRepoDb(repo);
+        try {
+            // The fixture's display name ("json-contract") deliberately differs
+            // from the workflow file basename ("workflow"), which keys the
+            // .smithers/ui entry.
+            await seedJsonContractFixture(repo, adapter, sqlite);
+            mkdirSync(join(repo.dir, ".smithers", "ui"), { recursive: true });
+            writeFileSync(join(repo.dir, ".smithers", "ui", "workflow.tsx"), "export default null;\n");
+            const result = runSmithers(["ps"], { cwd: repo.dir, format: "json" });
+            expect(result.exitCode).toBe(0);
+            const cta = result.json?.cta ?? result.json?.meta?.cta;
+            expect(cta).toBeDefined();
+            expect(cta.description).toContain(".smithers/ui/workflow.tsx");
+            expect(cta.description).toContain("a UI already exists");
+            expect(cta.description).not.toContain("json-contract.tsx");
         }
         finally {
             sqlite.close();

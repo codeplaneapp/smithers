@@ -18,6 +18,11 @@ import { hasCustomUi } from "./monitoring-suggestion.js";
  * { cta })`, which renders as human text on a TTY and as a structured `cta`
  * key under `--json`. Callers merge `commands` after their own command list.
  *
+ * `justRan` names the command the caller itself just executed so the guidance
+ * never re-suggests it verbatim (`smithers graph <file>` re-suggesting
+ * `graph <file>` is a pure no-op; `smithers tree <runId>` suggests
+ * `tree <runId> --watch` instead, which is a genuinely new action).
+ *
  * @param {{
  *   workflowId?: string;
  *   workflowFile?: string;
@@ -26,11 +31,12 @@ import { hasCustomUi } from "./monitoring-suggestion.js";
  *   cwd?: string;
  *   uiOpened?: boolean;
  *   omitUi?: boolean;
+ *   justRan?: "graph" | "tree";
  * }} [context]
  * @returns {{ description: string; commands: { command: string; description: string }[] }}
  */
 export function buildAgentNextSteps(context = {}) {
-    const { workflowId, workflowFile, runId, uiOpened, omitUi } = context;
+    const { workflowId, workflowFile, runId, uiOpened, omitUi, justRan } = context;
     const cwd = context.cwd ?? process.cwd();
     const hasUi = context.hasUi ?? (workflowId ? hasCustomUi(workflowId, cwd) : false);
     const runRef = runId ?? "<runId>";
@@ -44,7 +50,7 @@ export function buildAgentNextSteps(context = {}) {
         lines.push(`1. Iterate on the workflow UI source at ${uiFile} (built with the smithers-orchestrator/gateway-react hooks); the Gateway serves the file from disk, so edits show up on browser refresh.`);
         lines.push("2. Open the full Smithers control-plane UI with `smithers ui --app`.");
         lines.push(`3. Build custom UIs for other workflows that lack one: author .smithers/ui/<workflowId>.tsx with the gateway-react hooks, then open it with \`smithers ui <runId>\`.`);
-        lines.push(buildWorkflowLine);
+        lines.push(`4. ${buildWorkflowLine}`);
         commands.push({ command: "ui --app", description: "Open the full Smithers control-plane UI" });
     }
     else {
@@ -62,16 +68,20 @@ export function buildAgentNextSteps(context = {}) {
             step += 1;
         }
         const vizParts = [];
-        if (workflowFile) {
+        if (workflowFile && justRan !== "graph") {
             vizParts.push(`\`smithers graph ${workflowFile}\` renders the workflow graph without executing it`);
             commands.push({ command: `graph ${workflowFile}`, description: "Visualize the workflow graph" });
         }
-        else {
+        else if (!workflowFile) {
             vizParts.push("`smithers graph <workflow-file>` renders the workflow graph without executing it");
         }
-        if (runId) {
+        if (runId && justRan !== "tree") {
             vizParts.push(`\`smithers tree ${runId}\` prints the live run tree`);
             commands.push({ command: `tree ${runId}`, description: "Visualize the run tree" });
+        }
+        else if (runId) {
+            vizParts.push(`\`smithers tree ${runId} --watch\` streams the run tree live`);
+            commands.push({ command: `tree ${runId} --watch`, description: "Watch the run tree live" });
         }
         else {
             vizParts.push("`smithers tree <runId>` prints a run's live tree");

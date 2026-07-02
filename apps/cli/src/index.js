@@ -5,7 +5,7 @@ import { extractBackendFlag, findFirstPositionalIndex, rewriteBareResumeFlagArgv
 import { CLI_JSON_ARGUMENT_MAX_BYTES, parseJsonArgument, tryParseJsonInput } from "./json-args.js";
 import { resolve, dirname, basename, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { Effect, Fiber } from "effect";
 import { Cli, z } from "incur";
 import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
@@ -33,7 +33,7 @@ import { buildAgentAskRequestRow, isHumanRequestPastTimeout, validateHumanReques
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { assertMaxBytes, assertMaxStringLength } from "@smithers-orchestrator/db/input-bounds";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
-import { canonicalWorkspacePath, claimGatewayAutostartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, mintGatewayToken, readGatewayRuntimeState, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
+import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, formatAskHumanResolveHelp, parseChoices, resolveAskHumanContext, } from "./ask-human.js";
 import { chatAttemptKey, formatChatAttemptHeader, formatChatBlock, parseAgentEvent, parseChatAttemptMeta, parseNodeOutputEvent, selectChatAttempts, } from "./chat.js";
 import { buildHijackLaunchSpec, isNativeHijackCandidate, launchHijackSession, resolveHijackCandidate, waitForHijackCandidate, } from "./hijack.js";
@@ -53,6 +53,7 @@ import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
 import { buildAgentNextSteps } from "./agentNextSteps.js";
+import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
 import {
@@ -884,8 +885,14 @@ async function* streamRunEventsCommand(c) {
             const runPrefix = String(event.runId ?? "").slice(0, 12);
             return `${runPrefix} ${line}`;
         };
-        let lastSeq = c.options.since ?? -1;
-        if (!includeAncestry && c.options.since === undefined) {
+        // --from-seq is the preferred cursor flag; --since remains a deprecated
+        // alias (it collides with `events --since`, which is a duration). (#10)
+        const fromSeq = c.options.fromSeq ?? c.options.since;
+        if (c.options.since !== undefined && c.options.fromSeq === undefined) {
+            process.stderr.write("[smithers] logs --since is an event sequence number; prefer --from-seq (`events --since` takes a duration window like 5m).\n");
+        }
+        let lastSeq = fromSeq ?? -1;
+        if (!includeAncestry && fromSeq === undefined) {
             const lastEventSeq = await adapter.getLastEventSeq(c.args.runId);
             if (lastEventSeq !== undefined) {
                 lastSeq = Math.max(-1, lastEventSeq - c.options.tail);
@@ -911,8 +918,8 @@ async function* streamRunEventsCommand(c) {
                 return (left.seq ?? 0) - (right.seq ?? 0);
             });
             initialEvents =
-                c.options.since !== undefined
-                    ? merged.filter((event) => (event.seq ?? -1) > c.options.since)
+                fromSeq !== undefined
+                    ? merged.filter((event) => (event.seq ?? -1) > fromSeq)
                     : merged.slice(-c.options.tail);
             const lastCurrentEvent = [...initialEvents]
                 .reverse()
@@ -1255,6 +1262,12 @@ async function buildPsRows(adapter, limit, status) {
         rows.push({
             id: run.runId,
             workflow: run.workflowName ?? (run.workflowPath ? basename(run.workflowPath) : "—"),
+            // Path-first workflow id for CTA probing (mirrors inspect):
+            // `.smithers/ui/<id>.tsx` entries are keyed by the file basename,
+            // which the display name above need not match. (#26)
+            workflowId: run.workflowPath
+                ? workflowIdFromPath(run.workflowPath)
+                : (run.workflowName ?? undefined),
             status: derivedStateToStatus(view.state),
             dbStatus: run.status,
             state: view.state,
@@ -1541,7 +1554,7 @@ const upOptions = z.object({
     superviseInterval: z.string().default("10s").describe("With --supervise, poll interval (e.g. 10s, 30s)"),
     superviseStaleThreshold: z.string().default("30s").describe("With --supervise, stale heartbeat threshold"),
     superviseMaxConcurrent: z.number().int().min(1).default(3).describe("With --supervise, max runs resumed per poll"),
-    port: z.number().int().min(1).default(7331).describe("HTTP server port (with --serve)"),
+    port: z.number().int().min(1).max(65535).default(7331).describe("HTTP server port (with --serve)"),
     host: z.string().default("127.0.0.1").describe("HTTP server bind address (with --serve)"),
     authToken: z.string().optional().describe("Bearer token for HTTP auth (or set SMITHERS_API_KEY); required to bind a non-loopback --host"),
     insecure: z.boolean().default(false).describe("Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run — dangerous)"),
@@ -1587,7 +1600,7 @@ const gatewayArgs = z.object({
 });
 const gatewayOptions = z.object({
     host: z.string().default("127.0.0.1").describe("Gateway bind address"),
-    port: z.number().int().min(1).default(7331).describe("Preferred gateway port (falls back to an ephemeral port when taken; clients discover the real port from the runtime state file)"),
+    port: z.number().int().min(1).max(65535).default(7331).describe("Preferred gateway port (falls back to an ephemeral port when taken; clients discover the real port from the runtime state file)"),
     backend: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Workspace storage backend"),
     authToken: z.string().optional().describe("Bearer token for HTTP/WS auth (or set SMITHERS_API_KEY); required to bind a non-loopback --host"),
     mintToken: z.boolean().default(false).describe("Mint a random bearer token, require it on every request, and record it only in the 0600 runtime state file"),
@@ -1611,6 +1624,10 @@ const bugOptions = z.object({
     endpoint: z.string().optional().describe("Bug endpoint URL (default https://bug.smithers.sh/api/bugs; the SMITHERS_BUG_ENDPOINT env var takes precedence)"),
 });
 const monitorOptions = upOptions.extend({
+    // Override the inherited "Explicit run ID" copy: on monitor, --run-id names
+    // the monitor workflow's OWN run (pair it with --resume), NOT the run to
+    // watch -- the positional [runId] picks the watch target. (#9)
+    runId: z.string().optional().describe("Run ID for the monitor run itself (pair with --resume); to choose which run to WATCH, pass it as the positional [runId]"),
     autofix: z.boolean().default(false).describe("Let the monitor apply the smallest safe self-fix and resume the run"),
     requireApproval: z.boolean().default(true).describe("With --autofix, pause for a human approval gate before any fix"),
     staleMinutes: z.number().default(15).describe("Treat a non-terminal run idle past this many minutes as stuck"),
@@ -1623,16 +1640,22 @@ const psOptions = z.object({
     watch: z.boolean().default(false).describe("Watch mode: refresh output continuously"),
     interval: z.number().positive().default(2).describe("Watch refresh interval in seconds"),
 });
+// `--since` historically meant an event SEQUENCE NUMBER here while the sibling
+// `events --since` takes a DURATION window — the same token silently means two
+// different things. `--from-seq` is the preferred spelling for the cursor;
+// `--since` stays accepted as a deprecated alias so existing scripts keep
+// working. (#10)
 const logsOptions = z.object({
     follow: z.boolean().default(true).describe("Keep tailing (default true for active runs)"),
-    since: z.number().int().optional().describe("Start from event sequence number"),
+    fromSeq: z.number().int().optional().describe("Start from event sequence number (exclusive)"),
+    since: z.number().int().optional().describe("Deprecated alias of --from-seq: an event SEQUENCE NUMBER, not a duration (`events --since` takes a duration window like 5m)"),
     tail: z.number().int().min(1).default(50).describe("Show last N events first"),
     followAncestry: z.boolean().default(false).describe("Include events from ancestor runs (continuation lineage)"),
 });
 const eventsOptions = z.object({
     node: z.string().optional().describe("Filter events by node ID"),
     type: z.string().optional().describe(`Filter by event category (${[...EVENT_CATEGORY_VALUES].sort().join(", ")})`),
-    since: z.string().optional().describe("Filter to a recent duration window (e.g. 5m, 2h)"),
+    since: z.string().optional().describe("Filter to a recent duration window (e.g. 5m, 2h; a bare number is milliseconds, and `logs --since` is an event sequence number instead)"),
     limit: z.number().int().min(1).optional().describe("Maximum events to display (default 1000, max 100000)"),
     json: z.boolean().default(false).describe("Output NDJSON for piping"),
     groupBy: z.string().optional().describe("Group output by \"node\" or \"attempt\""),
@@ -1726,7 +1749,7 @@ const hijackArgs = z.object({
     runId: z.string().describe("Run ID whose latest agent session should be hijacked"),
 });
 const hijackOptions = z.object({
-    target: z.string().optional().describe("Expected agent engine (claude-code or codex)"),
+    target: z.string().optional().describe("Agent engine (e.g. claude-code, codex) or node id whose session to hand off"),
     timeoutMs: z.number().int().min(1).default(30_000).describe("How long to wait for a live run to hand off"),
     launch: z.boolean().default(true).describe("Open the hijacked session immediately"),
 });
@@ -1795,12 +1818,21 @@ function normalizeWorkflowRunOptions(options) {
  *   - "needs-tty" — --interactive was requested without an interactive terminal.
  *   - "missing-arg" — no workflow given and not a TTY, so there is nothing to run.
  *
+ * A machine-output request must never open interactive prompts: on a PTY the
+ * clack intro/picker bytes would interleave with the structured stdout stream
+ * and the picker would block waiting for keys. Any explicitly requested
+ * non-default format (`--format json|jsonl|yaml|md`, or the global `--json`
+ * shorthand, all of which resolve to a non-toon `c.format`) therefore forces
+ * the non-interactive branches even when attached to a TTY. (#19)
+ *
  * @param {{ interactive?: boolean }} options
  * @param {boolean} hasWorkflowArg
+ * @param {string} [format] resolved output format (`c.format`)
  * @returns {"interactive" | "direct" | "needs-tty" | "missing-arg"}
  */
-function interactiveLaunchMode(options, hasWorkflowArg) {
-    const tty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+function interactiveLaunchMode(options, hasWorkflowArg, format) {
+    const wantsStructured = format !== undefined && format !== "toon";
+    const tty = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !wantsStructured;
     if (options.interactive) return tty ? "interactive" : "needs-tty";
     if (!hasWorkflowArg) return tty ? "interactive" : "missing-arg";
     return "direct";
@@ -2140,11 +2172,15 @@ async function executeUpCommand(c, workflowPath, options, fail) {
         if (!resume) {
             const staleRuns = await adapter.listRuns(10, "running");
             if (staleRuns.length > 0) {
+                // Print commands that run as written: bare `smithers cancel`
+                // and `smithers up --resume` both fail validation, so
+                // substitute each run's real id and workflow path. (#27)
                 process.stderr.write(`⚠ Found ${staleRuns.length} run(s) still marked as 'running':\n`);
                 for (const r of staleRuns) {
                     process.stderr.write(`  ${r.runId} (started ${new Date(r.startedAtMs ?? r.createdAtMs).toISOString()})\n`);
+                    process.stderr.write(`    cancel it:  smithers cancel ${r.runId}\n`);
+                    process.stderr.write(`    resume it:  smithers up ${r.workflowPath ?? "<workflow-file>"} --resume --run-id ${r.runId}\n`);
                 }
-                process.stderr.write("  Use 'smithers cancel' to mark them as cancelled, or 'smithers up --resume' to continue.\n");
             }
         }
         let existingRun = null;
@@ -2223,7 +2259,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 hostname: options.host,
                 fetch: serveApp.fetch,
             });
-            process.stderr.write(`[smithers] HTTP server listening on http://${options.host}:${bunServer.port}\n`);
+            process.stderr.write(`[smithers] HTTP server listening on http://${formatHttpHost(options.host)}:${bunServer.port}\n`);
             const supervisorFiber = hostedSupervisor
                 ? runFork(supervisorLoopEffect({
                     adapter,
@@ -2375,6 +2411,40 @@ function resolveGatewayWorkspace(cwd = process.cwd()) {
         return undefined;
     }
 }
+
+function formatHttpHost(host) {
+    return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
+
+function readGatewayAutostartLogTail(workspace, maxLines = 20) {
+    const { logFile } = gatewayRuntimePaths(workspace);
+    try {
+        const text = readFileSync(logFile, "utf8").trimEnd();
+        if (!text)
+            return { logFile, tail: null };
+        return { logFile, tail: text.split(/\r?\n/).slice(-maxLines).join("\n") };
+    }
+    catch {
+        return { logFile, tail: null };
+    }
+}
+
+function formatGatewayAutostartDiagnostics(workspace, failure) {
+    const { logFile, tail } = readGatewayAutostartLogTail(workspace);
+    const headline = failure?.kind === "error"
+        ? `Autostarted gateway failed to spawn: ${failure.error?.message ?? String(failure.error)}.`
+        : failure?.kind === "exit"
+            ? `Autostarted gateway exited before it became reachable (exit code ${failure.code ?? "null"}${failure.signal ? `, signal ${failure.signal}` : ""}).`
+            : "Autostarted gateway did not become reachable before the wait timed out.";
+    return `${headline}\nGateway autostart log: ${logFile}${tail ? `\nLast gateway stderr:\n${tail}` : "\nNo gateway stderr has been written yet."}`;
+}
+
+function warnIfBrowserUiNeedsBearer(token) {
+    if (!token)
+        return;
+    process.stderr.write("[smithers] Warning: this Gateway requires a bearer token. CLI RPC calls use the state-file/env token, but browser navigations cannot send that header yet, so the workflow UI URL may return 401. Start `smithers gateway` without --mint-token for browser UI access until UI token injection ships.\n");
+}
+
 /**
  * Ensure the workspace's singleton gateway is running and return how to
  * reach it. Discovery first (runtime state file, verified against pid and
@@ -2384,7 +2454,7 @@ function resolveGatewayWorkspace(cwd = process.cwd()) {
  *
  * @param {string} workspace
  * @param {number} preferredPort
- * @returns {Promise<{ base: string; token: string | null; started: boolean } | null>}
+ * @returns {Promise<{ base: string; token: string | null; started: boolean } | { failed: true; message: string } | null>}
  */
 async function ensureWorkspaceGateway(workspace, preferredPort) {
     const discovered = await discoverWorkspaceGateway(workspace);
@@ -2396,24 +2466,49 @@ async function ensureWorkspaceGateway(workspace, preferredPort) {
         const awaited = await waitForWorkspaceGateway(workspace);
         return awaited ? { base: awaited.state.url, token: awaited.state.token, started: false } : null;
     }
+    let child;
+    let stderrFd;
     try {
-        const child = spawn(process.argv[0], [process.argv[1], "gateway", "--host", "127.0.0.1", "--port", String(preferredPort)], {
-            stdio: "ignore",
+        const { logFile } = gatewayRuntimePaths(workspace);
+        stderrFd = openSync(logFile, "w", 0o600);
+        child = spawn(process.argv[0], [process.argv[1], "gateway", "--host", "127.0.0.1", "--port", String(preferredPort)], {
+            stdio: ["ignore", stderrFd, stderrFd],
             detached: true,
             cwd: workspace,
         });
         child.unref();
-        child.on("error", () => { });
     }
-    catch {
+    catch (error) {
+        if (stderrFd !== undefined) {
+            try {
+                closeSync(stderrFd);
+            }
+            catch { }
+        }
         lock.release();
-        return null;
+        return { failed: true, message: formatGatewayAutostartDiagnostics(workspace, { kind: "error", error }) };
+    }
+    if (stderrFd !== undefined) {
+        try {
+            closeSync(stderrFd);
+        }
+        catch { }
     }
     try {
         // Gateway boot loads + compiles every workspace workflow before it
         // listens, so allow generous time for the state file to appear.
-        const awaited = await waitForWorkspaceGateway(workspace);
-        return awaited ? { base: awaited.state.url, token: awaited.state.token, started: true } : null;
+        const childFailure = new Promise((resolvePromise) => {
+            child.once("error", (error) => resolvePromise({ kind: "error", error }));
+            child.once("exit", (code, signal) => resolvePromise({ kind: "exit", code, signal }));
+        });
+        const result = await Promise.race([
+            waitForWorkspaceGateway(workspace).then((awaited) => ({ kind: "ready", awaited })),
+            childFailure.then((failure) => ({ kind: "failed", failure })),
+        ]);
+        if (result.kind === "failed") {
+            return { failed: true, message: formatGatewayAutostartDiagnostics(workspace, result.failure) };
+        }
+        return result.awaited ? { base: result.awaited.state.url, token: result.awaited.state.token, started: true } : null;
     }
     finally {
         lock.release();
@@ -2423,8 +2518,10 @@ async function runUiCommand(c) {
     const fail = (code, message) => c.error({ code, message, exitCode: 1 });
     const workspace = c.options.gateway ? undefined : resolveGatewayWorkspace();
     let base = c.options.gateway ? c.options.gateway.replace(/\/+$/, "") : null;
-    let token = process.env.SMITHERS_TOKEN || process.env.SMITHERS_API_KEY || null;
+    let token = base ? resolveGatewayBearer(workspace, base) : null;
     let reachable = false;
+    let autostartAttempted = false;
+    let autostartFailureMessage = null;
     if (base) {
         // Explicitly pinned gateway: the user chose it, probe it as-is.
         reachable = await fetch(`${base}/health`).then((r) => r.ok, () => false);
@@ -2435,20 +2532,21 @@ async function runUiCommand(c) {
         const discovered = await discoverWorkspaceGateway(workspace);
         if (discovered) {
             base = discovered.state.url;
-            token = discovered.state.token ?? token;
+            token = resolveGatewayBearer(workspace, base);
             reachable = true;
         }
     }
     if (!reachable && !base) {
         // Legacy probe: a gateway started by an older CLI or the SDK on the
-        // conventional port, with no runtime state file. Refuse an identity
-        // MISMATCH so another project's gateway is never silently attached.
+        // conventional port, with no runtime state file. An explicit identity
+        // mismatch is refused; identity-less legacy gateways are trusted.
         const legacyBase = `http://127.0.0.1:${c.options.port}`;
         const health = await fetch(`${legacyBase}/health`).then((r) => (r.ok ? r.json() : null), () => null);
         if (health) {
             const advertised = health?.identity?.workspaceRoot;
             if (!advertised || !workspace || canonicalWorkspacePath(advertised) === canonicalWorkspacePath(workspace)) {
                 base = legacyBase;
+                token = resolveGatewayBearer(workspace, base);
                 reachable = true;
             }
             else {
@@ -2458,20 +2556,28 @@ async function runUiCommand(c) {
     }
     if (!reachable && c.options.autostart && workspace) {
         process.stderr.write(`[smithers] No gateway for ${workspace}; starting one (smithers gateway)…\n`);
+        autostartAttempted = true;
         const ensured = await ensureWorkspaceGateway(workspace, c.options.port);
-        if (ensured) {
+        if (ensured?.failed) {
+            autostartFailureMessage = ensured.message;
+        }
+        else if (ensured) {
             base = ensured.base;
-            token = ensured.token ?? token;
+            token = ensured.token ?? resolveGatewayBearer(workspace, base);
             reachable = true;
         }
     }
     if (!reachable) {
-        return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable${base ? ` at ${base}` : " for this workspace"}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.`);
+        const detail = autostartAttempted && workspace
+            ? `\n\n${autostartFailureMessage ?? formatGatewayAutostartDiagnostics(workspace)}`
+            : "";
+        return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable${base ? ` at ${base}` : " for this workspace"}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.${detail}`);
     }
     // `--app`: serve the FULL local Smithers UI (apps/smithers) instead of a
     // single workflow-run UI. Build the bundle if needed, then serve it from a
     // static server that reverse-proxies the gateway so the app is same-origin.
     if (c.options.app) {
+        warnIfBrowserUiNeedsBearer(token);
         return runFullUiCommand(c, base, fail);
     }
     const rpc = async (method, params = {}) => {
@@ -2512,7 +2618,7 @@ async function runUiCommand(c) {
                 const runs = await rpc("listRuns", {});
                 const latest = Array.isArray(runs) ? runs[0] : undefined;
                 if (!latest) {
-                    return fail("NO_RUNS", "No runs found. Start one with `smithers up` or `smithers workflow <name>`.");
+                    return fail("NO_RUNS", "No runs found in this workspace yet, so there is no run UI to open. Start one with `smithers up <workflow.tsx>` or `smithers workflow run <id>` and re-run this command, pass --workflow <id> to open a workflow's UI directly, or run `smithers ui --app` for the full control-plane UI.");
                 }
                 runId = latest.runId ? String(latest.runId) : undefined;
                 workflowKey = latest.workflowKey ? String(latest.workflowKey) : undefined;
@@ -2530,6 +2636,7 @@ async function runUiCommand(c) {
             return fail("NO_UI", `Workflow "${workflowKey}" has no UI mounted on the Gateway at ${base}.`);
         }
         const url = `${base}${summary.uiPath}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
+        warnIfBrowserUiNeedsBearer(token);
         if (c.options.open) openInBrowser(url);
         console.log(`${c.options.open ? "Opening" : "UI URL:"} ${url}`);
         return c.ok({ opened: c.options.open, url, runId: runId ?? null, workflow: workflowKey }, {
@@ -2583,6 +2690,31 @@ async function runFullUiCommand(c, base, fail) {
 }
 const GATEWAY_LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"]);
 
+function isGatewayStateTrustError(error) {
+    return error?.code === "GATEWAY_STATE_UNTRUSTED";
+}
+
+function gatewayAlreadyRunningError(workspace, state) {
+    return new SmithersError("GATEWAY_ALREADY_RUNNING", `A gateway for this workspace is already running: pid ${state.pid} at ${state.url}. Use it, or stop it first with \`smithers gateway stop\`.`, { workspace, pid: state.pid, url: state.url });
+}
+
+async function closeGatewayStartupResources(gateway, backendCleanups) {
+    try {
+        await gateway?.close?.();
+    }
+    catch {
+        // Best effort: the command is already aborting startup.
+    }
+    for (const cleanup of backendCleanups.reverse()) {
+        try {
+            await cleanup?.();
+        }
+        catch {
+            // Best effort: the command is already aborting startup.
+        }
+    }
+}
+
 async function runGatewayStatusCommand(c) {
     const workspace = resolveGatewayWorkspace();
     if (!workspace) {
@@ -2614,14 +2746,32 @@ async function runGatewayStopCommand(c) {
     if (!workspace) {
         return c.error({ code: "CLI_DB_NOT_FOUND", message: "No workspace found: no .smithers/ pack or smithers.db in this directory or any parent.", exitCode: 1 });
     }
-    const state = readGatewayRuntimeState(workspace);
+    let state;
+    try {
+        assertGatewayRuntimeStateFileTrusted(workspace);
+        state = readGatewayRuntimeState(workspace);
+    }
+    catch (error) {
+        if (isGatewayStateTrustError(error)) {
+            return c.error({ code: "GATEWAY_STATE_UNTRUSTED", message: error?.message ?? String(error), exitCode: 1 });
+        }
+        throw error;
+    }
     if (!state) {
         return c.ok({ stopped: false, running: false, workspace });
     }
     // Verify pid AND identity before signalling: a recycled pid, or a state
     // file describing a dead daemon, must never get a SIGTERM aimed at it.
-    const identity = await verifyGatewayHealthIdentity(state.url, workspace);
-    if (!identity || identity.pid !== state.pid) {
+    const health = await probeGatewayHealthIdentity(state.url, workspace);
+    if (!health.ok) {
+        if (health.reason === "transient") {
+            return c.error({ code: "GATEWAY_STOP_UNREACHABLE", message: `Gateway pid ${state.pid} did not answer /health in time. Leaving the runtime state file intact and refusing to signal an unverified process.`, exitCode: 1 });
+        }
+        clearGatewayRuntimeState(workspace, state.pid);
+        return c.ok({ stopped: false, running: false, workspace, cleanedStaleState: true });
+    }
+    const identity = health.identity;
+    if (identity.pid !== state.pid) {
         clearGatewayRuntimeState(workspace, state.pid);
         return c.ok({ stopped: false, running: false, workspace, cleanedStaleState: true });
     }
@@ -2663,13 +2813,44 @@ async function runGatewayCommand(options) {
         ? resolve(localWorkspace, "smithers.db")
         : findSmithersDb(process.cwd());
     const workspace = localWorkspace ?? dirname(dbPath);
-    // Singleton: one gateway owns a workspace. A healthy incumbent (verified
-    // by pid + /health workspace identity, not just "something owns the
-    // port") means this start is a mistake — point at it instead.
-    const incumbent = await discoverWorkspaceGateway(workspace);
-    if (incumbent) {
-        throw new SmithersError("GATEWAY_ALREADY_RUNNING", `A gateway for this workspace is already running: pid ${incumbent.state.pid} at ${incumbent.state.url}. Use it, or stop it first with \`smithers gateway stop\`.`, { workspace, pid: incumbent.state.pid, url: incumbent.state.url });
+    const startLock = claimGatewayDaemonStartLock(workspace);
+    if (!startLock) {
+        const winner = await waitForWorkspaceGateway(workspace);
+        if (winner) {
+            throw gatewayAlreadyRunningError(workspace, winner.state);
+        }
+        throw new SmithersError("GATEWAY_START_IN_PROGRESS", `Another gateway start is already in progress for ${workspace}, but no healthy gateway became discoverable before the wait timed out.`, { workspace });
     }
+    let startLockReleased = false;
+    const releaseStartLock = () => {
+        if (startLockReleased)
+            return;
+        startLock.release();
+        startLockReleased = true;
+    };
+    /** @type {import("@smithers-orchestrator/server/gateway").Gateway | undefined} */
+    let gateway;
+    /** @type {Array<() => unknown | Promise<unknown>>} */
+    const backendCleanups = [];
+    /** @type {string[]} */
+    const workflows = [];
+    let runtimeStateFile;
+    let identityBackend;
+    let server;
+    let port;
+    let url;
+    try {
+        // Singleton: one gateway owns a workspace. A healthy incumbent
+        // (verified by pid + /health workspace identity, not just "something
+        // owns the port") means this start is a mistake — point at it instead.
+        const incumbent = await discoverWorkspaceGateway(workspace);
+        if (incumbent) {
+            throw gatewayAlreadyRunningError(workspace, incumbent.state);
+        }
+        const unresolvedState = readGatewayRuntimeState(workspace);
+        if (unresolvedState && isGatewayPidAlive(unresolvedState.pid)) {
+            throw new SmithersError("GATEWAY_ALREADY_RUNNING", `A gateway state file for this workspace names live pid ${unresolvedState.pid} at ${unresolvedState.url}, but /health did not verify in time. Refusing to start a second gateway over the same workspace.`, { workspace, pid: unresolvedState.pid, url: unresolvedState.url });
+        }
     process.chdir(workspace);
     if (options.backend) {
         process.env.SMITHERS_BACKEND = options.backend;
@@ -2678,8 +2859,8 @@ async function runGatewayCommand(options) {
         import("@smithers-orchestrator/server/gateway"),
         import("smithers-orchestrator"),
     ]);
-    const identityBackend = options.backend ?? process.env.SMITHERS_BACKEND ?? readBackendMarkerForCwd(workspace) ?? "sqlite";
-    const gateway = new Gateway({
+    identityBackend = options.backend ?? process.env.SMITHERS_BACKEND ?? readBackendMarkerForCwd(workspace) ?? "sqlite";
+    gateway = new Gateway({
         heartbeatMs: 15_000,
         workspaceRoot: workspace,
         identity: { backend: identityBackend, version: readPackageVersion() },
@@ -2693,8 +2874,7 @@ async function runGatewayCommand(options) {
     const workspaceWorkflow = workspaceApi.smithers(() => React.createElement(workspaceApi.Workflow, { name: "workspace" }));
     ensureSmithersTables(workspaceWorkflow.db);
     setupSqliteCleanup(workspaceWorkflow);
-    const backendCleanups = [() => workspaceApi.close?.()];
-    const workflows = [];
+    backendCleanups.push(() => workspaceApi.close?.());
     for (const discovered of discoverWorkflows(workspace)) {
         try {
             const workflow = await loadWorkflow(discovered.entryFile);
@@ -2709,10 +2889,11 @@ async function runGatewayCommand(options) {
                 gateway.register(discovered.id, workflow, {
                     ui: { entry: uiEntry, title: titleizeWorkflowId(discovered.id) },
                     system: discovered.system,
+                    entryFile: discovered.entryFile,
                 });
             }
             else {
-                gateway.register(discovered.id, workflow, { system: discovered.system });
+                gateway.register(discovered.id, workflow, { system: discovered.system, entryFile: discovered.entryFile });
             }
             workflows.push(discovered.id);
         }
@@ -2724,7 +2905,6 @@ async function runGatewayCommand(options) {
         gateway.register("workspace", workspaceWorkflow);
         workflows.push("workspace");
     }
-    let server;
     try {
         server = await gateway.listen({ host: options.host, port: options.port });
     }
@@ -2743,9 +2923,17 @@ async function runGatewayCommand(options) {
         server = await gateway.listen({ host: options.host, port: 0 });
     }
     const address = server.address();
-    const port = address && typeof address === "object" ? address.port : options.port;
-    const url = `http://${options.host}:${port}`;
-    const runtimeStateFile = writeGatewayRuntimeState(workspace, {
+    port = address && typeof address === "object" ? address.port : options.port;
+    url = `http://${formatHttpHost(options.host)}:${port}`;
+    const raced = await discoverWorkspaceGateway(workspace);
+    if (raced) {
+        throw gatewayAlreadyRunningError(workspace, raced.state);
+    }
+    const unresolvedStateAfterListen = readGatewayRuntimeState(workspace);
+    if (unresolvedStateAfterListen && isGatewayPidAlive(unresolvedStateAfterListen.pid)) {
+        throw new SmithersError("GATEWAY_ALREADY_RUNNING", `A gateway state file for this workspace names live pid ${unresolvedStateAfterListen.pid} at ${unresolvedStateAfterListen.url}, but /health did not verify in time. Refusing to overwrite it with this daemon's state.`, { workspace, pid: unresolvedStateAfterListen.pid, url: unresolvedStateAfterListen.url });
+    }
+    runtimeStateFile = writeGatewayRuntimeState(workspace, {
         pid: process.pid,
         host: options.host,
         port,
@@ -2757,6 +2945,13 @@ async function runGatewayCommand(options) {
         protocol: gateway.protocol ?? null,
         startedAtMs: Date.now(),
     });
+    }
+    catch (error) {
+        releaseStartLock();
+        await closeGatewayStartupResources(gateway, backendCleanups);
+        throw error;
+    }
+    releaseStartLock();
     process.stderr.write(`[smithers] Gateway listening on ${url}\n`);
     process.stderr.write(`[smithers] Workspace: ${workspace}\n`);
     process.stderr.write(`[smithers] Database: ${dbPath}\n`);
@@ -2819,9 +3014,9 @@ const workflowCli = Cli.create({
             return c.error(opts);
         };
         try {
-            const mode = interactiveLaunchMode(c.options, Boolean(c.args.name));
+            const mode = interactiveLaunchMode(c.options, Boolean(c.args.name), c.format);
             if (mode === "needs-tty") {
-                return fail({ code: "INTERACTIVE_REQUIRES_TTY", message: "--interactive needs an interactive terminal (TTY).", exitCode: 4 });
+                return fail({ code: "INTERACTIVE_REQUIRES_TTY", message: "--interactive needs an interactive terminal (TTY) and human output; it cannot be combined with --format json/jsonl.", exitCode: 4 });
             }
             if (mode === "missing-arg") {
                 return fail({ code: "WORKFLOW_REQUIRED", message: "Provide a workflow ID, or pass --interactive to pick one.", exitCode: 4 });
@@ -3817,6 +4012,14 @@ const DEVTOOLS_COMMANDS = new Set(["tree", "diff", "output", "rewind", "snapshot
 let lastDevtoolsCommandOutcome;
 
 /**
+ * Formats where a devtools command's stdout must stay a single machine-
+ * parseable document. Bare `--json` is rewritten to the command-scoped `-j`
+ * before parsing (rewriteDevtoolsJsonFlagArgv), so only an explicit global
+ * `--format <fmt>` reaches this path. (#7)
+ */
+const DEVTOOLS_MACHINE_FORMATS = new Set(["json", "jsonl"]);
+
+/**
  * Wrap the inner handler of a devtools command in structured telemetry.
  *
  * - Writes a JSON line to stderr when `SMITHERS_LOG_JSON=1` is set
@@ -3824,18 +4027,63 @@ let lastDevtoolsCommandOutcome;
  * - Emits an `smithers_cli_command_total{cmd,exit}` counter and a
  *   `smithers_cli_command_duration_ms{cmd}` histogram via the
  *   observability package.
+ *
+ * Devtools commands own stdout (raw trees/diffs/rows), so under an explicit
+ * global `--format` this wrapper also finishes the command itself instead of
+ * returning control to incur: incur's streaming path would otherwise append
+ * its own `{ok:true,data:[]}` envelope (rendered as `[]` or `{"cta":...}`)
+ * after the payload -- and, on failure, print that success-shaped document on
+ * stdout while the real error went to stderr as prose. For json/jsonl a
+ * failure is re-emitted as a structured `{code, message}` envelope on stdout
+ * (parsed back out of the formatCliErrorForStderr text the handler wrote to
+ * the captured stderr); exit codes are preserved as-is. (#7)
+ *
  * @param {"tree"|"diff"|"output"|"rewind"|"snapshots"|"restore"} cmd
- * @param {{ args: any; options: any }} c
- * @param {() => Promise<number>} handler
+ * @param {{ args: any; options: any; format?: string; formatExplicit?: boolean }} c
+ * @param {(io: { stdout: { write: (s: string) => unknown; isTTY?: boolean | undefined }; stderr: { write: (s: string) => unknown; isTTY?: boolean | undefined } }) => Promise<number>} handler
  */
 async function* runDevtoolsCommandWithTelemetry(cmd, c, handler) {
     const startedAt = Date.now();
+    const ownsCompletion = Boolean(c.formatExplicit);
+    const machineFormat = ownsCompletion && DEVTOOLS_MACHINE_FORMATS.has(c.format ?? "");
+    let capturedStderr = "";
+    const io = ownsCompletion
+        ? {
+            // Synchronous stdout so the payload is fully flushed before the
+            // direct process.exit below (an async process.stdout.write racing
+            // process.exit truncates >64KB pipes).
+            stdout: {
+                write: (chunk) => {
+                    writeStdoutSync(String(chunk));
+                    return true;
+                },
+                isTTY: process.stdout.isTTY,
+            },
+            stderr: {
+                write: (chunk) => {
+                    capturedStderr += String(chunk);
+                    process.stderr.write(String(chunk));
+                    return true;
+                },
+                isTTY: process.stderr.isTTY,
+            },
+        }
+        : { stdout: process.stdout, stderr: process.stderr };
+    if (machineFormat && c.options && typeof c.options === "object" && "json" in c.options) {
+        // An explicit global --format json/jsonl asks for the machine payload:
+        // behave exactly like the command-scoped --json/-j so the raw JSON
+        // document (snapshot/DiffBundle/row/JumpResult/rows) is what lands on
+        // stdout instead of the human render.
+        c.options.json = true;
+    }
     let exitCode = 0;
+    let thrownMessage;
     try {
-        exitCode = await handler();
+        exitCode = await handler(io);
     }
     catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        thrownMessage = message;
         process.stderr.write(`error: ${cmd} failed: ${message}\n`);
         exitCode = 2;
     }
@@ -3871,6 +4119,19 @@ async function* runDevtoolsCommandWithTelemetry(cmd, c, handler) {
         catch {
             // Telemetry must not affect command output.
         }
+    }
+    if (ownsCompletion) {
+        if (machineFormat && exitCode !== 0) {
+            const parsed = parseCliErrorFromStderr(capturedStderr);
+            writeStdoutSync(`${JSON.stringify({
+                code: parsed?.code ?? "DEVTOOLS_ERROR",
+                message: parsed?.message ?? thrownMessage ?? (capturedStderr.trim() || `smithers ${cmd} exited with code ${exitCode}`),
+                ...(parsed?.hint ? { hint: parsed.hint } : {}),
+            })}\n`);
+        }
+        // Exit before incur's streaming path can write its own envelope; the
+        // payload already went through the synchronous stdout above.
+        process.exit(exitCode);
     }
 }
 
@@ -4023,6 +4284,52 @@ function devtoolsUsage(cmd) {
 // CLI
 // ---------------------------------------------------------------------------
 /**
+ * Resolve the target to persist on a live-run hijack request. `--target`
+ * accepts an agent engine or a node id, but the engine-side hand-off check
+ * (maybeCompleteHijack in packages/engine) only compares the persisted target
+ * against the ENGINE name -- a node id would make the engine skip the hand-off
+ * until the CLI times out. When the target matches a node in the run, return
+ * that node's recorded agent engine (or null when the node has not recorded
+ * one yet -- a null target lets the engine hand off while the CLI still
+ * filters candidates by node id afterwards). A target matching no node is
+ * treated as an engine name and passed through. (#23)
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {string | undefined} target
+ * @returns {Promise<string | null>}
+ */
+async function resolveHijackRequestEngine(adapter, runId, target) {
+    if (!target) return null;
+    try {
+        const attempts = await adapter.listAttemptsForRun(runId);
+        const nodeAttempts = attempts
+            .filter((attempt) => attempt.nodeId === target)
+            .sort((a, b) => (b.startedAtMs ?? 0) - (a.startedAtMs ?? 0));
+        for (const attempt of nodeAttempts) {
+            try {
+                const meta = JSON.parse(attempt.metaJson ?? "null");
+                const engine = meta && typeof meta === "object" && typeof meta.agentEngine === "string"
+                    ? meta.agentEngine
+                    : null;
+                if (engine) return engine;
+            }
+            catch {
+                // Unparseable attempt meta; keep scanning older attempts.
+            }
+        }
+        let isNode = nodeAttempts.length > 0;
+        if (!isNode) {
+            const nodes = await adapter.listNodes(runId);
+            isNode = nodes.some((node) => node.nodeId === target);
+        }
+        return isNode ? null : target;
+    }
+    catch {
+        return target;
+    }
+}
+/**
  * `smithers monitor [runId]` resolves the bundled `monitor` workflow, folds the
  * monitor-specific flags + the optional target run id into its input, and runs
  * it through the same machinery as `up` (detach, serve, hot, resume all work).
@@ -4083,7 +4390,22 @@ async function runMonitorCommand(c, fail) {
         openMonitoredRunUi(targetRunId, c.options.port);
     }
     const options = { ...c.options, input: JSON.stringify(merged) };
-    return executeUpCommand(c, workflowPath, options, fail);
+    // `--run-id <existing-run>` almost always means the caller wanted the
+    // positional watch target: the monitor run's own id then collides with the
+    // existing run and executeUpCommand fails RUN_EXISTS. Rewrite that failure
+    // into an actionable pointer. (#9)
+    const explicitWatchTarget = c.args.runId ?? (typeof baseInput.targetRunId === "string" ? baseInput.targetRunId : undefined);
+    const { resume: monitorResume } = normalizeResumeOption(c.options.resume);
+    const failWithMonitorHint = (opts) => {
+        if (opts?.code === "RUN_EXISTS" && c.options.runId && !explicitWatchTarget && !monitorResume) {
+            return fail({
+                ...opts,
+                message: `${opts.message}. --run-id names the monitor run itself (pair it with --resume); to monitor ${c.options.runId}, pass it as the positional: smithers monitor ${c.options.runId}`,
+            });
+        }
+        return fail(opts);
+    };
+    return executeUpCommand(c, workflowPath, options, failWithMonitorHint);
 }
 /**
  * Resolve the most recent active run id from the nearest DB (else the most
@@ -4136,7 +4458,11 @@ function openMonitoredRunUi(runId, port) {
 let commandExitOverride;
 const cli = Cli.create({
     name: "smithers",
-    description: "Durable AI workflow orchestrator. Run, monitor, and manage workflow executions.",
+    // The trailing --json note belongs in the Global Options block, but that
+    // list is hardcoded in the incur framework (Help.ts globalOptionsLines), so
+    // the alias is documented here until an upstream flag entry lands. (#11)
+    description: "Durable AI workflow orchestrator. Run, monitor, and manage workflow executions. " +
+        "--json is accepted on every command as shorthand for `--format json`; after events, timeline, tree, diff, output, rewind, snapshots, and restore it is command-scoped and emits that command's raw JSON payload instead.",
     version: readPackageVersion(),
     mcp: { command: "bunx smithers-orchestrator --mcp" },
 })
@@ -4274,9 +4600,9 @@ const cli = Cli.create({
             commandExitOverride = opts.exitCode ?? 1;
             return c.error(opts);
         };
-        const mode = interactiveLaunchMode(c.options, Boolean(c.args.workflow));
+        const mode = interactiveLaunchMode(c.options, Boolean(c.args.workflow), c.format);
         if (mode === "needs-tty") {
-            return fail({ code: "INTERACTIVE_REQUIRES_TTY", message: "--interactive needs an interactive terminal (TTY).", exitCode: 4 });
+            return fail({ code: "INTERACTIVE_REQUIRES_TTY", message: "--interactive needs an interactive terminal (TTY) and human output; it cannot be combined with --format json/jsonl.", exitCode: 4 });
         }
         if (mode === "missing-arg") {
             return fail({ code: "WORKFLOW_REQUIRED", message: "Provide a workflow file path, or pass --interactive to pick one.", exitCode: 4 });
@@ -4368,6 +4694,8 @@ const cli = Cli.create({
     description: "Watch, diagnose, optionally self-fix, and HTML-report on a running workflow (runs the `monitor` workflow).",
     args: monitorArgs,
     options: monitorOptions,
+    // Unlike `up`, --run-id deliberately has NO -r alias here: -r would read as
+    // "run to monitor" while the flag names the monitor run itself. (#9)
     alias: { detach: "d", input: "i", autofix: "f" },
     async run(c) {
         const fail = (opts) => {
@@ -4680,7 +5008,7 @@ const cli = Cli.create({
                     ? {
                         cta: withAgentNextSteps({
                             runId: rows[0].id,
-                            workflowId: workflowIdFromPath(rows[0].workflow ?? ""),
+                            workflowId: rows[0].workflowId,
                         }, ctaCommands),
                     }
                     : (ctaCommands.length > 0 ? { cta: { commands: ctaCommands } } : undefined));
@@ -5277,13 +5605,20 @@ const cli = Cli.create({
             const runIsLive = run.status === "running";
             const requestedAtMs = Date.now();
             if (runIsLive) {
+                // `--target` accepts an agent engine OR a node id (the TUI's
+                // HijackMode passes the selected node id). The engine's
+                // hand-off check (maybeCompleteHijack) only understands engine
+                // names, so resolve a node-id target to that node's recorded
+                // engine before persisting the request; the raw target still
+                // scopes candidate matching below, which understands both. (#23)
+                const requestTarget = await resolveHijackRequestEngine(adapter, c.args.runId, c.options.target);
                 const event = {
                     type: "RunHijackRequested",
                     runId: c.args.runId,
                     timestampMs: requestedAtMs,
                     ...(c.options.target ? { target: c.options.target } : {}),
                 };
-                await adapter.requestRunHijack(c.args.runId, requestedAtMs, c.options.target ?? null);
+                await adapter.requestRunHijack(c.args.runId, requestedAtMs, requestTarget);
                 await adapter.insertEventWithNextSeq({
                     runId: c.args.runId,
                     timestampMs: requestedAtMs,
@@ -5313,10 +5648,15 @@ const cli = Cli.create({
                     exitCode: 4,
                 });
             }
-            if (c.options.target && candidate.engine !== c.options.target) {
+            // --target may name the engine OR the node id; the candidate the
+            // resolver returns matches on either, so reject only when it
+            // matches neither. (#23)
+            if (c.options.target &&
+                candidate.engine !== c.options.target &&
+                candidate.nodeId !== c.options.target) {
                 return fail({
                     code: "HIJACK_TARGET_MISMATCH",
-                    message: `Run ${c.args.runId} is resumable in ${candidate.engine}, not ${c.options.target}. Cross-engine hijack is not supported.`,
+                    message: `Run ${c.args.runId} is resumable via ${candidate.engine} on node ${candidate.nodeId}, not ${c.options.target}. Pass an agent engine (e.g. claude-code, codex) or a node id from \`smithers tree ${c.args.runId}\`.`,
                     exitCode: 4,
                 });
             }
@@ -6063,12 +6403,19 @@ const cli = Cli.create({
                         description: "Resume the paused run",
                     });
                 }
+                // The resume command must actually parse: `workflow run
+                // --resume <runId>` swallows the run id as the --resume value
+                // and fails WORKFLOW_REQUIRED, so mirror the runnable form the
+                // ctaCommands / signal / hijack paths already use. (#24)
+                const resumeNote = runAfterApproval?.workflowPath
+                    ? `smithers up ${runAfterApproval.workflowPath} --resume --run-id ${c.args.runId}`
+                    : `smithers up <workflow-file> --resume --run-id ${c.args.runId}`;
                 return c.ok({
                     runId: c.args.runId,
                     nodeId,
                     status: "approved",
                     ...(isDetached
-                        ? { note: `Approval recorded. If running detached, resume the run to continue: smithers workflow run --resume ${c.args.runId}` }
+                        ? { note: `Approval recorded. If running detached, resume the run to continue: ${resumeNote}` }
                         : {}),
                 }, {
                     cta: {
@@ -6452,6 +6799,7 @@ const cli = Cli.create({
                     workflowId: workflowIdFromPath(c.args.workflow),
                     workflowFile: c.args.workflow,
                     runId: c.options.runId,
+                    justRan: "graph",
                 }),
             });
         }
@@ -6473,7 +6821,7 @@ const cli = Cli.create({
     }),
     alias: { json: "j" },
     run(c) {
-        return runDevtoolsCommandWithTelemetry("snapshots", c, async () => {
+        return runDevtoolsCommandWithTelemetry("snapshots", c, async (io) => {
             const { runSnapshotsOnce } = await import("./snapshots.js");
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6481,9 +6829,9 @@ const cli = Cli.create({
                     adapter,
                     runId: c.args.runId,
                     json: c.options.json,
-                    stdout: c.options.json ? { write: writeStdoutSync } : process.stdout,
+                    stdout: c.options.json ? { write: writeStdoutSync } : io.stdout,
                 });
-                if (result.exitCode === 0 && !c.options.json)
+                if (result.exitCode === 0 && !c.options.json && !c.formatExplicit)
                     writeAgentNextStepsHuman({ runId: c.args.runId });
                 return result.exitCode;
             } finally {
@@ -6503,7 +6851,7 @@ const cli = Cli.create({
         seq: z.number().int().min(0).optional().describe("Checkpoint seq (default: latest)"),
     }),
     run(c) {
-        return runDevtoolsCommandWithTelemetry("restore", c, async () => {
+        return runDevtoolsCommandWithTelemetry("restore", c, async (io) => {
             const { runRestoreOnce } = await import("./restore.js");
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6513,8 +6861,8 @@ const cli = Cli.create({
                     nodeId: c.args.nodeId,
                     iteration: c.options.iteration,
                     seq: c.options.seq,
-                    stdout: process.stdout,
-                    stderr: process.stderr,
+                    stdout: io.stdout,
+                    stderr: io.stderr,
                 });
                 return result.exitCode;
             } finally {
@@ -6940,9 +7288,10 @@ const cli = Cli.create({
     // a command-scoped alias; rewriteDevtoolsJsonFlagArgv() in main()
     // rewrites raw `--json` → `-j` for these commands so it lands as a
     // command option, not a format directive.
-    alias: { json: "j" },
+    // -w matches --watch on ps/events/inspect/node. (#10)
+    alias: { json: "j", watch: "w" },
     run(c) {
-        return runDevtoolsCommandWithTelemetry("tree", c, async () => {
+        return runDevtoolsCommandWithTelemetry("tree", c, async (io) => {
             const { runTreeOnce, runTreeWatch } = await import("./tree.js");
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6962,8 +7311,8 @@ const cli = Cli.create({
                             json: c.options.json,
                             watch: true,
                             color,
-                            stdout: process.stdout,
-                            stderr: process.stderr,
+                            stdout: io.stdout,
+                            stderr: io.stderr,
                             abortSignal: abort.signal,
                         });
                         return result.exitCode;
@@ -6981,11 +7330,11 @@ const cli = Cli.create({
                     json: c.options.json,
                     watch: false,
                     color,
-                    stdout: process.stdout,
-                    stderr: process.stderr,
+                    stdout: io.stdout,
+                    stderr: io.stderr,
                 });
-                if (result.exitCode === 0 && !c.options.json)
-                    writeAgentNextStepsHuman({ runId: c.args.runId });
+                if (result.exitCode === 0 && !c.options.json && !c.formatExplicit)
+                    writeAgentNextStepsHuman({ runId: c.args.runId, justRan: "tree" });
                 return result.exitCode;
             } finally {
                 cleanup();
@@ -7010,7 +7359,7 @@ const cli = Cli.create({
     }),
     alias: { json: "j" },
     run(c) {
-        return runDevtoolsCommandWithTelemetry("diff", c, async () => {
+        return runDevtoolsCommandWithTelemetry("diff", c, async (io) => {
             const { runDiffOnce } = await import("./diff.js");
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -7023,8 +7372,8 @@ const cli = Cli.create({
                     json: c.options.json,
                     stat: c.options.stat,
                     color,
-                    stdout: process.stdout,
-                    stderr: process.stderr,
+                    stdout: io.stdout,
+                    stderr: io.stderr,
                 });
                 return result.exitCode;
             } finally {
@@ -7049,7 +7398,7 @@ const cli = Cli.create({
     }),
     alias: { json: "j" },
     run(c) {
-        return runDevtoolsCommandWithTelemetry("output", c, async () => {
+        return runDevtoolsCommandWithTelemetry("output", c, async (io) => {
             const { runOutputOnce } = await import("./output.js");
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -7060,8 +7409,8 @@ const cli = Cli.create({
                     iteration: c.options.iteration,
                     json: c.options.json && !c.options.pretty,
                     pretty: c.options.pretty,
-                    stdout: process.stdout,
-                    stderr: process.stderr,
+                    stdout: io.stdout,
+                    stderr: io.stderr,
                 });
                 return result.exitCode;
             } finally {
@@ -7085,7 +7434,7 @@ const cli = Cli.create({
     }),
     alias: { json: "j" },
     run(c) {
-        return runDevtoolsCommandWithTelemetry("rewind", c, async () => {
+        return runDevtoolsCommandWithTelemetry("rewind", c, async (io) => {
             const { runRewindOnce } = await import("./rewind.js");
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -7096,10 +7445,10 @@ const cli = Cli.create({
                     yes: c.options.yes,
                     json: c.options.json,
                     stdin: process.stdin,
-                    stdout: process.stdout,
-                    stderr: process.stderr,
+                    stdout: io.stdout,
+                    stderr: io.stderr,
                 });
-                if (result.exitCode === 0 && !c.options.json)
+                if (result.exitCode === 0 && !c.options.json && !c.formatExplicit)
                     writeAgentNextStepsHuman({ runId: c.args.runId });
                 return result.exitCode;
             } finally {
@@ -7264,7 +7613,7 @@ const cli = Cli.create({
     // Opens a directory as a workspace in the Smithers Gateway UI.
     // =========================================================================
     .command("gui", {
-    description: "Open a directory as a workspace in Smithers UI",
+    description: "Open a directory's workspace in the Smithers UI: starts (or attaches to) the workspace Gateway and opens the MOST RECENT run's workflow UI; pass --workflow <id> to open a specific workflow UI directly.",
     args: z.object({
         path: z.string().optional().describe("Directory path (defaults to current working directory)"),
     }),
@@ -7434,6 +7783,71 @@ if (!(cliCommands instanceof Map)) {
     throw new Error("Could not resolve Smithers CLI commands for input bounds.");
 }
 wrapCliCommandHandlersWithInputBounds(cliCommands);
+/**
+ * Resolve a leaf command entry (with its args/options zod schemas) from a
+ * resolved command path such as "inspect" or "workflow run".
+ *
+ * @param {string} commandPath
+ * @returns {{ args?: any; options?: any } | undefined}
+ */
+function resolveCliCommandEntry(commandPath) {
+    /** @type {any} */
+    let scope = cliCommands;
+    /** @type {any} */
+    let entry;
+    for (const token of String(commandPath ?? "").trim().split(/\s+/)) {
+        if (!(scope instanceof Map) || !scope.has(token)) return undefined;
+        entry = scope.get(token);
+        scope = entry && typeof entry === "object" && "_group" in entry ? entry.commands : undefined;
+    }
+    return entry && typeof entry === "object" && !("_group" in entry) ? entry : undefined;
+}
+/**
+ * incur reports missing required inputs with raw zod prose ("Invalid input:
+ * expected string, received undefined" plus an embedded Details blob) in its
+ * machine envelope. Build an explicit top line ("Missing required argument
+ * <runId>" / "Missing required option --run-id" plus a --help pointer) from
+ * the normalized fieldErrors instead, mirroring incur's own TTY renderer.
+ * Returns undefined when nothing is missing so invalid-value messages (the
+ * contract pinned by tests/init.e2e.test.js) pass through untouched. (#12)
+ *
+ * @param {string} commandPath
+ * @param {{ path?: string; missing?: boolean }[]} fieldErrors
+ * @returns {string | undefined}
+ */
+function friendlyMissingInputMessage(commandPath, fieldErrors) {
+    const missing = fieldErrors.filter((fieldError) => fieldError?.missing && typeof fieldError.path === "string");
+    if (missing.length === 0) return undefined;
+    const entry = resolveCliCommandEntry(commandPath);
+    const parts = missing.map((fieldError) => {
+        const head = String(fieldError.path).split(".")[0];
+        if (entry?.options?.shape?.[head]) {
+            const kebab = head.replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`);
+            return `Missing required option --${kebab}`;
+        }
+        return `Missing required argument <${fieldError.path}>`;
+    });
+    const helpCommand = commandPath ? `smithers ${commandPath} --help` : "smithers --help";
+    return `${parts.join("; ")}. Run \`${helpCommand}\` for usage.`;
+}
+// Root middleware: rewrite the VALIDATION_ERROR top line for missing required
+// inputs before incur formats the machine envelope. The zod ValidationError is
+// thrown inside incur's command execution (before any run handler), so a
+// middleware around next() is the only in-repo seam; mutating the message and
+// rethrowing preserves the fieldErrors contract and the exit code. (#12)
+cli.use(async (c, next) => {
+    try {
+        return await next();
+    }
+    catch (error) {
+        const fieldErrors = /** @type {any} */ (error)?.fieldErrors;
+        if (error instanceof Error && Array.isArray(fieldErrors)) {
+            const rewritten = friendlyMissingInputMessage(c.command, fieldErrors);
+            if (rewritten) error.message = rewritten;
+        }
+        throw error;
+    }
+});
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------

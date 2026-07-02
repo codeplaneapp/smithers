@@ -83,7 +83,7 @@ export const CLI_ERROR_MESSAGES = Object.freeze({
     // Auth
     Unauthorized: {
         message: "The request was rejected because credentials are missing or expired.",
-        hint: "Run `smithers login` and try again.",
+        hint: "Pass --token or set SMITHERS_TOKEN/SMITHERS_API_KEY. Mint a token with `smithers token issue`, or start the gateway with `smithers gateway --mint-token`.",
         exitCode: EXIT_SERVER_ERROR,
     },
 
@@ -154,12 +154,12 @@ export const CLI_ERROR_MESSAGES = Object.freeze({
     // Transport
     ServerUnreachable: {
         message: "The smithers gateway is not reachable.",
-        hint: "Check SMITHERS_HOST and verify the gateway is running.",
+        hint: "Check SMITHERS_GATEWAY_URL/SMITHERS_GATEWAY_PORT (or --port) and verify the gateway is running with `smithers gateway status`.",
         exitCode: EXIT_SERVER_ERROR,
     },
     AuthExpired: {
         message: "The authentication session has expired.",
-        hint: "Run `smithers login` to refresh credentials.",
+        hint: "Pass a fresh --token or update SMITHERS_TOKEN/SMITHERS_API_KEY; mint one with `smithers token issue`.",
         exitCode: EXIT_SERVER_ERROR,
     },
 });
@@ -193,4 +193,29 @@ export function formatCliErrorForStderr(code, rawMessage) {
         ? `error: ${code}: ${mapping.message}`
         : `error: ${mapping.message}`;
     return `${heading}\n  hint: ${mapping.hint}`;
+}
+
+/**
+ * Parse a rendering produced by {@link formatCliErrorForStderr} back into its
+ * structured parts. The devtools commands print their errors through the
+ * formatter above; when a machine format (`--format json`) is requested the
+ * CLI re-emits that captured text as a structured `{code, message}` envelope
+ * on stdout, so the parser lives next to the formatter to keep the two in
+ * lockstep. Returns null when the text carries no `error:` line.
+ *
+ * @param {string} text
+ * @returns {{ code?: string; message: string; hint?: string } | null}
+ */
+export function parseCliErrorFromStderr(text) {
+    const lines = String(text ?? "").split("\n");
+    const errorLine = lines.find((line) => line.startsWith("error: "));
+    if (!errorLine) return null;
+    const rest = errorLine.slice("error: ".length);
+    const hintLine = lines.find((line) => line.trimStart().startsWith("hint: "));
+    const hint = hintLine ? hintLine.trimStart().slice("hint: ".length) : undefined;
+    const withCode = rest.match(/^([A-Za-z][A-Za-z0-9_]*): (.*)$/);
+    if (withCode) {
+        return { code: withCode[1], message: withCode[2], ...(hint ? { hint } : {}) };
+    }
+    return { message: rest, ...(hint ? { hint } : {}) };
 }

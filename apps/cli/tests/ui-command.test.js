@@ -1,9 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, onTestFinished, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { createSmithers } from "../../../packages/smithers/src/create.js";
 import { createTempRepo, runSmithers, writeTestWorkflow } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { canonicalWorkspacePath, gatewayRuntimePaths, writeGatewayRuntimeState } from "../src/gateway-runtime.js";
 
 const CLI_ENTRY = resolve(import.meta.dir, "..", "src", "index.js");
 
@@ -32,13 +37,13 @@ function rpcResponse(payload) {
     return { type: "res", ok: true, payload };
 }
 
-async function startFakeGateway(handler) {
+async function startFakeGateway(handler, options = {}) {
     const requests = [];
     const server = createHttpServer(async (req, res) => {
         if (req.url === "/health") {
             requests.push({ method: "health", body: null });
             res.writeHead(200, { "content-type": "application/json" });
-            res.end(JSON.stringify({ ok: true }));
+            res.end(JSON.stringify({ ok: true, ...(options.identity ? { identity: options.identity } : {}) }));
             return;
         }
         const match = req.url?.match(/^\/v1\/rpc\/([^/?]+)/);
@@ -47,12 +52,17 @@ async function startFakeGateway(handler) {
             res.end();
             return;
         }
+        if (options.bearer && req.headers.authorization !== `Bearer ${options.bearer}`) {
+            res.writeHead(401, { "content-type": "application/json" });
+            res.end(JSON.stringify({ error: "unauthorized" }));
+            return;
+        }
         const chunks = [];
         for await (const chunk of req) chunks.push(chunk);
         const body = Buffer.concat(chunks).toString("utf8");
         const params = body ? JSON.parse(body) : {};
         const method = match[1];
-        requests.push({ method, body: params });
+        requests.push({ method, body: params, authorization: req.headers.authorization ?? null });
         const frame = handler(method, params);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify(frame));
@@ -86,6 +96,23 @@ async function stopProcess(child, closePromise) {
         child.kill("SIGKILL");
         await closePromise;
     }
+}
+
+function makeStateDirEnv() {
+    const stateDir = mkdtempSync(join(tmpdir(), "smithers-ui-gwstate-"));
+    onTestFinished(() => rmSync(stateDir, { recursive: true, force: true }));
+    return { stateDir, env: { NO_COLOR: "1", FORCE_COLOR: "0", SMITHERS_GATEWAY_STATE_DIR: stateDir } };
+}
+
+function seedLegacySqliteStore(repo) {
+    repo.write(".smithers/smithers.config.ts", "export default {};\n");
+    const api = createSmithers({}, { dbPath: repo.path("smithers.db"), backend: "sqlite" });
+    ensureSmithersTables(api.db);
+    api.db.$client.exec(`
+        INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms)
+          VALUES ('cli-ui-legacy-run', 'legacy', 'finished', 1);
+    `);
+    api.db.$client.close();
 }
 
 async function stopGatewayOnPort(port) {
@@ -279,6 +306,78 @@ describe("smithers ui", () => {
         });
         expect(envelope.message).toContain("No Smithers Gateway reachable for this workspace");
         expect(envelope.message).toContain("smithers gateway");
+    }, 30_000);
+
+    test("warns when a state-file token can authenticate CLI RPC but not browser UI navigation", async () => {
+        const repo = createTempRepo();
+        repo.write(".smithers/smithers.config.ts", "export default {};\n");
+        const token = "state-file-token";
+        const gateway = await startFakeGateway((method) => {
+            if (method === "listWorkflows") {
+                return rpcResponse([{ key: "alpha", hasUi: true, uiPath: "/ui/alpha" }]);
+            }
+            throw new Error(`Unexpected RPC ${method}`);
+        }, {
+            bearer: token,
+            identity: { workspaceRoot: repo.dir, backend: "sqlite", version: "test", pid: process.pid, startedAtMs: 1 },
+        });
+        const { env } = makeStateDirEnv();
+        const stateEnv = { ...process.env, ...env };
+        try {
+            writeGatewayRuntimeState(repo.dir, {
+                pid: process.pid,
+                host: "127.0.0.1",
+                port: Number(new URL(gateway.base).port),
+                url: gateway.base,
+                token,
+                workspaceRoot: canonicalWorkspacePath(repo.dir),
+                backend: "sqlite",
+                version: "0.0.0-test",
+                protocol: 1,
+                startedAtMs: Date.now(),
+            }, stateEnv);
+            const result = await runSmithersAsync(["ui", "--workflow", "alpha", "--no-open"], {
+                cwd: repo.dir,
+                format: "json",
+                env,
+            });
+            expect(result.exitCode).toBe(0);
+            expect(result.stderr).toContain("requires a bearer token");
+            expect(result.stderr).toContain("browser navigations cannot send that header");
+            expect(result.json).toMatchObject({
+                opened: false,
+                url: `${gateway.base}/ui/alpha`,
+                workflow: "alpha",
+            });
+            expect(gateway.requests.find((request) => request.method === "listWorkflows")?.authorization).toBe(`Bearer ${token}`);
+        }
+        finally {
+            await gateway.close();
+        }
+    }, 30_000);
+
+    test("autostart failure surfaces the gateway stderr tail instead of waiting for timeout", async () => {
+        const repo = createTempRepo();
+        seedLegacySqliteStore(repo);
+        const { stateDir, env } = makeStateDirEnv();
+        const port = await findOpenPort();
+        const startedAt = Date.now();
+        const result = runSmithers(["ui", "--workflow", "legacy", "--port", String(port), "--no-open"], {
+            cwd: repo.dir,
+            format: "json",
+            env: { ...env, SMITHERS_BACKEND: "pglite" },
+            timeoutMs: 20_000,
+        });
+        expect(Date.now() - startedAt).toBeLessThan(20_000);
+        expect(result.exitCode).not.toBe(0);
+        expect(result.exitCode).not.toBe(143);
+        expect(result.json?.code).toBe("GATEWAY_UNREACHABLE");
+        expect(result.json?.message).toContain("Autostarted gateway exited before it became reachable");
+        expect(result.json?.message).toContain("exit code");
+        expect(result.json?.message).toContain("Gateway autostart log:");
+        expect(result.json?.message).toContain(gatewayRuntimePaths(repo.dir, { ...process.env, SMITHERS_GATEWAY_STATE_DIR: stateDir }).logFile);
+        expect(result.json?.message).toContain("Last gateway stderr:");
+        expect(result.json?.message).toContain("SMITHERS_MIGRATION_REQUIRED");
     }, 30_000);
 
     test("autostarts a local Gateway when no Gateway is already listening", async () => {

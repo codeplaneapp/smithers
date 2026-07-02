@@ -89,6 +89,47 @@ describe("buildAgentNextSteps", () => {
         expect(next.commands.map((cmd) => cmd.command)).toContain("ui --app");
     });
 
+    test("uiOpened variant numbers every suggestion, including the trailing build-a-workflow line (#28)", () => {
+        const next = buildAgentNextSteps({ workflowId: "implement", runId: "run-1", hasUi: true, uiOpened: true });
+        expect(next.description).toContain("\n4. Ask the user clarifying questions");
+        const numberedLines = next.description
+            .split("\n")
+            .filter((line) => /^\d+\. /.test(line));
+        expect(numberedLines).toHaveLength(4);
+    });
+
+    test("justRan: \"graph\" drops the graph self-suggestion but keeps tree, UI, and build-a-workflow (#29)", () => {
+        const next = buildAgentNextSteps({
+            workflowId: "implement",
+            workflowFile: "flow.tsx",
+            runId: "run-1",
+            hasUi: false,
+            justRan: "graph",
+        });
+        const commandStrings = next.commands.map((cmd) => cmd.command);
+        expect(commandStrings).not.toContain("graph flow.tsx");
+        expect(next.description).not.toContain("smithers graph flow.tsx");
+        expect(commandStrings).toContain("tree run-1");
+        expect(next.description).toContain("smithers tree run-1");
+        expect(next.description).toContain("Ask the user clarifying questions");
+        expect(commandStrings).toContain('workflow run create-workflow --prompt "<describe the workflow>"');
+    });
+
+    test("justRan: \"tree\" swaps the tree self-suggestion for tree --watch (#29)", () => {
+        const next = buildAgentNextSteps({
+            workflowId: "implement",
+            workflowFile: "flow.tsx",
+            runId: "run-1",
+            hasUi: false,
+            justRan: "tree",
+        });
+        const commandStrings = next.commands.map((cmd) => cmd.command);
+        expect(commandStrings).not.toContain("tree run-1");
+        expect(commandStrings).toContain("tree run-1 --watch");
+        expect(next.description).toContain("smithers tree run-1 --watch");
+        expect(commandStrings).toContain("graph flow.tsx");
+    });
+
     test("uses placeholders when no run or workflow is known and never uses em-dashes", () => {
         const next = buildAgentNextSteps({});
         expect(next.description).toContain("<runId>");
