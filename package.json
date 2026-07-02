@@ -149,6 +149,7 @@
     "@smithers-orchestrator/time-travel": "workspace:*",
     "@smithers-orchestrator/tool-context": "workspace:*",
     "@smithers-orchestrator/tui": "workspace:*",
+    "@smithers-orchestrator/ui-styleguide": "workspace:*",
     "@smithers-orchestrator/usage": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
     "@tanstack/react-query": "^5.101.2",

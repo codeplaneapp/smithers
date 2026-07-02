@@ -8129,6 +8129,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/time-travel` | Snapshots, diffs, forks, replay, timelines, VCS tags, rewind locks/audits, and time-travel metrics | Time Travel, Time Travel Quickstart |
 | `@smithers-orchestrator/tool-context` | AsyncLocalStorage tool-execution context (run/node/idempotency keys, durability snapshot hook) shared by the engine and `smithers-orchestrator` without a dependency cycle | Execution Model |
 | `@smithers-orchestrator/tui` | Full-screen OpenTUI + React single-run monitor launched by `bunx smithers-orchestrator up --interactive`; reuses the gateway-react hooks for live tree, graph, logs, timeline, and hijack views of one run | CLI Overview |
+| `@smithers-orchestrator/ui-styleguide` | Shared CSS tokens and layout primitives for Smithers browser UIs, including the operator console and workflow UI components | Gateway UI Components, Custom Workflow UI |
 | `@smithers-orchestrator/usage` | Account quota and rate-limit usage reporting for Smithers providers | CLI Overview |
 | `@smithers-orchestrator/vcs` | VCS discovery and jj workspace operations such as `runJj`, `workspaceAdd`, `workspaceList`, and pointer reverts | VCS Helpers, VCS Guide |
 
