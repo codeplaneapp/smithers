@@ -259,6 +259,8 @@ const WORKFLOW_MANIFEST = [
     { id: "make-workflow-tutorial", ui: "make-workflow-tutorial", components: [], prompts: [], seeded: true },
     // System workflow: durable `smithers init` (hidden from default listings).
     { id: "init", ui: "init", components: [], prompts: [], seeded: true },
+    // System workflow: auto-launched autopsy for failed runs.
+    { id: "post-failure", ui: "post-failure", components: [], prompts: [], seeded: true },
 ];
 /**
  * Prompt IDs from renderPrompts() that are always emitted regardless of

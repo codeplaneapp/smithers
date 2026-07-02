@@ -71,6 +71,7 @@ import { optimizeOptions, runOptimizeCommand, withOptimizationArtifactEnv } from
 import { ask } from "./ask.js";
 import { runScheduler } from "./scheduler.js";
 import { resumeRunDetached } from "./resume-detached.js";
+import { launchPostFailureAutopsy } from "./launchPostFailureAutopsy.js";
 import { resolveLaunchRootDir, parsePersistedRootDir } from "./resolve-root.js";
 import { formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, } from "@smithers-orchestrator/agents/cli-capabilities";
 import { parseDurationMs, supervisorLoopEffect, } from "./supervisor.js";
@@ -1540,6 +1541,7 @@ const upOptions = z.object({
     insecure: z.boolean().default(false).describe("Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run — dangerous)"),
     metrics: z.boolean().default(true).describe("Expose /metrics endpoint (with --serve)"),
     backend: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Storage backend for workflows using openSmithersBackend"),
+    postFailure: z.boolean().default(true).describe("Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)"),
 });
 // Launch the interactive picker + live status card instead of a one-shot run.
 // Shared by `up` and `workflow run`; deliberately NOT folded into `upOptions`
@@ -1999,6 +2001,8 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 childArgs.push("--metrics", "false");
             if (options.backend)
                 childArgs.push("--backend", options.backend);
+            if (options.postFailure === false)
+                childArgs.push("--no-post-failure");
             const logFileDir = options.logDir ?? dirname(resolvedWorkflowPath);
             const effectiveRunId = runId ?? `run-${Date.now()}`;
             const logFile = resolve(logFileDir, `${effectiveRunId}.log`);
@@ -2263,6 +2267,13 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 process.once("SIGTERM", () => shutdown());
             });
             process.exitCode = formatStatusExitCode(result.status);
+            if (result.status === "failed") {
+                launchPostFailureAutopsy({
+                    failedRunId: result.runId,
+                    workflowPath: resolvedWorkflowPath,
+                    enabled: options.postFailure !== false,
+                });
+            }
             return c.ok(summarizeRunResult(result), {
                 cta: result.runId ? withAgentNextSteps({
                     workflowId: workflowIdFromPath(workflowPath),
@@ -2297,6 +2308,13 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             signal: abort.signal,
         }));
         process.exitCode = formatStatusExitCode(result.status);
+        if (result.status === "failed") {
+            launchPostFailureAutopsy({
+                failedRunId: result.runId,
+                workflowPath: resolvedWorkflowPath,
+                enabled: options.postFailure !== false,
+            });
+        }
         return c.ok(summarizeRunResult(result), {
             cta: result.runId ? withAgentNextSteps({
                 workflowId: workflowIdFromPath(workflowPath),

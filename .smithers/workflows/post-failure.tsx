@@ -1,4 +1,4 @@
-// smithers-source: authored
+// smithers-source: seeded
 // smithers-system: true
 // smithers-display-name: Post-Failure Autopsy
 // smithers-description: Auto-launched when a run fails: investigate why, suggest the fix (retry / rewind / edit-and-reset), and — gated on approval — report suspected smithers bugs via `smithers bug`.

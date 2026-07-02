@@ -79,6 +79,7 @@ test("CLI agent docs mention current agent-specific option names", () => {
         "ForgeAgentOptions.ts",
         "GeminiAgentOptions.ts",
         "KimiAgentOptions.ts",
+        "OpenClawAgentOptions.ts",
         "OpenCodeAgentOptions.ts",
         "PiAgentOptions.ts",
         "VibeAgentOptions.ts",
@@ -200,7 +201,7 @@ test("workflow overview, catalog, and sidebar cover every documented workflow", 
         .map((file) => file.replace(/\.mdx$/, ""))
         .filter((id) => id !== "overview" && id !== "catalog")
         .sort();
-    expect(workflowDocIds).toHaveLength(33);
+    expect(workflowDocIds).toHaveLength(34);
 
     const overview = readRepoFile("docs/workflows/overview.mdx");
     const catalog = readRepoFile("docs/workflows/catalog.mdx");

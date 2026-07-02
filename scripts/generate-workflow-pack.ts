@@ -57,6 +57,8 @@ const SEEDED_WORKFLOW_IDS = [
   "make-workflow-tutorial",
   // Durable `smithers init` (system workflow — hidden from default listings).
   "init",
+  // Auto-launched autopsy for failed runs (system workflow).
+  "post-failure",
 ];
 
 type TemplateFile = { path: string; contents: string };
