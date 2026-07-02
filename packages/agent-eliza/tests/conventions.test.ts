@@ -293,6 +293,18 @@ describe("formatWorkflowsForPrompt", () => {
     expect(out).toContain("ship");
   });
 
+  test("skips workflows with system: true", () => {
+    const wfSystem = defineWorkflow({
+      name: "init-plumbing",
+      description: "System plumbing",
+      system: true,
+      workflow: fakeWorkflow,
+    });
+    const out = formatWorkflowsForPrompt([wf1, wfSystem]);
+    expect(out).toContain("close-issues");
+    expect(out).not.toContain("init-plumbing");
+  });
+
   test("skips workflows with disableModelInvocation: true", () => {
     const out = formatWorkflowsForPrompt([wf1, wfDisabled]);
     expect(out).toContain("close-issues");

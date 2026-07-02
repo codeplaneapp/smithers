@@ -111,6 +111,9 @@ function buildDefinition(filePath, baseDir, exported, source, frontmatter) {
         (typeof frontmatter["disable-model-invocation"] === "boolean"
           ? frontmatter["disable-model-invocation"]
           : undefined),
+      system:
+        raw.system ??
+        (typeof frontmatter.system === "boolean" ? frontmatter.system : undefined),
       filePath,
       baseDir,
       source,
@@ -131,6 +134,8 @@ function buildDefinition(filePath, baseDir, exported, source, frontmatter) {
         typeof frontmatter["disable-model-invocation"] === "boolean"
           ? frontmatter["disable-model-invocation"]
           : undefined,
+      system:
+        typeof frontmatter.system === "boolean" ? frontmatter.system : undefined,
       filePath,
       baseDir,
       source,

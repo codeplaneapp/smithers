@@ -207,11 +207,15 @@ export type GatewayWorkflowSummary = {
   description?: string;
   hasUi: boolean;
   uiPath: string | null;
+  /** True for internal plumbing workflows (e.g. init) hidden from default listings. */
+  system?: boolean;
 };
 
 export type ListWorkflowsRequest = {
   filter?: {
     hasUi?: boolean;
+    /** System workflows are excluded from results unless this is true. */
+    includeSystem?: boolean;
   };
 };
 
@@ -772,6 +776,7 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
     requestSchema: objectSchema({
       filter: objectSchema({
         hasUi: booleanSchema("Only return workflows with or without an attached UI."),
+        includeSystem: booleanSchema("Include system (internal plumbing) workflows; they are excluded by default."),
       }),
     }),
     responseSchema: arraySchema(objectSchema({
@@ -780,10 +785,11 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
       description: stringSchema("Workflow description."),
       hasUi: booleanSchema("Whether this workflow has a custom UI mounted."),
       uiPath: { type: ["string", "null"], description: "Mounted UI path when present." },
+      system: booleanSchema("Whether this is a system (internal plumbing) workflow hidden from default listings."),
     }, ["key", "hasUi", "uiPath"]), "Registered workflow summaries."),
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "Internal"],
     exampleRequest: { filter: { hasUi: true } },
-    exampleResponse: [{ key: "deploy", readableName: "Deploy", hasUi: true, uiPath: "/workflows/deploy" }],
+    exampleResponse: [{ key: "deploy", readableName: "Deploy", hasUi: true, uiPath: "/workflows/deploy", system: false }],
   },
   {
     version: SMITHERS_API_VERSION,

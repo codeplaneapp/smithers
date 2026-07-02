@@ -1440,7 +1440,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
 
     let workflow = opts.preselect ?? null;
     if (!workflow) {
-        const workflows = discoverWorkflows();
+        const workflows = discoverWorkflows().filter((w) => !w.system);
         if (workflows.length === 0) {
             log.warn("No workflows found. Run `smithers init` to install the workflow pack.");
             return c.ok({ ran: false, reason: "no-workflows" });

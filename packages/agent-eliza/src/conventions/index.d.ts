@@ -18,6 +18,7 @@ interface WorkflowFrontmatter {
     aliases?: string[];
     "disable-model-invocation"?: boolean;
     "user-invocable"?: boolean;
+    system?: boolean;
     [key: string]: unknown;
 }
 /**
@@ -37,6 +38,8 @@ interface WorkflowDefinition {
     version?: string;
     /** When true, the workflow system should not invoke a model automatically. */
     disableModelInvocation?: boolean;
+    /** When true, the workflow is internal plumbing hidden from default listings and prompt sections. */
+    system?: boolean;
     /** Absolute path to the source file, when loaded from disk. */
     filePath?: string;
     /** Base directory the workflow was loaded from. */

@@ -4402,6 +4402,9 @@ paths:
                         hasUi:
                           type: boolean
                           description: "Only return workflows with or without an attached UI."
+                        includeSystem:
+                          type: boolean
+                          description: "Include system (internal plumbing) workflows; they are excluded by default."
                       required: []
                       additionalProperties: false
                   required: []
@@ -4465,6 +4468,9 @@ paths:
                             - string
                             - "null"
                           description: "Mounted UI path when present."
+                        system:
+                          type: boolean
+                          description: "Whether this is a system (internal plumbing) workflow hidden from default listings."
                       required:
                         - key
                         - hasUi
@@ -4481,6 +4487,7 @@ paths:
                     readableName: Deploy
                     hasUi: true
                     uiPath: /workflows/deploy
+                    system: false
         400:
           description: "The request shape is invalid."
           content:

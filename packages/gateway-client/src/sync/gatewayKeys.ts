@@ -8,7 +8,7 @@ import type { SyncKey } from "./SyncKey.ts";
  */
 
 export const gatewayKeys = {
-  workflows: (filter?: { hasUi?: boolean }): SyncKey => ["gateway:listWorkflows", filter ?? {}],
+  workflows: (filter?: { hasUi?: boolean; includeSystem?: boolean }): SyncKey => ["gateway:listWorkflows", filter ?? {}],
   runs: (params?: Record<string, unknown>): SyncKey => ["gateway:listRuns", params ?? {}],
   run: (runId: string): SyncKey => ["gateway:getRun", { runId }],
   devtoolsSnapshot: (runId: string): SyncKey => ["gateway:getDevToolsSnapshot", { runId }],

@@ -77,6 +77,7 @@ export const workflowSummarySchema = z.object({
     requiredEnv: z.array(z.string()).optional(),
     disableModelInvocation: z.boolean().optional(),
     userInvocable: z.boolean().optional(),
+    system: z.boolean().optional(),
     eligible: z.boolean().optional(),
     ineligibleReasons: z.array(z.string()).optional(),
 });
@@ -265,7 +266,9 @@ function resultSchema(data) {
         error: toolErrorSchema.optional(),
     });
 }
-const listWorkflowsInputSchema = z.object({});
+const listWorkflowsInputSchema = z.object({
+    includeSystem: z.boolean().optional().describe("Include system (internal plumbing) workflows; they are excluded by default."),
+});
 const listWorkflowsDataSchema = z.object({
     workflows: z.array(workflowSummarySchema),
 });
@@ -964,12 +967,12 @@ export function createSemanticToolDefinitions(options = {}) {
     return [
         {
             name: "list_workflows",
-            description: "List discovered Smithers workflows (local repo .smithers pack plus the global ~/.smithers pack; local shadows global on id collisions).",
+            description: "List discovered Smithers workflows (local repo .smithers pack plus the global ~/.smithers pack; local shadows global on id collisions). System workflows are excluded unless includeSystem is true.",
             inputSchema: listWorkflowsInputSchema,
             outputSchema: resultSchema(listWorkflowsDataSchema),
             annotations: { readOnlyHint: true },
-            handler: () => executeSemanticTool("list_workflows", async () => ({
-                workflows: discoverWorkflows(context.cwd()),
+            handler: (input) => executeSemanticTool("list_workflows", async () => ({
+                workflows: discoverWorkflows(context.cwd()).filter((workflow) => input?.includeSystem || !workflow.system),
             })),
         },
         {

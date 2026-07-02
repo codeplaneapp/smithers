@@ -1686,6 +1686,9 @@ const workflowSkillOptions = z.object({
     force: z.boolean().default(false).describe("Overwrite existing skill files"),
     global: z.boolean().default(false).describe("Write skills into the global ~/.smithers pack (honors SMITHERS_HOME) instead of the local .smithers"),
 });
+const workflowListOptions = z.object({
+    system: z.boolean().default(false).describe("Include system workflows (internal plumbing hidden from the default listing)"),
+});
 const workflowCreateOptions = z.object({
     global: z.boolean().default(false).describe("Create the workflow in the global ~/.smithers pack (honors SMITHERS_HOME) instead of the local .smithers"),
 });
@@ -2447,10 +2450,11 @@ async function runGatewayCommand(options) {
             if (existsSync(uiEntry)) {
                 gateway.register(discovered.id, workflow, {
                     ui: { entry: uiEntry, title: titleizeWorkflowId(discovered.id) },
+                    system: discovered.system,
                 });
             }
             else {
-                gateway.register(discovered.id, workflow);
+                gateway.register(discovered.id, workflow, { system: discovered.system });
             }
             workflows.push(discovered.id);
         }
@@ -2549,10 +2553,12 @@ const workflowCli = Cli.create({
     },
 })
     .command("list", {
-    description: "List discovered local workflows.",
+    description: "List discovered local workflows. System workflows are hidden unless --system is passed.",
+    options: workflowListOptions,
     run(c) {
+        const workflows = discoverWorkflows(process.cwd());
         return c.ok({
-            workflows: discoverWorkflows(process.cwd()),
+            workflows: c.options.system ? workflows : workflows.filter((workflow) => !workflow.system),
         });
     },
 })
@@ -2622,7 +2628,7 @@ const workflowCli = Cli.create({
         try {
             const workflowId = c.args.name ?? "all";
             const workflows = workflowId === "all"
-                ? discoverWorkflows(process.cwd()).filter((workflow) => workflow.id !== "workflow-skill")
+                ? discoverWorkflows(process.cwd()).filter((workflow) => workflow.id !== "workflow-skill" && !workflow.system)
                 : [resolveWorkflow(workflowId, process.cwd())];
             const inputSchemas = new Map();
             for (const workflow of workflows) {

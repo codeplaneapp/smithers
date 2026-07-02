@@ -107,6 +107,7 @@ function metadataValue(source, key) {
  *   required-bins: [jj, gh]
  *   required-env: [GITHUB_TOKEN]
  *   disable-model-invocation: false
+ *   system: false
  *   *\/
  *
  * A minimal YAML subset is supported: `key: value` scalars, inline `[a, b]`
@@ -445,6 +446,7 @@ function parseMetadata(source, id, env = process.env) {
         requiredEnv,
         disableModelInvocation: fieldBool(frontmatter, source, "disable-model-invocation"),
         userInvocable: fieldValue(frontmatter, source, "user-invocable")?.toLowerCase() !== "false",
+        system: fieldBool(frontmatter, source, "system"),
         eligible,
         ineligibleReasons,
     };
@@ -475,6 +477,7 @@ function buildWorkflow(id, entryFile, scope, env = process.env) {
         requiredEnv: metadata.requiredEnv,
         disableModelInvocation: metadata.disableModelInvocation,
         userInvocable: metadata.userInvocable,
+        system: metadata.system,
         eligible: metadata.eligible,
         ineligibleReasons: metadata.ineligibleReasons,
         entryFile,
@@ -779,7 +782,7 @@ export function writeWorkflowSkillFiles(root, options = {}) {
     const workflowId = options.workflowId ?? "all";
     const force = options.force === true;
     const workflows = workflowId === "all"
-        ? discoverWorkflows(root).filter((workflow) => workflow.id !== "workflow-skill")
+        ? discoverWorkflows(root).filter((workflow) => workflow.id !== "workflow-skill" && !workflow.system)
         : [resolveWorkflow(workflowId, root)];
     const output = options.output;
     const packDir = options.global

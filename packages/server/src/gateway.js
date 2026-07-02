@@ -108,6 +108,7 @@ import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
  *   schedule?: string;
  *   webhook?: GatewayWebhookConfig;
  *   ui?: ResolvedGatewayUiConfig | null;
+ *   system?: boolean;
  * }} RegisteredWorkflow
  */
 /**
@@ -1616,16 +1617,21 @@ export class Gateway {
             ...(entry.workflow.description ? { description: entry.workflow.description } : {}),
             hasUi: Boolean(entry.ui),
             uiPath: entry.ui?.path ?? null,
+            system: Boolean(entry.system),
         };
     }
     /**
    * @param {boolean | undefined} hasUi
+   * @param {boolean | undefined} [includeSystem] System (internal plumbing) workflows are hidden unless true.
    */
-    listWorkflowSummaries(hasUi) {
+    listWorkflowSummaries(hasUi, includeSystem) {
         const rows = [];
         for (const [key, entry] of this.workflows.entries()) {
             const summary = this.workflowSummary(key, entry);
             if (hasUi !== undefined && summary.hasUi !== hasUi) {
+                continue;
+            }
+            if (summary.system && includeSystem !== true) {
                 continue;
             }
             rows.push(summary);
@@ -2427,6 +2433,7 @@ export class Gateway {
             schedule: options?.schedule,
             webhook: options?.webhook,
             ui,
+            system: Boolean(options?.system),
         });
         // Startup recovery: any audit row left in `in_progress` from a prior
         // crash is flipped to `partial` and the associated run is flagged as
@@ -4587,7 +4594,8 @@ export class Gateway {
             case "listWorkflows": {
                 const filter = asObject(params.filter) ?? {};
                 const hasUi = asBoolean(params.hasUi) ?? asBoolean(filter.hasUi);
-                return responseOk(frame.id, this.listWorkflowSummaries(hasUi));
+                const includeSystem = asBoolean(params.includeSystem) ?? asBoolean(filter.includeSystem);
+                return responseOk(frame.id, this.listWorkflowSummaries(hasUi, includeSystem));
             }
             case "runs.create":
             case "launchRun": {

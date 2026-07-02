@@ -21,7 +21,8 @@
  * Render a list of WorkflowDefinitions as a Markdown-ish prompt section.
  *
  * Workflows with `disableModelInvocation: true` are excluded so the LLM cannot
- * invoke them (matching elizaOS `formatSkillsForPrompt` behavior).
+ * invoke them (matching elizaOS `formatSkillsForPrompt` behavior). Workflows
+ * with `system: true` (internal plumbing) are excluded as well.
  *
  * @param {WorkflowDefinition[]} workflows
  * @param {FormatWorkflowsOptions} [options]
@@ -34,7 +35,7 @@ export function formatWorkflowsForPrompt(workflows, options = {}) {
     includeAliases = true,
   } = options;
 
-  const visible = workflows.filter((w) => !w.disableModelInvocation);
+  const visible = workflows.filter((w) => !w.disableModelInvocation && !w.system);
 
   if (visible.length === 0) {
     return `${heading}\n\n(none)`;

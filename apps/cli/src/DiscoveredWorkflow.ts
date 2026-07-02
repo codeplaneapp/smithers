@@ -18,6 +18,8 @@ export type DiscoveredWorkflow = {
     disableModelInvocation: boolean;
     /** When false, the workflow cannot be invoked as a user command. Defaults to true. */
     userInvocable: boolean;
+    /** When true, the workflow is internal plumbing (e.g. `smithers init`): hidden from default user-facing listings (CLI `workflow list`, gateway, MCP) but still runnable explicitly. */
+    system: boolean;
     /** False when a `required-*` prerequisite is unmet; the workflow is still listed but flagged. */
     eligible: boolean;
     /** Human-readable reasons the workflow is ineligible (empty when eligible). */

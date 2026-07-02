@@ -288,12 +288,33 @@ describe("discoverWorkflows — skill-parity spec", () => {
         expect(wf.userInvocable).toBe(false);
     });
 
+    test("system flag parses from frontmatter and line comments", () => {
+        const { root } = seed({
+            "sys.tsx": [
+                "/* smithers",
+                "system: true",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+            "sys-legacy.tsx": [
+                "// smithers-system: true",
+                "export default {};",
+            ].join("\n"),
+            "plain.tsx": "export default {};",
+        });
+        const workflows = discoverWorkflows(root);
+        expect(workflows.find((w) => w.id === "sys").system).toBe(true);
+        expect(workflows.find((w) => w.id === "sys-legacy").system).toBe(true);
+        expect(workflows.find((w) => w.id === "plain").system).toBe(false);
+    });
+
     test("defaults: eligible, invocable, no gating when unspecified", () => {
         const { root } = seed({ "plain.tsx": "export default {};" });
         const wf = discoverWorkflows(root)[0];
         expect(wf.eligible).toBe(true);
         expect(wf.disableModelInvocation).toBe(false);
         expect(wf.userInvocable).toBe(true);
+        expect(wf.system).toBe(false);
         expect(wf.requiredBins).toEqual([]);
         expect(wf.requiredEnv).toEqual([]);
         expect(wf.requiredOs).toEqual([]);

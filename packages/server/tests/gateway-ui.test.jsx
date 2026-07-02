@@ -352,4 +352,23 @@ describe("Gateway UI", () => {
       }),
     ]);
   });
+
+  test("system workflows are hidden from listWorkflows unless includeSystem is set", async () => {
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-system-wf-"));
+    gateway = new Gateway();
+    gateway.register("main", createValueWorkflow(join(tempDir, "main.db")));
+    gateway.register("init", createValueWorkflow(join(tempDir, "init.db")), { system: true });
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const defaultResponse = await postRpc(port, "listWorkflows", {});
+    const defaultListed = await defaultResponse.json();
+    expect(defaultListed.payload.map((w) => w.key)).toEqual(["main"]);
+    expect(defaultListed.payload[0].system).toBe(false);
+
+    const withSystemResponse = await postRpc(port, "listWorkflows", { filter: { includeSystem: true } });
+    const withSystemListed = await withSystemResponse.json();
+    expect(withSystemListed.payload.map((w) => w.key)).toEqual(["init", "main"]);
+    expect(withSystemListed.payload.find((w) => w.key === "init").system).toBe(true);
+  });
 });
