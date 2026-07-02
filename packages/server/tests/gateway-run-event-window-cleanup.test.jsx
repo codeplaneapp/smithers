@@ -172,7 +172,19 @@ describe("gateway run event window cleanup", () => {
     const dbPath = makeDbPath("late");
     dbPaths.push(dbPath);
     const workflow = createCleanupWorkflow(dbPath);
-    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway = new Gateway({
+      heartbeatMs: 1000,
+      auth: {
+        mode: "token",
+        tokens: {
+          "op-token": {
+            role: "operator",
+            scopes: ["*"],
+            userId: "user:test",
+          },
+        },
+      },
+    });
     gateway.register("cleanup", workflow);
     ensureSmithersTables(workflow.db);
     const adapter = gateway.adapterForWorkflow(workflow);
@@ -184,6 +196,9 @@ describe("gateway run event window cleanup", () => {
       createdAtMs: Date.now(),
     });
 
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const client = await connectGateway(getPort(server), "op-token");
+
     gateway.broadcastEvent("node.started", { runId, nodeId: "a" });
     gateway.broadcastEvent("run.completed", { runId, status: "finished" });
 
@@ -191,10 +206,24 @@ describe("gateway run event window cleanup", () => {
     expect(gateway.runEventWindows.has(runId)).toBe(true);
     expect(gateway.terminalRunEventWindows.has(runId)).toBe(true);
 
+    const subscribed = await client.request("streamRunEvents", { runId, afterSeq: 0 });
+    expect(subscribed.ok).toBe(true);
+    expect(subscribed.payload.currentSeq).toBe(2);
+    const replayStart = await client.waitFor(
+      (message) => message.type === "event" && message.event === "run.event" && message.payload.seq === 1,
+    );
+    expect(replayStart.payload.event).toBe("node.started");
+    const replayDone = await client.waitFor(
+      (message) => message.type === "event" && message.event === "run.event" && message.payload.seq === 2,
+    );
+    expect(replayDone.payload.event).toBe("run.completed");
+
+    await client.close();
     await waitUntil(
       () =>
         !gateway.runEventWindows.has(runId) &&
         !gateway.terminalRunEventWindows.has(runId) &&
+        !gateway.runEventSubscriberCounts.has(runId) &&
         !gateway.terminalRunEventWindowTimers.has(runId),
       "late replay terminal window cleanup",
     );
