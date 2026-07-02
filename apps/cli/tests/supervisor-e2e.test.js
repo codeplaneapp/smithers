@@ -338,7 +338,7 @@ describe("supervisor e2e", () => {
             });
             expect(resumed).toEqual(["run-idempotent"]);
             const run = await adapter.getRun("run-idempotent");
-            expect(run?.heartbeatAtMs).toBe(now - 60_000);
+            expect(run?.heartbeatAtMs).toBe(now - 75_000);
             expect(run?.runtimeOwnerId).toBe("pid:99999:owner");
             expect(run?.claimedBy).toBe("supervisor:idempotent-e2e");
             expect(run?.claimedAtMs).toBe(now);

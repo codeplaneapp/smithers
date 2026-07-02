@@ -288,13 +288,15 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
         }
         const claimOwnerId = `supervisor:${options.supervisorId}`;
         const claimHeartbeatAtMs = options.deps.now();
+        const expectedStatus = "waiting-timer";
         // Delegates to `@smithers-orchestrator/server`'s `claimAndResumeRun`; see
         // the comment in `processCandidateEffect` above.
         let resumePid = null;
         const claimAndResumeResult = yield* Effect.tryPromise({
             try: () => claimAndResumeRun(options.adapter, {
                 runId: run.runId,
-                status: "waiting-timer",
+                expectedStatus: "waiting-timer",
+                status: expectedStatus,
                 runtimeOwnerId: run.runtimeOwnerId ?? null,
                 heartbeatAtMs: run.heartbeatAtMs ?? null,
                 workflowPath: run.workflowPath,
@@ -304,7 +306,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
                 workerId: options.supervisorId,
                 claimOwnerId,
                 resumeRun: async (job) => {
-                    resumePid = options.deps.spawnResumeDetached(workflowPath, job.runId, {
+                    resumePid = options.deps.spawnResumeDetached(workflowPath, run.runId, {
                         claimOwnerId: job.claimOwnerId,
                         claimHeartbeatAtMs: job.claimHeartbeatAtMs,
                         restoreRuntimeOwnerId: job.restoreRuntimeOwnerId,
@@ -452,7 +454,8 @@ function pollEffect(options) {
         const waitingTimerRuns = yield* options.adapter
             .listRunsEffect(500, "waiting-timer")
             .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] waiting-timer query failed: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))));
-        const claimableTimerRuns = waitingTimerRuns.filter((run) => run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs);
+        const claimableTimerRuns = waitingTimerRuns.filter((run) => (run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs) &&
+            (run.claimedAtMs == null || run.claimedAtMs <= staleBeforeMs));
         const timerDueChecks = yield* Effect.all(claimableTimerRuns.map((run) => runHasDueTimerEffect(options, run.runId, pollStartedAtMs)), { concurrency: options.maxConcurrent });
         const dueTimerRuns = claimableTimerRuns.filter((_run, index) => timerDueChecks[index]);
         const timerSlots = Math.max(0, options.maxConcurrent - staleResumedCount);
@@ -469,7 +472,8 @@ function pollEffect(options) {
         const waitingEventRuns = yield* options.adapter
             .listRunsEffect(500, "waiting-event")
             .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] waiting-event query failed: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))));
-        const claimableEventRuns = waitingEventRuns.filter((run) => run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs);
+        const claimableEventRuns = waitingEventRuns.filter((run) => (run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs) &&
+            (run.claimedAtMs == null || run.claimedAtMs <= staleBeforeMs));
         const approvalDecidedChecks = yield* Effect.all(claimableEventRuns.map((run) => runHasDecidedApprovalEffect(options, run.runId)), { concurrency: options.maxConcurrent });
         const approvalDecidedRuns = claimableEventRuns.filter((_run, index) => approvalDecidedChecks[index]);
         const approvalSlots = Math.max(0, options.maxConcurrent - staleResumedCount - timerResumedCount);
