@@ -218,7 +218,7 @@ export class SmithersCtx {
                 ? Number(row.iteration)
                 : 0;
             if (!best || iter >= bestIteration) {
-                best = /** @type {ResolveOutputRow<Schema, T>} */ (/** @type {unknown} */ (row));
+                best = /** @type {ResolveOutputRow<Schema, T>} */ (/** @type {unknown} */ (stripAutoColumns(row)));
                 bestIteration = iter;
             }
         }

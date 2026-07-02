@@ -337,6 +337,16 @@ describe("SmithersCtx output access", () => {
     expect(ctx.latest("rows", "a").value).toBe("two");
   });
 
+  test("latest strips internal output metadata from returned rows", () => {
+    const ctx = makeCtx({
+      outputs: {
+        rows: [{ runId: "run-1", nodeId: "a", iteration: 0, value: "visible" }],
+      },
+    });
+
+    expect(ctx.latest("rows", "a")).toEqual({ value: "visible" });
+  });
+
   test("latest treats missing iteration as zero", () => {
     const ctx = makeCtx({
       outputs: { rows: [{ nodeId: "a", value: "zero" }] },
