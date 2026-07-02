@@ -90,6 +90,10 @@ import {
     isUpdateAvailable,
 } from "./update-check.js";
 import { reportReplayResult } from "./reportReplayResult.js";
+import { buildClaudeMirrorTick } from "./claude-mirror/buildClaudeMirrorTick.js";
+import { buildClaudeNodeWait } from "./claude-mirror/buildClaudeNodeWait.js";
+import { runClaudeMonitor } from "./claude-mirror/runClaudeMonitor.js";
+import { waitForClaudeMirrorChange } from "./claude-mirror/waitForClaudeMirrorChange.js";
 import pc from "picocolors";
 import crypto from "node:crypto";
 import React from "react";
@@ -3208,6 +3212,180 @@ const memoryCli = Cli.create({
         catch (err) {
             console.error(`Error: ${err?.message ?? String(err)}`);
             return c.error({ code: "MEMORY_RM_FAILED", message: err?.message ?? String(err) });
+        }
+    },
+});
+// ---------------------------------------------------------------------------
+// `smithers claude ...` — protocol commands behind the Claude Code plugin's
+// /workflows mirror. Machine-shaped, contract-versioned (`contract` field):
+// the plugin's generic mirror script pins the shape, so keep changes additive.
+// ---------------------------------------------------------------------------
+const claudeTickArgs = z.object({
+    runId: z.string().describe("Run ID to mirror"),
+});
+const claudeTickOptions = z.object({
+    afterSeq: z.number().int().min(0).default(0).describe("Event-log cursor from the previous tick's `seq`"),
+    wait: z.boolean().default(false).describe("Block until a mirror-relevant event lands after --after-seq (or timeout)"),
+    timeoutMs: z.number().int().min(0).default(420000).describe("Max wait in ms before returning timedOut: true"),
+    intervalMs: z.number().int().min(100).default(750).describe("Wait poll interval in ms"),
+    maxOutputChars: z.number().int().min(0).default(2000).describe("Truncate node outputs to this many chars"),
+    collapsePhases: z.boolean().default(false).describe("Collapse the phase plan to a single phase"),
+});
+const claudeNodeWaitArgs = z.object({
+    nodeId: z.string().describe("Node ID to wait on"),
+});
+const claudeNodeWaitOptions = z.object({
+    runId: z.string().describe("Run ID that owns the node"),
+    iteration: z.number().int().min(0).optional().describe("Loop iteration (default: latest)"),
+    timeoutMs: z.number().int().min(0).default(480000).describe("Max wait in ms before returning timedOut: true"),
+    intervalMs: z.number().int().min(100).default(1000).describe("Poll interval in ms"),
+    maxOutputChars: z.number().int().min(0).default(2000).describe("Truncate the node output to this many chars"),
+});
+const claudeMonitorOptions = z.object({
+    intervalMs: z.number().int().min(250).default(2000).describe("Poll interval in ms"),
+    stalledAfterMs: z.number().int().min(5000).default(120000).describe("Heartbeat age that flags a running run as stalled"),
+    ticks: z.number().int().min(1).optional().describe("Stop after N polls (default: run until killed)"),
+});
+const claudeCli = Cli.create({
+    name: "claude",
+    description: "Protocol commands for the Claude Code plugin: mirror runs into /workflows and notify the session.",
+})
+    .command("tick", {
+    description: "One /workflows mirror frame for a run: status, phase plan, nodes, deltas since --after-seq, outputs, approvals. --wait blocks until something relevant changes.",
+    args: claudeTickArgs,
+    options: claudeTickOptions,
+    alias: {
+        afterSeq: "after-seq",
+        timeoutMs: "timeout-ms",
+        intervalMs: "interval-ms",
+        maxOutputChars: "max-output-chars",
+        collapsePhases: "collapse-phases",
+    },
+    async run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        try {
+            // With --wait, the store and the run are allowed to not exist YET:
+            // a mirror launched right after `workflow run --detach` races the
+            // detached engine's first write, so block until they appear (or the
+            // timeout budget runs out) instead of failing the first tick.
+            const deadline = Date.now() + (c.options.wait ? c.options.timeoutMs : 0);
+            let opened;
+            while (true) {
+                try {
+                    opened = await findAndOpenDb();
+                    break;
+                }
+                catch (err) {
+                    if (!c.options.wait || Date.now() >= deadline) {
+                        throw err;
+                    }
+                    await new Promise((resolveSleep) => setTimeout(resolveSleep, c.options.intervalMs));
+                }
+            }
+            const { adapter, cleanup } = opened;
+            try {
+                let timedOut = false;
+                if (c.options.wait) {
+                    while (!(await adapter.getRun(c.args.runId)) && Date.now() < deadline) {
+                        await new Promise((resolveSleep) => setTimeout(resolveSleep, c.options.intervalMs));
+                    }
+                    const waited = await waitForClaudeMirrorChange(adapter, c.args.runId, {
+                        afterSeq: c.options.afterSeq,
+                        timeoutMs: Math.max(0, deadline - Date.now()),
+                        intervalMs: c.options.intervalMs,
+                    });
+                    timedOut = waited.timedOut;
+                }
+                const tick = await buildClaudeMirrorTick(adapter, c.args.runId, {
+                    afterSeq: c.options.afterSeq,
+                    maxOutputChars: c.options.maxOutputChars,
+                    collapsePhases: c.options.collapsePhases,
+                });
+                return c.ok({ ...tick, timedOut });
+            }
+            finally {
+                cleanup();
+            }
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({ code: err.code, message: err.message, exitCode: err.code === "RUN_NOT_FOUND" ? 4 : 1 });
+            }
+            return fail({ code: "CLAUDE_TICK_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
+    },
+})
+    .command("node-wait", {
+    description: "Block until one node reaches a terminal state, then print its final state and output. Returns timedOut: true on --timeout-ms expiry (re-invoke to keep waiting).",
+    args: claudeNodeWaitArgs,
+    options: claudeNodeWaitOptions,
+    alias: {
+        runId: "run-id",
+        iteration: "i",
+        timeoutMs: "timeout-ms",
+        intervalMs: "interval-ms",
+        maxOutputChars: "max-output-chars",
+    },
+    async run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        try {
+            const { adapter, cleanup } = await findAndOpenDb();
+            try {
+                const result = await buildClaudeNodeWait(adapter, {
+                    runId: c.options.runId,
+                    nodeId: c.args.nodeId,
+                    iteration: c.options.iteration,
+                    timeoutMs: c.options.timeoutMs,
+                    intervalMs: c.options.intervalMs,
+                    maxOutputChars: c.options.maxOutputChars,
+                });
+                return c.ok(result);
+            }
+            finally {
+                cleanup();
+            }
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({ code: err.code, message: err.message, exitCode: err.code === "RUN_NOT_FOUND" ? 4 : 1 });
+            }
+            return fail({ code: "CLAUDE_NODE_WAIT_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
+    },
+})
+    .command("monitor", {
+    description: "Follow local runs and print one NDJSON line per notable transition (approval pending, human request, finished/failed/cancelled/continued, stalled). Backs the plugin's background monitor.",
+    options: claudeMonitorOptions,
+    alias: {
+        intervalMs: "interval-ms",
+        stalledAfterMs: "stalled-after-ms",
+    },
+    async run(c) {
+        let opened;
+        try {
+            opened = await findAndOpenDb();
+        }
+        catch {
+            // No smithers store here: the plugin monitor runs in every session,
+            // so a non-smithers project exits clean and silent by design.
+            return c.ok(undefined);
+        }
+        try {
+            await runClaudeMonitor(opened.adapter, {
+                intervalMs: c.options.intervalMs,
+                stalledAfterMs: c.options.stalledAfterMs,
+                ticks: c.options.ticks,
+            });
+            return c.ok(undefined);
+        }
+        finally {
+            opened.cleanup();
         }
     },
 });
@@ -7240,6 +7418,7 @@ const cli = Cli.create({
     },
 })
     .command(workflowCli)
+    .command(claudeCli)
     .command(cronCli)
     .command(agentsCli)
     .command(memoryCli)
