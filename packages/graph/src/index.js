@@ -5,6 +5,10 @@
  * @template [Ctx=any]
  * @typedef {import("./CachePolicy.ts").CachePolicy<Ctx>} CachePolicy
  */
+/** @typedef {import("./ClaudeWorkflowNodePhase.ts").ClaudeWorkflowNodeKind} ClaudeWorkflowNodeKind */
+/** @typedef {import("./ClaudeWorkflowNodePhase.ts").ClaudeWorkflowNodePhase} ClaudeWorkflowNodePhase */
+/** @typedef {import("./ClaudeWorkflowPhase.ts").ClaudeWorkflowPhase} ClaudeWorkflowPhase */
+/** @typedef {import("./ClaudeWorkflowPhasePlan.ts").ClaudeWorkflowPhasePlan} ClaudeWorkflowPhasePlan */
 /** @typedef {import("./ExtractGraph.ts").ExtractGraph} ExtractGraph */
 /** @typedef {import("./ExtractOptions.ts").ExtractOptions} ExtractOptions */
 /** @typedef {import("./GraphSnapshot.ts").GraphSnapshot} GraphSnapshot */
@@ -31,4 +35,7 @@
 // @smithers-type-exports-end
 
 export * from "./extract.js";
+export * from "./buildClaudeWorkflowPhasePlan.js";
+export * from "./deriveClaudeWorkflowPhases.js";
+export * from "./deriveClaudeWorkflowPhasesFromFrame.js";
 export * from "./worktree-path.js";

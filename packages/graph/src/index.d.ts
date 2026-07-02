@@ -194,6 +194,21 @@ type GraphSnapshot$1 = {
     xml: XmlNode$1 | null;
     tasks: TaskDescriptor$1[];
 };
+type ClaudeWorkflowPhase$1 = {
+    title: string;
+    detail?: string;
+};
+type ClaudeWorkflowNodeKind$1 = "agent" | "compute" | "static" | "human" | "wait" | "timer" | "approval" | "subflow" | "sandbox" | "unknown";
+type ClaudeWorkflowNodePhase$1 = {
+    nodeId: string;
+    label: string;
+    phase: string;
+    kind: ClaudeWorkflowNodeKind$1;
+};
+type ClaudeWorkflowPhasePlan$1 = {
+    phases: readonly ClaudeWorkflowPhase$1[];
+    nodes: readonly ClaudeWorkflowNodePhase$1[];
+};
 
 /**
  * @param {HostNode | null} root
@@ -207,6 +222,48 @@ declare function extractGraph(root: HostNode$1 | null, opts?: ExtractOptions$1):
  * @returns {WorkflowGraph}
  */
 declare function extractFromHost(root: HostNode$1 | null, opts?: ExtractOptions$1): WorkflowGraph$1;
+/**
+ * @param {GraphSnapshot} snapshot
+ * @param {{ collapsePhases?: boolean }} [options]
+ * @returns {ClaudeWorkflowPhasePlan}
+ */
+declare function deriveClaudeWorkflowPhases(snapshot: GraphSnapshot, options?: {
+    collapsePhases?: boolean;
+}): ClaudeWorkflowPhasePlan;
+type PhasePlanTask = {
+    nodeId: string;
+    label: string;
+    ordinal: number;
+    kind: string;
+};
+/**
+ * Core phase-plan walk shared by the live-snapshot and persisted-frame
+ * derivations. Tasks arrive pre-classified: `kind` is taken as-is.
+ *
+ * @param {XmlNode | null} xml
+ * @param {readonly PhasePlanTask[]} inputTasks
+ * @param {{ collapsePhases?: boolean }} [options]
+ * @returns {ClaudeWorkflowPhasePlan}
+ */
+declare function buildClaudeWorkflowPhasePlan(xml: XmlNode$1 | null, inputTasks: readonly PhasePlanTask[], options?: {
+    collapsePhases?: boolean;
+}): ClaudeWorkflowPhasePlan;
+/**
+ * Derive a Claude Code /workflows phase plan from a persisted frame row
+ * (`_smithers_frames.xml_json` + `task_index_json`), so the plan for a LIVE
+ * run comes from the store alone, with no workflow-file execution.
+ *
+ * @param {{ xmlJson: string | null | undefined; taskIndexJson: string | null | undefined }} frame
+ * @param {{ labels?: Record<string, string>; collapsePhases?: boolean }} [options]
+ * @returns {ClaudeWorkflowPhasePlan}
+ */
+declare function deriveClaudeWorkflowPhasesFromFrame(frame: {
+    xmlJson: string | null | undefined;
+    taskIndexJson: string | null | undefined;
+}, options?: {
+    labels?: Record<string, string>;
+    collapsePhases?: boolean;
+}): ClaudeWorkflowPhasePlan;
 /**
  * Resolve a <Worktree path> prop exactly the way graph extraction resolves it.
  * Relative paths are resolved against the launch root (`--root`, the nearest
@@ -229,6 +286,10 @@ type WorkflowGraph$1 = WorkflowGraph$2;
 type AgentLike = AgentLike$1;
 type ApprovalOption = ApprovalOption$1;
 type CachePolicy<Ctx = any> = CachePolicy$1<Ctx>;
+type ClaudeWorkflowNodeKind = ClaudeWorkflowNodeKind$1;
+type ClaudeWorkflowNodePhase = ClaudeWorkflowNodePhase$1;
+type ClaudeWorkflowPhase = ClaudeWorkflowPhase$1;
+type ClaudeWorkflowPhasePlan = ClaudeWorkflowPhasePlan$1;
 type ExtractGraph = ExtractGraph$1;
 type ExtractOptions = ExtractOptions$2;
 type GraphSnapshot = GraphSnapshot$1;
@@ -253,4 +314,4 @@ type XmlElement = XmlElement$1;
 type XmlNode = XmlNode$1;
 type XmlText = XmlText$1;
 
-export { type AgentLike, type ApprovalOption, type CachePolicy, type ExtractGraph, type ExtractOptions, type GraphSnapshot, type HostElement, type HostNode, type HostText, type MemoryNamespace, type MemoryNamespaceKind, type RetryPolicy, type SamplingConfig, type ScoreResult, type Scorer, type ScorerBinding, type ScorerFn, type ScorerInput, type ScorersMap, type TaskAspects, type TaskDescriptor, type TaskMemoryConfig, type WorkflowGraph, type XmlElement, type XmlNode, type XmlText, extractFromHost, extractGraph, resolveWorktreePath };
+export { type AgentLike, type ApprovalOption, type CachePolicy, type ClaudeWorkflowNodeKind, type ClaudeWorkflowNodePhase, type ClaudeWorkflowPhase, type ClaudeWorkflowPhasePlan, type ExtractGraph, type ExtractOptions, type GraphSnapshot, type HostElement, type HostNode, type HostText, type MemoryNamespace, type MemoryNamespaceKind, type RetryPolicy, type SamplingConfig, type ScoreResult, type Scorer, type ScorerBinding, type ScorerFn, type ScorerInput, type ScorersMap, type TaskAspects, type TaskDescriptor, type TaskMemoryConfig, type WorkflowGraph, type XmlElement, type XmlNode, type XmlText, buildClaudeWorkflowPhasePlan, deriveClaudeWorkflowPhases, deriveClaudeWorkflowPhasesFromFrame, extractFromHost, extractGraph, resolveWorktreePath };
