@@ -12,6 +12,7 @@ import {
   loadDiffs,
   previewOpenCodeReview,
   validateReviewInput,
+  type NativeReviewFileResult,
   type OpenCodeReviewInput,
 } from "../lib/open-code-review";
 
@@ -118,7 +119,7 @@ describe("OpenCodeReview compatibility helpers", () => {
     const prepared = await buildNativeReviewPrompt(reviewInput, preview);
     const appFile = prepared.files.find((file) => file.path === "src/app.ts")!;
     const otherFile = prepared.files.find((file) => file.path === "src/other.ts")!;
-    const finalized = finalizeNativeReview(reviewInput, prepared, preview, [
+    const fileResults: NativeReviewFileResult[] = [
       {
         file: appFile,
         output: {
@@ -134,6 +135,9 @@ describe("OpenCodeReview compatibility helpers", () => {
               startLine: 0,
               endLine: 0,
               thinking: "",
+              severity: "minor",
+              category: "correctness",
+              confidence: "confirmed",
             },
             {
               path: "src/app.test.ts",
@@ -143,6 +147,9 @@ describe("OpenCodeReview compatibility helpers", () => {
               startLine: 1,
               endLine: 1,
               thinking: "",
+              severity: "info",
+              category: "tests",
+              confidence: "plausible",
             },
           ],
           warnings: [],
@@ -158,7 +165,8 @@ describe("OpenCodeReview compatibility helpers", () => {
           warnings: [],
         },
       },
-    ]);
+    ];
+    const finalized = finalizeNativeReview(reviewInput, prepared, preview, fileResults);
 
     expect(finalized.status).toBe("completed_with_warnings");
     expect(finalized.summary?.filesReviewed).toBe(2);
