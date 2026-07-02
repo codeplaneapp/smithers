@@ -138,6 +138,13 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
     /** Render-time typed dependencies. Keys resolve from task ids of the same name, or from matching `needs` entries. */
     deps?: D;
     /**
+     * When true, missing render-time deps are omitted from the deps object instead
+     * of deferring this task. Pair with `needs`/`dependsOn` when the task should
+     * still wait for upstream terminal state but tolerate upstream failures that
+     * produce no output row.
+     */
+    depsOptional?: boolean;
+    /**
      * Start this agent task from a copy of another task's final agent session context.
      * The fork source becomes an implicit dependency: this task waits for it to complete,
      * then copies its conversation snapshot into a fresh, independent session and submits

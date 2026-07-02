@@ -93,6 +93,43 @@ describe("Task deps", () => {
         expect(summaryRows[0]?.title).toBe("Orders API");
         cleanup();
     }, 15_000);
+    test("optional deps render while preserving dependency gating", async () => {
+        const { smithers, Workflow, Task, outputs, cleanup } = createTestSmithers({
+            review: z.object({ verdict: z.string() }),
+            summary: z.object({ text: z.string() }),
+        });
+        const workflow = smithers(() => (<Workflow name="optional-deps">
+        <Task id="review-a" output={outputs.review}>
+          {{ verdict: "approved" }}
+        </Task>
+        <Task id="review-b" output={outputs.review}>
+          {{ verdict: "failed before output" }}
+        </Task>
+        <Task
+          id="summary"
+          output={outputs.summary}
+          needs={{ a: "review-a", b: "review-b" }}
+          deps={{ a: outputs.review, b: outputs.review }}
+          depsOptional
+        >
+          {(deps) => ({ text: `a=${deps.a?.verdict ?? "missing"} b=${deps.b?.verdict ?? "missing"}` })}
+        </Task>
+      </Workflow>));
+        const frame = await Effect.runPromise(renderFrame(workflow, new SmithersCtx({
+            runId: "optional-deps",
+            iteration: 0,
+            input: {},
+            outputs: {
+                review: [{ runId: "optional-deps", nodeId: "review-a", iteration: 0, verdict: "approved" }],
+            },
+            zodToKeyName: workflow.zodToKeyName,
+        })));
+        const summary = frame.tasks.find((task) => task.nodeId === "summary");
+        expect(summary).toBeDefined();
+        expect(summary?.staticPayload).toEqual({ text: "a=approved b=missing" });
+        expect(new Set(summary?.dependsOn)).toEqual(new Set(["review-a", "review-b"]));
+        cleanup();
+    });
     test("does not resolve deps from another createSmithers context", async () => {
         const dir = mkdtempSync(join(tmpdir(), "smithers-task-deps-"));
         const api1 = createSmithers({
