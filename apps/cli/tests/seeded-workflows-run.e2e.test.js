@@ -109,16 +109,21 @@ const AGENT_RESPONSE = JSON.stringify({
   caseCount: 0,
   runCommand: "smithers eval .smithers/evals/mock.jsonl",
   rootCauseHypothesis: "mock root cause",
+  rootCause: "The smoke fixture uses deterministic fake run evidence.",
+  failureClass: "unknown",
   evidence: ["fake evidence"],
   confidence: "medium",
+  suggestion: "retry",
+  suggestionDetail: "Retry the failed task in the deterministic smoke fixture.",
   recommendedAction: "retry",
   command: "smithers inspect missing-run",
+  bugTitle: "",
+  bugBody: "",
   rationale: "The fake fixture recommends a harmless retry.",
   buckets: { healthy: [], stuck: [], blocked: [], failed: [], overBudget: [] },
   actions: [],
   health: "healthy",
   waitingOn: null,
-  rootCause: "",
   recommendedActions: [],
   anySelfFixable: false,
   html: "<html><body>mock report</body></html>",
@@ -144,6 +149,7 @@ const WORKFLOW_INPUTS = {
   "create-workflow": { prompt: "Create a tiny test workflow.", review: false, name: "mock-workflow" },
   "context-engineer": { prompt: "Plan a tiny safe change.", review: false },
   monitor: { targetRunId: "missing-run", autofix: false, requireApproval: false },
+  "post-failure": { targetRunId: "missing-run" },
   "report-slideshow": { targetRunId: "missing-run", title: "Missing run report" },
   smithering: {
     prompt: "Make a tiny harmless change.",
@@ -228,7 +234,7 @@ function writeFakeAgentBinaries(binDir) {
     "const args = process.argv.slice(2);",
     'const outputIndex = args.indexOf("--output-last-message");',
     "if (outputIndex >= 0 && args[outputIndex + 1]) {",
-    '  fs.writeFileSync(args[outputIndex + 1], "```json\\n" + payload + "\\n```\\n", "utf8");',
+    '  fs.writeFileSync(args[outputIndex + 1], payload + "\\n", "utf8");',
     "}",
     'process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");',
     "",
@@ -290,10 +296,9 @@ for (const id of SEEDED_WORKFLOW_IDS) {
     if (!isValidSmokeOutcome(id, status, result.exitCode)) {
       const detail = `${result.stdout}\n${result.stderr}`
         .split("\n")
-        .filter((line) => /Run failed|failed|error|INVALID|ENOENT|Cannot|unsupported/i.test(line))
-        .slice(-4)
+        .slice(-30)
         .join(" ")
-        .slice(0, 800);
+        .slice(0, 2000);
       throw new Error(`${id} exited ${result.exitCode} with status ${String(status)}: ${detail}`);
     }
   }, 90_000);
