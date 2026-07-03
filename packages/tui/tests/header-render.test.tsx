@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/react */
-import { describe, it, expect } from "bun:test";
-import { renderForTest } from "./renderHelpers.tsx";
+import { it, expect } from "bun:test";
+import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 import { RunHeaderView } from "../src/Header.tsx";
 import type { RunHeaderData } from "../src/headerUtils.ts";
 
@@ -22,7 +22,7 @@ function data(overrides: Partial<RunHeaderData> = {}): RunHeaderData {
   };
 }
 
-describe("RunHeaderView – terminal rendering (CI-safe, no gateway)", () => {
+describeHeadlessRender("RunHeaderView – terminal rendering (CI-safe, no gateway)", () => {
   it("renders workflow, run id, model, elapsed, and the live indicator", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
       <RunHeaderView data={data()} compact={false} />,

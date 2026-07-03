@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/react */
-import { describe, it, expect } from "bun:test";
-import { renderForTest } from "./renderHelpers.tsx";
+import { it, expect } from "bun:test";
+import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 import { act } from "react";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import { TimelineView } from "../src/modes/TimelineMode.tsx";
@@ -32,7 +32,7 @@ const CANNED_EVENTS: GatewayEventFrame[] = [
   frame(8, "node.fail", { nodeId: "node-beta", status: "failed" }),
 ];
 
-describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
+describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
   it("renders TIMELINE header and frame count", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
       <TimelineView events={CANNED_EVENTS} />,

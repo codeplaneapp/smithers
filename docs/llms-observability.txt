@@ -466,7 +466,7 @@ bounds memory per stream.
 ## RPC methods (TOON)
 
 ```toon
-rpc[26]{method,params,returns,scope,transport}:
+rpc[27]{method,params,returns,scope,transport}:
   launchRun,workflow/input?/options.runId?/options.idempotencyKey?,{runId/workflow},run:write,http+websocket
   resumeRun,runId/options.force?,{runId/status},run:write,http+websocket
   cancelRun,runId,{runId/status:cancelling},run:write,http+websocket
@@ -480,6 +480,7 @@ rpc[26]{method,params,returns,scope,transport}:
   listApprovals,filter.runId?/filter.workflow?/filter.limit?,Pending approvals,run:read,http+websocket
   streamRunEvents,runId/afterSeq?,{streamId/runId/afterSeq/currentSeq},run:read,websocket
   streamDevTools,runId/afterSeq?/fromSeq?,{streamId/runId/fromSeq/afterSeq} + devtools.event frames,observability:read,websocket
+  getDevToolsSnapshot,runId/frameNo?,DevTools snapshot payload,observability:read,http+websocket
   getNodeOutput,runId/nodeId/iteration?,NodeOutputResponse,run:read,http+websocket
   getNodeDiff,runId/nodeId/iteration?,Node diff response,run:read,http+websocket
   cronList,filter.workflow?,Cron rows,cron:read,http+websocket
@@ -495,7 +496,7 @@ rpc[26]{method,params,returns,scope,transport}:
   deleteTicket,path,{path/deleted},ticket:write,http+websocket
 ```
 
-`health` remains available as a utility RPC and `GET /health` is available without auth. The legacy method names are still accepted for compatibility (`runs.create`, `runs.get`, `runs.list`, `runs.cancel`, `runs.rerun`, `runs.diff`, `frames.list`, `frames.get`, `attempts.list`, `attempts.get`, `workflows.list`, `approvals.list`, `approvals.decide`, `signals.send`, `cron.list`, `cron.add`, `cron.remove`, `cron.trigger`, `getDevToolsSnapshot`, `jumpToFrame`, `devtools.jumpToFrame`, `devtools.getNodeOutput`, `devtools.getNodeDiff`), but new clients should use the v1 names above.
+`health` remains available as a utility RPC and `GET /health` is available without auth. The legacy method names are still accepted for compatibility (`runs.create`, `runs.get`, `runs.list`, `runs.cancel`, `runs.rerun`, `runs.diff`, `frames.list`, `frames.get`, `attempts.list`, `attempts.get`, `workflows.list`, `approvals.list`, `approvals.decide`, `signals.send`, `cron.list`, `cron.add`, `cron.remove`, `cron.trigger`, `jumpToFrame`, `devtools.jumpToFrame`, `devtools.getNodeOutput`, `devtools.getNodeDiff`), but new clients should use the v1 names above.
 
 ### Scopes
 
@@ -680,7 +681,7 @@ type DevToolsNode = {
   type: "workflow" | "task" | "sequence" | "parallel" | /* …see protocol */;
   name: string;
   props: Record<string, unknown>;
-  task?: { nodeId: string; kind: "agent" | "compute" | "static" | "human" | "approval"; /* … */ };
+  task?: { nodeId: string; kind: "agent" | "compute" | "static"; /* … */ };
   children: DevToolsNode[];
   depth: number;
 };

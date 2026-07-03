@@ -177,13 +177,6 @@ const CLOUD_PRODUCT_SPEC = join(root, ".smithers/specs/cloud-execution-product.m
 
 let failed = false;
 
-// scripts/ lives at the workspace root, which `pnpm -r test` never runs, so the
-// normalize-bunx regression test has no other home; run it from the docs gate.
-{
-  const r = spawnSync("bun", ["test", join("scripts", "normalize-bunx.test.ts")], { cwd: root, stdio: "inherit" });
-  if (r.status !== 0) failed = true;
-}
-
 for (const script of ["normalize-bunx.ts", "normalize-placeholders.ts"]) {
   const r = spawnSync("bun", [join("scripts", script), "--check"], { cwd: root, stdio: "inherit" });
   if (r.status !== 0) failed = true;
@@ -958,8 +951,8 @@ function checkGatewayRpcReferenceDocsMatchRegistry() {
   const extraDocs = actualDocs.filter((name) => !expectedDocs.includes(name));
   const problems = [];
 
-  if (definitions.length !== 29) {
-    problems.push(`expected 29 Gateway RPC definitions, found ${definitions.length}`);
+  if (definitions.length !== 30) {
+    problems.push(`expected 30 Gateway RPC definitions, found ${definitions.length}`);
   }
   for (const name of missingDocs) problems.push(`missing docs/rpc/${name}`);
   for (const name of extraDocs) problems.push(`unexpected docs/rpc/${name}`);

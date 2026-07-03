@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/react */
-import { describe, it, expect } from "bun:test";
+import { it, expect } from "bun:test";
 import { act } from "react";
-import { renderForTest } from "./renderHelpers.tsx";
+import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { GraphView } from "../src/modes/GraphMode.tsx";
 
@@ -26,7 +26,7 @@ const ALPHA: GatewayRunNode = { id: "alpha", name: "alpha", kind: "task", status
 const BETA: GatewayRunNode = { id: "beta", name: "beta", kind: "task", status: "done", parentId: "root" };
 const NODES: GatewayRunNode[] = [ROOT, ALPHA, BETA];
 
-describe("GraphView – terminal rendering (CI-safe, no gateway)", () => {
+describeHeadlessRender("GraphView – terminal rendering (CI-safe, no gateway)", () => {
   it("renders the GRAPH header, node count, node cards, and connector arrows", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
       <GraphView nodes={NODES} root={ROOT} isLoading={false} error={undefined} />,
