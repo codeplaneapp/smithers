@@ -51,7 +51,8 @@ async function executeHttpRequest(input, options) {
     }
   }
 
-  const headers = new Headers(options.defaultHeaders ?? {});
+  const headers = new Headers();
+  applyDefaultHeaders(headers, options, url);
   for (const [key, value] of Object.entries(input.headers ?? {})) {
     headers.set(key, value);
   }
@@ -84,6 +85,73 @@ async function executeHttpRequest(input, options) {
       clearTimeout(timeout);
     }
   }
+}
+
+/**
+ * Attach the tool creator's configured default headers, but only to hosts the
+ * creator trusts. `defaultHeaders` can carry secrets (API keys, cookies) while
+ * the model chooses the request URL, so sending them to an arbitrary host would
+ * leak them to an attacker-controlled endpoint. When `baseUrl`/`allowedHosts`
+ * pin an allowlist the headers ride only to matching hosts; requests to the
+ * configured base URL are never broken. With no allowlist the behavior is
+ * unchanged (send everywhere), so configure one when the headers hold secrets.
+ *
+ * @param {Headers} headers
+ * @param {CreateHttpToolOptions} options
+ * @param {URL} url
+ */
+function applyDefaultHeaders(headers, options, url) {
+  const defaults = options.defaultHeaders;
+  if (!defaults) return;
+  const allowed = resolveAllowedHosts(options);
+  if (allowed && !allowed.has(url.host.toLowerCase())) return;
+  for (const [key, value] of Object.entries(defaults)) {
+    headers.set(key, value);
+  }
+}
+
+/**
+ * Build the set of hosts allowed to receive `defaultHeaders`, drawn from
+ * `baseUrl`'s host plus any explicit `allowedHosts`. Hosts are matched as
+ * WHATWG `url.host` (hostname plus any non-default port), so an entry with no
+ * port matches only default-port requests and a mismatched explicit port fails
+ * closed. Returns null when neither is configured (no restriction).
+ *
+ * @param {CreateHttpToolOptions} options
+ * @returns {Set<string> | null}
+ */
+function resolveAllowedHosts(options) {
+  const hosts = new Set();
+  if (options.baseUrl) {
+    try {
+      hosts.add(new URL(options.baseUrl).host.toLowerCase());
+    } catch {
+      // Ignore an unparseable baseUrl; allowedHosts can still pin the allowlist.
+    }
+  }
+  for (const entry of options.allowedHosts ?? []) {
+    hosts.add(hostOf(entry));
+  }
+  return hosts.size ? hosts : null;
+}
+
+/**
+ * Accept either a bare host (`api.example.com`, `api.example.com:8443`) or a
+ * full URL as an allowlist entry.
+ *
+ * @param {string} entry
+ * @returns {string}
+ */
+function hostOf(entry) {
+  const value = entry.trim();
+  if (value.includes("://")) {
+    try {
+      return new URL(value).host.toLowerCase();
+    } catch {
+      // Fall through and treat the entry as a bare host.
+    }
+  }
+  return value.toLowerCase();
 }
 
 /**

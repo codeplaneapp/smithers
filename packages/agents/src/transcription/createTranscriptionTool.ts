@@ -24,6 +24,17 @@ export type CreateTranscriptionToolOptions = {
   baseUrl?: string;
   description?: string;
   fetch?: typeof fetch;
+  /**
+   * Hosts an agent-supplied `audioUrl` may use. When set, only these hosts are
+   * allowed and the private/loopback guard is bypassed for them. Use to permit
+   * an internal audio store on purpose.
+   */
+  allowedAudioHosts?: string[];
+  /**
+   * Opt out of the SSRF guard entirely and let `audioUrl` name any http(s)
+   * host, including private/loopback addresses. Off by default.
+   */
+  allowPrivateAudioUrl?: boolean;
 };
 
 export declare function createTranscriptionTool(options: CreateTranscriptionToolOptions): Tool;

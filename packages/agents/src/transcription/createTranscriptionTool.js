@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { dynamicTool, jsonSchema } from "ai";
 
 const transcriptionInputSchema = {
@@ -47,6 +48,7 @@ export function createTranscriptionTool(options) {
     inputSchema: jsonSchema(transcriptionInputSchema),
     execute: async (input) => {
       const request = normalizeInput(input);
+      if (request.audioUrl) assertSafeAudioUrl(request.audioUrl, options);
       if (provider === "whisper") {
         return transcribeWithWhisper(options, request, fetchImpl);
       }
@@ -80,6 +82,102 @@ function normalizeInput(input) {
     ...(typeof value.language === "string" && value.language.trim() ? { language: value.language.trim() } : {}),
     ...(typeof value.prompt === "string" && value.prompt.trim() ? { prompt: value.prompt.trim() } : {}),
   };
+}
+
+/**
+ * Reject an agent-supplied audio URL that could drive an SSRF: a non-http(s)
+ * scheme, or a host that names loopback / private / link-local space (including
+ * cloud metadata at 169.254.169.254). DNS names that are not IP literals are
+ * allowed unless they name localhost. Pass `allowedAudioHosts` to pin an
+ * allowlist, or `allowPrivateAudioUrl` to opt out of the guard entirely.
+ *
+ * @param {string} rawUrl
+ * @param {import("./createTranscriptionTool.ts").CreateTranscriptionToolOptions} options
+ */
+function assertSafeAudioUrl(rawUrl, options) {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid audioUrl: ${rawUrl}`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`audioUrl must be an http(s) URL, got ${url.protocol}`);
+  }
+  const host = stripBrackets(url.hostname).toLowerCase();
+  const allowlist = options.allowedAudioHosts;
+  if (allowlist && allowlist.length > 0) {
+    const allowed = allowlist.map((entry) => stripBrackets(entry).toLowerCase());
+    if (!allowed.includes(host)) {
+      throw new Error(`audioUrl host ${host} is not in allowedAudioHosts`);
+    }
+    return;
+  }
+  if (options.allowPrivateAudioUrl) return;
+  if (isBlockedAudioHost(host)) {
+    throw new Error(`Refusing to fetch audioUrl from a private, loopback, or link-local host: ${host}`);
+  }
+}
+
+/**
+ * @param {string} host
+ * @returns {boolean}
+ */
+function isBlockedAudioHost(host) {
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+  const kind = isIP(host);
+  if (kind === 4) return isPrivateIPv4(host);
+  if (kind === 6) return isPrivateIPv6(host);
+  return false;
+}
+
+/**
+ * @param {string} ip
+ * @returns {boolean}
+ */
+function isPrivateIPv4(ip) {
+  const parts = ip.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b] = parts;
+  if (a === 0) return true; // 0.0.0.0/8 "this host"
+  if (a === 10) return true; // 10.0.0.0/8
+  if (a === 127) return true; // loopback
+  if (a === 169 && b === 254) return true; // link-local, incl. cloud metadata
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
+  if (a >= 224) return true; // multicast + reserved 224.0.0.0/3
+  return false;
+}
+
+/**
+ * @param {string} ip
+ * @returns {boolean}
+ */
+function isPrivateIPv6(ip) {
+  const h = ip.toLowerCase();
+  if (h === "::1" || h === "::") return true;
+  const mappedDotted = h.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mappedDotted) return isPrivateIPv4(mappedDotted[1]);
+  // URL parsing normalizes ::ffff:127.0.0.1 to its hex form ::ffff:7f00:1.
+  const mappedHex = h.match(/::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const hi = Number.parseInt(mappedHex[1], 16);
+    const lo = Number.parseInt(mappedHex[2], 16);
+    return isPrivateIPv4(`${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`);
+  }
+  const head = h.split(":")[0];
+  if (/^fe[89ab]/.test(head)) return true; // fe80::/10 link-local
+  if (/^f[cd]/.test(head)) return true; // fc00::/7 unique-local
+  return false;
+}
+
+/**
+ * @param {string} host
+ * @returns {string}
+ */
+function stripBrackets(host) {
+  return host.replace(/^\[/, "").replace(/\]$/, "");
 }
 
 /**
