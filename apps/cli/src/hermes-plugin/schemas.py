@@ -98,12 +98,12 @@ SMITHERS_DENY = {
 
 SMITHERS_OUTPUT = {
     "name": "smithers_output",
-    "description": "Print the structured output of a specific node in a finished Smithers run.",
+    "description": "Print the structured output of a specific node in a finished Smithers run. A node id is required (find one with smithers_inspect).",
     "parameters": {
         "type": "object",
         "properties": {
             "run_id": {"type": "string", "description": "The run id."},
-            "node": {"type": "string", "description": "The node id to fetch output for (required)."},
+            "node": {"type": "string", "description": "The node id to print output for (required)."},
         },
         "required": ["run_id", "node"],
     },

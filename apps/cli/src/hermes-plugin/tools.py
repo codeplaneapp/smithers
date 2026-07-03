@@ -32,24 +32,24 @@ def smithers_run(args: dict, **kwargs) -> str:
     workflow = str(args.get("workflow", "")).strip()
     if not workflow:
         return json.dumps({"error": "workflow is required"})
-    is_tsx = workflow.endswith(".tsx")
-    cli_args = ["up", workflow] if is_tsx else ["workflow", "run", workflow]
     prompt = args.get("prompt")
-    prompt = prompt.strip() if isinstance(prompt, str) else ""
+    has_prompt = isinstance(prompt, str) and prompt.strip() != ""
     user_input = args.get("input")
-    user_input = dict(user_input) if isinstance(user_input, dict) else {}
-    if is_tsx:
-        # `smithers up` has no --prompt flag; fold any prompt into the workflow
-        # input JSON (the workflow reads it from input) so the launch is not
-        # rejected. `workflow run` DOES accept --prompt, so keep it there.
-        if prompt:
-            user_input.setdefault("prompt", prompt)
-        if user_input:
+    has_input = isinstance(user_input, dict) and bool(user_input)
+    if workflow.endswith(".tsx"):
+        # `up` launches a workflow file. It has no --prompt flag; a prompt maps to
+        # input.prompt (the same mapping `workflow run --prompt` performs), and an
+        # explicit --input wins.
+        cli_args = ["up", workflow]
+        if has_input:
             cli_args += ["--input", json.dumps(user_input)]
+        elif has_prompt:
+            cli_args += ["--input", json.dumps({"prompt": prompt})]
     else:
-        if prompt:
+        cli_args = ["workflow", "run", workflow]
+        if has_prompt:
             cli_args += ["--prompt", prompt]
-        if user_input:
+        if has_input:
             cli_args += ["--input", json.dumps(user_input)]
     if args.get("detach", True):
         cli_args.append("--detach")
@@ -101,13 +101,12 @@ def smithers_deny(args: dict, **kwargs) -> str:
 
 def smithers_output(args: dict, **kwargs) -> str:
     run_id = str(args.get("run_id", "")).strip()
+    node = str(args.get("node", "")).strip()
     if not run_id:
         return json.dumps({"error": "run_id is required"})
-    # `smithers output` takes runId and nodeId as required POSITIONAL args (there
-    # is no --node flag, and nodeId is not optional).
-    node = str(args.get("node", "")).strip()
     if not node:
-        return json.dumps({"error": "node is required (the CLI output command needs a node id)"})
+        return json.dumps({"error": "node is required"})
+    # `output` takes the node id positionally; there is no --node flag.
     return _result_json(smithers_cli.run(["output", run_id, node]))
 
 
