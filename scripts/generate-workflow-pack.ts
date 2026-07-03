@@ -72,6 +72,36 @@ function promptImportsOf(source: string): string[] {
   return [...names];
 }
 
+/**
+ * Local `.smithers/lib/*` modules a workflow imports (`../lib/<spec>`). These
+ * are plain TS helpers (extracted so they can be unit-tested without an agent);
+ * unlike components — which init materializes from the WORKFLOW_MANIFEST — lib
+ * files have no other install path, so init only ships them if the pack embeds
+ * them. Returns the import specifiers verbatim (may omit the extension).
+ */
+function libImportsOf(source: string): string[] {
+  const specs = new Set<string>();
+  const re = /from\s+["']\.\.\/lib\/([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) specs.add(m[1]);
+  return [...specs];
+}
+
+/**
+ * Resolve a `../lib/<spec>` import specifier to the actual file on disk,
+ * returning its path relative to `.smithers/lib/`. Handles explicit-extension
+ * imports (`fleet-health.ts`), extensionless imports (`fleet-health`), and
+ * folder index imports (`foo` -> `foo/index.ts`).
+ */
+function resolveLibFile(spec: string): string {
+  const libDir = resolve(SMITHERS_DIR, "lib");
+  const candidates = [spec, `${spec}.ts`, `${spec}.tsx`, `${spec}/index.ts`, `${spec}/index.tsx`];
+  for (const rel of candidates) {
+    if (existsSync(resolve(libDir, rel))) return rel;
+  }
+  throw new Error(`Missing seeded lib module for import "../lib/${spec}" (looked under .smithers/lib/)`);
+}
+
 function readOrThrow(absPath: string, label: string): string {
   if (!existsSync(absPath)) {
     throw new Error(`Missing ${label}: ${absPath}`);
@@ -106,6 +136,22 @@ function build(): TemplateFile[] {
       const promptAbs = resolve(SMITHERS_DIR, "prompts", promptName);
       const promptSource = readOrThrow(promptAbs, `prompt ${promptName} for workflow ${id}`);
       push(`.smithers/prompts/${promptName}`, promptSource);
+    }
+
+    // Seed `../lib/*` helper modules the workflow imports, transitively (a lib
+    // module may pull in another). Without this the pack ships a workflow whose
+    // import resolves to a file init never installed.
+    const pendingLibSpecs = libImportsOf(workflowSource);
+    const seenLibSpecs = new Set<string>();
+    while (pendingLibSpecs.length > 0) {
+      const spec = pendingLibSpecs.shift()!;
+      if (seenLibSpecs.has(spec)) continue;
+      seenLibSpecs.add(spec);
+      const relFile = resolveLibFile(spec);
+      const libAbs = resolve(SMITHERS_DIR, "lib", relFile);
+      const libSource = readOrThrow(libAbs, `lib module ${relFile} for workflow ${id}`);
+      push(`.smithers/lib/${relFile}`, libSource);
+      for (const nested of libImportsOf(libSource)) pendingLibSpecs.push(nested);
     }
   }
 

@@ -366,6 +366,22 @@ function filterSeededFiles(files, workflowIds) {
             );
             return owner !== undefined && workflowIds.has(owner);
         }
+        if (f.path.startsWith(".smithers/lib/")) {
+            // A `.smithers/lib/*` helper ships only when a SELECTED seeded
+            // workflow actually imports it. Attribution is by real import edge,
+            // not a name prefix: a lib file's name need not match its importer
+            // (e.g. monitor-smithers imports ../lib/fleet-health.ts).
+            const rel = f.path.replace(".smithers/lib/", "");
+            const specForms = [rel, rel.replace(/\.tsx?$/, ""), rel.replace(/\/index\.tsx?$/, "")];
+            return files.some((wf) => {
+                if (!wf.path.startsWith(".smithers/workflows/")) return false;
+                const wfId = wf.path.replace(".smithers/workflows/", "").replace(/\.tsx$/, "");
+                if (!workflowIds.has(wfId)) return false;
+                return specForms.some((spec) =>
+                    wf.contents.includes(`../lib/${spec}"`) || wf.contents.includes(`../lib/${spec}'`),
+                );
+            });
+        }
         return true;
     });
 }
