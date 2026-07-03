@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const LATEST_DOCS_BASE_URL = "https://smithers.sh";
+const GITHUB_RAW_DOCS_BASE_URL = "https://raw.githubusercontent.com/smithersai/smithers";
 const SEMVER_TAG_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /**
@@ -27,6 +28,18 @@ export function versionedDocsUrl(file, version) {
 }
 
 /**
+ * The docs file at a specific git tag. smithers.sh only serves the versioned
+ * `<stem>-v<version>.txt` artifacts from 0.27.0 on, so this raw-by-tag URL is
+ * the fallback that works for every historical tag.
+ * @param {string} file
+ * @param {string} version
+ */
+export function githubRawDocsUrl(file, version) {
+    const normalizedVersion = normalizeDocsVersion(version);
+    return `${GITHUB_RAW_DOCS_BASE_URL}/v${normalizedVersion}/docs/${file}`;
+}
+
+/**
  * @param {{
  *   file: string;
  *   latest?: boolean;
@@ -34,7 +47,7 @@ export function versionedDocsUrl(file, version) {
  *   packageVersion: string;
  *   localDocsRoots?: string[];
  * }} input
- * @returns {{ kind: "local"; path: string; url: string } | { kind: "remote"; url: string }}
+ * @returns {{ kind: "local"; path: string; url: string } | { kind: "remote"; url: string; fallbackUrl?: string }}
  */
 export function resolveSmithersDocsSource(input) {
     if (input.latest && input.version) {
@@ -50,7 +63,13 @@ export function resolveSmithersDocsSource(input) {
     // erroring so a confusing version message never hides on-disk docs.
     if (input.version) {
         const version = normalizeDocsVersion(input.version);
-        return { kind: "remote", url: versionedDocsUrl(input.file, version) };
+        return {
+            kind: "remote",
+            url: versionedDocsUrl(input.file, version),
+            // smithers.sh only serves versioned artifacts for >= 0.27.0; fall
+            // back to the git tag's raw docs, which exist for every tag.
+            fallbackUrl: githubRawDocsUrl(input.file, version),
+        };
     }
 
     let url;

@@ -92,6 +92,9 @@ describe("docs command source resolution", () => {
             })).toEqual({
                 kind: "remote",
                 url: "https://smithers.sh/llms-v0.21.0.txt",
+                // Pre-0.27.0 tags have no smithers.sh versioned artifact, so an
+                // explicit --docs-version carries a git-tag raw fallback.
+                fallbackUrl: "https://raw.githubusercontent.com/smithersai/smithers/v0.21.0/docs/llms.txt",
             });
         }
         finally {
