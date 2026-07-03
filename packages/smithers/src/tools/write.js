@@ -25,10 +25,13 @@ export async function writeFileTool(path, content) {
   return "ok";
 }
 
+const writeSchema = z.object({ path: z.string(), content: z.string() });
+
+/** @type {import("../tools.js").DefinedTool<typeof writeSchema, "ok">} */
 export const write = defineTool({
   name: "write",
   description: "Write a file",
-  schema: z.object({ path: z.string(), content: z.string() }),
+  schema: writeSchema,
   sideEffect: true,
   idempotent: false,
   execute: async ({ path, content }, _ctx) => writeFileTool(path, content),

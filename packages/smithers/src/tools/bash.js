@@ -216,14 +216,17 @@ export async function bashTool(cmd, args = [], opts = undefined) {
   return output;
 }
 
+const bashSchema = z.object({
+  cmd: z.string(),
+  args: z.array(z.string()).optional(),
+  opts: z.object({ cwd: z.string().optional() }).optional(),
+});
+
+/** @type {import("../tools.js").DefinedTool<typeof bashSchema, string>} */
 export const bash = defineTool({
   name: "bash",
   description: "Run an executable with arguments",
-  schema: z.object({
-    cmd: z.string(),
-    args: z.array(z.string()).optional(),
-    opts: z.object({ cwd: z.string().optional() }).optional(),
-  }),
+  schema: bashSchema,
   sideEffect: true,
   idempotent: false,
   execute: async ({ cmd, args, opts }, _ctx) => bashTool(cmd, args, opts),

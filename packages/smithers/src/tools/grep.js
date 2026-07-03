@@ -25,9 +25,15 @@ export async function grepTool(pattern, path = ".") {
   return result.stdout;
 }
 
+const grepSchema = z.object({
+  pattern: z.string(),
+  path: z.string().optional(),
+});
+
+/** @type {import("../tools.js").DefinedTool<typeof grepSchema, string>} */
 export const grep = defineTool({
   name: "grep",
   description: "Search for a pattern in files",
-  schema: z.object({ pattern: z.string(), path: z.string().optional() }),
+  schema: grepSchema,
   execute: async ({ pattern, path }) => grepTool(pattern, path),
 });

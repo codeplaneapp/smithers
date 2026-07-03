@@ -16,9 +16,12 @@ export async function readFileTool(path) {
   return truncateToBytes(content, maxOutputBytes);
 }
 
+const readSchema = z.object({ path: z.string() });
+
+/** @type {import("../tools.js").DefinedTool<typeof readSchema, string>} */
 export const read = defineTool({
   name: "read",
   description: "Read a file",
-  schema: z.object({ path: z.string() }),
+  schema: readSchema,
   execute: async ({ path }) => readFileTool(path),
 });
