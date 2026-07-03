@@ -1,5 +1,5 @@
 /** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
-/** @typedef {import("./ClaudeWorkflowPhasePlan.ts").ClaudeWorkflowNodeKind} ClaudeWorkflowNodeKind */
+/** @typedef {import("./ClaudeWorkflowNodePhase.ts").ClaudeWorkflowNodeKind} ClaudeWorkflowNodeKind */
 
 /**
  * Classify a task descriptor into the Claude Code /workflows node kind.
