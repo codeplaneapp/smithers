@@ -8,9 +8,26 @@ const here = dirname(fileURLToPath(import.meta.url));
 const workflowPath = resolve(here, "../workflows/docs-driven-development.tsx");
 const tempDirs: string[] = [];
 
-afterEach(() => {
-  while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
+afterEach(async () => {
+  while (tempDirs.length > 0) await removeTempDir(tempDirs.pop()!);
 });
+
+async function removeTempDir(dir: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = (error as { code?: unknown }).code;
+      if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EPERM") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  if (process.platform === "win32") return;
+  throw lastError;
+}
 
 function tempRoot(status = "partial") {
   const root = mkdtempSync(join(tmpdir(), "ddd-workflow-"));

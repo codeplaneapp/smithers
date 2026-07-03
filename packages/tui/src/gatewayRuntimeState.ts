@@ -143,12 +143,15 @@ export function workspaceGatewayStatePath(
  * `<sha256(workspace)>.json` and, by advertising a `token: null` and an
  * attacker-controlled `url`, make the monitor send the victim's bearer token
  * (SMITHERS_TOKEN/SMITHERS_API_KEY) to their server. Require the dir and file to
- * be owned by the current uid and NOT group/other-writable. A legitimate
- * CLI-written file (0o600 in a 0o700 uid-owned dir) passes; anything else fails.
+ * be owned by the current uid and NOT group/other-writable on POSIX systems. A
+ * legitimate CLI-written file (0o600 in a 0o700 uid-owned dir) passes there;
+ * Windows lacks equivalent uid/mode bits in Node's Stats, so the regular-file
+ * and directory checks above form the trust gate on that platform.
  */
 function pathOwnedAndPrivate(stats: import("node:fs").Stats): boolean {
   const uid = currentUid();
   if (uid !== null && stats.uid !== uid) return false;
+  if (process.platform === "win32") return true;
   return (stats.mode & 0o022) === 0;
 }
 

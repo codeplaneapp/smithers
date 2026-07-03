@@ -18,9 +18,26 @@ const realDddLib = resolve(here, "../lib/ddd");
 const realNodeModules = resolve(repoRoot, "node_modules");
 const tempDirs: string[] = [];
 
-afterEach(() => {
-  while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
+afterEach(async () => {
+  while (tempDirs.length > 0) await removeTempDir(tempDirs.pop()!);
 });
+
+async function removeTempDir(dir: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = (error as { code?: unknown }).code;
+      if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EPERM") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  if (process.platform === "win32") return;
+  throw lastError;
+}
 
 function tempRoot() {
   const root = mkdtempSync(join(tmpdir(), "ddd-scripts-"));
@@ -66,20 +83,8 @@ function markdownPaths(root: string, dir: string): string[] {
   return out;
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
 function spawnBuild(args: string[], cwd: string) {
-  const stdoutPath = join(cwd, `.ddd-build-${Date.now()}-${Math.random().toString(16).slice(2)}.out`);
-  const stderrPath = `${stdoutPath}.err`;
-  const command = `${[process.execPath, ...args].map(shellQuote).join(" ")} > ${shellQuote(stdoutPath)} 2> ${shellQuote(stderrPath)}`;
-  const result = spawnSync("/bin/sh", ["-c", command], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
-  const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
-  rmSync(stdoutPath, { force: true });
-  rmSync(stderrPath, { force: true });
-  return { ...result, stdout, stderr };
+  return spawnSync(process.execPath, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
 describe("DDD scripts and build gate", () => {

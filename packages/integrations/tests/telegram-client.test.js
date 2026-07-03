@@ -31,9 +31,9 @@ describe("TelegramClient.call", () => {
         const startedAt = Date.now();
         const result = await Effect.runPromise(client.answerCallbackQuery("cb-1"));
         expect(result).toBe(true);
-        // Two real HTTP calls, spaced by at least the server's retry_after.
+        // Two real HTTP calls, spaced by the server's retry_after with timer jitter tolerance.
         expect(fixture.calls("answerCallbackQuery").length).toBe(before + 2);
-        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1000);
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(950);
     }, 10_000);
     test("gives up after maxRateLimitRetries and surfaces the 429", async () => {
         const client = makeClient({ maxRateLimitRetries: 1, maxRetryAfterSeconds: 0 });
