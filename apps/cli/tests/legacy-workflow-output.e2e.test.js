@@ -6,7 +6,6 @@ import {
   runSmithers,
   writeFakeAntigravityBinary,
   writeFakeClaudeBinary,
-  writeFakeCodexBinary,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 setDefaultTimeout(180_000);
@@ -24,7 +23,6 @@ setDefaultTimeout(180_000);
 function setup() {
   const binDir = createExecutableDir();
   writeFakeClaudeBinary(binDir);
-  writeFakeCodexBinary(binDir);
   writeFakeAntigravityBinary(binDir);
   const repo = createTempRepo();
   const env = {
