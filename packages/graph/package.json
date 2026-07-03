@@ -10,6 +10,21 @@
       "import": "./src/index.js",
       "default": "./src/index.js"
     },
+    "./constants": {
+      "types": "./src/constants.d.ts",
+      "import": "./src/constants.js",
+      "default": "./src/constants.js"
+    },
+    "./utils/xml": {
+      "types": "./src/utils/xml.d.ts",
+      "import": "./src/utils/xml.js",
+      "default": "./src/utils/xml.js"
+    },
+    "./classifyClaudeWorkflowNodeKind": {
+      "types": "./src/classifyClaudeWorkflowNodeKind.d.ts",
+      "import": "./src/classifyClaudeWorkflowNodeKind.js",
+      "default": "./src/classifyClaudeWorkflowNodeKind.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",
