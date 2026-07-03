@@ -129,6 +129,19 @@ export async function handleAnthropic(
       repo = auth.repos[0] ?? auth.owner;
     }
     pr = 0;
+
+    const registration = await lookupRepo(env.DB, repo);
+    if (!registration) {
+      return jsonError(403, "repo not registered", { repo });
+    }
+    const monthlyCapUsd = repoMonthlyCapUsd(registration);
+    const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
+    if (monthSpendUsd >= monthlyCapUsd) {
+      return jsonError(402, "repo monthly spend cap exhausted", {
+        monthlyCapUsd,
+        spentUsd: monthSpendUsd,
+      });
+    }
   }
 
   const upstreamUrl = `${deps.anthropicBaseUrl.replace(/\/$/, "")}${proxiedPath}${url.search}`;
