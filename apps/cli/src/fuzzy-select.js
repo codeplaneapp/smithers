@@ -143,6 +143,18 @@ function terminalRows() {
     return process.stdout.rows || 24;
 }
 
+function normalizeQueryInput(value) {
+    const out = [];
+    for (const char of String(value ?? "")) {
+        if (char === "\x7f" || char === "\b") {
+            out.pop();
+        } else {
+            out.push(char);
+        }
+    }
+    return out.join("");
+}
+
 /**
  * A type-to-filter picker built on clack's `Prompt` base class. We subclass
  * `Prompt` directly (NOT `SelectPrompt`) with `trackValue=true` so the base
@@ -173,7 +185,7 @@ class FuzzySelectPrompt extends Prompt {
         // defaults it to false when omitted, so we pass it explicitly. With it
         // the base tracks typed input into `userInput` and emits "cursor" for
         // arrow keys. We intentionally do NOT forward `initialValue`: the base
-        // would type it into the query box. We start the query empty and use
+        // can type it into the query box. We start the query empty and use
         // initialValue only to position the initial cursor (below).
         // `validate` is passed via options because v1 made `opts` private.
         super(
@@ -191,9 +203,9 @@ class FuzzySelectPrompt extends Prompt {
         this.maxItems = opts.maxItems;
         this.query = "";
         this.filtered = fuzzyFilter("", this.allOptions);
+        this.optionCursor = 0;
 
         // Position the cursor on the option matching initialValue (default 0).
-        this.optionCursor = 0;
         if (opts.initialValue !== undefined) {
             const i = this.filtered.findIndex((o) => o.value === opts.initialValue);
             if (i >= 0) this.optionCursor = i;
@@ -202,7 +214,7 @@ class FuzzySelectPrompt extends Prompt {
         // Re-filter on every keystroke. Typing AND backspace both edit rl.line,
         // so the base re-emits "userInput" for both — this covers backspace free.
         this.on("userInput", () => {
-            this.query = this.userInput ?? "";
+            this.query = normalizeQueryInput(this.userInput);
             this.filtered = fuzzyFilter(this.query, this.allOptions);
             if (this.optionCursor > this.filtered.length - 1) {
                 this.optionCursor = Math.max(0, this.filtered.length - 1);
@@ -270,7 +282,7 @@ function renderPrompt(self, message) {
             // Collapse to the selected label, dim, no list.
             return `${header}${pc.gray(S_BAR)}  ${pc.dim(selectedLabel ?? "")}`;
         case "cancel": {
-            // Strikethrough the would-be selection (or the query if no match).
+            // Strikethrough the candidate selection (or the query if no match).
             const cancelled = selectedLabel ?? self.query ?? "";
             return `${header}${pc.gray(S_BAR)}  ${pc.strikethrough(pc.dim(cancelled))}\n${pc.gray(S_BAR)}`;
         }
