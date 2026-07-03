@@ -18,6 +18,14 @@ export type GatewayOptions = {
   /** Called once when the daemon goes idle for `idleTimeoutMs` (graceful shutdown). */
   onIdle?: () => void | Promise<void>;
   auth?: GatewayAuthConfig;
+  /**
+   * Deliberately trust any Host header on an unauthenticated bind (the daemon
+   * equivalent of `smithers gateway --insecure`). Without it, an unauthenticated
+   * gateway rejects any non-loopback Host as a DNS-rebinding defense, so binding
+   * `--host 0.0.0.0` without a token would 403 every LAN request. Ignored when
+   * `auth` is set. Mirrors serve.js's `insecure`.
+   */
+  insecure?: boolean;
   ui?: GatewayUiConfig;
   /**
    * Optional host-owned HTTP fallback. The Gateway still owns its native

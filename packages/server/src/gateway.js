@@ -442,15 +442,13 @@ function isLoopbackHost(hostHeader) {
         host = end >= 0 ? host.slice(1, end) : host.slice(1);
     }
     else {
-        // Strip a trailing :port ONLY when there is a single colon. An
-        // unbracketed multi-colon host is a bare IPv6 literal (e.g. "::1"): a
-        // real port always requires brackets ("[::1]:80"), so a lone
-        // last-colon heuristic would mangle it (":1" read as a port).
-        const firstColon = host.indexOf(":");
-        if (firstColon >= 0
-            && firstColon === host.lastIndexOf(":")
-            && /^\d+$/.test(host.slice(firstColon + 1))) {
-            host = host.slice(0, firstColon);
+        // Strip a trailing :port, but only from a single-colon host ("host:port"):
+        // an unbracketed IPv6 literal like "::1" has multiple colons, so leaving it
+        // intact lets the `host === "::1"` check below match it (a lone-colon slice
+        // would otherwise mangle "::1" to ":" and wrongly reject loopback).
+        const colon = host.lastIndexOf(":");
+        if (colon >= 0 && colon === host.indexOf(":") && /^\d+$/.test(host.slice(colon + 1))) {
+            host = host.slice(0, colon);
         }
     }
     return (host === "localhost"
@@ -925,6 +923,7 @@ export function statusForRpcError(code) {
         case "Busy":
         case "AlreadyDecided":
         case "RUN_NOT_ACTIVE":
+        case "CONFLICT":
             return 409;
         case "DiffTooLarge":
         case "PayloadTooLarge":
@@ -1044,6 +1043,9 @@ function verifyJwtToken(token, config) {
     const expectedSignature = createHmac("sha256", config.secret)
         .update(`${encodedHeader}.${encodedPayload}`)
         .digest();
+    // Reject a non-base64url signature segment before decoding: a constant-time
+    // compare over raw bytes below leaks nothing, but a malformed segment must
+    // fail cleanly rather than decode to surprising bytes.
     if (!/^[A-Za-z0-9_-]+$/.test(encodedSignature)) {
         return { ok: false, message: "JWT signature verification failed" };
     }
@@ -1690,6 +1692,10 @@ export class Gateway {
             ? DEFAULT_REQUEST_TIMEOUT
             : Math.floor(assertPositiveFiniteInteger("requestTimeout", Number(options.requestTimeout)));
         this.auth = options.auth;
+        // A deliberate unauthenticated remote bind (`smithers gateway --insecure`)
+        // trusts any Host, matching serve.js. Without this, --insecure passes the
+        // CLI bind guard but isHostAllowed still 403s every non-loopback request.
+        this.trustAnyHost = options.insecure === true;
         this.routes = typeof options.routes === "function" ? options.routes : null;
         this.ui = resolveGatewayUiConfig(options.ui, "/");
         this.operatorUi = resolveDefaultOperatorUiConfig(options.operatorUi);
@@ -3211,11 +3217,16 @@ export class Gateway {
             }
             return [...matches];
         }
-        const waitingRuns = await adapter.listRuns(1_000, "waiting-event");
-        for (const run of waitingRuns) {
-            if (await this.runWaitsForSignal(adapter, run.runId, signalName, correlationId)) {
-                matches.add(run.runId);
-            }
+        // No explicit runId: match every run parked on this signal. Delegate to
+        // the adapter's single-query `findRunsAwaitingEvent` — the canonical
+        // run-targeting query for external events — instead of listing up to
+        // 1000 waiting runs and issuing listNodes + per-node listAttempts for
+        // each (an O(runs × nodes) DB scan on the webhook hot path). The query
+        // also skips already-resolved waits (`resolvedSignalSeq`), which the old
+        // per-run scan did not, closing a latent double-delivery gap.
+        const waitingRunIds = await runPromise(adapter.findRunsAwaitingEvent(signalName, correlationId));
+        for (const runId of waitingRunIds) {
+            matches.add(runId);
         }
         return [...matches];
     }
@@ -3501,7 +3512,7 @@ export class Gateway {
             // `handleUpgrade` opens the socket — otherwise a drive-by page could
             // open and hold connections (consuming maxConnections) by never
             // sending the `connect` RPC. (#446)
-            if (!this.isOriginAllowed(req) || !this.isHostAllowed(req)) {
+            if (!this.isRequestOriginAllowed(req) || !this.isHostAllowed(req)) {
                 emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
                     kind: "auth",
                     transport: "ws",
@@ -4051,6 +4062,18 @@ export class Gateway {
         if (!entry) {
             throw new Error(`Unknown workflow: ${workflowKey}`);
         }
+        // Idempotency guard: `launchRun` lets a client supply `params.runId`, so
+        // refuse to start a NEW run over one already live. Reusing an active id
+        // would overwrite its in-memory record in `runRegistry`/`activeRuns` and
+        // orphan the still-running run — its AbortController becomes unreachable,
+        // so it can no longer be cancelled or tracked. Resume intentionally
+        // re-targets an existing run and is exempt.
+        if (!options?.resume && this.activeRuns.has(runId)) {
+            throw new SmithersError("CONFLICT", `Run ${runId} is already active`, {
+                runId,
+                workflow: workflowKey,
+            });
+        }
         const abort = new AbortController();
         const record = {
             workflowKey,
@@ -4448,6 +4471,45 @@ export class Gateway {
         return !origin || allowedOrigins.includes(origin);
     }
     /**
+   * Origin gate that adapts to auth mode.
+   *
+   * With auth configured the token is the gate, so an empty allow-list is
+   * permissive (delegates to `isOriginAllowed`). With NO auth every request is
+   * an implicit operator, so a cross-origin browser page must be rejected even
+   * though `Host` is loopback: the page points a `fetch`/`WebSocket` straight at
+   * `http://127.0.0.1:<port>` — no DNS rebinding, so the Host gate can't see it —
+   * and would otherwise drive `launchRun` (real compute/shell) as operator. Only
+   * an absent, `"null"`, or loopback Origin may drive an unauthenticated daemon.
+   * `--insecure` / `SMITHERS_GATEWAY_TRUST_ANY_HOST` opts out, mirroring the Host
+   * gate for an explicit remote bind. (#446)
+   * @param {IncomingMessage} req
+   * @returns {boolean}
+   */
+    isRequestOriginAllowed(req) {
+        if (this.auth) {
+            return this.isOriginAllowed(req);
+        }
+        if (this.trustAnyHost) {
+            return true;
+        }
+        const trustAnyHost = process.env.SMITHERS_GATEWAY_TRUST_ANY_HOST;
+        if (trustAnyHost === "1" || trustAnyHost === "true") {
+            return true;
+        }
+        const origin = asString(req.headers.origin);
+        if (origin === undefined || origin === "" || origin === "null") {
+            return true;
+        }
+        let host;
+        try {
+            host = new URL(origin).host;
+        }
+        catch {
+            return false;
+        }
+        return host !== "" && isLoopbackHost(host);
+    }
+    /**
    * DNS-rebinding defense (spec decision 16a). An unauthenticated daemon grants
    * operator scope to every request, so a browser page at a name rebound to
    * 127.0.0.1 could drive `launchRun` (real compute/shell). Browsers send the
@@ -4462,6 +4524,9 @@ export class Gateway {
    */
     isHostAllowed(req) {
         if (this.auth) {
+            return true;
+        }
+        if (this.trustAnyHost) {
             return true;
         }
         const trustAnyHost = process.env.SMITHERS_GATEWAY_TRUST_ANY_HOST;
@@ -4490,22 +4555,25 @@ export class Gateway {
                 message: "Host is not allowed",
             };
         }
+        // Defense-in-depth Origin gate, enforced BEFORE the unauthenticated
+        // operator grant below. Auth-mode-aware (isRequestOriginAllowed): the
+        // token-gated paths keep allow-list semantics, while an unauthenticated
+        // daemon rejects any present cross-origin Origin so a drive-by browser
+        // page can't drive `launchRun` as an implicit operator. WS upgrades are
+        // also rejected earlier in the `upgrade` handler; this backstops the
+        // WS `connect` RPC and covers the HTTP RPC path (#446).
+        if (!this.isRequestOriginAllowed(req)) {
+            return {
+                ok: false,
+                code: "UNAUTHORIZED",
+                message: "Origin is not allowed",
+            };
+        }
         if (!this.auth) {
             return {
                 ok: true,
                 role: "operator",
                 scopes: ["*"],
-            };
-        }
-        // Defense-in-depth Origin allow-list, uniform across every auth mode
-        // (token / jwt / trusted-proxy). WS upgrades are rejected earlier in the
-        // `upgrade` handler so a disallowed browser can't even open a socket; this
-        // gate covers the HTTP RPC path and backstops the WS `connect` RPC (#446).
-        if (!this.isOriginAllowed(req)) {
-            return {
-                ok: false,
-                code: "UNAUTHORIZED",
-                message: "Origin is not allowed",
             };
         }
         if (this.auth.mode === "token") {
@@ -4590,9 +4658,22 @@ export class Gateway {
             const userId = asString(req.headers[userHeader]);
             const scopesValue = asString(req.headers[scopesHeader]);
             const role = asString(req.headers[roleHeader]) ?? this.auth.defaultRole ?? "operator";
+            // Fail CLOSED when the trusted proxy omits the scopes header: falling
+            // back to a hard-coded ["*"] would silently grant full operator scope
+            // to any request that reaches the gateway without the header (e.g. a
+            // request that bypassed the proxy, or a misconfigured proxy). An
+            // explicitly-configured `defaultScopes` is the operator's own choice
+            // and is honored; the implicit "*" is not.
+            if (!scopesValue && this.auth.defaultScopes === undefined) {
+                return {
+                    ok: false,
+                    code: "UNAUTHORIZED",
+                    message: "trusted-proxy request is missing the user scopes header and no defaultScopes is configured",
+                };
+            }
             const scopes = scopesValue
                 ? scopesValue.split(/[,\s]+/).map((value) => value.trim()).filter(Boolean)
-                : [...(this.auth.defaultScopes ?? ["*"])];
+                : [...(this.auth.defaultScopes ?? [])];
             return {
                 ok: true,
                 role,
@@ -5013,7 +5094,7 @@ export class Gateway {
    * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
    * by namespace+key, not per-run), so iterate each DISTINCT workflow DB exactly
    * once — shared-DB workflows share an adapter — and union the rows, deduping on
-   * `${namespace} ${key}` so a fact stored in a shared DB is returned once.
+   * `${namespace}\u0000${key}` so a fact stored in a shared DB is returned once.
    * Mirrors the `listRunsAcrossWorkflows` shape.
    * @param {string | null} [namespace]
    */
@@ -5029,7 +5110,7 @@ export class Gateway {
             seenAdapters.add(adapter);
             const rows = await adapter.listMemoryFacts(ns);
             for (const row of rows) {
-                const dedupeKey = `${row.namespace} ${row.key}`;
+                const dedupeKey = `${row.namespace}\u0000${row.key}`;
                 if (!byKey.has(dedupeKey)) {
                     byKey.set(dedupeKey, row);
                 }
