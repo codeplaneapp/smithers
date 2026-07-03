@@ -152,19 +152,29 @@ export function parseWorkspaceSnapshot(logStdout, opStdout) {
 export function captureWorkspaceSnapshot(cwd) {
     return Effect.gen(function* () {
         const logRes = yield* withJjTimeout(runJj(["log", "-r", "@", "--no-graph", "-T", 'commit_id ++ "\\n" ++ change_id'], { cwd }), "jj snapshot log");
-        if (logRes.code !== 0) {
-            // Attribute the gap: a bare null makes a missing durability snapshot
-            // impossible to diagnose. code 124 = timeout (see withSnapshotTimeout).
-            yield* Effect.logWarning(`workspace snapshot skipped: jj log exited ${logRes.code}: ${logRes.stderr?.trim() || "(no stderr)"}`);
-            return null;
-        }
+        if (logRes.code !== 0)
+            return yield* snapshotGap("log", logRes.code, jjError(logRes));
         const opRes = yield* withJjTimeout(runJj(["--ignore-working-copy", "operation", "log", "--no-graph", "--limit", "1", "-T", "self.id()"], { cwd }), "jj snapshot op");
-        if (opRes.code !== 0) {
-            yield* Effect.logWarning(`workspace snapshot skipped: jj operation log exited ${opRes.code}: ${opRes.stderr?.trim() || "(no stderr)"}`);
-            return null;
-        }
-        return parseWorkspaceSnapshot(logRes.stdout, opRes.stdout);
+        if (opRes.code !== 0)
+            return yield* snapshotGap("operation-log", opRes.code, jjError(opRes));
+        const snapshot = parseWorkspaceSnapshot(logRes.stdout, opRes.stdout);
+        if (!snapshot)
+            return yield* snapshotGap("parse", 0, "jj returned no commit id or operation id to parse");
+        return snapshot;
     }).pipe(Effect.annotateLogs({ cwd: cwd ?? "" }), Effect.withLogSpan("vcs:jj-snapshot"));
+}
+/**
+ * Record why a workspace snapshot could not be captured, then yield null.
+ * Callers treat null as a durability gap; without this the reason (a jj error,
+ * a timeout, or unparsable output) was lost and the gap was unattributable.
+ *
+ * @param {string} step which snapshot step failed
+ * @param {number} code jj exit code for the failing step (0 when the failure is a parse gap)
+ * @param {string} reason human-readable cause
+ * @returns {Effect.Effect<null, never, never>}
+ */
+function snapshotGap(step, code, reason) {
+    return Effect.logWarning(`jj workspace snapshot unavailable (durability gap): ${reason}`).pipe(Effect.annotateLogs({ snapshotStep: step, jjExit: String(code), reason }), Effect.as(null));
 }
 /**
  * Restore the working copy to a previously recorded jujutsu `change_id`.

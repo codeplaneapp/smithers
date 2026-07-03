@@ -10,7 +10,7 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { spawnSync } from "node:child_process";
-import { Effect } from "effect";
+import { Effect, HashMap, Logger, Option } from "effect";
 import * as BunContext from "@effect/platform-bun/BunContext";
 import * as vcsEffects from "../src/jj.js";
 
@@ -31,6 +31,27 @@ const describeIfJj = jjAvailable ? describe : describe.skip;
  */
 function runVcs(effect) {
     return Effect.runPromise(effect.pipe(Effect.provide(BunContext.layer)));
+}
+
+/**
+ * Run a vcs effect while capturing every emitted log record so a test can
+ * assert on structured warnings (e.g. the durability-gap reason).
+ *
+ * @template A
+ * @param {Effect.Effect<A, any, any>} effect
+ * @returns {Promise<{ value: A, records: Array<{ level: string, message: string, annotations: HashMap.HashMap<string, unknown> }> }>}
+ */
+function runVcsCapturingLogs(effect) {
+    /** @type {Array<{ level: string, message: string, annotations: HashMap.HashMap<string, unknown> }>} */
+    const records = [];
+    const testLogger = Logger.make((opts) => {
+        records.push({
+            level: opts.logLevel.label,
+            message: Array.isArray(opts.message) ? opts.message.join(" ") : String(opts.message),
+            annotations: opts.annotations,
+        });
+    });
+    return Effect.runPromise(effect.pipe(Effect.provide(BunContext.layer), Effect.provide(Logger.replace(Logger.defaultLogger, testLogger)))).then((value) => ({ value, records }));
 }
 const vcs = {
     runJj: (args, opts) => runVcs(vcsEffects.runJj(args, opts)),
@@ -349,6 +370,27 @@ describeIfJj("captureWorkspaceSnapshot against real jj", () => {
         try {
             const snap = await vcs.captureWorkspaceSnapshot(dir);
             expect(snap).toBeNull();
+        } finally {
+            await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+        }
+    }, 30_000);
+
+    test("logs a structured durability-gap warning with the jj reason when the snapshot fails", async () => {
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), "not-jj-"));
+        try {
+            const { value, records } = await runVcsCapturingLogs(vcsEffects.captureWorkspaceSnapshot(dir));
+            // Contract preserved: callers still see null on a gap.
+            expect(value).toBeNull();
+            // But the reason is no longer swallowed: a WARN records why.
+            const gap = records.find((r) => r.level === "WARN" && r.message.includes("durability gap"));
+            expect(gap).toBeDefined();
+            // The reason must be a concrete, non-empty attribution (jj's error).
+            const reason = Option.getOrNull(HashMap.get(gap.annotations, "reason"));
+            expect(typeof reason).toBe("string");
+            expect((reason ?? "").length).toBeGreaterThan(0);
+            // And the failing step is annotated so the gap is attributable.
+            const step = Option.getOrNull(HashMap.get(gap.annotations, "snapshotStep"));
+            expect(step).toBe("log");
         } finally {
             await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
         }
