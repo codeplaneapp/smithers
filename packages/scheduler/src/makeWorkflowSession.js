@@ -105,9 +105,11 @@ function findWaitingReason(state, currentTimeMs) {
             primaryReason = { _tag: "Event", eventName };
         }
         else if (taskState === "waiting-timer" && !primaryReason) {
+            // A task only reaches waiting-timer once decide() has validated its
+            // spec, so this cannot be null in practice; the fallback is defensive.
             primaryReason = {
                 _tag: "Timer",
-                resumeAtMs: timerResumeAtMs(descriptor, currentTimeMs),
+                resumeAtMs: timerResumeAtMs(state, descriptor, currentTimeMs) ?? currentTimeMs,
             };
         }
         else if (taskState === "waiting-quota") {
@@ -132,50 +134,69 @@ function findWaitingReason(state, currentTimeMs) {
     }
     return undefined;
 }
+// Keep in lockstep with the engine's authoritative parser
+// (packages/engine deferred-state-bridge `timerDurationMultipliers`). The two
+// live in separate layers (engine depends on scheduler, not the reverse) so we
+// cannot import it here without a dependency cycle; the units and semantics
+// must match.
+const durationUnitMs = {
+    ms: 1,
+    s: 1_000,
+    m: 60_000,
+    h: 3_600_000,
+    d: 86_400_000,
+};
 /**
+ * Resolve the wall-clock deadline (ms) at which a waiting-timer task resumes.
+ * A duration timer is anchored at the start recorded in `state.timerStarts`, so
+ * its deadline stays fixed across the many decide() passes that sibling work
+ * triggers instead of drifting later on each re-evaluation; the first
+ * evaluation records the start. Returns null when the timer spec is unparseable
+ * so the caller fails loudly rather than firing the timer immediately.
+ * @param {SessionState} state
  * @param {TaskDescriptor} descriptor
  * @param {number} nowMs
- * @returns {number}
+ * @returns {number | null}
  */
-function timerResumeAtMs(descriptor, nowMs) {
+function timerResumeAtMs(state, descriptor, nowMs) {
     const until = descriptor.meta?.__timerUntil;
     if (typeof until === "string" && until.length > 0) {
         const parsed = Date.parse(until);
-        if (Number.isFinite(parsed))
-            return parsed;
+        return Number.isFinite(parsed) ? Math.floor(parsed) : null;
     }
     const duration = descriptor.meta?.__timerDuration;
     if (typeof duration === "string") {
         const ms = parseDurationMs(duration);
-        if (ms != null)
-            return nowMs + ms;
+        if (ms == null)
+            return null;
+        const key = buildStateKey(descriptor.nodeId, descriptor.iteration);
+        let startMs = state.timerStarts.get(key);
+        if (startMs == null) {
+            startMs = nowMs;
+            state.timerStarts.set(key, startMs);
+        }
+        return startMs + ms;
     }
-    return nowMs;
+    return null;
 }
 /**
- * Parse a timer duration string to milliseconds, or null when invalid.
- *
- * MUST accept exactly the grammar the engine's authoritative parser writes
- * (`parseTimerDurationMs` in engine/effect/deferred-state-bridge.js): units
- * ms/s/m/h/d, case-insensitive, floored, non-negative. It previously omitted
- * `d` and was case-sensitive, so a valid `1d`/`2H` timer parsed to null here and
- * fell through to "resume now", which fired the timer immediately and re-decided
- * forever — a busy loop that never parked. Keep this table in lockstep with the
- * engine (importing it would be a scheduler->engine dependency cycle).
+ * Parse a timer duration string to milliseconds. Mirrors the engine's
+ * authoritative `parseTimerDurationMs`: units ms/s/m/h/d, case-insensitive,
+ * floored, non-negative. Returns null on a genuine parse failure.
  * @param {string} value
  * @returns {number | null}
  */
-const DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 function parseDurationMs(value) {
     const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec(value.trim().toLowerCase());
     if (!match)
         return null;
     const amount = Number(match[1]);
     const unit = match[2] ?? "ms";
-    const ms = Math.floor(amount * DURATION_UNIT_MS[unit]);
-    if (!Number.isFinite(ms) || ms < 0)
+    const multiplier = durationUnitMs[unit];
+    if (multiplier == null || !Number.isFinite(amount))
         return null;
-    return ms;
+    const ms = Math.floor(amount * multiplier);
+    return Number.isFinite(ms) && ms >= 0 ? ms : null;
 }
 /**
  * @param {TaskDescriptor} descriptor
@@ -336,6 +357,8 @@ export function makeWorkflowSession(options = {}) {
         ralphState: new Map(options.initialRalphState ?? []),
         /** @type {Map<string, number>} Maps state key → quota reset timestamp (ms) */
         quotaResetTimes: new Map(),
+        /** @type {Map<string, number>} Maps state key → duration-timer start (ms), the anchor its deadline is computed from */
+        timerStarts: new Map(),
         schedule: null,
         cancelled: false,
         lastMountedSignature: null,
@@ -422,6 +445,7 @@ export function makeWorkflowSession(options = {}) {
                 state.retryCounts.delete(key);
                 state.failureDescriptors.delete(key);
                 state.quotaResetTimes.delete(key);
+                state.timerStarts.delete(key);
             }
         }
         for (const ralph of ralphs) {
@@ -453,6 +477,7 @@ export function makeWorkflowSession(options = {}) {
         state.retryWait.delete(key);
         state.failureDescriptors.delete(key);
         state.quotaResetTimes.delete(key);
+        state.timerStarts.delete(key);
     }
     /**
    * @param {number} [iteration]
@@ -675,7 +700,25 @@ export function makeWorkflowSession(options = {}) {
                 continue;
             }
             if (task.meta?.__timer) {
-                const resumeAtMs = timerResumeAtMs(task, nowMs());
+                const resumeAtMs = timerResumeAtMs(state, task, nowMs());
+                if (resumeAtMs == null) {
+                    // A genuinely unparseable duration/until would otherwise fire
+                    // the timer immediately (deadline == now), and each re-decide
+                    // re-fires it — an infinite re-decide/DB-write loop that never
+                    // parks. Fail loudly instead, matching the engine's parser.
+                    return {
+                        _tag: "Failed",
+                        error: new SmithersError("INVALID_INPUT", `Timer "${task.nodeId}" has an invalid duration or until value.`, {
+                            nodeId: task.nodeId,
+                            ...(typeof task.meta?.__timerDuration === "string"
+                                ? { duration: task.meta.__timerDuration }
+                                : {}),
+                            ...(typeof task.meta?.__timerUntil === "string"
+                                ? { until: task.meta.__timerUntil }
+                                : {}),
+                        }),
+                    };
+                }
                 state.states.set(key, "waiting-timer");
                 waitReason ??= { _tag: "Timer", resumeAtMs };
                 changed = true;

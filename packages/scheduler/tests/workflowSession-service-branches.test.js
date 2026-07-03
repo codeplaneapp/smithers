@@ -117,6 +117,46 @@ describe("WorkflowSessionService direct methods", () => {
     });
   });
 
+  test("an unparseable timer duration fails loudly instead of firing immediately", () => {
+    const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "soon" } });
+    const session = makeWorkflowSession({ nowMs: () => 1_000 });
+
+    const decision = run(session.submitGraph(graph([task], workflow([
+      el("smithers:timer", { id: "timer" }),
+    ]))));
+    expect(decision._tag).toBe("Failed");
+    expect(decision.error.code).toBe("INVALID_INPUT");
+    expect(decision.error.details).toMatchObject({ nodeId: "timer", duration: "soon" });
+  });
+
+  test("timer duration parser accepts day units and is case-insensitive", () => {
+    const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "2D" } });
+    const session = makeWorkflowSession({ nowMs: () => 1_000 });
+
+    expect(run(session.submitGraph(graph([task], workflow([
+      el("smithers:timer", { id: "timer" }),
+    ]))))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "Timer", resumeAtMs: 1_000 + 2 * 86_400_000 },
+    });
+  });
+
+  test("duration timer deadline is anchored at start and does not drift on re-decide", () => {
+    let now = 1_000;
+    const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });
+    const session = makeWorkflowSession({ nowMs: () => now });
+
+    expect(run(session.submitGraph(graph([task], workflow([
+      el("smithers:timer", { id: "timer" }),
+    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+
+    // A later re-decide (a sibling completing, an unrelated event) must not push
+    // the deadline out; it stays anchored at the 1_000 start + 5s = 6_000.
+    now = 4_000;
+    const afterReDecide = run(session.eventReceived("noop", { ignored: true }));
+    expect(afterReDecide).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+  });
+
   test("hotReloaded cancels unmounted in-progress work and runs newly mounted tasks", () => {
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
