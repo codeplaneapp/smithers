@@ -10,6 +10,11 @@ import {
 } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 setDefaultTimeout(180_000);
+const FAKE_LOCAL_AUTH = {
+  auth_mode: "chatgpt",
+  OPENAI_API_KEY: null,
+  tokens: { access_token: "fake-access-token", account_id: "acct_test" },
+};
 
 /**
  * Every legacy-inline init-pack workflow now ends with a deterministic `output`
@@ -31,32 +36,23 @@ function setup() {
     HOME: repo.dir,
     PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
     ANTHROPIC_API_KEY: "",
-    // Leave OPENAI_API_KEY empty so Codex resolves subscription auth from the
-    // auth.json below instead of probing a fake env key against the real OpenAI
-    // API (which returns 401 and hard-fails Codex preflight). The `implement`
-    // workflow leads its first task with Codex (the "fable sandwich"), so a
-    // single-agent Codex task must authenticate — a non-retryable preflight
-    // auth failure would fail the run before it can fall over to Sonnet. This
-    // mirrors the canonical seeded-workflows-run.e2e setup.
+    // Keep preflight on local fixture auth instead of probing a fake env key.
     OPENAI_API_KEY: "",
     GEMINI_API_KEY: "",
     GOOGLE_API_KEY: "",
+    SMITHERS_POST_FAILURE: "0",
   };
   repo.write(".claude/.credentials.json", "{}\n");
-  // ChatGPT subscription auth: presence of a tokens.access_token makes Codex
-  // preflight pass in subscription mode (no network probe), matching how a
-  // logged-in `codex` CLI authenticates.
-  repo.write(
-    ".codex/auth.json",
-    JSON.stringify({
-      auth_mode: "chatgpt",
-      OPENAI_API_KEY: null,
-      tokens: { access_token: "fake-access-token", account_id: "acct_test" },
-    }) + "\n",
-  );
+  repo.write(".codex/auth.json", JSON.stringify(FAKE_LOCAL_AUTH, null, 2) + "\n");
   repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
   expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
   return { repo, env };
+}
+
+function expectSuccessfulRun(run) {
+  if (run.exitCode !== 0) {
+    throw new Error(`workflow exited ${run.exitCode}\nstdout:\n${run.stdout}\nstderr:\n${run.stderr}`);
+  }
 }
 
 test("single-task legacy workflow (plan) ends with a deterministic output task, not output: null", () => {
@@ -67,7 +63,7 @@ test("single-task legacy workflow (plan) ends with a deterministic output task, 
     format: "json",
     timeoutMs: 180_000,
   });
-  expect(run.exitCode).toBe(0);
+  expectSuccessfulRun(run);
   expect(run.json.status).toBe("finished");
   // The terminal output task derives `stepCount` from the plan it read — a field
   // the raw plan task never produces — so its presence proves the output task
@@ -85,7 +81,7 @@ test("component-based legacy workflow (review) aggregates reviewer verdicts in i
     format: "json",
     timeoutMs: 180_000,
   });
-  expect(run.exitCode).toBe(0);
+  expectSuccessfulRun(run);
   expect(run.json.status).toBe("finished");
   // The output task counts reviewers and folds their verdicts — fields no single
   // reviewer's output carries — so they prove the aggregate task fired.
@@ -103,10 +99,10 @@ test("validation-loop legacy workflow (implement) surfaces files changed + verdi
     format: "json",
     timeoutMs: 180_000,
   });
-  expect(run.exitCode).toBe(0);
+  expectSuccessfulRun(run);
   expect(run.json.status).toBe("finished");
   // The output task reads the last implement attempt plus the validate + review
-  // verdicts the ValidationLoop produced — the aggregated shape (filesChanged +
+  // verdicts the ValidationLoop produced — the aggregate payload (filesChanged +
   // allTestsPassing + approved) is what no single inner task emits together.
   expect(run.json.output).toBeDefined();
   expect(Array.isArray(run.json.output.filesChanged)).toBe(true);

@@ -5,6 +5,7 @@ import { StatusPill } from "./StatusPill";
 import { theme } from "./theme";
 
 export type NodeRowProps = {
+  key?: string;
   node: GatewayRunNode;
   depth: number;
   activeNodeId?: string;

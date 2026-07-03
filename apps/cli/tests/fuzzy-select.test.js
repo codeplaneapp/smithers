@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { isCancel } from "@clack/core";
 import { fuzzyFilter, fuzzyScore, fuzzySelect } from "../src/fuzzy-select.js";
 
@@ -122,32 +123,19 @@ describe("fuzzyFilter", () => {
 // --- Interactive prompt integration (real Prompt base class, fake streams) ---
 
 /** Minimal TTY-ish readable that the clack readline pipeline can consume. */
-class FakeInput extends EventEmitter {
+class FakeInput extends PassThrough {
     constructor() {
         super();
         this.isTTY = true;
-        this.readable = true;
     }
     setRawMode() {}
-    setEncoding() {}
-    resume() {}
-    pause() {}
-    pipe(dest) {
-        this._dest = dest;
-        return dest;
-    }
-    unpipe() {
-        this._dest = undefined;
-    }
-    write() {
-        return true;
-    }
-    on(event, cb) {
-        return super.on(event, cb);
-    }
     /** Drive the prompt's onKeypress directly, mirroring readline keypress events. */
     keypress(seq, key) {
-        this.emit("keypress", seq, key);
+        if (typeof seq === "string") {
+            this.write(seq);
+            return;
+        }
+        this.emit("keypress", seq, key && key.sequence === undefined ? { ...key, sequence: seq } : key);
     }
 }
 
@@ -243,7 +231,7 @@ describe("fuzzySelect (interactive)", () => {
         // Regression for the @clack/core cursor collision: Prompt.onKeypress runs
         // `this._cursor = this.rl?.cursor ?? 0` on every keypress BEFORE emitting
         // "cursor". With an empty query rl.cursor is 0, so a highlight that reused
-        // the base `_cursor` would reset to 0 then +1 on each press and stay stuck
+        // the base `_cursor` resets to 0 then +1 on each press and stays stuck
         // at index 1 forever. Owning `optionCursor` lets it advance past 1.
         const { promise, input } = startPicker([
             { value: "1", label: "one" },
@@ -259,10 +247,10 @@ describe("fuzzySelect (interactive)", () => {
 
     test("Enter after typing returns the top-ranked match, not the one at the text cursor", async () => {
         // Regression: typing advances rl.cursor to the query length, which the
-        // base copies into `_cursor`. A shared cursor would highlight
+        // base copies into `_cursor`. A shared cursor can highlight
         // filtered[queryLen] instead of the best match. "r" matches both labels
         // and "review" (shorter, contiguous) outranks "rebase-verify", so the
-        // top-ranked value is "tight". A base-`_cursor` highlight would land on
+        // top-ranked value is "tight". A base-`_cursor` highlight lands on
         // filtered[1] ("scattered") because rl.cursor is 1 after one keystroke.
         const { promise, input } = startPicker([
             { value: "scattered", label: "rebase-verify" },

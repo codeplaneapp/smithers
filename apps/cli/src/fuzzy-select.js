@@ -32,6 +32,7 @@ function symbol(state) {
 }
 
 const WORD_BOUNDARY = new Set([" ", "-", "_", "/", ".", ":"]);
+const BACKSPACE_SEQUENCES = new Set(["\x7f", "\b"]);
 
 /**
  * Score how well `query` fuzzy-matches `text` (case-insensitive subsequence).
@@ -110,6 +111,26 @@ export function fuzzyFilter(query, options) {
         .map((x) => x.option);
 }
 
+function removeBackspaceSequences(value) {
+    let result = "";
+    for (const char of String(value ?? "")) {
+        if (BACKSPACE_SEQUENCES.has(char)) {
+            result = result.slice(0, -1);
+        } else {
+            result += char;
+        }
+    }
+    return result;
+}
+
+function isBackspace(text, key) {
+    return key?.name === "backspace" || BACKSPACE_SEQUENCES.has(key?.sequence) || BACKSPACE_SEQUENCES.has(text);
+}
+
+function isDelete(key) {
+    return key?.name === "delete";
+}
+
 /**
  * Reimplements clack's `limitOptions` windowing EXACTLY (offset slide + "..."
  * sentinels) so the rendered list never overflows the terminal or ghosts on a
@@ -157,8 +178,8 @@ function terminalRows() {
  *      We deliberately do NOT reuse the base's `_cursor`: @clack/core's
  *      `Prompt.onKeypress` runs `this._cursor = this.rl?.cursor ?? 0` on every
  *      tracked keypress (before it emits our "cursor" event), so the base's
- *      readline text cursor would clobber our option index — arrow-down would
- *      stick near the top and Enter could return a lower-ranked match. Owning
+ *      readline text cursor can clobber our option index, leaving arrow-down
+ *      near the top and Enter able to return a lower-ranked match. Owning
  *      `optionCursor` keeps the highlight independent of readline.
  *  - `maxItems`     windowing budget.
  *
@@ -173,7 +194,7 @@ class FuzzySelectPrompt extends Prompt {
         // defaults it to false when omitted, so we pass it explicitly. With it
         // the base tracks typed input into `userInput` and emits "cursor" for
         // arrow keys. We intentionally do NOT forward `initialValue`: the base
-        // would type it into the query box. We start the query empty and use
+        // treats it as query text. We start the query empty and use
         // initialValue only to position the initial cursor (below).
         // `validate` is passed via options because v1 made `opts` private.
         super(
@@ -190,6 +211,7 @@ class FuzzySelectPrompt extends Prompt {
         this.allOptions = Array.isArray(opts.options) ? opts.options : [];
         this.maxItems = opts.maxItems;
         this.query = "";
+        this.previousQuery = "";
         this.filtered = fuzzyFilter("", this.allOptions);
 
         // Position the cursor on the option matching initialValue (default 0).
@@ -199,13 +221,29 @@ class FuzzySelectPrompt extends Prompt {
             if (i >= 0) this.optionCursor = i;
         }
 
-        // Re-filter on every keystroke. Typing AND backspace both edit rl.line,
-        // so the base re-emits "userInput" for both — this covers backspace free.
+        // Re-filter on every tracked text update from readline.
         this.on("userInput", () => {
-            this.query = this.userInput ?? "";
-            this.filtered = fuzzyFilter(this.query, this.allOptions);
-            if (this.optionCursor > this.filtered.length - 1) {
-                this.optionCursor = Math.max(0, this.filtered.length - 1);
+            this.previousQuery = this.query;
+            this.setQuery(this.userInput ?? "");
+        });
+
+        // Some synthetic TTY streams leave raw delete markers in rl.line. Normalize
+        // those while preserving terminals where readline already applied the edit.
+        this.on("key", (text, key) => {
+            const current = this.userInput ?? "";
+            const normalized = removeBackspaceSequences(current);
+            if (normalized !== current) {
+                this.replaceTrackedInput(normalized, normalized.length);
+                return;
+            }
+            if (isBackspace(text, key) && current === this.previousQuery && current.length > 0) {
+                const cursor = Math.max(0, Math.min(this.rl?.cursor ?? current.length, current.length));
+                this.replaceTrackedInput(current.slice(0, Math.max(0, cursor - 1)) + current.slice(cursor), Math.max(0, cursor - 1));
+                return;
+            }
+            if (isDelete(key) && current === this.previousQuery && current.length > 0) {
+                const cursor = Math.max(0, Math.min(this.rl?.cursor ?? current.length, current.length));
+                this.replaceTrackedInput(current.slice(0, cursor) + current.slice(cursor + 1), cursor);
             }
         });
 
@@ -235,6 +273,23 @@ class FuzzySelectPrompt extends Prompt {
                 this.value = selected ? selected.value : undefined;
             }
         });
+    }
+
+    setQuery(query) {
+        this.query = query ?? "";
+        this.filtered = fuzzyFilter(this.query, this.allOptions);
+        if (this.optionCursor > this.filtered.length - 1) {
+            this.optionCursor = Math.max(0, this.filtered.length - 1);
+        }
+    }
+
+    replaceTrackedInput(query, cursor) {
+        this.userInput = query ?? "";
+        if (this.rl) {
+            this.rl.line = this.userInput;
+            this.rl.cursor = Math.max(0, Math.min(cursor ?? this.userInput.length, this.userInput.length));
+        }
+        this.setQuery(this.userInput);
     }
 }
 
@@ -270,7 +325,7 @@ function renderPrompt(self, message) {
             // Collapse to the selected label, dim, no list.
             return `${header}${pc.gray(S_BAR)}  ${pc.dim(selectedLabel ?? "")}`;
         case "cancel": {
-            // Strikethrough the would-be selection (or the query if no match).
+            // Strikethrough the pending selection (or the query if no match).
             const cancelled = selectedLabel ?? self.query ?? "";
             return `${header}${pc.gray(S_BAR)}  ${pc.strikethrough(pc.dim(cancelled))}\n${pc.gray(S_BAR)}`;
         }
