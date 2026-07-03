@@ -86,30 +86,13 @@ export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFi
   mkdirSync(join(root, ".smithers/specs"), { recursive: true });
   mkdirSync(join(root, ".smithers/workflows"), { recursive: true });
   cpSync(agentsDir, join(root, ".smithers/agents"), { recursive: true });
-  writeFixtureAgents(root, binDir);
+  writeFixtureAgents(root);
   writeFileSync(join(root, ".smithers/spec/features.json"), `${JSON.stringify(options.features ?? [dddFixtureFeature()], null, 2)}\n`);
   writeFileSync(join(root, ".smithers/spec/content/overview.md"), "# Overview\n\nInitial DDD overview.\n");
   writeFileSync(join(root, ".smithers/specs/docs-driven-development.md"), "# Docs Driven Development\n");
-  const agentPath = pathWithBin(binDir);
   const workflowSource = readFileSync(workflowPath, "utf8").replace(
     `import { providers } from "../agents";`,
-    [
-      `import { type AgentLike, ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";`,
-      `const fixtureAgentEnv = { PATH: ${JSON.stringify(agentPath)}, SMITHERS_TEST_AGENT_PATH: ${JSON.stringify(agentPath)} };`,
-      `const providers = {`,
-      `  claude: new ClaudeCodeAgent({ model: "claude-fable-5", env: fixtureAgentEnv }),`,
-      `  claudeSonnet: new ClaudeCodeAgent({ model: "claude-sonnet-4-6", env: fixtureAgentEnv }),`,
-      `  codex: new CodexAgent({ model: "gpt-5.5", skipGitRepoCheck: true, env: fixtureAgentEnv }),`,
-      `} as const;`,
-      `const agents = {`,
-      `  cheapFast: [providers.claudeSonnet, providers.codex],`,
-      `  smart: [providers.claude, providers.claudeSonnet, providers.codex],`,
-      `  smartTool: [providers.claude, providers.claudeSonnet, providers.codex],`,
-      `  planning: [providers.claude],`,
-      `  review: [providers.claude],`,
-      `  implement: [providers.codex],`,
-      `} as const satisfies Record<string, AgentLike[]>;`,
-    ].join("\n"),
+    fixtureAgentsModuleSource(),
   );
   writeFileSync(join(root, ".smithers/workflows/docs-driven-development.tsx"), workflowSource);
   symlinkSync(resolve(repoRoot, "node_modules"), join(root, "node_modules"), "dir");
@@ -135,22 +118,76 @@ export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFi
   };
 }
 
-function writeFixtureAgents(root: string, binDir: string) {
-  const agentPath = pathWithBin(binDir);
-  writeFileSync(join(root, ".smithers/agents.ts"), `import { type AgentLike, ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
+function writeFixtureAgents(root: string) {
+  writeFileSync(join(root, ".smithers/agents.ts"), fixtureAgentsModuleSource());
+  writeFileSync(join(root, ".smithers/agents/index.ts"), 'export { agents, providers } from "../agents.ts";\n');
+}
 
-const env = {
-  PATH: ${JSON.stringify(agentPath)},
-  SMITHERS_TEST_AGENT_PATH: ${JSON.stringify(agentPath)},
-  ...(process.env.SMITHERS_FAKE_AGENT_RESPONSE ? { SMITHERS_FAKE_AGENT_RESPONSE: process.env.SMITHERS_FAKE_AGENT_RESPONSE } : {}),
-  ...(process.env.SMITHERS_FAKE_CODEX_RESPONSE ? { SMITHERS_FAKE_CODEX_RESPONSE: process.env.SMITHERS_FAKE_CODEX_RESPONSE } : {}),
-  ...(process.env.SMITHERS_FAKE_CLAUDE_RESPONSE ? { SMITHERS_FAKE_CLAUDE_RESPONSE: process.env.SMITHERS_FAKE_CLAUDE_RESPONSE } : {}),
-  ...(process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE ? { SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE: process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE } : {}),
-};
+function fixtureAgentsModuleSource() {
+  return `import { type AgentLike } from "smithers-orchestrator";
+
+type FixtureEngine = "claude" | "codex";
+
+function pickPayload(engine: FixtureEngine, prompt: string): string {
+  const fallback =
+    engine === "codex"
+      ? process.env.SMITHERS_FAKE_CODEX_RESPONSE ?? process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}"
+      : process.env.SMITHERS_FAKE_CLAUDE_RESPONSE ?? process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}";
+  let byNode: Record<string, unknown> = {};
+  try {
+    byNode = JSON.parse(process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE ?? "{}");
+  } catch {}
+  const pairs = [
+    ["audit", "Audit the current docs-driven-development spec state"],
+    ["spec-update", "Update the smithers product spec"],
+    ["triage", "Plan the next docs-driven-development round"],
+    ["work:1", "Implement or execute triage slot 1"],
+    ["work:1", "No triage item selected for slot 1"],
+    ["cycle-review", "Review this entire docs-driven-development cycle"],
+  ] as const;
+  for (const [node, marker] of pairs) {
+    const value = byNode[node];
+    if (prompt.includes(marker) && value !== undefined) {
+      return typeof value === "string" ? value : JSON.stringify(value);
+    }
+  }
+  return fallback;
+}
+
+class FixtureAgent implements AgentLike {
+  id: string;
+  model: string;
+  engine: FixtureEngine;
+  cliEngine: FixtureEngine;
+  supportsNativeStructuredOutput = false;
+
+  constructor(engine: FixtureEngine, model: string, id: string) {
+    this.engine = engine;
+    this.cliEngine = engine;
+    this.model = model;
+    this.id = id;
+  }
+
+  async preflight() {}
+
+  async generate(args: any = {}) {
+    const prompt = typeof args.prompt === "string" ? args.prompt : JSON.stringify(args.messages ?? []);
+    const payload = pickPayload(this.engine, prompt);
+    const text = "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n";
+    return {
+      text,
+      response: {
+        modelId: this.model,
+        messages: [{ role: "assistant", content: [{ type: "text", text }] }],
+      },
+    };
+  }
+}
+
 export const providers = {
-  claude: new ClaudeCodeAgent({ model: "claude-fable-5", env }),
-  claudeSonnet: new ClaudeCodeAgent({ model: "claude-sonnet-4-6", env }),
-  codex: new CodexAgent({ model: "gpt-5.5", skipGitRepoCheck: true, env }),
+  claude: new FixtureAgent("claude", "claude-fable-5", "fixture-claude"),
+  claudeSonnet: new FixtureAgent("claude", "claude-sonnet-4-6", "fixture-claude-sonnet"),
+  codex: new FixtureAgent("codex", "gpt-5.5", "fixture-codex"),
 } as const;
 
 export const agents = {
@@ -161,8 +198,7 @@ export const agents = {
   review: [providers.claude],
   implement: [providers.codex],
 } as const satisfies Record<string, AgentLike[]>;
-`);
-  writeFileSync(join(root, ".smithers/agents/index.ts"), 'export { agents, providers } from "../agents.ts";\n');
+`;
 }
 
 function writeFakeAgents(binDir: string) {
