@@ -181,7 +181,7 @@ export default smithers((ctx) => {
           <Task
             id="scaffold"
             output={outputs.scaffold}
-            agent={agents.smartTool}
+            agent={agents.implement}
             heartbeatTimeoutMs={900_000}
           >
             <ScaffoldPrompt design={design} skillsDir={SKILLS_DIR} />

@@ -21,7 +21,7 @@ export const providers = {
   kimi: new SmithersKimiAgent({ model: "kimi-latest" }),
   amp: new SmithersAmpAgent(),
   claudeOpus: new SmithersClaudeCodeAgent({ model: "claude-opus-4-8" }),
-  claudeSonnet: new SmithersClaudeCodeAgent({ model: "claude-sonnet-4-6", env: testAgentEnv }),
+  claudeSonnet: new SmithersClaudeCodeAgent({ model: "claude-sonnet-5", env: testAgentEnv }),
   kimi1: new SmithersKimiAgent({ model: "kimi-latest", configDir: path.join(homedir(), ".smithers/accounts/kimi-1") }),
   codex1: new SmithersCodexAgent({ model: "gpt-5.5", configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true }),
   antigravity1: new SmithersAntigravityAgent({ model: "gemini-3.1-pro-preview", configDir: path.join(homedir(), ".gemini") }),

@@ -301,7 +301,7 @@ export default smithers((ctx) => {
             <Task
               id="execute"
               output={outputs.execute}
-              agent={agents.smartTool}
+              agent={agents.implement}
               heartbeatTimeoutMs={900_000}
             >
               <ExecutePrompt

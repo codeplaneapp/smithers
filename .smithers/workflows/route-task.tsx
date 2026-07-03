@@ -159,7 +159,7 @@ export default smithers((ctx) => {
               </Task>
             }
             else={
-              <Task id="execute" output={outputs.execute} agent={agents.smartTool}>
+              <Task id="execute" output={outputs.execute} agent={agents.implement}>
                 <ExecutePrompt prompt={prompt} classification={classify} />
               </Task>
             }

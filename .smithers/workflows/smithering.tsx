@@ -153,7 +153,7 @@ const IMPL_WORKFLOW = ".smithers/workflows/smithering-impl.tsx";
 
 // ─── Model roster (the "use fable" part) ─────────────────────────────────────
 const FABLE_MODEL = "claude-fable-5";
-const FAST_MODEL = "claude-sonnet-4-7";
+const FAST_MODEL = "claude-sonnet-5";
 const CODEX_MODEL = "gpt-5.5";
 
 // Orchestrator-grade judgment. Default yolo (skip permission prompts) is intentional:

@@ -273,7 +273,7 @@ export default smithers((ctx) => {
           <Task
             id="provision"
             output={outputs.provision}
-            agent={agents.smartTool}
+            agent={agents.implement}
             heartbeatTimeoutMs={600_000}
           >
             <ProvisionPrompt spec={clarify} skillsDir={SKILLS_DIR} workflowsDir={WORKFLOWS_DIR} />
@@ -319,7 +319,7 @@ export default smithers((ctx) => {
           <Task
             id="scaffold"
             output={outputs.scaffold}
-            agent={agents.smartTool}
+            agent={agents.implement}
             heartbeatTimeoutMs={900_000}
           >
             <ScaffoldPrompt
@@ -374,7 +374,7 @@ export default smithers((ctx) => {
                   <Task
                     id="fix"
                     output={outputs.scaffold}
-                    agent={agents.smartTool}
+                    agent={agents.implement}
                     heartbeatTimeoutMs={900_000}
                   >
                     <FixPrompt
@@ -397,7 +397,7 @@ export default smithers((ctx) => {
 
         {/* 7 — Document the new workflow so future agents know how to run it. */}
         {proceed && verifyPassed ? (
-          <Task id="document" output={outputs.document} agent={agents.smartTool}>
+          <Task id="document" output={outputs.document} agent={agents.cheapFast}>
             <DocumentPrompt
               workflowName={workflowName}
               design={design}
