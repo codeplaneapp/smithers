@@ -1872,10 +1872,25 @@ function assertResumeDurabilityMetadata(existingRun, existingConfig, current, wo
  */
 const SUPERVISOR_CLAIM_OWNER_PREFIX = "supervisor:";
 /**
- * An unattended timer wake (the supervisor sweeping a due `waiting-timer` run)
- * that hits a resume-durability mismatch must fail the run instead of leaving it
- * parked forever while the sweep retries silently. Interactive `--resume`
- * mismatches still throw without failing the run.
+ * `triggeredBy` the gateway stamps on its default-active timer sweep:
+ * packages/server/src/gateway.js `processDueTimers` resumes each due
+ * `waiting-timer` run through `resumeRunIfNeeded` -> `startRun`, which surfaces
+ * this marker as `config.gatewayTriggeredBy`. That sweep carries no
+ * `resumeClaim`, so the engine keys "unattended timer wake" detection off this
+ * cross-package contract too — keep the two in sync.
+ */
+const GATEWAY_TIMER_TRIGGERED_BY = "timer:gateway";
+/**
+ * An unattended timer wake that hits a resume-durability mismatch must fail the
+ * run instead of leaving it parked forever while the waker retries silently.
+ * Two default-active wakers reach this path on a source-changed run:
+ *   - the supervisor sweep (apps/cli/src/supervisor.js), which claims the run and
+ *     resumes it with a `supervisor:<id>` `resumeClaim.claimOwnerId`; and
+ *   - the gateway timer sweep (packages/server/src/gateway.js `processDueTimers`),
+ *     which resumes with no `resumeClaim` but `config.gatewayTriggeredBy ===
+ *     "timer:gateway"` and whose `startRun.catch` only broadcasts a transient
+ *     failed event without persisting `status: failed` (issue #494).
+ * Interactive `--resume` mismatches still throw without failing the run.
  *
  * @param {RunRow | null | undefined} existingRun
  * @param {RunOptions} opts
@@ -1884,7 +1899,9 @@ const SUPERVISOR_CLAIM_OWNER_PREFIX = "supervisor:";
 function shouldFailTimerWakeResume(existingRun, opts) {
     if (existingRun?.status !== "waiting-timer")
         return false;
-    return opts.resumeClaim?.claimOwnerId?.startsWith(SUPERVISOR_CLAIM_OWNER_PREFIX) === true;
+    if (opts.resumeClaim?.claimOwnerId?.startsWith(SUPERVISOR_CLAIM_OWNER_PREFIX) === true)
+        return true;
+    return opts.config?.gatewayTriggeredBy === GATEWAY_TIMER_TRIGGERED_BY;
 }
 /**
  * @param {SmithersDb} adapter

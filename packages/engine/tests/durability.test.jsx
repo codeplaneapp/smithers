@@ -249,4 +249,48 @@ describe("Durability", () => {
         rmSync(dir, { recursive: true, force: true });
         cleanup();
     });
+    test("gateway timer-sweep resume mismatch fails the parked run", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-gateway-timer-resume-metadata-"));
+        const workflowPath = join(dir, "workflow.tsx");
+        writeFileSync(workflowPath, "export default 'v1';\n", "utf8");
+        const { smithers, db, cleanup } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        const runId = "gateway-timer-resume-metadata";
+        const workflow = smithers(() => (<Workflow name="gateway-timer-resume-metadata">
+        <Timer id="hold" duration="1h"/>
+      </Workflow>));
+        const first = await Effect.runPromise(runWorkflow(workflow, {
+            input: {},
+            runId,
+            workflowPath,
+        }));
+        expect(first.status).toBe("waiting-timer");
+        // The gateway timer sweep (packages/server/src/gateway.js processDueTimers ->
+        // resumeRunIfNeeded -> startRun) resumes with NO resumeClaim, only
+        // config.gatewayTriggeredBy === "timer:gateway". A source change since the
+        // run parked must fail it loudly rather than leave it on `waiting-timer` for
+        // the default-active sweep to re-drive forever (issue #494).
+        writeFileSync(workflowPath, "export default 'v2';\n", "utf8");
+        const resumed = await Effect.runPromise(runWorkflow(workflow, {
+            input: {},
+            runId,
+            resume: true,
+            workflowPath,
+            config: { gatewayTriggeredBy: "timer:gateway" },
+        }));
+        expect(resumed.status).toBe("failed");
+        expect(resumed.error?.code).toBe("RESUME_METADATA_MISMATCH");
+        const run = await adapter.getRun(runId);
+        expect(run?.status).toBe("failed");
+        expect(run?.runtimeOwnerId).toBeNull();
+        expect(JSON.parse(run?.errorJson ?? "{}")?.code).toBe("RESUME_METADATA_MISMATCH");
+        const node = await adapter.getNode(runId, "hold", 0);
+        expect(node?.state).toBe("cancelled");
+        const eventTypes = (await adapter.listEvents(runId, -1, 50)).map((event) => event.type);
+        expect(eventTypes).toContain("TimerCancelled");
+        expect(eventTypes).toContain("NodeCancelled");
+        expect(eventTypes).toContain("RunFailed");
+        rmSync(dir, { recursive: true, force: true });
+        cleanup();
+    });
 });
