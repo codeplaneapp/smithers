@@ -194,6 +194,27 @@ describe("fuzzySelect (interactive)", () => {
         expect(result).toBe("c");
     });
 
+    test("keeps the TOP match highlighted after a query narrows to several matches", async () => {
+        // Regression: the base Prompt owns `_cursor` and overwrites it with the
+        // readline text-cursor (= query length) on every keystroke. Tracking the
+        // highlighted option in a separate `optionCursor` keeps the top fuzzy
+        // match selected. With the old `_cursor` field, typing an N-char query
+        // landed the highlight on filtered index N (clamped), so Enter here
+        // returned "rebase" (index 1) instead of the top match "review".
+        const { promise, input } = startPicker([
+            { value: "a", label: "review" },
+            { value: "b", label: "rebase" },
+            { value: "c", label: "commit" },
+        ]);
+        // Type "re" → both "review" and "rebase" survive; "review" ranks first.
+        input.keypress("r", { name: "r" });
+        input.keypress("e", { name: "e" });
+        // No arrow movement: the highlight must stay on the top match.
+        input.keypress("\r", { name: "return" });
+        const result = await promise;
+        expect(result).toBe("a");
+    });
+
     test("typing 'j' appends to the query instead of moving the cursor", async () => {
         const { promise, input } = startPicker([
             { value: "x", label: "jot" },
@@ -243,7 +264,7 @@ describe("fuzzySelect (interactive)", () => {
         // Regression for the @clack/core cursor collision: Prompt.onKeypress runs
         // `this._cursor = this.rl?.cursor ?? 0` on every keypress BEFORE emitting
         // "cursor". With an empty query rl.cursor is 0, so a highlight that reused
-        // the base `_cursor` would reset to 0 then +1 on each press and stay stuck
+        // the base `_cursor` can reset to 0 then +1 on each press and stay stuck
         // at index 1 forever. Owning `optionCursor` lets it advance past 1.
         const { promise, input } = startPicker([
             { value: "1", label: "one" },
@@ -259,10 +280,10 @@ describe("fuzzySelect (interactive)", () => {
 
     test("Enter after typing returns the top-ranked match, not the one at the text cursor", async () => {
         // Regression: typing advances rl.cursor to the query length, which the
-        // base copies into `_cursor`. A shared cursor would highlight
+        // base copies into `_cursor`. A shared cursor can highlight
         // filtered[queryLen] instead of the best match. "r" matches both labels
         // and "review" (shorter, contiguous) outranks "rebase-verify", so the
-        // top-ranked value is "tight". A base-`_cursor` highlight would land on
+        // top-ranked value is "tight". A base-`_cursor` highlight can land on
         // filtered[1] ("scattered") because rl.cursor is 1 after one keystroke.
         const { promise, input } = startPicker([
             { value: "scattered", label: "rebase-verify" },
