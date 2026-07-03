@@ -115,7 +115,7 @@ made durable.
 
 ## How to guide the user (after every command)
 
-Three standing behaviors. They apply after every `smithers` command you run and
+Four standing behaviors. They apply after every `smithers` command you run and
 before every workflow you build, and the rest of this skill assumes them.
 
 1. **Act on the CLI's next steps.** Nearly every `smithers` command ends with a
@@ -144,6 +144,14 @@ before every workflow you build, and the rest of this skill assumes them.
      [Custom workflow UIs](#custom-workflow-uis).
    - `smithers ui --app` serves the full local control-plane UI when the user
      wants the whole picture, every run and workflow in one place.
+4. **Hand humans interactive commands.** When you give the human a command to
+   run themselves, include the `--interactive` flag whenever the command
+   supports it (`smithers up --interactive`,
+   `smithers workflow run <id> --interactive`), so they land in the full-screen
+   TUI monitor instead of staring at a detached log tail. Reserve the
+   non-interactive forms for CI, scripts, and the commands you run yourself
+   with your shell tool (never pass `--interactive` to a command you execute:
+   it opens a full-screen TUI your harness cannot drive).
 
 ## A workflow is a superset of a skill — author a workflow, not a skill
 

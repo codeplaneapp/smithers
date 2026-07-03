@@ -137,6 +137,10 @@ Tier = which model tier the candidate runs on.
 - [x] Expansion tasks applied (1340 cases / 24 suites). UI quality is now a first-class awaited
       judge **Task** (was a droppable async scorer): live-demoed sonnet one-shot a UI bundle → build
       PASS + **quality 1.00** persisted + surfaced in the scorecard ("UI quality (AI-judged)").
+- [x] **guidance-interactive suite** (6 cases, `contains` verify): when handing a human a
+      copy-paste command, the agent must include `--interactive` where supported (and never
+      `--detach`). Backed by new docs guidance: SKILL.md "How to guide the user" behavior 4 +
+      the agent-directed paragraph in `docs/cli/overview.mdx` (flows into llms bundles).
 
 ### Note on this session's live runs
 Heavy concurrent Claude Code usage this session hit subscription **session limits** (the exact
