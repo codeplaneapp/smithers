@@ -14,6 +14,12 @@ function makeEnv(overrides: Partial<TelegramSiteEnv> = {}): TelegramSiteEnv {
             headers: { "content-type": "text/html; charset=utf-8" },
           });
         }
+        // The real asset server maps /approve.html to /approve (auto html handling).
+        if (url.pathname === "/approve" || url.pathname === "/approve.html") {
+          return new Response("<!doctype html><title>Approve</title>", {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          });
+        }
         return new Response("not found", { status: 404 });
       },
     },
@@ -65,6 +71,12 @@ describe("telegram site worker", () => {
     const response = await createTelegramSiteWorker().fetch(new Request("https://telegram.smithers.sh/learn"), makeEnv());
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("Smithers");
+  });
+
+  test("redirects /join to the community invite the bare domain used to serve", async () => {
+    const response = await createTelegramSiteWorker().fetch(new Request("https://telegram.smithers.sh/join"), makeEnv());
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://t.me/+ANThR9bHDLAwMjUx");
   });
 
   test("reports health without touching static assets", async () => {
@@ -122,8 +134,17 @@ describe("reference Mini App /approve endpoint", () => {
     expect(response.status).toBe(503);
   });
 
-  test("rejects non-POST methods on /approve", async () => {
+  test("serves the Mini App page on GET /approve", async () => {
     const response = await worker.fetch(new Request("https://telegram.smithers.sh/approve"), makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("Approve");
+  });
+
+  test("rejects non-GET non-POST methods on /approve", async () => {
+    const response = await worker.fetch(
+      new Request("https://telegram.smithers.sh/approve", { method: "PUT" }),
+      makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }),
+    );
     expect(response.status).toBe(405);
   });
 });

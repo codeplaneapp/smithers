@@ -48,13 +48,9 @@ export function createTelegramSiteWorker() {
       const url = new URL(request.url);
 
       // Reference Mini App approval endpoint (verifies Telegram initData).
-      if (url.pathname === "/approve") {
-        if (request.method !== "POST") {
-          return new Response("method not allowed", {
-            status: 405,
-            headers: { allow: "POST", "content-type": "text/plain; charset=utf-8" },
-          });
-        }
+      // GET falls through to assets: the asset server maps /approve.html to /approve,
+      // so the Mini App page itself is served from this same path.
+      if (url.pathname === "/approve" && request.method === "POST") {
         return handleApprove(request, env);
       }
 
@@ -67,6 +63,11 @@ export function createTelegramSiteWorker() {
 
       if (url.pathname === "/healthz") {
         return Response.json({ ok: true, service: "telegram-site" });
+      }
+
+      // The bare domain used to 307 to the community invite; keep it reachable at /join.
+      if (url.pathname === "/join") {
+        return Response.redirect("https://t.me/+ANThR9bHDLAwMjUx", 307);
       }
 
       const direct = await fetchAsset(request, env);
