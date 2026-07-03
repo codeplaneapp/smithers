@@ -525,6 +525,21 @@ function originMatchesHost(originHeader, hostHeader, localPort) {
   );
 }
 
+/**
+ * A cross-origin browser request to one of the reverse-proxies (the gateway or
+ * the concierge). The proxies rewrite Host/Origin to a loopback origin, so a
+ * cross-origin page could otherwise reach the unauthenticated local gateway or
+ * concierge looking same-origin and drive them via a CORS "simple" request (CSRF
+ * against run control / workflow creation). We mirror the gateway's own model: a
+ * PRESENT Origin must match this server's loopback origin; an absent Origin
+ * (same-origin GETs, non-browser CLI) is allowed.
+ */
+function isCrossOriginProxyRequest(req) {
+  const origin = req.headers.origin;
+  if (typeof origin !== "string" || origin.trim() === "") return false;
+  return !originMatchesHost(origin, req.headers.host, req.socket.localPort);
+}
+
 function enforceFilesWriteSameOrigin(req, res) {
   if (
     originMatchesHost(
@@ -1173,6 +1188,11 @@ export function startLocalUiServer({
     }
     // The local concierge owns /api/chat (the chat backend).
     if (conciergePort && url.pathname.startsWith("/api/")) {
+      if (isCrossOriginProxyRequest(req)) {
+        res.writeHead(403, { "content-type": "text/plain" });
+        res.end("Cross-origin requests are not allowed");
+        return;
+      }
       proxyTo(req, res, "127.0.0.1", conciergePort, () => {
         res.writeHead(502, { "content-type": "text/plain" });
         res.end("Concierge unreachable");
@@ -1180,6 +1200,13 @@ export function startLocalUiServer({
       return;
     }
     if (isGatewayPath(url.pathname)) {
+      // Block cross-origin browsers BEFORE the Host/Origin rewrite, otherwise the
+      // rewrite would hide their real origin from the gateway's own defense.
+      if (isCrossOriginProxyRequest(req)) {
+        res.writeHead(403, { "content-type": "text/plain" });
+        res.end("Cross-origin gateway requests are not allowed");
+        return;
+      }
       // Reverse-proxy to the gateway, rewriting Host/Origin so the gateway sees
       // a same-origin loopback request (it may reject cross-origin upgrades).
       const headers = { ...req.headers, host: `${gatewayHost}:${gatewayPort}` };
@@ -1225,7 +1252,7 @@ export function startLocalUiServer({
   // the gateway, rewriting the Host/Origin lines to keep it same-origin.
   server.on("upgrade", (req, clientSocket, head) => {
     const url = new URL(req.url ?? "/", `http://${host}`);
-    if (!isGatewayPath(url.pathname)) {
+    if (!isGatewayPath(url.pathname) || isCrossOriginProxyRequest(req)) {
       clientSocket.destroy();
       return;
     }
@@ -1306,13 +1333,21 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
     concierge.on("error", () => {});
   }
 
-  const server = await startLocalUiServer({
-    distDir,
-    gatewayBase,
-    port,
-    conciergePort,
-    workspaceRoot: process.cwd(),
-  });
+  let server;
+  try {
+    server = await startLocalUiServer({
+      distDir,
+      gatewayBase,
+      port,
+      conciergePort,
+      workspaceRoot: process.cwd(),
+    });
+  } catch (error) {
+    // The concierge was already spawned above; a failed bind (e.g. EADDRINUSE)
+    // would otherwise orphan it, leaking its port on every failed launch.
+    concierge?.kill();
+    throw error;
+  }
   const addr = server.address();
   const actualPort = typeof addr === "object" && addr ? addr.port : port;
   // Tear the concierge down with the server.
