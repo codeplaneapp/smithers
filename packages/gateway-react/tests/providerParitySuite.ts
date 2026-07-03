@@ -72,6 +72,11 @@ export async function runProviderParitySuite(mode: WorkspaceMode) {
     await waitFor(() => approvals.toArray.length > 0);
     const approvalKey = `${approvalRunId}:pick-plan:0`;
     expect(approvals.has(approvalKey)).toBe(true);
+    // The pending approval row can surface a beat before the engine marks the
+    // node as waiting-approval; submitting a decision in that window 500s with
+    // "Node pick-plan is not waiting for approval". Gate the decision on the run
+    // actually reaching the waiting-approval state so the submit is never racy.
+    await waitFor(() => runs.get(approvalRunId)?.status === "waiting-approval");
     const approvalUpdate = approvals.update(approvalKey, (draft) => {
       (draft as { decision?: Record<string, unknown> }).decision = { selected: "balanced", notes: null };
     });

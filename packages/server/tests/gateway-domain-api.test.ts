@@ -210,6 +210,16 @@ async function waitForRun(baseUrl: string, runId: string, status: string) {
   throw new Error(`Timed out waiting for ${runId} to reach ${status}`);
 }
 
+async function waitForListedRun(baseUrl: string, runId: string) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const { response, json } = await apiRequest(baseUrl, "GET", "/v1/api/runs?limit=50");
+    const rows = Array.isArray(json.data) ? (json.data as Array<{ runId: string }>) : [];
+    if (response.status === 200 && json.ok === true && rows.some((row) => row.runId === runId)) return rows;
+    await sleep(25);
+  }
+  throw new Error(`Timed out waiting for ${runId} to appear in the run list`);
+}
+
 async function waitForApproval(baseUrl: string, runId: string) {
   for (let attempt = 0; attempt < 120; attempt += 1) {
     const { response, json } = await apiRequest(baseUrl, "GET", `/v1/api/approvals?runId=${encodeURIComponent(runId)}`);
@@ -302,6 +312,7 @@ for (const backend of backends) {
       await waitForRun(baseUrl, b.data.runId, "finished");
       // A run of a different workflow that the ?workflow=value filter must drop.
       const slow = await launchRun(baseUrl, "slow");
+      const unfilteredRows = await waitForListedRun(baseUrl, slow.data.runId);
 
       const filtered = await apiRequest(baseUrl, "GET", "/v1/api/runs?workflow=value&limit=50");
       expect(filtered.response.status).toBe(200);
@@ -313,8 +324,7 @@ for (const backend of backends) {
 
       // Without the filter the slow run is present, proving the filter (not an
       // empty DB) is what excluded it above.
-      const unfiltered = await apiRequest(baseUrl, "GET", "/v1/api/runs?limit=50");
-      const allIds = (unfiltered.json.data as Array<{ runId: string }>).map((row) => row.runId);
+      const allIds = unfilteredRows.map((row) => row.runId);
       expect(allIds).toContain(slow.data.runId);
 
       await apiRequest(baseUrl, "POST", `/v1/api/runs/${slow.data.runId}/cancel`, {});
