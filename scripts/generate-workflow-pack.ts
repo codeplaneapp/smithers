@@ -72,6 +72,52 @@ function promptImportsOf(source: string): string[] {
   return [...names];
 }
 
+/** Helper modules a workflow imports from `../lib/<path>`. */
+function libImportsOf(source: string): string[] {
+  const names = new Set<string>();
+  const re = /from\s+["']\.\.\/lib\/([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) names.add(m[1]);
+  return [...names];
+}
+
+/**
+ * Relative imports inside a lib module (`./x`, `../y`), resolved against the
+ * module's own path (relative to `.smithers/lib/`). Anything that escapes
+ * `.smithers/lib/` is rejected — seeded lib helpers must stay self-contained.
+ */
+function libRelativeImportsOf(source: string, fromLibPath: string): string[] {
+  const names = new Set<string>();
+  const re = /from\s+["'](\.\.?\/[^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    const joined = resolve("/lib", dirname(fromLibPath), m[1]);
+    if (!joined.startsWith("/lib/")) {
+      throw new Error(
+        `Seeded lib module .smithers/lib/${fromLibPath} imports ${m[1]}, which escapes .smithers/lib/. ` +
+          "Seeded lib helpers must be self-contained under .smithers/lib/.",
+      );
+    }
+    names.add(joined.slice("/lib/".length));
+  }
+  return [...names];
+}
+
+/** Resolve a lib import specifier to an on-disk file under `.smithers/lib/`. */
+function resolveLibFile(specifier: string): { relPath: string; absPath: string } {
+  const candidates = specifier.endsWith(".ts") || specifier.endsWith(".tsx")
+    ? [specifier]
+    : [`${specifier}.ts`, `${specifier}.tsx`, `${specifier}/index.ts`];
+  for (const candidate of candidates) {
+    const absPath = resolve(SMITHERS_DIR, "lib", candidate);
+    if (existsSync(absPath)) return { relPath: candidate, absPath };
+  }
+  throw new Error(
+    `Cannot resolve seeded lib import "../lib/${specifier}" under ${resolve(SMITHERS_DIR, "lib")} ` +
+      `(tried: ${candidates.join(", ")})`,
+  );
+}
+
 function readOrThrow(absPath: string, label: string): string {
   if (!existsSync(absPath)) {
     throw new Error(`Missing ${label}: ${absPath}`);
@@ -107,6 +153,21 @@ function build(): TemplateFile[] {
       const promptSource = readOrThrow(promptAbs, `prompt ${promptName} for workflow ${id}`);
       push(`.smithers/prompts/${promptName}`, promptSource);
     }
+
+    // Bundle `../lib/*` helpers (transitively) so a seeded workflow loads from
+    // a fresh init — a workflow shipped without its lib imports fails
+    // `smithers graph` with a module-not-found the moment it is seeded.
+    const libQueue = libImportsOf(workflowSource).map((specifier) => resolveLibFile(specifier));
+    while (libQueue.length > 0) {
+      const { relPath, absPath } = libQueue.shift()!;
+      const packPath = `.smithers/lib/${relPath}`;
+      if (seenPaths.has(packPath)) continue;
+      const libSource = readOrThrow(absPath, `lib module ${relPath} for workflow ${id}`);
+      push(packPath, libSource);
+      for (const nested of libRelativeImportsOf(libSource, relPath)) {
+        libQueue.push(resolveLibFile(nested));
+      }
+    }
   }
 
   return files;
@@ -133,8 +194,9 @@ function main() {
   writeFileSync(OUTPUT_FILE, output, "utf8");
   const workflows = files.filter((f) => f.path.includes("/workflows/")).length;
   const prompts = files.filter((f) => f.path.includes("/prompts/")).length;
+  const libs = files.filter((f) => f.path.startsWith(".smithers/lib/")).length;
   process.stdout.write(
-    `[generate-workflow-pack] wrote ${files.length} file(s) (${workflows} workflow, ${prompts} prompt) ` +
+    `[generate-workflow-pack] wrote ${files.length} file(s) (${workflows} workflow, ${prompts} prompt, ${libs} lib) ` +
       `to ${OUTPUT_FILE.replace(REPO_ROOT + "/", "")}\n`,
   );
   for (const f of files) process.stdout.write(`  + ${f.path}\n`);
