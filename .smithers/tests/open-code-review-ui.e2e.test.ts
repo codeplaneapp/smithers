@@ -149,7 +149,13 @@ browserTest("Open Code Review UI renders a real workflow run", async () => {
     await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=src/app.test.ts', { timeout: 20_000 });
     await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=default_path', { timeout: 20_000 });
     await page.waitForSelector('[data-testid="ocr-comments-panel"] >> text=Guard against null before trimming.', { timeout: 20_000 });
-    expect(await page.locator('[data-testid="ocr-kpi-tokens"]').textContent()).toContain("0");
+    // The tokens KPI is computed from run events, not the seeded fixture summary
+    // (openCodeReviewRunFixture totalTokens: 321) — assert it renders the computed
+    // value and never the raw fixture number. Scope both checks to the KPI element
+    // so an incidental "321" elsewhere (a hash, id, or timestamp) can't flip them.
+    const tokensKpi = await page.locator('[data-testid="ocr-kpi-tokens"]').textContent();
+    expect(tokensKpi).toContain("0");
+    expect(tokensKpi).not.toContain("321");
 
     expect(errors).toEqual([]);
   } finally {

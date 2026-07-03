@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,11 +22,26 @@ import {
 
 const tempDirs: string[] = [];
 
-afterEach(() => {
+setDefaultTimeout(30_000);
+
+afterEach(async () => {
   while (tempDirs.length > 0) {
-    rmSync(tempDirs.pop()!, { recursive: true, force: true });
+    await removeTempDir(tempDirs.pop()!);
   }
 });
+
+async function removeTempDir(dir: string) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
+      if (!["EBUSY", "ENOTEMPTY", "EPERM"].includes(code) || attempt >= 5) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
 
 function tempRepo() {
   const dir = mkdtempSync(join(tmpdir(), "ocr-smithers-"));
