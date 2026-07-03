@@ -46,7 +46,7 @@ If resume fails with `RESUME_METADATA_MISMATCH`, the workflow file changed after
 
 The monitor connects to a local Gateway on port 7331, starting one automatically if none is running.  It exits when you press `q`.
 
-**Agents: hand humans interactive commands.** When you (an AI agent) give a human a command to run themselves, include the `--interactive` flag whenever the command supports it (`bunx smithers-orchestrator up --interactive`, `bunx smithers-orchestrator workflow run <id> --interactive`), so the human lands in this full-screen monitor instead of a detached log tail. Reserve the non-interactive forms for CI, scripts, and the commands you execute yourself with your shell tool — never pass `--interactive` to a command you run programmatically, since it opens a full-screen TUI your harness cannot drive.
+**Agents: hand humans interactive commands.** When you (an AI agent) give a human a command to run themselves, include the `--interactive` flag whenever the command supports it (`bunx smithers-orchestrator up --interactive`, `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive`), so the human lands in this full-screen monitor instead of a detached log tail. Reserve the non-interactive forms for CI, scripts, and the commands you execute yourself with your shell tool. Never pass `--interactive` to a command you run programmatically, since it opens a full-screen TUI your harness cannot drive.
 
 ### Monitor modes and keybindings
 
