@@ -15,6 +15,12 @@ import {
 const protocolRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(protocolRoot, "../..");
 
+// Each error code is spelled in three hand-maintained places that must stay in
+// sync, INCLUDING member order: the runtime tuple in src/errors/index.js, the
+// type-alias union in src/errors/*.ts, and the generated-but-committed declaration
+// tuple in src/index.d.ts. The guards below compare with ordered `toEqual`, so a
+// reorder in one file that is not mirrored in the others fails by design — keep the
+// lists literally identical, in the same order, across all three representations.
 const ERROR_CODE_CONTRACTS = [
   {
     alias: "DevToolsErrorCode",
@@ -67,22 +73,41 @@ function unionMembers(node) {
   return members.map((member) => {
     const value = stringLiteralMember(member);
     if (value === null) {
-      throw new Error(`Unsupported error-code member: ${member.getText()}`);
+      throw new Error(
+        `Unsupported error-code member \`${member.getText()}\` in a type alias. This ` +
+          "drift guard expects each src/errors/*.ts alias to be either a string-literal " +
+          "union or the drift-proof `(typeof CODES)[number]` form. If you refactored the " +
+          "alias to a different shape, teach derivedRuntimeConstName()/unionMembers() how " +
+          "to read it so the runtime<->type contract stays enforced.",
+      );
     }
     return value;
   });
 }
 
-function membersForTypeAlias(relativePath, alias) {
+// Recognize the drift-proof-by-construction alias `type X = (typeof CODES)[number]`,
+// which derives its members directly from the runtime tuple and therefore cannot
+// drift. Returns the referenced runtime const's name, or null for any other shape.
+function derivedRuntimeConstName(node) {
+  if (!ts.isIndexedAccessTypeNode(node)) return null;
+  if (node.indexType.kind !== ts.SyntaxKind.NumberKeyword) return null;
+  let objectType = node.objectType;
+  while (ts.isParenthesizedTypeNode(objectType)) objectType = objectType.type;
+  if (!ts.isTypeQueryNode(objectType)) return null;
+  return objectType.exprName.getText();
+}
+
+function typeAliasContract(relativePath, alias) {
   const sourceFile = readSourceFile(relativePath);
-  let members = null;
+  let contract = null;
   sourceFile.forEachChild((node) => {
     if (ts.isTypeAliasDeclaration(node) && node.name.text === alias) {
-      members = unionMembers(node.type);
+      const derivedFrom = derivedRuntimeConstName(node.type);
+      contract = derivedFrom ? { derivedFrom } : { members: unionMembers(node.type) };
     }
   });
-  if (!members) throw new Error(`Missing ${alias} in ${relativePath}`);
-  return members;
+  if (!contract) throw new Error(`Missing ${alias} in ${relativePath}`);
+  return contract;
 }
 
 function tupleLiteralMembers(node) {
@@ -104,6 +129,7 @@ function membersForDeclarationTuple(declaration) {
   const sourceFile = readSourceFile("src/index.d.ts");
   let members = null;
   function visit(node) {
+    if (members) return;
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
@@ -229,7 +255,15 @@ describe("protocol runtime constants", () => {
 
   test("type aliases match runtime error code lists", () => {
     for (const contract of ERROR_CODE_CONTRACTS) {
-      expect(membersForTypeAlias(contract.relativePath, contract.alias)).toEqual(contract.runtime);
+      const alias = typeAliasContract(contract.relativePath, contract.alias);
+      if (alias.derivedFrom !== undefined) {
+        // Drift-proof-by-construction: `type X = (typeof CODES)[number]` takes its
+        // members from the runtime tuple verbatim, so only confirm it derives from the
+        // matching runtime const rather than re-comparing member-by-member.
+        expect(alias.derivedFrom).toBe(contract.declaration);
+      } else {
+        expect(alias.members).toEqual(contract.runtime);
+      }
     }
   });
 
