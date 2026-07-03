@@ -26,7 +26,10 @@ function resolveMinLevel() {
         case "fatal": return Infinity;
         case "all": return LOG_LEVEL_NONE;
         case "info": return LOG_LEVEL_INFO;
-        default: return LOG_LEVEL_WARNING;
+        // Default to INFO so INFO-severity records (including INFO OTLP log
+        // records) flow without requiring SMITHERS_LOG_LEVEL to be set. A
+        // WARNING default silently dropped every INFO/DEBUG line by default.
+        default: return LOG_LEVEL_INFO;
     }
 }
 

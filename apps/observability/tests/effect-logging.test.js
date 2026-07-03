@@ -47,6 +47,23 @@ describe("effect/logging", () => {
             restore();
         }
     });
+    test("emits INFO logs by default (default level is INFO, not WARNING)", () => {
+        // Guards against silently dropping INFO/DEBUG when SMITHERS_LOG_LEVEL is
+        // unset: an INFO log must reach the runner by default.
+        let forked = false;
+        const restore = setSmithersLogRunner({
+            runFork() {
+                forked = true;
+            },
+            async runPromise() { },
+        });
+        try {
+            logInfo("runner info");
+            expect(forked).toBe(true);
+        } finally {
+            restore();
+        }
+    });
     test("uses an injected Effect runner for awaited logs", async () => {
         let awaited = false;
         const restore = setSmithersLogRunner({
