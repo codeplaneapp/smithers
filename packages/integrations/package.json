@@ -10,6 +10,11 @@
       "import": "./src/index.js",
       "default": "./src/index.js"
     },
+    "./telegram": {
+      "types": "./src/telegram.d.ts",
+      "import": "./src/telegram.js",
+      "default": "./src/telegram.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",
