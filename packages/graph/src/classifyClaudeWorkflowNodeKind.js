@@ -16,7 +16,7 @@
  */
 export function classifyClaudeWorkflowNodeKind(task) {
     // A HumanTask carries both a computeFn and needsApproval, so the field
-    // checks below can misclassify it as "compute". The persisted descriptor
+    // checks below would misclassify it as "compute". The persisted descriptor
     // kind preserves the human classification (see extract.js), so trust it here.
     if (task.kind === "human") return "human";
     if (task.agent) return "agent";
