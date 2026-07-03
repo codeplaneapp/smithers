@@ -294,10 +294,31 @@ type SmithersAlertPolicy$1 = {
     rules?: Record<string, SmithersAlertPolicyRule$1>;
     reactions?: Record<string, SmithersAlertReaction$1>;
 };
+/**
+ * Where a workflow's `RunResult.output` rows are read from. Mirrors the
+ * component-level `OutputTarget` union (see `@smithers-orchestrator/components`
+ * `OutputTarget`), restated locally because `@smithers-orchestrator/scheduler`
+ * is a pure decision engine that must not depend on zod or components:
+ *
+ * - a Zod schema object registered via `createSmithers(...).outputs.<key>` (recommended),
+ * - a Drizzle table object, or
+ * - a string schema key (escape hatch).
+ */
+type SmithersWorkflowOutputTarget = {
+    readonly _def: unknown;
+} | {
+    readonly $inferSelect: Record<string, unknown>;
+} | string;
 type SmithersWorkflowOptions$1 = {
     alertPolicy?: SmithersAlertPolicy$1;
     cache?: boolean;
-    output?: unknown;
+    /**
+     * Explicit workflow-level output schema/table used to populate
+     * `RunResult.output` (and therefore a parent `Subflow`'s child result). Pass
+     * a `createSmithers(...).outputs.<key>` schema, a Drizzle table, or a string
+     * schema key. Defaults to the child schema key literally named `output`.
+     */
+    output?: SmithersWorkflowOutputTarget;
     workflowHash?: string;
 };
 
