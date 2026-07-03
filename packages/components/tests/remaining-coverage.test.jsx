@@ -312,7 +312,10 @@ describe("remaining component branch coverage", () => {
                 <Prompt />
             </Task>,
         );
-        expect(withSchema.tasks[0].prompt).toContain("&quot;title&quot;: &quot;Title&quot;");
+        // The injected JSON schema hint must reach the agent as literal JSON, not
+        // HTML-entity-escaped text (`&quot;title&quot;`), which would not parse.
+        expect(withSchema.tasks[0].prompt).toContain('"title": "Title"');
+        expect(withSchema.tasks[0].prompt).not.toContain("&quot;");
 
         const withAspects = await render(
             <Aspects tokenBudget={{ max: 100 }} latencySlo={{ maxMs: 250 }}>
@@ -348,6 +351,27 @@ describe("remaining component branch coverage", () => {
             </Task>,
         );
         expect(antigravityTools.tasks[0].agent.opts.allowedTools).toEqual(["Read"]);
+    });
+
+    test("React-element prompts deliver literal text, not HTML-entity-escaped text", async () => {
+        const literal = 'run tests when a < b && c is "true" > 0';
+        // Mimic a compiled MDX prompt: it renders through the injected `components`
+        // map, exactly the path renderPromptToText drives for real MDX.
+        function MdxPrompt(props) {
+            const P = props.components?.p ?? "p";
+            return <P>{literal}</P>;
+        }
+
+        expect(renderPromptToText(<MdxPrompt />)).toBe(literal);
+
+        const rendered = await render(
+            <Task id="mdx-prompt" output="out" agent={agent}>
+                <MdxPrompt />
+            </Task>,
+        );
+        expect(rendered.tasks[0].prompt).toBe(literal);
+        expect(rendered.tasks[0].prompt).not.toContain("&amp;");
+        expect(rendered.tasks[0].prompt).not.toContain("&lt;");
     });
 
     test("direct primitives cover remaining declarative branches", async () => {
@@ -474,6 +498,27 @@ describe("remaining component branch coverage", () => {
             objectFallback: {},
             customDescription: "Custom",
             noDef: "value",
+        });
+    });
+
+    test("zod examples use default and literal values, not the 'value' placeholder", () => {
+        const schema = z.object({
+            status: z.literal("active"),
+            priority: z.literal(3),
+            enabled: z.literal(true),
+            retries: z.number().default(5),
+            label: z.string().default("draft"),
+            flag: z.boolean().default(true),
+            mode: z.enum(["fast", "slow"]).default("slow"),
+        });
+        expect(JSON.parse(zodSchemaToJsonExample(schema))).toEqual({
+            status: "active",
+            priority: 3,
+            enabled: true,
+            retries: 5,
+            label: "draft",
+            flag: true,
+            mode: "slow",
         });
     });
 

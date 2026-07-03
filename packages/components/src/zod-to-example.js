@@ -30,6 +30,7 @@ function zodFieldToExample(field) {
                 values?: unknown[];
                 entries?: Record<string, unknown>;
                 innerType?: ZodTypeAny;
+                defaultValue?: unknown;
             };
         };
         shape?: Record<string, ZodTypeAny>;
@@ -81,6 +82,19 @@ function zodFieldToExample(field) {
             return def.innerType ? zodFieldToExample(def.innerType) : null;
         case "optional":
             return def.innerType ? zodFieldToExample(def.innerType) : undefined;
+        case "default":
+        case "prefault": {
+            // Prefer the concrete default so the agent sees a valid value; fall
+            // back to the wrapped type's shape when no default is present.
+            if ("defaultValue" in def && def.defaultValue !== undefined)
+                return def.defaultValue;
+            return def.innerType ? zodFieldToExample(def.innerType) : "value";
+        }
+        case "literal": {
+            if (Array.isArray(def.values) && def.values.length > 0)
+                return def.values[0];
+            return "value";
+        }
         default:
             return description || "value";
     }
