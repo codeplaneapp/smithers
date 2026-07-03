@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useGatewayRunTree } from "@smithers-orchestrator/gateway-react";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { type GatewayRunNode, runNodeKey } from "@smithers-orchestrator/gateway-client";
 import { StatusPill } from "./StatusPill";
 import { theme } from "./theme";
 
@@ -61,7 +61,7 @@ function NodeRow({
       </button>
       {(node.children ?? []).map((child) => (
         <NodeRow
-          key={child.id}
+          key={runNodeKey(child)}
           node={child}
           depth={depth + 1}
           activeNodeId={activeNodeId}
