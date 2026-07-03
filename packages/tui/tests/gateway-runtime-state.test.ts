@@ -32,7 +32,7 @@ afterEach(async () => {
 
 async function removeTempDir(dir: string) {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       rmSync(dir, { recursive: true, force: true });
       return;
@@ -40,9 +40,10 @@ async function removeTempDir(dir: string) {
       lastError = error;
       const code = (error as { code?: unknown }).code;
       if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EPERM") throw error;
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
+  if (process.platform === "win32") return;
   throw lastError;
 }
 

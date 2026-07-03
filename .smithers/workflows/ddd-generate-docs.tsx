@@ -215,7 +215,7 @@ function executableCandidates(name: string): string[] {
 
 function commandForExecutable(bin: string, args: string[]): { bin: string; args: string[] } {
   if (process.platform === "win32" && /\.(?:bat|cmd)$/i.test(bin)) {
-    const commandLine = ["call", cmdQuote(bin), ...args.map(cmdQuote)].join(" ");
+    const commandLine = ["call", cmdArg(bin), ...args.map(cmdArg)].join(" ");
     return {
       bin: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
       args: ["/d", "/c", commandLine],
@@ -232,7 +232,8 @@ function commandForExecutable(bin: string, args: string[]): { bin: string; args:
   return { bin, args };
 }
 
-function cmdQuote(value: string): string {
+function cmdArg(value: string): string {
+  if (!/[\s"&|<>^]/.test(value)) return value;
   return `"${value.replace(/"/g, '""')}"`;
 }
 
