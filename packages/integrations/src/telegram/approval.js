@@ -1,12 +1,12 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./approval.ts").TelegramApprovalChoice} TelegramApprovalChoice */
-/** @typedef {import("./approval.ts").TelegramApprovalOption} TelegramApprovalOption */
-/** @typedef {import("./approval.ts").TelegramApprovalMode} TelegramApprovalMode */
-/** @typedef {import("./approval.ts").TelegramApprovalKeyboardSpec} TelegramApprovalKeyboardSpec */
-/** @typedef {import("./approval.ts").TelegramApprovalDecision} TelegramApprovalDecision */
-/** @typedef {import("./approval.ts").TelegramApprovalSelection} TelegramApprovalSelection */
-/** @typedef {import("./TelegramClient.ts").TelegramInlineKeyboard} TelegramInlineKeyboard */
-/** @typedef {import("./TelegramClient.ts").TelegramInlineKeyboardButton} TelegramInlineKeyboardButton */
+/** @typedef {import("./approvalTypes.ts").TelegramApprovalChoice} TelegramApprovalChoice */
+/** @typedef {import("./approvalTypes.ts").TelegramApprovalOption} TelegramApprovalOption */
+/** @typedef {import("./approvalTypes.ts").TelegramApprovalMode} TelegramApprovalMode */
+/** @typedef {import("./approvalTypes.ts").TelegramApprovalKeyboardSpec} TelegramApprovalKeyboardSpec */
+/** @typedef {import("./approvalTypes.ts").TelegramApprovalDecision} TelegramApprovalDecision */
+/** @typedef {import("./approvalTypes.ts").TelegramApprovalSelection} TelegramApprovalSelection */
+/** @typedef {import("./TelegramClientTypes.ts").TelegramInlineKeyboard} TelegramInlineKeyboard */
+/** @typedef {import("./TelegramClientTypes.ts").TelegramInlineKeyboardButton} TelegramInlineKeyboardButton */
 // @smithers-type-exports-end
 
 // Inline-keyboard approval building blocks: the callback_data codec, keyboard
@@ -27,9 +27,9 @@ const CALLBACK_DATA_MAX_BYTES = 64;
 /** Decision schema for `mode: "approve"` (mirrors the core approvalDecisionSchema). */
 export const telegramApprovalDecisionSchema = z.object({
   approved: z.boolean(),
-  note: z.string().nullable(),
+  note: z.string().nullable().optional(),
   decidedBy: z.string().nullable(),
-  decidedAt: z.string().nullable(),
+  decidedAt: z.string().datetime().nullable(),
 });
 
 /** Decision schema for `mode: "select"` (mirrors the core approvalSelectionSchema). */
@@ -47,21 +47,44 @@ function byteLength(value) {
 }
 
 /**
- * Encode a choice as callback_data (`sap:a`, `sap:d`, `sap:s:<key>`).
- * @param {TelegramApprovalChoice} choice
+ * A short, deterministic, colon-free token that disambiguates one approval's
+ * buttons from any other keyboard in the same chat. Derived from the node id
+ * (djb2 → base36); NOT security-sensitive, just a namespace so a stale/foreign
+ * press on a different prompt cannot resolve this approval.
+ * @param {string} id
  * @returns {string}
  */
-export function telegramApprovalCallbackData(choice) {
+export function approvalToken(id) {
+  const source = String(id ?? "");
+  let hash = 5381;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = (((hash << 5) + hash) ^ source.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+/**
+ * Encode a choice as callback_data (`sap:<token>:a`, `sap:<token>:d`,
+ * `sap:<token>:s:<key>`). The token namespaces the press to one approval.
+ * @param {TelegramApprovalChoice} choice
+ * @param {string} token
+ * @returns {string}
+ */
+export function telegramApprovalCallbackData(choice, token) {
+  const tok = token ?? "";
+  if (tok.includes(":")) {
+    throw new SmithersError("INVALID_INPUT", "Approval token must not contain a colon.");
+  }
   let data;
   if (choice.kind === "approve") {
-    data = `${CALLBACK_PREFIX}:a`;
+    data = `${CALLBACK_PREFIX}:${tok}:a`;
   } else if (choice.kind === "reject") {
-    data = `${CALLBACK_PREFIX}:d`;
+    data = `${CALLBACK_PREFIX}:${tok}:d`;
   } else if (choice.kind === "select") {
     if (!choice.key || choice.key.includes(":")) {
       throw new SmithersError("INVALID_INPUT", `Approval option key must be non-empty and contain no ":": ${JSON.stringify(choice.key)}`);
     }
-    data = `${CALLBACK_PREFIX}:s:${choice.key}`;
+    data = `${CALLBACK_PREFIX}:${tok}:s:${choice.key}`;
   } else {
     throw new SmithersError("INVALID_INPUT", "Unknown approval choice.");
   }
@@ -72,30 +95,44 @@ export function telegramApprovalCallbackData(choice) {
 }
 
 /**
- * Decode approval callback_data. Returns null for anything that is not ours
- * (a stray press from an unrelated keyboard).
+ * Decode approval callback_data into `{ token, ...choice }`. Returns null for
+ * anything that is not ours (a stray press from an unrelated keyboard).
  * @param {string | undefined | null} data
- * @returns {TelegramApprovalChoice | null}
+ * @returns {(TelegramApprovalChoice & { token: string }) | null}
  */
 export function parseTelegramApprovalCallbackData(data) {
   if (typeof data !== "string") {
     return null;
   }
   const parts = data.split(":");
-  if (parts[0] !== CALLBACK_PREFIX) {
+  if (parts[0] !== CALLBACK_PREFIX || parts.length < 3) {
     return null;
   }
-  if (parts[1] === "a") {
-    return { kind: "approve" };
+  const token = parts[1];
+  const kindCode = parts[2];
+  if (kindCode === "a") {
+    return { token, kind: "approve" };
   }
-  if (parts[1] === "d") {
-    return { kind: "reject" };
+  if (kindCode === "d") {
+    return { token, kind: "reject" };
   }
-  if (parts[1] === "s" && parts.length >= 3) {
-    const key = parts.slice(2).join(":");
-    return key ? { kind: "select", key } : null;
+  if (kindCode === "s" && parts.length >= 4) {
+    const key = parts.slice(3).join(":");
+    return key ? { token, kind: "select", key } : null;
   }
   return null;
+}
+
+/**
+ * True when a delivered callback query is a press on THIS approval's own
+ * buttons (matching token), not a stale/foreign press in the same chat.
+ * @param {{ data?: string }} callbackQuery
+ * @param {TelegramApprovalKeyboardSpec} spec
+ * @returns {boolean}
+ */
+export function isOwnApprovalPress(callbackQuery, spec) {
+  const choice = parseTelegramApprovalCallbackData(callbackQuery?.data);
+  return Boolean(choice) && choice?.token === (spec.token ?? "");
 }
 
 /**
@@ -117,6 +154,7 @@ export function webAppButton(text, url) {
  * @returns {TelegramInlineKeyboard}
  */
 export function approvalInlineKeyboard(spec) {
+  const token = spec.token ?? "";
   /** @type {TelegramInlineKeyboard} */
   const rows = [];
   if (spec.mode === "select") {
@@ -125,12 +163,12 @@ export function approvalInlineKeyboard(spec) {
       throw new SmithersError("INVALID_INPUT", 'TelegramApproval mode "select" requires at least one option.');
     }
     for (const option of options) {
-      rows.push([{ text: option.label, callback_data: telegramApprovalCallbackData({ kind: "select", key: option.key }) }]);
+      rows.push([{ text: option.label, callback_data: telegramApprovalCallbackData({ kind: "select", key: option.key }, token) }]);
     }
   } else {
     rows.push([
-      { text: spec.approveText ?? "✅ Approve", callback_data: telegramApprovalCallbackData({ kind: "approve" }) },
-      { text: spec.rejectText ?? "🚫 Reject", callback_data: telegramApprovalCallbackData({ kind: "reject" }) },
+      { text: spec.approveText ?? "✅ Approve", callback_data: telegramApprovalCallbackData({ kind: "approve" }, token) },
+      { text: spec.rejectText ?? "🚫 Reject", callback_data: telegramApprovalCallbackData({ kind: "reject" }, token) },
     ]);
   }
   if (spec.miniAppUrl) {
@@ -169,23 +207,28 @@ function decidedAtFromCallback(callbackQuery) {
 
 /**
  * Map a delivered callback query to an approval decision. Deterministic from
- * the persisted payload. An unrecognized/stray press resolves to a safe
- * non-approval (`approved: false`) in approve mode, or an empty selection in
- * select mode.
+ * the persisted payload. A press that is not this approval's own (wrong or
+ * missing token) or is otherwise unrecognized fails safe: a non-approval
+ * (`approved: false`) in approve mode, or an empty selection in select mode. A
+ * stale/foreign press can therefore never produce a false approval.
  * @param {{ data?: string; from?: object; message?: { date?: number } }} callbackQuery
  * @param {TelegramApprovalKeyboardSpec} spec
  * @returns {TelegramApprovalDecision | TelegramApprovalSelection}
  */
 export function telegramApprovalDecision(callbackQuery, spec) {
   const choice = parseTelegramApprovalCallbackData(callbackQuery?.data);
+  const own = Boolean(choice) && choice?.token === (spec.token ?? "");
   const decidedBy = telegramApproverLabel(callbackQuery);
   if (spec.mode === "select") {
-    const selected = choice?.kind === "select" ? choice.key : "";
+    // Only accept a key THIS approval offered (matching token + a known key);
+    // a stale/foreign sap:s:<key> press resolves to no selection.
+    const offered = new Set((spec.options ?? []).map((option) => option.key));
+    const selected = own && choice?.kind === "select" && offered.has(choice.key) ? choice.key : "";
     return telegramApprovalSelectionSchema.parse({ selected, notes: null });
   }
   return telegramApprovalDecisionSchema.parse({
-    approved: choice?.kind === "approve",
-    note: choice ? null : "unrecognized response",
+    approved: own && choice?.kind === "approve",
+    note: own ? null : "press did not match this approval's prompt",
     decidedBy,
     decidedAt: decidedAtFromCallback(callbackQuery),
   });

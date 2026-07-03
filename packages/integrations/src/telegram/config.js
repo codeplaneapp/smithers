@@ -1,5 +1,5 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./TelegramClient.ts").TelegramClientConfig} TelegramClientConfig */
+/** @typedef {import("./TelegramClientTypes.ts").TelegramClientConfig} TelegramClientConfig */
 // @smithers-type-exports-end
 
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";

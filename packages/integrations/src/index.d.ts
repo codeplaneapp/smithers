@@ -1,84 +1,27 @@
-import * as effect from 'effect';
-import { Effect, Stream } from 'effect';
+import { C as CursorStore$1, E as ExternalEvent$1, a as EventSource$2, M as MakePollingSourceOptions$1, b as MakeWebhookSourceOptions$1, P as PollResult$1, W as WebhookRequest$1, c as WebhookSource$1 } from './EventSourceTypes-BAOYWyD3.js';
+import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
 import * as _smithers_orchestrator_errors_SmithersError from '@smithers-orchestrator/errors/SmithersError';
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
-import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
+import { Effect, Schema } from 'effect';
+import * as effect_Effect from 'effect/Effect';
+import * as effect_ParseResult from 'effect/ParseResult';
+import * as effect_SchemaAST from 'effect/SchemaAST';
 
+/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /**
- * Durable persistence seam for polling-source cursors. The db-backed
- * implementation (`makeDbCursorStore`) rides `_smithers_integration_cursors`.
+ * CursorStore backed by the db adapter's `_smithers_integration_cursors`
+ * table, so a polling source survives process restarts.
+ * @param {SmithersDb} adapter
+ * @returns {CursorStore}
  */
-type CursorStore = {
-    get: (sourceId: string) => Effect.Effect<string | null | undefined, SmithersError>;
-    set: (sourceId: string, cursor: string | null) => Effect.Effect<void, SmithersError>;
-};
-
+declare function makeDbCursorStore(adapter: SmithersDb$1): CursorStore;
 /**
- * A normalized event received from an external service (webhook delivery or
- * polling result) before it is fanned out to waiting runs via `signalRun`.
+ * In-memory CursorStore (tests / ephemeral sources).
+ * @returns {CursorStore}
  */
-type ExternalEvent$1 = {
-    /** Source id that produced the event (e.g. `github`, `telegram`, a generic webhook source id). */
-    source: string;
-    /** Smithers signal name, `integration:<service>:<event>` by convention. */
-    eventName: string;
-    /** Correlation id used to target waiting runs (null = match waits without one). */
-    correlationId: string | null;
-    /** JSON-serializable payload delivered as the signal payload. */
-    payload: unknown;
-    /** Provider-stable delivery id used for redelivery dedupe. */
-    dedupeKey: string;
-    /** When the event was received (Unix epoch ms). */
-    receivedAtMs: number;
-};
-
-/**
- * A process-wide source of external events. `events` is the (possibly
- * infinite) stream the IntegrationRuntime drains into the delivery pipeline.
- */
-type EventSource$1 = {
-    id: string;
-    events: Stream.Stream<ExternalEvent$1, SmithersError>;
-};
-/**
- * The raw webhook request handed to a webhook source's `offer`: the
- * already-read raw body (needed for HMAC verification) plus headers.
- */
-type WebhookRequest = {
-    headers: Record<string, string | string[] | undefined>;
-    rawBody: string;
-};
-type MakeWebhookSourceOptions = {
-    id: string;
-    /** Bounded queue capacity between ingress and delivery. @default 256 */
-    capacity?: number;
-    /** Signature check; return false to reject with `invalid-signature`. */
-    verify?: (request: WebhookRequest) => boolean;
-    /** Decode a verified request into one or more ExternalEvents. */
-    decode: (request: WebhookRequest) => ExternalEvent$1 | ExternalEvent$1[];
-};
-type WebhookSource = {
-    source: EventSource$1;
-    /** Verify + decode + enqueue a webhook request; resolves with the accepted count. */
-    offer: (request: WebhookRequest) => effect.Effect.Effect<{
-        accepted: number;
-    }, SmithersError>;
-    shutdown: effect.Effect.Effect<void>;
-};
-type PollResult = {
-    events: ExternalEvent$1[];
-    /** Next cursor to persist; omit/undefined to keep the current cursor. */
-    cursor?: string | null;
-};
-type MakePollingSourceOptions = {
-    id: string;
-    /** One poll turn: given the current cursor, fetch new events + next cursor. */
-    poll: (cursor: string | null) => effect.Effect.Effect<PollResult, SmithersError>;
-    /** Poll cadence. @default Schedule.spaced("5 seconds") */
-    schedule?: effect.Schedule.Schedule<unknown>;
-    /** Durable cursor persistence (e.g. `makeDbCursorStore(adapter)`). */
-    cursorStore?: CursorStore;
-};
+declare function makeInMemoryCursorStore(): CursorStore;
+type SmithersDb$1 = _smithers_orchestrator_db_adapter.SmithersDb;
+type CursorStore = CursorStore$1;
 
 /**
  * Deliver ONE external event: dedupe against
@@ -105,10 +48,58 @@ declare function deliverEvent(adapter: SmithersDb, event: ExternalEvent): Effect
  * @param {EventSource} source
  * @returns {Effect.Effect<void, import("@smithers-orchestrator/errors/SmithersError").SmithersError>}
  */
-declare function deliverEvents(adapter: SmithersDb, source: EventSource): Effect.Effect<void, _smithers_orchestrator_errors_SmithersError.SmithersError>;
+declare function deliverEvents(adapter: SmithersDb, source: EventSource$1): Effect.Effect<void, _smithers_orchestrator_errors_SmithersError.SmithersError>;
 type SmithersDb = _smithers_orchestrator_db_adapter.SmithersDb;
 type ExternalEvent = ExternalEvent$1;
-type EventSource = EventSource$1;
+type EventSource$1 = EventSource$2;
+
+/**
+ * Build a Queue-backed webhook EventSource. Ingress code calls
+ * `offer(request)` per incoming HTTP request: the request is verified
+ * (`invalid-signature` failure on mismatch), decoded into ExternalEvents, and
+ * enqueued; the returned `source.events` stream feeds the delivery pipeline.
+ *
+ * @param {MakeWebhookSourceOptions} options
+ * @returns {Effect.Effect<WebhookSource, never>}
+ */
+declare function makeWebhookSource(options: MakeWebhookSourceOptions): Effect.Effect<WebhookSource, never>;
+/**
+ * Build a polling EventSource: repeatedly runs `poll(cursor)` on `schedule`
+ * (first poll immediately), persists the returned cursor through the
+ * CursorStore, and emits the polled events one by one.
+ *
+ * @param {MakePollingSourceOptions} options
+ * @returns {EventSource}
+ */
+declare function makePollingSource(options: MakePollingSourceOptions): EventSource;
+type EventSource = EventSource$2;
+type MakePollingSourceOptions = MakePollingSourceOptions$1;
+type MakeWebhookSourceOptions = MakeWebhookSourceOptions$1;
+type PollResult = PollResult$1;
+type WebhookRequest = WebhookRequest$1;
+type WebhookSource = WebhookSource$1;
+
+/**
+ * Runtime schema for {@link ExternalEvent}. Webhook sources decode incoming
+ * requests through this schema so malformed decoder output fails loudly at
+ * the ingress boundary instead of surfacing as a broken signal later.
+ */
+declare const ExternalEventSchema: Schema.Struct<{
+    source: typeof Schema.String;
+    eventName: typeof Schema.String;
+    correlationId: Schema.NullOr<typeof Schema.String>;
+    payload: typeof Schema.Unknown;
+    dedupeKey: typeof Schema.String;
+    receivedAtMs: typeof Schema.Number;
+}>;
+declare const decodeExternalEvent: (u: unknown, overrideOptions?: effect_SchemaAST.ParseOptions) => effect_Effect.Effect<{
+    readonly source: string;
+    readonly eventName: string;
+    readonly correlationId: string | null;
+    readonly payload: unknown;
+    readonly dedupeKey: string;
+    readonly receivedAtMs: number;
+}, effect_ParseResult.ParseError, never>;
 
 /**
  * @param {unknown} error
@@ -145,17 +136,17 @@ type IntegrationErrorReason = "invalid-signature" | "unknown-source" | "decode-f
  * runtime constructs internally so `handleWebhook(sourceId, request)` can
  * route incoming HTTP deliveries to them.
  */
-type MakeIntegrationRuntimeOptions = {
+type MakeIntegrationRuntimeOptions$1 = {
     adapter: _smithers_orchestrator_db_adapter.SmithersDb;
-    sources?: EventSource$1[];
-    webhookSources?: MakeWebhookSourceOptions[];
+    sources?: EventSource$2[];
+    webhookSources?: MakeWebhookSourceOptions$1[];
 };
 /**
  * A running integration runtime: one supervised delivery fiber per source,
  * a promise-based webhook entrypoint for the node HTTP server, and a
  * graceful shutdown.
  */
-type IntegrationRuntime = {
+type IntegrationRuntime$1 = {
     /** True when a webhook source with this id is registered. */
     hasWebhookSource: (sourceId: string) => boolean;
     /**
@@ -163,12 +154,25 @@ type IntegrationRuntime = {
      * whose `reason` is `unknown-source` (404), `invalid-signature` (401), or
      * `decode-failed` (400).
      */
-    handleWebhook: (sourceId: string, request: WebhookRequest) => Promise<{
+    handleWebhook: (sourceId: string, request: WebhookRequest$1) => Promise<{
         accepted: number;
     }>;
     /** Interrupt all source fibers and dispose the runtime. Idempotent. */
     shutdown: () => Promise<void>;
 };
+
+/**
+ * Start the process-wide integration runtime: forks one supervised delivery
+ * fiber per event source (webhook + polling) and exposes a promise-based
+ * `handleWebhook` seam for the node HTTP server, plus a graceful `shutdown`.
+ * Fibers run on a dedicated ManagedRuntime so shutdown cannot leak them.
+ *
+ * @param {MakeIntegrationRuntimeOptions} options
+ * @returns {IntegrationRuntime}
+ */
+declare function makeIntegrationRuntime(options: MakeIntegrationRuntimeOptions): IntegrationRuntime;
+type IntegrationRuntime = IntegrationRuntime$1;
+type MakeIntegrationRuntimeOptions = MakeIntegrationRuntimeOptions$1;
 
 /**
  * Read a dot-separated path (e.g. `"issue.id"`) out of a decoded JSON value.
@@ -248,4 +252,4 @@ declare function verifySignature(options: {
     prefix?: string;
 }): boolean;
 
-export { type CursorStore, INTEGRATION_SIGNAL_PREFIX, IntegrationError, type IntegrationErrorReason, type IntegrationRuntime, type MakeIntegrationRuntimeOptions, type MakePollingSourceOptions, type MakeWebhookSourceOptions, type PollResult, type SmithersDb, type WebhookRequest, type WebhookSource, computeHmacSha256Hex, deliverEvent, deliverEvents, integrationEventName, integrationReceivedBy, isIntegrationError, isIntegrationSignalName, parseIntegrationEventName, readJsonPath, verifySignature };
+export { type CursorStore, ExternalEventSchema, INTEGRATION_SIGNAL_PREFIX, IntegrationError, type IntegrationErrorReason, type IntegrationRuntime, type MakeIntegrationRuntimeOptions, type MakePollingSourceOptions, type MakeWebhookSourceOptions, type PollResult, type WebhookRequest, type WebhookSource, computeHmacSha256Hex, decodeExternalEvent, deliverEvent, deliverEvents, integrationEventName, integrationReceivedBy, isIntegrationError, isIntegrationSignalName, makeDbCursorStore, makeInMemoryCursorStore, makeIntegrationRuntime, makePollingSource, makeWebhookSource, parseIntegrationEventName, readJsonPath, verifySignature };

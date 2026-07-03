@@ -68,7 +68,7 @@ export function resolveOutboundDeps(ctx, deps, needs) {
  * Render an outbound Telegram compute Task.
  * @param {import("./outboundProps.ts").TelegramOutboundBaseProps} props
  * @param {string} componentName
- * @param {(client: import("../TelegramClient.ts").TelegramClientService, resolvedDeps: Record<string, unknown>) => Effect.Effect<unknown, unknown>} run
+ * @param {(client: import("../TelegramClientTypes.ts").TelegramClientService, resolvedDeps: Record<string, unknown>) => Effect.Effect<unknown, unknown>} run
  * @returns {React.ReactElement | null}
  */
 export function renderOutboundTask(props, componentName, run) {

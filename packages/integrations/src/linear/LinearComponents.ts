@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { ZodType } from "zod";
 import type { LinearConfig } from "./LinearConfig.ts";
-import type { LinearPriority } from "./LinearClient.ts";
+import type { LinearPriority } from "./LinearClientTypes.ts";
 
 /** Props shared by the Linear listener components (Signal.js pattern). */
 export type LinearListenerProps<Schema extends ZodType = ZodType> = {

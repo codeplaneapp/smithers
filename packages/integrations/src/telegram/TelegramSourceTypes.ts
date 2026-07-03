@@ -1,6 +1,6 @@
 import type { Schedule } from "effect";
-import type { CursorStore } from "../core/CursorStore.ts";
-import type { TelegramClientConfig } from "./TelegramClient.ts";
+import type { CursorStore } from "../core/CursorStoreTypes.ts";
+import type { TelegramClientConfig } from "./TelegramClientTypes.ts";
 
 /**
  * Options for `makeTelegramSource`: a getUpdates long-poll EventSource whose

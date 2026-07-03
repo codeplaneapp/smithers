@@ -1,5 +1,5 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./ExternalEvent.ts").ExternalEvent} ExternalEvent */
+/** @typedef {import("./ExternalEventTypes.ts").ExternalEvent} ExternalEvent */
 // @smithers-type-exports-end
 
 import { Schema } from "effect";

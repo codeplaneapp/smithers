@@ -1,4 +1,4 @@
-import type { EventSource, MakeWebhookSourceOptions, WebhookRequest } from "./EventSource.ts";
+import type { EventSource, MakeWebhookSourceOptions, WebhookRequest } from "./EventSourceTypes.ts";
 
 /**
  * Options for `makeIntegrationRuntime`. `sources` are self-driving streams

@@ -1,6 +1,6 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./IntegrationRuntime.ts").IntegrationRuntime} IntegrationRuntime */
-/** @typedef {import("./IntegrationRuntime.ts").MakeIntegrationRuntimeOptions} MakeIntegrationRuntimeOptions */
+/** @typedef {import("./IntegrationRuntimeTypes.ts").IntegrationRuntime} IntegrationRuntime */
+/** @typedef {import("./IntegrationRuntimeTypes.ts").MakeIntegrationRuntimeOptions} MakeIntegrationRuntimeOptions */
 // @smithers-type-exports-end
 
 import { Cause, Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Schedule } from "effect";
@@ -25,14 +25,14 @@ const SOURCE_RESTART_SCHEDULE = Schedule.union(Schedule.exponential("1 second"),
 export function makeIntegrationRuntime(options) {
     const { adapter, sources = [], webhookSources = [] } = options;
     const runtime = ManagedRuntime.make(Layer.empty);
-    /** @type {Map<string, (request: import("./EventSource.ts").WebhookRequest) => Effect.Effect<{ accepted: number }, import("@smithers-orchestrator/errors/SmithersError").SmithersError>>} */
+    /** @type {Map<string, (request: import("./EventSourceTypes.ts").WebhookRequest) => Effect.Effect<{ accepted: number }, import("@smithers-orchestrator/errors/SmithersError").SmithersError>>} */
     const webhookOffers = new Map();
     /** @type {Effect.Effect<void>[]} */
     const sourceShutdowns = [];
     /** @type {import("effect/Fiber").RuntimeFiber<void, never>[]} */
     const fibers = [];
     /**
-   * @param {import("./EventSource.ts").EventSource} source
+   * @param {import("./EventSourceTypes.ts").EventSource} source
    */
     const supervise = (source) => deliverEvents(adapter, source).pipe(Effect.tapError((error) => Effect.sync(() => {
         logError("integration source stream failed; restarting", {

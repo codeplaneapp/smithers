@@ -1,4 +1,4 @@
-import type { MakeWebhookSourceOptions } from "../core/EventSource.ts";
+import type { MakeWebhookSourceOptions } from "../core/EventSourceTypes.ts";
 import type { LinearConfig } from "./LinearConfig.ts";
 
 export type MakeLinearWebhookSourceOptions = LinearConfig & {

@@ -1,5 +1,5 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./CursorStore.ts").CursorStore} CursorStore */
+/** @typedef {import("./CursorStoreTypes.ts").CursorStore} CursorStore */
 // @smithers-type-exports-end
 
 import { Effect } from "effect";

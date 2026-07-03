@@ -3,8 +3,8 @@ import { signalRun } from "@smithers-orchestrator/engine/signals";
 import { logError, logInfo } from "@smithers-orchestrator/observability/logging";
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("./ExternalEvent.ts").ExternalEvent} ExternalEvent */
-/** @typedef {import("./EventSource.ts").EventSource} EventSource */
+/** @typedef {import("./ExternalEventTypes.ts").ExternalEvent} ExternalEvent */
+/** @typedef {import("./EventSourceTypes.ts").EventSource} EventSource */
 
 // Per-run delivery retry: transient db/signal failures back off exponentially,
 // bounded so one poisoned run cannot stall the source stream.

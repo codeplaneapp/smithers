@@ -8,8 +8,8 @@ import { integrationEventName } from "../core/signalNames.js";
 import { verifySignature } from "../core/verifySignature.js";
 import { resolveGitHubConfig } from "./config.js";
 
-/** @typedef {import("../core/EventSource.ts").WebhookRequest} WebhookRequest */
-/** @typedef {import("../core/ExternalEvent.ts").ExternalEvent} ExternalEvent */
+/** @typedef {import("../core/EventSourceTypes.ts").WebhookRequest} WebhookRequest */
+/** @typedef {import("../core/ExternalEventTypes.ts").ExternalEvent} ExternalEvent */
 
 export const GITHUB_SOURCE_ID = "github";
 
@@ -120,7 +120,7 @@ export function decodeGitHubWebhook(request, receivedAtMs = Date.now()) {
  * and pass `source`/`offer` around.
  *
  * @param {MakeGitHubWebhookSourceOptions} [options]
- * @returns {import("effect").Effect.Effect<import("../core/EventSource.ts").WebhookSource, never>}
+ * @returns {import("effect").Effect.Effect<import("../core/EventSourceTypes.ts").WebhookSource, never>}
  */
 export function makeGitHubWebhookSource(options = {}) {
     return makeWebhookSource(githubWebhookSourceConfig(options));
@@ -132,7 +132,7 @@ export function makeGitHubWebhookSource(options = {}) {
  * object (the runtime constructs the queue itself).
  *
  * @param {MakeGitHubWebhookSourceOptions} [options]
- * @returns {import("../core/EventSource.ts").MakeWebhookSourceOptions}
+ * @returns {import("../core/EventSourceTypes.ts").MakeWebhookSourceOptions}
  */
 export function githubWebhookSourceConfig(options = {}) {
     const { id = GITHUB_SOURCE_ID, capacity, ...config } = options;

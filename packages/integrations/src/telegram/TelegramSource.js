@@ -1,5 +1,5 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./TelegramSource.ts").MakeTelegramSourceOptions} MakeTelegramSourceOptions */
+/** @typedef {import("./TelegramSourceTypes.ts").MakeTelegramSourceOptions} MakeTelegramSourceOptions */
 // @smithers-type-exports-end
 
 import { Effect, Schedule } from "effect";
@@ -13,6 +13,7 @@ export const TELEGRAM_SERVICE = "telegram";
 export const TELEGRAM_MESSAGE_EVENT = integrationEventName(TELEGRAM_SERVICE, "message");
 export const TELEGRAM_EDITED_MESSAGE_EVENT = integrationEventName(TELEGRAM_SERVICE, "edited_message");
 export const TELEGRAM_CALLBACK_QUERY_EVENT = integrationEventName(TELEGRAM_SERVICE, "callback_query");
+export const TELEGRAM_WEB_APP_DATA_EVENT = integrationEventName(TELEGRAM_SERVICE, "web_app_data");
 
 const DEFAULT_ALLOWED_UPDATES = ["message", "edited_message", "callback_query"];
 const DEFAULT_POLL_TIMEOUT_SECONDS = 25;
@@ -50,11 +51,11 @@ export function telegramThreadCorrelationId(chatId, threadId) {
  * @param {string} sourceId
  * @param {Record<string, any>} update
  * @param {number} receivedAtMs
- * @returns {import("../core/ExternalEvent.ts").ExternalEvent[]}
+ * @returns {import("../core/ExternalEventTypes.ts").ExternalEvent[]}
  */
 export function telegramUpdateToEvents(sourceId, update, receivedAtMs) {
     const updateId = update.update_id;
-    /** @type {import("../core/ExternalEvent.ts").ExternalEvent[]} */
+    /** @type {import("../core/ExternalEventTypes.ts").ExternalEvent[]} */
     const events = [];
     /**
    * @param {string} eventName
@@ -73,7 +74,10 @@ export function telegramUpdateToEvents(sourceId, update, receivedAtMs) {
             dedupeKey: `update:${updateId}`,
             receivedAtMs,
         });
-        if (message.is_topic_message && message.message_thread_id != null) {
+        // Emit a thread-scoped variant whenever the message carries a thread id
+        // (forum topic OR reply thread), matching the listener which builds a
+        // thread correlation for any threadId it is given.
+        if (message.message_thread_id != null) {
             events.push({
                 source: sourceId,
                 eventName,
@@ -86,6 +90,33 @@ export function telegramUpdateToEvents(sourceId, update, receivedAtMs) {
     };
     if (update.message) {
         pushMessageEvents(TELEGRAM_MESSAGE_EVENT, update.message);
+        // A reply-keyboard Mini App's Telegram.WebApp.sendData arrives as a
+        // normal message carrying a web_app_data field. Emit an extra,
+        // separately-deduped event so a run can wait specifically for
+        // structured Mini App data (payload = the same Message).
+        if (update.message.web_app_data) {
+            const chatId = update.message?.chat?.id;
+            if (chatId != null) {
+                events.push({
+                    source: sourceId,
+                    eventName: TELEGRAM_WEB_APP_DATA_EVENT,
+                    correlationId: telegramChatCorrelationId(chatId),
+                    payload: update.message,
+                    dedupeKey: `update:${updateId}:webappdata`,
+                    receivedAtMs,
+                });
+                if (update.message.message_thread_id != null) {
+                    events.push({
+                        source: sourceId,
+                        eventName: TELEGRAM_WEB_APP_DATA_EVENT,
+                        correlationId: telegramThreadCorrelationId(chatId, update.message.message_thread_id),
+                        payload: update.message,
+                        dedupeKey: `update:${updateId}:webappdata:thread`,
+                        receivedAtMs,
+                    });
+                }
+            }
+        }
     }
     else if (update.edited_message) {
         pushMessageEvents(TELEGRAM_EDITED_MESSAGE_EVENT, update.edited_message);
@@ -102,7 +133,7 @@ export function telegramUpdateToEvents(sourceId, update, receivedAtMs) {
             receivedAtMs,
         });
         const threadId = callbackQuery?.message?.message_thread_id;
-        if (chatId != null && callbackQuery?.message?.is_topic_message && threadId != null) {
+        if (chatId != null && threadId != null) {
             events.push({
                 source: sourceId,
                 eventName: TELEGRAM_CALLBACK_QUERY_EVENT,
@@ -136,7 +167,7 @@ function updateChatId(update) {
  * Non-allowed chats are dropped but still acknowledged (offset advances).
  *
  * @param {MakeTelegramSourceOptions} options
- * @returns {import("../core/EventSource.ts").EventSource}
+ * @returns {import("../core/EventSourceTypes.ts").EventSource}
  */
 export function makeTelegramSource(options) {
     const { sourceId = TELEGRAM_SERVICE, cursorStore, pollTimeoutSeconds = DEFAULT_POLL_TIMEOUT_SECONDS, schedule = Schedule.spaced("250 millis"), allowedUpdates = DEFAULT_ALLOWED_UPDATES, allowedChatIds, ...clientConfig } = options;
@@ -161,7 +192,7 @@ export function makeTelegramSource(options) {
             const result = yield* client.call("getUpdates", params).pipe(Effect.mapError((cause) => new IntegrationError("poll-failed", `Telegram getUpdates failed for source "${sourceId}".`, { sourceId }, { cause })));
             const updates = Array.isArray(result) ? result : [];
             const receivedAtMs = Date.now();
-            /** @type {import("../core/ExternalEvent.ts").ExternalEvent[]} */
+            /** @type {import("../core/ExternalEventTypes.ts").ExternalEvent[]} */
             const events = [];
             let maxUpdateId = null;
             for (const update of updates) {

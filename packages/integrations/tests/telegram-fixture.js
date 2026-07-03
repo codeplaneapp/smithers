@@ -109,6 +109,9 @@ export function startTelegramFixture(options = {}) {
                 case "answerCallbackQuery": {
                     return Response.json({ ok: true, result: true });
                 }
+                case "answerWebAppQuery": {
+                    return Response.json({ ok: true, result: { inline_message_id: `iq-${body.web_app_query_id}` } });
+                }
                 default:
                     return Response.json({ ok: false, error_code: 404, description: `Unknown method ${method}` }, { status: 404 });
             }

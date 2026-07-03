@@ -5,7 +5,7 @@ import type {
   TelegramClientConfig,
   TelegramDocumentInput,
   TelegramInlineKeyboard,
-} from "../TelegramClient.ts";
+} from "../TelegramClientTypes.ts";
 
 /** Loose deps spec (mirrors Task's DepsSpec: dep key → zod output schema). */
 export type TelegramDepsSpec = Record<string, z.ZodTypeAny>;

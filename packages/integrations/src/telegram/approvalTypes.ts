@@ -1,7 +1,7 @@
 import type {
   TelegramInlineKeyboard,
   TelegramInlineKeyboardButton,
-} from "./TelegramClient.ts";
+} from "./TelegramClientTypes.ts";
 
 /** One choice an approver can make via an inline button. */
 export type TelegramApprovalChoice =
@@ -22,6 +22,8 @@ export type TelegramApprovalMode = "approve" | "select";
 /** Spec for building the approval keyboard and mapping the press to a decision. */
 export type TelegramApprovalKeyboardSpec = {
   mode: TelegramApprovalMode;
+  /** Per-approval token that namespaces its buttons (see `approvalToken`). */
+  token?: string;
   /** Options for `mode: "select"` (required, non-empty). */
   options?: TelegramApprovalOption[];
   /** Approve-button label. @default "✅ Approve" */

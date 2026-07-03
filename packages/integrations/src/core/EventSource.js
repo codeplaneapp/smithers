@@ -1,10 +1,10 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./EventSource.ts").EventSource} EventSource */
-/** @typedef {import("./EventSource.ts").MakePollingSourceOptions} MakePollingSourceOptions */
-/** @typedef {import("./EventSource.ts").MakeWebhookSourceOptions} MakeWebhookSourceOptions */
-/** @typedef {import("./EventSource.ts").PollResult} PollResult */
-/** @typedef {import("./EventSource.ts").WebhookRequest} WebhookRequest */
-/** @typedef {import("./EventSource.ts").WebhookSource} WebhookSource */
+/** @typedef {import("./EventSourceTypes.ts").EventSource} EventSource */
+/** @typedef {import("./EventSourceTypes.ts").MakePollingSourceOptions} MakePollingSourceOptions */
+/** @typedef {import("./EventSourceTypes.ts").MakeWebhookSourceOptions} MakeWebhookSourceOptions */
+/** @typedef {import("./EventSourceTypes.ts").PollResult} PollResult */
+/** @typedef {import("./EventSourceTypes.ts").WebhookRequest} WebhookRequest */
+/** @typedef {import("./EventSourceTypes.ts").WebhookSource} WebhookSource */
 // @smithers-type-exports-end
 
 import { Effect, Queue, Ref, Schedule, Stream } from "effect";
@@ -25,7 +25,7 @@ const DEFAULT_WEBHOOK_CAPACITY = 256;
 export function makeWebhookSource(options) {
     const { id, capacity = DEFAULT_WEBHOOK_CAPACITY, verify, decode } = options;
     return Effect.gen(function* () {
-        /** @type {Queue.Queue<import("./ExternalEvent.ts").ExternalEvent>} */
+        /** @type {Queue.Queue<import("./ExternalEventTypes.ts").ExternalEvent>} */
         const queue = yield* Queue.bounded(capacity);
         /** @type {EventSource} */
         const source = { id, events: Stream.fromQueue(queue) };

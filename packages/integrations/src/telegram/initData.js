@@ -1,8 +1,8 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./initData.ts").TelegramInitData} TelegramInitData */
-/** @typedef {import("./initData.ts").TelegramInitDataUser} TelegramInitDataUser */
-/** @typedef {import("./initData.ts").VerifyTelegramWebAppInitDataOptions} VerifyTelegramWebAppInitDataOptions */
-/** @typedef {import("./initData.ts").VerifyTelegramWebAppInitDataSignatureOptions} VerifyTelegramWebAppInitDataSignatureOptions */
+/** @typedef {import("./initDataTypes.ts").TelegramInitData} TelegramInitData */
+/** @typedef {import("./initDataTypes.ts").TelegramInitDataUser} TelegramInitDataUser */
+/** @typedef {import("./initDataTypes.ts").VerifyTelegramWebAppInitDataOptions} VerifyTelegramWebAppInitDataOptions */
+/** @typedef {import("./initDataTypes.ts").VerifyTelegramWebAppInitDataSignatureOptions} VerifyTelegramWebAppInitDataSignatureOptions */
 // @smithers-type-exports-end
 
 // Telegram Mini App (Web App) initData verification.
@@ -275,13 +275,21 @@ export async function verifyTelegramWebAppInitDataSignature(initData, botId, opt
   const publicKeyHex = options.publicKeyHex ?? TELEGRAM_WEBAPP_ED25519_PUBLIC_KEY_PROD;
   const dataCheckString = buildDataCheckString(params, new Set(["hash", "signature"]));
   const message = `${botId}:WebAppData\n${dataCheckString}`;
+  // The signature is attacker-controlled: a malformed base64url value must
+  // reject as TELEGRAM_INIT_DATA_INVALID, not throw a raw DOMException.
+  let signatureBytes;
+  try {
+    signatureBytes = base64UrlToBytes(signature);
+  } catch {
+    throw invalid("initData signature is not valid base64url.");
+  }
   let key;
   try {
     key = await subtle.importKey("raw", hexToBytes(publicKeyHex), { name: "Ed25519" }, false, ["verify"]);
   } catch (cause) {
     throw new SmithersError("UNSUPPORTED", "Ed25519 verification is not supported in this runtime.", undefined, { cause });
   }
-  const ok = await subtle.verify("Ed25519", key, base64UrlToBytes(signature), encoder.encode(message));
+  const ok = await subtle.verify("Ed25519", key, signatureBytes, encoder.encode(message));
   if (!ok) {
     throw invalid("initData Ed25519 signature does not match.");
   }

@@ -1,6 +1,6 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./LinearWebhookSource.ts").LinearWebhookSourceConfig} LinearWebhookSourceConfig */
-/** @typedef {import("./LinearWebhookSource.ts").MakeLinearWebhookSourceOptions} MakeLinearWebhookSourceOptions */
+/** @typedef {import("./LinearWebhookSourceTypes.ts").LinearWebhookSourceConfig} LinearWebhookSourceConfig */
+/** @typedef {import("./LinearWebhookSourceTypes.ts").MakeLinearWebhookSourceOptions} MakeLinearWebhookSourceOptions */
 // @smithers-type-exports-end
 
 import { integrationEventName } from "../core/signalNames.js";
@@ -41,7 +41,7 @@ function normalizeWebhookTimestampMs(value) {
  * hex digest of the raw body, and `webhookTimestamp` inside the body must
  * be fresh (within `maxTimestampSkewMs`) to block replays.
  *
- * @param {import("../core/EventSource.ts").WebhookRequest} request
+ * @param {import("../core/EventSourceTypes.ts").WebhookRequest} request
  * @param {string} secret
  * @param {number} [maxTimestampSkewMs]
  * @param {() => number} [now]
@@ -83,9 +83,9 @@ export function verifyLinearWebhook(request, secret, maxTimestampSkewMs = DEFAUL
  * gets a distinct dedupeKey suffix so redeliveries of the whole webhook
  * dedupe while sibling variants do not collide.
  *
- * @param {import("../core/EventSource.ts").WebhookRequest} request
+ * @param {import("../core/EventSourceTypes.ts").WebhookRequest} request
  * @param {string} sourceId
- * @returns {import("../core/ExternalEvent.ts").ExternalEvent[]}
+ * @returns {import("../core/ExternalEventTypes.ts").ExternalEvent[]}
  */
 export function decodeLinearWebhook(request, sourceId = LINEAR_SOURCE_ID) {
     /** @type {any} */
@@ -115,7 +115,7 @@ export function decodeLinearWebhook(request, sourceId = LINEAR_SOURCE_ID) {
     ];
     /** @type {(string | null)[]} */
     const correlations = [...new Set([identifier, teamKey].filter((value) => value !== null)), null];
-    /** @type {import("../core/ExternalEvent.ts").ExternalEvent[]} */
+    /** @type {import("../core/ExternalEventTypes.ts").ExternalEvent[]} */
     const events = [];
     for (const eventName of eventNames) {
         for (const correlationId of correlations) {

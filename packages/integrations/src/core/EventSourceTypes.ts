@@ -1,5 +1,5 @@
 import type { Stream } from "effect";
-import type { ExternalEvent } from "./ExternalEvent.ts";
+import type { ExternalEvent } from "./ExternalEventTypes.ts";
 import type { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 /**
@@ -54,5 +54,5 @@ export type MakePollingSourceOptions = {
   /** Poll cadence. @default Schedule.spaced("5 seconds") */
   schedule?: import("effect").Schedule.Schedule<unknown>;
   /** Durable cursor persistence (e.g. `makeDbCursorStore(adapter)`). */
-  cursorStore?: import("./CursorStore.ts").CursorStore;
+  cursorStore?: import("./CursorStoreTypes.ts").CursorStore;
 };

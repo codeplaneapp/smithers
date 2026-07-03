@@ -144,7 +144,7 @@ function fromDeps(value, deps) {
 
 /**
  * @param {string} displayName
- * @param {(props: any, resolvedDeps: Record<string, unknown>) => (client: import("./LinearClient.ts").LinearClientService) => Effect.Effect<Record<string, unknown>, import("@smithers-orchestrator/errors/SmithersError").SmithersError>} buildCall
+ * @param {(props: any, resolvedDeps: Record<string, unknown>) => (client: import("./LinearClientTypes.ts").LinearClientService) => Effect.Effect<Record<string, unknown>, import("@smithers-orchestrator/errors/SmithersError").SmithersError>} buildCall
  */
 function makeLinearOutbound(displayName, buildCall) {
     /** @param {any} props */
@@ -189,7 +189,7 @@ function makeLinearOutbound(displayName, buildCall) {
 }
 
 /**
- * @param {import("./LinearClient.ts").LinearIssueResult} issue
+ * @param {import("./LinearClientTypes.ts").LinearIssueResult} issue
  * @returns {{ id: string; identifier: string; title: string; url: string }}
  */
 function issueOutputRow(issue) {
@@ -208,7 +208,7 @@ function issueOutputRow(issue) {
  * @type {(props: CreateIssueProps) => React.ReactElement | null}
  */
 export const CreateIssue = makeLinearOutbound("Linear.CreateIssue", (props, deps) => {
-    /** @type {import("./LinearClient.ts").CreateIssueInput} */
+    /** @type {import("./LinearClientTypes.ts").CreateIssueInput} */
     const input = {
         teamKey: fromDeps(props.teamKey, deps),
         teamId: fromDeps(props.teamId, deps),
@@ -229,7 +229,7 @@ export const CreateIssue = makeLinearOutbound("Linear.CreateIssue", (props, deps
  */
 export const UpdateIssue = makeLinearOutbound("Linear.UpdateIssue", (props, deps) => {
     const issue = /** @type {string} */ (fromDeps(props.issue, deps));
-    /** @type {import("./LinearClient.ts").UpdateIssueFields} */
+    /** @type {import("./LinearClientTypes.ts").UpdateIssueFields} */
     const fields = {
         title: fromDeps(props.title, deps),
         description: fromDeps(props.description, deps),

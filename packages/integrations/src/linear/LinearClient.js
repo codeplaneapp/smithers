@@ -1,10 +1,10 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./LinearClient.ts").CreateIssueInput} CreateIssueInput */
-/** @typedef {import("./LinearClient.ts").LinearClientService} LinearClientService */
-/** @typedef {import("./LinearClient.ts").LinearCommentResult} LinearCommentResult */
-/** @typedef {import("./LinearClient.ts").LinearIssueResult} LinearIssueResult */
-/** @typedef {import("./LinearClient.ts").LinearPriority} LinearPriority */
-/** @typedef {import("./LinearClient.ts").LinearTeamRef} LinearTeamRef */
+/** @typedef {import("./LinearClientTypes.ts").CreateIssueInput} CreateIssueInput */
+/** @typedef {import("./LinearClientTypes.ts").LinearClientService} LinearClientService */
+/** @typedef {import("./LinearClientTypes.ts").LinearCommentResult} LinearCommentResult */
+/** @typedef {import("./LinearClientTypes.ts").LinearIssueResult} LinearIssueResult */
+/** @typedef {import("./LinearClientTypes.ts").LinearPriority} LinearPriority */
+/** @typedef {import("./LinearClientTypes.ts").LinearTeamRef} LinearTeamRef */
 /** @typedef {import("./LinearConfig.ts").LinearConfig} LinearConfig */
 // @smithers-type-exports-end
 
@@ -298,7 +298,7 @@ export function makeLinearClient(config) {
      * Resolve name-based fields (priority/state/labels) into a raw
      * Issue{Create,Update}Input fragment.
      * @param {string | undefined} teamId
-     * @param {import("./LinearClient.ts").UpdateIssueFields} fields
+     * @param {import("./LinearClientTypes.ts").UpdateIssueFields} fields
      */
     const buildIssueInput = (teamId, fields) => Effect.gen(function* () {
         /** @type {Record<string, unknown>} */

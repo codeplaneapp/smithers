@@ -1,11 +1,11 @@
 // @smithers-type-exports-begin
-/** @typedef {import("./TelegramClient.ts").TelegramClientConfig} TelegramClientConfig */
-/** @typedef {import("./TelegramClient.ts").TelegramClientService} TelegramClientService */
-/** @typedef {import("./TelegramClient.ts").SendMessageSmartOptions} SendMessageSmartOptions */
-/** @typedef {import("./TelegramClient.ts").SendMessageSmartResult} SendMessageSmartResult */
-/** @typedef {import("./TelegramClient.ts").SendDocumentOptions} SendDocumentOptions */
-/** @typedef {import("./TelegramClient.ts").TelegramDocumentInput} TelegramDocumentInput */
-/** @typedef {import("./TelegramClient.ts").TelegramInlineKeyboard} TelegramInlineKeyboard */
+/** @typedef {import("./TelegramClientTypes.ts").TelegramClientConfig} TelegramClientConfig */
+/** @typedef {import("./TelegramClientTypes.ts").TelegramClientService} TelegramClientService */
+/** @typedef {import("./TelegramClientTypes.ts").SendMessageSmartOptions} SendMessageSmartOptions */
+/** @typedef {import("./TelegramClientTypes.ts").SendMessageSmartResult} SendMessageSmartResult */
+/** @typedef {import("./TelegramClientTypes.ts").SendDocumentOptions} SendDocumentOptions */
+/** @typedef {import("./TelegramClientTypes.ts").TelegramDocumentInput} TelegramDocumentInput */
+/** @typedef {import("./TelegramClientTypes.ts").TelegramInlineKeyboard} TelegramInlineKeyboard */
 // @smithers-type-exports-end
 
 import { Context, Effect, Layer, Schedule } from "effect";
@@ -307,7 +307,12 @@ export function makeTelegramClient(config) {
         ...(options.text ? { text: options.text } : {}),
         ...(options.showAlert ? { show_alert: true } : {}),
     });
-    return { call, sendMessageSmart, editMessageSmart, sendDocument, answerCallbackQuery };
+    /** @type {TelegramClientService["answerWebAppQuery"]} */
+    const answerWebAppQuery = (webAppQueryId, result) => call("answerWebAppQuery", {
+        web_app_query_id: webAppQueryId,
+        result,
+    });
+    return { call, sendMessageSmart, editMessageSmart, sendDocument, answerCallbackQuery, answerWebAppQuery };
 }
 
 /**
