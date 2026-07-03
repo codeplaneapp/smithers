@@ -109,6 +109,11 @@ the component in:
 
 ```tsx
 import { createSmithers } from "smithers-orchestrator";
+import {
+  TelegramApproval,
+  telegramApprovalSchemas,
+  telegramApprovalDecisionSchema,
+} from "@smithers-orchestrator/integrations/telegram";
 
 const { smithers, Workflow, outputs } = createSmithers({
   ...telegramApprovalSchemas,
