@@ -31,12 +31,29 @@ function setup() {
     HOME: repo.dir,
     PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
     ANTHROPIC_API_KEY: "",
-    OPENAI_API_KEY: "sk-test-openai-key",
+    // Leave OPENAI_API_KEY empty so Codex resolves subscription auth from the
+    // auth.json below instead of probing a fake env key against the real OpenAI
+    // API (which returns 401 and hard-fails Codex preflight). The `implement`
+    // workflow leads its first task with Codex (the "fable sandwich"), so a
+    // single-agent Codex task must authenticate — a non-retryable preflight
+    // auth failure would fail the run before it can fall over to Sonnet. This
+    // mirrors the canonical seeded-workflows-run.e2e setup.
+    OPENAI_API_KEY: "",
     GEMINI_API_KEY: "",
     GOOGLE_API_KEY: "",
   };
   repo.write(".claude/.credentials.json", "{}\n");
-  repo.write(".codex/auth.json", "{}\n");
+  // ChatGPT subscription auth: presence of a tokens.access_token makes Codex
+  // preflight pass in subscription mode (no network probe), matching how a
+  // logged-in `codex` CLI authenticates.
+  repo.write(
+    ".codex/auth.json",
+    JSON.stringify({
+      auth_mode: "chatgpt",
+      OPENAI_API_KEY: null,
+      tokens: { access_token: "fake-access-token", account_id: "acct_test" },
+    }) + "\n",
+  );
   repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
   expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
   return { repo, env };
