@@ -27,6 +27,7 @@ export async function createMcpToolset(config, options = {}) {
     ...(config.cwd ? { cwd: config.cwd } : {}),
     stderr: "pipe",
   });
+  drainStderr(transport, options.onStderr);
   const client = new Client({
     name: options.clientName ?? "smithers-mcp-toolset",
     version: options.clientVersion ?? "0.0.0",
@@ -73,6 +74,31 @@ export async function createMcpToolset(config, options = {}) {
     toolNames: Object.keys(tools),
     close: () => client.close(),
   };
+}
+
+/**
+ * Continuously consume the child's stderr so a chatty MCP server never blocks.
+ * With `stderr: "pipe"` the SDK pipes the child's stderr into a PassThrough that
+ * applies backpressure once its buffer fills; with no reader that backpressure
+ * stalls the child's writes (~80KB in) and the whole toolset deadlocks. The
+ * getter returns the PassThrough immediately, so attaching before `connect()`
+ * also captures any early startup output.
+ *
+ * @param {StdioClientTransport} transport
+ * @param {((chunk: string) => void) | undefined} onStderr
+ */
+function drainStderr(transport, onStderr) {
+  const stream = transport.stderr;
+  if (!stream) return;
+  const sink = onStderr ?? ((text) => void process.stderr.write(text));
+  stream.on("data", (chunk) => {
+    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    try {
+      sink(text);
+    } catch {
+      // A throwing sink must never break the drain loop, or the pipe re-fills.
+    }
+  });
 }
 
 /**

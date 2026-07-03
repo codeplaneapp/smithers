@@ -4,6 +4,7 @@ import { AnthropicAgent } from "../src/index.js";
 import { createMcpToolset } from "../src/mcp/createMcpToolset.js";
 
 const DEMO_SERVER = resolve(import.meta.dir, "fixtures", "demo-mcp-server.js");
+const FLOOD_SERVER = resolve(import.meta.dir, "fixtures", "stderr-flood-mcp-server.js");
 
 /** @param {Partial<import("../src/mcp/McpToolsetOptions")>} [options] */
 function connectDemo(options) {
@@ -53,7 +54,45 @@ describe("createMcpToolset (real MCP server over stdio)", () => {
       await toolset.close();
     }
   });
+
+  test(
+    "drains a chatty server's stderr so a >pipe-buffer flood never deadlocks",
+    async () => {
+      let received = 0;
+      const toolset = await createMcpToolset(
+        { command: "bun", args: [FLOOD_SERVER] },
+        {
+          onStderr: (chunk) => {
+            received += chunk.length;
+          },
+        },
+      );
+      try {
+        const flood = 4 * 1024 * 1024;
+        const result = await toolset.tools.flood.execute({ bytes: flood }, callOptions);
+        expect(result).toContain("flooded");
+        // The reply can land before the last stderr chunks are read, so wait for
+        // the sink to catch up. Without draining, received stays 0 and this times out.
+        await waitUntil(() => received >= flood, 10000);
+      } finally {
+        await toolset.close();
+      }
+    },
+    20000,
+  );
 });
+
+/**
+ * @param {() => boolean} predicate
+ * @param {number} timeoutMs
+ */
+async function waitUntil(predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("waitUntil timed out");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 /** A prebuilt language model so constructing the agent needs no API key. */
 function fakeModel() {

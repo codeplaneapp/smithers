@@ -376,6 +376,46 @@ function extractTextFromJsonPayload(raw) {
     return chunks.length ? chunks.join("") : undefined;
 }
 /**
+ * Choose the agent's final answer text from the available sources, in priority:
+ *   1. A dedicated final-message file that parsed as JSON — the CLI's
+ *      authoritative output channel (e.g. codex --output-last-message).
+ *   2. For `stream-json`, the interpreter's parsed final answer whenever it is
+ *      present, on INTACT runs too. `extractTextFromJsonPayload` concatenates
+ *      every assistant turn for Claude Code NDJSON — its reverse-scan matches no
+ *      terminal message type (Claude emits `assistant`/`result`, not
+ *      `turn_end`/`agent_end`/`finish`), so it falls to the chunk-join path and
+ *      duplicates content while splicing in tool-result noise. The interpreter's
+ *      answer is the clean terminal `result`. (#277 originally kept intact runs
+ *      on the concatenation path; that silently corrupted every stream-json step.)
+ *   3. On truncation or empty extraction, the interpreter answer, then the
+ *      extracted stdout, then the raw text.
+ *   4. Otherwise the historical stdout extraction (json / plain-text formats).
+ *
+ * @param {{
+ *   outputFileJson: unknown,
+ *   outputFileText: string | undefined,
+ *   streamedAnswer: string | undefined,
+ *   extractedFromStdout: string | undefined,
+ *   rawText: string,
+ *   stdoutTruncated: boolean,
+ *   outputFormat: string | undefined,
+ * }} sources
+ * @returns {string}
+ */
+export function resolveAgentAnswerText(sources) {
+    const { outputFileJson, outputFileText, streamedAnswer, extractedFromStdout, rawText, stdoutTruncated, outputFormat, } = sources;
+    if (outputFileJson != null) {
+        return outputFileText ?? rawText;
+    }
+    if (outputFormat === "stream-json" && streamedAnswer != null) {
+        return streamedAnswer;
+    }
+    if (stdoutTruncated || extractedFromStdout == null || extractedFromStdout.trim() === "") {
+        return streamedAnswer ?? extractedFromStdout ?? rawText;
+    }
+    return extractedFromStdout;
+}
+/**
  * @param {string} raw
  * @returns {string}
  */
@@ -1064,11 +1104,15 @@ export class BaseCliAgent {
                 const outputFileJson = typeof outputFileText === "string" && outputFileText.trim() !== ""
                     ? tryParseJson(outputFileText)
                     : null;
-                const extractedText = outputFileJson != null
-                    ? outputFileText
-                    : result.stdoutTruncated || extractedFromStdout == null || extractedFromStdout.trim() === ""
-                        ? (streamedAnswer ?? extractedFromStdout ?? rawText)
-                        : extractedFromStdout;
+                const extractedText = resolveAgentAnswerText({
+                    outputFileJson,
+                    outputFileText,
+                    streamedAnswer,
+                    extractedFromStdout,
+                    rawText,
+                    stdoutTruncated: result.stdoutTruncated,
+                    outputFormat,
+                });
                 const output = outputFileJson ?? tryParseJson(extractedText);
                 // Extract token usage from raw stdout before text extraction strips it.
                 // Each CLI harness embeds usage differently (NDJSON events, JSON stats, etc.)
