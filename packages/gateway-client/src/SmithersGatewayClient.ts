@@ -484,6 +484,10 @@ export class SmithersGatewayClient {
     return this.rpc("listApprovals", params);
   }
 
+  getDevToolsSnapshot(params: GatewayRpcParams<"getDevToolsSnapshot">) {
+    return this.rpc("getDevToolsSnapshot", params);
+  }
+
   getNodeOutput(params: GatewayRpcParams<"getNodeOutput">) {
     return this.rpc("getNodeOutput", params);
   }

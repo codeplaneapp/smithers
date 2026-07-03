@@ -6382,6 +6382,487 @@ paths:
                           - observability:read
                       refresh:
                         type: string
+  /v1/rpc/getDevToolsSnapshot:
+    post:
+      operationId: getDevToolsSnapshot
+      summary: "Get DevTools Snapshot"
+      description: "Fetch a DevTools snapshot tree for a run, optionally pinned to a frame number."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - observability:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: observability:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: getDevToolsSnapshot
+                params:
+                  type: object
+                  properties:
+                    runId:
+                      type: string
+                      description: "Stable run identifier."
+                    frameNo:
+                      type: integer
+                      minimum: 0
+                      description: "Target frame number."
+                  required:
+                    - runId
+                  additionalProperties: false
+            example:
+              id: getDevToolsSnapshot-1
+              method: getDevToolsSnapshot
+              params:
+                runId: run_01
+                frameNo: 4
+      responses:
+        200:
+          description: "Get DevTools Snapshot response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: object
+                    description: "DevTools snapshot payload."
+                    properties: {}
+                    required: []
+                    additionalProperties: true
+              example:
+                type: res
+                id: getDevToolsSnapshot-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  version: 1
+                  runId: run_01
+                  frameNo: 4
+                  seq: 18
+                  root:
+                    id: 0
+                    type: workflow
+                    name: deploy
+                    props: {}
+                    children: []
+                    depth: 0
+        400:
+          description: "The requested frame is outside the available range."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - FrameOutOfRange
+                          - PayloadTooLarge
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - FrameOutOfRange
+                          - PayloadTooLarge
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - FrameOutOfRange
+                          - PayloadTooLarge
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        404:
+          description: "The run does not exist."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - FrameOutOfRange
+                          - PayloadTooLarge
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        413:
+          description: "The response exceeds the configured payload limit."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - FrameOutOfRange
+                          - PayloadTooLarge
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - FrameOutOfRange
+                          - PayloadTooLarge
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
   /v1/rpc/getNodeOutput:
     post:
       operationId: getNodeOutput

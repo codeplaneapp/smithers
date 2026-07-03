@@ -1,10 +1,16 @@
 /** @jsxImportSource @opentui/react */
 import type { ReactNode } from "react";
 import { act } from "react";
+import { describe } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
 
 type TestRenderResult = Awaited<ReturnType<typeof testRender>>;
 type TestRenderOptions = Parameters<typeof testRender>[1];
+
+// Bun 1.3.13 can crash in OpenTUI's headless renderer on Windows during test
+// teardown. Pure utility tests still run there; renderer coverage stays active
+// on Linux/macOS until the upstream crash is fixed.
+export const describeHeadlessRender = describe.skipIf(process.platform === "win32");
 
 /**
  * Render a component with the headless OpenTUI test renderer, wrapping the
