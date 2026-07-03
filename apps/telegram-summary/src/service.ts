@@ -508,6 +508,7 @@ async function postDigest(env: TelegramSummaryEnv, telegramText: string): Promis
   if (!token || !chatId) return { posted: false, error: "Telegram token or output chat id is not configured." };
   const threadId = parseThreadId(env);
   const chunks = splitTelegramText(telegramText);
+  let sent = 0;
   for (const chunk of chunks) {
     const body: Record<string, unknown> = {
       chat_id: chatId,
@@ -515,7 +516,23 @@ async function postDigest(env: TelegramSummaryEnv, telegramText: string): Promis
       disable_web_page_preview: true,
     };
     if (threadId !== null) body.message_thread_id = threadId;
-    await telegramCall<unknown>(token, "sendMessage", body);
+    try {
+      await telegramCall<unknown>(token, "sendMessage", body);
+      sent += 1;
+    } catch (error) {
+      // Don't throw: the caller inserts the digest row BEFORE posting and only
+      // records the outcome (posted_at_ms / post_error) if we return. Throwing
+      // here orphans that row as a falsely-clean "Ready" digest and the next run
+      // re-summarizes and re-posts the overlapping window.
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        posted: false,
+        error:
+          sent > 0
+            ? `Partial post: sent ${sent}/${chunks.length} chunks, then failed: ${message}`
+            : message,
+      };
+    }
   }
   return { posted: true, error: null };
 }
