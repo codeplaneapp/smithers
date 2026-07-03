@@ -93,7 +93,7 @@ export function findFirstPositionalIndex(argv, startIndex = 0) {
 
 /**
  * Lift `--backend <value>` (or `--backend=value`) out of argv and return the
- * value separately. Only `up`/`gateway`/`monitor`/`workflow` register `--backend`
+ * value separately. Only `up`/`gateway`/`workflow` register `--backend`
  * as an option; read commands (`ps`, `inspect`, `output`, …) do not, so passing
  * the flag there is otherwise rejected as an unknown flag even though the
  * SMITHERS_MIGRATION_REQUIRED error tells users to use it. The caller sets

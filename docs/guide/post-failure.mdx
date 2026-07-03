@@ -73,7 +73,7 @@ The trigger is on by default. Turn it off with either:
 
 The trigger also skips itself automatically:
 
-- when the failing workflow is `post-failure` itself or another ops workflow (`triage-run`, `monitor`, `monitor-smithers`, `init`), so autopsies never recurse; the launched autopsy runs with `SMITHERS_POST_FAILURE=0` in its environment for the same reason;
+- when the failing workflow is `post-failure` itself or another ops workflow (`triage-run`, `init`), so autopsies never recurse; the launched autopsy runs with `SMITHERS_POST_FAILURE=0` in its environment for the same reason;
 - when the `post-failure` workflow is not installed. Then it prints the manual command instead:
 
 ```bash

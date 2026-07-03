@@ -9,8 +9,8 @@
  * Disabled when the `--no-daemon` flag is passed (a boolean option that
  * defaults true, so the parsed `options.daemon === false`) OR the
  * `SMITHERS_NO_DAEMON` env var is set to a truthy value. Because it reads the
- * env, a shell- or daemon-spawned child (e.g. `smithers monitor` launching
- * `smithers ui`) inherits the setting for free — no extra plumbing.
+ * env, a shell- or daemon-spawned child (e.g. `smithers ui` autostarting a
+ * gateway) inherits the setting for free — no extra plumbing.
  *
  * Note: pre-G2 no command strictly requires a daemon, so today the only effect
  * is suppressing autostart. Once reads/execution route through the daemon

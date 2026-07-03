@@ -67,11 +67,12 @@ The status header shrinks to a compact one-liner on terminals narrower than 100 
 
 ## Monitoring a background run
 
-A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` background launch both execute where the user has no live view of progress. To close that gap, the CLI returns a `monitoring` block with the run and prints agent-directed guidance in the "Next steps" CTA: offer the user one of three ways to watch the run, then set up whichever they pick.
+A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` background launch both execute where the user has no live view of progress. To close that gap, the CLI returns a `monitoring` block with the run and prints agent-directed guidance in the "Next steps" CTA: offer the user one of these ways to watch the run, then set up whichever they pick.
 
-1. **Status-report cron (hands-off):** a job that every 5 minutes reads `bunx smithers-orchestrator inspect RUN_ID --format json` and reports the status.
-2. **Live custom UI (richest):** run `bunx smithers-orchestrator ui RUN_ID` when a `.smithers/ui/<workflow>.tsx` already exists, otherwise author one with the gateway-react hooks first. See [custom workflow UIs](/guides/custom-workflow-ui).
-3. **Quick HTML page (fastest):** write a static status page from `bunx smithers-orchestrator inspect RUN_ID`, open it, and refresh it about every 5 minutes.
+1. **Smithers Monitor (live, zero setup):** run `bunx smithers-orchestrator monitor RUN_ID` to open the gateway's live web UI over every run in the workspace, focused on this one (status, execution tree, events, approvals), no code required. See [the Smithers Monitor](/guides/monitor).
+2. **Status-report cron (hands-off):** a job that every 5 minutes reads `bunx smithers-orchestrator inspect RUN_ID --format json` and reports the status.
+3. **Live custom UI (richest, most work):** run `bunx smithers-orchestrator ui RUN_ID` when a `.smithers/ui/<workflow>.tsx` already exists, otherwise author one with the gateway-react hooks first. See [custom workflow UIs](/guides/custom-workflow-ui).
+4. **Quick HTML page (fastest):** write a static status page from `bunx smithers-orchestrator inspect RUN_ID`, open it, and refresh it about every 5 minutes.
 
 The same `monitoring` object (its `text` plus structured `options`) is in the `run_workflow` MCP result for background launches, and is `null` when `waitForTerminal` is set (the run already finished).
 
@@ -265,14 +266,15 @@ commands[85]:
       mint-token,,boolean,false,Mint a random bearer; require it on every request and record it only in the 0600 runtime state file
       insecure,,boolean,false,Allow a non-loopback host with NO auth (dangerous)
   - name: monitor
-    purpose: Watch a single run, diagnose a stall or failure, and optionally apply the smallest safe self-fix behind an approval gate
+    purpose: Open the Smithers Monitor, the gateway's live web UI over every run in the workspace (served at /monitor, no .smithers pack required). Pure observation; launches no run, no workflow, no agents. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
     args[1]{name,type,required,desc}:
-      runId,string,false,Run ID to monitor (default: the most recent active run)
-    flags[4]{name,short,type,default,desc}:
-      autofix,,boolean,false,Let the monitor apply the smallest safe self-fix and resume the run
-      require-approval,,boolean,true,"With --autofix, pause for a human approval gate before any fix"
-      stale-minutes,,number,15,Treat a non-terminal run idle past this many minutes as stuck
-      ui,,boolean,true,Auto-open the monitored run's own custom UI when its workflow has one (use --no-ui to skip)
+      runId,string,false,Focus this run when the monitor opens (deep-linked as ?runId=)
+    flags[5]{name,short,type,default,desc}:
+      gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
+      port,,number,7331,Gateway port when --gateway is not set
+      open,,boolean,true,Open a browser; use --no-open to just print the URL
+      autostart,,boolean,true,Start a local Gateway automatically when no Gateway is reachable; --no-autostart fails fast instead
+      daemon,,boolean,true,Autostart the Gateway as a background daemon; --no-daemon (or SMITHERS_NO_DAEMON=1) disables daemonized autostart
   - name: bug
     purpose: File a smithers bug report to bug.smithers.sh; with --run it attaches the run's workflow, status, error, and last ~50 events with secrets scrubbed
     flags[5]{name,short,type,default,desc}:

@@ -59,8 +59,8 @@ test("embedded seeded components match their canonical .smithers/components sour
 
 // Guards the class of bug where a seeded workflow imports a local `../lib/*`,
 // `../prompts/*`, or `../components/*` module that init never installs (the pack
-// generator once followed prompt imports only, so monitor-smithers shipped an
-// unresolved `../lib/fleet-health.ts` import). Every local import of every
+// generator once followed prompt imports only, so a seeded workflow shipped an
+// unresolved `../lib/*` helper import). Every local import of every
 // installed seeded workflow must resolve to a file that init actually wrote.
 test("seeded workflows' local imports all resolve to installed files", () => {
   const tmpDir = mkdtempSync(join(tmpdir(), "smithers-seeded-imports-"));

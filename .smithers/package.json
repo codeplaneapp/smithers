@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts ./tests/ddd-scripts.test.ts ./tests/ddd-ui-parsers.test.ts ./tests/ddd-generate-bug-scan.test.ts ./tests/docs-driven-development-workflow.test.ts ./tests/release-content-probe.test.ts ./tests/release-content-sidebar.test.ts ./ui/ddd-tabs.test.tsx ./lib/plue-provider.test.ts ./lib/fleet-health.test.ts",
+    "test": "bun test ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts ./tests/ddd-scripts.test.ts ./tests/ddd-ui-parsers.test.ts ./tests/ddd-generate-bug-scan.test.ts ./tests/docs-driven-development-workflow.test.ts ./tests/release-content-probe.test.ts ./tests/release-content-sidebar.test.ts ./ui/ddd-tabs.test.tsx ./lib/plue-provider.test.ts",
     "lint": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path ../.gitignore .",
     "lint:fix": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path ../.gitignore --fix .",
     "workflow:list": "smithers workflow list",

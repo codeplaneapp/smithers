@@ -16,14 +16,12 @@ import { initWorkflowPack } from "../src/workflow-pack.js";
 
 const DESCRIPTOR_EXCLUDED_WORKFLOWS = new Set([
     "kanban",
-    "monitor",
     "hello",
     "create-workflow",
     "context-engineer",
     "route-task",
     "create-skill",
     "extract-skill",
-    "monitor-smithers",
     "triage-run",
     "context-doctor",
     "backpressure-plan",

@@ -104,7 +104,7 @@
     "name": "monitor",
     "area": "workflow-monitoring",
     "kind": "cli",
-    "summary": "Watch, diagnose, optionally self-fix, and generate HTML report on a running workflow.",
+    "summary": "Open the Smithers Monitor, the gateway-served live web UI over every run in the workspace (pure observation: launches no run, workflow, or agents).",
     "keyApi": "smithers monitor [runId]",
     "docPointer": "llms.txt",
     "slice": "cli-verbs"

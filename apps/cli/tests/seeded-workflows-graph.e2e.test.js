@@ -18,7 +18,8 @@ import {
  *
  * This guards specifically against the reserved-column regression: a seeded
  * workflow whose OUTPUT schema declares a field named `runId`/`nodeId`/
- * `iteration` (e.g. `monitor`'s `gather.runId`) fails to load with
+ * `iteration` (the reason run-inspecting workflows like `triage-run` take
+ * `targetRunId` instead) fails to load with
  * `INVALID_INPUT: ... uses reserved field name(s)`, which silently broke
  * `smithers workflow skills` (all) and any attempt to run that workflow. The
  * existing UI e2e only boots each UI's frontend bundle, so it never caught it.
@@ -57,7 +58,7 @@ test("every seeded init-pack workflow renders its graph without a load-time erro
   // `graph` loads the workflow and builds one frame (running createSmithers and
   // the compute tasks needed to resolve the tree) but dispatches no agent, so it
   // is the cheapest trigger for the whole class of load-time authoring bugs:
-  // reserved output columns (monitor's `gather.runId`), MDX prompts that lose
+  // reserved output columns (`runId`/`nodeId`/`iteration`), MDX prompts that lose
   // their default export to a bare `<tag>` (smithering), and `ctx.input` fields
   // dereferenced before coalescing their null (workflow-skill).
   const failures = [];

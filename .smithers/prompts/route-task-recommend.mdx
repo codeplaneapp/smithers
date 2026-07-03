@@ -37,7 +37,6 @@ Rough guide to what each is for:
 - `audit` — read-only sweep of a feature, surface, or area; deliverable is findings, not fixes.
 - `create-workflow` — author a brand-new Smithers workflow from a description.
 - `context-doctor` — diagnose and repair an agent's working context.
-- `monitor-smithers` — watchdog that detects stuck, blocked, failed, or over-budget runs.
 - `triage-run` — diagnose one failed or stuck Smithers run and recommend fix, rewind, retry, or escalate.
 - `report-slideshow` — turn a finished run into a self-contained HTML slideshow report.
 - `eval-author` — turn acceptance criteria into a runnable eval suite.
@@ -52,8 +51,10 @@ Prefer the most SPECIFIC workflow that covers the ask over a general one:
 - Diagnosing a failed or stuck **Smithers run** goes to `triage-run`, not
   `debug` — `debug` is for defects in the user's own code.
 - A read-only findings sweep is `audit`; reviewing a specific diff is `review`.
-- Ongoing watching of many runs is `monitor-smithers`; one run's post-mortem is
-  `triage-run`.
+- Live watching of runs ("watch my runs", fleet monitoring) is NOT a workflow —
+  it is served by the `smithers monitor` CLI command, which opens the gateway's
+  /monitor web UI. Do not recommend a workflow for it; one run's post-mortem is
+  still `triage-run`.
 - If two workflows fit equally, pick the narrower one and list the broader one
   in `alternativeWorkflows`.
 

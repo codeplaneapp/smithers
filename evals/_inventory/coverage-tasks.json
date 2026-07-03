@@ -253,17 +253,6 @@
     "slice": "cli-verbs"
   },
   {
-    "id": "eval-monitor-workflow",
-    "feature": "monitor",
-    "area": "workflow-monitoring",
-    "kind": "knowledge",
-    "tier": "weak",
-    "verify": "deterministic",
-    "task": "Which command watches, diagnoses, and generates an HTML report on a running workflow?",
-    "canonicalAnswer": "monitor",
-    "slice": "cli-verbs"
-  },
-  {
     "id": "eval-hijack-session",
     "feature": "hijack",
     "area": "agent-interaction",

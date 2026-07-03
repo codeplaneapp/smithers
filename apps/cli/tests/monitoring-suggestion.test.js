@@ -32,23 +32,24 @@ describe("hasCustomUi", () => {
 });
 
 describe("buildMonitoringOptions", () => {
-    test("offers the three monitoring options with the run id wired in", () => {
+    test("offers the monitoring options, Smithers Monitor first, with the run id wired in", () => {
         const options = buildMonitoringOptions({ runId: "run-1", workflowId: "implement", hasUi: false });
-        expect(options.map((o) => o.id)).toEqual(["cron-report", "live-ui", "html-page"]);
-        expect(options[0].how).toContain("smithers inspect run-1 --format json");
-        expect(options[2].how).toContain("smithers inspect run-1");
+        expect(options.map((o) => o.id)).toEqual(["monitor-ui", "cron-report", "live-ui", "html-page"]);
+        expect(options[0].how).toContain("smithers monitor run-1");
+        expect(options[1].how).toContain("smithers inspect run-1 --format json");
+        expect(options[3].how).toContain("smithers inspect run-1");
     });
 
     test("the live-ui option opens the existing UI when one exists", () => {
         const withUi = buildMonitoringOptions({ runId: "run-1", workflowId: "implement", hasUi: true });
-        expect(withUi[1].how).toContain("smithers ui run-1");
-        expect(withUi[1].how).not.toContain("author");
+        expect(withUi[2].how).toContain("smithers ui run-1");
+        expect(withUi[2].how).not.toContain("author");
     });
 
     test("the live-ui option tells the agent to author a UI when none exists", () => {
         const noUi = buildMonitoringOptions({ runId: "run-1", workflowId: "implement", hasUi: false });
-        expect(noUi[1].how).toContain(".smithers/ui/implement.tsx");
-        expect(noUi[1].how).toContain("author");
+        expect(noUi[2].how).toContain(".smithers/ui/implement.tsx");
+        expect(noUi[2].how).toContain("author");
     });
 });
 
@@ -58,7 +59,7 @@ describe("buildMonitoringGuidance", () => {
         expect(text).toContain("run-1");
         expect(text).toContain("background");
         expect(text).toContain("Offer the user");
-        expect(options).toHaveLength(3);
+        expect(options).toHaveLength(4);
         // Every option title surfaces in the rendered prose.
         for (const option of options) {
             expect(text).toContain(option.title);

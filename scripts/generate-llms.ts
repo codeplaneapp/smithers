@@ -113,7 +113,8 @@ const CORE_PAGES = [
   "runtime/render-frame.mdx",
   "runtime/revert.mdx",
   "runtime/run-state.mdx",
-  // TUI is a discrete product surface, not a recipe
+  // The Smithers Monitor and TUI are discrete product surfaces, not recipes
+  "guides/monitor.mdx",
   "guides/tui.mdx",
   "guides/workflow-optimization.mdx",
 ];

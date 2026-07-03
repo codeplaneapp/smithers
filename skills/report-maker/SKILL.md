@@ -70,9 +70,9 @@ bunx smithers-orchestrator workflow run report-slideshow --input '{"targetRunId"
 Reach for it to bootstrap the report, then hand-tighten the decisions and
 next-run slides. The workflow has its own deterministic `gather` step and
 agent-backed `render` step; `targetRunId` is the input name because `runId` is
-reserved for the report workflow's own run. For ongoing monitoring with an HTML
-report, use the separate `monitor` workflow. `monitor-smithers` is a fleet
-watchdog that emits a triage digest rather than attaching a slideshow.
+reserved for the report workflow's own run. For ongoing monitoring, use the
+`smithers monitor` CLI command instead — it opens a live all-runs web UI rather
+than attaching a slideshow.
 
 ## Progress is events, not "working on it"
 

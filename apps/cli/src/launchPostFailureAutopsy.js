@@ -13,8 +13,6 @@ import { resolveWorkflow } from "./workflows.js";
 const OPS_WORKFLOW_IDS = new Set([
     "post-failure",
     "triage-run",
-    "monitor",
-    "monitor-smithers",
     "init",
 ]);
 

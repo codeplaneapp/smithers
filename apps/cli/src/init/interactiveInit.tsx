@@ -43,7 +43,7 @@ const WORKFLOW_GROUPS: ReadonlyArray<{ title: string; ids: readonly string[] }> 
     { title: "Start here", ids: ["hello", "create-workflow", "make-workflow-tutorial", "route-task"] },
     { title: "Build & ship", ids: ["implement", "research-plan-implement", "plan", "research", "review", "debug", "improve-test-coverage", "ralph", "mission", "kanban", "smithering"] },
     { title: "Plan & organize", ids: ["grill-me", "ticket-create", "tickets-create", "feature-enum", "audit", "backpressure-plan", "context-engineer", "context-doctor"] },
-    { title: "Operate & monitor", ids: ["monitor", "monitor-smithers", "triage-run", "vcs"] },
+    { title: "Operate & monitor", ids: ["triage-run", "vcs"] },
     { title: "Meta & skills", ids: ["workflow-skill", "create-skill", "extract-skill", "eval-author", "report-slideshow"] },
 ];
 
@@ -71,8 +71,6 @@ const WORKFLOW_LABELS: Record<string, string> = {
     "route-task": "route-task – recommend a workflow for a task",
     "create-skill": "create-skill – scaffold a new agent skill",
     "extract-skill": "extract-skill – extract a skill from a coding session",
-    "monitor-smithers": "monitor-smithers – live run monitor",
-    monitor: "monitor – run + autofix loop",
     "triage-run": "triage-run – diagnose a failed run",
     "context-doctor": "context-doctor – CLAUDE.md health check",
     "backpressure-plan": "backpressure-plan – concurrency planning",

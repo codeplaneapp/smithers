@@ -249,8 +249,6 @@ const WORKFLOW_MANIFEST = [
     { id: "route-task", ui: "route-task", components: [], prompts: [], seeded: true },
     { id: "create-skill", ui: "create-skill", components: [], prompts: [], seeded: true },
     { id: "extract-skill", ui: "extract-skill", components: [], prompts: [], seeded: true },
-    { id: "monitor-smithers", ui: "monitor-smithers", components: [], prompts: [], seeded: true },
-    { id: "monitor", ui: "monitor", components: [], prompts: [], seeded: true },
     { id: "triage-run", ui: "triage-run", components: [], prompts: [], seeded: true },
     { id: "context-doctor", ui: "context-doctor", components: [], prompts: [], seeded: true },
     { id: "backpressure-plan", ui: "backpressure-plan", components: [], prompts: [], seeded: true },
@@ -352,7 +350,7 @@ function computeClosure(selectedWorkflows) {
  */
 function filterSeededFiles(files, workflowIds) {
     // Sort seeded IDs longest-first to resolve prefix ambiguity
-    // (e.g. "monitor-smithers" before "monitor").
+    // (e.g. "research-plan-implement" before "research").
     const seededIds = WORKFLOW_MANIFEST
         .filter((w) => w.seeded)
         .map((w) => w.id)
@@ -376,7 +374,7 @@ function filterSeededFiles(files, workflowIds) {
             // A `.smithers/lib/*` helper ships only when a SELECTED seeded
             // workflow actually imports it. Attribution is by real import edge,
             // not a name prefix: a lib file's name need not match its importer
-            // (e.g. monitor-smithers imports ../lib/fleet-health.ts).
+            // (e.g. ddd-bug-scan imports ../lib/ddd/dddRoot.ts).
             const rel = f.path.replace(".smithers/lib/", "");
             const specForms = [rel, rel.replace(/\.tsx?$/, ""), rel.replace(/\/index\.tsx?$/, "")];
             return files.some((wf) => {
@@ -1822,14 +1820,12 @@ const UI_WORKFLOWS = [
     { key: "mission", title: "Mission" },
     { key: "workflow-skill", title: "Workflow Skill" },
     { key: "vcs", title: "VCS" },
-    { key: "monitor", title: "Monitor" },
     { key: "hello", title: "Hello" },
     { key: "create-workflow", title: "Create Workflow" },
     { key: "context-engineer", title: "Context Engineer" },
     { key: "route-task", title: "Route Task" },
     { key: "create-skill", title: "Create Skill" },
     { key: "extract-skill", title: "Extract Skill" },
-    { key: "monitor-smithers", title: "Monitor Smithers" },
     { key: "triage-run", title: "Triage Run" },
     { key: "context-doctor", title: "Context Doctor" },
     { key: "backpressure-plan", title: "Backpressure Plan" },

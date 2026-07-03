@@ -239,6 +239,10 @@ and any application logs.
 When the human would benefit from seeing the work, suggest the UI and operate it
 for them:
 
+- `bunx smithers-orchestrator monitor [RUN_ID]` opens the Smithers Monitor: a
+  zero-setup live view over every run in the workspace (grouped runs, execution
+  tree, event log, approvals inbox), optionally focused on one run. It observes
+  only; it launches nothing.
 - `bunx smithers-orchestrator gui <path>` opens the workspace view.
 - `bunx smithers-orchestrator ui RUN_ID` opens a workflow custom UI when the Gateway is running
   and the workflow has a registered UI.

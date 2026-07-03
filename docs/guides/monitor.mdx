@@ -1,0 +1,38 @@
+---
+title: The Smithers Monitor
+description: A zero-setup live web UI over every run in the workspace, served by the workspace gateway at /monitor and opened with smithers monitor.
+---
+
+The Smithers Monitor is a live browser view over **every run in the workspace**: one page that groups runs by state, streams their execution trees and events, and surfaces every pending approval. It ships inside the CLI and is served by the workspace gateway at `/monitor`, so it works with no `.smithers/` pack installed and no UI code written. It is pure observation: opening it launches no run, no workflow, and no agents.
+
+## 10-second quickstart
+
+```bash
+bunx smithers-orchestrator monitor              # open the monitor over all runs
+bunx smithers-orchestrator monitor RUN_ID       # open it focused on one run
+bunx smithers-orchestrator monitor --no-open    # print the URL instead of opening a browser
+bunx smithers-orchestrator monitor --gateway http://127.0.0.1:7331   # use an explicit Gateway
+```
+
+The command resolves the workspace's singleton gateway the same way `bunx smithers-orchestrator ui` does (explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port`, default 7331) and **autostarts** `smithers gateway` when none is running. Disable autostart with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart. It then opens the gateway's `/monitor` page in the browser, deep-linking `?runId=` when you passed a run id, and prints a `{ opened, url, gateway, runId }` envelope.
+
+## What you see
+
+- **Grouped runs list**: needs-attention, active, completed, failed, and cancelled groups with search, status and workflow filters, and live elapsed clocks.
+- **Execution tree per run**: the paths through running or failed nodes auto-expand, so the thing you are looking for is already open.
+- **Node inspector**: the selected node's output and tool calls.
+- **Live event log**: with a follow mode that tracks the newest events.
+- **Approvals inbox**: every pending gate across all runs, with approve/deny inline.
+- **Run actions**: cancel an active run or resume a failed/cancelled one.
+- **A truthful connection badge**: Live when the gateway stream is up, Offline when it is not.
+- **Deep links**: `?runId=` and `&nodeId=` address a specific run and node, so URLs are shareable.
+
+## How it relates to the other surfaces
+
+| Surface | What it is for |
+| --- | --- |
+| `bunx smithers-orchestrator monitor` | Watch **all runs** live in the browser: triage, approvals, and drill-down with zero setup. |
+| [`bunx smithers-orchestrator ui`](/guides/custom-workflow-ui) | Open **one workflow's own custom UI** (`.smithers/ui/<workflow>.tsx`), purpose-built for that workflow's domain. |
+| `bunx smithers-orchestrator ps` / `logs` / `inspect` | The terminal watch loop: scriptable, agent-drivable, works over SSH. See the [CLI catalog](/cli/overview). |
+
+The monitor replaced the retired `monitor` *workflow*, which had to launch a durable run of agents just to look at another run. The command observes directly through the gateway instead.

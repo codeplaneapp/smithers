@@ -302,6 +302,7 @@ describe("--annotations streaming via stdin", () => {
         expect(monitoring?.text).toContain("background");
         expect(monitoring?.text).toContain(String(result.json.runId));
         expect(monitoring?.options?.map((o) => o.id)).toEqual([
+            "monitor-ui",
             "cron-report",
             "live-ui",
             "html-page",

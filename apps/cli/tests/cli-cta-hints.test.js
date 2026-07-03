@@ -1,7 +1,7 @@
 // The CLI's guidance strings must be runnable as written: every suggested
 // command has to parse when copy-pasted. These tests pin the fixes for the
-// stale-runs hint (#27), approve's detached-run resume note (#24), monitor's
-// misleading RUN_EXISTS on --run-id (#9), and logs' --from-seq alias (#10).
+// stale-runs hint (#27), approve's detached-run resume note (#24), and logs'
+// --from-seq alias (#10).
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -104,42 +104,6 @@ describe("approve's detached-run note suggests a command that parses (#24)", () 
         expect(result.json.status).toBe("approved");
         expect(result.json.note).toContain("smithers up workflow.tsx --resume --run-id approve-run");
         expect(result.json.note).not.toContain("workflow run --resume");
-    }, 60_000);
-});
-
-describe("monitor --run-id against an existing run explains itself (#9)", () => {
-    test("RUN_EXISTS is rewritten to point at the positional watch target", async () => {
-        const repo = createTempRepo();
-        // A real (fast, agent-free) workflow standing in for the monitor pack
-        // entry: runMonitorCommand only needs `monitor` to resolve.
-        writeTestWorkflow(repo, ".smithers/workflows/monitor.tsx");
-        const { sqlite, adapter } = openRepoDb(repo);
-        try {
-            const now = Date.now();
-            await adapter.insertRun({
-                runId: "watched-run",
-                workflowName: "fixture-workflow",
-                workflowPath: "workflow.tsx",
-                status: "running",
-                createdAtMs: now - 60_000,
-                startedAtMs: now - 60_000,
-                finishedAtMs: null,
-                heartbeatAtMs: now,
-                vcsType: "none",
-                vcsRevision: null,
-            });
-        }
-        finally {
-            sqlite.close();
-        }
-        const result = runSmithers(["monitor", "--run-id", "watched-run", "--no-ui"], {
-            cwd: repo.dir,
-            format: "json",
-        });
-        expect(result.exitCode).toBe(4);
-        expect(result.json.code).toBe("RUN_EXISTS");
-        expect(result.json.message).toContain("--run-id names the monitor run itself");
-        expect(result.json.message).toContain("smithers monitor watched-run");
     }, 60_000);
 });
 

@@ -36,7 +36,6 @@ const SEEDED_WORKFLOWS = [
   "backpressure-plan",
   "route-task",
   "report-slideshow",
-  "monitor-smithers",
 ] as const;
 
 const inputSchema = z.object({

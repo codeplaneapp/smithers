@@ -1314,9 +1314,9 @@ async function buildPsRows(adapter, limit, status) {
                     ? formatAge(run.createdAtMs)
                     : "—",
             // Raw epoch ms of terminal time (present only on finished/failed/
-            // cancelled runs). The fleet watchdog (monitor-smithers) needs
-            // time-since-FAILURE, not time-since-start, to judge a failure fresh
-            // enough to escalate — `started` above only carries start age.
+            // cancelled runs). Fleet tooling needs time-since-FAILURE, not
+            // time-since-start, to judge a failure fresh enough to escalate —
+            // `started` above only carries start age.
             ...(run.finishedAtMs ? { finishedAtMs: run.finishedAtMs } : {}),
             ...(pendingApprovals.length ? { pendingApprovals } : {}),
         });
@@ -1726,7 +1726,7 @@ const upOptions = z.object({
 });
 // Launch the interactive picker + live status card instead of a one-shot run.
 // Shared by `up` and `workflow run`; deliberately NOT folded into `upOptions`
-// so it does not leak onto `monitor` (which also extends `upOptions`).
+// so it does not leak onto other commands that extend `upOptions`.
 const interactiveRunOption = z
     .boolean()
     .default(false)
@@ -1776,24 +1776,11 @@ const migrateOptions = z.object({
     keepSqlite: z.boolean().default(true).describe("Keep the legacy SQLite database after a successful copy"),
     agent: z.boolean().default(false).describe("Run the durable migrate-repair workflow instead of deterministic migration"),
 });
-const monitorArgs = z.object({
-    runId: z.string().optional().describe("Run ID to monitor (default: the most recent active run)"),
-});
 const bugOptions = z.object({
     run: z.string().optional().describe("Attach this run's workflow name, status, error, and recent events to the report"),
     title: z.string().optional().describe("Bug title (derived from the run's error when omitted)"),
     body: z.string().optional().describe("Bug description body"),
     endpoint: z.string().optional().describe("Bug endpoint URL (default https://bug.smithers.sh/api/bugs; the SMITHERS_BUG_ENDPOINT env var takes precedence)"),
-});
-const monitorOptions = upOptions.extend({
-    // Override the inherited "Explicit run ID" copy: on monitor, --run-id names
-    // the monitor workflow's OWN run (pair it with --resume), NOT the run to
-    // watch -- the positional [runId] picks the watch target. (#9)
-    runId: z.string().optional().describe("Run ID for the monitor run itself (pair with --resume); to choose which run to WATCH, pass it as the positional [runId]"),
-    autofix: z.boolean().default(false).describe("Let the monitor apply the smallest safe self-fix and resume the run"),
-    requireApproval: z.boolean().default(true).describe("With --autofix, pause for a human approval gate before any fix"),
-    staleMinutes: z.number().default(15).describe("Treat a non-terminal run idle past this many minutes as stuck"),
-    ui: z.boolean().default(true).describe("Auto-open the monitored run's own custom UI in the browser when its workflow has one (use --no-ui to skip)"),
 });
 const psOptions = z.object({
     status: z.string().optional().describe("Filter by status: running, waiting-approval, waiting-event, waiting-timer, continued, finished, failed, cancelled"),
@@ -2700,10 +2687,18 @@ async function ensureWorkspaceGateway(workspace, preferredPort) {
         lock.release();
     }
 }
-async function runUiCommand(c) {
-    const fail = (code, message) => c.error({ code, message, exitCode: 1 });
-    const workspace = c.options.gateway ? undefined : resolveGatewayWorkspace();
-    let base = c.options.gateway ? c.options.gateway.replace(/\/+$/, "") : null;
+/**
+ * Resolve a reachable Gateway for a browser-facing command (`smithers ui`,
+ * `smithers monitor`): explicit --gateway probe → workspace runtime-state
+ * discovery → legacy port probe (refused on workspace-identity mismatch) →
+ * autostart, unless the daemon escape hatch disables it.
+ *
+ * @param {{ gateway?: string; port: number; autostart?: boolean; daemon?: boolean }} options
+ * @returns {Promise<{ ok: true; base: string; token: string | null; workspace: string | undefined } | { ok: false; message: string }>}
+ */
+async function resolveBrowserGateway(options) {
+    const workspace = options.gateway ? undefined : resolveGatewayWorkspace();
+    let base = options.gateway ? options.gateway.replace(/\/+$/, "") : null;
     let token = base ? resolveGatewayBearer(workspace, base) : null;
     let reachable = false;
     let autostartAttempted = false;
@@ -2726,7 +2721,7 @@ async function runUiCommand(c) {
         // Legacy probe: a gateway started by an older CLI or the SDK on the
         // conventional port, with no runtime state file. An explicit identity
         // mismatch is refused; identity-less legacy gateways are trusted.
-        const legacyBase = `http://127.0.0.1:${c.options.port}`;
+        const legacyBase = `http://127.0.0.1:${options.port}`;
         const health = await fetch(`${legacyBase}/health`).then((r) => (r.ok ? r.json() : null), () => null);
         if (health) {
             const advertised = health?.identity?.workspaceRoot;
@@ -2741,14 +2736,14 @@ async function runUiCommand(c) {
         }
     }
     // Daemon escape hatch (spec decision 18): --no-daemon / SMITHERS_NO_DAEMON
-    // suppresses autostart. For ui/gui the gateway is genuinely required (it
-    // serves the UI), so a disabled daemon with none already running fails
-    // loudly below rather than silently spawning one.
-    const daemonDisabled = isDaemonDisabled(c.options);
-    if (!reachable && c.options.autostart && workspace && !daemonDisabled) {
+    // suppresses autostart. For ui/gui/monitor the gateway is genuinely
+    // required (it serves the UI), so a disabled daemon with none already
+    // running fails loudly below rather than silently spawning one.
+    const daemonDisabled = isDaemonDisabled(options);
+    if (!reachable && options.autostart && workspace && !daemonDisabled) {
         process.stderr.write(`[smithers] No gateway for ${workspace}; starting one (smithers gateway)…\n`);
         autostartAttempted = true;
-        const ensured = await ensureWorkspaceGateway(workspace, c.options.port);
+        const ensured = await ensureWorkspaceGateway(workspace, options.port);
         if (ensured?.failed) {
             autostartFailureMessage = ensured.message;
         }
@@ -2764,8 +2759,47 @@ async function runUiCommand(c) {
             : autostartAttempted && workspace
                 ? `\n\n${autostartFailureMessage ?? formatGatewayAutostartDiagnostics(workspace)}`
                 : "";
-        return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable${base ? ` at ${base}` : " for this workspace"}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.${detail}`);
+        return { ok: false, message: `No Smithers Gateway reachable${base ? ` at ${base}` : " for this workspace"}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.${detail}` };
     }
+    return { ok: true, base, token, workspace };
+}
+/** Path the CLI-booted gateway mounts the Smithers Monitor UI on. */
+const MONITOR_UI_MOUNT_PATH = "/monitor";
+/**
+ * `smithers monitor` — open the Smithers Monitor, a live web UI over every
+ * run in this workspace (runs list, execution tree, events, approvals). It
+ * observes; it never launches a run. The page itself is served by the
+ * workspace gateway at /monitor (see runGatewayCommand's monitor UI mount).
+ */
+async function runMonitorCommand(c) {
+    const fail = (code, message) => c.error({ code, message, exitCode: 1 });
+    const resolved = await resolveBrowserGateway(c.options);
+    if (!resolved.ok) {
+        return fail("GATEWAY_UNREACHABLE", resolved.message);
+    }
+    const { base, token } = resolved;
+    const runId = c.args.runId;
+    const url = `${base}${MONITOR_UI_MOUNT_PATH}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
+    warnIfBrowserUiNeedsBearer(token);
+    const opened = c.options.open ? openInBrowser(url) : false;
+    console.log(`${opened ? "Opening" : "Monitor URL:"} ${url}`);
+    return c.ok({ opened, url, gateway: base, runId: runId ?? null }, {
+        cta: {
+            description: "The monitor shows every run this gateway owns, live.",
+            commands: [
+                { command: "ps", description: "List runs in the terminal instead" },
+                { command: "ui <runId>", description: "Open a run's own workflow UI" },
+            ],
+        },
+    });
+}
+async function runUiCommand(c) {
+    const fail = (code, message) => c.error({ code, message, exitCode: 1 });
+    const resolved = await resolveBrowserGateway(c.options);
+    if (!resolved.ok) {
+        return fail("GATEWAY_UNREACHABLE", resolved.message);
+    }
+    const { base, token } = resolved;
     // `--app`: serve the FULL local Smithers UI (apps/smithers) instead of a
     // single workflow-run UI. Build the bundle if needed, then serve it from a
     // static server that reverse-proxies the gateway so the app is same-origin.
@@ -3073,6 +3107,11 @@ async function runGatewayCommand(options) {
     // (see ensureWorkspaceGateway) so they exit once idle; an explicit
     // `smithers gateway` leaves it 0 and stays up. SMITHERS_GATEWAY_IDLE_MS overrides.
     idleTimeoutMs = Math.max(0, Math.floor(Number(options.idleTimeout ?? process.env.SMITHERS_GATEWAY_IDLE_MS ?? 0) || 0));
+    // Every CLI-booted gateway serves the Smithers Monitor — the live all-runs
+    // web UI — at /monitor (`smithers monitor` opens it). The entry ships
+    // inside the CLI package and is bundled by the gateway's UI pipeline on
+    // first request, so no workspace pack is required.
+    const monitorUiEntry = fileURLToPath(new URL("./monitor-ui/monitor.tsx", import.meta.url));
     gateway = new Gateway({
         heartbeatMs: 15_000,
         workspaceRoot: workspace,
@@ -3082,6 +3121,9 @@ async function runGatewayCommand(options) {
         // `--insecure` (a deliberate unauthenticated non-loopback bind) must
         // trust any Host, or the daemon binds but 403s every LAN request.
         ...(options.insecure ? { insecure: true } : {}),
+        ...(existsSync(monitorUiEntry)
+            ? { ui: { entry: monitorUiEntry, path: "/monitor", title: "Smithers Monitor" } }
+            : {}),
     });
     const workspaceApi = await openSmithersBackend({}, {
         backend: options.backend,
@@ -4555,131 +4597,6 @@ async function resolveHijackRequestEngine(adapter, runId, target) {
         return target;
     }
 }
-/**
- * `smithers monitor [runId]` resolves the bundled `monitor` workflow, folds the
- * monitor-specific flags + the optional target run id into its input, and runs
- * it through the same machinery as `up` (detach, serve, hot, resume all work).
- *
- * @param {any} c
- * @param {FailFn} fail
- */
-async function runMonitorCommand(c, fail) {
-    let workflowPath;
-    try {
-        workflowPath = resolveWorkflow("monitor", process.cwd()).entryFile;
-    }
-    catch {
-        return fail({
-            code: "MONITOR_WORKFLOW_NOT_FOUND",
-            message: "The 'monitor' workflow is not installed. Run `smithers init` to install the workflow pack, or author .smithers/workflows/monitor.tsx.",
-            exitCode: 4,
-        });
-    }
-    // Merge any explicit --input with the monitor flags and the positional run id.
-    let baseInput = {};
-    if (c.options.input) {
-        try {
-            const parsed = parseJsonArgument(c.options.input, "input");
-            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-                baseInput = parsed;
-            }
-        }
-        catch (err) {
-            return fail({
-                code: err instanceof SmithersError ? err.code : "INVALID_JSON",
-                message: err?.message ?? String(err),
-                exitCode: 4,
-            });
-        }
-    }
-    const merged = { ...baseInput };
-    // Resolve the target run id up front: this is the run we watch AND the run
-    // whose own custom UI we auto-open. Passing it explicitly also makes the
-    // workflow deterministic instead of re-resolving the latest run itself.
-    let targetRunId = c.args.runId ?? (typeof merged.targetRunId === "string" ? merged.targetRunId : undefined);
-    if (!targetRunId) {
-        targetRunId = await resolveLatestRunId();
-    }
-    if (targetRunId)
-        merged.targetRunId = targetRunId;
-    if (c.options.autofix)
-        merged.autofix = true;
-    if (c.options.requireApproval === false)
-        merged.requireApproval = false;
-    if (c.options.staleMinutes !== undefined && c.options.staleMinutes !== 15)
-        merged.staleMinutes = c.options.staleMinutes;
-    // Auto-open the monitored run's OWN custom UI (e.g. monitoring a `vcs` run
-    // pops open the vcs UI). Reuses `smithers ui`, which autostarts a persistent
-    // Gateway and resolves run -> workflow -> uiPath; a workflow with no UI just
-    // fails softly inside `ui`. Skipped for machine (JSON) output or --no-ui.
-    if (c.options.ui && targetRunId && c.format !== "json") {
-        openMonitoredRunUi(targetRunId, c.options.port);
-    }
-    const options = { ...c.options, input: JSON.stringify(merged) };
-    // `--run-id <existing-run>` almost always means the caller wanted the
-    // positional watch target: the monitor run's own id then collides with the
-    // existing run and executeUpCommand fails RUN_EXISTS. Rewrite that failure
-    // into an actionable pointer. (#9)
-    const explicitWatchTarget = c.args.runId ?? (typeof baseInput.targetRunId === "string" ? baseInput.targetRunId : undefined);
-    const { resume: monitorResume } = normalizeResumeOption(c.options.resume);
-    const failWithMonitorHint = (opts) => {
-        if (opts?.code === "RUN_EXISTS" && c.options.runId && !explicitWatchTarget && !monitorResume) {
-            return fail({
-                ...opts,
-                message: `${opts.message}. --run-id names the monitor run itself (pair it with --resume); to monitor ${c.options.runId}, pass it as the positional: smithers monitor ${c.options.runId}`,
-            });
-        }
-        return fail(opts);
-    };
-    return executeUpCommand(c, workflowPath, options, failWithMonitorHint);
-}
-/**
- * Resolve the most recent active run id from the nearest DB (else the most
- * recent run of any status). Returns undefined when nothing is found.
- *
- * @returns {Promise<string | undefined>}
- */
-async function resolveLatestRunId() {
-    try {
-        const { adapter, cleanup } = await findAndOpenDb();
-        try {
-            const runs = await adapter.listRuns(20);
-            if (!Array.isArray(runs) || runs.length === 0)
-                return undefined;
-            const terminal = new Set(["finished", "completed", "failed", "cancelled", "succeeded"]);
-            const active = runs.find((r) => !terminal.has(String(r.status ?? "").toLowerCase()));
-            const pick = active ?? runs[0];
-            return pick?.runId ? String(pick.runId) : undefined;
-        }
-        finally {
-            cleanup();
-        }
-    }
-    catch {
-        return undefined;
-    }
-}
-/**
- * Open the monitored run's own workflow UI by spawning `smithers ui <runId>` in
- * the background. Best-effort: never lets UI opening fail the monitor.
- *
- * @param {string} runId
- * @param {number} [port]
- */
-function openMonitoredRunUi(runId, port) {
-    try {
-        const cliPath = fileURLToPath(import.meta.url);
-        const args = [cliPath, "ui", runId];
-        if (port && port !== 7331)
-            args.push("--port", String(port));
-        const child = spawn("bun", args, { stdio: "inherit", detached: true });
-        child.unref();
-        child.on("error", () => { });
-    }
-    catch {
-        // best-effort: a UI that can't open must not break monitoring
-    }
-}
 // ---------------------------------------------------------------------------
 let commandExitOverride;
 // Shared with the init-time incur skill re-sync (SyncSkills.sync uses it as the
@@ -4928,24 +4845,6 @@ const cli = Cli.create({
             }
             return fail({ code: "MIGRATION_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
-    },
-})
-    // =========================================================================
-    // smithers monitor [runId]
-    // =========================================================================
-    .command("monitor", {
-    description: "Watch, diagnose, optionally self-fix, and HTML-report on a running workflow (runs the `monitor` workflow).",
-    args: monitorArgs,
-    options: monitorOptions,
-    // Unlike `up`, --run-id deliberately has NO -r alias here: -r would read as
-    // "run to monitor" while the flag names the monitor run itself. (#9)
-    alias: { detach: "d", input: "i", autofix: "f" },
-    async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
-        return runMonitorCommand(c, fail);
     },
 })
     // =========================================================================
@@ -7884,6 +7783,29 @@ const cli = Cli.create({
     },
 })
     // =========================================================================
+    // smithers monitor
+    // Open the Smithers Monitor — the live all-runs web UI the gateway serves
+    // at /monitor. Pure observation: unlike the retired monitor workflow, it
+    // launches nothing and costs nothing to look at.
+    // =========================================================================
+    .command("monitor", {
+    description: "Open the Smithers Monitor: a live web UI over every run in this workspace (runs, execution trees, events, approvals). Starts the workspace Gateway automatically if none is running; pass --no-autostart or --gateway <url> to opt out.",
+    args: z.object({
+        runId: z.string().optional().describe("Focus this run when the monitor opens (deep-links ?runId=)."),
+    }),
+    options: z.object({
+        gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
+        port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
+        open: z.boolean().default(true).describe("Open a browser. Use --no-open to just print the URL."),
+        autostart: z.boolean().default(true).describe("If no Gateway is reachable for this workspace, start one automatically. Use --no-autostart to disable."),
+        daemon: z.boolean().default(true).describe("Allow a background gateway daemon. Use --no-daemon (or SMITHERS_NO_DAEMON=1) to force direct operation and never autostart one — for CI, sandboxes, and containers."),
+    }),
+    alias: { gateway: "g" },
+    async run(c) {
+        return runMonitorCommand(c);
+    },
+})
+    // =========================================================================
     // smithers docs / smithers docs-full
     // Print the llms.txt / llms-full.txt docs for this CLI version by default.
     // =========================================================================
@@ -8617,11 +8539,11 @@ async function main() {
             /* best-effort: a failed update check never blocks a command */
         }
     }
-    // `--backend` is a registered option only on up/gateway/monitor/workflow.
+    // `--backend` is a registered option only on up/gateway/workflow.
     // The SMITHERS_MIGRATION_REQUIRED error tells users to run any command with
     // `--backend sqlite`, so lift it into SMITHERS_BACKEND for every other command
     // instead of letting incur reject it as an unknown flag.
-    const NATIVE_BACKEND_COMMANDS = new Set(["up", "gateway", "monitor", "workflow"]);
+    const NATIVE_BACKEND_COMMANDS = new Set(["up", "gateway", "workflow"]);
     if (command && !NATIVE_BACKEND_COMMANDS.has(command)) {
         const lifted = extractBackendFlag(argv);
         argv = lifted.argv;

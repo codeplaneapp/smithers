@@ -1761,6 +1761,10 @@ and any application logs.
 When the human would benefit from seeing the work, suggest the UI and operate it
 for them:
 
+- `bunx smithers-orchestrator monitor [RUN_ID]` opens the Smithers Monitor: a
+  zero-setup live view over every run in the workspace (grouped runs, execution
+  tree, event log, approvals inbox), optionally focused on one run. It observes
+  only; it launches nothing.
 - `bunx smithers-orchestrator gui <path>` opens the workspace view.
 - `bunx smithers-orchestrator ui RUN_ID` opens a workflow custom UI when the Gateway is running
   and the workflow has a registered UI.
@@ -2058,11 +2062,12 @@ The status header shrinks to a compact one-liner on terminals narrower than 100 
 
 ## Monitoring a background run
 
-A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` background launch both execute where the user has no live view of progress. To close that gap, the CLI returns a `monitoring` block with the run and prints agent-directed guidance in the "Next steps" CTA: offer the user one of three ways to watch the run, then set up whichever they pick.
+A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` background launch both execute where the user has no live view of progress. To close that gap, the CLI returns a `monitoring` block with the run and prints agent-directed guidance in the "Next steps" CTA: offer the user one of these ways to watch the run, then set up whichever they pick.
 
-1. **Status-report cron (hands-off):** a job that every 5 minutes reads `bunx smithers-orchestrator inspect RUN_ID --format json` and reports the status.
-2. **Live custom UI (richest):** run `bunx smithers-orchestrator ui RUN_ID` when a `.smithers/ui/<workflow>.tsx` already exists, otherwise author one with the gateway-react hooks first. See custom workflow UIs.
-3. **Quick HTML page (fastest):** write a static status page from `bunx smithers-orchestrator inspect RUN_ID`, open it, and refresh it about every 5 minutes.
+1. **Smithers Monitor (live, zero setup):** run `bunx smithers-orchestrator monitor RUN_ID` to open the gateway's live web UI over every run in the workspace, focused on this one (status, execution tree, events, approvals), no code required. See the Smithers Monitor.
+2. **Status-report cron (hands-off):** a job that every 5 minutes reads `bunx smithers-orchestrator inspect RUN_ID --format json` and reports the status.
+3. **Live custom UI (richest, most work):** run `bunx smithers-orchestrator ui RUN_ID` when a `.smithers/ui/<workflow>.tsx` already exists, otherwise author one with the gateway-react hooks first. See custom workflow UIs.
+4. **Quick HTML page (fastest):** write a static status page from `bunx smithers-orchestrator inspect RUN_ID`, open it, and refresh it about every 5 minutes.
 
 The same `monitoring` object (its `text` plus structured `options`) is in the `run_workflow` MCP result for background launches, and is `null` when `waitForTerminal` is set (the run already finished).
 
@@ -2256,14 +2261,15 @@ commands[85]:
       mint-token,,boolean,false,Mint a random bearer; require it on every request and record it only in the 0600 runtime state file
       insecure,,boolean,false,Allow a non-loopback host with NO auth (dangerous)
   - name: monitor
-    purpose: Watch a single run, diagnose a stall or failure, and optionally apply the smallest safe self-fix behind an approval gate
+    purpose: Open the Smithers Monitor, the gateway's live web UI over every run in the workspace (served at /monitor, no .smithers pack required). Pure observation; launches no run, no workflow, no agents. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
     args[1]{name,type,required,desc}:
-      runId,string,false,Run ID to monitor (default: the most recent active run)
-    flags[4]{name,short,type,default,desc}:
-      autofix,,boolean,false,Let the monitor apply the smallest safe self-fix and resume the run
-      require-approval,,boolean,true,"With --autofix, pause for a human approval gate before any fix"
-      stale-minutes,,number,15,Treat a non-terminal run idle past this many minutes as stuck
-      ui,,boolean,true,Auto-open the monitored run's own custom UI when its workflow has one (use --no-ui to skip)
+      runId,string,false,Focus this run when the monitor opens (deep-linked as ?runId=)
+    flags[5]{name,short,type,default,desc}:
+      gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
+      port,,number,7331,Gateway port when --gateway is not set
+      open,,boolean,true,Open a browser; use --no-open to just print the URL
+      autostart,,boolean,true,Start a local Gateway automatically when no Gateway is reachable; --no-autostart fails fast instead
+      daemon,,boolean,true,Autostart the Gateway as a background daemon; --no-daemon (or SMITHERS_NO_DAEMON=1) disables daemonized autostart
   - name: bug
     purpose: File a smithers bug report to bug.smithers.sh; with --run it attaches the run's workflow, status, error, and last ~50 events with secrets scrubbed
     flags[5]{name,short,type,default,desc}:
@@ -9217,6 +9223,44 @@ A run id that does not exist is not a `RunState`. It's an error
 
 ---
 
+## The Smithers Monitor
+
+> A zero-setup live web UI over every run in the workspace, served by the workspace gateway at /monitor and opened with smithers monitor.
+
+The Smithers Monitor is a live browser view over **every run in the workspace**: one page that groups runs by state, streams their execution trees and events, and surfaces every pending approval. It ships inside the CLI and is served by the workspace gateway at `/monitor`, so it works with no `.smithers/` pack installed and no UI code written. It is pure observation: opening it launches no run, no workflow, and no agents.
+
+## 10-second quickstart
+
+```bash
+bunx smithers-orchestrator monitor              # open the monitor over all runs
+bunx smithers-orchestrator monitor --no-open    # print the URL instead of opening a browser
+```
+
+The command resolves the workspace's singleton gateway the same way `bunx smithers-orchestrator ui` does (explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port`, default 7331) and **autostarts** `smithers gateway` when none is running. Disable autostart with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart. It then opens the gateway's `/monitor` page in the browser, deep-linking `?runId=` when you passed a run id, and prints a `{ opened, url, gateway, runId }` envelope.
+
+## What you see
+
+- **Grouped runs list**: needs-attention, active, completed, failed, and cancelled groups with search, status and workflow filters, and live elapsed clocks.
+- **Execution tree per run**: the paths through running or failed nodes auto-expand, so the thing you are looking for is already open.
+- **Node inspector**: the selected node's output and tool calls.
+- **Live event log**: with a follow mode that tracks the newest events.
+- **Approvals inbox**: every pending gate across all runs, with approve/deny inline.
+- **Run actions**: cancel an active run or resume a failed/cancelled one.
+- **A truthful connection badge**: Live when the gateway stream is up, Offline when it is not.
+- **Deep links**: `?runId=` and `&nodeId=` address a specific run and node, so URLs are shareable.
+
+## How it relates to the other surfaces
+
+| Surface | What it is for |
+| --- | --- |
+| `bunx smithers-orchestrator monitor` | Watch **all runs** live in the browser: triage, approvals, and drill-down with zero setup. |
+| `bunx smithers-orchestrator ui` | Open **one workflow's own custom UI** (`.smithers/ui/<workflow>.tsx`), purpose-built for that workflow's domain. |
+| `bunx smithers-orchestrator ps` / `logs` / `inspect` | The terminal watch loop: scriptable, agent-drivable, works over SSH. See the CLI catalog. |
+
+The monitor replaced the retired `monitor` *workflow*, which had to launch a durable run of agents just to look at another run. The command observes directly through the gateway instead.
+
+---
+
 ## TUI Removed
 
 > The old smithers tui command is no longer shipped; use the CLI commands instead.
@@ -9232,6 +9276,7 @@ If you want the old "pick a workflow, start it, and watch it live" experience, t
 | Need | Use |
 | --- | --- |
 | Pick a workflow and watch it run | `up --interactive` or `workflow run --interactive` |
+| Live browser view over every run | `monitor` |
 | Active run list | `ps --watch` |
 | Lifecycle event stream | `events --watch` or `logs --follow` |
 | Agent transcript | `chat --follow` |
@@ -10504,6 +10549,7 @@ Runs started through the gateway expose `ctx.auth = { triggeredBy, role, scopes,
 - Identity: `GET /health`, the `health` RPC, and the WS hello carry `identity: { workspaceRoot, backend, version, pid, startedAtMs }`. Clients (the CLI's `ui`/`gateway status` among them) verify `workspaceRoot` against the workspace they resolved locally instead of trusting whichever process owns the port.
 - Bind failures reject: `gateway.listen()` rejects on `EADDRINUSE` (and any other bind error) instead of crashing the process. The `smithers gateway` command retries on an ephemeral port and records the real port in its runtime state file.
 - Singleton per workspace: `smithers gateway` writes `{pid, host, port, url, token, workspaceRoot, backend, version, protocol, startedAtMs}` to `<tmpdir>/smithers-gateway/<workspace-hash>.json` (mode 0600) after listening, refuses to start when a healthy gateway for the same workspace is already running, and cleans the file up on shutdown. `smithers gateway status` and `smithers gateway stop` manage it; stale files (dead pid, identity mismatch) are cleaned up on the next discovery.
+- Monitor mount: the `smithers gateway` CLI singleton also serves the Smithers Monitor, a live web UI over every run in the workspace, at `/monitor` (open it with `bunx smithers-orchestrator monitor`). The mount ships inside the CLI, so it needs no `.smithers/` pack and no registered workflow UI. Library embedders control the other UI mounts through `ui` (custom gateway UI, workflow UIs at `/workflows/<key>`) and `operatorUi` (the embeddable operator console, default `/console`).
 - `--mint-token`: mints a random bearer, requires it on every request, and records it only in the runtime state file (plus the daemon's own stderr). `bunx smithers-orchestrator ui` reads the token from the state file automatically for CLI RPC calls, but browser navigation to the printed workflow UI URL cannot send that bearer header until UI token injection ships; use `smithers gateway` without `--mint-token` when you need browser-served workflow UIs. Other clients can read `SMITHERS_TOKEN` / `SMITHERS_API_KEY`.
 - Cron: `gateway.register(name, wf, { schedule })` writes a cron row keyed `gateway:<name>`; the gateway polls between 1 s and 15 s (clamped from `heartbeatMs`). Cron-fired runs get `ctx.auth.role = "system"`, `triggeredBy = "cron:gateway"`, `scopes = ["*"]`.
 - Host defense: an unauthenticated gateway (the autostart default) rejects any request whose `Host` header is non-loopback, as a DNS-rebinding defense, so binding `--host 0.0.0.0` without a token returns 403 `Host is not allowed`. This applies only when no `auth` is configured. To deliberately expose an unauthenticated remote bind, pass `smithers gateway --insecure` (or `up --serve --insecure`), which trusts any Host; `SMITHERS_GATEWAY_TRUST_ANY_HOST=1` (gateway) and `SMITHERS_SERVE_TRUST_ANY_HOST=1` (serve) do the same via the environment.

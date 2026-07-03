@@ -36,8 +36,9 @@ export function hasCustomUi(workflowId, cwd, exists = existsSync) {
 }
 
 /**
- * The three monitoring options the agent should offer the user, tailored to
- * whether a custom UI already exists for the workflow.
+ * The monitoring options the agent should offer the user, tailored to
+ * whether a custom UI already exists for the workflow. The Smithers Monitor
+ * leads: it is live and needs zero setup, so it should be the default pick.
  * @param {{ runId: string; workflowId: string; hasUi: boolean }} params
  * @returns {{ id: string; title: string; how: string }[]}
  */
@@ -46,6 +47,11 @@ export function buildMonitoringOptions({ runId, workflowId, hasUi }) {
         ? `run \`smithers ui ${runId}\` (a custom UI already exists for "${workflowId}")`
         : `author \`.smithers/ui/${workflowId}.tsx\` with the gateway-react hooks, then run \`smithers ui ${runId}\``;
     return [
+        {
+            id: "monitor-ui",
+            title: "Smithers Monitor (live, zero setup)",
+            how: `Run \`smithers monitor ${runId}\` — opens the gateway's live web UI focused on this run (status, execution tree, events, approvals), no code required.`,
+        },
         {
             id: "cron-report",
             title: "Status-report cron (hands-off)",

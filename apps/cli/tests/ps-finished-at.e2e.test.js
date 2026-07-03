@@ -5,9 +5,10 @@ setDefaultTimeout(120_000);
 
 /**
  * `ps --format json` must expose `finishedAtMs` (raw epoch ms) on a terminal
- * run so the fleet watchdog (monitor-smithers) can gate failure freshness on
- * time-since-FAILURE rather than time-since-start. Real CLI, real temp store, a
- * compute-only workflow — no agent CLI needed, so this runs in CI.
+ * run so run watchers (e.g. the `smithers monitor` live UI and run-triage
+ * workflows) can gate failure freshness on time-since-FAILURE rather than
+ * time-since-start. Real CLI, real temp store, a compute-only workflow — no
+ * agent CLI needed, so this runs in CI.
  */
 function finishingWorkflowSource() {
     return [

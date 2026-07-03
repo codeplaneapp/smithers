@@ -11,7 +11,7 @@
  *  - Gateway mounts == UI file keys == selected workflow IDs.
  */
 import { expect, onTestFinished, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { createExecutableDir, writeFakeCodexBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
@@ -98,7 +98,6 @@ test("selecting a workflow subset installs exactly that subset + transitive deps
     expect(promptFiles.has("mission-plan")).toBe(false);
     expect(promptFiles.has("merge-tickets")).toBe(false);
     expect(promptFiles.has("grill-me")).toBe(false);
-    expect(existsSync(join(smithersDir, "lib", "fleet-health.ts"))).toBe(false);
 
     // --- gateway mounts match selected workflows ---
     const gatewaySource = readFileSync(join(smithersDir, "gateway.ts"), "utf8");
@@ -124,22 +123,9 @@ test("selecting a workflow subset installs exactly that subset + transitive deps
     expect(writtenRelative).toContain("gateway.ts");
 }, 30_000);
 
-test("selected seeded workflows install their local helper imports", () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "smithers-seeded-helper-"));
-    onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
-
-    initWorkflowPack({
-        rootDir: tmpDir,
-        installSkill: false,
-        skipInstall: true,
-        env: seededAgentEnv(),
-        selectedWorkflows: ["monitor-smithers"],
-    });
-
-    const helperPath = join(tmpDir, ".smithers", "lib", "fleet-health.ts");
-    expect(existsSync(helperPath)).toBe(true);
-    expect(readFileSync(helperPath, "utf8")).toContain("filterFleetHealth");
-}, 30_000);
+// NOTE: there is no test for .smithers/lib/* helper installation anymore — no
+// seeded workflow imports a lib/ helper since monitor-smithers (fleet-health.ts)
+// was removed. Re-add one if a seeded workflow grows a local helper import.
 
 test("default selectedWorkflows (undefined) emits the same set as all-workflow selection", () => {
     const tmpAll = mkdtempSync(join(tmpdir(), "smithers-all-"));
@@ -155,7 +141,7 @@ test("default selectedWorkflows (undefined) emits the same set as all-workflow s
         "ticket-create", "tickets-create", "ralph", "improve-test-coverage", "debug",
         "grill-me", "feature-enum", "audit", "mission", "workflow-skill", "kanban",
         "hello", "create-workflow", "context-engineer", "route-task", "create-skill",
-        "extract-skill", "monitor-smithers", "monitor", "triage-run", "context-doctor",
+        "extract-skill", "triage-run", "context-doctor",
         "backpressure-plan", "eval-author", "report-slideshow", "smithering",
         "make-workflow-tutorial", "init", "post-failure",
     ];

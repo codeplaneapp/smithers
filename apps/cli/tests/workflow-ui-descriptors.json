@@ -243,17 +243,6 @@
     "verifyOutput": false
   },
   {
-    "key": "monitor",
-    "title": "Monitor",
-    "runnable": false,
-    "launchArgs": [],
-    "primaryTestId": "",
-    "populatedTestId": "monitor-empty",
-    "expectedText": [],
-    "mountOnlyReason": "monitor UI mounts in the generated gateway but does not settle deterministically in the all-UI browser sweep",
-    "verifyOutput": false
-  },
-  {
     "key": "workflow-skill",
     "title": "Workflow Skill",
     "runnable": false,
@@ -323,17 +312,6 @@
   {
     "key": "extract-skill",
     "title": "Extract Skill",
-    "runnable": false,
-    "launchArgs": [],
-    "primaryTestId": "",
-    "populatedTestId": "",
-    "expectedText": [],
-    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
-    "verifyOutput": false
-  },
-  {
-    "key": "monitor-smithers",
-    "title": "Monitor Smithers",
     "runnable": false,
     "launchArgs": [],
     "primaryTestId": "",

@@ -148,7 +148,6 @@ const WORKFLOW_INPUTS = {
   "create-skill": { prompt: "Create a tiny test skill.", review: false, name: "mock-skill" },
   "create-workflow": { prompt: "Create a tiny test workflow.", review: false, name: "mock-workflow" },
   "context-engineer": { prompt: "Plan a tiny safe change.", review: false },
-  monitor: { targetRunId: "missing-run", autofix: false, requireApproval: false },
   "post-failure": { targetRunId: "missing-run" },
   "report-slideshow": { targetRunId: "missing-run", title: "Missing run report" },
   smithering: {

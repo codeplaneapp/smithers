@@ -9,6 +9,14 @@ test("help surface advertises the ui command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("\n  ui ");
 });
+test("monitor --help describes the live all-runs web UI, not a workflow", () => {
+    const repo = createTempRepo();
+    const result = runSmithers(["monitor", "--help"], { cwd: repo.dir, format: null });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("live web UI over every run");
+    expect(result.stdout).toContain("--no-open");
+    expect(result.stdout).not.toContain("autofix");
+});
 test("root help documents the global --json shorthand and its command-scoped exceptions (#11)", () => {
     const repo = createTempRepo();
     const result = runSmithers(["--help"], {
@@ -43,14 +51,6 @@ test("events --help says --since is a duration and distinguishes it from logs --
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("duration window");
     expect(result.stdout).toContain("milliseconds");
-});
-test("monitor --help disambiguates the positional watch target from --run-id (#9)", () => {
-    const repo = createTempRepo();
-    const result = runSmithers(["monitor", "--help"], { cwd: repo.dir, format: null });
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("Run ID to monitor");
-    expect(result.stdout).toContain("monitor run itself");
-    expect(result.stdout).toContain("positional [runId]");
 });
 test("hijack --help documents --target as engine OR node id (#23)", () => {
     const repo = createTempRepo();

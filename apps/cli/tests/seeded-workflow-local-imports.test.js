@@ -1,10 +1,10 @@
 /**
  * Guards the class of bug where a seeded workflow imports a local `../lib/*`,
  * `../prompts/*`, or `../components/*` module that `smithers init` never
- * installs. The pack generator once followed prompt imports only, so
- * monitor-smithers shipped an unresolved `../lib/fleet-health.ts` import (its
- * health filter was extracted for unit-testing but never seeded). Every local
- * import of every installed seeded workflow must resolve to a file init wrote.
+ * installs. The pack generator once followed prompt imports only, so a seeded
+ * workflow shipped an unresolved `../lib/*` import (a helper extracted for
+ * unit-testing but never seeded). Every local import of every installed seeded
+ * workflow must resolve to a file init wrote.
  */
 import { expect, onTestFinished, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
