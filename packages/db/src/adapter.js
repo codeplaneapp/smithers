@@ -495,6 +495,65 @@ function resolveOutputTableName(table) {
     }
 }
 /**
+ * Flatten an error and its `cause` chain (plus any SmithersError `summary`) into
+ * one string so read-path classification can inspect the underlying driver
+ * message regardless of how many wrappers sit on top of it.
+ * @param {unknown} error
+ * @returns {string}
+ */
+function collectErrorText(error) {
+    const parts = [];
+    let current = error;
+    for (let depth = 0; current != null && depth < 8; depth += 1) {
+        if (typeof current === "string") {
+            parts.push(current);
+            break;
+        }
+        if (current instanceof Error) {
+            parts.push(current.message);
+            const summary = /** @type {{ summary?: unknown }} */ (current).summary;
+            if (typeof summary === "string") {
+                parts.push(summary);
+            }
+            current = current.cause;
+            continue;
+        }
+        parts.push(String(current));
+        break;
+    }
+    return parts.join(" ");
+}
+/**
+ * A read whose output table has not been created yet is a legitimately-absent
+ * output, not a fault: SQLite reports "no such table", Postgres/PGlite report
+ * `relation "..." does not exist`. Anything else (I/O errors, malformed SQL,
+ * corruption) is a genuine fault that must stay observable rather than be
+ * flattened into a null that reads as "no output".
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isMissingOutputTableError(error) {
+    const text = collectErrorText(error);
+    return /no such table/i.test(text) || /does not exist/i.test(text);
+}
+/**
+ * Recover an output-row read. A missing table yields null (the not-found
+ * contract callers depend on); any other error is logged (structured) and
+ * rethrown so genuine DB faults do not masquerade as an absent output.
+ * @param {string} operation
+ * @param {SmithersError} error
+ * @returns {Effect.Effect<null, SmithersError>}
+ */
+function recoverOutputRead(operation, error) {
+    if (isMissingOutputTableError(error)) {
+        return Effect.succeed(null);
+    }
+    return Effect.logWarning("output read failed").pipe(Effect.annotateLogs({
+        dbOperation: operation,
+        errorCode: /** @type {{ code?: unknown }} */ (error)?.code ?? "UNKNOWN",
+    }), Effect.zipRight(Effect.fail(error)));
+}
+/**
  * @param {unknown} db
  * @param {string} tableName
  * @returns {unknown | null}
@@ -1527,13 +1586,7 @@ export class SmithersDb {
             const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`);
             const row = stmt.get(runId, nodeId);
             return Promise.resolve(coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
-        }).pipe(
-            // A missing row already returns null from the query; this only fires
-            // on a genuine read error (bad table, DB failure), which must not be
-            // silently indistinguishable from "no output". Log it, keep null.
-            Effect.tapError((error) => Effect.logWarning(`failed to read raw node output from ${tableName}`).pipe(Effect.annotateLogs({ runId, nodeId, error: String(error) }))),
-            Effect.catchAll(() => Effect.succeed(null)),
-        ));
+        }).pipe(Effect.catchAll((error) => recoverOutputRead(`get raw node output ${tableName}`, error))));
     }
     /**
    * @param {string} tableName
@@ -1588,12 +1641,7 @@ export class SmithersDb {
             const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? AND iteration = ? LIMIT 1`);
             const row = stmt.get(runId, nodeId, iteration);
             return Promise.resolve(coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
-        }).pipe(
-            // Only fires on a genuine read error (a missing row already returns
-            // null); log it so a failed output read is not mistaken for absence.
-            Effect.tapError((error) => Effect.logWarning(`failed to read raw node output from ${tableName} (iteration ${iteration})`).pipe(Effect.annotateLogs({ runId, nodeId, iteration, error: String(error) }))),
-            Effect.catchAll(() => Effect.succeed(null)),
-        ));
+        }).pipe(Effect.catchAll((error) => recoverOutputRead(`get raw node output ${tableName} iteration ${iteration}`, error))));
     }
     /**
    * @param {Record<string, unknown>} row
@@ -3095,7 +3143,7 @@ export class SmithersDb {
             /** @type {Map<string, Array<Record<string, unknown>>>} */
             const byNode = new Map();
             for (const row of rows) {
-                const key = `${row.runId} ${row.nodeId} ${row.iteration}`;
+                const key = `${row.runId}\u0000${row.nodeId}\u0000${row.iteration}`;
                 const list = byNode.get(key) ?? [];
                 list.push(row);
                 byNode.set(key, list);

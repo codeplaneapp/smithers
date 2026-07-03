@@ -75,6 +75,38 @@ describe("getRawNodeOutput", () => {
         expect(row?.title).toBe("second");
     });
 
+    test("returns null when the output table has not been created (absent output)", async () => {
+        // A node that has not written yet has no physical table. The read must
+        // preserve the not-found contract callers depend on: null, not a throw.
+        const { adapter } = createDbWithOutputTable("present", z.object({ title: z.string() }));
+
+        const row = await adapter.getRawNodeOutput("never_created", "run-1", "n1");
+        expect(row).toBeNull();
+
+        const iterationRow = await adapter.getRawNodeOutputForIteration("never_created", "run-1", "n1", 0);
+        expect(iterationRow).toBeNull();
+    });
+
+    test("rethrows a genuine read error instead of masking it as a null output", async () => {
+        // A real table that lacks run_id/node_id makes the parameterized SELECT
+        // raise "no such column" — a genuine fault (e.g. a schema/query bug),
+        // not an absent output. It must surface, not flatten into null.
+        const sqlite = new Database(":memory:");
+        sqlite.run(`CREATE TABLE broken (foo TEXT)`);
+        const adapter = new SmithersDb(drizzle(sqlite));
+
+        let caught;
+        try {
+            await adapter.getRawNodeOutput("broken", "run-1", "n1");
+        } catch (error) {
+            caught = error;
+        }
+        expect(caught).toBeDefined();
+        expect(String(caught?.message ?? caught)).toMatch(/no such column/i);
+
+        sqlite.close();
+    });
+
     test("preserves persisted boolean schema metadata without a live drizzle schema", async () => {
         const tableName = "boolean_results";
         const { db, sqlite, table } = createDbWithOutputTable(tableName, z.object({

@@ -469,7 +469,13 @@ function logDestructiveMigration(migration, details) {
     if (droppedCount <= 0) {
         return;
     }
-    console.warn(`[smithers-db] migration ${migration.id} dropped ${droppedCount} orphan run-owned rows`, details.tables);
+    // Route through Effect's structured logger (spans + annotations reach the
+    // observability sink) instead of console.warn, which bypasses it.
+    Effect.runSync(Effect.logWarning(`migration ${migration.id} dropped ${droppedCount} orphan run-owned rows`).pipe(Effect.annotateLogs({
+        migrationId: migration.id,
+        droppedCount,
+        droppedTables: details.tables,
+    }), Effect.withLogSpan("db:schema-migration")));
 }
 
 /**

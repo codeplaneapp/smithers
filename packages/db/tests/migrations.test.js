@@ -540,11 +540,21 @@ describe("DB migration edges", () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);
     const originalWarn = console.warn;
+    const originalLog = console.log;
     /** @type {unknown[][]} */
     const warnings = [];
+    /** @type {string[]} */
+    const structuredLogs = [];
     console.warn = (...args) => {
       warnings.push(args);
     };
+    console.log = (...args) => {
+      structuredLogs.push(args.map(String).join(" "));
+    };
+    const destructiveNotices = () =>
+      structuredLogs.filter(
+        (line) => line.includes("dropped") && line.includes("orphan run-owned rows"),
+      );
     try {
       createV019RunOwnedSchema(sqlite);
       ensureSmithersTables(db);
@@ -572,15 +582,25 @@ describe("DB migration edges", () => {
       expect(Boolean(migration.destructive)).toBe(true);
       const details = JSON.parse(migration.details_json);
       expect(details.tables.map((row) => row.droppedCount)).toEqual([1, 1, 1]);
-      expect(warnings).toHaveLength(1);
-      expect(String(warnings[0][0])).toContain("0013_run_owned_foreign_keys");
+
+      // The destructive-migration notice routes through the structured logger
+      // (level=WARN + db:schema-migration span reach the observability sink),
+      // never console.warn.
+      expect(warnings).toHaveLength(0);
+      const notices = destructiveNotices();
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain("level=WARN");
+      expect(notices[0]).toContain("0013_run_owned_foreign_keys");
+      expect(notices[0]).toContain("db:schema-migration");
 
       const rowsAfterFirstRun = migrationRows(sqlite);
       ensureSmithersTables(db);
       expect(migrationRows(sqlite)).toEqual(rowsAfterFirstRun);
-      expect(warnings).toHaveLength(1);
+      // The idempotent re-run drops nothing, so no second notice is emitted.
+      expect(destructiveNotices()).toHaveLength(1);
     } finally {
       console.warn = originalWarn;
+      console.log = originalLog;
       sqlite.close();
     }
   });
