@@ -3517,7 +3517,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
     [CLI_AGENTS_INTEGRATION, "AmpAgent,amp,CLI default,thread id"],
     [CLI_AGENTS_INTEGRATION, "VibeAgent,vibe,CLI default,headless session id"],
     [CLI_AGENTS_INTEGRATION, "OpenCodeAgent,opencode,CLI default,not yet"],
-    [CLI_AGENTS_INTEGRATION, "OpenClawAgent,openclaw,CLI default,not yet"],
+    [CLI_AGENTS_INTEGRATION, "OpenClawAgent,openclaw,CLI default,session id"],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "vibe"'],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "openclaw"'],
     [CLI_AGENT_AVAILABILITY_TYPE, '"vibe"'],

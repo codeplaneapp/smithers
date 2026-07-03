@@ -10,7 +10,9 @@ import type { BaseCliAgentOptions } from "./BaseCliAgent/BaseCliAgentOptions";
 export type OpenClawAgentOptions = BaseCliAgentOptions & {
   /** OpenClaw agent id. Defaults to OpenClaw's configured default agent. */
   agent?: string;
-  /** Session id to route the message into, when supported by the installed CLI. */
+  /** Session id to route the message into. Emits OpenClaw's `--session-id` flag. */
+  sessionId?: string;
+  /** Legacy alias for sessionId. */
   session?: string;
   /** Workspace/root directory to expose to OpenClaw, when supported by the installed CLI. */
   workspace?: string;

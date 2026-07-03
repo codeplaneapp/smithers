@@ -47,7 +47,7 @@ agents[12]{class,cli,modelDefault,hijack,notes}:
   AmpAgent,amp,CLI default,thread id,Amp CLI (--execute headless mode)
   VibeAgent,vibe,CLI default,headless session id,Mistral Vibe CLI
   OpenCodeAgent,opencode,CLI default,not yet,OpenCode CLI (opencode run --format json)
-  OpenClawAgent,openclaw,CLI default,not yet,OpenClaw gateway-backed agent CLI (openclaw agent --message)
+  OpenClawAgent,openclaw,CLI default,session id,OpenClaw CLI (openclaw agent --json)
 ```
 
 CLI binaries must be on `PATH`: `claude`, `codex`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`.
@@ -56,6 +56,11 @@ CLI binaries must be on `PATH`: `claude`, `codex`, `agy`, `gemini`, `pi`, `kimi`
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
 `HermesCliAgent` to delegate a task to the Hermes coding agent itself; use
 `HermesAgent` to call a Hermes model endpoint.
+
+`OpenClawAgent` drives `openclaw agent` in JSON mode. Pass `agent` for a named
+OpenClaw agent, `sessionId` to resume a session with `--session-id`, `workspace`
+to set the workspace path, and `continueSession` when the installed CLI should
+continue its active session.
 
 ## Codex CLI Agent
 
