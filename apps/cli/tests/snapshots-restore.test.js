@@ -76,15 +76,12 @@ describe("smithers restore", () => {
         expect(out.get()).toContain("Restored");
     });
 
-    test("reuses a preselected target without listing checkpoints again", async () => {
+    test("reuses a preselected target without an adapter to list from", async () => {
         const reverted = [];
         const out = capture();
         const r = await runRestoreOnce({
-            adapter: {
-                async listWorkspaceCheckpoints() {
-                    throw new Error("checkpoint list should not be read");
-                },
-            },
+            // No adapter: a preselected target must be honored without any
+            // listWorkspaceCheckpoints read, so callers can omit it entirely.
             runId: "r1",
             nodeId: "n1",
             target: cps[0],
