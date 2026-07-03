@@ -358,7 +358,7 @@ export function makeWorkflowSession(options = {}) {
         /** @type {Map<string, number>} Maps state key → quota reset timestamp (ms) */
         quotaResetTimes: new Map(),
         /** @type {Map<string, number>} Maps state key → duration-timer start (ms), the anchor its deadline is computed from */
-        timerStarts: new Map(),
+        timerStarts: new Map([...(options.initialTimerStarts ?? [])].filter(([, startMs]) => Number.isFinite(startMs))),
         schedule: null,
         cancelled: false,
         lastMountedSignature: null,
@@ -619,7 +619,23 @@ export function makeWorkflowSession(options = {}) {
                 id,
                 { iteration: value.iteration, done: value.done },
             ])),
+            ...timerStartsPayload(),
         };
+    }
+    function timerStartsPayload() {
+        const timerStarts = [...state.timerStarts.entries()]
+            .filter(([, startMs]) => Number.isFinite(startMs))
+            .sort(([left], [right]) => left.localeCompare(right));
+        return timerStarts.length > 0
+            ? { timerStarts: Object.fromEntries(timerStarts) }
+            : {};
+    }
+    function schedulerStatePayload() {
+        const payload = timerStartsPayload();
+        if (Object.keys(payload).length === 0) {
+            return undefined;
+        }
+        return payload;
     }
     /**
    * @param {number} [depth] recursion depth; a safety net for a true decision
@@ -655,11 +671,13 @@ export function makeWorkflowSession(options = {}) {
             };
         }
         if (schedule.continuation) {
+            const statePayload = schedulerStatePayload();
             return {
                 _tag: "ContinueAsNew",
                 transition: {
                     reason: "explicit",
                     stateJson: schedule.continuation.stateJson,
+                    ...(statePayload ? { statePayload } : {}),
                 },
             };
         }

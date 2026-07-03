@@ -5022,6 +5022,52 @@ function ralphStateFromDriverTransition(transition) {
     return state;
 }
 /**
+ * @param {unknown} input
+ * @returns {unknown}
+ */
+function continuationPayloadFromInput(input) {
+    const normalized = normalizeInputRow(input);
+    const envelope = normalized.__smithersContinuation;
+    if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+        return undefined;
+    }
+    return "payload" in envelope ? envelope.payload : undefined;
+}
+/**
+ * @param {Record<string, unknown>} config
+ * @returns {unknown}
+ */
+function continuationPayloadFromConfig(config) {
+    const continuation = config.continuation;
+    if (!continuation || typeof continuation !== "object" || Array.isArray(continuation)) {
+        return undefined;
+    }
+    return "payload" in continuation ? continuation.payload : undefined;
+}
+/**
+ * @param {unknown} payload
+ * @returns {Map<string, number> | undefined}
+ */
+function timerStartsFromContinuationPayload(payload) {
+    const raw = payload &&
+        typeof payload === "object" &&
+        !Array.isArray(payload) &&
+        "timerStarts" in payload
+        ? payload.timerStarts
+        : undefined;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return undefined;
+    }
+    const timerStarts = new Map();
+    for (const [key, value] of Object.entries(raw)) {
+        const startMs = Number(value);
+        if (key.length > 0 && Number.isFinite(startMs)) {
+            timerStarts.set(key, startMs);
+        }
+    }
+    return timerStarts.size > 0 ? timerStarts : undefined;
+}
+/**
  * @template Schema
  * @param {SmithersWorkflow<Schema>} workflow
  * @param {RunOptions} opts
@@ -5951,11 +5997,15 @@ async function runWorkflowBodyDriver(workflow, opts) {
             const maxRalphIteration = [...ralphState.values()].reduce((max, state) => Math.max(max, state.iteration), 0);
             defaultIteration = Math.max(defaultIteration, maxRalphIteration);
         }
+        const activeInput = await loadInput(db, inputTable, runId);
+        const activeRun = await Effect.runPromise(adapter.getRun(runId));
+        const continuationPayload = continuationPayloadFromInput(activeInput) ??
+            continuationPayloadFromConfig(parseRunConfigJson(activeRun?.configJson));
         budgetTracker = await setupBudgetTracker({
             adapter,
             runId,
             eventBus,
-            runStartMs: (await Effect.runPromise(adapter.getRun(runId)))?.createdAtMs ?? nowMs(),
+            runStartMs: activeRun?.createdAtMs ?? nowMs(),
         });
         workflowSession = makeWorkflowSession({
             runId,
@@ -5963,6 +6013,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             requireStableFinish: true,
             requireRerenderOnOutputChange: opts.requireRerenderOnOutputChange ?? true,
             initialRalphState: ralphState,
+            initialTimerStarts: timerStartsFromContinuationPayload(continuationPayload),
             evaluateAspectBudget: (descriptor) => budgetTracker
                 ? evaluateAspectBudget(descriptor.aspects, budgetTracker.snapshot(nowMs()))
                 : null,
@@ -6056,7 +6107,6 @@ async function runWorkflowBodyDriver(workflow, opts) {
             ...workflowRef,
             build: (ctx) => withWorkflowVersioningRuntime(workflowVersioning, () => workflowRef.build(ctx)),
         };
-        const activeInput = await loadInput(db, inputTable, runId);
         const driver = new ReactWorkflowDriver({
             workflow: driverWorkflow,
             runtime: { runPromise: Effect.runPromise },
@@ -6313,6 +6363,9 @@ export const __engineInternals = {
     validateRunOptions,
     iterationsToMap,
     ralphStateFromDriverTransition,
+    continuationPayloadFromInput,
+    continuationPayloadFromConfig,
+    timerStartsFromContinuationPayload,
     resolveTaskOutputs,
     resolveWorkflowOutputTable,
     buildDescriptorMap,

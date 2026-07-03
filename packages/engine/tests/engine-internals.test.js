@@ -498,6 +498,14 @@ describe("engine internals: durability, options and graph helpers", () => {
         expect(I.iterationsToMap({ a: 1 })).toEqual(new Map([["a", 1]]));
         expect(I.ralphStateFromDriverTransition({ statePayload: { ralphState: { loop: { iteration: "2", done: true } } } })).toEqual(new Map([["loop", { iteration: 2, done: true }]]));
         expect(I.ralphStateFromDriverTransition({ statePayload: { ralphState: [] } })).toBeUndefined();
+        expect(I.continuationPayloadFromInput({ payload: { __smithersContinuation: { payload: { timerStarts: { "timer::0": "1000" } } } } })).toEqual({
+            timerStarts: { "timer::0": "1000" },
+        });
+        expect(I.continuationPayloadFromConfig({ continuation: { payload: { timerStarts: { "timer::0": 1000 } } } })).toEqual({
+            timerStarts: { "timer::0": 1000 },
+        });
+        expect(I.timerStartsFromContinuationPayload({ timerStarts: { "timer::0": "1000", bad: "nope" } })).toEqual(new Map([["timer::0", 1000]]));
+        expect(I.timerStartsFromContinuationPayload({ timerStarts: [] })).toBeUndefined();
 
         const state = new Map([
             ["outer", { iteration: 1, done: false }],
