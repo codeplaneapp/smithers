@@ -1,9 +1,10 @@
 /** @jsxImportSource smithers-orchestrator */
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
+import { sleep } from "../../smithers/tests/helpers.js";
 let createSmithers;
 let Gateway;
 let SmithersDb;
@@ -154,5 +155,40 @@ describe("Gateway timer sweep", () => {
         gateway.activeRuns.set("active-run", { abort: { abort() { } } });
         await gateway.processDueTimers();
         expect(resumed).toEqual([]);
+    });
+    test("fails a due run whose source changed instead of re-sweeping it forever", async () => {
+        const dbPath = makeDbPath("source-changed");
+        dbPaths.push(dbPath);
+        const dir = mkdtempSync(join(tmpdir(), "smithers-gateway-timer-source-"));
+        const entryFile = join(dir, "workflow.tsx");
+        // The workflow source as it stands now: its content hash will not match the
+        // run's recorded durability hash, exactly as when the source changed since
+        // the run parked on its <Timer>.
+        writeFileSync(entryFile, "export default 'v2';\n", "utf8");
+        const { workflow, db } = createTimerHostWorkflow(dbPath);
+        gateway = new Gateway();
+        gateway.register("report", workflow, { entryFile });
+        const adapter = new SmithersDb(db);
+        await seedWaitingTimerRun(adapter, "source-changed-run", "report", Date.now() - 1_000);
+        // Drive the REAL sweep chain (processDueTimers -> resumeRunIfNeeded ->
+        // startRun -> engine runWorkflow), no monkeypatched resume. On the mismatch
+        // the run must be persisted `failed`, not rethrown transiently while the row
+        // stays `waiting-timer` for the next sweep to re-drive forever (issue #494).
+        await gateway.processDueTimers();
+        // startRun resolves before the background resume settles; poll for the row.
+        let run = await adapter.getRun("source-changed-run");
+        for (let i = 0; i < 200 && run?.status === "waiting-timer"; i += 1) {
+            await sleep(25);
+            run = await adapter.getRun("source-changed-run");
+        }
+        expect(run?.status).toBe("failed");
+        expect(JSON.parse(run?.errorJson ?? "{}")?.code).toBe("RESUME_METADATA_MISMATCH");
+        const eventTypes = (await adapter.listEvents("source-changed-run", -1, 50)).map((event) => event.type);
+        expect(eventTypes).toContain("RunFailed");
+        // A second sweep must not resurrect the now-failed run (no silent re-park loop).
+        await gateway.processDueTimers();
+        const after = await adapter.getRun("source-changed-run");
+        expect(after?.status).toBe("failed");
+        rmSync(dir, { recursive: true, force: true });
     });
 });
