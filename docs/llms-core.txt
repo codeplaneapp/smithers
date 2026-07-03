@@ -8106,7 +8106,15 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/memory` | Cross-run facts, message history, processors, namespaces, service layer, and metrics | [Memory](/how-it-works), [Memory Quickstart](/guides/memory-quickstart) |
 | `@smithers-orchestrator/observability` | Event types, logging, tracing, metrics, Prometheus rendering, and runtime observability layers | [Events](/runtime/events), [Event Types](/reference/event-types) |
 | `@smithers-orchestrator/openapi` | OpenAPI parsing, operation extraction, AI SDK tool generation, schema conversion, and metrics | [OpenAPI Tools](/concepts/openapi-tools), [Tools](/integrations/tools) |
+| `@smithers-orchestrator/automate-site` | Private Cloudflare Worker deployment for the automation marketing site | [Ecosystem](/integrations/ecosystem) |
+| `@smithers-orchestrator/ddd-site` | Private Cloudflare Worker deployment for the docs-driven-development marketing site | [Ecosystem](/integrations/ecosystem) |
+| `@smithers-orchestrator/init-site` | Private Cloudflare Worker deployment for the init marketing site | [Ecosystem](/integrations/ecosystem) |
+| `@smithers-orchestrator/monitor-site` | Private Cloudflare Worker deployment for the monitor marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/openclaw-site` | Private Cloudflare Worker deployment for the OpenClaw marketing site | [Ecosystem](/integrations/ecosystem) |
+| `@smithers-orchestrator/plugins-site` | Private Cloudflare Worker deployment for the plugins marketing site | [Ecosystem](/integrations/ecosystem) |
+| `@smithers-orchestrator/self-healing-site` | Private Cloudflare Worker deployment for the self-healing marketing site | [Ecosystem](/integrations/ecosystem) |
+| `@smithers-orchestrator/telegram-site` | Private Cloudflare Worker deployment for the Telegram marketing site | [Ecosystem](/integrations/ecosystem) |
+| `@smithers-orchestrator/ui-site` | Private Cloudflare Worker deployment for the UI marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/pi-plugin` | PI extension runtime, views, API wrappers, and workflow inspection integration | [PI Integration](/integrations/pi-integration) |
 | `@smithers-orchestrator/protocol` | Shared contracts, small value types, and protocol-level errors for cross-package use | [Types](/reference/types), [Errors](/reference/errors) |
 | `@smithers-orchestrator/react-reconciler` | Custom React reconciler, host context, DOM renderer, DevTools preload, driver, and JSX runtime internals | [Why React](/why-react), [Render Frame](/runtime/render-frame) |
@@ -9163,7 +9171,7 @@ A run id that does not exist is not a `RunState`. It's an error
 
 That removal dropped the old `apps/cli/src/tui/` tree (and, at the time, the CLI's OpenTUI dependency). OpenTUI has since returned in a different place: the full-screen single-run monitor (a separate `@smithers-orchestrator/tui` package, `smithers-mon` bin) is built on OpenTUI and is what `up --interactive` hands off to (see below). The historical note above is about the *old* `tui` command, not the new monitor.
 
-If you want the old "pick a workflow, start it, and watch it live" experience, that flow now lives behind a flag on the run commands: [`up --interactive`](/cli/overview) (or [`workflow run --interactive`](/cli/overview)). With no workflow argument it opens an interactive picker, prompts for inputs, starts the run, and then hands off to the full-screen single-run monitor (a separate `smithers-mon` binary) for the lifetime of the run. There is no silent fallback: if `@smithers-orchestrator/tui` cannot be resolved (e.g. a slim install), the command fails with `TUI_MONITOR_UNAVAILABLE` while the detached run keeps running — watch it with [`smithers ps`](/cli/overview) / [`smithers inspect <runId>`](/cli/overview) or the run's log file.
+If you want the old "pick a workflow, start it, and watch it live" experience, that flow now lives behind a flag on the run commands: [`up --interactive`](/cli/overview) (or [`workflow run --interactive`](/cli/overview)). With no workflow argument it opens an interactive picker, prompts for inputs, starts the run, and then hands off to the full-screen single-run monitor (a separate `smithers-mon` binary) for the lifetime of the run. There is no silent fallback: if `@smithers-orchestrator/tui` cannot be resolved (e.g. a slim install), the command fails with `TUI_MONITOR_UNAVAILABLE` while the detached run keeps running; watch it with [`bunx smithers-orchestrator ps`](/cli/overview) / [`bunx smithers-orchestrator inspect RUN_ID`](/cli/overview) or the run's log file.
 
 ## Replacements
 
