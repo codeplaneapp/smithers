@@ -194,6 +194,27 @@ describe("fuzzySelect (interactive)", () => {
         expect(result).toBe("c");
     });
 
+    test("keeps the TOP match highlighted after a query narrows to several matches", async () => {
+        // Regression: the base Prompt owns `_cursor` and overwrites it with the
+        // readline text-cursor (= query length) on every keystroke. Tracking the
+        // highlighted option in a separate `selectedIndex` keeps the top fuzzy
+        // match selected. With the old `_cursor` field, typing an N-char query
+        // landed the highlight on filtered index N (clamped), so Enter here would
+        // wrongly return "rebase" (index 1) instead of the top match "review".
+        const { promise, input } = startPicker([
+            { value: "a", label: "review" },
+            { value: "b", label: "rebase" },
+            { value: "c", label: "commit" },
+        ]);
+        // Type "re" → both "review" and "rebase" survive; "review" ranks first.
+        input.keypress("r", { name: "r" });
+        input.keypress("e", { name: "e" });
+        // No arrow movement: the highlight must stay on the top match.
+        input.keypress("\r", { name: "return" });
+        const result = await promise;
+        expect(result).toBe("a");
+    });
+
     test("typing 'j' appends to the query instead of moving the cursor", async () => {
         const { promise, input } = startPicker([
             { value: "x", label: "jot" },
