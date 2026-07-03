@@ -61,6 +61,17 @@ export function pickTargetCheckpoint(checkpoints, sel) {
 }
 
 /**
+ * @param {Checkpoint} checkpoint
+ * @param {{ nodeId: string, iteration?: number, seq?: number }} sel
+ * @returns {boolean}
+ */
+function matchesCheckpointSelection(checkpoint, sel) {
+    return checkpoint.nodeId === sel.nodeId
+        && (sel.iteration === undefined || Number(checkpoint.iteration) === Number(sel.iteration))
+        && (sel.seq === undefined || Number(checkpoint.seq) === Number(sel.seq));
+}
+
+/**
  * @param {{
  *   adapter?: { listWorkspaceCheckpoints: (runId: string) => Promise<Array<Checkpoint>> },
  *   runId: string,
@@ -81,9 +92,14 @@ export async function runRestoreOnce(opts) {
     // Reuse a preselected target when the caller already picked one (the
     // semantic tool reports it), so we never re-list and risk selecting a
     // different checkpoint than the one reported. Otherwise list and pick.
-    const target = opts.target ?? (adapter
-        ? pickTargetCheckpoint(await adapter.listWorkspaceCheckpoints(runId), { nodeId, iteration, seq })
-        : null);
+    const selection = { nodeId, iteration, seq };
+    let target = null;
+    if (opts.target) {
+        target = matchesCheckpointSelection(opts.target, selection) ? opts.target : null;
+    }
+    else if (adapter) {
+        target = pickTargetCheckpoint(await adapter.listWorkspaceCheckpoints(runId), selection);
+    }
     if (!target) {
         stderr.write(`No matching durability checkpoint for run ${runId} node ${nodeId}${seq !== undefined ? ` seq ${seq}` : ""}\n`);
         return { exitCode: 1 };

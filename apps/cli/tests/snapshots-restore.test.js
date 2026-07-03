@@ -98,6 +98,26 @@ describe("smithers restore", () => {
         expect(out.get()).toContain("checkpoint #0");
     });
 
+    test("rejects a preselected target that does not match the requested node", async () => {
+        const reverted = [];
+        const err = capture();
+        const r = await runRestoreOnce({
+            runId: "r1",
+            nodeId: "n2",
+            target: cps[0],
+            stdout: capture(),
+            stderr: err,
+            revert: async (commitId, cwd) => {
+                reverted.push([commitId, cwd]);
+                return { success: true };
+            },
+        });
+
+        expect(r.exitCode).toBe(1);
+        expect(reverted).toEqual([]);
+        expect(err.get()).toContain("No matching durability checkpoint");
+    });
+
     test("missing checkpoint exits non-zero with a message", async () => {
         const err = capture();
         const r = await runRestoreOnce({
