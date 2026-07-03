@@ -30,6 +30,28 @@ function createJwtToken(payload, secret, header = { alg: "HS256", typ: "JWT" }) 
         .digest("base64url");
     return `${encodedHeader}.${encodedPayload}.${signature}`;
 }
+const base64UrlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+/**
+ * @param {string} token
+ * @param {string} signature
+ */
+function replaceJwtSignature(token, signature) {
+    const [encodedHeader, encodedPayload] = token.split(".");
+    return `${encodedHeader}.${encodedPayload}.${signature}`;
+}
+/**
+ * @param {string} value
+ */
+function createNonCanonicalBase64Url(value) {
+    const lastChar = value[value.length - 1];
+    const lastIndex = base64UrlAlphabet.indexOf(lastChar);
+    if (lastIndex < 0) {
+        throw new Error("Expected base64url signature");
+    }
+    const groupStart = lastIndex & ~3;
+    const replacementIndex = groupStart + ((lastIndex + 1) % 4);
+    return `${value.slice(0, -1)}${base64UrlAlphabet[replacementIndex]}`;
+}
 /**
  * @param {Server} server
  * @returns {number}
@@ -512,6 +534,10 @@ describe("Gateway", () => {
             exp: Math.floor(Date.now() / 1_000) + 300,
         };
         const valid = createJwtToken(basePayload, secret);
+        const [, , signature] = valid.split(".");
+        const nonCanonicalSignature = createNonCanonicalBase64Url(signature);
+        expect(Buffer.from(nonCanonicalSignature, "base64url")
+            .equals(Buffer.from(signature, "base64url"))).toBe(true);
         const cases = [
             {
                 token: createJwtToken(basePayload, secret, { alg: "none", typ: "JWT" }),
@@ -520,6 +546,18 @@ describe("Gateway", () => {
             {
                 token: `${valid.slice(0, -1)}${valid.endsWith("a") ? "b" : "a"}`,
                 message: "signature",
+            },
+            {
+                token: replaceJwtSignature(valid, `${signature}=`),
+                message: "signature",
+            },
+            {
+                token: replaceJwtSignature(valid, nonCanonicalSignature),
+                message: "signature",
+            },
+            {
+                token: `${valid}.ignored`,
+                message: "three segments",
             },
             {
                 token: createJwtToken({ ...basePayload, iss: "https://evil.example.com" }, secret),
