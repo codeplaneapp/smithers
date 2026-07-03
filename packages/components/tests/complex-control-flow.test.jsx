@@ -1,9 +1,15 @@
 /** @jsxImportSource smithers-orchestrator */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Workflow, Task, Sequence, Parallel, Branch, Ralph, renderFrame, runWorkflow, } from "smithers-orchestrator";
 import { createTestSmithers, sleep } from "./helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
+
+// These drive real workflow executions; the bun default 5s budget is too tight
+// for the slower nested cases on a loaded Windows CI runner (observed a 5015ms
+// timeout on "loop inside sequence"). 30s removes the timing flake without
+// weakening any assertion.
+setDefaultTimeout(30_000);
 describe("nested control flow", () => {
     test("sequence inside parallel executes each sequence independently", async () => {
         const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
