@@ -200,6 +200,44 @@ describe("active shape limiter reclaims abandoned slots after a TTL", () => {
     const reclaimed = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs"));
     expect(reclaimed.status).toBe(200);
   });
+
+  test("reclaiming a TTL-expired slot cancels the upstream Electric stream so activeMax bounds real connections", async () => {
+    let clock = 0;
+    let upstreamOpened = 0;
+    let upstreamCancelled = 0;
+    const proxy = createSmithersElectricProxy({
+      electricUrl: "http://electric.local/v1/shape",
+      authenticate: () => auth(),
+      rateLimits: { openPerMinute: 100, activeMax: 1 },
+      activeTtlMs: 1_000,
+      now: () => clock,
+      fetchClient: async () => {
+        upstreamOpened += 1;
+        // Never produces a byte (so the slot never drains) and records when the
+        // proxy tears the upstream stream down.
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            pull() {},
+            cancel() {
+              upstreamCancelled += 1;
+            },
+          }),
+        );
+      },
+    });
+
+    const first = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs"));
+    expect(first.status).toBe(200);
+    expect(upstreamOpened).toBe(1);
+    expect(upstreamCancelled).toBe(0);
+
+    // Past the TTL the abandoned slot is reclaimed on the next acquire -> the
+    // still-open upstream stream must be cancelled, not just the local slot.
+    clock = 5_000;
+    const reclaimed = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs"));
+    expect(reclaimed.status).toBe(200);
+    expect(upstreamCancelled).toBe(1);
+  });
 });
 
 describe("the Electric proxy emits structured events + OTLP spans", () => {
@@ -234,6 +272,33 @@ describe("the Electric proxy emits structured events + OTLP spans", () => {
     expect(spans.some((span) => span.name === "smithers.electric.shape.rejected")).toBe(true);
   });
 
+  test("an upstream outage emits a structured error event + span with the reason and bumps the metric", async () => {
+    const events: SmithersElectricProxyEvent[] = [];
+    const spans: SmithersElectricProxySpan[] = [];
+    const proxy = createSmithersElectricProxy({
+      electricUrl: "http://electric.local/v1/shape",
+      authenticate: () => auth(),
+      observer: {
+        event: (event) => events.push(event),
+        span: (span) => spans.push(span),
+      },
+      fetchClient: async () => {
+        throw new Error("ECONNREFUSED electric.local:5133");
+      },
+    });
+
+    const response = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs"));
+    expect(response.status).toBe(502);
+
+    const upstreamEvent = events.find((event) => event.type === "electric.upstream.error");
+    expect(upstreamEvent).toBeDefined();
+    expect(upstreamEvent?.reason).toContain("ECONNREFUSED");
+    expect(upstreamEvent?.table).toBe("_smithers_runs");
+    expect(upstreamEvent?.principalId).toBe("user-1");
+    expect(spans.some((span) => span.name === "smithers.electric.upstream.error")).toBe(true);
+    expect(proxy.metrics.snapshot().upstreamErrors).toBe(1);
+  });
+
   test("emitSmithersElectricEvent also fans out to the global telemetry sink and never throws", () => {
     const spans: SmithersElectricProxySpan[] = [];
     const host = globalThis as { __smithersElectricTelemetry?: unknown };
@@ -250,5 +315,52 @@ describe("the Electric proxy emits structured events + OTLP spans", () => {
     } finally {
       host.__smithersElectricTelemetry = previous;
     }
+  });
+});
+
+describe("the frame-bound scanner counts each SSE frame independently", () => {
+  const encoder = new TextEncoder();
+  const streamOf = (chunks: readonly string[]): ReadableStream<Uint8Array> =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    });
+
+  test("the per-frame byte bound resets at each blank line so many sub-limit frames stream past a cumulative total over the bound", async () => {
+    // 20 frames, each far under the 10-byte bound but ~120 bytes in total. If the
+    // scanner did not reset per frame the running count would blow the bound; the
+    // whole stream must forward with no large-frame trip.
+    const frames = Array.from({ length: 20 }, () => "data\n\n");
+    const proxy = createSmithersElectricProxy({
+      electricUrl: "http://electric.local/v1/shape",
+      authenticate: () => auth(),
+      maxFrameBytes: 10,
+      fetchClient: async () => new Response(streamOf(frames)),
+    });
+
+    const response = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs"));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(frames.join(""));
+    expect(proxy.metrics.snapshot().largeFrames).toBe(0);
+    expect(proxy.metrics.snapshot().forwardedBytes).toBe(120);
+  });
+
+  test("the reset does not disable the bound: a single oversized frame after several small ones still trips", async () => {
+    // Three tiny frames reset the counter to zero, then one genuinely oversized
+    // frame (no delimiter) must still exceed the per-frame bound.
+    const chunks = ["ok\n\n", "ok\n\n", "ok\n\n", "X".repeat(50)];
+    const proxy = createSmithersElectricProxy({
+      electricUrl: "http://electric.local/v1/shape",
+      authenticate: () => auth(),
+      maxFrameBytes: 10,
+      fetchClient: async () => new Response(streamOf(chunks)),
+    });
+
+    const response = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs"));
+    expect(response.status).toBe(200);
+    await expect(response.text()).rejects.toThrow("Electric frame exceeded 10 bytes");
+    expect(proxy.metrics.snapshot().largeFrames).toBe(1);
   });
 });

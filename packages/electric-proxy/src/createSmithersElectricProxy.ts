@@ -346,6 +346,12 @@ type ActiveSlot = {
   /** Set true once the stream actually starts draining (first pull / cancel). */
   draining: boolean;
   released: boolean;
+  /**
+   * Tears down the upstream Electric stream bound to this slot. Reclaiming the
+   * local slot without this leaves the upstream connection open, so activeMax
+   * would stop bounding real upstream connections.
+   */
+  cancelUpstream?: () => void;
 };
 
 function rateLimiter(now: () => number, openPerMinute: number, activeMax: number, activeTtlMs: number) {
@@ -363,6 +369,10 @@ function rateLimiter(now: () => number, openPerMinute: number, activeMax: number
         if (!slot.released && !slot.draining && current - slot.acquiredAtMs >= activeTtlMs) {
           slot.released = true;
           slots.delete(slot);
+          // Freeing the local slot count is not enough: cancel the upstream
+          // Electric stream too, or activeMax stops bounding real upstream
+          // connections (reclaimed-but-open streams would leak past the cap).
+          slot.cancelUpstream?.();
         }
       }
       if (slots.size === 0) active.delete(key);
@@ -479,7 +489,16 @@ function wrapBody(
   body: ReadableStream<Uint8Array> | null,
   metrics: SmithersElectricProxyMetrics,
   maxFrameBytes: number,
-  hooks: { onStart: () => void; release: () => void },
+  hooks: {
+    onStart: () => void;
+    release: () => void;
+    /**
+     * Receives a callback that cancels the upstream reader and releases the
+     * slot. Wired to the active slot so a TTL reclaim can tear down the real
+     * upstream Electric stream, not just the local slot count.
+     */
+    registerCancel?: (cancel: () => void) => void;
+  },
 ): ReadableStream<Uint8Array> | null {
   if (!body) {
     hooks.release();
@@ -492,6 +511,10 @@ function wrapBody(
     hooks.release();
   };
   const reader = body.getReader();
+  hooks.registerCancel?.(() => {
+    reader.cancel("smithers electric active-slot TTL reclaimed").catch(() => undefined);
+    done();
+  });
   const scanner = createFrameBoundScanner(maxFrameBytes);
   let started = false;
   return new ReadableStream<Uint8Array>({
@@ -665,6 +688,20 @@ export function createSmithersElectricProxy(options: SmithersElectricProxyOption
       signal: request.signal,
     }).catch((error) => {
       release();
+      // An upstream outage is otherwise invisible past a counter bump. Emit a
+      // structured event (with the failure reason) on the observability path so
+      // the cloud exporter surfaces Electric outages, not just a 502 to the
+      // client.
+      const reason = error instanceof Error ? error.message : String(error);
+      metrics.incUpstreamError();
+      emitSmithersElectricEvent(observer, {
+        type: "electric.upstream.error",
+        principalId: principal,
+        table: effectiveTable,
+        shape: shape.name,
+        requiredScope: shape.requiredScope,
+        reason,
+      });
       throw error;
     });
     const lagHeader = response.headers.get("x-electric-lag-ms") ?? response.headers.get("electric-lag-ms");
@@ -675,6 +712,9 @@ export function createSmithersElectricProxy(options: SmithersElectricProxyOption
     return new Response(
       wrapBody(response.body, metrics, maxFrameBytes, {
         onStart: () => limits.markDraining(slot),
+        registerCancel: (cancel) => {
+          slot.cancelUpstream = cancel;
+        },
         release: () => {
           release();
           emitSmithersElectricEvent(observer, {

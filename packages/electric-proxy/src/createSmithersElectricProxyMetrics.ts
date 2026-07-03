@@ -5,6 +5,7 @@ export type SmithersElectricProxyMetricSnapshot = {
   replayGaps: number;
   largeFrames: number;
   forwardedBytes: number;
+  upstreamErrors: number;
   lastSyncLagMs: number | null;
 };
 
@@ -14,6 +15,7 @@ export type SmithersElectricProxyMetrics = {
   incShapeOpenRejected(): void;
   incReplayGap(): void;
   incLargeFrame(): void;
+  incUpstreamError(): void;
   addForwardedBytes(bytes: number): void;
   setActiveShapes(count: number): void;
   observeSyncLag(ms: number): void;
@@ -28,6 +30,7 @@ export function createSmithersElectricProxyMetrics(): SmithersElectricProxyMetri
     replayGaps: 0,
     largeFrames: 0,
     forwardedBytes: 0,
+    upstreamErrors: 0,
     lastSyncLagMs: null,
   };
 
@@ -44,6 +47,9 @@ export function createSmithersElectricProxyMetrics(): SmithersElectricProxyMetri
     },
     incLargeFrame: () => {
       state.largeFrames += 1;
+    },
+    incUpstreamError: () => {
+      state.upstreamErrors += 1;
     },
     addForwardedBytes: (bytes) => {
       state.forwardedBytes += Math.max(0, Math.floor(bytes));
@@ -73,6 +79,9 @@ export function createSmithersElectricProxyMetrics(): SmithersElectricProxyMetri
       "# HELP smithers_electric_forwarded_bytes_total Response bytes forwarded through the Electric proxy.",
       "# TYPE smithers_electric_forwarded_bytes_total counter",
       `smithers_electric_forwarded_bytes_total ${state.forwardedBytes}`,
+      "# HELP smithers_electric_upstream_errors_total Upstream Electric requests that failed or timed out.",
+      "# TYPE smithers_electric_upstream_errors_total counter",
+      `smithers_electric_upstream_errors_total ${state.upstreamErrors}`,
       "# HELP smithers_electric_sync_lag_ms Last observed Electric sync lag in milliseconds.",
       "# TYPE smithers_electric_sync_lag_ms gauge",
       `smithers_electric_sync_lag_ms ${state.lastSyncLagMs ?? 0}`,

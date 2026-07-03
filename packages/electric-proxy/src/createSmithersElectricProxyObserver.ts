@@ -15,6 +15,7 @@ export type SmithersElectricProxyEvent = {
     | "electric.shape.open"
     | "electric.shape.rejected"
     | "electric.shape.forwarded"
+    | "electric.upstream.error"
     | "electric.write.commit"
     | "electric.write.rejected";
   principalId: string;
