@@ -680,7 +680,7 @@ type DevToolsNode = {
   type: "workflow" | "task" | "sequence" | "parallel" | /* …see protocol */;
   name: string;
   props: Record<string, unknown>;
-  task?: { nodeId: string; kind: "agent" | "compute" | "static"; /* … */ };
+  task?: { nodeId: string; kind: "agent" | "compute" | "static" | "human" | "approval"; /* … */ };
   children: DevToolsNode[];
   depth: number;
 };
