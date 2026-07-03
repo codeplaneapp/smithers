@@ -476,7 +476,12 @@ export async function resolveSmithersBackendChoice(opts = {}) {
     return {
         backend,
         source,
-        dbPath,
+        // The store that actually holds the sqlite run history, not the requested
+        // primary path. When the primary store is empty/absent but a legacy
+        // nested `.smithers/smithers.db` has runs, `inspectLegacySqliteStore`
+        // returns that legacy path; surfacing it here keeps consumers (e.g.
+        // openSmithersStore) from opening the empty primary and hiding history.
+        dbPath: sqliteStore.dbPath,
         workspaceRoot,
         runCount: sqliteStore.runCount,
         schemaVersion: sqliteStore.schemaVersion,

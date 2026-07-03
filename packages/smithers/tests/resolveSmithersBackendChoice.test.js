@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openSmithersBackend } from "../src/openSmithersBackend.js";
+import { openSmithersStore } from "../src/openSmithersStore.js";
 import { createSmithersPostgres } from "../src/create.js";
 import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
 
@@ -590,5 +591,50 @@ describe("resolveSmithersBackendChoice", () => {
       code: "SMITHERS_MIGRATION_REQUIRED",
       details: { dbPath: nested, runCount: 1 },
     });
+  });
+
+  test("resolves dbPath to the legacy nested store when the primary sqlite store is empty or absent", async () => {
+    // Absent primary: history lives only in .smithers/smithers.db. The returned
+    // dbPath must point at that legacy store, otherwise consumers open the empty
+    // primary path and the legacy runs are invisible.
+    const absentPrimary = makeWorkspace("resolver-legacy-nested-absent-primary");
+    const nested = join(absentPrimary, ".smithers", "smithers.db");
+    seedSqliteRuns(absentPrimary, nested);
+    const absentChoice = await resolveSmithersBackendChoice({ cwd: absentPrimary, env: {} });
+    expect(absentChoice).toMatchObject({
+      backend: "sqlite",
+      dbPath: nested,
+      runCount: 1,
+      sqlite: { dbPath: nested, runCount: 1 },
+    });
+
+    // A read through the public store opener must surface those runs rather than
+    // throwing CLI_DB_NOT_FOUND against the empty primary path.
+    const store = await openSmithersStore({ cwd: absentPrimary, env: {}, mode: "read" });
+    try {
+      expect(store.dbPath).toBe(nested);
+    } finally {
+      await store.cleanup?.();
+    }
+
+    // Empty primary beside a populated legacy store: still resolve to legacy.
+    const emptyPrimary = makeWorkspace("resolver-legacy-nested-empty-primary");
+    seedEmptySqlite(emptyPrimary);
+    const nested2 = join(emptyPrimary, ".smithers", "smithers.db");
+    seedSqliteRuns(emptyPrimary, nested2);
+    const emptyChoice = await resolveSmithersBackendChoice({ cwd: emptyPrimary, env: {} });
+    expect(emptyChoice).toMatchObject({ dbPath: nested2, runCount: 1 });
+  });
+
+  test("dbPath stays on the primary sqlite store when it holds the run history", async () => {
+    // Regression guard for the legacy-nested fix: the common case (runs in the
+    // primary store) must keep returning the primary path unchanged.
+    const cwd = makeWorkspace("resolver-primary-store-wins");
+    const primary = join(cwd, "smithers.db");
+    seedSqliteRuns(cwd, primary);
+    const nested = join(cwd, ".smithers", "smithers.db");
+    seedSqliteRuns(cwd, nested);
+    const choice = await resolveSmithersBackendChoice({ cwd, env: {} });
+    expect(choice.dbPath).toBe(primary);
   });
 });
