@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import { useEffect, type CSSProperties } from "react";
 import { useGatewayRuns } from "@smithers-orchestrator/gateway-react";
 import type { GatewayRunSummaryRow } from "@smithers-orchestrator/gateway-client";

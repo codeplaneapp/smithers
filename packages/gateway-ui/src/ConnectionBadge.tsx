@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import type { CSSProperties } from "react";
 import { useGatewayConnectionStatus } from "@smithers-orchestrator/gateway-react";
 import { theme } from "./theme";
