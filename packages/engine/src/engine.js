@@ -3547,12 +3547,25 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 // we don't snapshot the pre-restore tree. No-op when disabled or
                 // when there is no prior checkpoint.
                 if (process.env.SMITHERS_DURABILITY_SNAPSHOTS === "1" && resumeSession) {
-                    await restoreWorkspaceToLatestCheckpoint({
+                    const restore = await restoreWorkspaceToLatestCheckpoint({
                         adapter,
                         runId,
                         nodeId: desc.nodeId,
                         iteration: desc.iteration,
                     });
+                    // A failed restore means the agent resumes against a stale or
+                    // half-written tree; surface it instead of silently proceeding.
+                    // (`restored: false` with no error is the normal no-checkpoint
+                    // case and is not a failure.)
+                    if (restore?.error) {
+                        logWarning("durable resume: workspace restore failed; agent may resume against a stale tree", {
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            reason: restore.reason ?? null,
+                            error: restore.error,
+                        });
+                    }
                 }
                 // Tier 2 durability: watch the worktree for the life of this
                 // attempt and snapshot settled writes. Env-gated, default off, so
