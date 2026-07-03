@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { DEVTOOLS_PROTOCOL_VERSION } from "../src/devtools.js";
 import {
   DEVTOOLS_ERROR_CODES,
@@ -10,10 +12,137 @@ import {
   NODE_OUTPUT_ERROR_CODES,
 } from "../src/errors/index.js";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const protocolRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = resolve(protocolRoot, "../..");
+
+// Each error code is spelled in three hand-maintained places that must stay in
+// sync, INCLUDING member order: the runtime tuple in src/errors/index.js, the
+// type-alias union in src/errors/*.ts, and the generated-but-committed declaration
+// tuple in src/index.d.ts. The guards below compare with ordered `toEqual`, so a
+// reorder in one file that is not mirrored in the others fails by design — keep the
+// lists literally identical, in the same order, across all three representations.
+const ERROR_CODE_CONTRACTS = [
+  {
+    alias: "DevToolsErrorCode",
+    declaration: "DEVTOOLS_ERROR_CODES",
+    relativePath: "src/errors/DevToolsErrorCode.ts",
+    runtime: DEVTOOLS_ERROR_CODES,
+  },
+  {
+    alias: "NodeOutputErrorCode",
+    declaration: "NODE_OUTPUT_ERROR_CODES",
+    relativePath: "src/errors/NodeOutputErrorCode.ts",
+    runtime: NODE_OUTPUT_ERROR_CODES,
+  },
+  {
+    alias: "NodeDiffErrorCode",
+    declaration: "NODE_DIFF_ERROR_CODES",
+    relativePath: "src/errors/NodeDiffErrorCode.ts",
+    runtime: NODE_DIFF_ERROR_CODES,
+  },
+  {
+    alias: "JumpToFrameErrorCode",
+    declaration: "JUMP_TO_FRAME_ERROR_CODES",
+    relativePath: "src/errors/JumpToFrameErrorCode.ts",
+    runtime: JUMP_TO_FRAME_ERROR_CODES,
+  },
+];
 
 function expectNoDuplicates(values) {
   expect(new Set(values).size).toBe(values.length);
+}
+
+function readSourceFile(relativePath) {
+  const absolutePath = resolve(protocolRoot, relativePath);
+  return ts.createSourceFile(
+    relativePath,
+    readFileSync(absolutePath, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+}
+
+function stringLiteralMember(node) {
+  if (!ts.isLiteralTypeNode(node)) return null;
+  return ts.isStringLiteral(node.literal) ? node.literal.text : null;
+}
+
+function unionMembers(node) {
+  const members = ts.isUnionTypeNode(node) ? node.types : [node];
+  return members.map((member) => {
+    const value = stringLiteralMember(member);
+    if (value === null) {
+      throw new Error(
+        `Unsupported error-code member \`${member.getText()}\` in a type alias. This ` +
+          "drift guard expects each src/errors/*.ts alias to be either a string-literal " +
+          "union or the drift-proof `(typeof CODES)[number]` form. If you refactored the " +
+          "alias to a different shape, teach derivedRuntimeConstName()/unionMembers() how " +
+          "to read it so the runtime<->type contract stays enforced.",
+      );
+    }
+    return value;
+  });
+}
+
+// Recognize the drift-proof-by-construction alias `type X = (typeof CODES)[number]`,
+// which derives its members directly from the runtime tuple and therefore cannot
+// drift. Returns the referenced runtime const's name, or null for any other shape.
+function derivedRuntimeConstName(node) {
+  if (!ts.isIndexedAccessTypeNode(node)) return null;
+  if (node.indexType.kind !== ts.SyntaxKind.NumberKeyword) return null;
+  let objectType = node.objectType;
+  while (ts.isParenthesizedTypeNode(objectType)) objectType = objectType.type;
+  if (!ts.isTypeQueryNode(objectType)) return null;
+  return objectType.exprName.getText();
+}
+
+function typeAliasContract(relativePath, alias) {
+  const sourceFile = readSourceFile(relativePath);
+  let contract = null;
+  sourceFile.forEachChild((node) => {
+    if (ts.isTypeAliasDeclaration(node) && node.name.text === alias) {
+      const derivedFrom = derivedRuntimeConstName(node.type);
+      contract = derivedFrom ? { derivedFrom } : { members: unionMembers(node.type) };
+    }
+  });
+  if (!contract) throw new Error(`Missing ${alias} in ${relativePath}`);
+  return contract;
+}
+
+function tupleLiteralMembers(node) {
+  if (ts.isTypeOperatorNode(node) && node.operator === ts.SyntaxKind.ReadonlyKeyword) {
+    return tupleLiteralMembers(node.type);
+  }
+  if (!ts.isTupleTypeNode(node)) return null;
+  return node.elements.map((element) => {
+    const member = ts.isNamedTupleMember(element) ? element.type : element;
+    const value = stringLiteralMember(member);
+    if (value === null) {
+      throw new Error(`Unsupported declaration member: ${member.getText()}`);
+    }
+    return value;
+  });
+}
+
+function membersForDeclarationTuple(declaration) {
+  const sourceFile = readSourceFile("src/index.d.ts");
+  let members = null;
+  function visit(node) {
+    if (members) return;
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === declaration &&
+      node.type
+    ) {
+      members = tupleLiteralMembers(node.type);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  if (!members) throw new Error(`Missing ${declaration} in src/index.d.ts`);
+  return members;
 }
 
 describe("protocol runtime constants", () => {
@@ -122,6 +251,26 @@ describe("protocol runtime constants", () => {
     expectNoDuplicates(NODE_OUTPUT_ERROR_CODES);
     expectNoDuplicates(NODE_DIFF_ERROR_CODES);
     expectNoDuplicates(JUMP_TO_FRAME_ERROR_CODES);
+  });
+
+  test("type aliases match runtime error code lists", () => {
+    for (const contract of ERROR_CODE_CONTRACTS) {
+      const alias = typeAliasContract(contract.relativePath, contract.alias);
+      if (alias.derivedFrom !== undefined) {
+        // Drift-proof-by-construction: `type X = (typeof CODES)[number]` takes its
+        // members from the runtime tuple verbatim, so only confirm it derives from the
+        // matching runtime const rather than re-comparing member-by-member.
+        expect(alias.derivedFrom).toBe(contract.declaration);
+      } else {
+        expect(alias.members).toEqual(contract.runtime);
+      }
+    }
+  });
+
+  test("public declaration tuples match runtime error code lists", () => {
+    for (const contract of ERROR_CODE_CONTRACTS) {
+      expect(membersForDeclarationTuple(contract.declaration)).toEqual(contract.runtime);
+    }
   });
 
   test("run lookup failures use consistent code spelling", () => {
