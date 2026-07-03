@@ -6,6 +6,8 @@
 
 const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled"]);
 const TERMINAL_TASK_STATUSES = new Set(["finished", "failed", "cancelled", "skipped"]);
+const DEFAULT_MAX_RUNS = 500;
+const DEFAULT_MAX_EVENTS_PER_RUN = 10_000;
 /**
  * Run-level waiting statuses that a NodeWaitingApproval/NodeWaitingTimer event
  * can raise. These must clear back to "running" once the blocking task resumes.
@@ -136,6 +138,11 @@ export class DevToolsRunStore {
             return;
         const run = this.ensureRun(event.runId);
         run.events.push(event);
+        // Cap per-run event history so a hot run cannot grow without bound.
+        const maxEvents = this.options.maxEventsPerRun ?? DEFAULT_MAX_EVENTS_PER_RUN;
+        if (maxEvents > 0 && run.events.length > maxEvents) {
+            run.events.splice(0, run.events.length - maxEvents);
+        }
         const verbose = this.options.verbose ?? false;
         switch (event.type) {
             case "RunStarted":
@@ -293,8 +300,37 @@ export class DevToolsRunStore {
                 events: [],
             };
             this._runs.set(runId, run);
+            this._evictOldRuns();
         }
         return run;
+    }
+    /**
+     * Bound the number of retained runs. Map iteration is insertion order, so
+     * evict from the front, preferring terminal (settled) runs so an in-flight
+     * run is never dropped while active; fall back to the oldest run only if the
+     * whole store is still live and over the cap.
+     * @returns {void}
+     */
+    _evictOldRuns() {
+        const maxRuns = this.options.maxRuns ?? DEFAULT_MAX_RUNS;
+        if (maxRuns <= 0)
+            return;
+        while (this._runs.size > maxRuns) {
+            let victim;
+            for (const [id, run] of this._runs) {
+                if (isTerminalRun(run)) {
+                    victim = id;
+                    break;
+                }
+            }
+            if (victim === undefined) {
+                // Nothing terminal to reclaim: drop the oldest to stay bounded.
+                victim = this._runs.keys().next().value;
+            }
+            if (victim === undefined)
+                break;
+            this._runs.delete(victim);
+        }
     }
     /**
      * @param {RunExecutionState} run

@@ -579,3 +579,48 @@ describe("DevToolsRunStore event processing", () => {
     expect(store.getRun("r-after-detach")).toBeUndefined();
   });
 });
+
+describe("DevToolsRunStore bounded retention", () => {
+  test("evicts the oldest terminal runs once past maxRuns", () => {
+    const store = new DevToolsRunStore({ maxRuns: 3 });
+    for (let i = 0; i < 5; i++) {
+      store.processEngineEvent({ type: "RunStarted", runId: `r${i}`, timestampMs: i });
+      store.processEngineEvent({ type: "RunFinished", runId: `r${i}`, timestampMs: i + 1 });
+    }
+    expect(store.runs.size).toBe(3);
+    // The two oldest were evicted; the three newest remain.
+    expect(store.getRun("r0")).toBeUndefined();
+    expect(store.getRun("r1")).toBeUndefined();
+    expect(store.getRun("r4")).toBeDefined();
+  });
+
+  test("prefers evicting terminal runs over an in-flight run", () => {
+    const store = new DevToolsRunStore({ maxRuns: 2 });
+    // Oldest run stays running; two later runs finish.
+    store.processEngineEvent({ type: "RunStarted", runId: "live", timestampMs: 0 });
+    store.processEngineEvent({ type: "RunStarted", runId: "done1", timestampMs: 1 });
+    store.processEngineEvent({ type: "RunFinished", runId: "done1", timestampMs: 2 });
+    store.processEngineEvent({ type: "RunStarted", runId: "done2", timestampMs: 3 });
+    store.processEngineEvent({ type: "RunFinished", runId: "done2", timestampMs: 4 });
+    expect(store.runs.size).toBe(2);
+    expect(store.getRun("live")).toBeDefined();
+    expect(store.getRun("done1")).toBeUndefined();
+  });
+
+  test("caps per-run event history at maxEventsPerRun (keeps newest)", () => {
+    const store = new DevToolsRunStore({ maxEventsPerRun: 5 });
+    store.processEngineEvent({ type: "RunStarted", runId: "r", timestampMs: 0 });
+    for (let i = 0; i < 20; i++) {
+      store.processEngineEvent({ type: "NodeStarted", runId: "r", nodeId: `n${i}`, iteration: 0, timestampMs: i });
+    }
+    expect(store.getRun("r")?.events.length).toBe(5);
+  });
+
+  test("maxRuns=0 disables run eviction", () => {
+    const store = new DevToolsRunStore({ maxRuns: 0 });
+    for (let i = 0; i < 10; i++) {
+      store.processEngineEvent({ type: "RunStarted", runId: `r${i}`, timestampMs: i });
+    }
+    expect(store.runs.size).toBe(10);
+  });
+});
