@@ -1361,6 +1361,137 @@ function buildPsCtaCommands(rows) {
     }
     return ctaCommands;
 }
+
+// Run statuses on which `approve`/`deny` may still resolve a gate. `failed` is
+// included so an operator can approve a still-waiting gate before `up --resume`
+// recovery (approveNode never checks run status); only the truly terminal
+// statuses (finished/cancelled/continued) are rejected as RUN_NOT_ACTIVE.
+const ACTIVE_APPROVAL_RUN_STATUSES = new Set([
+    "running",
+    "waiting-approval",
+    "waiting-event",
+    "waiting-timer",
+    "failed",
+]);
+const WAITING_APPROVAL_NODE_STATES = new Set(["waiting-approval", "waiting_approval"]);
+
+/**
+ * @param {string} nodeId
+ * @param {number | null | undefined} iteration
+ * @returns {string}
+ */
+function approvalTargetKey(nodeId, iteration) {
+    return `${nodeId} ${iteration ?? 0}`;
+}
+
+/**
+ * @param {Array<{ nodeId: string; iteration?: number | null }>} targets
+ * @returns {string}
+ */
+function formatApprovalTargetList(targets) {
+    return targets.map((target) => `  ${target.nodeId} (iteration ${target.iteration ?? 0})`).join("\n");
+}
+
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {{ node?: string; iteration?: number }} options
+ * @returns {Promise<
+ *   | { ok: true; nodeId: string; iteration: number }
+ *   | { ok: false; code: string; message: string; exitCode: number }
+ * >}
+ */
+async function resolveApprovalCommandTarget(adapter, runId, options) {
+    const run = await adapter.getRun(runId);
+    if (!run) {
+        return {
+            ok: false,
+            code: "RUN_NOT_FOUND",
+            message: `Run not found: ${runId}`,
+            exitCode: 4,
+        };
+    }
+    const runStatus = String(run.status ?? "unknown");
+    if (!ACTIVE_APPROVAL_RUN_STATUSES.has(runStatus)) {
+        return {
+            ok: false,
+            code: "RUN_NOT_ACTIVE",
+            message: `Run is not active (status: ${runStatus})`,
+            exitCode: 4,
+        };
+    }
+
+    const matchesTarget = (target) => {
+        if (options.node && target.nodeId !== options.node)
+            return false;
+        if (options.iteration != null && (target.iteration ?? 0) !== options.iteration)
+            return false;
+        return true;
+    };
+
+    const pending = (await adapter.listPendingApprovals(runId)).filter(matchesTarget);
+    if (pending.length === 1) {
+        const target = pending[0];
+        return {
+            ok: true,
+            nodeId: target.nodeId,
+            iteration: target.iteration ?? 0,
+        };
+    }
+    if (pending.length > 1) {
+        return {
+            ok: false,
+            code: "AMBIGUOUS_APPROVAL",
+            message: `Multiple pending approvals. Specify --node:\n${formatApprovalTargetList(pending)}`,
+            exitCode: 4,
+        };
+    }
+
+    const waitingNodesRaw = (await adapter.listNodes(runId))
+        .filter((node) => WAITING_APPROVAL_NODE_STATES.has(String(node.state ?? "")))
+        .filter(matchesTarget);
+    // A node can sit in `waiting-approval` with an already-decided approval row
+    // when the real blocker is a pending human request (the deferred-state
+    // bridge re-parks such nodes). Approving there would report a bogus success
+    // and the bridge would just re-park it, so exclude decided rows and point
+    // the operator at `smithers human` instead.
+    const decidedApprovalKeys = new Set((await adapter.listAllDecidedApprovals(runId)).map((approval) => approvalTargetKey(approval.nodeId, approval.iteration)));
+    const waitingNodes = waitingNodesRaw.filter((node) => !decidedApprovalKeys.has(approvalTargetKey(node.nodeId, node.iteration)));
+    if (waitingNodes.length === 1) {
+        const target = waitingNodes[0];
+        return {
+            ok: true,
+            nodeId: target.nodeId,
+            iteration: target.iteration ?? 0,
+        };
+    }
+    if (waitingNodes.length > 1) {
+        return {
+            ok: false,
+            code: "AMBIGUOUS_APPROVAL",
+            message: `Multiple waiting approval nodes. Specify --node:\n${formatApprovalTargetList(waitingNodes)}`,
+            exitCode: 4,
+        };
+    }
+    if (waitingNodesRaw.length > 0) {
+        const target = waitingNodesRaw[0];
+        return {
+            ok: false,
+            code: "APPROVAL_ALREADY_DECIDED",
+            message: `Approval for node ${target.nodeId} (iteration ${target.iteration ?? 0}) is already decided; the gate is waiting on a human request. Resolve it with: smithers human inbox (then smithers human answer <requestId> --value <json>)`,
+            exitCode: 4,
+        };
+    }
+    return {
+        ok: false,
+        code: "NO_PENDING_APPROVALS",
+        message: options.node
+            ? `No pending approval matched node ${options.node} for run: ${runId}`
+            : `No pending approvals for run: ${runId}`,
+        exitCode: 4,
+    };
+}
+
 /**
  * @param {SmithersDb} adapter
  * @param {string} runId
@@ -6442,30 +6573,11 @@ const cli = Cli.create({
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
-                const pending = await adapter.listPendingApprovals(c.args.runId);
-                if (pending.length === 0) {
-                    return fail({ code: "NO_PENDING_APPROVALS", message: `No pending approvals for run: ${c.args.runId}`, exitCode: 4 });
+                const target = await resolveApprovalCommandTarget(adapter, c.args.runId, c.options);
+                if (!target.ok) {
+                    return fail(target);
                 }
-                let nodeId = c.options.node;
-                let target;
-                if (!nodeId) {
-                    if (pending.length > 1) {
-                        const nodeList = pending.map((a) => `  ${a.nodeId} (iteration ${a.iteration})`).join("\n");
-                        return fail({
-                            code: "AMBIGUOUS_APPROVAL",
-                            message: `Multiple pending approvals. Specify --node:\n${nodeList}`,
-                            exitCode: 4,
-                        });
-                    }
-                    target = pending[0];
-                    nodeId = target.nodeId;
-                }
-                else {
-                    target = pending.find((a) => a.nodeId === nodeId);
-                }
-                // Default to the actual iteration of the pending gate so approvals
-                // inside loops (iteration > 0) work without --iteration.
-                const iteration = c.options.iteration ?? target?.iteration ?? 0;
+                const { nodeId, iteration } = target;
                 await Effect.runPromise(approveNode(adapter, c.args.runId, nodeId, iteration, c.options.note, c.options.by));
                 const runAfterApproval = await adapter.getRun(c.args.runId);
                 const isDetached = !runAfterApproval ||
@@ -6594,30 +6706,11 @@ const cli = Cli.create({
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
-                const pending = await adapter.listPendingApprovals(c.args.runId);
-                if (pending.length === 0) {
-                    return fail({ code: "NO_PENDING_APPROVALS", message: `No pending approvals for run: ${c.args.runId}`, exitCode: 4 });
+                const target = await resolveApprovalCommandTarget(adapter, c.args.runId, c.options);
+                if (!target.ok) {
+                    return fail(target);
                 }
-                let nodeId = c.options.node;
-                let target;
-                if (!nodeId) {
-                    if (pending.length > 1) {
-                        const nodeList = pending.map((a) => `  ${a.nodeId} (iteration ${a.iteration})`).join("\n");
-                        return fail({
-                            code: "AMBIGUOUS_APPROVAL",
-                            message: `Multiple pending approvals. Specify --node:\n${nodeList}`,
-                            exitCode: 4,
-                        });
-                    }
-                    target = pending[0];
-                    nodeId = target.nodeId;
-                }
-                else {
-                    target = pending.find((a) => a.nodeId === nodeId);
-                }
-                // Default to the actual iteration of the pending gate so denials
-                // inside loops (iteration > 0) work without --iteration.
-                const iteration = c.options.iteration ?? target?.iteration ?? 0;
+                const { nodeId, iteration } = target;
                 await Effect.runPromise(denyNode(adapter, c.args.runId, nodeId, iteration, c.options.note, c.options.by));
                 return c.ok({ runId: c.args.runId, nodeId, status: "denied" }, {
                     cta: {

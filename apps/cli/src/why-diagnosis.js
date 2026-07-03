@@ -13,6 +13,7 @@ import { formatAge } from "./format.js";
 
 const RECENT_EVENTS_LIMIT = 50;
 const MAX_CTA_COMMANDS = 5;
+const WAITING_APPROVAL_STATES = new Set(["waiting-approval", "waiting_approval"]);
 /**
  * @param {string} nodeId
  * @param {number} iteration
@@ -587,6 +588,21 @@ function buildDiagnosis(params) {
     const status = run.status === "continued" && run.finishedAtMs == null
         ? "running"
         : String(run.status ?? "unknown");
+    if (status === "finished" || status === "cancelled") {
+        const summary = status === "finished"
+            ? "Run is finished, nothing is blocked."
+            : typeof run.finishedAtMs === "number"
+                ? `Run was cancelled at ${new Date(run.finishedAtMs).toISOString()}.`
+                : "Run was cancelled.";
+        return {
+            runId,
+            status,
+            summary,
+            generatedAtMs: nowMs,
+            blockers: [],
+            currentNodeId: firstCurrentNode(nodes),
+        };
+    }
     const descriptorMetadata = parseFrameDescriptorMetadata(lastFrame?.xmlJson);
     const parsedEvents = events.map((row) => ({
         row,
@@ -651,6 +667,40 @@ function buildDiagnosis(params) {
             waitingSince,
             unblocker: approvals.length > 1
                 ? `smithers approve ${runId} --node ${approval.nodeId} --iteration ${approval.iteration ?? 0}`
+                : `smithers approve ${runId}`,
+            context: contextParts.join("\n\n"),
+            ...(retryInsight
+                ? {
+                    attempt: retryInsight.failedCount,
+                    maxAttempts: retryInsight.maxAttempts,
+                }
+                : {}),
+        });
+    }
+    const requestedApprovalKeys = new Set(approvals
+        .filter((approval) => approval.status === "requested")
+        .map((approval) => nodeKey(approval.nodeId, approval.iteration ?? 0)));
+    const waitingApprovalNodesWithoutRequests = nodes.filter((node) => WAITING_APPROVAL_STATES.has(String(node.state ?? "")) &&
+        !requestedApprovalKeys.has(nodeKey(node.nodeId, node.iteration ?? 0)));
+    const totalWaitingApprovalTargets = approvals.filter((approval) => approval.status === "requested").length +
+        waitingApprovalNodesWithoutRequests.length;
+    for (const node of waitingApprovalNodesWithoutRequests) {
+        const iteration = node.iteration ?? 0;
+        const retryInsight = retryInsightsByNode.get(nodeKey(node.nodeId, iteration));
+        const contextParts = [];
+        if (retryInsight && !retryInsight.exhausted) {
+            contextParts.push(describeRetryContext(retryInsight, nowMs));
+        }
+        contextParts.push("No approval request row is recorded for this gate; approve or deny can resolve the waiting node directly.");
+        contextParts.push(`Deny instead: smithers deny ${runId} --node ${node.nodeId} --iteration ${iteration}`);
+        blockers.push({
+            kind: "waiting-approval",
+            nodeId: node.nodeId,
+            iteration,
+            reason: "Approval node is waiting, but no approval request row was recorded",
+            waitingSince: waitingSinceFallback(nowMs, node.updatedAtMs, run.startedAtMs, run.createdAtMs),
+            unblocker: totalWaitingApprovalTargets > 1
+                ? `smithers approve ${runId} --node ${node.nodeId} --iteration ${iteration}`
                 : `smithers approve ${runId}`,
             context: contextParts.join("\n\n"),
             ...(retryInsight
