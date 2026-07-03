@@ -15,6 +15,9 @@
 // providers) so the file is robust regardless of which accounts a given user
 // has registered.
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import {
   type AgentLike,
   AntigravityAgent,
@@ -43,8 +46,44 @@ function commandExists(command: string): boolean {
   return probe.status === 0;
 }
 
+function commandOutput(command: string, args: string[]): { status: number | null; output: string } {
+  const probe = spawnSync(command, args, { encoding: "utf8" });
+  return {
+    status: probe.status,
+    output: `${probe.stdout ?? ""}\n${probe.stderr ?? ""}`.trim(),
+  };
+}
+
+function codexAuthFileHasCredentials(): boolean {
+  try {
+    const homeDir = process.env.HOME?.trim() || homedir();
+    const codexHome = process.env.CODEX_HOME?.trim()
+      ? resolve(process.env.CODEX_HOME)
+      : join(homeDir, ".codex");
+    const parsed = JSON.parse(readFileSync(join(codexHome, "auth.json"), "utf8"));
+    return (
+      (typeof parsed?.OPENAI_API_KEY === "string" && parsed.OPENAI_API_KEY.trim().length > 0) ||
+      (typeof parsed?.tokens?.access_token === "string" && parsed.tokens.access_token.trim().length > 0)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isFixtureOpenAiKey(value: string): boolean {
+  return value === "sk-test" || value.startsWith("sk-test-");
+}
+
 const hasGemini = commandExists("agy");
-const hasCodex = commandExists("codex");
+const hasCodexCommand = commandExists("codex");
+const codexLogin = hasCodexCommand ? commandOutput("codex", ["login", "status"]) : null;
+const hasCodexCliAuth =
+  hasCodexCommand &&
+  (codexAuthFileHasCredentials() ||
+    (codexLogin?.status === 0 && /logged in|api key|chatgpt/i.test(codexLogin.output)));
+const openAiApiKey = process.env.OPENAI_API_KEY?.trim() ?? "";
+const hasOpenAiApiKey = openAiApiKey.length > 0 && !isFixtureOpenAiKey(openAiApiKey);
+const hasCodex = hasCodexCommand && (hasCodexCliAuth || hasOpenAiApiKey);
 const hasClaude = commandExists("claude");
 
 const sonnet = new ClaudeCodeAgent({ model: IMPLEMENTER_MODEL });
@@ -52,7 +91,11 @@ const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
 // Fable 5: the planning/review tier of the fable sandwich (subscription access
 // verified 2026-07-02). Fable plans and reviews; Codex implements.
 const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
-const codex = new CodexAgent({ model: "gpt-5.5", skipGitRepoCheck: true });
+const codex = new CodexAgent({
+  model: "gpt-5.5",
+  skipGitRepoCheck: true,
+  ...(hasCodexCliAuth ? { env: { OPENAI_API_KEY: "" } } : {}),
+});
 const gemini = new AntigravityAgent({ model: GEMINI_MODEL });
 
 // Implementer failover chain (the middle of the fable sandwich): Codex leads
