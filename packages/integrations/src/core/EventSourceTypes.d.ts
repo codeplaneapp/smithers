@@ -1,34 +1,8 @@
+import { CursorStore } from './CursorStoreTypes.js';
 import * as effect from 'effect';
-import { Effect, Stream } from 'effect';
+import { Stream } from 'effect';
+import { ExternalEvent } from './ExternalEventTypes.js';
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
-
-/**
- * Durable persistence seam for polling-source cursors. The db-backed
- * implementation (`makeDbCursorStore`) rides `_smithers_integration_cursors`.
- */
-type CursorStore = {
-    get: (sourceId: string) => Effect.Effect<string | null | undefined, SmithersError>;
-    set: (sourceId: string, cursor: string | null) => Effect.Effect<void, SmithersError>;
-};
-
-/**
- * A normalized event received from an external service (webhook delivery or
- * polling result) before it is fanned out to waiting runs via `signalRun`.
- */
-type ExternalEvent = {
-    /** Source id that produced the event (e.g. `github`, `telegram`, a generic webhook source id). */
-    source: string;
-    /** Smithers signal name, `integration:<service>:<event>` by convention. */
-    eventName: string;
-    /** Correlation id used to target waiting runs (null = match waits without one). */
-    correlationId: string | null;
-    /** JSON-serializable payload delivered as the signal payload. */
-    payload: unknown;
-    /** Provider-stable delivery id used for redelivery dedupe. */
-    dedupeKey: string;
-    /** When the event was received (Unix epoch ms). */
-    receivedAtMs: number;
-};
 
 /**
  * A process-wide source of external events. `events` is the (possibly
@@ -78,4 +52,4 @@ type MakePollingSourceOptions = {
     cursorStore?: CursorStore;
 };
 
-export type { CursorStore as C, ExternalEvent as E, MakePollingSourceOptions as M, PollResult as P, WebhookRequest as W, EventSource as a, MakeWebhookSourceOptions as b, WebhookSource as c };
+export type { EventSource, MakePollingSourceOptions, MakeWebhookSourceOptions, PollResult, WebhookRequest, WebhookSource };

@@ -26,7 +26,7 @@
       "default": "./src/linear.js"
     },
     "./*": {
-      "types": "./src/index.d.ts",
+      "types": "./src/*.d.ts",
       "import": "./src/*.js",
       "default": "./src/*.js"
     }
@@ -37,7 +37,7 @@
   "scripts": {
     "test": "bun test tests",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "rm -f src/index.d.ts src/telegram.d.ts src/github.d.ts src/linear.d.ts && tsup --dts-only"
+    "build": "node ../../scripts/clean-dts.mjs src && tsup --dts-only"
   },
   "dependencies": {
     "@smithers-orchestrator/components": "workspace:*",
