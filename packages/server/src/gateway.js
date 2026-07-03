@@ -1358,6 +1358,22 @@ function workflowKeyFromCronPath(workflowPath) {
     }
     return workflowPath.slice("gateway:".length);
 }
+
+/**
+ * Derive a discovered-workflow key from a stored run's `workflowPath`: the
+ * entry-file basename minus its extension, mirroring how `smithers gateway`
+ * keys the workflows it discovers under .smithers/workflows.
+ * @param {string | undefined} workflowPath
+ * @returns {string | null}
+ */
+function workflowKeyFromRunPath(workflowPath) {
+    if (!workflowPath) {
+        return null;
+    }
+    const base = workflowPath.replaceAll("\\", "/").split("/").pop() ?? "";
+    const key = base.replace(/\.(tsx|jsx|mdx|ts|js)$/i, "");
+    return key || null;
+}
 /**
  * @param {ConnectionState} connection
  * @param {string | null} runId
@@ -5035,10 +5051,12 @@ export class Gateway {
    * Resolve the true gateway workflow key for a stored run row. A run started
    * THROUGH the gateway records its key in config; a run started elsewhere (e.g.
    * the CLI) does not, so we fall back to the row's own `workflowName` when that
-   * matches a registered key, and only then to the adapter's first owner. This
+   * matches a registered key, then to the run's entry-file basename (the
+   * discovered-workflow id — this catches runs whose workflow crashed before it
+   * ever announced a name), and only then to the adapter's first owner. This
    * is what keeps runs correctly attributed when many workflows share one DB —
    * the adapter that finds a row is no longer assumed to own it.
-   * @param {{ configJson?: string; workflowName?: string }} row
+   * @param {{ configJson?: string; workflowName?: string; workflowPath?: string }} row
    * @param {Set<string>} registeredKeys
    * @param {string} fallbackKey
    * @returns {string}
@@ -5052,6 +5070,10 @@ export class Gateway {
         const fromName = asString(row.workflowName);
         if (fromName && registeredKeys.has(fromName)) {
             return fromName;
+        }
+        const fromPath = workflowKeyFromRunPath(asString(row.workflowPath));
+        if (fromPath && registeredKeys.has(fromPath)) {
+            return fromPath;
         }
         return fallbackKey;
     }

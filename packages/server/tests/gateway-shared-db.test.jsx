@@ -158,9 +158,34 @@ describe("gateway — resolveRunWorkflowKey precedence", () => {
       gateway.resolveRunWorkflowKey({ configJson: "{}", workflowName: "beta" }, registered, "zzz"),
     ).toBe("beta");
 
-    // Unknown workflowName: last-resort fallback (the adapter's first owner).
+    // Unknown workflowName but a registered entry-file basename: attribute by
+    // path. This is the CLI-started run whose workflow crashed before it ever
+    // announced a name — its row still records which file it ran.
     expect(
-      gateway.resolveRunWorkflowKey({ configJson: "{}", workflowName: "ghost" }, registered, "zzz"),
+      gateway.resolveRunWorkflowKey(
+        { configJson: "{}", workflowName: "workflow", workflowPath: "/ws/.smithers/workflows/beta.tsx" },
+        registered,
+        "zzz",
+      ),
+    ).toBe("beta");
+
+    // A registered workflowName still beats the path-derived key.
+    expect(
+      gateway.resolveRunWorkflowKey(
+        { configJson: "{}", workflowName: "alpha", workflowPath: "/ws/.smithers/workflows/beta.tsx" },
+        registered,
+        "zzz",
+      ),
+    ).toBe("alpha");
+
+    // Unknown workflowName and unregistered path: last-resort fallback (the
+    // adapter's first owner).
+    expect(
+      gateway.resolveRunWorkflowKey(
+        { configJson: "{}", workflowName: "ghost", workflowPath: "/elsewhere/ghost-flow.tsx" },
+        registered,
+        "zzz",
+      ),
     ).toBe("zzz");
   });
 });
