@@ -1208,9 +1208,6 @@ export function getRequiredScopeForGatewayMethod(method: string): GatewayScope |
   if (method === "runs.diff" || method === "frames.list" || method === "frames.get" || method === "attempts.list" || method === "attempts.get") {
     return "run:read";
   }
-  if (method === "getDevToolsSnapshot") {
-    return "observability:read";
-  }
   if (method === "runs.rerun") {
     return "run:write";
   }
