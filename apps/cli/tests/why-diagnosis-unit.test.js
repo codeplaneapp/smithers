@@ -642,7 +642,21 @@ describe("why diagnosis unit coverage", () => {
                 finishedAtMs: NOW - 1_000,
                 heartbeatAtMs: null,
             }),
+            nodes: [
+                nodeRow({
+                    nodeId: "stale-finished-gate",
+                    state: "waiting-approval",
+                    updatedAtMs: NOW - 5_000,
+                }),
+            ],
+            approvals: [
+                approvalRow({
+                    nodeId: "stale-finished-gate",
+                    requestedAtMs: NOW - 5_000,
+                }),
+            ],
         }));
+        expect(finished.blockers).toEqual([]);
         expect(renderWhyDiagnosisHuman(finished)).toBe("Run is finished, nothing is blocked.");
 
         const cancelled = await diagnose(makeAdapter({
@@ -651,9 +665,27 @@ describe("why diagnosis unit coverage", () => {
                 finishedAtMs: null,
                 heartbeatAtMs: null,
             }),
+            nodes: [
+                nodeRow({
+                    nodeId: "stale-cancelled-gate",
+                    state: "waiting-approval",
+                    updatedAtMs: NOW - 5_000,
+                }),
+            ],
+            approvals: [
+                approvalRow({
+                    nodeId: "stale-cancelled-gate",
+                    requestedAtMs: NOW - 5_000,
+                }),
+            ],
         }));
         expect(cancelled.summary).toBe("Run was cancelled.");
+        expect(cancelled.blockers).toEqual([]);
         expect(renderWhyDiagnosisHuman(cancelled)).toBe("Run was cancelled.");
+        expect(diagnosisCtaCommands(cancelled).map((entry) => entry.command)).toEqual([
+            "inspect diag-run",
+            "logs diag-run",
+        ]);
 
         const healthy = await diagnose(makeAdapter({
             nodes: [
@@ -686,6 +718,35 @@ describe("why diagnosis unit coverage", () => {
         }));
         expect(unknown.summary).toBe("Run is unknown. No blockers were identified.");
         expect(renderWhyDiagnosisHuman(unknown)).toContain("No blockers were identified.");
+    });
+
+    test("reports waiting approval nodes that are missing approval request rows", async () => {
+        const diagnosis = await diagnose(makeAdapter({
+            run: runRow({
+                status: "waiting-approval",
+                heartbeatAtMs: null,
+            }),
+            nodes: [
+                nodeRow({
+                    nodeId: "mounted-gate",
+                    state: "waiting-approval",
+                    updatedAtMs: NOW - 12_000,
+                }),
+            ],
+            approvals: [],
+        }));
+
+        expect(diagnosis.blockers).toHaveLength(1);
+        expect(diagnosis.blockers[0]).toMatchObject({
+            kind: "waiting-approval",
+            nodeId: "mounted-gate",
+            iteration: 0,
+            reason: "Approval node is waiting, but no approval request row was recorded",
+            unblocker: "smithers approve diag-run",
+        });
+        expect(diagnosis.blockers[0]?.context).toContain("No approval request row is recorded");
+        expect(diagnosis.blockers[0]?.context).toContain("smithers deny diag-run --node mounted-gate --iteration 0");
+        expect(renderWhyDiagnosisHuman(diagnosis)).toContain("Approval node is waiting");
     });
 
     test("reports stale continued runs without a heartbeat", async () => {
