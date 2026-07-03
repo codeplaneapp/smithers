@@ -64,8 +64,20 @@ interface SmithersWorkflow<Schema = unknown> {
 type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
   cache?: boolean;
+  // Explicit workflow-level output schema/table used to populate
+  // RunResult.output (and therefore a parent <Subflow>'s child result).
+  // Defaults to the schema key literally named `output`.
+  output?: SmithersWorkflowOutputTarget;
   workflowHash?: string;
 };
+
+// A Zod schema (createSmithers(...).outputs.<key>), a Drizzle table, or a
+// string schema key. Restated in @smithers-orchestrator/scheduler, which must
+// not depend on zod or components.
+type SmithersWorkflowOutputTarget =
+  | { readonly _def: unknown }
+  | { readonly $inferSelect: Record<string, unknown> }
+  | string;
 
 type SchemaRegistryEntry = {
   table: any;

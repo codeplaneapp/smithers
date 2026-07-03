@@ -4351,18 +4351,29 @@ const child = createSmithers({
   childResult: z.object({ summary: z.string() }),
 });
 
-const childWorkflow = child.smithers((ctx) => (
-  <child.Workflow name="scan-repo">
-    <Sequence>
-      <Task id="scan" output={child.outputs.childResult} agent={scanner}>
-        {`Scan ${ctx.input.repo} and summarize.`}
-      </Task>
-    </Sequence>
-  </child.Workflow>
-));
+const childWorkflow = child.smithers(
+  (ctx) => (
+    <child.Workflow name="scan-repo">
+      <Sequence>
+        <Task id="scan" output={child.outputs.childResult} agent={scanner}>
+          {`Scan ${ctx.input.repo} and summarize.`}
+        </Task>
+      </Sequence>
+    </child.Workflow>
+  ),
+  { output: child.outputs.childResult },
+);
 
 export default childWorkflow;
 ```
+
+The second argument to `smithers(build, { output })` declares which schema
+becomes the child's `RunResult.output`: the value a parent `<Subflow>`
+persists. Pass the `createSmithers(...).outputs.<key>` schema (a string schema
+key or a Drizzle table also work). Without it, the child result is read only
+from a schema key literally named `output`, so a child that writes to any other
+key (like `childResult` here) would yield an empty subflow result. Declare it
+whenever the child's result schema is not named `output`.
 
 Import that value into the parent and hand it to `<Subflow workflow={...}>`.
 The parent declares the schema it wants to persist the subflow result under;
@@ -4429,13 +4440,16 @@ const child = createSmithers({
   scanResult: z.object({ summary: z.string() }),
 });
 
-const scanWorkflow = child.smithers((ctx) => (
-  <child.Workflow name="scan-child">
-    <child.Task id="scan" output={child.outputs.scanResult}>
-      {{ summary: `Scanned ${ctx.input.repo}` }}
-    </child.Task>
-  </child.Workflow>
-));
+const scanWorkflow = child.smithers(
+  (ctx) => (
+    <child.Workflow name="scan-child">
+      <child.Task id="scan" output={child.outputs.scanResult}>
+        {{ summary: `Scanned ${ctx.input.repo}` }}
+      </child.Task>
+    </child.Workflow>
+  ),
+  { output: child.outputs.scanResult },
+);
 
 const parent = createSmithers({
   input: z.object({ repo: z.string() }),
@@ -4479,6 +4493,7 @@ value passed through the parent's `<Subflow input={...}>` prop.
 - `childRun` (default) gives the child its own DB row; retry/cache/resume scope it as a unit.
 - `inline` renders the child tree as siblings in the parent plan, sharing its scope.
 - Subflows compose; children may contain `<Subflow>` themselves.
+- Declare the child's result via `smithers(build, { output })` unless its result schema is literally named `output`; that is the schema a parent `<Subflow>` persists.
 
 ---
 
@@ -6087,8 +6102,20 @@ interface SmithersWorkflow<Schema = unknown> {
 type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
   cache?: boolean;
+  // Explicit workflow-level output schema/table used to populate
+  // RunResult.output (and therefore a parent <Subflow>'s child result).
+  // Defaults to the schema key literally named `output`.
+  output?: SmithersWorkflowOutputTarget;
   workflowHash?: string;
 };
+
+// A Zod schema (createSmithers(...).outputs.<key>), a Drizzle table, or a
+// string schema key. Restated in @smithers-orchestrator/scheduler, which must
+// not depend on zod or components.
+type SmithersWorkflowOutputTarget =
+  | { readonly _def: unknown }
+  | { readonly $inferSelect: Record<string, unknown> }
+  | string;
 
 type SchemaRegistryEntry = {
   table: any;
