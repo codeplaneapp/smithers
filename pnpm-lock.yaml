@@ -132,6 +132,9 @@ importers:
       '@smithers-orchestrator/telegram':
         specifier: workspace:*
         version: link:packages/telegram
+      '@smithers-orchestrator/testing':
+        specifier: workspace:*
+        version: link:packages/testing
       '@smithers-orchestrator/time-travel':
         specifier: workspace:*
         version: link:packages/time-travel
@@ -1833,6 +1836,9 @@ importers:
       '@smithers-orchestrator/telegram':
         specifier: workspace:*
         version: link:../telegram
+      '@smithers-orchestrator/testing':
+        specifier: workspace:*
+        version: link:../testing
       '@smithers-orchestrator/time-travel':
         specifier: workspace:*
         version: link:../time-travel
@@ -1889,6 +1895,46 @@ importers:
       '@types/bun':
         specifier: latest
         version: 1.3.14
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  packages/testing:
+    dependencies:
+      '@smithers-orchestrator/components':
+        specifier: workspace:*
+        version: link:../components
+      '@smithers-orchestrator/driver':
+        specifier: workspace:*
+        version: link:../driver
+      '@smithers-orchestrator/graph':
+        specifier: workspace:*
+        version: link:../graph
+      '@smithers-orchestrator/react-reconciler':
+        specifier: workspace:*
+        version: link:../react-reconciler
+      react:
+        specifier: ^19.2.7
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.2.7
+        version: 19.2.7(react@19.2.7)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/bun':
+        specifier: latest
+        version: 1.3.14
+      '@types/react':
+        specifier: ^19.2.17
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.17)
+      smithers-orchestrator:
+        specifier: workspace:*
+        version: link:../smithers
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
