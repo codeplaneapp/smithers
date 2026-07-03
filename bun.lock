@@ -35,6 +35,7 @@
         "@smithers-orchestrator/gateway-react": "workspace:*",
         "@smithers-orchestrator/gateway-ui": "workspace:*",
         "@smithers-orchestrator/graph": "workspace:*",
+        "@smithers-orchestrator/integrations": "workspace:*",
         "@smithers-orchestrator/memory": "workspace:*",
         "@smithers-orchestrator/observability": "workspace:*",
         "@smithers-orchestrator/openapi": "workspace:*",
@@ -107,6 +108,17 @@
         "playwright": "^1.61.1",
       },
     },
+    "apps/automate-site": {
+      "name": "@smithers-orchestrator/automate-site",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/node": "26.1.0",
+        "alchemy": "^0.93.12",
+        "bun-types": "^1.3.14",
+        "typescript": "~6.0.3",
+        "wrangler": "^4.106.0",
+      },
+    },
     "apps/bug-worker": {
       "name": "@smithers-orchestrator/bug-worker",
       "version": "0.0.1",
@@ -166,6 +178,39 @@
         "typescript": "~6.0.3",
       },
     },
+    "apps/ddd-site": {
+      "name": "@smithers-orchestrator/ddd-site",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/node": "26.1.0",
+        "alchemy": "^0.93.12",
+        "bun-types": "^1.3.14",
+        "typescript": "~6.0.3",
+        "wrangler": "^4.106.0",
+      },
+    },
+    "apps/init-site": {
+      "name": "@smithers-orchestrator/init-site",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/node": "26.1.0",
+        "alchemy": "^0.93.12",
+        "bun-types": "^1.3.14",
+        "typescript": "~6.0.3",
+        "wrangler": "^4.106.0",
+      },
+    },
+    "apps/monitor-site": {
+      "name": "@smithers-orchestrator/monitor-site",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/node": "26.1.0",
+        "alchemy": "^0.93.12",
+        "bun-types": "^1.3.14",
+        "typescript": "~6.0.3",
+        "wrangler": "^4.106.0",
+      },
+    },
     "apps/observability": {
       "name": "@smithers-orchestrator/observability",
       "version": "0.26.1",
@@ -182,6 +227,17 @@
     },
     "apps/openclaw-site": {
       "name": "@smithers-orchestrator/openclaw-site",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/node": "26.1.0",
+        "alchemy": "^0.93.12",
+        "bun-types": "^1.3.14",
+        "typescript": "~6.0.3",
+        "wrangler": "^4.106.0",
+      },
+    },
+    "apps/plugins-site": {
+      "name": "@smithers-orchestrator/plugins-site",
       "version": "0.0.1",
       "devDependencies": {
         "@types/node": "26.1.0",
@@ -215,6 +271,17 @@
         "react": "19.2.7",
         "react-dom": "19.2.7",
         "typescript": "~6.0.3",
+      },
+    },
+    "apps/self-healing-site": {
+      "name": "@smithers-orchestrator/self-healing-site",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/node": "26.1.0",
+        "alchemy": "^0.93.12",
+        "bun-types": "^1.3.14",
+        "typescript": "~6.0.3",
+        "wrangler": "^4.106.0",
       },
     },
     "apps/smithers": {
@@ -255,6 +322,17 @@
         "zod": "4.4.3",
       },
     },
+    "apps/telegram-site": {
+      "name": "@smithers-orchestrator/telegram-site",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/node": "26.1.0",
+        "alchemy": "^0.93.12",
+        "bun-types": "^1.3.14",
+        "typescript": "~6.0.3",
+        "wrangler": "^4.106.0",
+      },
+    },
     "apps/telegram-summary": {
       "name": "@smithers-orchestrator/telegram-summary",
       "version": "0.0.1",
@@ -266,6 +344,17 @@
         "alchemy": "^0.93.12",
         "bun-types": "^1.3.14",
         "typescript": "~6.0.3",
+      },
+    },
+    "apps/ui-site": {
+      "name": "@smithers-orchestrator/ui-site",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/node": "26.1.0",
+        "alchemy": "^0.93.12",
+        "bun-types": "^1.3.14",
+        "typescript": "~6.0.3",
+        "wrangler": "^4.106.0",
       },
     },
     "packages/accounts": {
@@ -570,6 +659,27 @@
         "typescript": "~6.0.3",
       },
     },
+    "packages/integrations": {
+      "name": "@smithers-orchestrator/integrations",
+      "version": "0.26.1",
+      "dependencies": {
+        "@smithers-orchestrator/components": "workspace:*",
+        "@smithers-orchestrator/db": "workspace:*",
+        "@smithers-orchestrator/engine": "workspace:*",
+        "@smithers-orchestrator/errors": "workspace:*",
+        "@smithers-orchestrator/observability": "workspace:*",
+        "@smithers-orchestrator/react-reconciler": "workspace:*",
+        "@smithers-orchestrator/scheduler": "workspace:*",
+        "effect": "3.21.4",
+        "react": "^19.2.7",
+        "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "drizzle-orm": "^0.45.2",
+        "typescript": "~6.0.3",
+      },
+    },
     "packages/jj-darwin-arm64": {
       "name": "@smithers-orchestrator/jj-darwin-arm64",
       "version": "0.26.1",
@@ -736,6 +846,7 @@
         "@smithers-orchestrator/engine": "workspace:*",
         "@smithers-orchestrator/errors": "workspace:*",
         "@smithers-orchestrator/gateway": "workspace:*",
+        "@smithers-orchestrator/integrations": "workspace:*",
         "@smithers-orchestrator/observability": "workspace:*",
         "@smithers-orchestrator/protocol": "workspace:*",
         "@smithers-orchestrator/scheduler": "workspace:*",
@@ -1751,6 +1862,8 @@
 
     "@smithers-orchestrator/agents": ["@smithers-orchestrator/agents@workspace:packages/agents"],
 
+    "@smithers-orchestrator/automate-site": ["@smithers-orchestrator/automate-site@workspace:apps/automate-site"],
+
     "@smithers-orchestrator/bug-worker": ["@smithers-orchestrator/bug-worker@workspace:apps/bug-worker"],
 
     "@smithers-orchestrator/cli": ["@smithers-orchestrator/cli@workspace:apps/cli"],
@@ -1762,6 +1875,8 @@
     "@smithers-orchestrator/control-plane": ["@smithers-orchestrator/control-plane@workspace:packages/control-plane"],
 
     "@smithers-orchestrator/db": ["@smithers-orchestrator/db@workspace:packages/db"],
+
+    "@smithers-orchestrator/ddd-site": ["@smithers-orchestrator/ddd-site@workspace:apps/ddd-site"],
 
     "@smithers-orchestrator/devtools": ["@smithers-orchestrator/devtools@workspace:packages/devtools"],
 
@@ -1783,6 +1898,10 @@
 
     "@smithers-orchestrator/graph": ["@smithers-orchestrator/graph@workspace:packages/graph"],
 
+    "@smithers-orchestrator/init-site": ["@smithers-orchestrator/init-site@workspace:apps/init-site"],
+
+    "@smithers-orchestrator/integrations": ["@smithers-orchestrator/integrations@workspace:packages/integrations"],
+
     "@smithers-orchestrator/jj-darwin-arm64": ["@smithers-orchestrator/jj-darwin-arm64@workspace:packages/jj-darwin-arm64"],
 
     "@smithers-orchestrator/jj-darwin-x64": ["@smithers-orchestrator/jj-darwin-x64@workspace:packages/jj-darwin-x64"],
@@ -1795,6 +1914,8 @@
 
     "@smithers-orchestrator/memory": ["@smithers-orchestrator/memory@workspace:packages/memory"],
 
+    "@smithers-orchestrator/monitor-site": ["@smithers-orchestrator/monitor-site@workspace:apps/monitor-site"],
+
     "@smithers-orchestrator/observability": ["@smithers-orchestrator/observability@workspace:apps/observability"],
 
     "@smithers-orchestrator/openapi": ["@smithers-orchestrator/openapi@workspace:packages/openapi"],
@@ -1802,6 +1923,8 @@
     "@smithers-orchestrator/openclaw-site": ["@smithers-orchestrator/openclaw-site@workspace:apps/openclaw-site"],
 
     "@smithers-orchestrator/pi-plugin": ["@smithers-orchestrator/pi-plugin@workspace:packages/pi-plugin"],
+
+    "@smithers-orchestrator/plugins-site": ["@smithers-orchestrator/plugins-site@workspace:apps/plugins-site"],
 
     "@smithers-orchestrator/protocol": ["@smithers-orchestrator/protocol@workspace:packages/protocol"],
 
@@ -1815,11 +1938,15 @@
 
     "@smithers-orchestrator/scorers": ["@smithers-orchestrator/scorers@workspace:packages/scorers"],
 
+    "@smithers-orchestrator/self-healing-site": ["@smithers-orchestrator/self-healing-site@workspace:apps/self-healing-site"],
+
     "@smithers-orchestrator/server": ["@smithers-orchestrator/server@workspace:packages/server"],
 
     "@smithers-orchestrator/smithers-ui": ["@smithers-orchestrator/smithers-ui@workspace:apps/smithers"],
 
     "@smithers-orchestrator/telegram": ["@smithers-orchestrator/telegram@workspace:packages/telegram"],
+
+    "@smithers-orchestrator/telegram-site": ["@smithers-orchestrator/telegram-site@workspace:apps/telegram-site"],
 
     "@smithers-orchestrator/telegram-summary": ["@smithers-orchestrator/telegram-summary@workspace:apps/telegram-summary"],
 
@@ -1828,6 +1955,8 @@
     "@smithers-orchestrator/tool-context": ["@smithers-orchestrator/tool-context@workspace:packages/tool-context"],
 
     "@smithers-orchestrator/tui": ["@smithers-orchestrator/tui@workspace:packages/tui"],
+
+    "@smithers-orchestrator/ui-site": ["@smithers-orchestrator/ui-site@workspace:apps/ui-site"],
 
     "@smithers-orchestrator/ui-styleguide": ["@smithers-orchestrator/ui-styleguide@workspace:packages/ui-styleguide"],
 
@@ -2551,7 +2680,7 @@
 
     "fresh": ["fresh@2.0.0", "", {}, "sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A=="],
 
-    "fsevents": ["fsevents@2.3.2", "", { "os": "darwin" }, "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="],
+    "fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
     "function-bind": ["function-bind@1.1.2", "", {}, "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA=="],
 
@@ -3663,6 +3792,8 @@
 
     "@smithers-orchestrator/graph/@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
+    "@smithers-orchestrator/integrations/@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
+
     "@smithers-orchestrator/memory/@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
     "@smithers-orchestrator/observability/@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
@@ -3857,6 +3988,8 @@
 
     "parse5-htmlparser2-tree-adapter/parse5": ["parse5@6.0.1", "", {}, "sha512-Ofn/CTFzRGTTxwpNEs9PP93gXShHcTq255nzRYSKe8AkVpZY7e1fpmTfOyoIvjP5HG7Z2ZM7VS9PPhQGW2pOpw=="],
 
+    "playwright/fsevents": ["fsevents@2.3.2", "", { "os": "darwin" }, "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="],
+
     "proper-lockfile/signal-exit": ["signal-exit@3.0.7", "", {}, "sha512-wnD2ZE+l+SPC/uoS0vXeE9L1+0wuaMqKlfz9AMUo38JsyLSBWSFcHR1Rri62LZc12vLr1gb3jl7iwQhgwpAbGQ=="],
 
     "protobufjs/@types/node": ["@types/node@25.6.0", "", { "dependencies": { "undici-types": "~7.19.0" } }, "sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ=="],
@@ -3870,8 +4003,6 @@
     "readable-stream/safe-buffer": ["safe-buffer@5.1.2", "", {}, "sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g=="],
 
     "ripemd160/hash-base": ["hash-base@3.1.2", "", { "dependencies": { "inherits": "^2.0.4", "readable-stream": "^2.3.8", "safe-buffer": "^5.2.1", "to-buffer": "^1.2.1" } }, "sha512-Bb33KbowVTIj5s7Ked1OsqHUeCpz//tPwR+E2zJgJKo9Z5XolZ9b6bdUgjmYlwnWhoOQKoTd1TYToZGn5mAYOg=="],
-
-    "rollup/fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
     "router/path-to-regexp": ["path-to-regexp@8.4.2", "", {}, "sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA=="],
 
@@ -3893,17 +4024,11 @@
 
     "tsx/esbuild": ["esbuild@0.28.0", "", { "optionalDependencies": { "@esbuild/aix-ppc64": "0.28.0", "@esbuild/android-arm": "0.28.0", "@esbuild/android-arm64": "0.28.0", "@esbuild/android-x64": "0.28.0", "@esbuild/darwin-arm64": "0.28.0", "@esbuild/darwin-x64": "0.28.0", "@esbuild/freebsd-arm64": "0.28.0", "@esbuild/freebsd-x64": "0.28.0", "@esbuild/linux-arm": "0.28.0", "@esbuild/linux-arm64": "0.28.0", "@esbuild/linux-ia32": "0.28.0", "@esbuild/linux-loong64": "0.28.0", "@esbuild/linux-mips64el": "0.28.0", "@esbuild/linux-ppc64": "0.28.0", "@esbuild/linux-riscv64": "0.28.0", "@esbuild/linux-s390x": "0.28.0", "@esbuild/linux-x64": "0.28.0", "@esbuild/netbsd-arm64": "0.28.0", "@esbuild/netbsd-x64": "0.28.0", "@esbuild/openbsd-arm64": "0.28.0", "@esbuild/openbsd-x64": "0.28.0", "@esbuild/openharmony-arm64": "0.28.0", "@esbuild/sunos-x64": "0.28.0", "@esbuild/win32-arm64": "0.28.0", "@esbuild/win32-ia32": "0.28.0", "@esbuild/win32-x64": "0.28.0" }, "bin": { "esbuild": "bin/esbuild" } }, "sha512-sNR9MHpXSUV/XB4zmsFKN+QgVG82Cc7+/aaxJ8Adi8hyOac+EXptIp45QBPaVyX3N70664wRbTcLTOemCAnyqw=="],
 
-    "tsx/fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
-
-    "vite/fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
-
     "vite/postcss": ["postcss@8.5.16", "", { "dependencies": { "nanoid": "^3.3.12", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-vuwillviilfKZsg0VGj5R/YwwcHx4SLsIOI/7K6mQkWx+l5cUHTjj5g0AasTBcyXsbfTgrwsUNmVUb5xVwyPwg=="],
 
     "vite/tinyglobby": ["tinyglobby@0.2.17", "", { "dependencies": { "fdir": "^6.5.0", "picomatch": "^4.0.4" } }, "sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g=="],
 
     "wrangler/@cloudflare/unenv-preset": ["@cloudflare/unenv-preset@2.16.1", "", { "peerDependencies": { "unenv": "2.0.0-rc.24", "workerd": ">1.20260305.0 <2.0.0-0" }, "optionalPeers": ["workerd"] }, "sha512-ECxObrMfyTl5bhQf/lZCXwo5G6xX9IAUo+nDMKK4SZ8m4Jvvxp52vilxyySSWh2YTZz8+HQ07qGH/2rEom1vDw=="],
-
-    "wrangler/fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
     "wrangler/miniflare": ["miniflare@4.20260630.0", "", { "dependencies": { "@cspotcode/source-map-support": "0.8.1", "sharp": "0.34.5", "undici": "7.28.0", "workerd": "1.20260630.1", "ws": "8.21.0", "youch": "4.1.0-beta.10" }, "bin": { "miniflare": "bootstrap.js" } }, "sha512-lyRplDrSJJWVpzSSQPBSQtNmUuxScCZyOOkXFs37uSbdTfWRDDmw6DyFKVS2s1eYtA/i4u2xR/0FyPIsTl/HJw=="],
 
@@ -3966,6 +4091,8 @@
     "@octokit/plugin-paginate-rest/@octokit/types/@octokit/openapi-types": ["@octokit/openapi-types@24.2.0", "", {}, "sha512-9sIH3nSUttelJSXUrmGzl7QUBFul0/mB8HRYl3fOlgHbIWG+WnYDXU3v/2zMtAvuzZ/ed00Ei6on975FhBfzrg=="],
 
     "@octokit/plugin-rest-endpoint-methods/@octokit/types/@octokit/openapi-types": ["@octokit/openapi-types@24.2.0", "", {}, "sha512-9sIH3nSUttelJSXUrmGzl7QUBFul0/mB8HRYl3fOlgHbIWG+WnYDXU3v/2zMtAvuzZ/ed00Ei6on975FhBfzrg=="],
+
+    "@playwright/test/playwright/fsevents": ["fsevents@2.3.2", "", { "os": "darwin" }, "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="],
 
     "@playwright/test/playwright/playwright-core": ["playwright-core@1.60.0", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-9bW6zvX/m0lEbgTKJ6YppOKx8H3VOPBMOCFh2irXFOT4BbHgrx5hPjwJYLT40Lu+4qtD36qKc/Hn56StUW57IA=="],
 
@@ -4034,8 +4161,6 @@
     "alchemy/wrangler/@cloudflare/unenv-preset": ["@cloudflare/unenv-preset@2.16.1", "", { "peerDependencies": { "unenv": "2.0.0-rc.24", "workerd": ">1.20260305.0 <2.0.0-0" }, "optionalPeers": ["workerd"] }, "sha512-ECxObrMfyTl5bhQf/lZCXwo5G6xX9IAUo+nDMKK4SZ8m4Jvvxp52vilxyySSWh2YTZz8+HQ07qGH/2rEom1vDw=="],
 
     "alchemy/wrangler/esbuild": ["esbuild@0.27.3", "", { "optionalDependencies": { "@esbuild/aix-ppc64": "0.27.3", "@esbuild/android-arm": "0.27.3", "@esbuild/android-arm64": "0.27.3", "@esbuild/android-x64": "0.27.3", "@esbuild/darwin-arm64": "0.27.3", "@esbuild/darwin-x64": "0.27.3", "@esbuild/freebsd-arm64": "0.27.3", "@esbuild/freebsd-x64": "0.27.3", "@esbuild/linux-arm": "0.27.3", "@esbuild/linux-arm64": "0.27.3", "@esbuild/linux-ia32": "0.27.3", "@esbuild/linux-loong64": "0.27.3", "@esbuild/linux-mips64el": "0.27.3", "@esbuild/linux-ppc64": "0.27.3", "@esbuild/linux-riscv64": "0.27.3", "@esbuild/linux-s390x": "0.27.3", "@esbuild/linux-x64": "0.27.3", "@esbuild/netbsd-arm64": "0.27.3", "@esbuild/netbsd-x64": "0.27.3", "@esbuild/openbsd-arm64": "0.27.3", "@esbuild/openbsd-x64": "0.27.3", "@esbuild/openharmony-arm64": "0.27.3", "@esbuild/sunos-x64": "0.27.3", "@esbuild/win32-arm64": "0.27.3", "@esbuild/win32-ia32": "0.27.3", "@esbuild/win32-x64": "0.27.3" }, "bin": { "esbuild": "bin/esbuild" } }, "sha512-8VwMnyGCONIs6cWue2IdpHxHnAjzxnw2Zr7MkVxB2vjmQ2ivqGFb4LEG3SMnv0Gb2F/G/2yA8zUaiL1gywDCCg=="],
-
-    "alchemy/wrangler/fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
     "alchemy/wrangler/miniflare": ["miniflare@4.20260603.0", "", { "dependencies": { "@cspotcode/source-map-support": "0.8.1", "sharp": "0.34.5", "undici": "7.24.8", "workerd": "1.20260603.1", "ws": "8.20.1", "youch": "4.1.0-beta.10" }, "bin": { "miniflare": "bootstrap.js" } }, "sha512-+kMQYB82gC8MPOuojHur3icQsUeZUEJ+Sphuo5rVC3Ri9txBLAW/mH33b9OVrpmkogQeaaqPS4tPtugJZhk5Kw=="],
 
