@@ -8,12 +8,17 @@
  */
 export interface FetchOidcTokenInput {
   audience?: string;
+  env?: {
+    ACTIONS_ID_TOKEN_REQUEST_URL?: string;
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN?: string;
+  };
   fetchImpl?: typeof fetch;
 }
 
 export async function fetchOidcToken(input: FetchOidcTokenInput = {}): Promise<string> {
-  const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-  const requestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  const env = input.env ?? process.env;
+  const requestUrl = env.ACTIONS_ID_TOKEN_REQUEST_URL;
+  const requestToken = env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   if (!requestUrl || !requestToken) {
     throw new Error(
       "ACTIONS_ID_TOKEN_REQUEST_URL / ACTIONS_ID_TOKEN_REQUEST_TOKEN are unset; add `permissions: id-token: write` to the workflow",
