@@ -177,6 +177,8 @@ const CLOUD_PRODUCT_SPEC = join(root, ".smithers/specs/cloud-execution-product.m
 
 let failed = false;
 
+// scripts/ lives at the workspace root, which `pnpm -r test` never runs, so the
+// normalize-bunx regression test has no other home; run it from the docs gate.
 {
   const r = spawnSync("bun", ["test", join("scripts", "normalize-bunx.test.ts")], { cwd: root, stdio: "inherit" });
   if (r.status !== 0) failed = true;

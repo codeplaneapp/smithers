@@ -21,6 +21,16 @@
  * subcommand (e.g. "the `smithers` skill"), and never touches prose outside
  * code spans (e.g. "the smithers init command").
  *
+ * The lookbehind `(?<![/\\\w@.-])` requires `smithers` to start a fresh token,
+ * so a `smithers` glued to a preceding character is left alone. Each excluded
+ * prefix guards a distinct false positive:
+ *   - `/`  slash commands and POSIX path segments (`/smithers`, Hermes `/smithers run`)
+ *   - `\`  Windows path segments (`C:\tools\smithers run`)
+ *   - word chars  hyphen-free bin/package suffixes (`mysmithers`, `smithers-orchestrator`)
+ *   - `@`  scoped packages and mentions (`@smithersai/smithers`, a `@smithers run` chat mention)
+ *   - `.`  domain- or property-like tokens (`foo.smithers run`)
+ *   - `-`  hyphenated bin names (`my-smithers run`)
+ *
  * Modes:
  *   bun scripts/normalize-bunx.ts          rewrite files in place
  *   bun scripts/normalize-bunx.ts --check  exit 1 and list offenders, write nothing

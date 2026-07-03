@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { normalizeCommands, rewrite } from "./normalize-bunx.ts";
+import { normalizeCommands, normalizeInline, rewrite } from "./normalize-bunx.ts";
 
 describe("normalize-bunx", () => {
   test("rewrites bare and runner-prefixed Smithers CLI invocations", () => {
@@ -33,6 +33,18 @@ describe("normalize-bunx", () => {
     for (const command of commands) {
       expect(normalizeCommands(command)).toBe(command);
     }
+  });
+
+  test("normalizeInline rewrites CLI code spans but not prose or path-prefixed bins", () => {
+    expect(normalizeInline("Run `smithers run workflow.tsx` from the project root.")).toBe(
+      "Run `bunx smithers-orchestrator run workflow.tsx` from the project root.",
+    );
+    expect(normalizeInline("The smithers run command appears in prose.")).toBe(
+      "The smithers run command appears in prose.",
+    );
+    expect(normalizeInline("Use `my-smithers run workflow.tsx` from your fork.")).toBe(
+      "Use `my-smithers run workflow.tsx` from your fork.",
+    );
   });
 
   test("normalizes only code spans and shell fences", () => {
