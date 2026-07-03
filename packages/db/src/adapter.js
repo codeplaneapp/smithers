@@ -1527,7 +1527,13 @@ export class SmithersDb {
             const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`);
             const row = stmt.get(runId, nodeId);
             return Promise.resolve(coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
-        }).pipe(Effect.catchAll(() => Effect.succeed(null))));
+        }).pipe(
+            // A missing row already returns null from the query; this only fires
+            // on a genuine read error (bad table, DB failure), which must not be
+            // silently indistinguishable from "no output". Log it, keep null.
+            Effect.tapError((error) => Effect.logWarning(`failed to read raw node output from ${tableName}`).pipe(Effect.annotateLogs({ runId, nodeId, error: String(error) }))),
+            Effect.catchAll(() => Effect.succeed(null)),
+        ));
     }
     /**
    * @param {string} tableName
@@ -1582,7 +1588,12 @@ export class SmithersDb {
             const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? AND iteration = ? LIMIT 1`);
             const row = stmt.get(runId, nodeId, iteration);
             return Promise.resolve(coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
-        }).pipe(Effect.catchAll(() => Effect.succeed(null))));
+        }).pipe(
+            // Only fires on a genuine read error (a missing row already returns
+            // null); log it so a failed output read is not mistaken for absence.
+            Effect.tapError((error) => Effect.logWarning(`failed to read raw node output from ${tableName} (iteration ${iteration})`).pipe(Effect.annotateLogs({ runId, nodeId, iteration, error: String(error) }))),
+            Effect.catchAll(() => Effect.succeed(null)),
+        ));
     }
     /**
    * @param {Record<string, unknown>} row
