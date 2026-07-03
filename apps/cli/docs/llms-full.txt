@@ -2183,7 +2183,7 @@ commands[85]:
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       insecure,,boolean,false,Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run; dangerous)
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
-      interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (falls back to inline streaming)
+      interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (no silent fallback: fails with TUI_MONITOR_UNAVAILABLE if the tui package is missing, leaving the detached run running)
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
   - name: migrate
@@ -2627,7 +2627,7 @@ commands[85]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[33]{name,short,type,default,desc}:
+    flags[35]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2659,8 +2659,10 @@ commands[85]:
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
+      verbose,,boolean,false,Show engine info logs on interactive runs; the default keeps progress + warnings only (non-TTY/structured output always gets full logs)
+      report,,boolean,true,Narrate an interactive run's result with a cheap/fast agent and open an HTML summary in the browser (disable with --no-report or SMITHERS_NO_REPORT=1)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted
-      interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (falls back to inline streaming)
+      interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (no silent fallback: fails with TUI_MONITOR_UNAVAILABLE if the tui package is missing, leaving the detached run running)
   - name: workflow.path
     purpose: Resolve a workflow ID to its entry file path
     args[1]{name,type,required,desc}:
@@ -2973,6 +2975,7 @@ type TaskProps = {
   dependsOn?: string[];
   needs?: Record<string, string>;
   deps?: Record<string, OutputTarget>; // typed render-time upstream outputs
+  depsOptional?: boolean; // render even when some deps are unresolved (skip them)
   fork?: string; // start from another task's final agent session snapshot
   allowTools?: string[]; // CLI-agent tool allowlist
   key?: string;
@@ -3080,6 +3083,7 @@ Three props express upstream dependencies. They compose.
 - **`dependsOn: string[]`**: ordering only. The task waits until every listed task id is terminal. No values are passed in.
 - **`needs: Record<string, string>`**: named dependencies. Each value is an upstream task id; each key is the name that value is looked up under.
 - **`deps: Record<string, OutputTarget>`**: typed render-time outputs. The task gates on each dependency and passes the resolved rows to a `children` callback via `{(deps) => ...}`.
+- **`depsOptional: boolean`**: tolerate unresolved deps. By default a task with `deps` defers until every dependency has an output row. With `depsOptional`, the task renders as soon as it can, and any dependency that has no row (for example an upstream `continueOnFail` task that failed) is simply absent from the `deps` object. Read those values defensively: `deps.summary?.text`, because an unresolved dep is missing, not present-but-undefined.
 
 The detail that bites people: **a `deps` key is treated as the upstream task's id.** `deps={{ analyze: outputs.analysis }}` depends on a task whose id is `analyze`. If your dep name differs from the upstream id, remap it with `needs`:
 
@@ -3819,6 +3823,7 @@ type WaitForEventProps = {
 ## Notes
 
 - Push-based; for poll-based checks use `<Task>` with a compute function.
+- External integration webhooks (the `@smithers-orchestrator/integrations` package) deliver these events. A source signals `integration:<service>:<event>` (for example `integration:github:pull_request`) with a `correlationId` that is `owner/repo#number`, `owner/repo`, or `null` depending on the payload, so set `signalName` and `correlationId` to match.
 - With `async`, dependents via `dependsOn`/`needs` still block until payload arrives.
 - Async waits are tracked by the `smithers_external_wait_async_pending{kind="event"}` gauge while pending (it rises on start, falls on completion).
 - A run suspended on `<WaitForEvent>` (status `waiting-event`) does not resume itself when the event is delivered out of process. Deliver it, then resume with `bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true`. Run the CLI from the workspace root (the directory holding `.smithers/`) so it resolves the same `smithers.db` the run wrote. See the keeper-loop pattern in the CLI overview.
@@ -7348,7 +7353,7 @@ type GatewayAuthConfig =
       trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
       defaultRole?: string;          // default "operator"
-      defaultScopes?: string[];      // default ["*"] when scopes header is absent
+      defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected
     };
 type GatewayDefaults = { cliAgentTools?: "all" | "explicit-only" };
 
@@ -8122,10 +8127,12 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | CLI Agents |
 | `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | SDK Agents |
 | `@smithers-orchestrator/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | CLI Agents, SDK Agents |
+| `@smithers-orchestrator/automate-site` | Private Cloudflare Worker deployment for the event-triggered durable workflows marketing site | Ecosystem |
 | `@smithers-orchestrator/bug-worker` | Private Cloudflare Worker behind `bug.smithers.sh` that receives `smithers bug` reports and stores them in KV | CLI Overview |
 | `@smithers-orchestrator/components` | JSX workflow components such as `Task`, `Workflow`, `Approval`, `Sandbox`, `Timer`, `Signal`, and control-flow components | Components |
 | `@smithers-orchestrator/control-plane` | Durable organization, project, team, billing, usage, secret-reference, and audit primitives for hosted deployments | Control Plane |
 | `@smithers-orchestrator/db` | SQLite/Drizzle adapter, table setup, run-state derivation, schema helpers, and output tables | Data Model, Run State |
+| `@smithers-orchestrator/ddd-site` | Private Cloudflare Worker deployment for the Docs-Driven Development marketing site | Ecosystem |
 | `@smithers-orchestrator/devtools` | Snapshot, tree, diff, node lookup, task collection, and DevTools run-store helpers behind the CLI inspect commands | Debugging, CLI Overview |
 | `@smithers-orchestrator/driver` | Runtime driver contracts: `RunOptions`, `RunResult`, `RunStatus`, `SmithersCtx`, outputs, task runtime, interop, and child process helpers | Run Workflow, Execution Model |
 | `@smithers-orchestrator/electric-proxy` | ElectricSQL shape proxy for cloud sync, scoped shape access, rate limits, stripped auth forwarding, and shape metrics | Production Hardening, Gateway |
@@ -8136,6 +8143,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/gateway-react` | React hooks and root helpers for Gateway-backed UIs | Gateway |
 | `@smithers-orchestrator/gateway-ui` | Prebuilt React components for Gateway-backed UIs, built on the gateway-react hooks | Gateway UI Components |
 | `@smithers-orchestrator/graph` | Framework-neutral workflow graph model, XML nodes, task descriptors, and graph snapshots | Planner Internals, Types |
+| `@smithers-orchestrator/init-site` | Private Cloudflare Worker deployment for the interactive Smithers init wizard and workflow builder marketing site | Ecosystem |
 | `@smithers-orchestrator/integrations` | External webhook and polling event sources, cursor storage, signature verification, and delivery helpers for workflow integrations | Integrations, Server |
 | `@smithers-orchestrator/jj-darwin-arm64` | Vendored jj (Jujutsu) binary for darwin-arm64; auto-installed as an optional dependency of `@smithers-orchestrator/vcs`, not depended on directly | VCS Guide |
 | `@smithers-orchestrator/jj-darwin-x64` | Vendored jj (Jujutsu) binary for darwin-x64; auto-installed as an optional dependency of `@smithers-orchestrator/vcs`, not depended on directly | VCS Guide |
@@ -8143,6 +8151,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/jj-linux-x64` | Vendored jj (Jujutsu) binary for linux-x64; auto-installed as an optional dependency of `@smithers-orchestrator/vcs`, not depended on directly | VCS Guide |
 | `@smithers-orchestrator/jj-win32-x64` | Vendored jj (Jujutsu) binary for win32-x64; auto-installed as an optional dependency of `@smithers-orchestrator/vcs`, not depended on directly | VCS Guide |
 | `@smithers-orchestrator/memory` | Cross-run facts, message history, processors, namespaces, service layer, and metrics | Memory, Memory Quickstart |
+| `@smithers-orchestrator/monitor-site` | Private Cloudflare Worker deployment for the full-screen Smithers TUI monitor marketing site | Ecosystem |
 | `@smithers-orchestrator/observability` | Event types, logging, tracing, metrics, Prometheus rendering, and runtime observability layers | Events, Event Types |
 | `@smithers-orchestrator/openapi` | OpenAPI parsing, operation extraction, AI SDK tool generation, schema conversion, and metrics | OpenAPI Tools, Tools |
 | `@smithers-orchestrator/automate-site` | Private Cloudflare Worker deployment for the automation marketing site | Ecosystem |
@@ -8155,19 +8164,23 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/telegram-site` | Private Cloudflare Worker deployment for the Telegram marketing site | Ecosystem |
 | `@smithers-orchestrator/ui-site` | Private Cloudflare Worker deployment for the UI marketing site | Ecosystem |
 | `@smithers-orchestrator/pi-plugin` | PI extension runtime, views, API wrappers, and workflow inspection integration | PI Integration |
+| `@smithers-orchestrator/plugins-site` | Private Cloudflare Worker deployment for the Smithers plugins marketing site (Claude Code and Codex) | Ecosystem |
 | `@smithers-orchestrator/protocol` | Shared contracts, small value types, and protocol-level errors for cross-package use | Types, Errors |
 | `@smithers-orchestrator/react-reconciler` | Custom React reconciler, host context, DOM renderer, DevTools preload, driver, and JSX runtime internals | Why React, Render Frame |
 | `@smithers-orchestrator/review` | Private code review app: review flow plus story-form HTML walkthrough, exposed through the `smithers-review` bin | CLI Overview |
 | `@smithers-orchestrator/sandbox` | Sandbox bundle, execute, and transport primitives used by the `Sandbox` component | Sandbox |
 | `@smithers-orchestrator/scheduler` | Pure workflow state machine: task state, scheduler decisions, retry/cache policies, wait reasons, and workflow session services | Workflow State, Suspend and Resume |
 | `@smithers-orchestrator/scorers` | Scorer definitions, LLM judges, batch execution, aggregation, persistence schema, and metrics | Evals, Evals Quickstart |
+| `@smithers-orchestrator/self-healing-site` | Private Cloudflare Worker deployment for the self-healing agent runs marketing site | Ecosystem |
 | `@smithers-orchestrator/server` | HTTP, WebSocket, Gateway, cron, webhook, metrics, and single-workflow serving APIs | Server, Serve |
 | `@smithers-orchestrator/smithers-ui` | Private local-only UI app: the full run/approval/memory control surface, served by `bunx smithers-orchestrator ui --app` against a local Gateway | Gateway UI Components |
 | `@smithers-orchestrator/telegram` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes | Telegram |
+| `@smithers-orchestrator/telegram-site` | Private Cloudflare Worker deployment for the Smithers on Telegram marketing site, including the reference approval Mini App | Telegram, Ecosystem |
 | `@smithers-orchestrator/telegram-summary` | Private Cloudflare app: Telegram Bot API ingestion, Kimi daily digests, D1 storage, and the `telegram-summary.smithers.sh` dashboard | Custom Workflow UI, CLI Overview |
 | `@smithers-orchestrator/time-travel` | Snapshots, diffs, forks, replay, timelines, VCS tags, rewind locks/audits, and time-travel metrics | Time Travel, Time Travel Quickstart |
 | `@smithers-orchestrator/tool-context` | AsyncLocalStorage tool-execution context (run/node/idempotency keys, durability snapshot hook) shared by the engine and `smithers-orchestrator` without a dependency cycle | Execution Model |
 | `@smithers-orchestrator/tui` | Full-screen OpenTUI + React single-run monitor launched by `bunx smithers-orchestrator up --interactive`; reuses the gateway-react hooks for live tree, graph, logs, timeline, and hijack views of one run | CLI Overview |
+| `@smithers-orchestrator/ui-site` | Private Cloudflare Worker deployment for the local Smithers app and AI concierge marketing site | Ecosystem |
 | `@smithers-orchestrator/ui-styleguide` | Shared CSS tokens and layout primitives for Smithers browser UIs, including the operator console and workflow UI components | Gateway UI Components, Custom Workflow UI |
 | `@smithers-orchestrator/usage` | Account quota and rate-limit usage reporting for Smithers providers | CLI Overview |
 | `@smithers-orchestrator/vcs` | VCS discovery and jj workspace operations such as `runJj`, `workspaceAdd`, `workspaceList`, and pointer reverts | VCS Helpers, VCS Guide |
@@ -8759,7 +8772,7 @@ endpoints the app uses to read and edit your working tree:
 
 - `GET /api/files/tree`, `GET /api/files/read`, and `POST /api/files/write` for
   the file browser and editor.
-- `/__smithers/local-vcs` for the local VCS (jj/git) status the app renders.
+- `/__smithers/vcs` for the local VCS (jj/git) status the app renders.
 - `/__smithers/local-workspace` and `/__smithers/local-workspace/readiness` for
   workspace detection and readiness against the proxied Gateway.
 
@@ -10113,7 +10126,7 @@ rpc[27]{method,params,returns,scope,transport}:
   submitApproval,runId/nodeId/iteration?/decision,{runId/nodeId/iteration/approved},approval:submit,http+websocket
   submitSignal,runId/correlationKey/payload?/signalName?,Delivery metadata,signal:submit,http+websocket
   getRun,runId,Run record + optional runState,run:read,http+websocket
-  listRuns,filter.status?/filter.limit?,Run summaries,run:read,http+websocket
+  listRuns,filter.status?/filter.limit?/filter.workflow?,Run summaries,run:read,http+websocket
   listWorkflows,filter.hasUi?,Workflow summaries,run:read,http+websocket
   listApprovals,filter.runId?/filter.workflow?/filter.limit?,Pending approvals,run:read,http+websocket
   streamRunEvents,runId/afterSeq?,{streamId/runId/afterSeq/currentSeq},run:read,websocket
@@ -10472,11 +10485,11 @@ type GatewayAuthConfig =
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
       trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
       defaultRole?: string;          // default "operator"
-      defaultScopes?: string[];      // default ["*"] when scopes header is absent
+      defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected
     };
 ```
 
-JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names. Missing JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes` and then `["*"]`.
+JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names. Missing JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes`, or the request is rejected when no `defaultScopes` is configured.
 
 `allowedOrigins` is available in every mode (token, jwt, trusted-proxy) as defense-in-depth. It defaults to `[]`, which enforces no Origin allowlist. When non-empty, the gateway rejects any HTTP RPC or WebSocket upgrade whose browser `Origin` header is not on the list; requests with no `Origin` header (server-to-server / CLI callers) are always allowed. Set it to your operator-UI origin(s) when exposing a token/jwt gateway to a browser.
 
@@ -10491,6 +10504,7 @@ Runs started through the gateway expose `ctx.auth = { triggeredBy, role, scopes,
 - Singleton per workspace: `smithers gateway` writes `{pid, host, port, url, token, workspaceRoot, backend, version, protocol, startedAtMs}` to `<tmpdir>/smithers-gateway/<workspace-hash>.json` (mode 0600) after listening, refuses to start when a healthy gateway for the same workspace is already running, and cleans the file up on shutdown. `smithers gateway status` and `smithers gateway stop` manage it; stale files (dead pid, identity mismatch) are cleaned up on the next discovery.
 - `--mint-token`: mints a random bearer, requires it on every request, and records it only in the runtime state file (plus the daemon's own stderr). `bunx smithers-orchestrator ui` reads the token from the state file automatically for CLI RPC calls, but browser navigation to the printed workflow UI URL cannot send that bearer header until UI token injection ships; use `smithers gateway` without `--mint-token` when you need browser-served workflow UIs. Other clients can read `SMITHERS_TOKEN` / `SMITHERS_API_KEY`.
 - Cron: `gateway.register(name, wf, { schedule })` writes a cron row keyed `gateway:<name>`; the gateway polls between 1 s and 15 s (clamped from `heartbeatMs`). Cron-fired runs get `ctx.auth.role = "system"`, `triggeredBy = "cron:gateway"`, `scopes = ["*"]`.
+- Host defense: an unauthenticated gateway (the autostart default) rejects any request whose `Host` header is non-loopback, as a DNS-rebinding defense, so binding `--host 0.0.0.0` without a token returns 403 `Host is not allowed`. This applies only when no `auth` is configured. To deliberately expose an unauthenticated remote bind, pass `smithers gateway --insecure` (or `up --serve --insecure`), which trusts any Host; `SMITHERS_GATEWAY_TRUST_ANY_HOST=1` (gateway) and `SMITHERS_SERVE_TRUST_ANY_HOST=1` (serve) do the same via the environment.
 - JWT mode currently validates `alg=HS256`, HMAC, `iss`, `aud`, `exp`, `nbf`. Scope claims may be arrays or space/comma-separated strings.
 - Trusted-proxy mode is only safe behind something you control (Cloudflare Access, internal API gateway) that strips and rewrites identity headers.
 - DevTools streams: see Versioned wire shapes for re-baseline triggers; over-capacity subscribers receive `BackpressureDisconnect`.
@@ -11667,7 +11681,7 @@ A fragment is typed with an input schema so TypeScript can infer each step's `in
 
 > Three patterns for connecting Smithers to external services.
 
-Smithers ships no first-party clients for Linear, Notion, Slack, or similar services. Treat them as external integrations your app owns and pick one of three wirings: tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If a service already exposes an MCP server and you are using an SDK agent, MCP Toolset turns that server into AI SDK tools.
+Smithers ships first-party event sources for GitHub, Linear, and Telegram (the `@smithers-orchestrator/integrations` package) that turn provider webhooks into durable workflow signals. For services it does not cover (Notion, Slack, and similar), treat them as external integrations your app owns and pick one of three wirings: tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If a service already exposes an MCP server and you are using an SDK agent, MCP Toolset turns that server into AI SDK tools.
 
 ## Pattern 1: Pass tools to an SDK agent
 
