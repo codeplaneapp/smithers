@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventBus } from "../src/events.js";
-import { runWorkflow, Task, Workflow } from "smithers-orchestrator";
+import { runWorkflow, Task, Timer, Workflow } from "smithers-orchestrator";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
@@ -189,6 +189,63 @@ describe("Durability", () => {
         const adapter = new SmithersDb(db);
         const run = await adapter.getRun(runId);
         expect(run?.status).toBe("finished");
+        rmSync(dir, { recursive: true, force: true });
+        cleanup();
+    });
+    test("supervised timer resume mismatch fails the parked run", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-timer-resume-metadata-"));
+        const workflowPath = join(dir, "workflow.tsx");
+        writeFileSync(workflowPath, "export default 'v1';\n", "utf8");
+        const { smithers, db, cleanup } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        const runId = "timer-resume-metadata";
+        const workflow = smithers(() => (<Workflow name="timer-resume-metadata">
+        <Timer id="hold" duration="1h"/>
+      </Workflow>));
+        const first = await Effect.runPromise(runWorkflow(workflow, {
+            input: {},
+            runId,
+            workflowPath,
+        }));
+        expect(first.status).toBe("waiting-timer");
+        const claimOwnerId = "supervisor:timer-test";
+        const claimHeartbeatAtMs = nowMs();
+        const claimed = await adapter.claimRunForResume({
+            runId,
+            expectedStatus: "waiting-timer",
+            expectedRuntimeOwnerId: null,
+            expectedHeartbeatAtMs: null,
+            staleBeforeMs: claimHeartbeatAtMs,
+            claimOwnerId,
+            claimHeartbeatAtMs,
+            requireStale: true,
+        });
+        expect(claimed).toBe(true);
+        writeFileSync(workflowPath, "export default 'v2';\n", "utf8");
+        const resumed = await Effect.runPromise(runWorkflow(workflow, {
+            input: {},
+            runId,
+            resume: true,
+            workflowPath,
+            resumeClaim: {
+                claimOwnerId,
+                claimHeartbeatAtMs,
+                restoreRuntimeOwnerId: null,
+                restoreHeartbeatAtMs: null,
+            },
+        }));
+        expect(resumed.status).toBe("failed");
+        expect(resumed.error?.code).toBe("RESUME_METADATA_MISMATCH");
+        const run = await adapter.getRun(runId);
+        expect(run?.status).toBe("failed");
+        expect(run?.runtimeOwnerId).toBeNull();
+        expect(JSON.parse(run?.errorJson ?? "{}")?.code).toBe("RESUME_METADATA_MISMATCH");
+        const node = await adapter.getNode(runId, "hold", 0);
+        expect(node?.state).toBe("cancelled");
+        const eventTypes = (await adapter.listEvents(runId, -1, 50)).map((event) => event.type);
+        expect(eventTypes).toContain("TimerCancelled");
+        expect(eventTypes).toContain("NodeCancelled");
+        expect(eventTypes).toContain("RunFailed");
         rmSync(dir, { recursive: true, force: true });
         cleanup();
     });
