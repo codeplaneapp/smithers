@@ -78,8 +78,8 @@ function findWorkspacePackages() {
   return packages.sort((a, b) => a.dir.localeCompare(b.dir));
 }
 
-/** @param {string} dir @param {string[]} out */
-function collectSourceFiles(dir, out) {
+/** @param {string} dir @param {string[]} out @param {string[]} [nestedPackageDirs] */
+function collectSourceFiles(dir, out, nestedPackageDirs) {
   const absDir = join(repoRoot, dir);
   if (!isDirectory(absDir)) return;
   for (const entry of readdirSync(absDir)) {
@@ -96,7 +96,14 @@ function collectSourceFiles(dir, out) {
       continue;
     }
     if (stats.isDirectory()) {
-      collectSourceFiles(child, out);
+      // A nested package.json with a name marks a standalone package (e.g. a
+      // shipped plugin such as apps/cli/src/openclaw-plugin). Its files are
+      // checked against its own manifest, not the enclosing workspace's.
+      if (nestedPackageDirs && readPackage(child)) {
+        nestedPackageDirs.push(child);
+        continue;
+      }
+      collectSourceFiles(child, out, nestedPackageDirs);
       continue;
     }
     if (!stats.isFile()) continue;
@@ -104,22 +111,24 @@ function collectSourceFiles(dir, out) {
   }
 }
 
-/** @param {WorkspacePackage} pkg */
+/** @param {WorkspacePackage} pkg @returns {{ files: string[]; nestedPackageDirs: string[] }} */
 function filesForPackage(pkg) {
   /** @type {string[]} */
   const files = [];
+  /** @type {string[]} */
+  const nestedPackageDirs = [];
   if (pkg.dir === ".") {
     // The root workspace's own sources live under scripts/.
-    collectSourceFiles("scripts", files);
+    collectSourceFiles("scripts", files, nestedPackageDirs);
   } else if (isDirectory(join(repoRoot, pkg.dir, "src"))) {
-    collectSourceFiles(join(pkg.dir, "src"), files);
+    collectSourceFiles(join(pkg.dir, "src"), files, nestedPackageDirs);
   } else {
     // Some workspaces (e.g. e2e) have no src/ and keep their sources at the
     // package root (faults/, exports/, …). Scan the whole package dir; the
     // recursive collector already skips node_modules/dist/coverage.
-    collectSourceFiles(pkg.dir, files);
+    collectSourceFiles(pkg.dir, files, nestedPackageDirs);
   }
-  return files.sort();
+  return { files: files.sort(), nestedPackageDirs: nestedPackageDirs.sort() };
 }
 
 /** @param {string} specifier */
@@ -254,8 +263,16 @@ const workspaceNames = new Set(workspacePackages.map((pkg) => pkg.name));
 /** @type {Array<{ file: string; specifier: string; packageName: string; section: "dependencies" | "devDependencies" }>} */
 const violations = [];
 
-for (const pkg of workspacePackages) {
-  const files = filesForPackage(pkg);
+const packageQueue = [...workspacePackages];
+let checkedPackageCount = 0;
+while (packageQueue.length > 0) {
+  const pkg = packageQueue.shift();
+  checkedPackageCount += 1;
+  const { files, nestedPackageDirs } = filesForPackage(pkg);
+  for (const nestedDir of nestedPackageDirs) {
+    const nestedPkg = readPackage(nestedDir);
+    if (nestedPkg) packageQueue.push(nestedPkg);
+  }
   const deps = dependencySets(pkg);
   for (const file of files) {
     const devOnly = isDevOnlyFile(file);
@@ -281,5 +298,5 @@ if (violations.length > 0) {
   }
   process.exitCode = 1;
 } else {
-  console.log(`Dependency boundary check passed for ${workspacePackages.length} workspace package(s).`);
+  console.log(`Dependency boundary check passed for ${checkedPackageCount} package(s).`);
 }
