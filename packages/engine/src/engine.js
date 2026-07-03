@@ -27,7 +27,8 @@ import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj
 import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
 import { startDurability } from "./startDurability.js";
 import { startDocFileSync } from "./startDocFileSync.js";
-import { restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
+import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
+import { appendGap, defaultGapSpoolPath } from "./durabilityGapSpool.js";
 import { runWithToolContext } from "@smithers-orchestrator/tool-context";
 import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
 import * as BunContext from "@effect/platform-bun/BunContext";
@@ -640,7 +641,9 @@ function ensureJjGitExclude(commonGitDir) {
     try {
         existing = readFileSync(excludePath, "utf8");
     }
-    catch { }
+    catch {
+        // No exclude file yet (or unreadable): start from empty and write it below.
+    }
     if (!existing.split(/\r?\n/).some((line) => line.trim() === ".jj/")) {
         writeFileSync(excludePath, `${existing}${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}.jj/\n`, "utf8");
     }
@@ -987,7 +990,9 @@ function acquireCaffeinate() {
                 try {
                     child.kill();
                 }
-                catch { }
+                catch {
+                    // Best-effort: the caffeinate child may have already exited.
+                }
             },
         };
     }
@@ -3466,11 +3471,13 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     const engineName = typeof attemptMeta.agentEngine === "string"
                         ? attemptMeta.agentEngine
                         : (effectiveAgent.constructor?.name ?? "unknown");
-                    console.warn(
-                        `[smithers] Task "${desc.nodeId}" has an output schema but engine "${engineName}" does not support native structured output. ` +
+                    // Info, not a raw console.warn: prompt-injection is the
+                    // designed fallback for CLI engines (every seeded starter
+                    // takes it), so it must not shout over a first
+                    // `workflow run hello`. Extraction failures still surface.
+                    logInfo(`Task "${desc.nodeId}" has an output schema but engine "${engineName}" does not support native structured output. ` +
                         `Falling back to prompt-injection + text JSON extraction. Schema validity does not guarantee meaningful output — ` +
-                        `consider switching to an engine that declares supportsNativeStructuredOutput=true (Anthropic, OpenAI).`
-                    );
+                        `consider switching to an engine that declares supportsNativeStructuredOutput=true (Anthropic, OpenAI).`, { nodeId: desc.nodeId, agentEngine: engineName }, "engine:task");
                     const schemaDesc = describeSchemaShape(desc.outputTable, desc.outputSchema);
                     const jsonInstructions = [
                         "**REQUIRED OUTPUT** — You MUST return ONLY a raw JSON object matching this schema:",
@@ -3651,23 +3658,46 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 // we don't snapshot the pre-restore tree. No-op when disabled or
                 // when there is no prior checkpoint.
                 if (process.env.SMITHERS_DURABILITY_SNAPSHOTS === "1" && resumeSession) {
-                    const restore = await restoreWorkspaceToLatestCheckpoint({
+                    const restoreResult = await restoreWorkspaceToLatestCheckpoint({
                         adapter,
                         runId,
                         nodeId: desc.nodeId,
                         iteration: desc.iteration,
                     });
-                    // A failed restore means the agent resumes against a stale or
-                    // half-written tree; surface it instead of silently proceeding.
-                    // (`restored: false` with no error is the normal no-checkpoint
-                    // case and is not a failure.)
-                    if (restore?.error) {
-                        logWarning("durable resume: workspace restore failed; agent may resume against a stale tree", {
+                    // A failed restore means the agent is about to resume against a
+                    // stale or half-written tree. Never swallow it: surface a
+                    // structured error and mark the run needs-attention via the
+                    // durable gap spool. A benign "no-checkpoint" first attempt is
+                    // not a failure (failedRestoreToSurface returns null for it).
+                    const restoreFailure = failedRestoreToSurface(restoreResult);
+                    if (restoreFailure) {
+                        logError("durable resume: workspace restore failed; resuming against a possibly stale tree", {
                             runId,
                             nodeId: desc.nodeId,
                             iteration: desc.iteration,
-                            reason: restore.reason ?? null,
-                            error: restore.error,
+                            attempt: attemptNo,
+                            ...restoreFailure,
+                        }, "engine:durability");
+                        appendGap(defaultGapSpoolPath(runId), {
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            attempt: attemptNo,
+                            cwd: restoreFailure.cwd ?? taskRoot,
+                            reason: `restore-${restoreFailure.reason}`,
+                            error: restoreFailure.error,
+                            needsAttention: true,
+                            ts: nowMs(),
+                        });
+                        void eventBus.emitEventQueued({
+                            type: "NodeOutput",
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            attempt: attemptNo,
+                            text: `durability: workspace restore failed (${restoreFailure.reason}${restoreFailure.error ? `: ${restoreFailure.error}` : ""}); resuming may run against a stale tree`,
+                            stream: "stderr",
+                            timestampMs: nowMs(),
                         });
                     }
                 }
@@ -4339,7 +4369,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     try {
                         retryOutput = JSON.parse(fenceMatch[1]);
                     }
-                    catch { }
+                    catch {
+                        // Fenced text was not valid JSON; fall through to balanced extraction.
+                    }
                 }
             }
             if (retryOutput === undefined) {
@@ -4373,7 +4405,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                                 try {
                                     retryOutput = JSON.parse(retryText.slice(jsonStart, i + 1));
                                 }
-                                catch { }
+                                catch {
+                                    // Balanced slice was not valid JSON; leave retryOutput undefined.
+                                }
                                 break;
                             }
                         }

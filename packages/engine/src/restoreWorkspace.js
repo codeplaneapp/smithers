@@ -70,3 +70,19 @@ export async function restoreWorkspaceToLatestCheckpoint(opts) {
     }
     return { restored: false, reason: "revert-failed", commitId: latest.jjCommitId, cwd: latest.jjCwd, error: result?.error };
 }
+
+/**
+ * Classify a restore result for the durable-resume call site. Returns null when
+ * it is safe to proceed (restored, or the benign first-attempt "no-checkpoint"
+ * case with nothing to restore), or a structured failure the caller must surface
+ * and never swallow: a failed restore means the agent would resume against a
+ * stale or half-written tree.
+ *
+ * @param {{ restored: boolean, reason?: string, commitId?: string, cwd?: string, error?: string }} result
+ * @returns {null | { reason: string, commitId?: string, cwd?: string, error?: string }}
+ */
+export function failedRestoreToSurface(result) {
+    if (result.restored) return null;
+    if (result.reason === "no-checkpoint") return null;
+    return { reason: result.reason ?? "unknown", commitId: result.commitId, cwd: result.cwd, error: result.error };
+}

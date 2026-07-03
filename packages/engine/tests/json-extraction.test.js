@@ -63,6 +63,40 @@ describe("JSON extraction", () => {
             ],
         });
     });
+
+    test("returns the last sibling object, not an earlier one", () => {
+        const text = 'tool output {"intermediate":1} then the answer {"final":true,"score":9}';
+        expect(JSON.parse(extractLastBalancedJson(text))).toEqual({ final: true, score: 9 });
+    });
+
+    test("returns the inner balanced object when the outer brace never closes", () => {
+        const text = 'noise {"outer": {"inner": 42}';
+        expect(JSON.parse(extractLastBalancedJson(text))).toEqual({ inner: 42 });
+    });
+
+    test("ignores braces inside string literals", () => {
+        const text = 'talk "a { brace in prose }" more {"real":true}';
+        expect(JSON.parse(extractLastBalancedJson(text))).toEqual({ real: true });
+    });
+
+    test("returns null when there is no closing brace", () => {
+        expect(extractLastBalancedJson("no json here")).toBeNull();
+        expect(extractLastBalancedJson("only an open { and text")).toBeNull();
+    });
+
+    test("scales linearly on a large brace-heavy payload (no O(n^2) blowup)", () => {
+        // Worst case for the old per-brace re-scan: tens of thousands of unclosed
+        // opening braces, then one real object at the very end. The old O(n^2)
+        // version re-scanned the whole tail for each brace (~seconds); the single
+        // pass finishes in well under the budget below.
+        const openers = "{ ".repeat(100_000);
+        const text = `prose ${openers} final answer {"answer":42,"ok":true}`;
+        const start = performance.now();
+        const extracted = extractLastBalancedJson(text);
+        const elapsedMs = performance.now() - start;
+        expect(JSON.parse(extracted)).toEqual({ answer: 42, ok: true });
+        expect(elapsedMs).toBeLessThan(500);
+    });
 });
 
 describe("extractLastBalancedJson — semantics preserved by the single-pass rewrite", () => {

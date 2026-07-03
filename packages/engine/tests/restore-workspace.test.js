@@ -11,7 +11,8 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { captureWorkspaceSnapshot } from "@smithers-orchestrator/vcs/jj";
 import { createSnapshotService } from "../src/snapshotService.js";
-import { restoreWorkspaceToLatestCheckpoint } from "../src/restoreWorkspace.js";
+import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "../src/restoreWorkspace.js";
+import { appendGap, defaultGapSpoolPath, drainGaps } from "../src/durabilityGapSpool.js";
 
 function fakeAdapter(checkpoints) {
     return { async listWorkspaceCheckpoints() { return checkpoints; } };
@@ -51,6 +52,51 @@ describe("restoreWorkspaceToLatestCheckpoint logic (fakes)", () => {
         expect(res.restored).toBe(false);
         expect(res.reason).toBe("revert-failed");
         expect(res.error).toBe("commit gone");
+    });
+});
+
+describe("failedRestoreToSurface (durable-resume must not swallow a failed restore)", () => {
+    test("returns null for a successful restore", () => {
+        expect(failedRestoreToSurface({ restored: true, commitId: "c1", cwd: "/wt", seq: 3 })).toBeNull();
+    });
+
+    test("returns null for the benign no-checkpoint first attempt", () => {
+        expect(failedRestoreToSurface({ restored: false, reason: "no-checkpoint" })).toBeNull();
+    });
+
+    test("surfaces every real failure reason with its diagnostics", () => {
+        for (const reason of ["list-failed", "revert-threw", "revert-failed"]) {
+            const surfaced = failedRestoreToSurface({
+                restored: false, reason, commitId: "c1", cwd: "/wt", error: "boom",
+            });
+            expect(surfaced).toEqual({ reason, commitId: "c1", cwd: "/wt", error: "boom" });
+        }
+    });
+
+    test("a surfaced failure writes a durable needs-attention gap record", async () => {
+        const runId = `restore-fail-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const spool = defaultGapSpoolPath(runId);
+        try {
+            // Mirror the engine call site: classify a failed restore, then spool it.
+            const surfaced = failedRestoreToSurface({ restored: false, reason: "revert-failed", cwd: "/wt", error: "commit gone" });
+            expect(surfaced).not.toBeNull();
+            appendGap(spool, {
+                runId, nodeId: "n1", iteration: 0, attempt: 2,
+                cwd: surfaced.cwd, reason: `restore-${surfaced.reason}`,
+                error: surfaced.error, needsAttention: true, ts: Date.now(),
+            });
+
+            const gaps = drainGaps(spool);
+            expect(gaps).toHaveLength(1);
+            expect(gaps[0]).toMatchObject({
+                runId, reason: "restore-revert-failed", error: "commit gone", needsAttention: true,
+            });
+            // Drain clears the spool.
+            expect(drainGaps(spool)).toHaveLength(0);
+        }
+        finally {
+            await fs.rm(spool, { force: true }).catch(() => {});
+        }
     });
 });
 
