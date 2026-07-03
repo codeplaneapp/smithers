@@ -29,7 +29,7 @@ const NODES: GatewayRunNode[] = [ROOT, ALPHA, BETA];
 describe("GraphView – terminal rendering (CI-safe, no gateway)", () => {
   it("renders the GRAPH header, node count, node cards, and connector arrows", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <GraphView nodes={NODES} root={ROOT} isLoading={false} error={null} />,
+      <GraphView nodes={NODES} root={ROOT} isLoading={false} error={undefined} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -46,7 +46,7 @@ describe("GraphView – terminal rendering (CI-safe, no gateway)", () => {
 
   it("shows the loading placeholder", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <GraphView nodes={[]} root={null} isLoading={true} error={null} />,
+      <GraphView nodes={[]} root={null} isLoading={true} error={undefined} />,
       { width: 120, height: 20 },
     );
     await waitForVisualIdle();
@@ -66,7 +66,7 @@ describe("GraphView – terminal rendering (CI-safe, no gateway)", () => {
 
   it("shows the empty state when there are no nodes", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <GraphView nodes={[]} root={null} isLoading={false} error={null} />,
+      <GraphView nodes={[]} root={null} isLoading={false} error={undefined} />,
       { width: 120, height: 20 },
     );
     await waitForVisualIdle();
@@ -77,7 +77,7 @@ describe("GraphView – terminal rendering (CI-safe, no gateway)", () => {
   it("Enter fires onSelectNodeKey with the focused node's key (root, column-major first)", async () => {
     const selected: string[] = [];
     const { waitForVisualIdle, mockInput, flush, renderer } = await renderForTest(
-      <GraphView nodes={NODES} root={ROOT} isLoading={false} error={null} onSelectNodeKey={(k) => selected.push(k)} />,
+      <GraphView nodes={NODES} root={ROOT} isLoading={false} error={undefined} onSelectNodeKey={(k) => selected.push(k)} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -93,7 +93,7 @@ describe("GraphView – terminal rendering (CI-safe, no gateway)", () => {
   it("j moves selection to the next node, then Enter fires it", async () => {
     const selected: string[] = [];
     const { waitForVisualIdle, mockInput, flush, renderer } = await renderForTest(
-      <GraphView nodes={NODES} root={ROOT} isLoading={false} error={null} onSelectNodeKey={(k) => selected.push(k)} />,
+      <GraphView nodes={NODES} root={ROOT} isLoading={false} error={undefined} onSelectNodeKey={(k) => selected.push(k)} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
