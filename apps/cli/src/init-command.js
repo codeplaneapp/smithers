@@ -115,6 +115,15 @@ async function runDurableReinit(options) {
             import("./mdx-plugin.js"),
         ]);
         mdxPlugin();
+        // The durable init run is plumbing: a human running `smithers init`
+        // (or `--yes`) wants the "pack up to date" summary, not the engine's
+        // `info starting workflow run engine:run=...` / task-lifecycle logs.
+        // The CLI log sink reads SMITHERS_LOG_LEVEL live, so raising the floor
+        // to warn here quiets the run without touching structured output.
+        // An explicit level (debugging) is preserved.
+        if (process.env.SMITHERS_LOG_LEVEL === undefined) {
+            process.env.SMITHERS_LOG_LEVEL = "warn";
+        }
         const mod = await import(pathToFileURL(entryFile).href);
         const workflow = mod.default;
         if (!workflow) return null;

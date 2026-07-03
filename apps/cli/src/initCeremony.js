@@ -1,6 +1,7 @@
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { intro, isCancel, log, multiselect } from "@clack/prompts";
 import pc from "picocolors";
+import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { detectAvailableAgents } from "./agent-detection.js";
 import { applyWorkflowPackUpdates, initWorkflowPack } from "./workflow-pack.js";
 import { runInteractiveInitFlow, buildDefaultSelections, selectionsToPackOptions, withRequiredWorkflows } from "./init/interactiveInit.js";
@@ -16,7 +17,7 @@ import { runInteractiveInitFlow, buildDefaultSelections, selectionsToPackOptions
  * Only call this in interactive TTY mode; piped/agent callers should use
  * {@link initWorkflowPack} directly so structured output is preserved.
  *
- * @param {{ force?: boolean; agentsOnly?: boolean; install?: boolean; global?: boolean; installSkill?: boolean; updatePrompt?: boolean; requiredWorkflows?: readonly string[]; env?: NodeJS.ProcessEnv; runWizard?: (opts: { env: NodeJS.ProcessEnv }) => Promise<import("./init/interactiveInit.js").InitSelections | null> }} opts
+ * @param {{ force?: boolean; agentsOnly?: boolean; install?: boolean; global?: boolean; installSkill?: boolean; updatePrompt?: boolean; requiredWorkflows?: readonly string[]; env?: NodeJS.ProcessEnv; runWizard?: (opts: { env: NodeJS.ProcessEnv; packRoot?: string }) => Promise<import("./init/interactiveInit.js").InitSelections | null> }} opts
  * @returns {Promise<import("./workflow-pack.js").InitResult>}
  */
 export async function runInitCeremony(opts = {}) {
@@ -31,9 +32,12 @@ export async function runInitCeremony(opts = {}) {
     // Step 1: Interactive selection wizard (OpenTUI full-screen)
     // ------------------------------------------------------------------
     // Skipped when --agents-only: workflows and skills are irrelevant there.
-    let selections = buildDefaultSelections(env);
+    // The pack root seeds the wizard's checkboxes from the previous init's
+    // persisted deselections (pack-selections.json).
+    const packRoot = global ? accountsRoot(env) : resolve(process.cwd(), ".smithers");
+    let selections = buildDefaultSelections(env, packRoot);
     if (!agentsOnly) {
-        const chosen = await runWizard({ env });
+        const chosen = await runWizard({ env, packRoot });
         if (chosen === null) {
             // User pressed Esc / Ctrl-C in the wizard. Print a visible notice
             // (the renderer wiped the screen on shutdown, so a bare exit reads
@@ -79,6 +83,10 @@ export async function runInitCeremony(opts = {}) {
             if (updated.length === 0) return;
             const names = updated.map((file) => pc.cyan(basename(file.path))).join(", ");
             log.message(`${pc.dim("→")} Added ${pc.cyan("smithers.sh")} workflow guidance to ${names}`);
+        },
+        gitignoreEnsured(result) {
+            if (result.status !== "created" && result.status !== "updated") return;
+            log.message(`${pc.dim("→")} Ignored the ${pc.cyan("smithers.db")} run store in ${pc.cyan(".gitignore")}`);
         },
         installStart() {
             log.step("Installing dependencies " + pc.dim("(bun install)"));

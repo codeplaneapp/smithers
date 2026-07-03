@@ -5,6 +5,9 @@
  * mapping without requiring a real TTY or an OpenTUI renderer.
  */
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
     buildAgentSetupOptions,
     buildWorkflowOptions,
@@ -333,5 +336,93 @@ describe("runInteractiveInitFlow degradation", () => {
         expect(result.selectedWorkflows.length).toBeGreaterThan(0);
         expect(stderr).toContain("interactive wizard unavailable");
         expect(stderr).toContain("no pty");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Wizard display order + grouping
+// ---------------------------------------------------------------------------
+
+describe("buildWorkflowOptions grouping", () => {
+    test("puts the starter workflows first under a 'Start here' header", () => {
+        const opts = buildWorkflowOptions();
+        expect(opts[0].id).toBe("hello");
+        expect(opts[0].header).toBe("Start here");
+        expect(opts[1].id).toBe("create-workflow");
+        expect(opts[1].header).toBeUndefined();
+    });
+
+    test("covers every manifest workflow exactly once despite grouping", () => {
+        const ids = buildWorkflowOptions().map((o) => o.id).sort();
+        expect(ids).toEqual(workflowManifestIds().slice().sort());
+    });
+
+    test("each group header appears at most once", () => {
+        const headers = buildWorkflowOptions().map((o) => o.header).filter(Boolean);
+        expect(headers.length).toBe(new Set(headers).size);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Persisted-deselection seeding (re-init must not wipe earlier opt-outs)
+// ---------------------------------------------------------------------------
+
+describe("persisted deselection seeding", () => {
+    function tempPackRoot(selections) {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-wizard-seed-"));
+        writeFileSync(join(dir, "pack-selections.json"), JSON.stringify(selections), "utf8");
+        return dir;
+    }
+
+    test("buildDefaultSelections drops workflows deselected in a previous init", () => {
+        const packRoot = tempPackRoot({ deselectedWorkflows: ["ralph", "kanban"], deselectedAgentDocs: [] });
+        try {
+            const sel = buildDefaultSelections({}, packRoot);
+            expect(sel.selectedWorkflows).not.toContain("ralph");
+            expect(sel.selectedWorkflows).not.toContain("kanban");
+            expect(sel.selectedWorkflows).toContain("hello");
+        } finally {
+            rmSync(packRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("buildDefaultSelections honors agent-doc deselection case-insensitively", () => {
+        const packRoot = tempPackRoot({ deselectedWorkflows: [], deselectedAgentDocs: ["agents.md"] });
+        try {
+            const sel = buildDefaultSelections({}, packRoot);
+            expect(sel.selectedAgentDocs).toEqual(["CLAUDE.md"]);
+        } finally {
+            rmSync(packRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("buildDefaultSelections drops skill targets the user opted out of", () => {
+        const home = mkdtempSync(join(tmpdir(), "smithers-wizard-home-"));
+        try {
+            mkdirSync(join(home, ".smithers"), { recursive: true });
+            writeFileSync(join(home, ".smithers", "skill-deselections.json"), JSON.stringify({ optedOut: ["pi"] }), "utf8");
+            const sel = buildDefaultSelections({ HOME: home });
+            expect(sel.selectedSkillTargets).not.toContain("pi");
+            expect(sel.selectedSkillTargets).toContain("claude");
+        } finally {
+            rmSync(home, { recursive: true, force: true });
+        }
+    });
+
+    test("wizard degrade path honors the persisted deselections", async () => {
+        const packRoot = tempPackRoot({ deselectedWorkflows: ["ralph"], deselectedAgentDocs: [] });
+        try {
+            const result = await runInteractiveInitFlow({
+                env: {},
+                packRoot,
+                loadRenderer: async () => {
+                    throw new Error("dlopen boom");
+                },
+            });
+            expect(result.selectedWorkflows).not.toContain("ralph");
+            expect(result.selectedWorkflows).toContain("hello");
+        } finally {
+            rmSync(packRoot, { recursive: true, force: true });
+        }
     });
 });

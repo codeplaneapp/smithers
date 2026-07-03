@@ -56,7 +56,6 @@ type WizardProps = {
 
 function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, agentItems: initAgents, noAgentsMessage, onConfirm, onCancel }: WizardProps) {
     const { height } = useTerminalDimensions();
-    const visible = Math.max(5, height - 12);
 
     const [stepIdx, setStepIdx] = useState(0);
     const [wfItems, setWfItems] = useState<CheckItem[]>(initWf);
@@ -65,15 +64,21 @@ function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, agentIte
     const [cursor, setCursor] = useState(0);
     const [scrollOff, setScrollOff] = useState(0);
 
-    // Ref keeps the keyboard handler free of stale closures
-    const stateRef = useRef<WizardRef>({ stepIdx, cursor, scrollOff, wfItems, skItems, agentItems, visible, steps });
-    stateRef.current = { stepIdx, cursor, scrollOff, wfItems, skItems, agentItems, visible, steps };
-
     const step = steps[stepIdx] ?? "workflows";
     const isLastStep = stepIdx === steps.length - 1;
     const items = step === "workflows" ? wfItems : step === "skills" ? skItems : agentItems;
-    const checkedCount = items.filter((i) => i.checked).length;
+    // Group headers render as extra rows above their item, so shrink the item
+    // window by the headers inside the current slice to avoid overflowing the
+    // terminal (two-pass approximation: measure against the raw window).
+    const rawVisible = Math.max(5, height - 13);
+    const headerRows = items.slice(scrollOff, scrollOff + rawVisible).filter((i) => i.header).length;
+    const visible = Math.max(4, rawVisible - headerRows);
     const visibleItems = items.slice(scrollOff, scrollOff + visible);
+    const checkedCount = items.filter((i) => i.checked).length;
+
+    // Ref keeps the keyboard handler free of stale closures
+    const stateRef = useRef<WizardRef>({ stepIdx, cursor, scrollOff, wfItems, skItems, agentItems, visible, steps });
+    stateRef.current = { stepIdx, cursor, scrollOff, wfItems, skItems, agentItems, visible, steps };
 
     useKeyboard((key: KeyEvent) => {
         const s = stateRef.current;
@@ -180,6 +185,9 @@ function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, agentIte
     const stepTitle = step === "workflows"
         ? `Select workflows to install  (${checkedCount} / ${items.length} selected)`
         : `Select skills + agent docs  (${checkedCount} / ${items.length} selected)`;
+    const stepHint = step === "workflows"
+        ? "  Installs to .smithers/ in this repo (plus deps via bun install). Everything stays editable."
+        : "  Teaches your coding agents to reach for smithers workflows.";
 
     const scrollInfo = items.length > visible
         ? `  [${scrollOff + 1}–${Math.min(scrollOff + visible, items.length)}/${items.length}]`
@@ -191,15 +199,18 @@ function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, agentIte
     return (
         <box width="100%" height="100%" flexDirection="column" padding={1}>
             <text content={`  smithers init  —  ${stepTitle}`} fg="#00cccc" />
+            <text content={stepHint} fg="#666666" />
             <text content="" />
             {visibleItems.map((item, idx) => {
                 const globalIdx = idx + scrollOff;
                 return (
-                    <text
-                        key={item.id}
-                        content={formatRow(item.label, globalIdx === cursor, item.checked)}
-                        fg={globalIdx === cursor ? "#ffffff" : "#888888"}
-                    />
+                    <React.Fragment key={item.id}>
+                        {item.header ? <text content={`  ${item.header}`} fg="#00aaaa" /> : null}
+                        <text
+                            content={formatRow(item.label, globalIdx === cursor, item.checked)}
+                            fg={globalIdx === cursor ? "#ffffff" : "#888888"}
+                        />
+                    </React.Fragment>
                 );
             })}
             <text content="" />
