@@ -239,6 +239,41 @@ describe("fuzzySelect (interactive)", () => {
         expect(result).toBe("3");
     });
 
+    test("arrow-down twice from an empty query lands on the THIRD option", async () => {
+        // Regression for the @clack/core cursor collision: Prompt.onKeypress runs
+        // `this._cursor = this.rl?.cursor ?? 0` on every keypress BEFORE emitting
+        // "cursor". With an empty query rl.cursor is 0, so a highlight that reused
+        // the base `_cursor` would reset to 0 then +1 on each press and stay stuck
+        // at index 1 forever. Owning `optionCursor` lets it advance past 1.
+        const { promise, input } = startPicker([
+            { value: "1", label: "one" },
+            { value: "2", label: "two" },
+            { value: "3", label: "three" },
+        ]);
+        input.keypress(undefined, { name: "down" });
+        input.keypress(undefined, { name: "down" });
+        input.keypress("\r", { name: "return" });
+        const result = await promise;
+        expect(result).toBe("3");
+    });
+
+    test("Enter after typing returns the top-ranked match, not the one at the text cursor", async () => {
+        // Regression: typing advances rl.cursor to the query length, which the
+        // base copies into `_cursor`. A shared cursor would highlight
+        // filtered[queryLen] instead of the best match. "r" matches both labels
+        // and "review" (shorter, contiguous) outranks "rebase-verify", so the
+        // top-ranked value is "tight". A base-`_cursor` highlight would land on
+        // filtered[1] ("scattered") because rl.cursor is 1 after one keystroke.
+        const { promise, input } = startPicker([
+            { value: "scattered", label: "rebase-verify" },
+            { value: "tight", label: "review" },
+        ]);
+        input.keypress("r", { name: "r" });
+        input.keypress("\r", { name: "return" });
+        const result = await promise;
+        expect(result).toBe("tight");
+    });
+
     test("ctrl-c resolves the clack cancel symbol", async () => {
         const { promise, input } = startPicker([{ value: "a", label: "review" }]);
         input.keypress("\x03", { name: "c" });

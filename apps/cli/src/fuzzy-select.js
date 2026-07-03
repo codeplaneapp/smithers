@@ -150,11 +150,17 @@ function terminalRows() {
  * (including j/k/h/l) become filter text, while arrow keys still move the cursor.
  *
  * Instance fields we own (separate from base `this.value`/`this._cursor`):
- *  - `query`      live filter text, mirrored from base `this.value`.
- *  - `allOptions` immutable input options.
- *  - `filtered`   current fuzzyFilter(query, allOptions) result.
- *  - `cursor`     index into `filtered` (clamped), NOT into allOptions.
- *  - `maxItems`   windowing budget.
+ *  - `query`        live filter text, mirrored from base `this.value`.
+ *  - `allOptions`   immutable input options.
+ *  - `filtered`     current fuzzyFilter(query, allOptions) result.
+ *  - `optionCursor` index into `filtered` (clamped), NOT into allOptions.
+ *      We deliberately do NOT reuse the base's `_cursor`: @clack/core's
+ *      `Prompt.onKeypress` runs `this._cursor = this.rl?.cursor ?? 0` on every
+ *      tracked keypress (before it emits our "cursor" event), so the base's
+ *      readline text cursor would clobber our option index — arrow-down would
+ *      stick near the top and Enter could return a lower-ranked match. Owning
+ *      `optionCursor` keeps the highlight independent of readline.
+ *  - `maxItems`     windowing budget.
  *
  * Enter, ctrl-c and escape flow to the base: Enter sets state="submit" and we
  * override `this.value` to the highlighted option's value in a `finalize`
@@ -187,10 +193,10 @@ class FuzzySelectPrompt extends Prompt {
         this.filtered = fuzzyFilter("", this.allOptions);
 
         // Position the cursor on the option matching initialValue (default 0).
-        this._cursor = 0;
+        this.optionCursor = 0;
         if (opts.initialValue !== undefined) {
             const i = this.filtered.findIndex((o) => o.value === opts.initialValue);
-            if (i >= 0) this._cursor = i;
+            if (i >= 0) this.optionCursor = i;
         }
 
         // Re-filter on every keystroke. Typing AND backspace both edit rl.line,
@@ -198,8 +204,8 @@ class FuzzySelectPrompt extends Prompt {
         this.on("userInput", () => {
             this.query = this.userInput ?? "";
             this.filtered = fuzzyFilter(this.query, this.allOptions);
-            if (this._cursor > this.filtered.length - 1) {
-                this._cursor = Math.max(0, this.filtered.length - 1);
+            if (this.optionCursor > this.filtered.length - 1) {
+                this.optionCursor = Math.max(0, this.filtered.length - 1);
             }
         });
 
@@ -210,11 +216,11 @@ class FuzzySelectPrompt extends Prompt {
             switch (key) {
                 case "up":
                 case "left":
-                    this._cursor = this._cursor === 0 ? this.filtered.length - 1 : this._cursor - 1;
+                    this.optionCursor = this.optionCursor === 0 ? this.filtered.length - 1 : this.optionCursor - 1;
                     break;
                 case "down":
                 case "right":
-                    this._cursor = this._cursor === this.filtered.length - 1 ? 0 : this._cursor + 1;
+                    this.optionCursor = this.optionCursor === this.filtered.length - 1 ? 0 : this.optionCursor + 1;
                     break;
             }
         });
@@ -225,7 +231,7 @@ class FuzzySelectPrompt extends Prompt {
         // value so the caller receives the selection, not the query string.
         this.on("finalize", () => {
             if (this.state === "submit") {
-                const selected = this.filtered[this._cursor];
+                const selected = this.filtered[this.optionCursor];
                 this.value = selected ? selected.value : undefined;
             }
         });
@@ -257,7 +263,7 @@ function styleOption(option, active) {
  */
 function renderPrompt(self, message) {
     const header = `${pc.gray(S_BAR)}\n${symbol(self.state)}  ${message}\n`;
-    const selectedLabel = self.filtered[self._cursor]?.label;
+    const selectedLabel = self.filtered[self.optionCursor]?.label;
 
     switch (self.state) {
         case "submit":
@@ -280,7 +286,7 @@ function renderPrompt(self, message) {
                 lines.push(`${gutter}  ${pc.dim("No matches")}`);
             } else {
                 const windowed = limitOptions({
-                    cursor: self._cursor,
+                    cursor: self.optionCursor,
                     options: self.filtered,
                     maxItems: self.maxItems,
                     rows: terminalRows(),
