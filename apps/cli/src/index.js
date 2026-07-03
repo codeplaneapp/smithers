@@ -7,7 +7,7 @@ import { resolve, dirname, basename, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { Effect, Fiber } from "effect";
-import { Cli, z } from "incur";
+import { Cli, SyncSkills, z } from "incur";
 import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
 import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smithers-orchestrator/engine/workflow-hash";
 import { mdxPlugin } from "./mdx-plugin.js";
@@ -54,6 +54,8 @@ import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
 import { buildAgentNextSteps } from "./agentNextSteps.js";
+import { generateRunReport } from "./runReport.js";
+import { openInBrowser } from "./openInBrowser.js";
 import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
@@ -395,10 +397,11 @@ function pauseCtas(status, runId) {
 function withAgentNextSteps(context, ownCommands = [], ownDescription) {
     const next = buildAgentNextSteps(context);
     const seen = new Set(ownCommands.map((cmd) => cmd.command));
+    // The human next-steps carry no description of their own (the caller's
+    // ownDescription is the header), so join only the parts that exist.
+    const description = [ownDescription, next.description].filter(Boolean).join("\n\n");
     return {
-        description: ownDescription
-            ? `${ownDescription}\n\n${next.description}`
-            : next.description,
+        description,
         commands: [
             ...ownCommands,
             ...next.commands.filter((cmd) => !seen.has(cmd.command)),
@@ -691,11 +694,20 @@ async function printSmithersDocs(c, file, errorCode) {
     }
     else {
         try {
-            const res = await fetch(source.url);
+            let res = await fetch(source.url);
+            // smithers.sh only serves versioned artifacts for >= 0.27.0; on a
+            // miss for an explicit --docs-version, fall back to the git tag's raw
+            // docs, which exist for every tag.
+            if (!res.ok && source.fallbackUrl) {
+                res = await fetch(source.fallbackUrl);
+            }
             if (!res.ok) {
+                const attempted = source.fallbackUrl
+                    ? `${source.url} and ${source.fallbackUrl}`
+                    : source.url;
                 return c.error({
                     code: errorCode,
-                    message: `Failed to fetch ${source.url}: HTTP ${res.status}`,
+                    message: `Failed to fetch ${attempted}: HTTP ${res.status}`,
                     exitCode: 1,
                 });
             }
@@ -1709,6 +1721,8 @@ const upOptions = z.object({
     metrics: z.boolean().default(true).describe("Expose /metrics endpoint (with --serve)"),
     backend: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Storage backend for workflows using openSmithersBackend"),
     postFailure: z.boolean().default(true).describe("Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)"),
+    verbose: z.boolean().default(false).describe("Show engine info logs (run lifecycle, agent sessions) on interactive runs; the default keeps progress lines + warnings only. Non-TTY/structured output always gets full logs."),
+    report: z.boolean().default(true).describe("On an interactive run, narrate the result with a cheap/fast agent and open an HTML summary in the browser when it finishes (disable with --no-report or SMITHERS_NO_REPORT=1)."),
 });
 // Launch the interactive picker + live status card instead of a one-shot run.
 // Shared by `up` and `workflow run`; deliberately NOT folded into `upOptions`
@@ -2237,6 +2251,17 @@ async function executeUpCommand(c, workflowPath, options, fail) {
         if (options.hot) {
             process.env.SMITHERS_HOT = "1";
         }
+        // Human-facing one-shot runs default the engine to warn-level logs: the
+        // progress reporter already narrates lifecycle, and info-level logs dump
+        // the full agent prompt/args over a first `workflow run hello`. Scoped
+        // AFTER the detach branch so a detached child's log file keeps full
+        // detail. Piped/structured output, an explicit SMITHERS_LOG_LEVEL, and
+        // --verbose all keep full logs.
+        const humanTty = Boolean(process.stdin.isTTY && process.stdout.isTTY) &&
+            (c.format === undefined || c.format === "toon");
+        if (humanTty && !options.verbose && process.env.SMITHERS_LOG_LEVEL === undefined) {
+            process.env.SMITHERS_LOG_LEVEL = "warn";
+        }
         if (options.backend) {
             process.env.SMITHERS_BACKEND = options.backend;
         }
@@ -2364,6 +2389,53 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 restoreHeartbeatAtMs: options.resumeRestoreHeartbeat ?? null,
             }
             : undefined;
+        // Shared run-completion response for both the plain and --serve paths:
+        // set the exit code, launch the post-failure autopsy on failure, narrate
+        // the run for a human (a cheap agent writes + opens an HTML summary), and
+        // attach the next-steps CTA (concise for humans, agent script otherwise).
+        const finishRun = async (result) => {
+            process.exitCode = formatStatusExitCode(result.status);
+            if (result.status === "failed") {
+                launchPostFailureAutopsy({
+                    failedRunId: result.runId,
+                    workflowPath: resolvedWorkflowPath,
+                    enabled: options.postFailure !== false,
+                });
+            }
+            const reportEnabled = humanTty && options.report !== false && process.env.SMITHERS_NO_REPORT !== "1";
+            if (reportEnabled && result.runId) {
+                const report = await generateRunReport({
+                    adapter,
+                    runId: result.runId,
+                    workflowName: workflowIdFromPath(workflowPath),
+                    result,
+                    cwd: rootDir,
+                    packDir: resolve(process.cwd(), ".smithers"),
+                    open: openInBrowser,
+                });
+                if (report) {
+                    const relReport = relative(process.cwd(), report.reportPath) || report.reportPath;
+                    process.stderr.write(`\n${pc.cyan("summary")}\n${report.terminal}\n`);
+                    process.stderr.write(`${pc.dim(report.opened ? `↗ opened ${relReport}` : `report written to ${relReport}`)}\n`);
+                }
+            }
+            return c.ok(summarizeRunResult(result), {
+                cta: result.runId ? withAgentNextSteps({
+                    workflowId: workflowIdFromPath(workflowPath),
+                    workflowFile: workflowPath,
+                    runId: result.runId,
+                    human: humanTty,
+                }, [
+                    ...pauseCtas(result.status, result.runId),
+                    ...getWorkflowFollowUpCtas(workflowPath),
+                    { command: `inspect ${result.runId}`, description: "Inspect run state" },
+                    { command: `logs ${result.runId}`, description: "View run logs" },
+                    { command: `chat ${result.runId}`, description: "View agent chat" },
+                ], isWaitingStatus(result.status)
+                    ? "Run is paused (exit 3 = awaiting a decision, not a failure). Next steps:"
+                    : "Next steps:") : undefined,
+            });
+        };
         if (options.serve) {
             let hostedSupervisor = null;
             if (options.supervise) {
@@ -2400,6 +2472,10 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 runId: effectiveRunId,
                 abort,
                 authToken: serveAuthToken,
+                // Forward --insecure so a deliberate unauthenticated non-loopback
+                // bind actually trusts the LAN Host, instead of passing the bind
+                // guard but then 403-ing every request as a non-loopback Host.
+                insecure: options.insecure,
                 metrics: options.metrics,
             });
             const bunServer = Bun.serve({
@@ -2460,29 +2536,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 process.once("SIGINT", () => shutdown());
                 process.once("SIGTERM", () => shutdown());
             });
-            process.exitCode = formatStatusExitCode(result.status);
-            if (result.status === "failed") {
-                launchPostFailureAutopsy({
-                    failedRunId: result.runId,
-                    workflowPath: resolvedWorkflowPath,
-                    enabled: options.postFailure !== false,
-                });
-            }
-            return c.ok(summarizeRunResult(result), {
-                cta: result.runId ? withAgentNextSteps({
-                    workflowId: workflowIdFromPath(workflowPath),
-                    workflowFile: workflowPath,
-                    runId: result.runId,
-                }, [
-                    ...pauseCtas(result.status, result.runId),
-                    ...getWorkflowFollowUpCtas(workflowPath),
-                    { command: `inspect ${result.runId}`, description: "Inspect run state" },
-                    { command: `logs ${result.runId}`, description: "View run logs" },
-                    { command: `chat ${result.runId}`, description: "View agent chat" },
-                ], isWaitingStatus(result.status)
-                    ? "Run is paused (exit 3 = awaiting a decision, not a failure). Next steps:"
-                    : "Next steps:") : undefined,
-            });
+            return await finishRun(result);
         }
         const result = await Effect.runPromise(runWorkflow(workflow, {
             input,
@@ -2501,29 +2555,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             onProgress,
             signal: abort.signal,
         }));
-        process.exitCode = formatStatusExitCode(result.status);
-        if (result.status === "failed") {
-            launchPostFailureAutopsy({
-                failedRunId: result.runId,
-                workflowPath: resolvedWorkflowPath,
-                enabled: options.postFailure !== false,
-            });
-        }
-        return c.ok(summarizeRunResult(result), {
-            cta: result.runId ? withAgentNextSteps({
-                workflowId: workflowIdFromPath(workflowPath),
-                workflowFile: workflowPath,
-                runId: result.runId,
-            }, [
-                ...pauseCtas(result.status, result.runId),
-                ...getWorkflowFollowUpCtas(workflowPath),
-                { command: `inspect ${result.runId}`, description: "Inspect run state" },
-                { command: `logs ${result.runId}`, description: "View run logs" },
-                { command: `chat ${result.runId}`, description: "View agent chat" },
-            ], isWaitingStatus(result.status)
-                ? "Run is paused (exit 3 = awaiting a decision, not a failure). Next steps:"
-                : "Next steps:") : undefined,
-        });
+        return await finishRun(result);
     }
     catch (err) {
         return fail({ code: "RUN_FAILED", message: err?.message ?? String(err), exitCode: 1 });
@@ -3047,6 +3079,9 @@ async function runGatewayCommand(options) {
         identity: { backend: identityBackend, version: readPackageVersion() },
         idleTimeoutMs,
         ...(auth ? { auth } : {}),
+        // `--insecure` (a deliberate unauthenticated non-loopback bind) must
+        // trust any Host, or the daemon binds but 403s every LAN request.
+        ...(options.insecure ? { insecure: true } : {}),
     });
     const workspaceApi = await openSmithersBackend({}, {
         backend: options.backend,
@@ -4647,13 +4682,16 @@ function openMonitoredRunUi(runId, port) {
 }
 // ---------------------------------------------------------------------------
 let commandExitOverride;
+// Shared with the init-time incur skill re-sync (SyncSkills.sync uses it as the
+// top-level group description, mirroring what `smithers skills add` passes).
+const CLI_DESCRIPTION = "Durable AI workflow orchestrator. Run, monitor, and manage workflow executions. " +
+    "--json is accepted on every command as shorthand for `--format json`; after events, timeline, tree, diff, output, rewind, snapshots, and restore it is command-scoped and emits that command's raw JSON payload instead.";
 const cli = Cli.create({
     name: "smithers",
     // The trailing --json note belongs in the Global Options block, but that
     // list is hardcoded in the incur framework (Help.ts globalOptionsLines), so
     // the alias is documented here until an upstream flag entry lands. (#11)
-    description: "Durable AI workflow orchestrator. Run, monitor, and manage workflow executions. " +
-        "--json is accepted on every command as shorthand for `--format json`; after events, timeline, tree, diff, output, rewind, snapshots, and restore it is command-scoped and emits that command's raw JSON payload instead.",
+    description: CLI_DESCRIPTION,
     version: readPackageVersion(),
     mcp: { command: "bunx smithers-orchestrator --mcp" },
 })
@@ -8535,6 +8573,28 @@ async function main() {
         const refreshNotice = formatRefreshNotice(ensureCuratedSkillsFresh());
         if (refreshNotice) console.error(refreshNotice);
     }
+    // A successful `smithers init` installs/refreshes skills, so it must not end
+    // with incur's "Skills are out of date → smithers skills add" CTA one line
+    // later. incur compares its stored skill hash (~/.local/share/incur/
+    // smithers.json) against the current command tree during serve, so re-sync
+    // BEFORE serve — and only when a previous `smithers skills add` install
+    // exists (readHash + hasInstalledSkills), so this never installs skill files
+    // for users who never opted in. Best-effort; honors the same opt-out as the
+    // curated refresh.
+    if (command === "init" &&
+        process.env.SMITHERS_NO_SKILL_REFRESH !== "1" &&
+        !argvRequestsJsonMode(argv) &&
+        !argv.includes("--help") &&
+        !argv.includes("-h")) {
+        try {
+            if (SyncSkills.readHash("smithers") && SyncSkills.hasInstalledSkills("smithers", {})) {
+                await SyncSkills.sync("smithers", cliCommands, { description: CLI_DESCRIPTION });
+            }
+        }
+        catch {
+            /* best-effort: a failed incur skill sync never blocks init */
+        }
+    }
     // Passive "new version available" notice. Hits npm at most once a day (see
     // ensureUpdateCheck) and only on an interactive, human-facing invocation so
     // it never adds latency or noise to scripted/agent/CI use. The `update`
@@ -8645,4 +8705,32 @@ async function main() {
     }
     process.exit(process.exitCode ?? 0);
 }
-main();
+/**
+ * Last-resort handler for an error that escaped a pre-serve fast path (the
+ * raw-JSON timeline/agent paths, MCP mode) or any other unhandled rejection.
+ * Without it `main()` rejects unhandled and Bun prints a raw V8 stack, bypassing
+ * the CLI's clean-message + exit-code contract. Emits a JSON error envelope on
+ * stdout when JSON output was requested (so machine readers still get a
+ * parseable document), else the plain message on stderr, then exits non-zero.
+ * @param {unknown} err
+ */
+function reportFatalCliError(err) {
+    const rawArgv = process.argv.slice(2);
+    const wantsJson = argvRequestsJsonMode(rawArgv) ||
+        rawArgv.some((arg) => arg === "--json" || arg === "-j" || arg === "--jsonl");
+    const code = err instanceof SmithersError ? err.code : "UNEXPECTED_ERROR";
+    const message = err && typeof err === "object" && "message" in err
+        ? String(/** @type {{ message: unknown }} */ (err).message)
+        : String(err);
+    if (wantsJson) {
+        writeStdoutSync(`${JSON.stringify({ code, message })}\n`);
+    }
+    else {
+        console.error(message);
+    }
+    process.exit(1);
+}
+process.on("unhandledRejection", (reason) => {
+    reportFatalCliError(reason);
+});
+main().catch(reportFatalCliError);

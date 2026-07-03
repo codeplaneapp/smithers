@@ -1,4 +1,56 @@
+import { isAbsolute, relative } from "node:path";
 import { hasCustomUi } from "./monitoring-suggestion.js";
+
+/**
+ * Render a workflow file path the way a human would type it: relative to the
+ * cwd when it lives underneath it (so a next-step reads `smithers graph
+ * .smithers/workflows/hello.tsx`, not a wrapping absolute `/private/tmp/...`
+ * path), but left absolute when it points outside the cwd.
+ *
+ * @param {string | undefined} workflowFile
+ * @param {string} cwd
+ * @returns {string | undefined}
+ */
+function displayWorkflowFile(workflowFile, cwd) {
+    if (!workflowFile) return workflowFile;
+    if (!isAbsolute(workflowFile)) return workflowFile;
+    const rel = relative(cwd, workflowFile);
+    if (!rel || rel.startsWith("..") || isAbsolute(rel)) return workflowFile;
+    return rel;
+}
+
+/**
+ * A human watching a terminal wants a short "here's what you can do next" list,
+ * not the agent-facing "Suggest to the user: 1. …" script (which tells an AI to
+ * ask the human clarifying questions). The commands are useful to both; only
+ * the framing differs. Returns the same `{ description, commands }` shape.
+ *
+ * @param {{ workflowId?: string; workflowFile?: string; runId?: string; hasUi?: boolean; cwd?: string; omitUi?: boolean }} context
+ * @returns {{ description: string; commands: { command: string; description: string }[] }}
+ */
+function buildHumanNextSteps(context = {}) {
+    const { workflowId, runId, omitUi } = context;
+    const cwd = context.cwd ?? process.cwd();
+    const workflowFile = displayWorkflowFile(context.workflowFile, cwd);
+    const hasUi = context.hasUi ?? (workflowId ? hasCustomUi(workflowId, cwd) : false);
+    const commands = [];
+    if (runId && !omitUi && hasUi) {
+        commands.push({ command: `ui ${runId}`, description: "Open the run's workflow UI in your browser" });
+    }
+    if (runId) {
+        commands.push({ command: `inspect ${runId}`, description: "See full run state, outputs, and any gates" });
+    }
+    if (workflowFile) {
+        commands.push({ command: `graph ${workflowFile}`, description: "Diagram how this workflow runs" });
+    }
+    commands.push({
+        command: 'make-workflow "<describe the workflow>"',
+        description: "Build your own workflow from a description",
+    });
+    // No description of our own: the caller supplies the "Next steps:" header via
+    // withAgentNextSteps's ownDescription, so returning one here double-prints it.
+    return { description: "", commands };
+}
 
 /**
  * Shared "what next" guidance appended to user-facing CLI commands, aimed at
@@ -23,6 +75,10 @@ import { hasCustomUi } from "./monitoring-suggestion.js";
  * `graph <file>` is a pure no-op; `smithers tree <runId>` suggests
  * `tree <runId> --watch` instead, which is a genuinely new action).
  *
+ * When `human` is set the caller is a person watching a terminal (not an AI
+ * driving the CLI), so the concise {@link buildHumanNextSteps} list is returned
+ * instead of the agent script.
+ *
  * @param {{
  *   workflowId?: string;
  *   workflowFile?: string;
@@ -31,13 +87,16 @@ import { hasCustomUi } from "./monitoring-suggestion.js";
  *   cwd?: string;
  *   uiOpened?: boolean;
  *   omitUi?: boolean;
+ *   human?: boolean;
  *   justRan?: "graph" | "tree";
  * }} [context]
  * @returns {{ description: string; commands: { command: string; description: string }[] }}
  */
 export function buildAgentNextSteps(context = {}) {
-    const { workflowId, workflowFile, runId, uiOpened, omitUi, justRan } = context;
+    if (context.human) return buildHumanNextSteps(context);
+    const { workflowId, runId, uiOpened, omitUi, justRan } = context;
     const cwd = context.cwd ?? process.cwd();
+    const workflowFile = displayWorkflowFile(context.workflowFile, cwd);
     const hasUi = context.hasUi ?? (workflowId ? hasCustomUi(workflowId, cwd) : false);
     const runRef = runId ?? "<runId>";
     const uiFile = `.smithers/ui/${workflowId ?? "<workflowId>"}.tsx`;

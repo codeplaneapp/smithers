@@ -85,6 +85,36 @@ describe("conflicting / invalid flag combinations", () => {
     }, 30_000);
 });
 
+describe("pre-serve fast-path errors honor the CLI error contract, not a raw rejection (H19)", () => {
+    // The raw-JSON timeline fast path runs before `cli.serve` and outside its
+    // try/catch. Before main() got a `.catch` + unhandledRejection handler, a
+    // throw here rejected unhandled and Bun printed a raw V8 stack, bypassing
+    // the clean-message + JSON-envelope contract.
+    test("`timeline <id> --format json` with no store emits a clean JSON error, not a V8 stack", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["timeline", "missing-run"], { cwd: repo.dir, format: "json" });
+        expect(result.exitCode).not.toBe(0);
+        // A machine reader still gets a single parseable document on stdout ...
+        expect(result.json?.code).toBe("CLI_DB_NOT_FOUND");
+        // ... and never the raw V8 stack an unhandled rejection would dump.
+        const all = `${result.stdout}\n${result.stderr}`;
+        expect(all).not.toContain("SmithersError:");
+        expect(all).not.toContain("assertReadStoreExists");
+        expect(all).not.toContain("processTicksAndRejections");
+    });
+
+    test("`timeline <id> --json` with no store emits a clean JSON error, not a V8 stack", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["timeline", "missing-run", "--json"], { cwd: repo.dir, format: null });
+        expect(result.exitCode).not.toBe(0);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.code).toBe("CLI_DB_NOT_FOUND");
+        const all = `${result.stdout}\n${result.stderr}`;
+        expect(all).not.toContain("SmithersError:");
+        expect(all).not.toContain("assertReadStoreExists");
+    });
+});
+
 describe("documented negated boolean flags parse", () => {
     // Regression: incur reads `--no-<x>` as "negate the boolean option <x>".
     // Declaring the option as `noX` (kebab `no-x`) made `--help` advertise

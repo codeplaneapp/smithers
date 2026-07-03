@@ -215,7 +215,7 @@ describe("generateAgentsTs (account-driven)", () => {
             "export const providers = {",
             "  claude: ClaudeCodeAgent,",
             "  claudeOpus: new SmithersClaudeCodeAgent({ model: \"claude-opus-4-8\", cwd: process.cwd() }),",
-            "  claudeSonnet: new SmithersClaudeCodeAgent({ model: \"claude-sonnet-4-6\", cwd: process.cwd() }),",
+            "  claudeSonnet: new SmithersClaudeCodeAgent({ model: \"claude-sonnet-5\", cwd: process.cwd() }),",
             "} as const;",
             "",
         ].join("\n");

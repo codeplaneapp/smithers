@@ -266,7 +266,7 @@ const AGENT_VARIANTS = [
         displayName: "Claude Sonnet",
         constructor: {
             importName: "ClaudeCodeAgent",
-            expr: 'new SmithersClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: process.cwd() })',
+            expr: 'new SmithersClaudeCodeAgent({ model: "claude-sonnet-5", cwd: process.cwd() })',
         },
     },
 ];
@@ -290,11 +290,23 @@ const LOCAL_SCAFFOLDED_PROVIDERS = {
 const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
     ...SCAFFOLDED_PROVIDER_FILES,
 };
+// The fable sandwich (see docs/guides/context-engineering.mdx "sandwich
+// delegation"): Fable plans and reviews at the two ends (planning/review,
+// claude-family-led), Codex implements the middle (implement, codex-led with a
+// guaranteed claude-sonnet-5 fallback), and cheapFast/smart/smartTool serve the
+// generic tiers. planning/implement are additive pool names — existing
+// workflows on cheapFast/smart/smartTool/review are unaffected.
 const TIER_PREFERENCES = {
     cheapFast: { order: ["claudeSonnet", "kimi", "vibe", "antigravity", "openclaw", "pi"], maxSize: 2 },
     smart: { order: ["claude", "claudeOpus", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
     smartTool: { order: ["claude", "claudeOpus", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
     review: { order: ["claude", "claudeOpus", "claudeSonnet", "amp", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    // Fable-led senior planning/architecture seat; degrades to codex when no claude CLI.
+    planning: { order: ["claude", "claudeOpus", "claudeSonnet", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    // Codex-led implementation middle; claude-sonnet-5 is the guaranteed
+    // fallback, then gemini/claude. opencode stays a deep fallback (demoted like
+    // smart/smartTool) so codex+sonnet win when both are present.
+    implement: { order: ["codex", "claudeSonnet", "antigravity", "claude", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
 };
 const REQUIRED_DEFAULT_TIERS = ["smart", "smartTool"];
 const CONSTRUCTORS = {
@@ -447,14 +459,37 @@ function passProbe(reason) {
  * @param {string} reason
  */
 function failProbe(reason) {
-    return { verified: false, reason: oneLine(reason) };
+    return { verified: false, reason: sanitizeProbeOutput(reason) };
 }
 
 /**
+ * Collapse probe output into one short human-readable reason. Probe commands
+ * are arbitrary CLIs - some (Hermes) print full-screen TUI banners with ANSI
+ * escapes and box-drawing borders, which would otherwise get dumped verbatim
+ * into `unusableReasons` and wreck the init ceremony's agent list. Strip
+ * escapes and border glyphs, keep the first lines with real content, and cap
+ * the length.
+ *
  * @param {string} value
  */
-function oneLine(value) {
-    return value.trim().split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 2).join("; ");
+export function sanitizeProbeOutput(value) {
+    const cleaned = value
+        // ANSI CSI escape sequences (colors, cursor movement).
+        .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "")
+        // OSC sequences (terminal titles), terminated by BEL or ST.
+        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, "")
+        // Box-drawing / block glyphs used by TUI banner borders.
+        .replace(/[\u2500-\u257f\u2580-\u259f]/g, " ")
+        // Remaining control chars except newline.
+        .replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "");
+    const lines = cleaned
+        .split("\n")
+        .map((line) => line.replace(/\s+/g, " ").trim())
+        // A border row reduces to empty; require some word character so pure
+        // punctuation rows are dropped too.
+        .filter((line) => /\w/.test(line));
+    const joined = lines.slice(0, 2).join("; ");
+    return joined.length > 160 ? `${joined.slice(0, 157)}...` : joined;
 }
 
 /**
@@ -485,7 +520,7 @@ function runProbeCommand(command, args, env) {
             status: result.status,
             stdout,
             stderr,
-            output: oneLine([stdout, stderr, result.error?.message ?? ""].filter(Boolean).join("\n")),
+            output: sanitizeProbeOutput([stdout, stderr, result.error?.message ?? ""].filter(Boolean).join("\n")),
         };
     }
     catch (error) {
@@ -943,6 +978,9 @@ function generateAccountsAgentsTs(accounts, env) {
     poolLines.push(`  smartTool: [${membersForFamilies("claude", "codex").map((m) => `providers.${m}`).join(", ")}],`);
     poolLines.push(`  cheapFast: [${membersForFamilies("kimi", "antigravity", "codex", "claude").slice(0, 2).map((m) => `providers.${m}`).join(", ")}],`);
     poolLines.push(`  review: [${membersForFamilies("claude", "codex").slice(0, 3).map((m) => `providers.${m}`).join(", ")}],`);
+    // Fable sandwich (see TIER_PREFERENCES): planning is claude-led, implement is codex-led.
+    poolLines.push(`  planning: [${membersForFamilies("claude", "codex").slice(0, 3).map((m) => `providers.${m}`).join(", ")}],`);
+    poolLines.push(`  implement: [${membersForFamilies("codex", "claude").slice(0, 3).map((m) => `providers.${m}`).join(", ")}],`);
     return [
         "// smithers-source: generated",
         "// Source of truth: ~/.smithers/accounts.json (managed via `smithers agent add|list|remove`)",

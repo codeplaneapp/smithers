@@ -155,3 +155,55 @@ describe("agent next steps in command ctas", () => {
         expect(cta.commands.some((cmd) => String(cmd.command).includes("create-workflow"))).toBe(true);
     }, 60_000);
 });
+
+describe("buildAgentNextSteps human mode", () => {
+    test("returns a concise human list, not the agent script", () => {
+        const next = buildAgentNextSteps({
+            workflowId: "hello",
+            workflowFile: ".smithers/workflows/hello.tsx",
+            runId: "run-9",
+            hasUi: false,
+            human: true,
+        });
+        // The human fragment carries no header of its own (the caller supplies
+        // "Next steps:"); it must not emit the agent script.
+        expect(next.description).toBe("");
+        expect(next.description).not.toContain("Suggest to the user");
+        const joined = next.commands.map((c) => `${c.command} ${c.description}`).join("\n");
+        expect(joined).not.toContain("clarifying questions");
+        expect(next.commands.some((c) => c.command === "inspect run-9")).toBe(true);
+        expect(next.commands.some((c) => c.command.startsWith("make-workflow"))).toBe(true);
+    });
+
+    test("offers the workflow UI command only when one exists", () => {
+        const withUi = buildAgentNextSteps({ workflowId: "hello", runId: "r1", hasUi: true, human: true });
+        expect(withUi.commands.some((c) => c.command === "ui r1")).toBe(true);
+        const withoutUi = buildAgentNextSteps({ workflowId: "hello", runId: "r1", hasUi: false, human: true });
+        expect(withoutUi.commands.some((c) => c.command === "ui r1")).toBe(false);
+    });
+
+    test("relativizes an absolute workflow path under the cwd", () => {
+        const cwd = "/home/dev/proj";
+        const next = buildAgentNextSteps({
+            workflowId: "hello",
+            workflowFile: "/home/dev/proj/.smithers/workflows/hello.tsx",
+            runId: "r1",
+            hasUi: false,
+            human: true,
+            cwd,
+        });
+        const graph = next.commands.find((c) => c.command.startsWith("graph "));
+        expect(graph?.command).toBe("graph .smithers/workflows/hello.tsx");
+    });
+
+    test("leaves an absolute path outside the cwd absolute (agent mode)", () => {
+        const cwd = "/home/dev/proj";
+        const next = buildAgentNextSteps({
+            workflowId: "hello",
+            workflowFile: "/other/place/hello.tsx",
+            runId: "r1",
+            cwd,
+        });
+        expect(next.description).toContain("/other/place/hello.tsx");
+    });
+});

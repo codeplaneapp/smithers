@@ -7,7 +7,7 @@ import { ask } from "../src/ask.js";
 // We test the exported pure-logic functions by importing the module.
 // detectAvailableAgents calls spawnSync so we test the scoring/status logic
 // via generateAgentsTs with controlled env.
-import { detectAvailableAgents, generateAgentsTs } from "../src/agent-detection.js";
+import { detectAvailableAgents, generateAgentsTs, sanitizeProbeOutput } from "../src/agent-detection.js";
 // We can't easily mock spawnSync, but we can test the detection logic
 // by verifying structure and scoring behavior with the real environment.
 describe("detectAvailableAgents", () => {
@@ -336,5 +336,44 @@ describe("detectAvailableAgents", () => {
         const kimi = results.find((r) => r.id === "kimi");
         const authCheck = kimi.checks.find((c) => c.replaceAll("\\", "/").includes("/tmp/kimi-test"));
         expect(authCheck).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// sanitizeProbeOutput — probe reasons must stay one clean line
+// ---------------------------------------------------------------------------
+
+describe("sanitizeProbeOutput", () => {
+    test("strips a TUI banner down to its meaningful lines", () => {
+        // Real repro: `hermes status` prints a full-screen box-drawing banner;
+        // the raw first lines were pure border glyphs that wrecked the init
+        // ceremony's agent list.
+        const banner = [
+            "┌─────────────────────────────┐",
+            "│      ⚕ Hermes Agent Status  │",
+            "├─────────────────────────────┤",
+            "│  Not logged in              │",
+            "└─────────────────────────────┘",
+        ].join("\n");
+        const result = sanitizeProbeOutput(banner);
+        expect(result).toContain("Hermes Agent Status");
+        expect(result).toContain("Not logged in");
+        expect(result).not.toMatch(/[─-╿]/);
+        expect(result).not.toContain("\n");
+    });
+
+    test("strips ANSI color and OSC title sequences", () => {
+        const colored = "\x1b[31mlogin failed\x1b[0m\n\x1b]0;hermes\x07try `hermes login`";
+        const result = sanitizeProbeOutput(colored);
+        expect(result).toBe("login failed; try `hermes login`");
+    });
+
+    test("caps pathological output length", () => {
+        const long = `error: ${"x".repeat(500)}`;
+        expect(sanitizeProbeOutput(long).length).toBeLessThanOrEqual(160);
+    });
+
+    test("keeps plain single-line reasons untouched", () => {
+        expect(sanitizeProbeOutput("Kimi credentials are missing or expired")).toBe("Kimi credentials are missing or expired");
     });
 });
