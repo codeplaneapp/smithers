@@ -154,11 +154,17 @@ export function parseWorkspaceSnapshot(logStdout, opStdout) {
 export function captureWorkspaceSnapshot(cwd) {
     return Effect.gen(function* () {
         const logRes = yield* withSnapshotTimeout(runJj(["log", "-r", "@", "--no-graph", "-T", 'commit_id ++ "\\n" ++ change_id'], { cwd }), "jj snapshot log");
-        if (logRes.code !== 0)
+        if (logRes.code !== 0) {
+            // Attribute the gap: a bare null makes a missing durability snapshot
+            // impossible to diagnose. code 124 = timeout (see withSnapshotTimeout).
+            yield* Effect.logWarning(`workspace snapshot skipped: jj log exited ${logRes.code}: ${logRes.stderr?.trim() || "(no stderr)"}`);
             return null;
+        }
         const opRes = yield* withSnapshotTimeout(runJj(["--ignore-working-copy", "operation", "log", "--no-graph", "--limit", "1", "-T", "self.id()"], { cwd }), "jj snapshot op");
-        if (opRes.code !== 0)
+        if (opRes.code !== 0) {
+            yield* Effect.logWarning(`workspace snapshot skipped: jj operation log exited ${opRes.code}: ${opRes.stderr?.trim() || "(no stderr)"}`);
             return null;
+        }
         return parseWorkspaceSnapshot(logRes.stdout, opRes.stdout);
     }).pipe(Effect.annotateLogs({ cwd: cwd ?? "" }), Effect.withLogSpan("vcs:jj-snapshot"));
 }
