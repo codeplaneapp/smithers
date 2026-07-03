@@ -20,7 +20,11 @@ import {
   defineTool,
   getDefinedToolMetadata,
 } from "../src/tools/defineTool.js";
-import { bashTool } from "../src/tools/bash.js";
+import {
+  bashTool,
+  resolveNetworkIsolatedCommand,
+  warnNetworkIsolationUnenforced,
+} from "../src/tools/bash.js";
 import { editFileTool } from "../src/tools/edit.js";
 import { grepTool } from "../src/tools/grep.js";
 import { readFileTool } from "../src/tools/read.js";
@@ -507,6 +511,75 @@ describe("process helpers and bash tool", () => {
         "TOOL_NETWORK_DISABLED",
       );
     });
+  });
+
+  test("reports whether OS-level network isolation is actually enforced", async () => {
+    // macOS with sandbox-exec is the only real kernel sandbox: enforced.
+    await withPlatform("darwin", () =>
+      withBunWhich(
+        (name) => (name === "sandbox-exec" ? "/usr/bin/sandbox-exec" : null),
+        () => {
+          const isolation = resolveNetworkIsolatedCommand("/bin/echo", ["hi"]);
+          expect(isolation.enforced).toBe(true);
+          expect(isolation.command).toBe("/usr/bin/sandbox-exec");
+          expect(isolation.args[0]).toBe("-p");
+          expect(isolation.args.some((a) => a.includes("deny network"))).toBe(true);
+          // The original command and args are preserved at the tail.
+          expect(isolation.args.slice(-2)).toEqual(["/bin/echo", "hi"]);
+        },
+      ),
+    );
+
+    // darwin without sandbox-exec: no mechanism, so NOT enforced.
+    await withPlatform("darwin", () =>
+      withBunWhich(() => null, () => {
+        const isolation = resolveNetworkIsolatedCommand("/bin/echo", ["hi"]);
+        expect(isolation).toEqual({ command: "/bin/echo", args: ["hi"], enforced: false });
+      }),
+    );
+
+    // Linux (and any non-darwin platform) has no enforced sandbox here: the
+    // resolver must not claim isolation it cannot deliver.
+    for (const platform of ["linux", "freebsd", "win32"]) {
+      await withPlatform(platform, () =>
+        withBunWhich(() => "/usr/bin/unshare", () => {
+          const isolation = resolveNetworkIsolatedCommand("/bin/echo", ["hi"]);
+          expect(isolation).toEqual({ command: "/bin/echo", args: ["hi"], enforced: false });
+        }),
+      );
+    }
+  });
+
+  test("emits a structured observability warning when isolation is unenforced", async () => {
+    const lines = [];
+    const spy = spyOn(console, "log").mockImplementation((...parts) => {
+      lines.push(parts.join(" "));
+    });
+    try {
+      await warnNetworkIsolationUnenforced();
+    } finally {
+      spy.mockRestore();
+    }
+    const warning = lines.find((line) => line.includes("network_isolation_unenforced"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("level=WARN");
+    expect(warning).toContain("TOOL_NETWORK_ISOLATION_UNENFORCED");
+  });
+
+  test("bash tool still runs (degrades, not fail-closed) where isolation is unenforced", async () => {
+    const root = await makeRoot();
+    // Simulate a platform with no enforced sandbox. The command must still run
+    // under the bypassable denylist rather than being refused, so existing
+    // workflows keep working while the warning surfaces the gap.
+    await withPlatform("linux", () =>
+      withBunWhich(() => null, () =>
+        withToolCtx(root, { allowNetwork: false }, async () => {
+          expect((await bashTool("/bin/echo", ["net-degraded"])).trim()).toBe(
+            "net-degraded",
+          );
+        }),
+      ),
+    );
   });
 
   test("resolves an explicit working directory inside the root", async () => {

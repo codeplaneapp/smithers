@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { z } from "zod";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { defineTool } from "./defineTool.js";
@@ -16,17 +17,52 @@ export const BASH_TOOL_MAX_CWD_LENGTH = 1_024;
 export const BASH_TOOL_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 export const BASH_TOOL_MAX_TIMEOUT_MS = 60 * 60 * 1000;
 
-function resolveNetworkIsolatedCommand(cmd, args) {
+// Wrap a command so the OS blocks all network access, and report whether that
+// isolation is actually enforced. Only macOS `sandbox-exec` gives a real kernel
+// sandbox here. On every other platform (and on darwin without sandbox-exec) we
+// cannot enforce isolation, so `enforced` is false and the caller must not
+// assume the process is network-sandboxed: the token/URL denylist in
+// assertNetworkAllowed still runs as defense-in-depth, but it is bypassable (a
+// shell, an interpreter, a renamed binary), so it is NOT isolation.
+export function resolveNetworkIsolatedCommand(cmd, args) {
   if (process.platform === "darwin") {
     const sandboxExec = globalThis.Bun?.which?.("sandbox-exec") ?? null;
     if (sandboxExec) {
       return {
         command: sandboxExec,
         args: ["-p", DARWIN_NETWORK_DENY_PROFILE, cmd, ...args],
+        enforced: true,
       };
     }
   }
-  return { command: cmd, args };
+  return { command: cmd, args, enforced: false };
+}
+
+// Structured observability warning (Effect logging, not raw console) surfaced
+// when a caller asked for `allowNetwork:false` but this platform cannot enforce
+// network isolation, so they are not silently left unprotected.
+export function warnNetworkIsolationUnenforced() {
+  return Effect.runPromise(
+    Effect.logWarning("smithers.tool.network_isolation_unenforced").pipe(
+      Effect.annotateLogs({
+        code: "TOOL_NETWORK_ISOLATION_UNENFORCED",
+        platform: process.platform,
+        detail:
+          "allowNetwork:false was requested but OS-level network isolation is not enforced on this platform; the bash tool falls back to a bypassable command denylist.",
+      }),
+      Effect.withLogSpan("smithers:bash-tool"),
+    ),
+  ).catch(() => {});
+}
+
+let networkIsolationUnenforcedWarned = false;
+
+function noteNetworkIsolationUnenforced() {
+  if (networkIsolationUnenforcedWarned) {
+    return;
+  }
+  networkIsolationUnenforcedWarned = true;
+  void warnNetworkIsolationUnenforced();
 }
 
 function assertOptionalStringMaxLength(name, value, maxLength) {
@@ -145,12 +181,19 @@ export async function bashTool(cmd, args = [], opts = undefined) {
   const cwd = opts?.cwd
     ? await resolveToolPath(runtime.rootDir, opts.cwd)
     : runtime.rootDir;
-  const resolvedCommand = !runtime.allowNetwork
-    ? resolveNetworkIsolatedCommand(cmd, args)
-    : { command: cmd, args };
+  let command = cmd;
+  let commandArgs = args;
+  if (!runtime.allowNetwork) {
+    const isolation = resolveNetworkIsolatedCommand(cmd, args);
+    command = isolation.command;
+    commandArgs = isolation.args;
+    if (!isolation.enforced) {
+      noteNetworkIsolationUnenforced();
+    }
+  }
   const result = await captureProcess(
-    resolvedCommand.command,
-    resolvedCommand.args,
+    command,
+    commandArgs,
     {
       cwd,
       env: process.env,
