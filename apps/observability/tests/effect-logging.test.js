@@ -79,4 +79,37 @@ describe("effect/logging", () => {
             restore();
         }
     });
+    test("emits INFO records by default (no SMITHERS_LOG_LEVEL)", () => {
+        // With no SMITHERS_LOG_LEVEL the minimum level defaults to INFO, so
+        // logInfo must reach the runner rather than being dropped.
+        let forked = false;
+        const restore = setSmithersLogRunner({
+            runFork() {
+                forked = true;
+            },
+            async runPromise() { },
+        });
+        try {
+            logInfo("default info");
+            expect(forked).toBe(true);
+        } finally {
+            restore();
+        }
+    });
+    test("drops DEBUG records below the default INFO level", () => {
+        // DEBUG is below the default INFO minimum, so the runner is never hit.
+        let forked = false;
+        const restore = setSmithersLogRunner({
+            runFork() {
+                forked = true;
+            },
+            async runPromise() { },
+        });
+        try {
+            logDebug("default debug");
+            expect(forked).toBe(false);
+        } finally {
+            restore();
+        }
+    });
 });
