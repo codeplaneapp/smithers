@@ -7,6 +7,8 @@ import {
   type WorkspaceMode,
 } from "@smithers-orchestrator/gateway-client";
 
+type SmithersDataClient = ReturnType<typeof createSmithersDataClient>;
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -25,6 +27,23 @@ async function waitFor(assertion: () => void | boolean | Promise<void | boolean>
   }
   if (lastError) throw lastError;
   throw new Error("Timed out waiting for provider parity assertion.");
+}
+
+async function waitForApprovalNodeReady(
+  client: SmithersDataClient,
+  runId: string,
+  nodeId: string,
+  iteration = 0,
+) {
+  await waitFor(async () => {
+    const nodes = await client.api.getRunTree({ runId });
+    return nodes.some(
+      (node) =>
+        node.id === nodeId &&
+        (node.iteration ?? 0) === iteration &&
+        node.status === "waiting",
+    );
+  });
 }
 
 function cronRow(overrides: Partial<GatewayCronRow> = {}): GatewayCronRow {
@@ -72,6 +91,7 @@ export async function runProviderParitySuite(mode: WorkspaceMode) {
     await waitFor(() => approvals.toArray.length > 0);
     const approvalKey = `${approvalRunId}:pick-plan:0`;
     expect(approvals.has(approvalKey)).toBe(true);
+    await waitForApprovalNodeReady(client, approvalRunId, "pick-plan");
     const approvalUpdate = approvals.update(approvalKey, (draft) => {
       (draft as { decision?: Record<string, unknown> }).decision = { selected: "balanced", notes: null };
     });
