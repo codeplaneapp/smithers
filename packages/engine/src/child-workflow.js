@@ -91,6 +91,7 @@ function resolveChildWorkflow(definition, parentWorkflow) {
             opts: resolved.opts ?? {},
             schemaRegistry: resolved.schemaRegistry ?? parentWorkflow?.schemaRegistry,
             zodToKeyName: resolved.zodToKeyName ?? parentWorkflow?.zodToKeyName,
+            ambiguousZodSchemas: resolved.ambiguousZodSchemas ?? parentWorkflow?.ambiguousZodSchemas,
         };
     }
     if (typeof resolved === "function") {
@@ -104,6 +105,7 @@ function resolveChildWorkflow(definition, parentWorkflow) {
             opts: {},
             schemaRegistry: parentWorkflow.schemaRegistry,
             zodToKeyName: parentWorkflow.zodToKeyName,
+            ambiguousZodSchemas: parentWorkflow.ambiguousZodSchemas,
         };
     }
     throw new SmithersError("INVALID_INPUT", "Child workflow must be a Smithers workflow object or function.");

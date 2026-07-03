@@ -31,7 +31,7 @@ import { restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
 import { runWithToolContext } from "@smithers-orchestrator/tool-context";
 import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
 import * as BunContext from "@effect/platform-bun/BunContext";
-import { eq, getTableName } from "drizzle-orm";
+import { eq, getTableName, isTable } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { Cause, Chunk, Duration, Effect, Exit, Fiber, Metric, Queue, Schedule } from "effect";
 import { attemptDuration, cacheHits, cacheMisses, nodeDuration, promptSizeBytes, responseSizeBytes, runDuration, runsResumedTotal, schedulerConcurrencyUtilization, schedulerQueueDepth, schedulerWaitDuration, trackEvent, } from "@smithers-orchestrator/observability/metrics";
@@ -2222,12 +2222,8 @@ function resolveWorkflowOutputTable(workflow, schema) {
             return schema[target];
         }
     }
-    if (target && typeof target === "object") {
-        try {
-            getTableName(/** @type {any} */ (target));
-            return target;
-        }
-        catch { }
+    if (isTable(/** @type {any} */ (target))) {
+        return target;
     }
     throw new SmithersError("UNKNOWN_OUTPUT_SCHEMA", "Workflow output target is not registered in createSmithers().", {
         output: typeof target === "string" ? target : undefined,
@@ -6159,6 +6155,7 @@ export const __engineInternals = {
     iterationsToMap,
     ralphStateFromDriverTransition,
     resolveTaskOutputs,
+    resolveWorkflowOutputTable,
     buildDescriptorMap,
     buildRalphStateMap,
     ralphIterationsFromState,

@@ -538,6 +538,60 @@ describe("engine internals: durability, options and graph helpers", () => {
         expect(I.isRetryableTaskFailure({ metaJson: '{"kind":"compute"}', errorJson: '{"code":"INVALID_OUTPUT"}' })).toBe(false);
         expect(I.isRetryableTaskFailure({ metaJson: '{"kind":"agent"}', errorJson: '{"code":"INVALID_OUTPUT"}' })).toBe(true);
     });
+
+    test("resolveWorkflowOutputTable resolves declared outputs and fails fast on unregistered targets", () => {
+        const schemaRef = { schema: true };
+        const registry = new Map([["childResult", { table: outputTable, zodSchema: schemaRef }]]);
+        const zodToKeyName = new Map([[schemaRef, "childResult"]]);
+        const defaultOutput = { defaultOutput: true };
+        const stringKeyTable = { stringKeyTable: true };
+        const schema = { output: defaultOutput, phase: stringKeyTable };
+
+        const base = { schemaRegistry: registry, zodToKeyName, ambiguousZodSchemas: new Set() };
+
+        // No explicit output: falls back to the schema key literally named `output`.
+        expect(I.resolveWorkflowOutputTable({ opts: {}, ...base }, schema)).toBe(defaultOutput);
+
+        // A registered schema object resolves to its table.
+        expect(
+            I.resolveWorkflowOutputTable({ opts: { output: schemaRef }, ...base }, schema),
+        ).toBe(outputTable);
+
+        // A string key resolves via the schema registry first...
+        expect(
+            I.resolveWorkflowOutputTable({ opts: { output: "childResult" }, ...base }, schema),
+        ).toBe(outputTable);
+        // ...then falls back to a raw schema key.
+        expect(
+            I.resolveWorkflowOutputTable({ opts: { output: "phase" }, ...base }, schema),
+        ).toBe(stringKeyTable);
+
+        // A real Drizzle table passes through the isTable() guard.
+        expect(
+            I.resolveWorkflowOutputTable({ opts: { output: outputTable }, ...base }, schema),
+        ).toBe(outputTable);
+
+        // An unregistered, non-table object fails fast with the clear error
+        // instead of being returned as a bogus table (the isTable() fix).
+        const unregistered = { schema: true };
+        expect(() =>
+            I.resolveWorkflowOutputTable({ opts: { output: unregistered }, ...base }, schema),
+        ).toThrow("not registered");
+
+        // A schema object registered under multiple keys reports the ambiguity.
+        const ambiguous = { ambiguous: true };
+        expect(() =>
+            I.resolveWorkflowOutputTable(
+                {
+                    opts: { output: ambiguous },
+                    schemaRegistry: registry,
+                    zodToKeyName: new Map(),
+                    ambiguousZodSchemas: new Set([ambiguous]),
+                },
+                schema,
+            ),
+        ).toThrow("multiple keys");
+    });
 });
 
 describe("engine internals: cancellation maintenance", () => {
