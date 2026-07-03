@@ -114,6 +114,92 @@ describe("POST /api/sessions (OIDC)", () => {
     expect(body.quiz).toBe("on");
   });
 
+  test("accepts body pr only for issue_comment oidc tokens without a pull request ref", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker(jwks.url);
+    await registerRepo(env, REPO);
+    const claims = {
+      ...baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600),
+      event_name: "issue_comment",
+      ref: "refs/heads/main",
+    };
+    const token = await signTestJwt(keypair, claims);
+    const res = await worker.fetch(
+      new Request("https://review.test/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ oidcToken: token, pr: 77 }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const reviewed = await env.DB
+      .prepare("SELECT pr FROM reviewed_prs WHERE repo = ?")
+      .bind(REPO)
+      .first<{ pr: number }>();
+    expect(reviewed?.pr).toBe(77);
+  });
+
+  test("rejects body pr for oidc tokens that are not tied to a pull request event", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker(jwks.url);
+    await registerRepo(env, REPO);
+    const claims = {
+      ...baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600),
+      event_name: "push",
+      ref: "refs/heads/main",
+    };
+    const token = await signTestJwt(keypair, claims);
+    const res = await worker.fetch(
+      new Request("https://review.test/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ oidcToken: token, pr: 42 }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("missing pull request number");
+  });
+
+  test("rejects body pr that disagrees with the oidc pull request ref", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker(jwks.url);
+    await registerRepo(env, REPO);
+    const token = await signTestJwt(keypair, baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600));
+    const res = await worker.fetch(
+      new Request("https://review.test/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ oidcToken: token, pr: 41 }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("does not match");
+  });
+
+  test("rejects oidc tokens with conflicting pull request claims", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker(jwks.url);
+    await registerRepo(env, REPO);
+    const claims = {
+      ...baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600),
+      pull_request: { number: 41 },
+    };
+    const token = await signTestJwt(keypair, claims);
+    const res = await worker.fetch(
+      new Request("https://review.test/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ oidcToken: token }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("claims do not match");
+  });
+
   test("rejects a token signed with the wrong key", async () => {
     const env = await buildTestEnv();
     await registerRepo(env, REPO);

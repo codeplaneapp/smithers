@@ -25,6 +25,41 @@ function pullRequestFromOidcRef(ref?: string): number | null {
   return m ? Number.parseInt(m[1], 10) : null;
 }
 
+function positiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+type PullRequestResolution =
+  | { ok: true; pr: number }
+  | { ok: false; message: string };
+
+function resolveOidcPullRequestNumber(
+  claims: { ref?: string; event_name?: string; pull_request?: { number?: number } },
+  bodyPr: unknown,
+): PullRequestResolution {
+  const prFromRef = pullRequestFromOidcRef(claims.ref);
+  const prFromClaim = positiveInteger(claims.pull_request?.number);
+  const prFromBody = positiveInteger(bodyPr);
+
+  if (prFromRef && prFromClaim && prFromRef !== prFromClaim) {
+    return { ok: false, message: "oidc pull request claims do not match" };
+  }
+
+  const verifiedPr = prFromRef ?? prFromClaim;
+  if (verifiedPr) {
+    if (prFromBody && prFromBody !== verifiedPr) {
+      return { ok: false, message: "body pull request number does not match oidc claims" };
+    }
+    return { ok: true, pr: verifiedPr };
+  }
+
+  if (claims.event_name === "issue_comment" && prFromBody) {
+    return { ok: true, pr: prFromBody };
+  }
+
+  return { ok: false, message: "missing pull request number" };
+}
+
 /**
  * POST /api/sessions — mint a session from an OIDC token or operator API key.
  *
@@ -59,16 +94,9 @@ export async function handleSessions(
       return jsonError(401, "oidc: missing repository claim");
     }
     repo = claims.repository;
-    const prFromRef = pullRequestFromOidcRef(claims.ref);
-    const prFromClaim = typeof claims.pull_request?.number === "number" ? claims.pull_request.number : null;
-    // The body is caller-controlled; only accept its PR number when the
-    // verified claims prove a PR context. Otherwise a push-triggered token
-    // could claim an already-reviewed PR and dodge the monthly quota.
-    const prContextEvents = new Set(["pull_request", "pull_request_target", "issue_comment"]);
-    const prFromBody =
-      prContextEvents.has(claims.event_name ?? "") && typeof body.pr === "number" ? body.pr : null;
-    pr = prFromRef ?? prFromClaim ?? prFromBody ?? 0;
-    if (!pr || pr <= 0) return jsonError(400, "missing pull request number");
+    const resolvedPr = resolveOidcPullRequestNumber(claims, body.pr);
+    if (!resolvedPr.ok) return jsonError(400, resolvedPr.message);
+    pr = resolvedPr.pr;
   } else if (typeof body.apiKey === "string" && body.apiKey.length > 0) {
     const record = await lookupApiKey(env.DB, body.apiKey);
     if (!record) return jsonError(401, "unknown api key");
