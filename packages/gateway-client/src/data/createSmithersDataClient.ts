@@ -134,7 +134,7 @@ function eventFromMessage(type: "change" | "reset" | "heartbeat", raw: string): 
 
 function fetchEventSource(
   url: string,
-  init: { fetchImpl: typeof fetch; token?: string },
+  init: { fetchImpl: typeof fetch; token?: string; onError?: (cause: unknown) => void },
 ): EventSourceLike {
   const listeners = new Map<string, Set<(event: MessageEvent) => void>>();
   const abort = new AbortController();
@@ -154,6 +154,11 @@ function fetchEventSource(
     const event = new MessageEvent(type, { data });
     for (const listener of listeners.get(type) ?? []) listener(event);
   };
+  const fail = (cause: unknown) => {
+    if (abort.signal.aborted) return;
+    init.onError?.(cause);
+    source.onerror?.(new Event("error"));
+  };
   void (async () => {
     try {
       const response = await init.fetchImpl(url, {
@@ -161,7 +166,7 @@ function fetchEventSource(
         signal: abort.signal,
       });
       if (!response.ok || !response.body) {
-        source.onerror?.(new Event("error"));
+        fail(new Error(`Smithers stream request failed with HTTP ${response.status}.`));
         return;
       }
       source.onopen?.(new Event("open"));
@@ -181,9 +186,9 @@ function fetchEventSource(
           dispatch(type, data);
         }
       }
-      if (!abort.signal.aborted) source.onerror?.(new Event("error"));
-    } catch {
-      if (!abort.signal.aborted) source.onerror?.(new Event("error"));
+      fail(new Error("Smithers stream ended before the run was done."));
+    } catch (cause) {
+      fail(cause);
     }
   })();
   return source;
@@ -233,9 +238,12 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
     const url = new URL("/v1/api/stream", apiBaseUrl);
     if (lastSeq > 0) url.searchParams.set("lastEventId", String(lastSeq));
     const EventSourceImpl = options.EventSource;
+    // The transport's own failure reason, captured so the reconnect error can
+    // carry a cause instead of a bare Event.
+    let streamCause: unknown;
     source = EventSourceImpl
       ? new EventSourceImpl(url.toString(), { withCredentials: true, headers: Object.fromEntries(headers(mode.token)) } as EventSourceInit) as EventSourceLike
-      : fetchEventSource(url.toString(), { fetchImpl, token: mode.token });
+      : fetchEventSource(url.toString(), { fetchImpl, token: mode.token, onError: (cause) => { streamCause = cause; } });
     const wasReconnect = reconnectAttempt > 0;
     source.onopen = () => {
       setStatus({ status: "online" });
@@ -249,6 +257,14 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       const reconnectingSince = state.reconnectingSince ?? Date.now();
       setStatus({ status: "offline", reconnectingSince });
       const backoff = Math.min(10_000, 250 * 2 ** reconnectAttempt) + Math.floor(Math.random() * 100);
+      // Surface every drop so a broken stream is observable rather than
+      // reconnecting silently. reconnectAttempt is the attempt about to run.
+      options.onError?.({
+        reason: "disconnected",
+        reconnectAttempt,
+        backoffMs: backoff,
+        ...(streamCause === undefined ? {} : { cause: streamCause }),
+      });
       reconnectAttempt += 1;
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
@@ -260,8 +276,10 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
         try {
           const event = eventFromMessage(type, String(message.data));
           if (event) emit(event);
-        } catch {
-          // Ignore malformed stream frames; the next heartbeat or change will resync status.
+        } catch (cause) {
+          // A malformed frame is dropped (the next heartbeat/change resyncs), but
+          // report it so a broken stream is observable.
+          options.onError?.({ reason: "malformed_frame", event: type, cause });
         }
       });
     }

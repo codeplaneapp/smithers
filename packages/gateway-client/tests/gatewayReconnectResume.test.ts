@@ -20,6 +20,8 @@ type ServerBehavior = {
   subscribeReply?: (params: SubscribeFrame["params"], streamId: string) => unknown;
   /** Called after each socket's subscribe so the test can drive events/drops. */
   onSubscribed?: (ws: ServerWebSocket<unknown>, ctx: { streamId: string; afterSeq?: number; connectionIndex: number }) => void;
+  /** Complete the connect handshake but never reply to streamRunEvents — a gateway that stalls after handshake. */
+  stallSubscribe?: boolean;
 };
 
 type RealGatewayServer = {
@@ -68,6 +70,11 @@ function startRealGatewayServer(behavior: ServerBehavior = {}): RealGatewayServe
           const idx = (ws as unknown as { _idx: number })._idx;
           const afterSeq = frame.params?.afterSeq;
           state.afterSeqLog.push(typeof afterSeq === "number" ? afterSeq : -1);
+          if (behavior.stallSubscribe) {
+            // Handshake done, subscribe received, but no reply — the client's
+            // subscribe wait must honor the caller's AbortSignal.
+            return;
+          }
           const streamId = `stream-${idx}`;
           const payload = behavior.subscribeReply
             ? behavior.subscribeReply(frame.params, streamId)
@@ -485,5 +492,32 @@ describe("connect() AbortSignal handling (real WS server)", () => {
     controller.abort();
 
     await expect(client.connect({ signal: controller.signal })).rejects.toThrow(/aborted/i);
+  });
+});
+
+describe("streamRunEvents subscribe AbortSignal handling (real WS server)", () => {
+  test("aborting a stalled subscribe rejects promptly and does not hang", async () => {
+    // Real gateway that completes the connect handshake, receives the
+    // streamRunEvents subscribe, then NEVER replies. Without honoring the abort
+    // signal during the subscribe wait the iterator would hang forever.
+    running = startRealGatewayServer({ stallSubscribe: true });
+    const client = new SmithersGatewayClient({ baseUrl: running.baseUrl });
+    const controller = new AbortController();
+
+    const iterator = client.streamRunEvents({ runId: "run-1" }, { signal: controller.signal });
+    const next = iterator.next();
+
+    // Wait until the server has recorded the subscribe (handshake done, now stalled).
+    for (let attempt = 0; attempt < 200 && running.afterSeqLog.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(running.afterSeqLog.length).toBe(1);
+
+    const start = Date.now();
+    controller.abort();
+
+    await expect(next).rejects.toThrow(/aborted/i);
+    // Prompt rejection proves the signal short-circuits the stalled subscribe.
+    expect(Date.now() - start).toBeLessThan(1000);
   });
 });

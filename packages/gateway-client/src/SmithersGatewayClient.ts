@@ -296,7 +296,11 @@ export class SmithersGatewayClient {
   ): AsyncGenerator<GatewayEventFrame<StreamRunEventPayload>> {
     const connection = await this.connect({ subscribe: [params.runId], signal: options.signal });
     try {
-      const subscribed = await connection.request("streamRunEvents", params);
+      const subscribed = await raceSignal(
+        connection.request("streamRunEvents", params),
+        options.signal,
+        "Gateway stream subscribe aborted.",
+      );
       if (!isObject(subscribed) || typeof subscribed.streamId !== "string") {
         throw invalidGatewayResponse("streamRunEvents", undefined, subscribed);
       }
@@ -420,7 +424,11 @@ export class SmithersGatewayClient {
   ): AsyncGenerator<GatewayEventFrame<StreamDevToolsEventPayload>> {
     const connection = await this.connect({ subscribe: [params.runId], signal: options.signal });
     try {
-      const subscribed = await connection.request("streamDevTools", params);
+      const subscribed = await raceSignal(
+        connection.request("streamDevTools", params),
+        options.signal,
+        "Gateway stream subscribe aborted.",
+      );
       if (!isObject(subscribed) || typeof subscribed.streamId !== "string") {
         throw invalidGatewayResponse("streamDevTools", undefined, subscribed);
       }
@@ -555,9 +563,11 @@ export class SmithersGatewayClient {
     const connection = await this.connect({ signal: options.signal });
     const method = extensionStreamMethodName(namespace, key);
     try {
-      const response = (await connection.requestRaw(method, params)) as
-        | GatewayExtensionSubscribeResponse<T>
-        | undefined;
+      const response = (await raceSignal(
+        connection.requestRaw(method, params),
+        options.signal,
+        "Gateway stream subscribe aborted.",
+      )) as GatewayExtensionSubscribeResponse<T> | undefined;
       if (!isObject(response) || typeof response.streamId !== "string") {
         throw invalidGatewayResponse(method, undefined, response);
       }

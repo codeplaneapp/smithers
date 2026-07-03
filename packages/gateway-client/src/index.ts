@@ -50,6 +50,7 @@ export type { SmithersCollectionName } from "./data/SmithersCollectionName.ts";
 export type { SmithersCollections } from "./data/SmithersCollections.ts";
 export type { SmithersDataClient } from "./data/SmithersDataClient.ts";
 export type { SmithersStreamEvent } from "./data/SmithersStreamEvent.ts";
+export type { SmithersStreamError } from "./data/SmithersStreamError.ts";
 export type { WorkspaceMode } from "./data/WorkspaceMode.ts";
 export { createSmithersCollections } from "./data/createSmithersCollections.ts";
 export { createSmithersDataClient } from "./data/createSmithersDataClient.ts";
