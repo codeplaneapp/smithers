@@ -52,6 +52,25 @@ describe("createImageGenerationTool", () => {
     });
   });
 
+  test("clamps count into the advertised 1..10 range before calling the provider", async () => {
+    const calls = [];
+    const provider = {
+      async generateImage(request) {
+        calls.push(request);
+        return { images: [] };
+      },
+    };
+    const tool = createImageGenerationTool(provider);
+
+    await tool.execute({ prompt: "a", count: 50 }, callOptions);
+    await tool.execute({ prompt: "b", count: 0 }, callOptions);
+    await tool.execute({ prompt: "c", count: -3 }, callOptions);
+    await tool.execute({ prompt: "d", count: 3.7 }, callOptions);
+    await tool.execute({ prompt: "e", count: Number.POSITIVE_INFINITY }, callOptions);
+
+    expect(calls.map((request) => request.count)).toEqual([10, 1, 1, 4, undefined]);
+  });
+
   test("can return a named toolset for mounting on an agent", () => {
     const provider = {
       async generateImage() {

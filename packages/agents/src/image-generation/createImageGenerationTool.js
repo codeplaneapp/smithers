@@ -6,6 +6,8 @@ import { dynamicTool, jsonSchema } from "ai";
 /** @typedef {import("./ImageGenerationRequest.ts").ImageGenerationRequest} ImageGenerationRequest */
 
 const DEFAULT_TOOL_NAME = "generate_image";
+const MIN_IMAGE_COUNT = 1;
+const MAX_IMAGE_COUNT = 10;
 
 const imageGenerationInputSchema = {
   type: "object",
@@ -28,8 +30,8 @@ const imageGenerationInputSchema = {
     count: {
       type: "integer",
       description: "Number of images to generate.",
-      minimum: 1,
-      maximum: 10,
+      minimum: MIN_IMAGE_COUNT,
+      maximum: MAX_IMAGE_COUNT,
     },
     seed: {
       type: "integer",
@@ -81,12 +83,27 @@ function normalizeImageGenerationInput(input, options) {
   if (typeof value.prompt !== "string" || value.prompt.trim() === "") {
     throw new TypeError("generate_image requires a non-empty prompt");
   }
+  const count = typeof value.count === "number" ? clampImageCount(value.count) : undefined;
   return {
     prompt: value.prompt,
     ...(typeof value.size === "string" ? { size: value.size } : {}),
-    ...(typeof value.count === "number" ? { count: value.count } : {}),
+    ...(count !== undefined ? { count } : {}),
     ...(typeof value.seed === "number" ? { seed: value.seed } : {}),
     ...(typeof value.style === "string" ? { style: value.style } : {}),
     ...(typeof value.model === "string" ? { model: value.model } : options.model ? { model: options.model } : {}),
   };
+}
+
+/**
+ * Clamp a requested image count into the advertised [1, 10] range. The JSON
+ * schema only advertises those bounds; nothing enforces them at call time, so a
+ * model that asks for 1000 would otherwise pass straight through to the
+ * provider. Non-finite input yields undefined so the provider default applies.
+ *
+ * @param {number} count
+ * @returns {number | undefined}
+ */
+function clampImageCount(count) {
+  if (!Number.isFinite(count)) return undefined;
+  return Math.min(MAX_IMAGE_COUNT, Math.max(MIN_IMAGE_COUNT, Math.round(count)));
 }
