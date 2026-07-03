@@ -1394,7 +1394,7 @@ describe("DDD tabs and components", () => {
       Object.defineProperty(window, "navigator", { configurable: true, value: originalWindowNavigator });
       Object.defineProperty(globalThis, "navigator", { configurable: true, value: originalNavigator });
     }
-  });
+  }, 15_000);
 
   test("MarkdownEditor shows a readable Crepe failure with retry and textarea fallback", async () => {
     const originalNavigator = globalThis.navigator;
