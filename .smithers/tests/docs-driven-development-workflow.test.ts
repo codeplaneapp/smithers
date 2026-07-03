@@ -9,8 +9,12 @@ const workflowPath = resolve(here, "../workflows/docs-driven-development.tsx");
 const tempDirs: string[] = [];
 
 afterEach(() => {
-  while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
+  while (tempDirs.length > 0) removeTempDir(tempDirs.pop()!);
 });
+
+function removeTempDir(dir: string) {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+}
 
 function tempRoot(status = "partial") {
   const root = mkdtempSync(join(tmpdir(), "ddd-workflow-"));

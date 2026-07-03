@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withDddProcessEnvLock } from "./docsDrivenDevelopmentRunFixture.ts";
 
@@ -15,8 +15,12 @@ const generateWorkflowPath = resolve(here, "../workflows/ddd-generate-docs.tsx")
 const bugScanWorkflowPath = resolve(here, "../workflows/ddd-bug-scan.tsx");
 
 afterEach(() => {
-  while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
+  while (tempDirs.length > 0) removeTempDir(tempDirs.pop()!);
 });
+
+function removeTempDir(dir: string) {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+}
 
 function tempRoot() {
   const root = mkdtempSync(join(tmpdir(), "ddd-generate-bug-unit-"));
@@ -51,6 +55,15 @@ function writeExecutable(path: string, source: string) {
 }
 
 function writeSmithersExecutable(path: string, output: "run" | "no-id" | "fail") {
+  if (process.platform === "win32") {
+    const source = output === "run"
+      ? "@echo off\r\necho started run-abc-123\r\n"
+      : output === "no-id"
+        ? "@echo off\r\necho queued without id\r\n"
+        : "@echo off\r\necho boom 1>&2\r\nexit /b 7\r\n";
+    writeFileSync(path, source);
+    return;
+  }
   const source = output === "run"
     ? 'printf "started run-abc-123\\n"'
     : output === "no-id"
@@ -58,6 +71,10 @@ function writeSmithersExecutable(path: string, output: "run" | "no-id" | "fail")
       : 'printf "boom\\n" >&2\nexit 7';
   writeFileSync(path, `#!/bin/sh\n${source}\n`);
   chmodSync(path, 0o755);
+}
+
+function smithersExecutablePath(binDir: string): string {
+  return join(binDir, process.platform === "win32" ? "smithers.cmd" : "smithers");
 }
 
 async function generateModule() {
@@ -115,7 +132,7 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     const root = tempRoot();
     const binDir = mkdtempSync(join(tmpdir(), "ddd-bugscan-bin-"));
     tempDirs.push(binDir);
-    const smithersPath = join(binDir, "smithers");
+    const smithersPath = smithersExecutablePath(binDir);
     const { kickoffBugScan, kickoffBugScanAfterGate, resolveExecutable } = await generateModule();
 
     expect(kickoffBugScan(root, false)).toEqual({
@@ -136,7 +153,7 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
 
     await withDddProcessEnvLock(async () => {
       const previousPath = process.env.PATH;
-      process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+      process.env.PATH = [binDir, previousPath ?? ""].filter(Boolean).join(delimiter);
       try {
         writeSmithersExecutable(smithersPath, "run");
         expect(resolveExecutable("smithers", process.env.PATH)).toBe(smithersPath);

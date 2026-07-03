@@ -10,7 +10,7 @@ import {
 // Relative import (not a bare specifier) so check-dependency-boundaries permits
 // a test reaching across to the CLI writer it must stay in lockstep with. Loaded
 // dynamically through a non-literal specifier + cast because the CLI is plain JS
-// with no shipped .d.ts (a statically-resolvable import would trip TS7016 under
+// with no shipped .d.ts (a statically-resolvable import trips TS7016 under
 // this project's stricter settings); the runtime import is unchanged.
 const cliGatewayRuntimeModule = "../../../apps/cli/src/gateway-runtime.js";
 const { gatewayRuntimePaths } = (await import(cliGatewayRuntimeModule)) as {
@@ -27,8 +27,12 @@ function tempDir(prefix: string): string {
   return dir;
 }
 afterEach(() => {
-  for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of tmpDirs.splice(0)) removeTempDir(dir);
 });
+
+function removeTempDir(dir: string) {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+}
 
 /** Write a state file under `stateDir` keyed by `workspaceRoot`, returning its path. */
 function writeState(
@@ -127,6 +131,7 @@ describe("readWorkspaceGatewayState", () => {
   });
 
   test("returns null when the state file is group/other-writable (untrusted)", () => {
+    if (process.platform === "win32") return;
     const workspaceRoot = tempDir("smx-ws-");
     const stateDir = tempDir("smx-state-");
     const stateFile = writeState(stateDir, workspaceRoot, {
@@ -140,6 +145,7 @@ describe("readWorkspaceGatewayState", () => {
   });
 
   test("returns null when the state directory is group/other-writable (untrusted)", () => {
+    if (process.platform === "win32") return;
     const workspaceRoot = tempDir("smx-ws-");
     const stateDir = tempDir("smx-state-");
     writeState(stateDir, workspaceRoot, {
@@ -178,7 +184,7 @@ describe("resolveMonitorWorkspaceRoot", () => {
 });
 
 describe("state path parity with the CLI writer (gateway-runtime.js)", () => {
-  // These assertions would go RED if the TUI reader's directory or hash-key
+  // These assertions go RED if the TUI reader's directory or hash-key
   // convention drifted from the daemon writer's, which is exactly the class of
   // bug (Linux uid dir + cwd keying) that broke singleton reuse.
   test("default state path matches on this platform", () => {

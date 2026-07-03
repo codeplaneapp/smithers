@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Gateway, mdxPlugin } from "smithers-orchestrator";
 
@@ -24,6 +24,14 @@ export type DddFixtureRepoOptions = {
 };
 
 export type DddFakeAgentResponses = Record<string, string | Record<string, unknown>>;
+
+function pathWithBin(binDir: string, current = process.env.PATH ?? "") {
+  return [binDir, current].filter(Boolean).join(delimiter);
+}
+
+function removeTempDir(dir: string) {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+}
 
 export async function withDddProcessEnvLock<T>(body: () => Promise<T>): Promise<T> {
   const key = "__smithersDddProcessEnvLock";
@@ -82,7 +90,7 @@ export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFi
   writeFileSync(join(root, ".smithers/spec/features.json"), `${JSON.stringify(options.features ?? [dddFixtureFeature()], null, 2)}\n`);
   writeFileSync(join(root, ".smithers/spec/content/overview.md"), "# Overview\n\nInitial DDD overview.\n");
   writeFileSync(join(root, ".smithers/specs/docs-driven-development.md"), "# Docs Driven Development\n");
-  const agentPath = `${binDir}:${process.env.PATH ?? ""}`;
+  const agentPath = pathWithBin(binDir);
   const workflowSource = readFileSync(workflowPath, "utf8").replace(
     `import { providers } from "../agents";`,
     [
@@ -121,14 +129,14 @@ export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFi
     root,
     binDir,
     cleanup: () => {
-      rmSync(root, { recursive: true, force: true });
-      rmSync(binDir, { recursive: true, force: true });
+      removeTempDir(root);
+      removeTempDir(binDir);
     },
   };
 }
 
 function writeFixtureAgents(root: string, binDir: string) {
-  const agentPath = `${binDir}:${process.env.PATH ?? ""}`;
+  const agentPath = pathWithBin(binDir);
   writeFileSync(join(root, ".smithers/agents.ts"), `import { type AgentLike, ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
 
 const env = {
@@ -262,7 +270,7 @@ export async function withDddFixtureExecutionEnv<T>(
     const previousByNode = process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE;
     const previousTestAgentPath = process.env.SMITHERS_TEST_AGENT_PATH;
     process.chdir(repo.root);
-    process.env.PATH = `${repo.binDir}:${process.env.PATH ?? ""}`;
+    process.env.PATH = pathWithBin(repo.binDir, process.env.PATH);
     process.env.SMITHERS_TEST_AGENT_PATH = process.env.PATH;
     process.env.SMITHERS_FAKE_CODEX_RESPONSE = fakeAgentResponse("codex fake output");
     process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = fakeAgentResponse("claude fake output");
