@@ -13,6 +13,18 @@ function createTestDb() {
 }
 const WF_NS = { kind: "workflow", id: "test-wf" };
 const AGENT_NS = { kind: "agent", id: "test-agent" };
+async function waitForExpiredFactDelete(store) {
+    const deadline = Date.now() + 1_000;
+    let deleted = 0;
+    while (Date.now() < deadline) {
+        deleted = await store.deleteExpiredFacts();
+        if (deleted > 0) {
+            return deleted;
+        }
+        await new Promise((r) => setTimeout(r, 5));
+    }
+    return deleted;
+}
 describe("MemoryStore - Working Memory", () => {
     let store;
     beforeEach(() => {
@@ -86,8 +98,7 @@ describe("MemoryStore - Working Memory", () => {
         await store.setFact(WF_NS, "immediate", "temp", 0);
         const stored = await store.getFact(WF_NS, "immediate");
         expect(stored.ttlMs).toBe(0);
-        await new Promise((r) => setTimeout(r, 1));
-        const deleted = await store.deleteExpiredFacts();
+        const deleted = await waitForExpiredFactDelete(store);
         expect(deleted).toBeGreaterThanOrEqual(1);
         await expect(store.getFact(WF_NS, "immediate")).resolves.toBeUndefined();
     });
