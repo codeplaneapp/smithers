@@ -177,13 +177,16 @@ export const toolSpecs = [
         max_cases: { type: "number", description: "Run only the first N cases." },
         optimization: { type: "string", description: "Optimization artifact to apply during eval." },
       },
-      required: ["workflow"],
+      required: ["workflow", "cases"],
     },
     toArgs(params) {
       const workflow = String(params.workflow ?? "").trim();
       if (!workflow) throw new Error("workflow is required");
+      // The CLI `eval` command requires --cases (evalOptions.cases is not optional).
+      const cases = String(params.cases ?? "").trim();
+      if (!cases) throw new Error("cases is required");
       const args = ["eval", workflow, "--format", "json"];
-      addString(args, "--cases", params.cases);
+      addString(args, "--cases", cases);
       addString(args, "--suite", params.suite);
       addString(args, "--report", params.report);
       addString(args, "--optimization", params.optimization);
