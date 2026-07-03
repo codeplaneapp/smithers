@@ -239,6 +239,26 @@ describe("fuzzySelect (interactive)", () => {
         expect(result).toBe("3");
     });
 
+    test("arrowing down twice advances past index 1 to the third option", async () => {
+        // Regression: @clack/core 1.4.2's base Prompt.onKeypress runs
+        // `this._cursor = this.rl?.cursor ?? 0` on every tracked keypress, so a
+        // subclass that stored its highlight in `_cursor` had it clobbered back
+        // toward the (empty) query cursor between keystrokes — the second
+        // down-arrow never advanced past index 1. We keep the option index in a
+        // private `optionCursor` the base never touches; this proves two moves
+        // land on index 2. A single-arrow test (above) cannot catch the clobber.
+        const { promise, input } = startPicker([
+            { value: "1", label: "one" },
+            { value: "2", label: "two" },
+            { value: "3", label: "three" },
+        ]);
+        input.keypress(undefined, { name: "down" });
+        input.keypress(undefined, { name: "down" });
+        input.keypress("\r", { name: "return" });
+        const result = await promise;
+        expect(result).toBe("3");
+    });
+
     test("ctrl-c resolves the clack cancel symbol", async () => {
         const { promise, input } = startPicker([{ value: "a", label: "review" }]);
         input.keypress("\x03", { name: "c" });
