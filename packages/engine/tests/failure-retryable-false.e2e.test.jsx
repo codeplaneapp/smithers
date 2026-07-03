@@ -112,6 +112,122 @@ describe("failureRetryable=false short-circuits engine retries", () => {
         }
     }, 15_000);
 
+    test("a failover chain advances past a leading agent that fails preflight auth", async () => {
+        // Regression: the implementer chain documents a "guaranteed fallback"
+        // (Sonnet behind Codex). A leading agent that fails preflight (e.g. Codex
+        // with an invalid OPENAI_API_KEY → 401) is non-retryable for THAT agent,
+        // and previously sank the whole task. Selection must advance to the next
+        // agent that passes preflight WITHIN the same attempt.
+        const { smithers, outputs, cleanup, db } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        try {
+            let leadPreflight = 0;
+            let leadGenerate = 0;
+            let fallbackPreflight = 0;
+            let fallbackGenerate = 0;
+            const authFailLead = {
+                id: "codex-auth-fail",
+                model: "gpt-5.5",
+                cliEngine: "fake-cli",
+                tools: {},
+                async preflight() {
+                    leadPreflight += 1;
+                    throw new SmithersError("AGENT_CONFIG_INVALID", "OPENAI_API_KEY is invalid (401 Unauthorized)", {
+                        failureRetryable: false,
+                        preflight: true,
+                    });
+                },
+                async generate() {
+                    leadGenerate += 1;
+                    return { output: { value: -1 } };
+                },
+            };
+            const healthyFallback = {
+                id: "sonnet-fallback",
+                model: "claude-sonnet-5",
+                cliEngine: "fake-cli",
+                tools: {},
+                supportsNativeStructuredOutput: true,
+                async preflight() {
+                    fallbackPreflight += 1;
+                },
+                async generate() {
+                    fallbackGenerate += 1;
+                    return { output: { value: 42 } };
+                },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="failover-preflight-advance">
+                    <Task
+                        id="impl"
+                        output={outputs.outputA}
+                        agent={[authFailLead, healthyFallback]}
+                        retries={0}
+                    >
+                        The leading agent cannot authenticate; the fallback must run.
+                    </Task>
+                </Workflow>
+            ));
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+            expect(result.status).toBe("finished");
+            // Failover happens within selection, before any generate. The lead
+            // never generates; the fallback runs exactly once.
+            expect(leadPreflight).toBe(1);
+            expect(leadGenerate).toBe(0);
+            expect(fallbackGenerate).toBe(1);
+            // A single successful attempt: no retry was needed to reach the fallback.
+            const attempts = await adapter.listAttempts(result.runId, "impl", 0);
+            expect(attempts).toHaveLength(1);
+            expect(attempts[0]?.state).toBe("finished");
+            const meta = JSON.parse(attempts[0]?.metaJson ?? "{}");
+            expect(meta.agentId).toBe("sonnet-fallback");
+        } finally {
+            cleanup();
+        }
+    }, 15_000);
+
+    test("a failover chain whose every agent fails preflight still fails terminally", async () => {
+        const { smithers, outputs, cleanup, db } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        try {
+            const makeBroken = (id) => ({
+                id,
+                model: "bad",
+                cliEngine: "fake-cli",
+                tools: {},
+                async preflight() {
+                    throw new SmithersError("AGENT_CONFIG_INVALID", "401 invalid_authentication", {
+                        failureRetryable: false,
+                        preflight: true,
+                    });
+                },
+                async generate() {
+                    return { output: { value: 0 } };
+                },
+            });
+            const workflow = smithers(() => (
+                <Workflow name="failover-all-broken">
+                    <Task
+                        id="impl"
+                        output={outputs.outputA}
+                        agent={[makeBroken("a"), makeBroken("b")]}
+                        retries={0}
+                    >
+                        Both agents are unauthenticated.
+                    </Task>
+                </Workflow>
+            ));
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+            expect(result.status).toBe("failed");
+            const attempts = await adapter.listAttempts(result.runId, "impl", 0);
+            expect(attempts).toHaveLength(1);
+            const error = JSON.parse(attempts[0]?.errorJson ?? "{}");
+            expect(error.code).toBe("AGENT_CONFIG_INVALID");
+        } finally {
+            cleanup();
+        }
+    }, 15_000);
+
     test("Kimi-style AGENT_CONFIG_INVALID stops after a single attempt", async () => {
         const { smithers, outputs, cleanup, db } = createTestSmithers(outputSchemas);
         const adapter = new SmithersDb(db);

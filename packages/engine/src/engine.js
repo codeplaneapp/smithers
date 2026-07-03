@@ -3230,9 +3230,53 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         if (!payload) {
             const allAgents = Array.isArray(desc.agent) ? desc.agent : (desc.agent ? [desc.agent] : []);
             const agents = disabledAgents ? allAgents.filter((a) => !disabledAgents.has(a)) : allAgents;
-            effectiveAgent = agents.length > 0
-                ? agents[Math.min(attemptNo - 1, agents.length - 1)]
-                : allAgents[Math.min(attemptNo - 1, allAgents.length - 1)]; // fallback to disabled agent if all disabled
+            const selectionPool = agents.length > 0 ? agents : allAgents; // fall back to disabled agents if all disabled
+            const startIndex = Math.min(attemptNo - 1, Math.max(selectionPool.length - 1, 0));
+            // Preflight-aware selection for a multi-agent failover chain. A leading
+            // agent that fails preflight (e.g. Codex with an invalid OPENAI_API_KEY
+            // → 401) must not sink the task: advance to the next agent that passes
+            // preflight within THIS attempt, so a documented "guaranteed fallback"
+            // (Sonnet behind Codex) actually engages instead of dying non-retryably.
+            // Auth failures also disable the agent run-wide (mirroring the circuit
+            // breaker below) so later panels skip it too. If every candidate fails,
+            // keep the original pick so the preflight block below (cache hit → same
+            // rejection) reproduces the terminal error. Single-agent tasks and
+            // fully-broken chains are therefore unchanged.
+            effectiveAgent = selectionPool[startIndex] ?? null;
+            const preflightSelectOptions = {
+                rootDir: taskRoot,
+                maxOutputBytes: toolConfig.maxOutputBytes,
+                timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
+                taskContext: {
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                },
+            };
+            for (let i = startIndex; i < selectionPool.length; i++) {
+                const candidate = selectionPool[i];
+                effectiveAgent = candidate;
+                if (!isPreflightCapableAgent(candidate)) {
+                    break;
+                }
+                try {
+                    await runAgentPreflightOnce(candidate, preflightSelectOptions, toolConfig.agentPreflightCache);
+                    break;
+                }
+                catch (selectionPreflightError) {
+                    const errStr = String((selectionPreflightError && selectionPreflightError.message) ??
+                        selectionPreflightError ??
+                        "");
+                    const isAuthError = /invalid_authentication|401|api.key.*invalid|expired.*credentials|authentication.*failed/i.test(errStr);
+                    if (isAuthError && disabledAgents && i < selectionPool.length - 1) {
+                        disabledAgents.add(candidate);
+                    }
+                    // Advance to the next candidate; if this was the last one,
+                    // effectiveAgent stays set to it and the preflight block below
+                    // surfaces the terminal failure exactly as before.
+                }
+            }
             const priorToolCalls = attemptNo > 1
                 ? await Effect.runPromise(adapter.listToolCalls(runId, desc.nodeId, desc.iteration))
                 : [];
