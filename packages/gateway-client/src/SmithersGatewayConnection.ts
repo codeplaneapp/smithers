@@ -102,7 +102,11 @@ export class SmithersGatewayConnection {
   }
 
   async *events(signal?: AbortSignal): AsyncGenerator<GatewayEventFrame> {
-    const abort = () => this.close();
+    let aborted = false;
+    const abort = () => {
+      aborted = true;
+      this.close();
+    };
     if (signal?.aborted) {
       this.close();
       return;
@@ -110,7 +114,13 @@ export class SmithersGatewayConnection {
     signal?.addEventListener("abort", abort, { once: true });
     try {
       while (!this.closed || this.queue.length > 0) {
+        if (aborted || signal?.aborted) {
+          return;
+        }
         const next = await this.shift();
+        if (aborted || signal?.aborted) {
+          return;
+        }
         if (!next || next.kind === "close") {
           return;
         }

@@ -246,7 +246,7 @@ describe("streamExtension WebSocket subscription", () => {
     }).toThrow(/upstream broke/);
   });
 
-  test("AbortSignal aborts the stream mid-flight", async () => {
+  test("AbortSignal stops the stream without yielding stale queued frames", async () => {
     const ac = new AbortController();
     const { client } = makeClientWithWS((ws, frame) => {
       if (frame.method === "ext.stream.logs.tail") {
@@ -286,8 +286,7 @@ describe("streamExtension WebSocket subscription", () => {
         ac.abort();
       }
     }
-    // Only the initial frame (or initial + first live) should be collected; the abort ends iteration.
-    expect(out.length).toBeGreaterThanOrEqual(1);
+    expect(out).toEqual([{ line: "first" }]);
     expect(ac.signal.aborted).toBe(true);
   });
 });

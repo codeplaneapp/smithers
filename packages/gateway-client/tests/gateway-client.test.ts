@@ -338,6 +338,26 @@ describe("SmithersGatewayConnection WebSocket RPC", () => {
     connection.close();
   });
 
+  test("abort stops the event stream without draining queued frames", async () => {
+    const ws = new FakeWebSocket("ws://gateway.local");
+    const connection = new SmithersGatewayConnection(ws as unknown as WebSocket);
+    const controller = new AbortController();
+    const next = connection.events(controller.signal).next();
+    await Promise.resolve();
+
+    ws.receive({
+      type: "event",
+      event: "run.event",
+      seq: 1,
+      stateVersion: 1,
+      payload: { runId: "run-1", streamId: "stream-1", event: "task.started" },
+    });
+    controller.abort();
+
+    await expect(next).resolves.toEqual({ done: true, value: undefined });
+    expect(ws.closeCalls).toBe(1);
+  });
+
   test("rejects pending requests when the connection closes", async () => {
     const ws = new FakeWebSocket("ws://gateway.local");
     const connection = new SmithersGatewayConnection(ws as unknown as WebSocket);
