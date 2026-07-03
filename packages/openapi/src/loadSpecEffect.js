@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { Effect } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { parseSpecText } from "./_specHelpers.js";
+import { SPEC_SOURCE_URL } from "./specSourceUrl.js";
 
 /** @typedef {import("./OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
 
@@ -37,7 +38,11 @@ export function loadSpecEffect(input) {
                     throw new Error(`Failed to fetch OpenAPI spec: ${res.status} ${res.statusText}`);
                 }
                 const text = await res.text();
-                return parseSpecText(text);
+                const spec = parseSpecText(text);
+                // Remember where the spec came from so a relative server URL
+                // can be resolved against it. Prefer the post-redirect URL.
+                /** @type {Record<PropertyKey, unknown>} */ (spec)[SPEC_SOURCE_URL] = res.url || str;
+                return spec;
             },
             catch: (cause) => toSmithersError(cause, "openapi fetch spec"),
         });

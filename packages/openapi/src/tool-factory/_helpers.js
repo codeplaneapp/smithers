@@ -8,6 +8,7 @@ import { openApiToolCallsTotal, openApiToolCallErrorsTotal, openApiToolDuration,
 import { buildOperationSchema } from "../schema-converter.js";
 import { extractOperations } from "../spec-parser.js";
 import { getRequestBodyArgName } from "../getRequestBodyArgName.js";
+import { SPEC_SOURCE_URL } from "../specSourceUrl.js";
 /** @typedef {import("../OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
 /** @typedef {import("../OpenApiTool.ts").OpenApiTool} OpenApiTool */
 /** @typedef {import("../OpenApiToolsOptions.ts").OpenApiToolsOptions} OpenApiToolsOptions */
@@ -362,6 +363,40 @@ export function createToolFromOperation(operation, spec, baseUrl, options) {
     };
 }
 /**
+ * @param {string} url
+ * @returns {boolean}
+ */
+function isAbsoluteUrl(url) {
+    try {
+        // A URL is absolute iff it parses without a base.
+        void new URL(url);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Resolve a spec `servers[].url` to an absolute URL. Absolute URLs pass through
+ * unchanged. A relative URL (e.g. the Swagger Petstore's "/api/v3") is resolved
+ * against the URL the spec was loaded from; if that base is unknown, throw a
+ * clear error naming the relative URL so the caller can pass `baseUrl`.
+ *
+ * @param {string} serverUrl
+ * @param {OpenApiSpec} spec
+ * @returns {string}
+ */
+function resolveServerUrl(serverUrl, spec) {
+    if (isAbsoluteUrl(serverUrl))
+        return serverUrl;
+    const sourceUrl = /** @type {Record<PropertyKey, unknown>} */ (spec)[SPEC_SOURCE_URL];
+    if (typeof sourceUrl === "string")
+        return new URL(serverUrl, sourceUrl).toString();
+    throw new Error(`OpenAPI spec server URL "${serverUrl}" is relative and no base URL is available to resolve it. `
+        + `Pass an absolute base URL via the \`baseUrl\` option (e.g. { baseUrl: "https://api.example.com" }), `
+        + `or load the spec from its URL so the relative server URL can be resolved against it.`);
+}
+/**
  * @param {OpenApiSpec} spec
  * @param {OpenApiToolsOptions} options
  * @returns {string}
@@ -370,7 +405,7 @@ export function resolveBaseUrl(spec, options) {
     if (options.baseUrl)
         return options.baseUrl;
     if (spec.servers && spec.servers.length > 0)
-        return spec.servers[0].url;
+        return resolveServerUrl(spec.servers[0].url, spec);
     return "http://localhost";
 }
 /**
