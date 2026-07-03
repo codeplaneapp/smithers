@@ -1088,7 +1088,7 @@ function checkGatewayAuthDocsMatchRuntimeDefaults() {
     [serverSource, 'scopes: scopes.length > 0 ? scopes : [...(this.auth.defaultScopes ?? [])],'],
     [serverSource, 'const [userHeader = "x-user-id", scopesHeader = "x-user-scopes", roleHeader = "x-user-role"]'],
     [serverSource, 'const role = asString(req.headers[roleHeader]) ?? this.auth.defaultRole ?? "operator";'],
-    [serverSource, ': [...(this.auth.defaultScopes ?? ["*"])];'],
+    [serverSource, 'message: "trusted-proxy request is missing the user scopes header and no defaultScopes is configured"'],
     [serverSource, "const allowedOrigins = this.auth?.allowedOrigins ?? [];"],
     [serverSource, "return !origin || allowedOrigins.includes(origin);"],
     [GATEWAY_INTEGRATION, 'scopesClaim?: string;          // default "scope"'],
@@ -1099,14 +1099,14 @@ function checkGatewayAuthDocsMatchRuntimeDefaults() {
     [GATEWAY_INTEGRATION, "clockSkewSeconds?: number;     // default 60; negative values clamp to 0"],
     [GATEWAY_INTEGRATION, "allowedOrigins?: string[];     // default [] (no Origin allowlist)"],
     [GATEWAY_INTEGRATION, 'trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]'],
-    [GATEWAY_INTEGRATION, 'defaultScopes?: string[];      // default ["*"] when scopes header is absent'],
+    [GATEWAY_INTEGRATION, 'defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected'],
     [
       GATEWAY_INTEGRATION,
       'JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names.',
     ],
     [
       GATEWAY_INTEGRATION,
-      'Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes` and then `["*"]`.',
+      'Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes`, or the request is rejected when no `defaultScopes` is configured.',
     ],
     [TYPES_REFERENCE, 'scopesClaim?: string;          // default "scope"'],
     [TYPES_REFERENCE, 'roleClaim?: string;            // default "role"'],
@@ -1116,7 +1116,7 @@ function checkGatewayAuthDocsMatchRuntimeDefaults() {
     [TYPES_REFERENCE, "clockSkewSeconds?: number;     // default 60; negative values clamp to 0"],
     [TYPES_REFERENCE, 'trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]'],
     [TYPES_REFERENCE, "allowedOrigins?: string[];     // default [] (no Origin allowlist)"],
-    [TYPES_REFERENCE, 'defaultScopes?: string[];      // default ["*"] when scopes header is absent'],
+    [TYPES_REFERENCE, 'defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected'],
   ];
   const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
   if (missing.length) {
@@ -3708,7 +3708,7 @@ function checkGatewaySdkDocsMatchExports() {
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "listApprovals: ListApprovalsResponse;"],
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "getNodeOutput: Record<string, unknown>;"],
     [GATEWAY_CLIENT_SOURCE, "async *streamDevTools("],
-    [GATEWAY_CLIENT_SOURCE, 'const subscribed = await connection.request("streamDevTools", params);'],
+    [GATEWAY_CLIENT_SOURCE, 'connection.request("streamDevTools", params)'],
     [gatewayServerSource, 'if (this.auth.mode === "token") {'],
     [gatewayServerSource, 'if (this.auth.mode === "trusted-proxy") {'],
     [gatewayServerSource, 'rpcPath: "/v1/rpc",'],

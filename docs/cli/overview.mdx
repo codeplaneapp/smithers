@@ -192,7 +192,7 @@ commands[85]:
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       insecure,,boolean,false,Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run; dangerous)
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
-      interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (falls back to inline streaming)
+      interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (no silent fallback: fails with TUI_MONITOR_UNAVAILABLE if the tui package is missing, leaving the detached run running)
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
   - name: migrate
@@ -636,7 +636,7 @@ commands[85]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[33]{name,short,type,default,desc}:
+    flags[35]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -668,8 +668,10 @@ commands[85]:
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
+      verbose,,boolean,false,Show engine info logs on interactive runs; the default keeps progress + warnings only (non-TTY/structured output always gets full logs)
+      report,,boolean,true,Narrate an interactive run's result with a cheap/fast agent and open an HTML summary in the browser (disable with --no-report or SMITHERS_NO_REPORT=1)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted
-      interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (falls back to inline streaming)
+      interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (no silent fallback: fails with TUI_MONITOR_UNAVAILABLE if the tui package is missing, leaving the detached run running)
   - name: workflow.path
     purpose: Resolve a workflow ID to its entry file path
     args[1]{name,type,required,desc}:

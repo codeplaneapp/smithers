@@ -1293,7 +1293,7 @@ type GatewayAuthConfig =
       trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
       defaultRole?: string;          // default "operator"
-      defaultScopes?: string[];      // default ["*"] when scopes header is absent
+      defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected
     };
 type GatewayDefaults = { cliAgentTools?: "all" | "explicit-only" };
 
