@@ -580,47 +580,76 @@ describe("DevToolsRunStore event processing", () => {
   });
 });
 
-describe("DevToolsRunStore bounded retention", () => {
-  test("evicts the oldest terminal runs once past maxRuns", () => {
-    const store = new DevToolsRunStore({ maxRuns: 3 });
-    for (let i = 0; i < 5; i++) {
-      store.processEngineEvent({ type: "RunStarted", runId: `r${i}`, timestampMs: i });
-      store.processEngineEvent({ type: "RunFinished", runId: `r${i}`, timestampMs: i + 1 });
-    }
-    expect(store.runs.size).toBe(3);
-    // The two oldest were evicted; the three newest remain.
-    expect(store.getRun("r0")).toBeUndefined();
-    expect(store.getRun("r1")).toBeUndefined();
-    expect(store.getRun("r4")).toBeDefined();
-  });
-
-  test("prefers evicting terminal runs over an in-flight run", () => {
-    const store = new DevToolsRunStore({ maxRuns: 2 });
-    // Oldest run stays running; two later runs finish.
-    store.processEngineEvent({ type: "RunStarted", runId: "live", timestampMs: 0 });
-    store.processEngineEvent({ type: "RunStarted", runId: "done1", timestampMs: 1 });
-    store.processEngineEvent({ type: "RunFinished", runId: "done1", timestampMs: 2 });
-    store.processEngineEvent({ type: "RunStarted", runId: "done2", timestampMs: 3 });
-    store.processEngineEvent({ type: "RunFinished", runId: "done2", timestampMs: 4 });
-    expect(store.runs.size).toBe(2);
-    expect(store.getRun("live")).toBeDefined();
-    expect(store.getRun("done1")).toBeUndefined();
-  });
-
-  test("caps per-run event history at maxEventsPerRun (keeps newest)", () => {
-    const store = new DevToolsRunStore({ maxEventsPerRun: 5 });
-    store.processEngineEvent({ type: "RunStarted", runId: "r", timestampMs: 0 });
-    for (let i = 0; i < 20; i++) {
-      store.processEngineEvent({ type: "NodeStarted", runId: "r", nodeId: `n${i}`, iteration: 0, timestampMs: i });
-    }
-    expect(store.getRun("r")?.events.length).toBe(5);
-  });
-
-  test("maxRuns=0 disables run eviction", () => {
-    const store = new DevToolsRunStore({ maxRuns: 0 });
+describe("DevToolsRunStore retention/eviction", () => {
+  test("caps events per run with FIFO eviction, keeping the most recent", () => {
+    const store = new DevToolsRunStore({ maxEventsPerRun: 3 });
     for (let i = 0; i < 10; i++) {
-      store.processEngineEvent({ type: "RunStarted", runId: `r${i}`, timestampMs: i });
+      store.processEngineEvent({
+        type: "FrameCommitted",
+        runId: "r1",
+        timestampMs: i,
+        frameNo: i,
+      });
     }
-    expect(store.runs.size).toBe(10);
+    const events = store.getRun("r1")?.events ?? [];
+    expect(events).toHaveLength(3);
+    // Oldest evicted; the last three pushed survive.
+    expect(events.map((e) => e.timestampMs)).toEqual([7, 8, 9]);
+  });
+
+  test("caps retained runs with FIFO eviction of the oldest run", () => {
+    const store = new DevToolsRunStore({ maxRunsRetained: 2 });
+    store.processEngineEvent({ type: "RunStarted", runId: "r1", timestampMs: 1 });
+    store.processEngineEvent({ type: "RunStarted", runId: "r2", timestampMs: 2 });
+    expect(store.runs.size).toBe(2);
+    store.processEngineEvent({ type: "RunStarted", runId: "r3", timestampMs: 3 });
+    // Oldest run evicted, newest two retained.
+    expect(store.runs.size).toBe(2);
+    expect(store.getRun("r1")).toBeUndefined();
+    expect(store.getRun("r2")?.status).toBe("running");
+    expect(store.getRun("r3")?.status).toBe("running");
+  });
+
+  test("later events for an evicted run recreate it (no stale reference)", () => {
+    const store = new DevToolsRunStore({ maxRunsRetained: 1 });
+    store.processEngineEvent({ type: "RunStarted", runId: "r1", timestampMs: 1 });
+    store.processEngineEvent({ type: "RunStarted", runId: "r2", timestampMs: 2 });
+    expect(store.getRun("r1")).toBeUndefined();
+    // r1 comes back as a fresh run when it emits again; r2 is evicted.
+    store.processEngineEvent({
+      type: "FrameCommitted",
+      runId: "r1",
+      timestampMs: 3,
+      frameNo: 4,
+    });
+    expect(store.runs.size).toBe(1);
+    expect(store.getRun("r1")?.frameNo).toBe(4);
+    expect(store.getRun("r2")).toBeUndefined();
+  });
+
+  test("Infinity disables eviction; invalid cap falls back to the default", () => {
+    const unbounded = new DevToolsRunStore({
+      maxEventsPerRun: Number.POSITIVE_INFINITY,
+    });
+    for (let i = 0; i < 50; i++) {
+      unbounded.processEngineEvent({
+        type: "FrameCommitted",
+        runId: "r1",
+        timestampMs: i,
+        frameNo: i,
+      });
+    }
+    expect(unbounded.getRun("r1")?.events).toHaveLength(50);
+
+    // A non-positive cap is nonsensical, so it falls back to the default (500).
+    const defaulted = new DevToolsRunStore({ maxRunsRetained: 0 });
+    for (let i = 0; i < 20; i++) {
+      defaulted.processEngineEvent({
+        type: "RunStarted",
+        runId: `r${i}`,
+        timestampMs: i,
+      });
+    }
+    expect(defaulted.runs.size).toBe(20);
   });
 });

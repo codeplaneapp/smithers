@@ -247,6 +247,16 @@ type SmithersDevToolsOptions$2 = {
     onEngineEvent?: (event: DevToolsEngineEvent$2) => void;
     /** Enable verbose console logging */
     verbose?: boolean;
+    /**
+     * Max number of runs the store retains before FIFO-evicting the oldest.
+     * Default 500. Pass Infinity to disable eviction.
+     */
+    maxRunsRetained?: number;
+    /**
+     * Max events retained per run before FIFO-evicting the oldest events.
+     * Default 10000. Pass Infinity to disable eviction.
+     */
+    maxEventsPerRun?: number;
 };
 
 /** Execution state for a run, aggregated from SmithersEvent stream */
@@ -264,7 +274,7 @@ type RunExecutionState$3 = {
     finishedAt?: number;
 };
 
-type DevToolsRunStoreOptions$2 = Pick<SmithersDevToolsOptions$2, "onEngineEvent" | "verbose">;
+type DevToolsRunStoreOptions$2 = Pick<SmithersDevToolsOptions$2, "onEngineEvent" | "verbose" | "maxRunsRetained" | "maxEventsPerRun">;
 
 type DevToolsEventBus$3 = {
     on: (event: "event", handler: (e: DevToolsEngineEvent$2) => void) => void;

@@ -6,8 +6,26 @@
 
 const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled"]);
 const TERMINAL_TASK_STATUSES = new Set(["finished", "failed", "cancelled", "skipped"]);
-const DEFAULT_MAX_RUNS = 500;
-const DEFAULT_MAX_EVENTS_PER_RUN = 10_000;
+
+/** Default cap on retained runs before the oldest is FIFO-evicted. */
+const DEFAULT_MAX_RUNS_RETAINED = 500;
+/** Default cap on retained events per run before the oldest are FIFO-evicted. */
+const DEFAULT_MAX_EVENTS_PER_RUN = 10000;
+
+/**
+ * Normalize a retention cap. A finite value >= 1 is used as-is; Infinity
+ * disables eviction; anything else falls back to the default.
+ * @param {number | undefined} value
+ * @param {number} fallback
+ * @returns {number}
+ */
+function resolveCap(value, fallback) {
+    if (value === undefined)
+        return fallback;
+    if (typeof value !== "number" || Number.isNaN(value) || value < 1)
+        return fallback;
+    return value;
+}
 /**
  * Run-level waiting statuses that a NodeWaitingApproval/NodeWaitingTimer event
  * can raise. These must clear back to "running" once the blocking task resumes.
@@ -64,11 +82,17 @@ export class DevToolsRunStore {
     _runs = new Map();
     /** @type {Array<{ bus: DevToolsEventBus; handler: (event: DevToolsEngineEvent) => void }>} */
     _eventBusListeners = [];
+    /** @type {number} */
+    _maxRunsRetained;
+    /** @type {number} */
+    _maxEventsPerRun;
     /**
      * @param {DevToolsRunStoreOptions} [options]
      */
     constructor(options = {}) {
         this.options = options;
+        this._maxRunsRetained = resolveCap(options.maxRunsRetained, DEFAULT_MAX_RUNS_RETAINED);
+        this._maxEventsPerRun = resolveCap(options.maxEventsPerRun, DEFAULT_MAX_EVENTS_PER_RUN);
     }
     /**
      * Attach to a Smithers EventBus-like source.
@@ -138,10 +162,8 @@ export class DevToolsRunStore {
             return;
         const run = this.ensureRun(event.runId);
         run.events.push(event);
-        // Cap per-run event history so a hot run cannot grow without bound.
-        const maxEvents = this.options.maxEventsPerRun ?? DEFAULT_MAX_EVENTS_PER_RUN;
-        if (maxEvents > 0 && run.events.length > maxEvents) {
-            run.events.splice(0, run.events.length - maxEvents);
+        if (run.events.length > this._maxEventsPerRun) {
+            run.events.splice(0, run.events.length - this._maxEventsPerRun);
         }
         const verbose = this.options.verbose ?? false;
         switch (event.type) {
@@ -300,37 +322,16 @@ export class DevToolsRunStore {
                 events: [],
             };
             this._runs.set(runId, run);
-            this._evictOldRuns();
+            // FIFO-evict oldest runs (Map preserves insertion order) so a live
+            // bus with unbounded distinct runs can't grow the store forever.
+            while (this._runs.size > this._maxRunsRetained) {
+                const oldest = this._runs.keys().next().value;
+                if (oldest === undefined)
+                    break;
+                this._runs.delete(oldest);
+            }
         }
         return run;
-    }
-    /**
-     * Bound the number of retained runs. Map iteration is insertion order, so
-     * evict from the front, preferring terminal (settled) runs so an in-flight
-     * run is never dropped while active; fall back to the oldest run only if the
-     * whole store is still live and over the cap.
-     * @returns {void}
-     */
-    _evictOldRuns() {
-        const maxRuns = this.options.maxRuns ?? DEFAULT_MAX_RUNS;
-        if (maxRuns <= 0)
-            return;
-        while (this._runs.size > maxRuns) {
-            let victim;
-            for (const [id, run] of this._runs) {
-                if (isTerminalRun(run)) {
-                    victim = id;
-                    break;
-                }
-            }
-            if (victim === undefined) {
-                // Nothing terminal to reclaim: drop the oldest to stay bounded.
-                victim = this._runs.keys().next().value;
-            }
-            if (victim === undefined)
-                break;
-            this._runs.delete(victim);
-        }
     }
     /**
      * @param {RunExecutionState} run

@@ -9,15 +9,13 @@ export type SmithersDevToolsOptions = {
   /** Enable verbose console logging */
   verbose?: boolean;
   /**
-   * Max runs retained in the in-memory store before the oldest are evicted
-   * (terminal runs first). On a long-lived bus the store would otherwise grow
-   * without bound. Defaults to 500; set 0 or a negative value to disable.
+   * Max number of runs the store retains before FIFO-evicting the oldest.
+   * Default 500. Pass Infinity to disable eviction.
    */
-  maxRuns?: number;
+  maxRunsRetained?: number;
   /**
-   * Max engine events retained per run before the oldest are dropped. A hot run
-   * can emit unbounded events; this caps per-run memory. Defaults to 10000; set
-   * 0 or a negative value to disable.
+   * Max events retained per run before FIFO-evicting the oldest events.
+   * Default 10000. Pass Infinity to disable eviction.
    */
   maxEventsPerRun?: number;
 };
