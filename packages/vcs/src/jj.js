@@ -20,8 +20,7 @@ import { Duration, Effect, Fiber, Metric, Stream } from "effect";
 import { vcsDuration } from "@smithers-orchestrator/observability/metrics";
 import { resolveJjBinary } from "./resolveJjBinary.js";
 
-const JJ_POINTER_TIMEOUT_MS = 1_500;
-const WORKSPACE_SNAPSHOT_TIMEOUT_MS = 1_500;
+const JJ_PROBE_TIMEOUT_MS = 1_500;
 /**
  * @param {Stream.Stream<Uint8Array, unknown, never>} stream
  * @returns {Effect.Effect<string, unknown, never>}
@@ -84,15 +83,7 @@ function jjError(res) {
  * @returns {Effect.Effect<string | null, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
  */
 export function getJjPointer(cwd) {
-    return runJj(["log", "-r", "@", "--no-graph", "--template", "change_id"], { cwd }).pipe(Effect.timeoutTo({
-        duration: Duration.millis(JJ_POINTER_TIMEOUT_MS),
-        onSuccess: (res) => res,
-        onTimeout: () => ({
-            code: 124,
-            stdout: "",
-            stderr: `jj pointer timed out after ${JJ_POINTER_TIMEOUT_MS}ms`,
-        }),
-    }), Effect.map((res) => {
+    return withJjTimeout(runJj(["log", "-r", "@", "--no-graph", "--template", "change_id"], { cwd }), "jj pointer").pipe(Effect.map((res) => {
         if (res.code !== 0)
             return null;
         const out = res.stdout.trim();
@@ -100,24 +91,31 @@ export function getJjPointer(cwd) {
     }), Effect.annotateLogs({ cwd: cwd ?? "" }), Effect.withLogSpan("vcs:jj-pointer"));
 }
 /**
- * Wrap a snapshot jj call with a bounded timeout so a slow or hung jj cannot
- * block the agent. On timeout it returns a sentinel non-zero result, which the
- * caller treats as a durability gap rather than a value.
+ * Wrap a jj probe/snapshot call with a bounded timeout so a slow or hung jj
+ * cannot block the agent. On timeout it returns a sentinel non-zero result,
+ * which the caller treats as a failed probe (durability gap / not a repo)
+ * rather than a value, and logs a warning so the silent downgrade is
+ * diagnosable.
  *
  * @param {Effect.Effect<RunJjResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>} effect
  * @param {string} label
  * @returns {Effect.Effect<RunJjResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
  */
-function withSnapshotTimeout(effect, label) {
+function withJjTimeout(effect, label) {
     return effect.pipe(Effect.timeoutTo({
-        duration: Duration.millis(WORKSPACE_SNAPSHOT_TIMEOUT_MS),
-        onSuccess: (res) => res,
+        duration: Duration.millis(JJ_PROBE_TIMEOUT_MS),
+        onSuccess: (res) => ({ res, timedOut: false }),
         onTimeout: () => ({
-            code: 124,
-            stdout: "",
-            stderr: `${label} timed out after ${WORKSPACE_SNAPSHOT_TIMEOUT_MS}ms`,
+            res: {
+                code: 124,
+                stdout: "",
+                stderr: `${label} timed out after ${JJ_PROBE_TIMEOUT_MS}ms`,
+            },
+            timedOut: true,
         }),
-    }));
+    }), Effect.tap(({ timedOut }) => timedOut
+        ? Effect.logWarning(`${label} timed out after ${JJ_PROBE_TIMEOUT_MS}ms; treating as failed probe`)
+        : Effect.void), Effect.map(({ res }) => res));
 }
 /**
  * Parse the snapshot values returned by the two jj commands in
@@ -153,14 +151,14 @@ export function parseWorkspaceSnapshot(logStdout, opStdout) {
  */
 export function captureWorkspaceSnapshot(cwd) {
     return Effect.gen(function* () {
-        const logRes = yield* withSnapshotTimeout(runJj(["log", "-r", "@", "--no-graph", "-T", 'commit_id ++ "\\n" ++ change_id'], { cwd }), "jj snapshot log");
+        const logRes = yield* withJjTimeout(runJj(["log", "-r", "@", "--no-graph", "-T", 'commit_id ++ "\\n" ++ change_id'], { cwd }), "jj snapshot log");
         if (logRes.code !== 0) {
             // Attribute the gap: a bare null makes a missing durability snapshot
             // impossible to diagnose. code 124 = timeout (see withSnapshotTimeout).
             yield* Effect.logWarning(`workspace snapshot skipped: jj log exited ${logRes.code}: ${logRes.stderr?.trim() || "(no stderr)"}`);
             return null;
         }
-        const opRes = yield* withSnapshotTimeout(runJj(["--ignore-working-copy", "operation", "log", "--no-graph", "--limit", "1", "-T", "self.id()"], { cwd }), "jj snapshot op");
+        const opRes = yield* withJjTimeout(runJj(["--ignore-working-copy", "operation", "log", "--no-graph", "--limit", "1", "-T", "self.id()"], { cwd }), "jj snapshot op");
         if (opRes.code !== 0) {
             yield* Effect.logWarning(`workspace snapshot skipped: jj operation log exited ${opRes.code}: ${opRes.stderr?.trim() || "(no stderr)"}`);
             return null;
@@ -188,9 +186,9 @@ export function revertToJjPointer(pointer, cwd) {
  * @returns {Effect.Effect<boolean, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
  */
 export function isJjRepo(cwd) {
-    return runJj(["log", "-r", "@", "-n", "1", "--no-graph"], {
+    return withJjTimeout(runJj(["log", "-r", "@", "-n", "1", "--no-graph"], {
         cwd,
-    }).pipe(Effect.map((res) => res.code === 0), Effect.annotateLogs({ cwd: cwd ?? "" }), Effect.withLogSpan("vcs:jj-is-repo"));
+    }), "jj repo check").pipe(Effect.map((res) => res.code === 0), Effect.annotateLogs({ cwd: cwd ?? "" }), Effect.withLogSpan("vcs:jj-is-repo"));
 }
 /**
  * Create a new JJ workspace at `path` with a friendly `name`.

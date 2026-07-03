@@ -177,6 +177,19 @@ exit 1
             expect(ok).toBe(false);
         });
     });
+    test("false when repo check times out", async () => {
+        const script = `
+if [[ "$1" = "log" ]]; then
+  sleep 2
+  exit 0
+fi
+exit 1
+`;
+        await withFakeJj(script, async () => {
+            const ok = await vcs.isJjRepo();
+            expect(ok).toBe(false);
+        });
+    });
     test("forwards cwd to repo check command", async () => {
         const tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), "jj-repo-"));
         await fs.writeFile(path.join(tmpCwd, ".cwd"), "x");
