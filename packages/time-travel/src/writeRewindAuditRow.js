@@ -19,9 +19,11 @@ import { resolveRewindAuditClient } from "./resolveRewindAuditClient.js";
  * @returns {Promise<number | null>}
  */
 export async function writeRewindAuditRow(adapter, row) {
-  const client = resolveRewindAuditClient(adapter);
-  client
-    .query(
+  const storage = resolveRewindAuditClient(adapter);
+  // `INSERT ... RETURNING id` is portable (SQLite >= 3.35 and PostgreSQL) and
+  // avoids SQLite's `last_insert_rowid()`, which has no PostgreSQL equivalent.
+  const inserted = /** @type {Record<string, unknown> | undefined} */ (
+    await storage.queryOne(
       `INSERT INTO _smithers_time_travel_audit (
          run_id,
          from_frame_no,
@@ -30,17 +32,19 @@ export async function writeRewindAuditRow(adapter, row) {
          timestamp_ms,
          result,
          duration_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+       RETURNING id`,
+      [
+        row.runId,
+        row.fromFrameNo,
+        row.toFrameNo,
+        row.caller,
+        row.timestampMs,
+        row.result,
+        row.durationMs ?? null,
+      ],
     )
-    .run(
-      row.runId,
-      row.fromFrameNo,
-      row.toFrameNo,
-      row.caller,
-      row.timestampMs,
-      row.result,
-      row.durationMs ?? null,
-    );
-  const inserted = client.query("SELECT last_insert_rowid() AS id").get();
-  return typeof inserted?.id === "number" ? inserted.id : null;
+  );
+  const id = Number(inserted?.id);
+  return Number.isFinite(id) ? id : null;
 }

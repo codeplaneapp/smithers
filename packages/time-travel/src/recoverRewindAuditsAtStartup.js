@@ -9,10 +9,9 @@ import { recoverInProgressRewindAudits } from "./recoverInProgressRewindAudits.j
  * needs_attention — the durable marker `jumpToFrame` writes before mutating is
  * useless unless something runs this on startup.
  *
- * NEVER throws: startup must not be blocked. The non-SQLite case (e.g. a Postgres
- * audit client, which has no recovery path) surfaces as a TypeError from
- * `resolveRewindAuditClient` mentioning the SQLite client; that is swallowed
- * silently. Any other failure is reported via `onError` but still swallowed.
+ * NEVER throws: startup must not be blocked. Recovery runs on every backend
+ * (bun:sqlite, PostgreSQL, PGlite); an adapter with no usable storage layer is a
+ * silent no-op. Any unexpected failure is reported via `onError` but swallowed.
  *
  * @param {SmithersDb} adapter
  * @param {{ onRecovered?: (count: number) => void; onError?: (error: unknown) => void; nowMs?: () => number }} [options]
@@ -26,9 +25,6 @@ export async function recoverRewindAuditsAtStartup(adapter, options = {}) {
     }
   }
   catch (error) {
-    const isNonSqliteAuditClient = error instanceof TypeError && /SQLite/.test(error.message);
-    if (!isNonSqliteAuditClient) {
-      options.onError?.(error);
-    }
+    options.onError?.(error);
   }
 }

@@ -11,25 +11,23 @@ import { resolveRewindAuditClient } from "./resolveRewindAuditClient.js";
  * @param {{ id: number; result: RewindAuditResult; durationMs?: number | null; fromFrameNo?: number }} row
  */
 export async function updateRewindAuditRow(adapter, row) {
-  const client = resolveRewindAuditClient(adapter);
+  const storage = resolveRewindAuditClient(adapter);
   if (typeof row.fromFrameNo === "number") {
-    client
-      .query(
-        `UPDATE _smithers_time_travel_audit
-            SET result = ?,
-                duration_ms = ?,
-                from_frame_no = ?
-          WHERE id = ?`,
-      )
-      .run(row.result, row.durationMs ?? null, row.fromFrameNo, row.id);
-    return;
-  }
-  client
-    .query(
+    await storage.execute(
       `UPDATE _smithers_time_travel_audit
           SET result = ?,
-              duration_ms = ?
+              duration_ms = ?,
+              from_frame_no = ?
         WHERE id = ?`,
-    )
-    .run(row.result, row.durationMs ?? null, row.id);
+      [row.result, row.durationMs ?? null, row.fromFrameNo, row.id],
+    );
+    return;
+  }
+  await storage.execute(
+    `UPDATE _smithers_time_travel_audit
+        SET result = ?,
+            duration_ms = ?
+      WHERE id = ?`,
+    [row.result, row.durationMs ?? null, row.id],
+  );
 }

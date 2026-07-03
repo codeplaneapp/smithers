@@ -41,43 +41,27 @@ function mapRewindAuditRows(rows) {
  * @returns {Promise<Array<RewindAuditRow>>}
  */
 export async function listRewindAuditRows(adapter, input = {}) {
-  const client = resolveRewindAuditClient(adapter);
+  const storage = resolveRewindAuditClient(adapter);
   const limit = Number.isInteger(input.limit) ? Math.max(1, Number(input.limit)) : 100;
-  if (typeof input.runId === "string") {
-    const rows = client
-      .query(
-        `SELECT
-             id,
-             run_id AS runId,
-             from_frame_no AS fromFrameNo,
-             to_frame_no AS toFrameNo,
-             caller,
-             timestamp_ms AS timestampMs,
-             result,
-             duration_ms AS durationMs
-           FROM _smithers_time_travel_audit
-           WHERE run_id = ?
-           ORDER BY id ASC
-           LIMIT ?`,
-      )
-      .all(input.runId, limit);
-    return mapRewindAuditRows(rows);
-  }
-  const rows = client
-    .query(
-      `SELECT
-           id,
-           run_id AS runId,
-           from_frame_no AS fromFrameNo,
-           to_frame_no AS toFrameNo,
-           caller,
-           timestamp_ms AS timestampMs,
-           result,
-           duration_ms AS durationMs
-         FROM _smithers_time_travel_audit
-         ORDER BY id ASC
-         LIMIT ?`,
-    )
-    .all(limit);
+  // Storage returns snake_case columns camelCased, so `run_id` arrives as
+  // `runId`, `from_frame_no` as `fromFrameNo`, etc. (consumed by mapRewindAuditRows).
+  const rows = /** @type {Array<Record<string, unknown>>} */ (
+    typeof input.runId === "string"
+      ? await storage.queryAll(
+          `SELECT id, run_id, from_frame_no, to_frame_no, caller, timestamp_ms, result, duration_ms
+             FROM _smithers_time_travel_audit
+            WHERE run_id = ?
+            ORDER BY id ASC
+            LIMIT ?`,
+          [input.runId, limit],
+        )
+      : await storage.queryAll(
+          `SELECT id, run_id, from_frame_no, to_frame_no, caller, timestamp_ms, result, duration_ms
+             FROM _smithers_time_travel_audit
+            ORDER BY id ASC
+            LIMIT ?`,
+          [limit],
+        )
+  );
   return mapRewindAuditRows(rows);
 }

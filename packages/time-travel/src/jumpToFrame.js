@@ -42,31 +42,24 @@ function asString(value) {
 }
 
 /**
- * @typedef {{
- *   query: (sql: string) => {
- *     run: (...args: unknown[]) => unknown;
- *     get: (...args: unknown[]) => Record<string, unknown> | null | undefined;
- *     all: (...args: unknown[]) => Array<Record<string, unknown>>;
- *   };
- * }} JumpSqliteClient
- */
-
-/**
+ * Portable SQL seam. Every rewind mutation runs through the adapter's
+ * dialect-agnostic {@link SmithersDb.internalStorage} (the same layer the
+ * adapter's own methods use), so rewind works on bun:sqlite, PostgreSQL, and
+ * PGlite alike. `?` placeholders are rewritten to `$n` for PostgreSQL and
+ * snake_case columns are returned camelCased by the storage layer.
+ *
  * @param {SmithersDb} adapter
- * @returns {JumpSqliteClient}
+ * @returns {SmithersDb["internalStorage"]}
  */
-function resolveSqliteClient(adapter) {
-  const db = /** @type {{ session?: { client?: unknown }; $client?: unknown } | null | undefined} */ (
-    /** @type {unknown} */ (adapter?.db)
-  );
-  const candidate = /** @type {unknown} */ (db?.session?.client ?? db?.$client);
-  if (
-    !candidate ||
-    typeof (/** @type {{ query?: unknown }} */ (candidate).query) !== "function"
-  ) {
-    throw new TypeError("Could not resolve Bun SQLite client from adapter.");
+function resolveStorage(adapter) {
+  const storage = adapter?.internalStorage;
+  if (!storage || typeof storage.execute !== "function") {
+    throw new JumpToFrameError(
+      "RewindFailed",
+      "Rewind requires a SmithersDb backed by internalStorage; none was resolved from the adapter.",
+    );
   }
-  return /** @type {JumpSqliteClient} */ (candidate);
+  return storage;
 }
 
 /**
@@ -182,15 +175,15 @@ async function readLatestFrame(adapter, runId) {
  * @returns {Promise<{ frameNo: number; createdAtMs: number; xmlJson: string } | null>}
  */
 async function readFrameByNo(adapter, runId, frameNo) {
-  const client = resolveSqliteClient(adapter);
-  const row = client
-    .query(
-      `SELECT frame_no AS frameNo, created_at_ms AS createdAtMs, xml_json AS xmlJson
+  const row = /** @type {Record<string, unknown> | undefined} */ (
+    await resolveStorage(adapter).queryOne(
+      `SELECT frame_no, created_at_ms, xml_json
          FROM _smithers_frames
         WHERE run_id = ? AND frame_no = ?
         LIMIT 1`,
+      [runId, frameNo],
     )
-    .get(runId, frameNo);
+  );
   if (!row) {
     return null;
   }
@@ -207,14 +200,14 @@ async function readFrameByNo(adapter, runId, frameNo) {
  * @param {number} targetFrameNo
  */
 async function countFramesAfter(adapter, runId, targetFrameNo) {
-  const client = resolveSqliteClient(adapter);
-  const row = client
-    .query(
+  const row = /** @type {Record<string, unknown> | undefined} */ (
+    await resolveStorage(adapter).queryOne(
       `SELECT COUNT(*) AS count
          FROM _smithers_frames
         WHERE run_id = ? AND frame_no > ?`,
+      [runId, targetFrameNo],
     )
-    .get(runId, targetFrameNo);
+  );
   return Number(row?.count ?? 0);
 }
 
@@ -224,14 +217,11 @@ async function countFramesAfter(adapter, runId, targetFrameNo) {
  * @param {number} cutoffMs
  */
 async function deleteAttemptsStartedAfter(adapter, runId, cutoffMs) {
-  const client = resolveSqliteClient(adapter);
-  client
-    .query(
-      `DELETE FROM _smithers_attempts
-        WHERE run_id = ?
-          AND started_at_ms > ?`,
-    )
-    .run(runId, cutoffMs);
+  await resolveStorage(adapter).deleteWhere(
+    "_smithers_attempts",
+    "run_id = ? AND started_at_ms > ?",
+    [runId, cutoffMs],
+  );
 }
 
 /**
@@ -244,18 +234,18 @@ async function resetNodesToPending(adapter, runId, nodeKeys, nowMs) {
   if (nodeKeys.length === 0) {
     return;
   }
-  const client = resolveSqliteClient(adapter);
-  const statement = client.query(
-    `UPDATE _smithers_nodes
-        SET state = ?,
-            last_attempt = NULL,
-            updated_at_ms = ?
-      WHERE run_id = ?
-        AND node_id = ?
-        AND iteration = ?`,
-  );
+  const storage = resolveStorage(adapter);
   for (const key of nodeKeys) {
-    statement.run("pending", nowMs, runId, key.nodeId, key.iteration);
+    await storage.execute(
+      `UPDATE _smithers_nodes
+          SET state = ?,
+              last_attempt = NULL,
+              updated_at_ms = ?
+        WHERE run_id = ?
+          AND node_id = ?
+          AND iteration = ?`,
+      ["pending", nowMs, runId, key.nodeId, key.iteration],
+    );
   }
 }
 
@@ -290,7 +280,7 @@ async function deleteOutputTargets(adapter, targets, runId) {
   if (targets.length === 0) {
     return 0;
   }
-  const client = resolveSqliteClient(adapter);
+  const storage = resolveStorage(adapter);
   let deleted = 0;
   for (const target of targets) {
     if (!OUTPUT_TABLE_PATTERN.test(target.tableName)) {
@@ -298,23 +288,24 @@ async function deleteOutputTargets(adapter, targets, runId) {
     }
     const tableSql = quoteIdentifier(target.tableName);
     try {
-      const countRow = client
-        .query(
+      const countRow = /** @type {Record<string, unknown> | undefined} */ (
+        await storage.queryOne(
           `SELECT COUNT(*) AS count
              FROM ${tableSql}
             WHERE run_id = ? AND node_id = ? AND iteration = ?`,
+          [runId, target.nodeId, target.iteration],
         )
-        .get(runId, target.nodeId, target.iteration);
+      );
       deleted += Number(countRow?.count ?? 0);
-      client
-        .query(
-          `DELETE FROM ${tableSql}
-            WHERE run_id = ? AND node_id = ? AND iteration = ?`,
-        )
-        .run(runId, target.nodeId, target.iteration);
+      await storage.execute(
+        `DELETE FROM ${tableSql}
+          WHERE run_id = ? AND node_id = ? AND iteration = ?`,
+        [runId, target.nodeId, target.iteration],
+      );
     } catch (error) {
       const message = formatError(error);
-      if (/no such table/i.test(message)) {
+      // SQLite: "no such table"; PostgreSQL: "relation ... does not exist".
+      if (/no such table|does not exist/i.test(message)) {
         continue;
       }
       throw error;
@@ -830,31 +821,26 @@ export async function jumpToFrame(input) {
                   };
                   // Insert the event row via raw SQL inside the enclosing
                   // transaction. We deliberately avoid `insertEventWithNextSeq`
-                  // here because it opens its own BEGIN IMMEDIATE and would
-                  // error out under a nested transaction.
-                  yield* Effect.promise(() => {
-                    const txnClient = resolveSqliteClient(input.adapter);
-                    const seqRow = txnClient
-                      .query(
+                  // here because it opens its own transaction and would error
+                  // out nested. internalStorage runs on the same connection as
+                  // the open transaction, so this participates in the commit.
+                  yield* Effect.promise(async () => {
+                    const storage = resolveStorage(input.adapter);
+                    const seqRow = /** @type {Record<string, unknown> | undefined} */ (
+                      await storage.queryOne(
                         `SELECT COALESCE(MAX(seq), -1) + 1 AS seq
                            FROM _smithers_events
                           WHERE run_id = ?`,
+                        [runId],
                       )
-                      .get(runId);
+                    );
                     const seq = Number(seqRow?.seq ?? 0);
-                    txnClient
-                      .query(
-                        `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
-                         VALUES (?, ?, ?, ?, ?)`,
-                      )
-                      .run(
-                        runId,
-                        seq,
-                        event.timestampMs,
-                        event.type,
-                        JSON.stringify(event),
-                      );
-                    return Promise.resolve(seq);
+                    await storage.execute(
+                      `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
+                       VALUES (?, ?, ?, ?, ?)`,
+                      [runId, seq, event.timestampMs, event.type, JSON.stringify(event)],
+                    );
+                    return seq;
                   });
 
                   return {

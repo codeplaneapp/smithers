@@ -1,38 +1,23 @@
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 
 /**
- * Minimal Bun SQLite client surface used by the rewind audit helpers.
- * This mirrors the shape returned by `bun:sqlite`'s `Database.query()`
- * and is sufficient for the raw SQL writes / reads we perform against
- * the `_smithers_time_travel_audit` and `_smithers_frames` tables.
+ * Resolve the portable storage layer used by the rewind audit helpers.
  *
- * @typedef {{
- *   query: (sql: string) => {
- *     run: (...args: unknown[]) => unknown;
- *     get: (...args: unknown[]) => Record<string, unknown> | null | undefined;
- *     all: (...args: unknown[]) => Array<Record<string, unknown>>;
- *   };
- * }} RewindAuditSqliteClient
- */
-
-/**
- * Resolve the Bun SQLite client from a {@link SmithersDb} instance for audit writes.
+ * Rewind audit writes/reads run against the `_smithers_time_travel_audit` table
+ * through the adapter's dialect-agnostic {@link SmithersDb.internalStorage} (the
+ * same layer the adapter's own methods use), so they work on bun:sqlite,
+ * PostgreSQL, and PGlite alike. `?` placeholders are rewritten to `$n` for
+ * PostgreSQL and snake_case columns are returned camelCased.
  *
  * @param {SmithersDb} adapter
- * @returns {RewindAuditSqliteClient}
+ * @returns {SmithersDb["internalStorage"]}
  */
 export function resolveRewindAuditClient(adapter) {
-  const db = /** @type {{ session?: { client?: unknown }; $client?: unknown } | null | undefined} */ (
-    /** @type {unknown} */ (adapter?.db)
-  );
-  const candidate = /** @type {unknown} */ (db?.session?.client ?? db?.$client);
-  if (
-    !candidate ||
-    typeof (/** @type {{ query?: unknown }} */ (candidate).query) !== "function"
-  ) {
+  const storage = adapter?.internalStorage;
+  if (!storage || typeof storage.execute !== "function") {
     throw new TypeError(
-      "Could not resolve a Bun SQLite client for rewind audit writes.",
+      "Could not resolve storage for rewind audit writes; adapter has no internalStorage.",
     );
   }
-  return /** @type {RewindAuditSqliteClient} */ (candidate);
+  return storage;
 }

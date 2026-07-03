@@ -1,5 +1,3 @@
-import { resolveRewindAuditClient } from "./resolveRewindAuditClient.js";
-
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 
 /**
@@ -12,38 +10,43 @@ import { resolveRewindAuditClient } from "./resolveRewindAuditClient.js";
  */
 export async function recoverInProgressRewindAudits(adapter, options = {}) {
   const nowMs = options.nowMs ?? (() => Date.now());
-  const client = resolveRewindAuditClient(adapter);
-  const rows = /** @type {Array<{ id: number; runId: string; timestampMs: number }>} */ (
-    client
-      .query(
-        `SELECT id, run_id AS runId, timestamp_ms AS timestampMs
-           FROM _smithers_time_travel_audit
-          WHERE result = 'in_progress'`,
-      )
-      .all()
+  // An adapter without a usable storage layer has no audit table to recover
+  // from; treat it as a silent no-op so startup recovery never throws.
+  const storage = adapter?.internalStorage;
+  if (!storage || typeof storage.execute !== "function") {
+    return { recovered: [] };
+  }
+  const rows = /** @type {Array<Record<string, unknown>>} */ (
+    await storage.queryAll(
+      `SELECT id, run_id, timestamp_ms
+         FROM _smithers_time_travel_audit
+        WHERE result = 'in_progress'`,
+    )
   );
   if (rows.length === 0) {
     return { recovered: [] };
   }
   const now = nowMs();
-  const updateStmt = client.query(
-    `UPDATE _smithers_time_travel_audit
-        SET result = 'partial',
-            duration_ms = COALESCE(duration_ms, ?)
-      WHERE id = ?`,
-  );
   const recovered = [];
   for (const row of rows) {
+    const id = Number(row.id);
+    const runId = String(row.runId);
     const duration = Math.max(0, now - Number(row.timestampMs ?? now));
-    updateStmt.run(duration, row.id);
+    await storage.execute(
+      `UPDATE _smithers_time_travel_audit
+          SET result = 'partial',
+              duration_ms = COALESCE(duration_ms, ?)
+        WHERE id = ?`,
+      [duration, id],
+    );
     try {
       const payload = JSON.stringify({
         code: "RewindFailed",
         needsAttention: true,
-        message: `Rewind audit ${row.id} was in_progress at startup; marked partial.`,
+        message: `Rewind audit ${id} was in_progress at startup; marked partial.`,
         timestampMs: now,
       });
-      await adapter.updateRun(row.runId, {
+      await adapter.updateRun(runId, {
         status: "needs_attention",
         heartbeatAtMs: null,
         runtimeOwnerId: null,
@@ -51,7 +54,7 @@ export async function recoverInProgressRewindAudits(adapter, options = {}) {
       });
     } catch {
       try {
-        await adapter.updateRun(row.runId, {
+        await adapter.updateRun(runId, {
           status: "failed",
           heartbeatAtMs: null,
           runtimeOwnerId: null,
@@ -66,7 +69,7 @@ export async function recoverInProgressRewindAudits(adapter, options = {}) {
         // best-effort: nothing to do if the run row was deleted.
       }
     }
-    recovered.push({ id: row.id, runId: row.runId });
+    recovered.push({ id, runId });
   }
   return { recovered };
 }

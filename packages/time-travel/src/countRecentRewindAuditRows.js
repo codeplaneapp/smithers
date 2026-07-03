@@ -12,16 +12,17 @@ import { resolveRewindAuditClient } from "./resolveRewindAuditClient.js";
  * @returns {Promise<number>}
  */
 export async function countRecentRewindAuditRows(adapter, input) {
-  const client = resolveRewindAuditClient(adapter);
-  const row = client
-    .query(
+  const storage = resolveRewindAuditClient(adapter);
+  const row = /** @type {Record<string, unknown> | undefined} */ (
+    await storage.queryOne(
       `SELECT COUNT(*) AS count
          FROM _smithers_time_travel_audit
         WHERE run_id = ?
           AND caller = ?
           AND timestamp_ms >= ?
           AND result <> 'in_progress'`,
+      [input.runId, input.caller, input.sinceMs],
     )
-    .get(input.runId, input.caller, input.sinceMs);
+  );
   return Number(row?.count ?? 0);
 }
