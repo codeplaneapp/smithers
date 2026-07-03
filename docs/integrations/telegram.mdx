@@ -1,11 +1,16 @@
 ---
 title: Telegram
-description: Use the first-class Smithers Telegram helpers for Bot API calls, webhook ingestion, retries, formatting, and tests.
+description: Bot API calls, webhook ingestion, durable in-chat approvals, and Mini App (Web App) verification for Smithers Telegram bots.
 ---
 
-Smithers ships `@smithers-orchestrator/telegram` for Telegram bots that need to
-run inside serverless functions, workflow tasks, or tests without owning a
-long-lived polling process.
+Smithers ships two Telegram surfaces:
+
+- `@smithers-orchestrator/telegram` for bots that run inside serverless
+  functions, workflow tasks, or tests without owning a long-lived polling
+  process (this page's first half).
+- `@smithers-orchestrator/integrations/telegram` for workflows that wait on
+  Telegram durably: listen for messages, and approve gated steps from the chat
+  with inline buttons or a Mini App ([Approve from the chat](#approve-from-the-chat)).
 
 The package follows the integration shape proven by Eliza's Telegram plugin:
 separate bot lifecycle/API access, normalized incoming messages, formatting
@@ -88,3 +93,100 @@ console.log(telegram.messages[0].message_id);
 ```
 
 Use the fake in local e2e tests when production uses real Telegram credentials.
+
+## Approve from the chat
+
+`<Telegram.Approval>` turns a workflow approval into inline Approve and Reject
+buttons in a chat and resolves it from the button press, using the durable
+long-poll source. No web server, no gateway wiring. The decision has the same
+shape as the core [`<Approval>`](/components/approval) component:
+`{ approved, note, decidedBy, decidedAt }`.
+
+Import `TelegramApproval`, `telegramApprovalSchemas`, and
+`telegramApprovalDecisionSchema` from `@smithers-orchestrator/integrations/telegram`.
+Register the two internal node schemas with `telegramApprovalSchemas`, then drop
+the component in:
+
+```tsx
+import { createSmithers } from "smithers-orchestrator";
+
+const { smithers, Workflow, outputs } = createSmithers({
+  ...telegramApprovalSchemas,
+  decision: telegramApprovalDecisionSchema,
+});
+
+export default smithers(() => (
+  <Workflow name="deploy">
+    <TelegramApproval
+      id="ship"
+      chatId={process.env.TELEGRAM_CHAT_ID}
+      config={{ botToken: process.env.TELEGRAM_BOT_TOKEN }}
+      request={{ title: "Deploy to prod?", summary: "Tests are green." }}
+      output={outputs.decision}
+    />
+  </Workflow>
+));
+```
+
+For a menu instead of Approve and Reject, pass `mode="select"` with `options`;
+the decision becomes `{ selected, notes }`.
+
+For the run to receive the press, a Telegram source must be polling. Run one
+next to your workflow with `makeTelegramSource` (from
+`@smithers-orchestrator/integrations/telegram`) plus `makeIntegrationRuntime`
+and `makeDbCursorStore` (from `@smithers-orchestrator/integrations`):
+
+```ts
+const source = makeTelegramSource({
+  botToken: process.env.TELEGRAM_BOT_TOKEN,
+  cursorStore: makeDbCursorStore(adapter),
+});
+const runtime = makeIntegrationRuntime({ adapter, sources: [source] });
+```
+
+`WaitForEvent` wakes on the first callback query for the chat, so run one
+interactive approval per chat at a time, or pass `threadId` (a forum topic) to
+isolate concurrent approvals. Any chat member can press a button, so keep
+approvals in a private or allowlisted chat.
+
+## Mini App approvals
+
+For a richer decision (read a diff, pick an option, add a note) inside Telegram,
+add a Mini App button. `miniApp` opens a `web_app` page in the chat alongside the
+plain buttons:
+
+```tsx
+<TelegramApproval
+  id="ship"
+  chatId={chatId}
+  request={{ title: "Deploy to prod?" }}
+  miniApp={{ url: "https://telegram.smithers.sh/approve.html" }}
+  output={outputs.decision}
+/>
+```
+
+A Mini App exposes a signed `initData` string. Your backend must verify it
+before trusting the user. Never trust `initDataUnsafe`. Verify it with
+`verifyTelegramWebAppInitData` from `@smithers-orchestrator/integrations/telegram`:
+
+```ts
+// Resolves to the parsed fields, or throws on a bad signature, a stale
+// auth_date, or the wrong token.
+const data = await verifyTelegramWebAppInitData(initData, botToken, {
+  maxAgeSeconds: 3600,
+});
+console.log(data.user?.id);
+```
+
+Verification is HMAC-SHA256 with a crossed key: `secret =
+HMAC_SHA256(key="WebAppData", message=botToken)`, and the data is authentic when
+`hex(HMAC_SHA256(key=secret, message=dataCheckString))` equals the `hash` field,
+where `dataCheckString` is every field except `hash`, formatted `key=value`,
+sorted, and newline-joined. It runs on Web Crypto, so the same call works in the
+Smithers runtime and in a Cloudflare Worker. `verifyTelegramWebAppInitDataSignature`
+verifies the newer Ed25519 `signature` from a third party with only the numeric
+bot id.
+
+A runnable reference (a static Mini App page plus a Worker endpoint that verifies
+`initData` for real) ships in `apps/telegram-site`: `site/approve.html` and
+`src/handleApprove.ts`.
