@@ -40,25 +40,56 @@ export function extractBalancedJson(str) {
 }
 
 /**
- * Extract the last balanced JSON object from text.
+ * Extract the balanced JSON object with the latest end from text — the object
+ * whose closing brace is rightmost, matching the previous "max end over every
+ * `{` start" behavior (so a trailing top-level object wins, and the deepest
+ * closed object wins when its encloser never closes).
+ *
+ * Single left-to-right pass with a stack of open-brace positions: each `}`
+ * outside a string pops its matching `{`, forming a balanced span, and the last
+ * such span (largest end, since `i` is monotonic) is returned. This is O(n)
+ * time and allocation; the old version re-`slice`d and re-scanned from every
+ * `{`, which was O(n^2) and blocked the event loop ~1.7s on a 200KB payload —
+ * this runs on the agent final-output extraction hot path.
  *
  * @param {string} str
  * @returns {string | null}
  */
 export function extractLastBalancedJson(str) {
-    let bestJson = null;
+    /** @type {number[]} */
+    const openStack = [];
+    let inString = false;
+    let escape = false;
+    let bestStart = -1;
     let bestEnd = -1;
-    let pos = str.indexOf("{");
-    while (pos >= 0) {
-        const json = extractBalancedJson(str.slice(pos));
-        if (json !== null) {
-            const end = pos + json.length;
-            if (end > bestEnd) {
-                bestJson = json;
-                bestEnd = end;
+    for (let i = 0; i < str.length; i++) {
+        const c = str[i];
+        if (escape) {
+            escape = false;
+            continue;
+        }
+        if (c === "\\") {
+            escape = true;
+            continue;
+        }
+        if (c === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString)
+            continue;
+        if (c === "{") {
+            openStack.push(i);
+        }
+        else if (c === "}") {
+            const start = openStack.pop();
+            if (start !== undefined) {
+                // `i` only increases, so each matched close ends later than the
+                // last; the final matched close is the max-end span.
+                bestStart = start;
+                bestEnd = i + 1;
             }
         }
-        pos = str.indexOf("{", pos + 1);
     }
-    return bestJson;
+    return bestEnd >= 0 ? str.slice(bestStart, bestEnd) : null;
 }
