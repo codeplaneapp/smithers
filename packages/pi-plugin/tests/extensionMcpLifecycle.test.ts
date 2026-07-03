@@ -5,6 +5,7 @@ import {
   extension,
   resetMcpStateForTesting,
   setMcpConnectionFactoryForTesting,
+  setMcpLoggerForTesting,
 } from "../src/extension.js";
 
 // Drain the microtask queue so the fully-resolved (no I/O, no timers) MCP
@@ -62,11 +63,13 @@ describe("pi-plugin MCP lifecycle", () => {
   beforeEach(() => {
     resetMcpStateForTesting();
     setMcpConnectionFactoryForTesting(undefined);
+    setMcpLoggerForTesting(undefined);
   });
 
   afterEach(() => {
     resetMcpStateForTesting();
     setMcpConnectionFactoryForTesting(undefined);
+    setMcpLoggerForTesting(undefined);
   });
 
   test("concurrent ensureMcpClient callers spawn and connect exactly once", async () => {
@@ -189,6 +192,39 @@ describe("pi-plugin MCP lifecycle", () => {
     expect(factoryCalls).toBe(2);
     expect(closeCounts[0]).toBe(1);
     expect(result.systemPrompt).toContain("### Tools (available to you, the agent)");
+  });
+
+  test("withMcpRetry logs a structured subprocess-death record before rebuilding", async () => {
+    const records: Array<{ event: string; reason: string; stack?: string }> = [];
+    setMcpLoggerForTesting((record) => records.push(record));
+
+    let factoryCalls = 0;
+    setMcpConnectionFactoryForTesting(async () => {
+      const index = factoryCalls++;
+      const transport = { close: async () => {} };
+      const client = {
+        async listTools() {
+          // First connection's live call rejects (subprocess died); the rebuilt
+          // connection answers so the retry recovers.
+          if (index === 0) throw new Error("transport closed mid-session");
+          return { tools: [{ name: "list_runs", description: "List runs" }] as FakeTool[] };
+        },
+      } as unknown as Client;
+      return { client, transport };
+    });
+
+    const pi = makeFakePi();
+    extension(pi.api);
+    const beforeAgentStart = pi.handlers.get("before_agent_start")!;
+
+    const result = await beforeAgentStart({ systemPrompt: "BASE PROMPT" });
+
+    // Recovery still succeeds, and the swallowed death left exactly one
+    // structured record naming the reason so a crash loop is observable.
+    expect(result.systemPrompt).toContain("### Tools (available to you, the agent)");
+    expect(records).toHaveLength(1);
+    expect(records[0].event).toBe("mcp_subprocess_died");
+    expect(records[0].reason).toBe("transport closed mid-session");
   });
 
   test("withMcpRetry gives up after the second failure without a third connection", async () => {

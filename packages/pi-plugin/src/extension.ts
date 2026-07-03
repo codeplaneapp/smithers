@@ -54,6 +54,21 @@ type McpTransportHandle = { close: () => Promise<void> };
 type McpConnection = { client: Client; transport: McpTransportHandle };
 type McpConnectionFactory = () => Promise<McpConnection>;
 
+type McpLogRecord = { event: string; reason: string; stack?: string };
+type McpLogger = (record: McpLogRecord) => void;
+
+// One structured line to stderr per subprocess death. The MCP child's own
+// stderr is dropped (see defaultCreateMcpConnection) so this is the only trace
+// of a crash-looping server. stderr (fd 2), not stdout, so it can't land inside
+// the Pi TUI's stdout frame; volume is bounded to one line per death.
+function defaultLogMcpEvent(record: McpLogRecord) {
+  try {
+    process.stderr.write(`${JSON.stringify({ source: "smithers-pi", ...record })}\n`);
+  } catch {
+    // Never let a logging failure break the retry path.
+  }
+}
+
 const DEFAULT_BASE = "http://127.0.0.1:7331";
 const requireFromHere = createRequire(import.meta.url);
 
@@ -69,6 +84,7 @@ let pollInterval: ReturnType<typeof setInterval> | undefined;
 let activeRunId: string | undefined;
 let includeSmithersDocsNextTurn = false;
 let createMcpConnection: McpConnectionFactory = defaultCreateMcpConnection;
+let logMcpEvent: McpLogger = defaultLogMcpEvent;
 
 const runs = new Map<string, TrackedRun>();
 
@@ -196,7 +212,15 @@ async function withMcpRetry<T>(call: (client: Client) => Promise<T>): Promise<T>
   try {
     const client = await ensureMcpClient();
     return await call(client);
-  } catch {
+  } catch (error) {
+    // Log the death before the silent rebuild so a crash-looping server (dies,
+    // recovers, dies again) leaves one structured record per cycle instead of
+    // vanishing.
+    logMcpEvent({
+      event: "mcp_subprocess_died",
+      reason: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     await resetMcpConnection();
     const client = await ensureMcpClient();
     return await call(client);
@@ -240,6 +264,12 @@ async function callMcpTool(name: string, args: Record<string, unknown>) {
 // lifecycle can be exercised with a fake transport, no subprocess, no network.
 export function setMcpConnectionFactoryForTesting(factory: McpConnectionFactory | undefined) {
   createMcpConnection = factory ?? defaultCreateMcpConnection;
+}
+
+// Test seam: capture the structured subprocess-death records withMcpRetry emits
+// without touching the real stderr sink.
+export function setMcpLoggerForTesting(logger: McpLogger | undefined) {
+  logMcpEvent = logger ?? defaultLogMcpEvent;
 }
 
 export function resetMcpStateForTesting() {
