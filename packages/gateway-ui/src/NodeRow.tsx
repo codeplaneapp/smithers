@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import { runNodeKey } from "@smithers-orchestrator/gateway-client";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { StatusPill } from "./StatusPill";
