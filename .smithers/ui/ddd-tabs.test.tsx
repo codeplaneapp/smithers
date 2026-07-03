@@ -65,14 +65,26 @@ afterEach(async () => {
   while (servers.length > 0) {
     await new Promise<void>((resolve) => servers.pop()!.close(() => resolve()));
   }
-  while (tempDirs.length > 0) removeTempDir(tempDirs.pop()!);
+  while (tempDirs.length > 0) await removeTempDir(tempDirs.pop()!);
   document.body.innerHTML = "";
   window.localStorage.clear();
   setWindowUrl("/workflows/docs-driven-development");
 });
 
-function removeTempDir(dir: string) {
-  rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+async function removeTempDir(dir: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = (error as { code?: unknown }).code;
+      if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EPERM") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+  throw lastError;
 }
 
 function setWindowUrl(pathname: string) {

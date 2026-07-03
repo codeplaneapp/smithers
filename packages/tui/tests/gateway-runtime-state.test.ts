@@ -26,12 +26,24 @@ function tempDir(prefix: string): string {
   tmpDirs.push(dir);
   return dir;
 }
-afterEach(() => {
-  for (const dir of tmpDirs.splice(0)) removeTempDir(dir);
+afterEach(async () => {
+  for (const dir of tmpDirs.splice(0)) await removeTempDir(dir);
 });
 
-function removeTempDir(dir: string) {
-  rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+async function removeTempDir(dir: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = (error as { code?: unknown }).code;
+      if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EPERM") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+  throw lastError;
 }
 
 /** Write a state file under `stateDir` keyed by `workspaceRoot`, returning its path. */
