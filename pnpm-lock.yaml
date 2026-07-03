@@ -569,6 +569,9 @@ importers:
       '@pierre/diffs':
         specifier: ^1.2.12
         version: 1.2.12(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@smithers-orchestrator/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
       '@smithers-orchestrator/db':
         specifier: workspace:*
         version: link:../../packages/db

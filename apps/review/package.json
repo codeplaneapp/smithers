@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@pierre/diffs": "^1.2.12",
+    "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
     "@smithers-orchestrator/gateway-ui": "workspace:*",
