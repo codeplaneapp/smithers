@@ -35,6 +35,8 @@ import type {
   SubmitApprovalResponse,
   SubmitSignalRequest,
   GetRunRequest,
+  GetDevToolsSnapshotRequest,
+  GetDevToolsSnapshotResponse,
   GetSchemaSignatureRequest,
   GetSchemaSignatureResponse,
   ListDocsRequest,
@@ -60,6 +62,7 @@ export type GatewayRpcRequestMap = {
   listApprovals: ListApprovalsRequest;
   streamRunEvents: StreamRunEventsRequest;
   streamDevTools: StreamDevToolsRequest;
+  getDevToolsSnapshot: GetDevToolsSnapshotRequest;
   getNodeOutput: NodeRequest;
   getNodeDiff: NodeRequest;
   cronList: CronListRequest;
@@ -92,6 +95,7 @@ export type GatewayRpcResponseMap = {
   listApprovals: ListApprovalsResponse;
   streamRunEvents: StreamRunEventsResponse;
   streamDevTools: Record<string, unknown>;
+  getDevToolsSnapshot: GetDevToolsSnapshotResponse;
   getNodeOutput: Record<string, unknown>;
   getNodeDiff: Record<string, unknown>;
   cronList: GatewayCronRow[];

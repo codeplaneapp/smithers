@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/react */
-import { describe, it, expect } from "bun:test";
-import { renderForTest } from "./renderHelpers.tsx";
+import { it, expect } from "bun:test";
+import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 import { act } from "react";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import { LogView } from "../src/modes/LogMode.tsx";
@@ -39,7 +39,7 @@ const CANNED_EVENTS: GatewayEventFrame[] = [
   frame(5, "run.event", { nodeId: "node-beta", text: "Second node", iteration: 0 }),
 ];
 
-describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
+describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", () => {
   it("renders event seq numbers and node IDs", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
       <LogView events={CANNED_EVENTS} />,

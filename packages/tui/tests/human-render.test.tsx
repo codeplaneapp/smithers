@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/react */
-import { describe, it, expect } from "bun:test";
-import { renderForTest } from "./renderHelpers.tsx";
+import { it, expect } from "bun:test";
+import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { NodeInspectorView, type ApprovalUiState } from "../src/modes/TreeMode.tsx";
 import type { HumanRequestUiState } from "../src/modes/humanUtils.ts";
@@ -38,7 +38,7 @@ function baseProps(overrides: Partial<Parameters<typeof NodeInspectorView>[0]> =
   };
 }
 
-describe("NodeInspectorView – human-task banner (CI-safe, no gateway)", () => {
+describeHeadlessRender("NodeInspectorView – human-task banner (CI-safe, no gateway)", () => {
   it("renders the human-request banner with the prompt and CLI guidance", async () => {
     const humanRequest: HumanRequestUiState = {
       title: "Need a value",

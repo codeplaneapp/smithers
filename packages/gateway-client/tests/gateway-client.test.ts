@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { listGatewayRpcMethods, type GatewayRpcMethod } from "@smithers-orchestrator/gateway/rpc";
 import { GatewayRpcError, SmithersGatewayClient, SmithersGatewayConnection } from "../src/index.ts";
+import type { GatewayRpcRequestMap, GatewayRpcResponseMap } from "../src/GatewayRpcTypeMap.ts";
 
 type SentRequest = {
   type: "req";
@@ -73,6 +75,41 @@ function errorResponse(error: Record<string, unknown>, status = 500) {
   return Response.json({ type: "res", id: "http", ok: false, error }, { status });
 }
 
+const typedRpcRequestMethods = {
+  launchRun: "launchRun",
+  resumeRun: "resumeRun",
+  cancelRun: "cancelRun",
+  hijackRun: "hijackRun",
+  rewindRun: "rewindRun",
+  submitApproval: "submitApproval",
+  submitSignal: "submitSignal",
+  getRun: "getRun",
+  listRuns: "listRuns",
+  getSchemaSignature: "getSchemaSignature",
+  listWorkflows: "listWorkflows",
+  listApprovals: "listApprovals",
+  listDocs: "listDocs",
+  streamRunEvents: "streamRunEvents",
+  streamDevTools: "streamDevTools",
+  getDevToolsSnapshot: "getDevToolsSnapshot",
+  getNodeOutput: "getNodeOutput",
+  getNodeDiff: "getNodeDiff",
+  cronList: "cronList",
+  cronCreate: "cronCreate",
+  cronDelete: "cronDelete",
+  cronRun: "cronRun",
+  listAccounts: "listAccounts",
+  listMemoryFacts: "listMemoryFacts",
+  listPrompts: "listPrompts",
+  listScores: "listScores",
+  listTickets: "listTickets",
+  createTicket: "createTicket",
+  updateTicket: "updateTicket",
+  deleteTicket: "deleteTicket",
+} satisfies Record<GatewayRpcMethod, keyof GatewayRpcRequestMap>;
+
+const typedRpcResponseMethods = typedRpcRequestMethods satisfies Record<GatewayRpcMethod, keyof GatewayRpcResponseMap>;
+
 async function waitForSent(ws: FakeWebSocket, count: number) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (ws.sent.length >= count) {
@@ -84,6 +121,11 @@ async function waitForSent(ws: FakeWebSocket, count: number) {
 }
 
 describe("SmithersGatewayClient HTTP RPC", () => {
+  test("typed RPC maps cover every stable gateway method", () => {
+    expect(Object.keys(typedRpcRequestMethods).sort()).toEqual([...listGatewayRpcMethods()].sort());
+    expect(Object.keys(typedRpcResponseMethods).sort()).toEqual([...listGatewayRpcMethods()].sort());
+  });
+
   test("normalizes base URLs and sends typed JSON RPC requests with auth headers", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl: typeof fetch = async (url, init) => {
@@ -194,6 +236,7 @@ describe("SmithersGatewayClient HTTP RPC", () => {
     await client.submitSignal({ runId: "run-1", signal: "continue", payload: {} });
     await client.listRuns();
     await client.listApprovals();
+    await client.getDevToolsSnapshot({ runId: "run-1", frameNo: 2 });
     await client.getNodeOutput({ runId: "run-1", nodeId: "task" });
     await client.getNodeDiff({ runId: "run-1", nodeId: "task" });
     await client.cronList();
@@ -209,6 +252,7 @@ describe("SmithersGatewayClient HTTP RPC", () => {
       "submitSignal",
       "listRuns",
       "listApprovals",
+      "getDevToolsSnapshot",
       "getNodeOutput",
       "getNodeDiff",
       "cronList",
