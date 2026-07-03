@@ -89,8 +89,11 @@ export function probeRelease(input: ReleaseContentInput): Probe {
   const pkg = readJson<{ version: string }>(join(root, "package.json"));
   // If `v<pkg.version>` already exists, `pnpm version` ran before this workflow,
   // so pkg.version IS the release target — do not bump it again (bumping again
-  // is what produced 0.25.1 instead of 0.25.0 in the 0.25.0 dry run).
-  const alreadyBumped = !input.version && tagExists(`v${pkg.version}`);
+  // is what produced 0.25.1 instead of 0.25.0 in the 0.25.0 dry run). The tag
+  // also exists when pkg.version is already *published*, though, and there the
+  // next release DOES need a bump — so an explicit `version` or `bump` input
+  // always wins over this inference.
+  const alreadyBumped = !input.version && !input.bump && tagExists(`v${pkg.version}`);
   const bump = input.bump ?? (input.version || alreadyBumped ? null : "patch");
   const nextVersion =
     input.version ?? (alreadyBumped ? pkg.version : incrementVersion(pkg.version, bump ?? "patch"));
