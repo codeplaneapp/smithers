@@ -5,9 +5,9 @@ try { GlobalRegistrator.register(); } catch { /* already registered */ }
   .happyDOM!.settings!.fetch!.disableSameOriginPolicy = true;
 
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import React, { createElement, type ReactElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -44,6 +44,16 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function removeSqliteTempDir(dbPath: string) {
+  try {
+    rmSync(dirname(dbPath), { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+  } catch (error: any) {
+    if (process.platform !== "win32" || !["EBUSY", "EPERM"].includes(error?.code)) {
+      throw error;
+    }
+  }
+}
+
 async function waitFor(assertion: () => void | boolean | Promise<void | boolean>, timeoutMs = 5_000) {
   const started = Date.now();
   let lastError: unknown;
@@ -69,21 +79,7 @@ function getPort(server: import("node:http").Server) {
 }
 
 function makeDbPath(name: string) {
-  return join(tmpdir(), `smithers-collections-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-}
-
-async function removeSqliteFiles(dbPath: string) {
-  for (const target of [dbPath, `${dbPath}-shm`, `${dbPath}-wal`]) {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      try {
-        rmSync(target, { force: true });
-        break;
-      } catch {
-        if (attempt === 5) break;
-        await sleep(50);
-      }
-    }
-  }
+  return join(mkdtempSync(join(tmpdir(), `smithers-collections-${name}-`)), "store.db");
 }
 
 async function createApi(backend: Backend) {
@@ -95,11 +91,11 @@ async function createApi(backend: Backend) {
     const dbPath = makeDbPath("sqlite");
     const api = createSmithers(schemas, { dbPath });
     cleanups.push(async () => {
-      api.db.$client?.close?.();
-      // bun:sqlite does not release the file lock synchronously after close()
-      // on Windows, so a same-tick rm throws EBUSY and fails the just-finished
-      // test. These are throwaway tmpdir files — retry briefly, then give up.
-      await removeSqliteFiles(dbPath);
+      try {
+        api.db.$client?.run?.("PRAGMA wal_checkpoint(TRUNCATE)");
+      } catch {}
+      await api.db.$client?.close?.();
+      removeSqliteTempDir(dbPath);
     });
     return api;
   }

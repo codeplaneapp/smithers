@@ -3,7 +3,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { delimiter, resolve } from "node:path";
 import { z } from "zod/v4";
 import { providers } from "../agents";
@@ -195,13 +195,32 @@ export function resolveExecutable(name: string, pathValue: string | undefined): 
   if (name.includes("/") || name.includes("\\")) return name;
   for (const dir of (pathValue ?? "").split(delimiter)) {
     if (!dir) continue;
-    const full = resolve(dir, name);
-    if (existsSync(full)) return full;
+    for (const candidate of executableCandidates(name)) {
+      const full = resolve(dir, candidate);
+      if (existsSync(full)) return full;
+    }
   }
   return name;
 }
 
+function executableCandidates(name: string): string[] {
+  if (process.platform !== "win32" || /\.[^\\/]+$/.test(name)) return [name];
+  const exts = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  return [
+    name,
+    ...exts.map((ext) => `${name}${ext.toLowerCase()}`),
+    ...exts.map((ext) => `${name}${ext.toUpperCase()}`),
+  ];
+}
+
 function commandForExecutable(bin: string, args: string[]): { bin: string; args: string[] } {
+  if (process.platform === "win32" && /\.(?:bat|cmd)$/i.test(bin)) {
+    const commandLine = ["call", cmdArg(bin), ...args.map(cmdArg)].join(" ");
+    return {
+      bin: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
+      args: ["/d", "/c", commandLine],
+    };
+  }
   try {
     const firstLine = readFileSync(bin, "utf8").split(/\r?\n/, 1)[0] ?? "";
     if (firstLine.includes("/bin/sh") || firstLine.includes("/usr/bin/env sh")) {
@@ -213,33 +232,22 @@ function commandForExecutable(bin: string, args: string[]): { bin: string; args:
   return { bin, args };
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
+function cmdArg(value: string): string {
+  if (!/[\s"&|<>^]/.test(value)) return value;
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function execFileCapture(command: { bin: string; args: string[] }, cwd: string): string {
-  const captureDir = resolve(cwd, ".smithers/docs-driven-development/tmp");
-  mkdirSync(captureDir, { recursive: true });
-  const base = resolve(captureDir, `bug-scan-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-  const stdoutPath = `${base}.out`;
-  const stderrPath = `${base}.err`;
-  const shellCommand = `${[command.bin, ...command.args].map(shellQuote).join(" ")} > ${shellQuote(stdoutPath)} 2> ${shellQuote(stderrPath)}`;
   try {
-    execFileSync("/bin/sh", ["-c", shellCommand], {
+    return execFileSync(command.bin, command.args, {
       cwd,
       env: process.env,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       maxBuffer: 4 * 1024 * 1024,
     });
-    return existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
   } catch (error) {
-    const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
-    const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
-    throw new Error([commandErrorMessage(error), stderr.trim(), stdout.trim()].filter(Boolean).join("\n"));
-  } finally {
-    rmSync(stdoutPath, { force: true });
-    rmSync(stderrPath, { force: true });
+    throw new Error(commandErrorMessage(error));
   }
 }
 

@@ -22,7 +22,7 @@
  * workflow ships it to init automatically.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,7 +61,7 @@ const SEEDED_WORKFLOW_IDS = [
   "post-failure",
 ];
 
-type TemplateFile = { path: string; contents: string };
+type TemplateFile = { path: string; contents: string; owners?: string[] };
 
 /** Prompts a workflow imports from `../prompts/<name>.mdx`. */
 function promptImportsOf(source: string): string[] {
@@ -88,18 +88,43 @@ function libImportsOf(source: string): string[] {
 }
 
 /**
- * Resolve a `../lib/<spec>` import specifier to the actual file on disk,
- * returning its path relative to `.smithers/lib/`. Handles explicit-extension
- * imports (`fleet-health.ts`), extensionless imports (`fleet-health`), and
- * folder index imports (`foo` -> `foo/index.ts`).
+ * Relative imports inside a lib module (`./x`, `../y`), resolved against the
+ * module's own path (relative to `.smithers/lib/`). Anything that escapes
+ * `.smithers/lib/` is rejected — seeded lib helpers must stay self-contained.
  */
-function resolveLibFile(spec: string): string {
-  const libDir = resolve(SMITHERS_DIR, "lib");
-  const candidates = [spec, `${spec}.ts`, `${spec}.tsx`, `${spec}/index.ts`, `${spec}/index.tsx`];
-  for (const rel of candidates) {
-    if (existsSync(resolve(libDir, rel))) return rel;
+function libRelativeImportsOf(source: string, fromLibPath: string): string[] {
+  const names = new Set<string>();
+  const re = /from\s+["'](\.\.?\/[^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    // Import specifiers are POSIX regardless of host OS; normalize in POSIX
+    // space so the escape check cannot be confused by win32 drive letters.
+    const joined = posix.normalize(posix.join(posix.dirname(fromLibPath), m[1]));
+    if (joined.startsWith("..")) {
+      throw new Error(
+        `Seeded lib module .smithers/lib/${fromLibPath} imports ${m[1]}, which escapes .smithers/lib/. ` +
+          "Seeded lib helpers must be self-contained under .smithers/lib/.",
+      );
+    }
+    names.add(joined);
   }
-  throw new Error(`Missing seeded lib module for import "../lib/${spec}" (looked under .smithers/lib/)`);
+  return [...names];
+}
+
+/** Resolve a lib import specifier to an on-disk file under `.smithers/lib/`. */
+function resolveLibFile(specifier: string): { relPath: string; absPath: string } {
+  const candidates =
+    specifier.endsWith(".ts") || specifier.endsWith(".tsx")
+      ? [specifier]
+      : [specifier, `${specifier}.ts`, `${specifier}.tsx`, `${specifier}/index.ts`, `${specifier}/index.tsx`];
+  for (const candidate of candidates) {
+    const absPath = resolve(SMITHERS_DIR, "lib", candidate);
+    if (existsSync(absPath)) return { relPath: candidate, absPath };
+  }
+  throw new Error(
+    `Cannot resolve seeded lib import "../lib/${specifier}" under ${resolve(SMITHERS_DIR, "lib")} ` +
+      `(tried: ${candidates.join(", ")})`,
+  );
 }
 
 function readOrThrow(absPath: string, label: string): string {
@@ -111,12 +136,24 @@ function readOrThrow(absPath: string, label: string): string {
 
 function build(): TemplateFile[] {
   const files: TemplateFile[] = [];
-  const seenPaths = new Set<string>();
+  const byPath = new Map<string, TemplateFile>();
 
-  const push = (path: string, contents: string) => {
-    if (seenPaths.has(path)) return; // dedup shared prompts across workflows
-    seenPaths.add(path);
-    files.push({ path, contents });
+  // Dedup shared files across workflows; `owner` records which seeded
+  // workflow(s) pull the file in so init can install lib helpers only with
+  // the workflows that import them.
+  const push = (path: string, contents: string, owner?: string) => {
+    const existing = byPath.get(path);
+    if (existing) {
+      if (owner) {
+        existing.owners ??= [];
+        if (!existing.owners.includes(owner)) existing.owners.push(owner);
+      }
+      return;
+    }
+    const file: TemplateFile = { path, contents };
+    if (owner) file.owners = [owner];
+    byPath.set(path, file);
+    files.push(file);
   };
 
   for (const id of SEEDED_WORKFLOW_IDS) {
@@ -138,20 +175,20 @@ function build(): TemplateFile[] {
       push(`.smithers/prompts/${promptName}`, promptSource);
     }
 
-    // Seed `../lib/*` helper modules the workflow imports, transitively (a lib
-    // module may pull in another). Without this the pack ships a workflow whose
-    // import resolves to a file init never installed.
-    const pendingLibSpecs = libImportsOf(workflowSource);
-    const seenLibSpecs = new Set<string>();
-    while (pendingLibSpecs.length > 0) {
-      const spec = pendingLibSpecs.shift()!;
-      if (seenLibSpecs.has(spec)) continue;
-      seenLibSpecs.add(spec);
-      const relFile = resolveLibFile(spec);
-      const libAbs = resolve(SMITHERS_DIR, "lib", relFile);
-      const libSource = readOrThrow(libAbs, `lib module ${relFile} for workflow ${id}`);
-      push(`.smithers/lib/${relFile}`, libSource);
-      for (const nested of libImportsOf(libSource)) pendingLibSpecs.push(nested);
+    // Bundle `../lib/*` helpers (transitively) so a seeded workflow loads from
+    // a fresh init — a workflow shipped without its lib imports fails
+    // `smithers graph` with a module-not-found the moment it is seeded.
+    const libQueue = libImportsOf(workflowSource).map((specifier) => resolveLibFile(specifier));
+    const visitedLibs = new Set<string>();
+    while (libQueue.length > 0) {
+      const { relPath, absPath } = libQueue.shift()!;
+      if (visitedLibs.has(relPath)) continue;
+      visitedLibs.add(relPath);
+      const libSource = readOrThrow(absPath, `lib module ${relPath} for workflow ${id}`);
+      push(`.smithers/lib/${relPath}`, libSource, id);
+      for (const nested of libRelativeImportsOf(libSource, relPath)) {
+        libQueue.push(resolveLibFile(nested));
+      }
     }
   }
 
@@ -165,7 +202,7 @@ function emit(files: TemplateFile[]): string {
     "//",
     "// Seeded workflow ids: " + SEEDED_WORKFLOW_IDS.join(", "),
     "",
-    "/** @typedef {{ path: string; contents: string }} TemplateFile */",
+    "/** @typedef {{ path: string; contents: string; owners?: string[] }} TemplateFile */",
     "",
     "/** @type {TemplateFile[]} */",
     "export const GENERATED_SEEDED_FILES = ",
@@ -179,8 +216,9 @@ function main() {
   writeFileSync(OUTPUT_FILE, output, "utf8");
   const workflows = files.filter((f) => f.path.includes("/workflows/")).length;
   const prompts = files.filter((f) => f.path.includes("/prompts/")).length;
+  const libs = files.filter((f) => f.path.startsWith(".smithers/lib/")).length;
   process.stdout.write(
-    `[generate-workflow-pack] wrote ${files.length} file(s) (${workflows} workflow, ${prompts} prompt) ` +
+    `[generate-workflow-pack] wrote ${files.length} file(s) (${workflows} workflow, ${prompts} prompt, ${libs} lib) ` +
       `to ${OUTPUT_FILE.replace(REPO_ROOT + "/", "")}\n`,
   );
   for (const f of files) process.stdout.write(`  + ${f.path}\n`);

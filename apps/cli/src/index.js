@@ -2884,6 +2884,7 @@ async function runGatewayCommand(options) {
     let server;
     let port;
     let url;
+    let idleTimeoutMs = 0;
     try {
         // Singleton: one gateway owns a workspace. A healthy incumbent
         // (verified by pid + /health workspace identity, not just "something
@@ -2908,7 +2909,7 @@ async function runGatewayCommand(options) {
     // Idle spin-down (spec decision 14): autostarted daemons pass --idle-timeout
     // (see ensureWorkspaceGateway) so they exit once idle; an explicit
     // `smithers gateway` leaves it 0 and stays up. SMITHERS_GATEWAY_IDLE_MS overrides.
-    const idleTimeoutMs = Math.max(0, Math.floor(Number(options.idleTimeout ?? process.env.SMITHERS_GATEWAY_IDLE_MS ?? 0) || 0));
+    idleTimeoutMs = Math.max(0, Math.floor(Number(options.idleTimeout ?? process.env.SMITHERS_GATEWAY_IDLE_MS ?? 0) || 0));
     gateway = new Gateway({
         heartbeatMs: 15_000,
         workspaceRoot: workspace,
