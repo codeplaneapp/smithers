@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { delimiter } from "node:path";
-import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, } from "../../smithers/tests/e2e-helpers.js";
+import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, } from "../../smithers/tests/e2e-helpers.js";
 const WORKFLOW_PACK_SMOKE_TIMEOUT_MS = 30_000;
 /**
  * @param {string} homeDir
@@ -8,7 +8,6 @@ const WORKFLOW_PACK_SMOKE_TIMEOUT_MS = 30_000;
 function buildWorkflowPackEnv(homeDir) {
     const binDir = createExecutableDir();
     writeFakeClaudeBinary(binDir);
-    writeFakeCodexBinary(binDir);
     writeFakeAntigravityBinary(binDir);
     return {
         HOME: homeDir,
