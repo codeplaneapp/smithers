@@ -180,12 +180,32 @@ import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
  */
 
 /**
+ * Reverse the HTML-entity escaping that renderToStaticMarkup applies to text
+ * (& < > " '). Without this, a prompt like `a < b && c` reaches the agent as
+ * `a &lt; b &amp;&amp; c`, and injected JSON schema hints (`"key"`) arrive as
+ * `&quot;key&quot;`, both of which corrupt the agent-facing text.
+ * `&amp;` is decoded last so an escaped literal (`&amp;lt;`, meaning the source
+ * text `&lt;`) is not double-decoded into `<`.
+ * @param {string} html
+ * @returns {string}
+ */
+function decodeHtmlEntities(html) {
+    return html
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#x27;/g, "'")
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, "&");
+}
+/**
  * Render a prompt React node to plain markdown text.
  *
  * If the prompt is a React element (e.g. a compiled MDX component), we inject
  * `markdownComponents` via the standard MDX `components` prop so that
- * renderToStaticMarkup outputs clean markdown instead of HTML.
- * No HTML tag stripping or entity decoding needed.
+ * renderToStaticMarkup outputs clean markdown instead of HTML. The static
+ * render entity-escapes all text, so we decode the entities back to literal
+ * characters before handing the prompt to the agent.
  * @param {unknown} prompt
  * @returns {string}
  */
@@ -208,7 +228,7 @@ export function renderPromptToText(prompt) {
         else {
             element = React.createElement(React.Fragment, null, prompt);
         }
-        return renderToStaticMarkup(element)
+        return decodeHtmlEntities(renderToStaticMarkup(element))
             .replace(/\n{3,}/g, "\n\n")
             .trim();
     }
