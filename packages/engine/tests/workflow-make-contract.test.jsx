@@ -18,6 +18,7 @@ const contractSchemas = {
         autoApproved: z.boolean().optional(),
     }),
     output: z.object({ value: z.number() }),
+    childOutput: z.object({ value: z.number() }),
     phase: z.object({ value: z.number() }),
     result: z.object({ value: z.number() }),
 };
@@ -188,6 +189,37 @@ describe("workflow make contract", () => {
             const childRun = await adapter.getLatestChildRun(result.runId);
             expect(childRun?.parentRunId).toBe(result.runId);
             expect(childRun?.status).toBe("finished");
+        }
+        finally {
+            cleanup();
+        }
+    }, 30_000);
+    test("subflow child runs can return an explicitly declared workflow output", async () => {
+        const { smithers, outputs, tables, db, cleanup } = buildContractSmithers();
+        try {
+            const childWorkflow = smithers(() => (<Workflow name="workflow-make-child-output">
+          <Task id="child-task" output={outputs.childOutput}>
+            {{ value: 11 }}
+          </Task>
+        </Workflow>), { output: outputs.childOutput });
+            const parentWorkflow = smithers(() => (<Workflow name="workflow-make-parent-output">
+          <Subflow id="child-run" output={outputs.result} workflow={childWorkflow}/>
+        </Workflow>));
+
+            const result = await Effect.runPromise(runWorkflow(parentWorkflow, { input: {} }));
+
+            expect(result.status).toBe("finished");
+            const adapter = new SmithersDb(db);
+            const childRun = await adapter.getLatestChildRun(result.runId);
+            expect(childRun?.status).toBe("finished");
+            const rows = await db.select().from(tables.result);
+            expect(rows).toEqual([
+                expect.objectContaining({
+                    runId: result.runId,
+                    nodeId: "child-run",
+                    value: 11,
+                }),
+            ]);
         }
         finally {
             cleanup();
