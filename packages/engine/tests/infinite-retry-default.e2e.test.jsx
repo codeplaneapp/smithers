@@ -23,7 +23,7 @@ describe("default infinite retries e2e", () => {
                 },
             };
             const workflow = smithers(() => (<Workflow name="default-infinite-retry-success">
-            <Task id="flaky" output={outputs.outputA} agent={agent}>
+            <Task id="flaky" output={outputs.outputA} agent={agent} retryPolicy={{ backoff: "fixed", initialDelayMs: 1 }}>
               Keep retrying until success.
             </Task>
           </Workflow>));
