@@ -138,10 +138,16 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
     /** Render-time typed dependencies. Keys resolve from task ids of the same name, or from matching `needs` entries. */
     deps?: D;
     /**
-     * When true, missing render-time deps are omitted from the deps object instead
-     * of deferring this task. Pair with `needs`/`dependsOn` when the task should
-     * still wait for upstream terminal state but tolerate upstream failures that
-     * produce no output row.
+     * When true, `deps` resolution omits keys whose upstream task has no output
+     * (e.g. a `continueOnFail` task that failed) instead of deferring the task
+     * until every dep resolves. Pair with `needs`/`dependsOn` so the task is
+     * still gated on upstream tasks reaching a terminal state.
+     *
+     * Runtime caveat: under `depsOptional`, a resolved `deps` value is absent
+     * (not present-but-undefined) when its upstream produced no output, even
+     * though the `children(deps)` callback types every key as present. Null-check
+     * each dep you read (`deps.a?.field`) — reading `deps.a.field` for a failed
+     * upstream throws at runtime despite compiling cleanly.
      */
     depsOptional?: boolean;
     /**
@@ -1036,7 +1042,7 @@ type TaskProps$1<Row, Output, D> = TaskProps$2<Row, Output, D>;
 /**
  * @param {SequenceProps} props
  */
-declare function Sequence(props: SequenceProps$1): React__default.DOMElement<{}, Element> | null;
+declare function Sequence(props: SequenceProps$1): React__default.DetailedReactHTMLElement<React__default.InputHTMLAttributes<HTMLInputElement>, HTMLInputElement> | null;
 type SequenceProps$1 = SequenceProps$2;
 
 /** @typedef {import("./ParallelProps.ts").ParallelProps} ParallelProps */
@@ -1044,6 +1050,7 @@ type SequenceProps$1 = SequenceProps$2;
  * @param {ParallelProps} props
  */
 declare function Parallel(props: ParallelProps$1): React__default.ReactElement<{
+    label?: string | undefined;
     maxConcurrency: number | undefined;
     id: string | undefined;
 }, string | React__default.JSXElementConstructor<any>> | null;
@@ -1054,7 +1061,7 @@ type ParallelProps$1 = ParallelProps$2;
  * @param {MergeQueueProps} props
  */
 declare function MergeQueue(props: MergeQueueProps$1): React__default.ReactElement<{
-    maxConcurrency: any;
+    maxConcurrency: number;
     id: string | undefined;
 }, string | React__default.JSXElementConstructor<any>> | null;
 type MergeQueueProps$1 = MergeQueueProps$2;

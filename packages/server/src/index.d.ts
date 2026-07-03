@@ -6,6 +6,7 @@ import * as _smithers_orchestrator_components_SmithersWorkflow from '@smithers-o
 import { SmithersWorkflow as SmithersWorkflow$1 } from '@smithers-orchestrator/components/SmithersWorkflow';
 import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
 import { SmithersDb as SmithersDb$4 } from '@smithers-orchestrator/db/adapter';
+import * as _smithers_orchestrator_db_runState from '@smithers-orchestrator/db/runState';
 import * as hono from 'hono';
 import { Hono } from 'hono';
 import * as hono_types from 'hono/types';
@@ -243,7 +244,24 @@ type GatewayOptions$1 = {
     protocol?: number;
     features?: string[];
     heartbeatMs?: number;
+    /**
+     * Idle spin-down (spec decision 14). When > 0 and `onIdle` is set, the daemon
+     * fires `onIdle` once it has been idle — no WS clients, no in-flight runs, no
+     * registered crons or pending timers — for this many milliseconds. Wired by
+     * the CLI for autostarted daemons only; 0 (default) never idle-exits.
+     */
+    idleTimeoutMs?: number;
+    /** Called once when the daemon goes idle for `idleTimeoutMs` (graceful shutdown). */
+    onIdle?: () => void | Promise<void>;
     auth?: GatewayAuthConfig$1;
+    /**
+     * Deliberately trust any Host header on an unauthenticated bind (the daemon
+     * equivalent of `smithers gateway --insecure`). Without it, an unauthenticated
+     * gateway rejects any non-loopback Host as a DNS-rebinding defense, so binding
+     * `--host 0.0.0.0` without a token would 403 every LAN request. Ignored when
+     * `auth` is set. Mirrors serve.js's `insecure`.
+     */
+    insecure?: boolean;
     ui?: GatewayUiConfig$1;
     /**
      * Optional host-owned HTTP fallback. The Gateway still owns its native
@@ -653,6 +671,16 @@ declare class Gateway {
     inflightRuns: Map<any, any>;
     devtoolsSubscribers: Map<any, any>;
     runEventWindows: Map<any, any>;
+    runEventSubscriberCounts: Map<any, any>;
+    terminalRunEventWindows: Map<any, any>;
+    terminalRunEventWindowTimers: Map<any, any>;
+    apiStreamSeq: number;
+    apiStreamFrames: any[];
+    apiStreamFrameBytes: number;
+    apiStreamSubscribers: Set<any>;
+    apiStreamPendingCollections: Set<any>;
+    apiStreamPendingResolvers: any[];
+    apiStreamFlushTimer: null;
     /** Absolute active subscriber count per runId (gauge source of truth). */
     devtoolsSubscriberCounts: Map<any, any>;
     /** Flagged subscriber IDs that should force a snapshot on their next emit. */
@@ -696,6 +724,16 @@ declare class Gateway {
     outOfProcessEventBridgeDrainedRuns: Set<any>;
     stateVersion: number;
     startedAtMs: number;
+    idleTimeoutMs: number;
+    /** @type {(() => void | Promise<void>) | null} */
+    onIdle: (() => void | Promise<void>) | null;
+    lastActivityMs: number;
+    /** @type {ReturnType<typeof setInterval> | null} */
+    idleTimer: ReturnType<typeof setInterval> | null;
+    idleFired: boolean;
+    hasActiveCrons: boolean;
+    hasPendingTimers: boolean;
+    trustAnyHost: boolean;
     identity: {
         backend?: string;
         version?: string;
@@ -851,6 +889,33 @@ declare class Gateway {
     cleanupDevToolsSubscribers(connection: ConnectionState): void;
     /**
    * @param {string} runId
+   * @returns {number}
+   */
+    getRunEventSubscriberCount(runId: string): number;
+    /**
+   * @param {string} runId
+   */
+    deleteRunEventWindow(runId: string): void;
+    /**
+   * @param {string} runId
+   */
+    clearTerminalRunEventWindowTimer(runId: string): void;
+    /**
+   * @param {string} runId
+   */
+    scheduleTerminalRunEventWindowRelease(runId: string): void;
+    /**
+   * @param {string} runId
+   * @returns {boolean}
+   */
+    releaseTerminalRunEventWindow(runId: string): boolean;
+    /**
+   * @param {string} runId
+   */
+    markRunEventWindowTerminal(runId: string): void;
+    enforceRunEventWindowLimit(): void;
+    /**
+   * @param {string} runId
    * @returns {{ nextSeq: number; window: Array<Record<string, unknown>> }}
    */
     getRunEventWindow(runId: string): {
@@ -919,7 +984,30 @@ declare class Gateway {
     /**
    * @param {string} runId
    */
-    buildRunSnapshot(runId: string): Promise<any>;
+    buildRunSnapshot(runId: string): Promise<{
+        runState?: _smithers_orchestrator_db_runState.RunStateView | undefined;
+        workflowKey: string;
+        summary: {};
+        runId: string;
+        parentRunId: string | null;
+        workflowName: string;
+        workflowPath: string | null;
+        workflowHash: string | null;
+        status: string;
+        createdAtMs: number;
+        startedAtMs: number | null;
+        finishedAtMs: number | null;
+        heartbeatAtMs: number | null;
+        runtimeOwnerId: string | null;
+        cancelRequestedAtMs: number | null;
+        hijackRequestedAtMs: number | null;
+        hijackTarget: string | null;
+        vcsType: string | null;
+        vcsRoot: string | null;
+        vcsRevision: string | null;
+        errorJson: string | null;
+        configJson: string | null;
+    } | null>;
     /**
    * @param {GatewayTransport} transport
    * @param {string} frameType
@@ -960,6 +1048,64 @@ declare class Gateway {
    * @param {ResponseFrame} response
    */
     sendHttpRpcResponse(res: ServerResponse$1, status: number, response: ResponseFrame): void;
+    /**
+     * @param {Record<string, unknown>} frame
+     */
+    recordApiStreamFrame(frame: Record<string, unknown>): void;
+    /**
+     * @param {Record<string, unknown>} subscriber
+     */
+    drainApiStreamSubscriber(subscriber: Record<string, unknown>): void;
+    /**
+     * @param {Record<string, unknown>} subscriber
+     * @param {string} text
+     * @param {number} bytes
+     */
+    enqueueApiStreamText(subscriber: Record<string, unknown>, text: string, bytes?: number): void;
+    /**
+     * @param {Record<string, unknown>} subscriber
+     * @param {Record<string, unknown>} frame
+     */
+    sendApiStreamFrame(subscriber: Record<string, unknown>, frame: Record<string, unknown>): void;
+    /**
+     * @param {string[]} collections
+     * @returns {Promise<number>}
+     */
+    queueApiInvalidation(collections: string[]): Promise<number>;
+    flushApiInvalidation(): void;
+    /**
+     * @param {IncomingMessage} req
+     * @param {ServerResponse} res
+     */
+    handleApiStream(req: IncomingMessage, res: ServerResponse$1): Promise<void>;
+    /**
+     * @param {string} method
+     * @param {Record<string, unknown>} params
+     * @returns {Promise<SmithersDb | null>}
+     */
+    adapterForApiMutation(method: string, params: Record<string, unknown>): Promise<SmithersDb$4 | null>;
+    /**
+     * @param {string} httpMethod
+     * @param {URL} url
+     * @param {Record<string, unknown>} body
+     * @returns {{ method: string; params: Record<string, unknown>; mutation?: boolean; direct?: "events" } | null}
+     */
+    apiRouteForRequest(httpMethod: string, url: URL, body: Record<string, unknown>): {
+        method: string;
+        params: Record<string, unknown>;
+        mutation?: boolean;
+        direct?: "events";
+    } | null;
+    /**
+     * @param {Record<string, unknown>} params
+     * @returns {Promise<Record<string, unknown>[]>}
+     */
+    listApiRunEvents(params: Record<string, unknown>): Promise<Record<string, unknown>[]>;
+    /**
+     * @param {IncomingMessage} req
+     * @param {ServerResponse} res
+     */
+    handleHttpApi(req: IncomingMessage, res: ServerResponse$1): Promise<void>;
     /**
    * @param {SmithersDb} adapter
    * @param {string} runId
@@ -1017,6 +1163,23 @@ declare class Gateway {
     close(): Promise<void>;
     ticketWatchers: Map<any, any> | null | undefined;
     startScheduler(): void;
+    /**
+   * Record client activity for idle spin-down (spec decision 14). Called on
+   * every RPC (HTTP + WS) and on each new WS connection. If the daemon had
+   * already fired onIdle but a client came back, re-arm the monitor.
+   */
+    markActivity(): void;
+    /**
+   * Whether the daemon has nothing to do: no attached WS clients, no in-flight
+   * runs, and no registered crons or pending durable timers. Schedules count as
+   * "busy" so an autostarted daemon that owns a schedule does not idle-exit and
+   * silently stop firing it.
+   * @returns {boolean}
+   */
+    isIdle(): boolean;
+    startIdleMonitor(): void;
+    stopIdleMonitor(): void;
+    checkIdle(): Promise<void>;
     startOutOfProcessEventBridge(): void;
     stopOutOfProcessEventBridge(): void;
     pollOutOfProcessRunEvents(): Promise<void>;
@@ -1116,6 +1279,36 @@ declare class Gateway {
    */
     isOriginAllowed(req: IncomingMessage): boolean;
     /**
+   * Origin gate that adapts to auth mode.
+   *
+   * With auth configured the token is the gate, so an empty allow-list is
+   * permissive (delegates to `isOriginAllowed`). With NO auth every request is
+   * an implicit operator, so a cross-origin browser page must be rejected even
+   * though `Host` is loopback: the page points a `fetch`/`WebSocket` straight at
+   * `http://127.0.0.1:<port>` — no DNS rebinding, so the Host gate can't see it —
+   * and would otherwise drive `launchRun` (real compute/shell) as operator. Only
+   * an absent, `"null"`, or loopback Origin may drive an unauthenticated daemon.
+   * `--insecure` / `SMITHERS_GATEWAY_TRUST_ANY_HOST` opts out, mirroring the Host
+   * gate for an explicit remote bind. (#446)
+   * @param {IncomingMessage} req
+   * @returns {boolean}
+   */
+    isRequestOriginAllowed(req: IncomingMessage): boolean;
+    /**
+   * DNS-rebinding defense (spec decision 16a). An unauthenticated daemon grants
+   * operator scope to every request, so a browser page at a name rebound to
+   * 127.0.0.1 could drive `launchRun` (real compute/shell). Browsers send the
+   * rebound name in `Host`, so requiring a loopback `Host` closes the hole even
+   * when the Origin allow-list is empty (permissive). Only the unauthenticated
+   * path is gated: with auth configured the token is the gate and a remote
+   * client legitimately sends a non-loopback Host. `SMITHERS_GATEWAY_TRUST_ANY_HOST=1`
+   * opts out for an explicit `--insecure` remote bind. A missing/empty Host
+   * (non-browser CLI, HTTP/1.0) is not a rebinding vector and is allowed.
+   * @param {IncomingMessage} req
+   * @returns {boolean}
+   */
+    isHostAllowed(req: IncomingMessage): boolean;
+    /**
    * @param {IncomingMessage} req
    * @param {string | null} token
    * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
@@ -1160,13 +1353,13 @@ declare class Gateway {
     buildSnapshot(): Promise<{
         runs: any[];
         approvals: {
-            runId: any;
+            runId: string;
             workflowKey: string;
-            nodeId: any;
-            iteration: any;
+            nodeId: string;
+            iteration: number;
             requestTitle: any;
             requestSummary: any;
-            requestedAtMs: any;
+            requestedAtMs: number | null;
             approvalMode: any;
             options: any;
             allowedScopes: any;
@@ -1186,10 +1379,12 @@ declare class Gateway {
    * Resolve the true gateway workflow key for a stored run row. A run started
    * THROUGH the gateway records its key in config; a run started elsewhere (e.g.
    * the CLI) does not, so we fall back to the row's own `workflowName` when that
-   * matches a registered key, and only then to the adapter's first owner. This
+   * matches a registered key, then to the run's entry-file basename (the
+   * discovered-workflow id — this catches runs whose workflow crashed before it
+   * ever announced a name), and only then to the adapter's first owner. This
    * is what keeps runs correctly attributed when many workflows share one DB —
    * the adapter that finds a row is no longer assumed to own it.
-   * @param {{ configJson?: string; workflowName?: string }} row
+   * @param {{ configJson?: string; workflowName?: string; workflowPath?: string }} row
    * @param {Set<string>} registeredKeys
    * @param {string} fallbackKey
    * @returns {string}
@@ -1197,6 +1392,7 @@ declare class Gateway {
     resolveRunWorkflowKey(row: {
         configJson?: string;
         workflowName?: string;
+        workflowPath?: string;
     }, registeredKeys: Set<string>, fallbackKey: string): string;
     /**
    * @param {string} [status]
@@ -1207,7 +1403,7 @@ declare class Gateway {
    * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
    * by namespace+key, not per-run), so iterate each DISTINCT workflow DB exactly
    * once — shared-DB workflows share an adapter — and union the rows, deduping on
-   * `${namespace} ${key}` so a fact stored in a shared DB is returned once.
+   * `${namespace}\u0000${key}` so a fact stored in a shared DB is returned once.
    * Mirrors the `listRunsAcrossWorkflows` shape.
    * @param {string | null} [namespace]
    */
@@ -1335,13 +1531,13 @@ declare class Gateway {
         close: () => void;
     } | null;
     listPendingApprovals(): Promise<{
-        runId: any;
+        runId: string;
         workflowKey: string;
-        nodeId: any;
-        iteration: any;
+        nodeId: string;
+        iteration: number;
         requestTitle: any;
         requestSummary: any;
-        requestedAtMs: any;
+        requestedAtMs: number | null;
         approvalMode: any;
         options: any;
         allowedScopes: any;
@@ -1357,12 +1553,14 @@ declare class Gateway {
         updatedAfterMs?: number;
         limit?: number;
     }): Promise<any[]>;
-    listCrons(): Promise<any[]>;
+    listCrons(): Promise<{
+        workflow: any;
+    }[]>;
     /**
    * @param {string} cronId
    */
     findCron(cronId: string): Promise<{
-        cron: any;
+        cron: Record<string, unknown>;
         workflowKey: any;
         adapter: SmithersDb$4;
     } | null>;
@@ -1371,6 +1569,11 @@ declare class Gateway {
    * @returns {Promise<ResolvedRun | null>}
    */
     resolveRun(runId: string): Promise<ResolvedRun | null>;
+    /**
+   * @param {SmithersEvent} event
+   * @returns {string | null}
+   */
+    terminalRunIdFromSmithersEvent(event: SmithersEvent$1): string | null;
     /**
    * @param {SmithersEvent} event
    */
@@ -1550,6 +1753,13 @@ type ServeOptions$1 = {
     abort: AbortController;
     authToken?: string;
     metrics?: boolean;
+    /**
+     * Opt out of the unauthenticated Host/Origin rebinding+CSRF defense for a
+     * deliberate remote unauthenticated bind (the CLI `--insecure` flag). Ignored
+     * when `authToken` is set (the token is the gate). `SMITHERS_SERVE_TRUST_ANY_HOST`
+     * is an equivalent env opt-out.
+     */
+    insecure?: boolean;
 };
 
 /**
