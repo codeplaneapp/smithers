@@ -5,7 +5,11 @@
 import { Database } from "bun:sqlite";
 import { createSmithers, approvalDecisionSchema } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { agents } from "../agents";
+import { agents, providers } from "../agents";
+
+// All release content is written by Claude Code running claude-fable-5 —
+// no failover to other providers for content-authoring steps.
+const contentAgent = providers.claude;
 import AnalyzeReleasePrompt from "../prompts/release-content/analyze-release.mdx";
 import DraftBlogPrompt from "../prompts/release-content/draft-blog.mdx";
 import DraftBlogOutlinePrompt from "../prompts/release-content/draft-blog-outline.mdx";
@@ -235,7 +239,7 @@ export default smithers((rawCtx) => {
           <Task
             id="analyze-release"
             output={outputs.releaseAnalysis}
-            agent={input.skip.analyze ? undefined : agents.smart}
+            agent={input.skip.analyze ? undefined : contentAgent}
             heartbeatTimeoutMs={900_000}
           >
             {input.skip.analyze
@@ -274,7 +278,7 @@ export default smithers((rawCtx) => {
             <Task
               id="draft-changelog"
               output={outputs.changelogDraft}
-              agent={agents.smart}
+              agent={contentAgent}
               skipIf={!input.channels.changelog || input.skip.changelog}
               heartbeatTimeoutMs={900_000}
             >
@@ -291,7 +295,7 @@ export default smithers((rawCtx) => {
             <Task
               id="draft-thread"
               output={outputs.threadDraft}
-              agent={agents.smart}
+              agent={contentAgent}
               skipIf={!input.channels.tweetThread || input.skip.tweetThread}
               heartbeatTimeoutMs={900_000}
             >
@@ -315,7 +319,7 @@ export default smithers((rawCtx) => {
               <Task
                 id="draft-blog-outline"
                 output={outputs.blogOutline}
-                agent={agents.smart}
+                agent={contentAgent}
                 heartbeatTimeoutMs={900_000}
               >
                 <DraftBlogOutlinePrompt
@@ -333,7 +337,7 @@ export default smithers((rawCtx) => {
                 <Task
                   id="draft-blog"
                   output={outputs.blogDraft}
-                  agent={agents.smart}
+                  agent={contentAgent}
                   heartbeatTimeoutMs={900_000}
                 >
                   <DraftBlogPrompt
@@ -366,7 +370,7 @@ export default smithers((rawCtx) => {
               <Task
                 id="edit-content"
                 output={outputs.editedContent}
-                agent={agents.smart}
+                agent={contentAgent}
                 heartbeatTimeoutMs={900_000}
               >
                 <EditContentPrompt
@@ -396,7 +400,7 @@ export default smithers((rawCtx) => {
               <Task
                 id="score-content"
                 output={outputs.scoreReport}
-                agent={agents.smart}
+                agent={contentAgent}
                 skipIf={input.skip.scoring}
                 needs={{ edited: "edit-content", deterministicCheck: "claim-check" }}
                 deps={{ edited: outputs.editedContent, deterministicCheck: outputs.deterministicCheck }}
@@ -574,7 +578,7 @@ Rules:
 - Do not commit unrelated changes, package manager metadata, database files, logs, or ignored preview artifacts.
 - Use explicit pathspecs with \`git add <path> ...\` and \`git commit <path> ...\`; never use \`git add -A\`, \`git add .\`, or blanket pathspecs.
 - Use an emoji + Conventional Commit subject, and include this trailer:
-  Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+  Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 - If there are no matching working-copy changes, do not commit.
 
 Return JSON:
