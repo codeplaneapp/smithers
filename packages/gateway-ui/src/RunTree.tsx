@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import type { CSSProperties } from "react";
 import { useGatewayRunTree } from "@smithers-orchestrator/gateway-react";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
