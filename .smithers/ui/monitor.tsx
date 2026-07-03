@@ -1,9 +1,10 @@
 /** @jsxImportSource react */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
   useGatewayNodeOutput,
+  useGatewayRun,
   useGatewayRunEvents,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
@@ -62,6 +63,16 @@ function healthClass(health: string | undefined) {
   if (health === "blocked" || health === "stuck") return "warn";
   if (health === "failed" || health === "overBudget") return "err";
   return "";
+}
+function timeAgo(ms: number | undefined): string {
+  if (!ms) return "—";
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return "just now";
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 type Question = { nodeId: string; prompt: string; answer: string | null; answeredBy: string | null; pending: boolean };
@@ -152,7 +163,8 @@ const styles = [
   "h1 { margin:0; font-size:14px; font-weight:600; }",
   ".pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--panel); padding:4px 10px; border-radius:6px; border:1px solid var(--border); font-family:ui-monospace,monospace; }",
   ".toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }",
-  ".input { height:30px; padding:0 10px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); min-width:200px; }",
+  ".input { height:30px; padding:0 10px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); min-width:180px; }",
+  ".select { height:30px; padding:0 8px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); }",
   ".check { display:inline-flex; align-items:center; gap:6px; color:var(--muted); }",
   ".button { height:30px; padding:0 12px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); cursor:pointer; font-weight:500; }",
   ".button:hover { background:var(--card); }",
@@ -165,7 +177,8 @@ const styles = [
   ".badge.ok { color:var(--ok); border-color:var(--ok); }",
   ".badge.warn { color:var(--warn); border-color:var(--warn); }",
   ".badge.err { color:var(--err); border-color:var(--err); }",
-  ".main { display:grid; grid-template-columns:1fr 240px; flex:1; overflow:hidden; }",
+  ".main { display:grid; grid-template-columns:minmax(360px,5fr) minmax(420px,6fr); flex:1; overflow:hidden; }",
+  ".runs-pane { border-right:1px solid var(--border); overflow:auto; }",
   ".content { padding:20px; overflow:auto; }",
   ".panel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:16px; }",
   ".panel h2 { margin:0 0 10px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted); }",
@@ -174,6 +187,11 @@ const styles = [
   "table { width:100%; border-collapse:collapse; font-size:12px; }",
   "th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); vertical-align:top; }",
   "th { color:var(--muted); font-weight:600; text-transform:uppercase; font-size:10px; letter-spacing:0.04em; }",
+  "th.sortable { cursor:pointer; user-select:none; }",
+  "th.sortable:hover { color:var(--text); }",
+  ".runs-table tbody tr { cursor:pointer; }",
+  ".runs-table tbody tr:hover td { background:var(--card); }",
+  ".runs-table tbody tr.active td { background:var(--card); box-shadow:inset 2px 0 0 var(--primary); }",
   ".mono { font-family:ui-monospace,monospace; }",
   ".tag { font-size:10px; font-weight:600; text-transform:uppercase; padding:2px 6px; border-radius:4px; border:1px solid var(--border); }",
   ".tag.pending { color:var(--warn); border-color:var(--warn); }",
@@ -187,49 +205,115 @@ const styles = [
   ".pre { font-family:ui-monospace,monospace; font-size:11px; white-space:pre; overflow:auto; max-height:260px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; }",
   ".reportframe { width:100%; height:520px; border:1px solid var(--border); border-radius:8px; background:#fff; }",
   ".empty { color:var(--muted); text-align:center; padding:48px 16px; }",
-  ".sidebar { border-left:1px solid var(--border); background:var(--panel); overflow:auto; }",
-  ".side-head { padding:12px 16px; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted); border-bottom:1px solid var(--border); }",
-  ".run-row { width:100%; text-align:left; padding:10px 16px; border:0; border-bottom:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; display:flex; justify-content:space-between; gap:8px; align-items:center; }",
-  ".run-row:hover { background:var(--card); }",
-  ".run-row.active { background:var(--card); box-shadow:inset 2px 0 0 var(--primary); }",
+  ".events { font-family:ui-monospace,monospace; font-size:11px; color:var(--muted); max-height:220px; overflow:auto; }",
+  ".events div { padding:2px 0; border-bottom:1px solid var(--border); }",
 ].join("\n");
 
+type SortKey = "started" | "workflow" | "status" | "run";
+
 function App() {
-  const [selectedRunId, setSelectedRunId] = useState<string | undefined>(runIdFromUrl());
-  const [target, setTarget] = useState("");
+  // Runs-first: the table is the primary surface. `selectedRunId` is the run
+  // under inspection; `monitorRunId` is the monitor-workflow run whose
+  // diagnosis panels we render (only when it targeted the selected run).
+  const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined);
+  const [monitorRunId, setMonitorRunId] = useState<string | undefined>(undefined);
+  const [filterText, setFilterText] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [workflowFilter, setWorkflowFilter] = useState("all");
+  const [sortKey, setSortKey] = useState<SortKey>("started");
+  const [sortDesc, setSortDesc] = useState(true);
   const [autofix, setAutofix] = useState(false);
   const [showReport, setShowReport] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  const runsQuery = useGatewayRuns({ filter: { limit: 20 } });
+  const runsQuery = useGatewayRuns({ filter: { limit: 200 } });
   const actions = useGatewayActions();
+  const allRuns = (runsQuery.data ?? []) as RunSummary[];
 
-  const monitorRuns = useMemo(
-    () => ((runsQuery.data ?? []) as RunSummary[]).filter((r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY),
-    [runsQuery.data],
+  // `?runId=` deep link: a monitor run id selects that monitor's panels; any
+  // other run id selects the run itself. Resolved once, when runs first load.
+  const urlResolved = useRef(false);
+  useEffect(() => {
+    if (urlResolved.current || allRuns.length === 0) return;
+    urlResolved.current = true;
+    const fromUrl = runIdFromUrl();
+    if (!fromUrl) return;
+    const row = allRuns.find((r) => r.runId === fromUrl);
+    if (row?.workflowKey === WORKFLOW_KEY) setMonitorRunId(fromUrl);
+    else setSelectedRunId(fromUrl);
+  }, [allRuns]);
+
+  const workflows = useMemo(
+    () => Array.from(new Set(allRuns.map((r) => r.workflowKey ?? "unknown"))).sort(),
+    [allRuns],
   );
-  const activeRunId = selectedRunId ?? runIdFromUrl() ?? monitorRuns[0]?.runId;
-  const activeRun = monitorRuns.find((r) => r.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
-  const eventCount = (stream.events ?? []).length;
+  const statuses = useMemo(
+    () => Array.from(new Set(allRuns.map((r) => r.status ?? "unknown"))).sort(),
+    [allRuns],
+  );
 
-  const gatherOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "gather", iteration: 0 });
-  const diagnoseOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "diagnose", iteration: 0 });
-  const fixOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "fix", iteration: 0 });
-  const reportOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "report", iteration: 0 });
-  const artifactOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "artifact", iteration: 0 });
+  const visibleRuns = useMemo(() => {
+    const text = filterText.trim().toLowerCase();
+    const rows = allRuns.filter((r) => {
+      if (statusFilter !== "all" && (r.status ?? "unknown") !== statusFilter) return false;
+      if (workflowFilter !== "all" && (r.workflowKey ?? "unknown") !== workflowFilter) return false;
+      if (text && !r.runId.toLowerCase().includes(text) && !(r.workflowKey ?? "").toLowerCase().includes(text)) return false;
+      return true;
+    });
+    const dir = sortDesc ? -1 : 1;
+    rows.sort((a, b) => {
+      if (sortKey === "started") return ((a.createdAtMs ?? 0) - (b.createdAtMs ?? 0)) * dir;
+      if (sortKey === "workflow") return (a.workflowKey ?? "").localeCompare(b.workflowKey ?? "") * dir;
+      if (sortKey === "status") return (a.status ?? "").localeCompare(b.status ?? "") * dir;
+      return a.runId.localeCompare(b.runId) * dir;
+    });
+    return rows;
+  }, [allRuns, filterText, statusFilter, workflowFilter, sortKey, sortDesc]);
+
+  const selectedRun = allRuns.find((r) => r.runId === selectedRunId);
+  const runDetailQuery = useGatewayRun(selectedRunId);
+  const runDetail = isRecord(runDetailQuery.data) ? runDetailQuery.data : null;
+  const steps = useMemo(
+    () =>
+      asArray(runDetail?.steps).filter(isRecord).map((s) => ({
+        id: asString(s.id) ?? "",
+        state: asString(s.state) ?? "",
+        attempt: Number(s.attempt ?? 0),
+      })),
+    [runDetail],
+  );
+  const stream = useGatewayRunEvents(selectedRunId, { afterSeq: 0 });
+  const events = stream.events ?? [];
+  const eventTail = events.slice(-12);
+
+  // Default the monitor panels to the newest monitor run when none is chosen.
+  const newestMonitorRun = allRuns.find((r) => r.workflowKey === WORKFLOW_KEY);
+  const activeMonitorRunId = monitorRunId ?? newestMonitorRun?.runId;
+  const activeMonitorRun = allRuns.find((r) => r.runId === activeMonitorRunId);
+
+  const gatherOut = useGatewayNodeOutput({ runId: activeMonitorRunId, nodeId: "gather", iteration: 0 });
+  const diagnoseOut = useGatewayNodeOutput({ runId: activeMonitorRunId, nodeId: "diagnose", iteration: 0 });
+  const fixOut = useGatewayNodeOutput({ runId: activeMonitorRunId, nodeId: "fix", iteration: 0 });
+  const reportOut = useGatewayNodeOutput({ runId: activeMonitorRunId, nodeId: "report", iteration: 0 });
+  const artifactOut = useGatewayNodeOutput({ runId: activeMonitorRunId, nodeId: "artifact", iteration: 0 });
 
   const gather = rowOf(gatherOut.data);
-  const targetRunId = gather ? asString(pick(gather, "runId", "run_id")) : undefined;
-  const targetState = gather ? asString(gather.state) : undefined;
-  const diagnosis = extractDiagnosis(diagnoseOut.data);
-  const fix = rowOf(fixOut.data);
-  const report = extractReport(reportOut.data);
-  const artifact = extractArtifact(artifactOut.data);
+  const monitorTargetRunId = gather ? asString(pick(gather, "runId", "run_id")) : undefined;
+  // Only show diagnosis panels when the monitor actually analyzed the selected run.
+  const monitorMatchesSelection = !!selectedRunId && monitorTargetRunId === selectedRunId;
+  const diagnosis = monitorMatchesSelection ? extractDiagnosis(diagnoseOut.data) : null;
+  const fix = monitorMatchesSelection ? rowOf(fixOut.data) : null;
+  const report = monitorMatchesSelection ? extractReport(reportOut.data) : null;
+  const artifact = monitorMatchesSelection ? extractArtifact(artifactOut.data) : null;
+
+  const runningMonitors = allRuns.filter(
+    (r) => r.workflowKey === WORKFLOW_KEY && (r.status ?? "").toLowerCase() === "running",
+  );
 
   async function refresh() {
     await Promise.all([
       runsQuery.refetch(),
+      runDetailQuery.refetch?.(),
       gatherOut.refetch(),
       diagnoseOut.refetch(),
       fixOut.refetch(),
@@ -237,33 +321,39 @@ function App() {
       artifactOut.refetch(),
     ]);
   }
-  const runningMonitors = monitorRuns.filter((r) => (r.status ?? "").toLowerCase() === "running");
 
-  async function launch() {
-    // Each click starts a NEW durable monitor run. Guard against accidentally
-    // stacking duplicates: with one already running, make the user confirm.
+  async function monitorSelected() {
+    if (!selectedRunId) return;
+    // Each launch starts a NEW durable monitor run — confirm before stacking.
     if (
       runningMonitors.length > 0 &&
       !window.confirm(
-        `${runningMonitors.length} monitor run(s) are already running. ` +
-          "Start another one anyway? (Each click of Monitor launches a new run.)",
+        `${runningMonitors.length} monitor run(s) are already running. Start another one for ${shortRunId(selectedRunId)}?`,
       )
     ) {
       return;
     }
     setBusy(true);
     try {
-      const input: Record<string, unknown> = { autofix };
-      if (target.trim()) input.targetRunId = target.trim();
-      const run = await actions.launchRun({ workflow: WORKFLOW_KEY, input });
-      setSelectedRunId(run.runId);
+      const run = await actions.launchRun({
+        workflow: WORKFLOW_KEY,
+        input: { autofix, targetRunId: selectedRunId },
+      });
+      setMonitorRunId(run.runId);
       await refresh();
     } finally {
       setBusy(false);
     }
   }
 
-  const hasData = gather || diagnosis || report;
+  function sortBy(key: SortKey) {
+    if (sortKey === key) setSortDesc((v) => !v);
+    else {
+      setSortKey(key);
+      setSortDesc(key === "started");
+    }
+  }
+  const arrow = (key: SortKey) => (sortKey === key ? (sortDesc ? " ▾" : " ▴") : "");
 
   return (
     <main className="shell" data-testid="monitor-ui">
@@ -271,182 +361,255 @@ function App() {
       <WorkflowUiStyles mode="theme" />
       <header className="topbar">
         <div className="title-group">
-          <h1>Monitor</h1>
-          <span className="pill" data-testid="monitor-runid">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
-          {targetRunId ? <span className="pill" data-testid="monitor-target">target {shortRunId(targetRunId)}</span> : null}
-          {diagnosis ? (
-            <span className={"badge " + healthClass(diagnosis.health)} data-testid="monitor-health">{diagnosis.health}</span>
-          ) : activeRun ? (
-            <span className={"badge " + runStatusClass(activeRun.status)}>{activeRun.status ?? "idle"}</span>
-          ) : null}
+          <h1>Runs</h1>
+          <span className="pill">{visibleRuns.length} / {allRuns.length} runs</span>
+          {runningMonitors.length > 0 ? <span className="pill">{runningMonitors.length} monitor(s) running</span> : null}
         </div>
         <div className="toolbar">
           <input
             className="input"
-            data-testid="monitor-target-input"
-            value={target}
-            onChange={(e) => setTarget(e.currentTarget.value)}
-            placeholder="target run id (blank = latest active)"
+            data-testid="monitor-filter"
+            value={filterText}
+            onChange={(e) => setFilterText(e.currentTarget.value)}
+            placeholder="filter by run id or workflow"
           />
-          <label className="check"><input type="checkbox" checked={autofix} onChange={(e) => setAutofix(e.currentTarget.checked)} /> autofix</label>
+          <select className="select" data-testid="monitor-status-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.currentTarget.value)}>
+            <option value="all">all statuses</option>
+            {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select className="select" data-testid="monitor-workflow-filter" value={workflowFilter} onChange={(e) => setWorkflowFilter(e.currentTarget.value)}>
+            <option value="all">all workflows</option>
+            {workflows.map((w) => <option key={w} value={w}>{w}</option>)}
+          </select>
           <button className="button" data-testid="monitor-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
-          <button className="button primary" data-testid="monitor-launch" onClick={() => void launch()} disabled={busy}>Start monitor run</button>
         </div>
       </header>
 
       <div className="main">
+        <div className="runs-pane">
+          <table className="runs-table" data-testid="monitor-runs-table">
+            <thead>
+              <tr>
+                <th className="sortable" onClick={() => sortBy("run")}>Run{arrow("run")}</th>
+                <th className="sortable" onClick={() => sortBy("workflow")}>Workflow{arrow("workflow")}</th>
+                <th className="sortable" onClick={() => sortBy("status")}>Status{arrow("status")}</th>
+                <th className="sortable" onClick={() => sortBy("started")}>Started{arrow("started")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRuns.map((r) => (
+                <tr
+                  key={r.runId}
+                  className={r.runId === selectedRunId ? "active" : ""}
+                  onClick={() => setSelectedRunId(r.runId)}
+                >
+                  <td className="mono">{shortRunId(r.runId)}</td>
+                  <td className="mono">{r.workflowKey ?? "—"}</td>
+                  <td><span className={"badge " + runStatusClass(r.status)}>{r.status ?? "?"}</span></td>
+                  <td className="mono">{timeAgo(r.createdAtMs)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {visibleRuns.length === 0 ? <div className="empty">No runs match the current filter.</div> : null}
+        </div>
+
         <div className="content">
-          {gather ? (
-            <section className="panel" data-testid="monitor-state">
-              <h2>Run state</h2>
-              <div className="summary">{asString(gather.summary) ?? ""}</div>
-              <div className="meta">
-                {targetRunId ?? "?"} · {targetState ?? "unknown"} · {String(asString(pick(gather, "ageMinutes", "age_minutes")) ?? "0")}m idle
-              </div>
-            </section>
-          ) : null}
-
-          {diagnosis ? (
-            <section className="panel" data-testid="monitor-diagnosis">
-              <h2>Diagnosis</h2>
-              <div className="summary">{diagnosis.summary}</div>
-              {diagnosis.waitingOn ? <div className="meta">Waiting on: {diagnosis.waitingOn}</div> : null}
-              {diagnosis.rootCause ? <div className="meta">Root cause: {diagnosis.rootCause}</div> : null}
-            </section>
-          ) : null}
-
-          {diagnosis && diagnosis.questions.length > 0 ? (
-            <section className="panel" data-testid="monitor-questions">
-              <h2>Questions &amp; answers</h2>
-              <table>
-                <thead><tr><th>Node</th><th>Question</th><th>Answer</th><th>By</th></tr></thead>
-                <tbody>
-                  {diagnosis.questions.map((q, i) => (
-                    <tr key={q.nodeId + ":" + i}>
-                      <td className="mono">{q.nodeId}</td>
-                      <td>{q.prompt}</td>
-                      <td>{q.pending ? <span className="tag pending">pending</span> : (q.answer ?? "—")}</td>
-                      <td className="mono">{q.answeredBy ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          ) : null}
-
-          {diagnosis && diagnosis.approvals.length > 0 ? (
-            <section className="panel" data-testid="monitor-approvals">
-              <h2>Approval gates</h2>
-              <table>
-                <thead><tr><th>Node</th><th>Decision</th><th>Note</th><th>By</th></tr></thead>
-                <tbody>
-                  {diagnosis.approvals.map((a, i) => (
-                    <tr key={a.nodeId + ":" + i}>
-                      <td className="mono">{a.nodeId}</td>
-                      <td>{a.pending ? <span className="tag pending">pending</span> : a.approved ? <span className="tag yes">approved</span> : <span className="tag no">denied</span>}</td>
-                      <td>{a.note ?? "—"}</td>
-                      <td className="mono">{a.decidedBy ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          ) : null}
-
-          {diagnosis && diagnosis.keyOutputs.length > 0 ? (
-            <section className="panel" data-testid="monitor-outputs">
-              <h2>Task outputs</h2>
-              <table>
-                <thead><tr><th>Node</th><th>Summary</th><th>Value</th></tr></thead>
-                <tbody>
-                  {diagnosis.keyOutputs.map((o, i) => (
-                    <tr key={o.nodeId + ":" + i}>
-                      <td className="mono">{o.nodeId}</td>
-                      <td>{o.summary}</td>
-                      <td className="mono">{o.value ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          ) : null}
-
-          {diagnosis && diagnosis.diffs.length > 0 ? (
-            <section className="panel" data-testid="monitor-diffs">
-              <h2>Code diffs</h2>
-              {diagnosis.diffs.map((d, i) => (
-                <div key={d.nodeId + ":" + i} style={{ marginBottom: 12 }}>
-                  <div className="meta"><b className="mono">{d.nodeId}</b> · {d.summary} · {d.files.join(", ")}</div>
-                  {d.excerpt ? <pre className="pre">{d.excerpt}</pre> : null}
-                </div>
-              ))}
-            </section>
-          ) : null}
-
-          {diagnosis && diagnosis.actions.length > 0 ? (
-            <section className="panel" data-testid="monitor-actions">
-              <h2>Recommended actions</h2>
-              {diagnosis.actions.map((a, i) => (
-                <div className="action" key={i}>
-                  <div>{a.problem} <span className={"tag " + (a.needsHuman ? "human" : "auto")}>{a.needsHuman ? "human" : "auto"}</span></div>
-                  {a.command ? <div style={{ marginTop: 4 }}><code>{a.command}</code></div> : null}
-                </div>
-              ))}
-            </section>
-          ) : null}
-
-          {fix ? (
-            <section className="panel" data-testid="monitor-fix">
-              <h2>What the monitor fixed</h2>
-              <div className="summary">{asString(fix.summary) ?? ""}</div>
-              <div className="meta">
-                applied: {String(asBool(fix.applied))} · resumed: {String(asBool(fix.resumed))}
-                {asString(pick(fix, "stillNeedsHuman", "still_needs_human")) ? " · still needs human: " + asString(pick(fix, "stillNeedsHuman", "still_needs_human")) : ""}
-              </div>
-            </section>
-          ) : null}
-
-          {report ? (
-            <section className="panel" data-testid="monitor-report">
-              <h2>
-                Report
-                <button className="button" style={{ float: "right", height: 24 }} onClick={() => setShowReport((v) => !v)}>
-                  {showReport ? "hide" : "show"}
-                </button>
-              </h2>
-              <div className="meta">{report.title} · {report.sectionCount} sections{artifact ? " · " + artifact.path : ""}</div>
-              {showReport ? <iframe className="reportframe" title="monitor report" sandbox="" srcDoc={report.html} data-testid="monitor-report-frame" /> : null}
-            </section>
-          ) : null}
-
-          {!hasData ? (
+          {!selectedRun ? (
             <div className="empty" data-testid="monitor-empty">
-              <div>{activeRunId ? "Monitoring…" : "No monitor runs yet."}</div>
+              <div>Select a run to inspect it.</div>
               <div style={{ maxWidth: 460, margin: "8px auto 0", fontSize: 12 }}>
-                Enter a target run id (or leave blank for the latest active run), then Monitor. The monitor gathers
-                the run's state, diagnoses its health, answers questions / approvals / outputs / diffs, and renders an
+                Pick any run from the table to see its steps and live events, then <b>Monitor this run</b> to
+                launch a diagnosis: run state, health, pending questions/approvals, key outputs, diffs, and an
                 HTML report. Tick <b>autofix</b> to let it apply the smallest safe repair behind an approval gate.
               </div>
             </div>
-          ) : null}
+          ) : (
+            <>
+              <section className="panel" data-testid="monitor-run-detail">
+                <h2>Run</h2>
+                <div className="summary mono" style={{ fontSize: 13 }}>{selectedRun.runId}</div>
+                <div className="meta" style={{ marginBottom: 10 }}>
+                  <span className={"badge " + runStatusClass(selectedRun.status)}>{selectedRun.status ?? "?"}</span>
+                  {"  "}· {selectedRun.workflowKey ?? "unknown workflow"} · started {timeAgo(selectedRun.createdAtMs)} · {events.length} events
+                </div>
+                <div className="toolbar">
+                  <label className="check"><input type="checkbox" checked={autofix} onChange={(e) => setAutofix(e.currentTarget.checked)} /> autofix</label>
+                  <button className="button primary" data-testid="monitor-launch" onClick={() => void monitorSelected()} disabled={busy}>
+                    Monitor this run
+                  </button>
+                  {activeMonitorRun && monitorMatchesSelection ? (
+                    <span className="pill">monitor {shortRunId(activeMonitorRun.runId)} · {activeMonitorRun.status ?? "?"}</span>
+                  ) : null}
+                </div>
+              </section>
 
-          <div className="meta" style={{ marginTop: 4 }}>{eventCount} monitor events</div>
+              {steps.length > 0 ? (
+                <section className="panel" data-testid="monitor-steps">
+                  <h2>Steps</h2>
+                  <table>
+                    <thead><tr><th>Node</th><th>State</th><th>Attempt</th></tr></thead>
+                    <tbody>
+                      {steps.map((s, i) => (
+                        <tr key={s.id + ":" + i}>
+                          <td className="mono">{s.id}</td>
+                          <td><span className={"badge " + runStatusClass(s.state === "in-progress" ? "running" : s.state)}>{s.state}</span></td>
+                          <td className="mono">{s.attempt}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+              ) : null}
+
+              {eventTail.length > 0 ? (
+                <section className="panel" data-testid="monitor-events">
+                  <h2>Recent events</h2>
+                  <div className="events">
+                    {eventTail.map((e, i) => {
+                      const row: Record<string, unknown> = isRecord(e) ? e : {};
+                      return (
+                        <div key={i}>
+                          #{asString(row.seq) ?? "?"} {asString(row.type) ?? "event"}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+
+              {monitorMatchesSelection && gather ? (
+                <section className="panel" data-testid="monitor-state">
+                  <h2>Monitor: run state</h2>
+                  <div className="summary">{asString(gather.summary) ?? ""}</div>
+                  <div className="meta">
+                    {monitorTargetRunId ?? "?"} · {asString(gather.state) ?? "unknown"} · {String(asString(pick(gather, "ageMinutes", "age_minutes")) ?? "0")}m idle
+                  </div>
+                </section>
+              ) : null}
+
+              {selectedRunId && !monitorMatchesSelection ? (
+                <section className="panel">
+                  <h2>Monitor</h2>
+                  <div className="meta">No monitor diagnosis for this run yet — click <b>Monitor this run</b> above.</div>
+                </section>
+              ) : null}
+
+              {diagnosis ? (
+                <section className="panel" data-testid="monitor-diagnosis">
+                  <h2>Diagnosis <span className={"badge " + healthClass(diagnosis.health)} data-testid="monitor-health">{diagnosis.health}</span></h2>
+                  <div className="summary">{diagnosis.summary}</div>
+                  {diagnosis.waitingOn ? <div className="meta">Waiting on: {diagnosis.waitingOn}</div> : null}
+                  {diagnosis.rootCause ? <div className="meta">Root cause: {diagnosis.rootCause}</div> : null}
+                </section>
+              ) : null}
+
+              {diagnosis && diagnosis.questions.length > 0 ? (
+                <section className="panel" data-testid="monitor-questions">
+                  <h2>Questions &amp; answers</h2>
+                  <table>
+                    <thead><tr><th>Node</th><th>Question</th><th>Answer</th><th>By</th></tr></thead>
+                    <tbody>
+                      {diagnosis.questions.map((q, i) => (
+                        <tr key={q.nodeId + ":" + i}>
+                          <td className="mono">{q.nodeId}</td>
+                          <td>{q.prompt}</td>
+                          <td>{q.pending ? <span className="tag pending">pending</span> : (q.answer ?? "—")}</td>
+                          <td className="mono">{q.answeredBy ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+              ) : null}
+
+              {diagnosis && diagnosis.approvals.length > 0 ? (
+                <section className="panel" data-testid="monitor-approvals">
+                  <h2>Approval gates</h2>
+                  <table>
+                    <thead><tr><th>Node</th><th>Decision</th><th>Note</th><th>By</th></tr></thead>
+                    <tbody>
+                      {diagnosis.approvals.map((a, i) => (
+                        <tr key={a.nodeId + ":" + i}>
+                          <td className="mono">{a.nodeId}</td>
+                          <td>{a.pending ? <span className="tag pending">pending</span> : a.approved ? <span className="tag yes">approved</span> : <span className="tag no">denied</span>}</td>
+                          <td>{a.note ?? "—"}</td>
+                          <td className="mono">{a.decidedBy ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+              ) : null}
+
+              {diagnosis && diagnosis.keyOutputs.length > 0 ? (
+                <section className="panel" data-testid="monitor-outputs">
+                  <h2>Task outputs</h2>
+                  <table>
+                    <thead><tr><th>Node</th><th>Summary</th><th>Value</th></tr></thead>
+                    <tbody>
+                      {diagnosis.keyOutputs.map((o, i) => (
+                        <tr key={o.nodeId + ":" + i}>
+                          <td className="mono">{o.nodeId}</td>
+                          <td>{o.summary}</td>
+                          <td className="mono">{o.value ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+              ) : null}
+
+              {diagnosis && diagnosis.diffs.length > 0 ? (
+                <section className="panel" data-testid="monitor-diffs">
+                  <h2>Code diffs</h2>
+                  {diagnosis.diffs.map((d, i) => (
+                    <div key={d.nodeId + ":" + i} style={{ marginBottom: 12 }}>
+                      <div className="meta"><b className="mono">{d.nodeId}</b> · {d.summary} · {d.files.join(", ")}</div>
+                      {d.excerpt ? <pre className="pre">{d.excerpt}</pre> : null}
+                    </div>
+                  ))}
+                </section>
+              ) : null}
+
+              {diagnosis && diagnosis.actions.length > 0 ? (
+                <section className="panel" data-testid="monitor-actions">
+                  <h2>Recommended actions</h2>
+                  {diagnosis.actions.map((a, i) => (
+                    <div className="action" key={i}>
+                      <div>{a.problem} <span className={"tag " + (a.needsHuman ? "human" : "auto")}>{a.needsHuman ? "human" : "auto"}</span></div>
+                      {a.command ? <div style={{ marginTop: 4 }}><code>{a.command}</code></div> : null}
+                    </div>
+                  ))}
+                </section>
+              ) : null}
+
+              {fix ? (
+                <section className="panel" data-testid="monitor-fix">
+                  <h2>What the monitor fixed</h2>
+                  <div className="summary">{asString(fix.summary) ?? ""}</div>
+                  <div className="meta">
+                    applied: {String(asBool(fix.applied))} · resumed: {String(asBool(fix.resumed))}
+                    {asString(pick(fix, "stillNeedsHuman", "still_needs_human")) ? " · still needs human: " + asString(pick(fix, "stillNeedsHuman", "still_needs_human")) : ""}
+                  </div>
+                </section>
+              ) : null}
+
+              {report ? (
+                <section className="panel" data-testid="monitor-report">
+                  <h2>
+                    Report
+                    <button className="button" style={{ float: "right", height: 24 }} onClick={() => setShowReport((v) => !v)}>
+                      {showReport ? "hide" : "show"}
+                    </button>
+                  </h2>
+                  <div className="meta">{report.title} · {report.sectionCount} sections{artifact ? " · " + artifact.path : ""}</div>
+                  {showReport ? <iframe className="reportframe" title="monitor report" sandbox="" srcDoc={report.html} data-testid="monitor-report-frame" /> : null}
+                </section>
+              ) : null}
+            </>
+          )}
         </div>
-
-        <aside className="sidebar">
-          <div className="side-head">Monitor runs</div>
-          {monitorRuns.map((r) => (
-            <button
-              key={r.runId}
-              className={"run-row" + (r.runId === activeRunId ? " active" : "")}
-              onClick={() => setSelectedRunId(r.runId)}
-            >
-              <span className="mono" style={{ fontSize: 11 }}>{shortRunId(r.runId)}</span>
-              <span className={"badge " + runStatusClass(r.status)}>{r.status ?? "?"}</span>
-            </button>
-          ))}
-          {monitorRuns.length === 0 ? <div className="empty">No runs yet.</div> : null}
-        </aside>
       </div>
     </main>
   );
