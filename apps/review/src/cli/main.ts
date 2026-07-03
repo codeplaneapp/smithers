@@ -15,6 +15,7 @@ import { storySchema } from "../walkthrough/storySchema";
 import { createReviewAgents } from "../workflow/createReviewAgents";
 import { createReviewWorkflow } from "../workflow/createReviewWorkflow";
 import { createProgressReporter } from "./createProgressReporter";
+import { parseJsonColumn } from "./parseJsonColumn";
 import { parseReviewArgs, type ReviewArgs } from "./parseReviewArgs";
 import { publishWalkthrough } from "./publishWalkthrough";
 
@@ -29,17 +30,6 @@ function refExists(repoDir: string, ref: string): boolean {
 
 type Finding = Parameters<typeof buildPullRequestReview>[0]["findings"][number];
 type Warning = { file: string; message: string; type: string };
-
-// Output rows store array columns as JSON strings.
-function parseJsonColumn<T>(value: unknown): T[] {
-  if (typeof value !== "string" || !value.trim()) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
-  } catch {
-    return [];
-  }
-}
 
 // Exported for tests: small pure parser for the walkthrough row's quiz column.
 export function parseQuizColumn(value: unknown): Quiz | null {

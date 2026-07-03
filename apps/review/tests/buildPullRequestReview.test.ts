@@ -376,4 +376,32 @@ describe("buildPullRequestReview", () => {
     expect(payload.body).not.toContain("xxx");
     expect(payload.body.endsWith("_…truncated; see the full walkthrough._")).toBe(true);
   });
+
+  test("truncation inside an open <details> closes it so the notice is not swallowed", () => {
+    // A quiz large enough that the 60k cut lands inside the quiz <details>
+    // (and the per-question answer <details>), where the old blank-line cut
+    // left the disclosure open and hid the truncation notice.
+    const questions = Array.from({ length: 200 }, (_, i) => ({
+      question: `Question ${i}: ${"why does this branch matter ".repeat(6)}`,
+      options: ["A".repeat(120), "B".repeat(120)],
+      correctIndex: 0,
+      explanation: "x".repeat(300),
+      path: "src/widget.ts",
+    }));
+    const payload = buildPullRequestReview({
+      story,
+      findings: [],
+      prFiles: new Map<string, PullRequestFile>(),
+      headSha: "abc123",
+      quiz: { impact: { level: "high", reasons: [] }, questions },
+    });
+    expect(payload.body).toContain("…truncated");
+    // Every <details> opened in the kept body is closed; otherwise GitHub
+    // renders the notice (and everything after) collapsed out of view.
+    const open = (payload.body.match(/<details>/g) ?? []).length;
+    const close = (payload.body.match(/<\/details>/g) ?? []).length;
+    expect(open).toBeGreaterThan(0);
+    expect(open).toBe(close);
+    expect(payload.body.endsWith("_…truncated; see the full walkthrough._")).toBe(true);
+  });
 });

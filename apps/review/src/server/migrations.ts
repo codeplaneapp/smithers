@@ -32,6 +32,8 @@ const SCHEMA_STATEMENTS = [
     model TEXT NOT NULL,
     input_tokens INTEGER NOT NULL,
     output_tokens INTEGER NOT NULL,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL,
     kind TEXT NOT NULL,
     created_at INTEGER NOT NULL
@@ -62,8 +64,23 @@ export async function ensureSchema(db: D1Database): Promise<void> {
   }
   // Additive columns for databases created before the column existed; SQLite
   // has no ADD COLUMN IF NOT EXISTS, so a duplicate-column error means done.
-  try {
-    await db.prepare(`ALTER TABLE repos ADD COLUMN quiz TEXT NOT NULL DEFAULT 'auto'`).run();
-  } catch {}
+  // Any OTHER error (transient D1 failure, locked db) must propagate so it does
+  // not get mistaken for "migrated" — otherwise later SELECTs of the missing
+  // column fail far from the cause, and ensured.add() below would make the
+  // half-applied schema sticky for the life of this worker instance.
+  await addColumnIfMissing(db, `ALTER TABLE repos ADD COLUMN quiz TEXT NOT NULL DEFAULT 'auto'`);
+  await addColumnIfMissing(db, `ALTER TABLE usage_events ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0`);
+  await addColumnIfMissing(db, `ALTER TABLE usage_events ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0`);
   ensured.add(db);
+}
+
+async function addColumnIfMissing(db: D1Database, alter: string): Promise<void> {
+  try {
+    await db.prepare(alter).run();
+  } catch (err) {
+    // D1/SQLite reports "duplicate column name: <col>"; the message can also be
+    // nested in the error's cause. Anything else is a real failure — rethrow.
+    const message = `${String(err)} ${String((err as { cause?: { message?: unknown } })?.cause?.message ?? "")}`;
+    if (!/duplicate column/i.test(message)) throw err;
+  }
 }

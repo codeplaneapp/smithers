@@ -2,6 +2,33 @@ import type { PullRequestReviewPayload } from "./buildPullRequestReview";
 import type { PullRequestTarget } from "./resolvePullRequest";
 import { runGh as defaultRunGh } from "./runGh";
 
+// GitHub caps review bodies at 65536 chars; leave headroom for the folded note.
+const MAX_FOLD_BODY = 64_000;
+
+/**
+ * Fold the inline comments into the review body one at a time until the budget
+ * is reached, so a large finding never gets cut mid-code-fence (a blind slice
+ * of the joined string could truncate inside a ```suggestion block and corrupt
+ * the render). Any findings that do not fit point to the full walkthrough.
+ */
+function foldCommentsIntoBody(payload: PullRequestReviewPayload): string {
+  let body = `${payload.body}\n\n### Inline findings (could not anchor in the diff)\n\n`;
+  let appended = 0;
+  for (const comment of payload.comments) {
+    const entry = `- \`${comment.path}:${comment.start_line ?? comment.line}\`\n\n${comment.body}`;
+    const candidate = appended === 0 ? `${body}${entry}` : `${body}\n\n${entry}`;
+    if (candidate.length > MAX_FOLD_BODY) break;
+    body = candidate;
+    appended += 1;
+  }
+  const remaining = payload.comments.length - appended;
+  if (remaining > 0) {
+    const note = `\n\n_…and ${remaining} more finding${remaining === 1 ? "" : "s"}; see the full walkthrough._`;
+    if (body.length + note.length <= MAX_FOLD_BODY) body += note;
+  }
+  return body;
+}
+
 /**
  * Post a review to the PR via `gh api`. GitHub rejects the whole batch (422,
  * typically mentioning "line" or "position") when any inline comment fails to
@@ -33,13 +60,10 @@ export async function postPullRequestReview(
     console.error(
       `smithers-review: inline comment batch failed, folding ${payload.comments.length} finding(s) into the body: ${(error as Error).message.slice(0, 300)}`,
     );
-    const folded = payload.comments
-      .map((comment) => `- \`${comment.path}:${comment.start_line ?? comment.line}\`\n\n${comment.body}`)
-      .join("\n\n");
     const fallback: PullRequestReviewPayload = {
       ...payload,
       comments: [],
-      body: `${payload.body}\n\n### Inline findings (could not anchor in the diff)\n\n${folded}`.slice(0, 64_000),
+      body: foldCommentsIntoBody(payload),
     };
     const result = await post(fallback);
     return { url: result.html_url ?? pr.url, inline: 0 };

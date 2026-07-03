@@ -7,8 +7,9 @@
  *                  actions that change the reviewable diff: opened,
  *                  synchronize, reopened, ready_for_review. Everything else
  *                  (labeled, edited, assigned, …) skips with a reason.
- *   issue_comment  comment is on a PR, body starts with the magic phrase
- *                  "@smithers review", and the author's association is
+ *   issue_comment  action is "created" (edited/deleted comments never
+ *                  re-trigger), comment is on a PR, body starts with the magic
+ *                  phrase "@smithers review", and the author's association is
  *                  OWNER / MEMBER / COLLABORATOR.
  *
  * Returns the PR number (and the head SHA for `pull_request` events, when
@@ -75,6 +76,16 @@ export function gateEvent({ eventName, payload }: GateInput): GateDecision {
   }
 
   if (eventName === "issue_comment") {
+    const action = typeof top.action === "string" ? top.action : "";
+    if (action !== "created") {
+      // Only a freshly posted comment triggers a review. Editing or deleting a
+      // comment that starts with the magic phrase would otherwise re-run (and
+      // could be spammed to re-run) a review the diff has not changed for.
+      return {
+        run: false,
+        reason: `issue_comment action "${action || "(missing)"}" is not "created"`,
+      };
+    }
     const issue = obj(top.issue);
     const comment = obj(top.comment);
     if (!issue || !obj(issue.pull_request)) {

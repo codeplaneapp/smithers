@@ -392,4 +392,76 @@ describe("POST /api/sessions (OIDC)", () => {
     const row = await env.DB.prepare("SELECT pr FROM sessions").first<{ pr: number }>();
     expect(row?.pr).toBe(7);
   });
+
+  test("atomically enforces the monthly PR quota under concurrent mints", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker(jwks.url);
+    await registerRepo(env, REPO, 3);
+    const exp = Math.floor(Date.now() / 1000) + 600;
+    // Six distinct new PRs racing at once against a 3-PR plan. A check-then-insert
+    // split lets more than three pass the read; the atomic claim must grant three.
+    const tokens = await Promise.all(
+      [1, 2, 3, 4, 5, 6].map((pr) => signTestJwt(keypair, baseClaims(REPO, pr, exp))),
+    );
+    const responses = await Promise.all(
+      tokens.map((token) =>
+        worker.fetch(
+          new Request("https://review.test/api/sessions", {
+            method: "POST",
+            body: JSON.stringify({ oidcToken: token }),
+          }),
+          env,
+        ),
+      ),
+    );
+    const statuses = responses.map((r) => r.status);
+    expect(statuses.filter((s) => s === 200).length).toBe(3);
+    expect(statuses.filter((s) => s === 402).length).toBe(3);
+    const reviewed = await env.DB
+      .prepare("SELECT COUNT(*) AS c FROM reviewed_prs WHERE repo = ?")
+      .bind(REPO)
+      .first<{ c: number }>();
+    expect(reviewed?.c).toBe(3);
+    const sessions = await env.DB.prepare("SELECT COUNT(*) AS c FROM sessions").first<{ c: number }>();
+    expect(sessions?.c).toBe(3);
+  });
+
+  test("402s minting once the repo's monthly spend cap is reached (re-mint cannot reset it)", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker(jwks.url);
+    // Ceiling = prs_per_month * spend_cap_usd = 1 * 0.01 = 0.01.
+    await env.DB
+      .prepare(
+        "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .bind(REPO, "auto", 1, 0.01, Date.now())
+      .run();
+    // Prior sessions this month already spent past the ceiling.
+    await env.DB
+      .prepare(
+        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .bind("u1", REPO, 1, "claude-sonnet-4-6", 0, 0, 0.05, "messages", Date.now())
+      .run();
+    // A fresh mint for a brand-new PR — the re-mint that would otherwise reset
+    // the per-session budget — must be refused.
+    const token = await signTestJwt(keypair, baseClaims(REPO, 2, Math.floor(Date.now() / 1000) + 600));
+    const res = await worker.fetch(
+      new Request("https://review.test/api/sessions", {
+        method: "POST",
+        body: JSON.stringify({ oidcToken: token }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(402);
+    expect(((await res.json()) as { error: string }).error).toContain("monthly spend cap");
+    // Rejected before claiming a quota slot or minting a session.
+    const reviewed = await env.DB
+      .prepare("SELECT COUNT(*) AS c FROM reviewed_prs WHERE repo = ?")
+      .bind(REPO)
+      .first<{ c: number }>();
+    expect(reviewed?.c).toBe(0);
+    const sessions = await env.DB.prepare("SELECT COUNT(*) AS c FROM sessions").first<{ c: number }>();
+    expect(sessions?.c).toBe(0);
+  });
 });

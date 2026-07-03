@@ -39,6 +39,37 @@ describe("createProgressReporter", () => {
     ]);
   });
 
+  test("reads the real engine shape where files/comments are already-parsed arrays", async () => {
+    // loadOutputs returns json-mode columns parsed, not as JSON strings — the
+    // reporter must handle that shape or every per-file line degrades to the
+    // node id, "[index]", and "done".
+    const { reporter, lines } = reporterWith({
+      reviewPrompt: [
+        {
+          files: [
+            { id: "review-file-1-src-foo-ts", path: "src/foo.ts" },
+            { id: "review-file-2-src-bar-ts", path: "src/bar.ts" },
+          ],
+        },
+      ],
+      agentReview: [
+        { nodeId: "review-file-1-src-foo-ts", comments: [{ path: "src/foo.ts" }, { path: "src/foo.ts" }] },
+        { nodeId: "review-file-2-src-bar-ts", comments: [] },
+      ],
+    });
+
+    reporter.onEvent({ type: "NodeStarted", nodeId: "review-file-1-src-foo-ts", timestampMs: 1_000 });
+    reporter.onEvent({ type: "NodeStarted", nodeId: "review-file-2-src-bar-ts", timestampMs: 1_000 });
+    reporter.onEvent({ type: "NodeFinished", nodeId: "review-file-1-src-foo-ts", timestampMs: 49_000 });
+    reporter.onEvent({ type: "NodeFinished", nodeId: "review-file-2-src-bar-ts", timestampMs: 61_000 });
+    await reporter.flush();
+
+    expect(lines).toEqual([
+      "[1/2] src/foo.ts … 2 findings (48s)",
+      "[2/2] src/bar.ts … 0 findings (60s)",
+    ]);
+  });
+
   test("prints phase lines for verify, narrate, quiz, and walkthrough", async () => {
     const { reporter, lines } = reporterWith({});
     for (const nodeId of ["verify-findings", "narrate", "quiz", "walkthrough"]) {

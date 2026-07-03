@@ -1,6 +1,9 @@
 import type { ReviewWorkerEnv } from "../env.ts";
 import { jsonError } from "../jsonError.ts";
-import { checkQuota } from "./checkQuota.ts";
+import { monthKey as monthKeyFor } from "../monthKey.ts";
+import { repoMonthlyCapUsd } from "../repoMonthlyCapUsd.ts";
+import { repoMonthlySpendUsd } from "../repoMonthlySpendUsd.ts";
+import { claimReviewSlot } from "./claimReviewSlot.ts";
 import { lookupApiKey } from "./lookupApiKey.ts";
 import { lookupRepo } from "./lookupRepo.ts";
 import { mintSession } from "./mintSession.ts";
@@ -123,7 +126,22 @@ export async function handleSessions(
     });
   }
 
-  const quota = await checkQuota(env.DB, repo, pr, registration.prs_per_month, now);
+  // Bound total monthly spend per repo BEFORE claiming a quota slot: the
+  // per-session cap resets on every mint, so without this a caller can re-mint
+  // sessions for an already-reviewed PR to reset the budget and spend without
+  // limit. Rejecting here means a blocked request never consumes a quota slot.
+  const monthlyCapUsd = repoMonthlyCapUsd(registration);
+  const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
+  if (monthSpendUsd >= monthlyCapUsd) {
+    return jsonError(402, "monthly spend cap exhausted", {
+      repo,
+      monthlyCapUsd,
+      spentUsd: monthSpendUsd,
+      month: monthKeyFor(now),
+    });
+  }
+
+  const quota = await claimReviewSlot(env.DB, repo, pr, registration.prs_per_month, now);
   if (quota.overQuota) {
     return jsonError(402, "monthly PR quota exhausted", {
       repo,
@@ -133,17 +151,9 @@ export async function handleSessions(
     });
   }
 
-  const minted = await mintSession(
-    env.DB,
-    repo,
-    pr,
-    registration.spend_cap_usd,
-    quota.monthKey,
-    quota.alreadyReviewed,
-    now,
-  );
+  const minted = await mintSession(env.DB, repo, pr, registration.spend_cap_usd, now);
 
-  const used = quota.alreadyReviewed ? quota.used : quota.used + 1;
+  const used = quota.used;
   const nowDate = new Date(now);
   const resetsAt = new Date(Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() + 1, 1)).toISOString();
   return Response.json({

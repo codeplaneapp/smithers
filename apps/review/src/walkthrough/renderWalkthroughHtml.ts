@@ -10,7 +10,7 @@ import { formatUtcTimestamp } from "./formatUtcTimestamp";
 import { humanizeExcludeReason } from "./humanizeExcludeReason";
 import { mermaidLoaderScript } from "./mermaidLoaderScript";
 import { mermaidRuntimeGzipBase64 } from "./mermaidRuntimeGzipBase64";
-import { pluralize } from "./pluralize";
+import { pluralize } from "../text/pluralize";
 import { renderOverviewChart } from "./renderOverviewChart";
 import { renderProse, renderProseInline } from "./renderProse";
 import { renderQuizSection } from "./renderQuizSection";

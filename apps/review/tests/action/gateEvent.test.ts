@@ -128,6 +128,7 @@ describe("gateEvent", () => {
         const d = gateEvent({
           eventName: "issue_comment",
           payload: {
+            action: "created",
             issue: issuePr(9),
             comment: { body: "@smithers review", author_association: association },
           },
@@ -140,11 +141,38 @@ describe("gateEvent", () => {
       const d = gateEvent({
         eventName: "issue_comment",
         payload: {
+          action: "created",
           issue: issuePr(11),
           comment: { body: "@Smithers Review", author_association: "OWNER" },
         },
       });
       expect(d.run).toBe(true);
+    });
+
+    test("skips edited and deleted comment actions (no re-trigger on unchanged diff)", () => {
+      for (const action of ["edited", "deleted"]) {
+        const d = gateEvent({
+          eventName: "issue_comment",
+          payload: {
+            action,
+            issue: issuePr(7),
+            comment: { body: "@smithers review", author_association: "OWNER" },
+          },
+        });
+        expect(d.run).toBe(false);
+        if (!d.run) expect(d.reason).toMatch(/is not "created"/);
+      }
+    });
+
+    test("skips issue_comment payloads with no action", () => {
+      const d = gateEvent({
+        eventName: "issue_comment",
+        payload: {
+          issue: issuePr(7),
+          comment: { body: "@smithers review", author_association: "OWNER" },
+        },
+      });
+      expect(d.run).toBe(false);
     });
 
     test("skips comments on issues that are not PRs", () => {

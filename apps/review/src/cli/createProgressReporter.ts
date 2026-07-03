@@ -1,3 +1,5 @@
+import { parseJsonColumn } from "./parseJsonColumn";
+
 // Structural subset of the engine's SmithersEvent (RunOptions.onProgress):
 // NodeStarted/NodeFinished/NodeFailed carry { type, nodeId, timestampMs },
 // NodeFailed adds { error }.
@@ -56,29 +58,18 @@ export function createProgressReporter(options: {
     const rows = await options.loadRows();
     let path = nodeId;
     let total: number | null = null;
-    const prepared = rows.reviewPrompt?.at(-1);
-    const filesRaw = prepared?.files;
-    if (typeof filesRaw === "string" && filesRaw.trim()) {
-      try {
-        const files = JSON.parse(filesRaw) as Array<{ id?: string; path?: string }>;
-        if (Array.isArray(files)) {
-          total = files.length;
-          const file = files.find((entry) => entry.id === nodeId);
-          if (file?.path) path = file.path;
-        }
-      } catch {
-        // Fall back to the node id.
-      }
+    // loadOutputs returns json-mode columns as parsed arrays; raw sqlite rows and
+    // the string test fixtures surface JSON strings — parseJsonColumn takes both.
+    const files = parseJsonColumn<{ id?: string; path?: string }>(rows.reviewPrompt?.at(-1)?.files);
+    if (files.length > 0) {
+      total = files.length;
+      const file = files.find((entry) => entry.id === nodeId);
+      if (file?.path) path = file.path;
     }
     let findings: number | null = null;
     const row = (rows.agentReview ?? []).find((entry) => entry.nodeId === nodeId);
-    if (row && typeof row.comments === "string" && row.comments.trim()) {
-      try {
-        const comments = JSON.parse(row.comments) as unknown;
-        if (Array.isArray(comments)) findings = comments.length;
-      } catch {
-        // Leave findings unknown.
-      }
+    if (row && row.comments != null && row.comments !== "") {
+      findings = parseJsonColumn<unknown>(row.comments).length;
     }
     return { path, findings, total };
   };

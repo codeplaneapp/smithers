@@ -15,7 +15,10 @@ export function parseUsageFromSse(stream: string): UsageSummary | null {
   let cacheCreationTokens = 0;
   let cacheReadTokens = 0;
   let saw = false;
-  const frames = stream.split(/\n\n+/);
+  // Split on a blank line between frames. The SSE spec allows CRLF endings, so
+  // match one-or-more `\r?\n` pairs — an LF-only split silently turns a CRLF
+  // stream into one unparseable frame and drops the whole request's metering.
+  const frames = stream.split(/(?:\r?\n){2,}/);
   for (const frame of frames) {
     const lines = frame.split(/\r?\n/);
     let eventName = "";

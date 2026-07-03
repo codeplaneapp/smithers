@@ -45,7 +45,7 @@ export async function recordUsage(
   }
   await db
     .prepare(
-      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(
       randomTokenHex(8),
@@ -54,6 +54,8 @@ export async function recordUsage(
       options.summary.model,
       options.summary.inputTokens,
       options.summary.outputTokens,
+      options.summary.cacheCreationTokens,
+      options.summary.cacheReadTokens,
       costUsd,
       options.kind,
       options.now,

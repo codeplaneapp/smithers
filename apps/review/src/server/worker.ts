@@ -40,7 +40,9 @@ function defaultDeps(ctx?: ReviewWorkerCtx): ReviewWorkerDeps {
           ctx.waitUntil!(p);
         }
       : (p: Promise<unknown>) => {
-          p.catch(() => undefined);
+          // No ctx.waitUntil (non-Worker caller): still surface background
+          // failures instead of dropping them silently.
+          p.catch((err) => console.error("smithers-review: background task failed", String(err)));
         },
   };
 }

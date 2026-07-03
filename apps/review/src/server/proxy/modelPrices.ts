@@ -23,7 +23,15 @@ const PRICES: Record<string, ModelPrice> = {
 export function modelPrices(model: string): ModelPrice {
   const normalized = model.toLowerCase();
   for (const [key, price] of Object.entries(PRICES)) {
-    if (normalized === key || normalized.startsWith(`${key}-`) || normalized.startsWith(`${key}_`)) {
+    // Match the base id plus any `-`/`_` suffix (date stamps) or a bracketed
+    // context-window alias like `claude-opus-4-8[1m]`, so a real model is never
+    // metered as free.
+    if (
+      normalized === key ||
+      normalized.startsWith(`${key}-`) ||
+      normalized.startsWith(`${key}_`) ||
+      normalized.startsWith(`${key}[`)
+    ) {
       return price;
     }
   }

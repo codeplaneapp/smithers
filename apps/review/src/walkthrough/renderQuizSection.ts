@@ -1,6 +1,6 @@
 import type { Quiz } from "../quiz/quizSchema";
 import { escapeHtml } from "./escapeHtml";
-import { pluralize } from "./pluralize";
+import { pluralize } from "../text/pluralize";
 
 const optionKeys = ["A", "B", "C", "D", "E"];
 

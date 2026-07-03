@@ -12,6 +12,8 @@ interface TokensRow {
   model: string;
   input_tokens: number;
   output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
 }
 
 interface SpendRow {
@@ -46,7 +48,7 @@ export async function handleMetrics(request: Request, env: ReviewWorkerEnv): Pro
 
   const tokensRes = await env.DB
     .prepare(
-      "SELECT repo, model, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens FROM usage_events GROUP BY repo, model",
+      "SELECT repo, model, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cache_creation_tokens) AS cache_creation_tokens, SUM(cache_read_tokens) AS cache_read_tokens FROM usage_events GROUP BY repo, model",
     )
     .all<TokensRow>();
   const spendRes = await env.DB
@@ -67,10 +69,11 @@ export async function handleMetrics(request: Request, env: ReviewWorkerEnv): Pro
   lines.push("# HELP review_tokens_total Anthropic token usage by repo, model, kind");
   lines.push("# TYPE review_tokens_total counter");
   for (const row of tokensRes.results) {
-    const labels = `repo="${escapeLabel(row.repo)}",model="${escapeLabel(row.model)}",kind="input"`;
-    lines.push(`review_tokens_total{${labels}} ${row.input_tokens ?? 0}`);
-    const labelsO = `repo="${escapeLabel(row.repo)}",model="${escapeLabel(row.model)}",kind="output"`;
-    lines.push(`review_tokens_total{${labelsO}} ${row.output_tokens ?? 0}`);
+    const base = `repo="${escapeLabel(row.repo)}",model="${escapeLabel(row.model)}"`;
+    lines.push(`review_tokens_total{${base},kind="input"} ${row.input_tokens ?? 0}`);
+    lines.push(`review_tokens_total{${base},kind="output"} ${row.output_tokens ?? 0}`);
+    lines.push(`review_tokens_total{${base},kind="cache_write"} ${row.cache_creation_tokens ?? 0}`);
+    lines.push(`review_tokens_total{${base},kind="cache_read"} ${row.cache_read_tokens ?? 0}`);
   }
 
   lines.push("# HELP review_spend_usd_total Estimated Anthropic spend (USD), per repo and model");

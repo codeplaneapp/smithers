@@ -14,6 +14,7 @@ import {
   reviewTargetSchema,
 } from "smithers-workflows/lib/open-code-review";
 import { z } from "zod/v4";
+import { pluralize } from "../text/pluralize";
 import { assessChangeImpact } from "../quiz/assessChangeImpact";
 import { buildQuizPrompt } from "../quiz/buildQuizPrompt";
 import { normalizeQuiz } from "../quiz/normalizeQuiz";
@@ -36,12 +37,9 @@ import { verifyVerdictsSchema } from "./verifyVerdictsSchema";
 // honestly adjudicate in one pass.
 const MAX_VERIFIABLE_FINDINGS = 40;
 
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
-
-// Single-word column names on purpose: output rows come back snake_cased from
-// loadOutputs, single words round-trip unchanged (see the spec).
+// Single-word column names on purpose: loadOutputs returns columns camelCased,
+// so single words round-trip unchanged. story/quiz hold JSON strings by design
+// (they are z.string(), not json-mode array columns that loadOutputs parses).
 const walkthroughOutputSchema = z.object({
   path: z.string(),
   bytes: z.number().int().nonnegative(),
@@ -255,7 +253,7 @@ export function createReviewWorkflow(opts: {
                   summary: reviewOut.summary ? { ...reviewOut.summary, comments: applied.findings.length } : null,
                   message:
                     applied.dropped > 0
-                      ? `${reviewOut.message} Verification dropped ${plural(applied.dropped, "finding")}.`
+                      ? `${reviewOut.message} Verification dropped ${pluralize(applied.dropped, "finding")}.`
                       : reviewOut.message,
                 };
               }}
@@ -361,7 +359,7 @@ export function createReviewWorkflow(opts: {
                 chapters: story.chapters.length,
                 files: changesOut.files.length,
                 findings: reviewOut.comments.length,
-                message: `Walkthrough written to ${outPath} (${plural(story.chapters.length, "chapter")}, ${plural(reviewOut.comments.length, "finding")}).`,
+                message: `Walkthrough written to ${outPath} (${pluralize(story.chapters.length, "chapter")}, ${pluralize(reviewOut.comments.length, "finding")}).`,
                 story: JSON.stringify(story),
                 quiz: quiz ? JSON.stringify(quiz) : "",
                 impact: changeImpact.level,

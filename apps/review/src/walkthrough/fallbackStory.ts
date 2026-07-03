@@ -1,7 +1,7 @@
 import type { ChangedFile } from "./changedFileSchema";
 import { classifyChangeRole } from "./classifyChangeRole";
 import { describeChange } from "./describeChange";
-import { pluralize } from "./pluralize";
+import { pluralize } from "../text/pluralize";
 import type { Story, StoryBlock, StoryChapter } from "./storySchema";
 
 const groupedRoots = new Set(["apps", "packages", "examples", "src"]);

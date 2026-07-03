@@ -1,5 +1,6 @@
+import { fenceFor } from "../text/fenceFor";
+import { trimDiff } from "../text/trimDiff";
 import type { ImpactFile, ImpactFinding } from "./assessChangeImpact";
-import { fenceFor, trimDiff } from "./promptDiff";
 import type { QuizImpact } from "./quizSchema";
 
 export function buildQuizPrompt(args: {

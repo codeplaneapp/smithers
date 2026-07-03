@@ -1,6 +1,6 @@
 import type { ChangedFile } from "./changedFileSchema";
 import { escapeHtml } from "./escapeHtml";
-import { pluralize } from "./pluralize";
+import { pluralize } from "../text/pluralize";
 
 const MAX_ROWS = 12;
 const MIN_SEGMENT_PCT = 1.5;

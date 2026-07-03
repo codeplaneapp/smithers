@@ -1,4 +1,5 @@
-import { fenceFor, trimDiff } from "../quiz/promptDiff";
+import { fenceFor } from "../text/fenceFor";
+import { trimDiff } from "../text/trimDiff";
 
 export type VerifiableFinding = {
   path: string;

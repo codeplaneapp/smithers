@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { sha256Hex } from "../../src/server/sha256Hex.ts";
 import { createReviewWorker } from "../../src/server/worker.ts";
 import type { ReviewWorkerEnv } from "../../src/server/env.ts";
@@ -23,6 +23,18 @@ const SSE_USAGE = [
 ].join("\n");
 
 const SINGLE_CALL_COST_USD = 0.00153;
+
+const SSE_USAGE_WITH_CACHE = [
+  'event: message_start',
+  'data: {"type":"message_start","message":{"id":"m2","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":200,"cache_read_input_tokens":4000}}}',
+  "",
+  'event: message_delta',
+  'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":10,"output_tokens":42}}',
+  "",
+  'event: message_stop',
+  'data: {"type":"message_stop"}',
+  "",
+].join("\n");
 
 function sseUsageWithLargeBodyBeforeFinalUsage(): string {
   return [
@@ -158,6 +170,40 @@ describe("anthropic proxy", () => {
     expect(session?.spent_usd ?? 0).toBeCloseTo(SINGLE_CALL_COST_USD, 6);
   });
 
+  test("persists cache token counts so cache-heavy spend can be explained and backfilled", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE_WITH_CACHE });
+    teardowns.push(() => fixture.stop());
+    const token = await seedSession(env, REPO);
+    const meterings: Promise<unknown>[] = [];
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: (p) => meterings.push(p),
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await Promise.all(meterings);
+    const row = await env.DB.prepare("SELECT * FROM usage_events").first<Record<string, unknown>>();
+    expect(row?.input_tokens).toBe(10);
+    expect(row?.output_tokens).toBe(42);
+    expect(row?.cache_creation_tokens).toBe(200);
+    expect(row?.cache_read_tokens).toBe(4000);
+    // Cost folds cache tokens in: 10*3 + 42*15 + 200*3.75 + 4000*0.3 = per-1e6 USD.
+    const expected = (10 * 3 + 42 * 15 + 200 * 3.75 + 4000 * 0.3) / 1_000_000;
+    expect(row?.cost_usd as number).toBeCloseTo(expected, 9);
+  });
+
   test("meters SSE usage after more than 1 MiB of streamed content", async () => {
     const env = await buildTestEnv();
     const token = await seedSession(env, REPO);
@@ -198,6 +244,43 @@ describe("anthropic proxy", () => {
     expect(row?.input_tokens).toBe(300);
     expect(row?.output_tokens).toBe(42);
     expect(row?.cost_usd as number).toBeCloseTo(SINGLE_CALL_COST_USD, 6);
+  });
+
+  test("logs a metering miss when a 2xx messages response yields no usage (silent unmetered spend)", async () => {
+    const env = await buildTestEnv();
+    // A 200 /v1/messages body with no `model`: parseUsageFromJson returns null,
+    // so real spend would go unrecorded. That must be surfaced, not swallowed.
+    const fixture = serveFixtureAnthropic({ contentType: "application/json", body: '{"id":"x","content":[]}' });
+    teardowns.push(() => fixture.stop());
+    const token = await seedSession(env, REPO);
+    const meterings: Promise<unknown>[] = [];
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: (p) => meterings.push(p),
+    });
+    const errorSpy = spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const res = await worker.fetch(
+        new Request("https://review.test/anthropic/v1/messages", {
+          method: "POST",
+          headers: { "x-api-key": token, "content-type": "application/json" },
+          body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        }),
+        env,
+      );
+      expect(res.status).toBe(200);
+      await res.text();
+      await Promise.all(meterings);
+      const logged = errorSpy.mock.calls.some((call) => String(call[0]).includes("metering miss"));
+      expect(logged).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
+    const usage = await env.DB.prepare("SELECT * FROM usage_events").all();
+    expect(usage.results.length).toBe(0);
   });
 
   test("records all in-flight usage even when concurrent calls cross the spend cap", async () => {
@@ -451,6 +534,82 @@ describe("anthropic proxy", () => {
     );
     expect(res.status).toBe(403);
     expect(fixture.requests.length).toBe(0);
+  });
+
+  test("402s a re-minted session once the repo's monthly spend cap is reached", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });
+    teardowns.push(() => fixture.stop());
+    // Plan ceiling = prs_per_month * spend_cap_usd = 1 * 0.01 = 0.01.
+    await env.DB
+      .prepare(
+        "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .bind(REPO, "auto", 1, 0.01, Date.now())
+      .run();
+    // Month-to-date spend already crossed the ceiling.
+    await env.DB
+      .prepare(
+        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .bind("u1", REPO, 1, "claude-sonnet-4-6", 0, 0, 0.02, "messages", Date.now())
+      .run();
+    // A fresh session: spent_usd = 0 with a high per-session cap, i.e. a re-mint
+    // that reset the per-session budget. The per-repo ceiling must still bite.
+    const token = await seedSession(env, REPO, 1);
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+      }),
+      env,
+    );
+    expect(res.status).toBe(402);
+    expect(((await res.json()) as { error: string }).error).toContain("monthly spend cap");
+    // Enforced pre-flight: no real Anthropic call was made.
+    expect(fixture.requests.length).toBe(0);
+  });
+
+  test("forwards for a registered repo still under its monthly spend cap", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });
+    teardowns.push(() => fixture.stop());
+    // Ceiling = 5 * 1 = 5; nothing spent yet.
+    await env.DB
+      .prepare(
+        "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .bind(REPO, "auto", 5, 1, Date.now())
+      .run();
+    const token = await seedSession(env, REPO, 1);
+    const meterings: Promise<unknown>[] = [];
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: (p) => meterings.push(p),
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await Promise.all(meterings);
+    expect(fixture.requests.length).toBe(1);
   });
 
   test("forwards retry-after and x-request-id from upstream responses", async () => {

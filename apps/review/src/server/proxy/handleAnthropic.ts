@@ -1,5 +1,8 @@
 import type { ReviewWorkerEnv } from "../env.ts";
 import { jsonError } from "../jsonError.ts";
+import { repoMonthlyCapUsd } from "../repoMonthlyCapUsd.ts";
+import { repoMonthlySpendUsd } from "../repoMonthlySpendUsd.ts";
+import { lookupRepo } from "../sessions/lookupRepo.ts";
 import { authenticateProxyRequest } from "./authenticateProxyRequest.ts";
 import { parseUsageFromJson } from "./parseUsageFromJson.ts";
 import { parseUsageFromSse } from "./parseUsageFromSse.ts";
@@ -100,6 +103,21 @@ export async function handleAnthropic(
     if (spentUsd >= spendCapUsd) {
       return jsonError(402, "session spend cap exhausted", { spendCapUsd, spentUsd });
     }
+    // The per-session cap above resets whenever a session is re-minted; the
+    // per-repo month-to-date total does not. Enforce it so re-minted sessions
+    // cannot drive unbounded spend on an already-reviewed PR. Skipped when the
+    // repo has no live registration (nothing to derive a ceiling from).
+    const registration = await lookupRepo(env.DB, repo);
+    if (registration) {
+      const monthlyCapUsd = repoMonthlyCapUsd(registration);
+      const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
+      if (monthSpendUsd >= monthlyCapUsd) {
+        return jsonError(402, "repo monthly spend cap exhausted", {
+          monthlyCapUsd,
+          spentUsd: monthSpendUsd,
+        });
+      }
+    }
   } else {
     const repoHint = request.headers.get("x-smithers-repo");
     if (repoHint) {
@@ -154,7 +172,20 @@ export async function handleAnthropic(
     const summary = contentType.includes("text/event-stream")
       ? parseUsageFromSse(body)
       : parseUsageFromJson(body);
-    if (!summary) return;
+    if (!summary) {
+      // A 2xx /v1/messages response that yields no usage is a metering MISS
+      // (unexpected body shape), not a benign non-content frame — real spend
+      // goes unrecorded. Surface it so Workers logs can catch a parser drift.
+      if (upstream.status >= 200 && upstream.status < 300 && proxiedPath.startsWith("/v1/messages")) {
+        console.error("smithers-review: metering miss (usage parser returned null on a 2xx messages response)", {
+          repo,
+          pr,
+          path: proxiedPath,
+          contentType,
+        });
+      }
+      return;
+    }
     await recordUsage(env.DB, {
       sessionHash,
       repo,
@@ -163,7 +194,18 @@ export async function handleAnthropic(
       kind: contentType.includes("text/event-stream") ? "messages_stream" : "messages",
       now: deps.now(),
     });
-  })().catch(() => undefined);
+  })().catch((err) => {
+    // recordUsage spends real money; a silent failure here is the last
+    // unmetered-spend hole. Log (do not rethrow — the response already
+    // streamed) so the drop is diagnosable in production.
+    console.error("smithers-review: metering failed", {
+      repo,
+      pr,
+      path: proxiedPath,
+      status: upstream.status,
+      err: String(err),
+    });
+  });
   deps.waitUntil(metering);
 
   const responseHeaders = new Headers();
