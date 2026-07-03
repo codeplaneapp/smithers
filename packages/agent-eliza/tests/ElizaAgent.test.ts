@@ -95,6 +95,25 @@ describe("ElizaAgent", () => {
             await agent.preflight();
             expect(fake.getInitCount()).toBe(1);
         });
+
+        test("retries init after a failure instead of caching the rejected promise", async () => {
+            let attempts = 0;
+            const fake = createFakeRuntime();
+            const agent = new ElizaAgent(
+                { character: testCharacter },
+                {
+                    runtimeFactory: async () => {
+                        attempts += 1;
+                        if (attempts === 1) throw new Error("transient factory failure");
+                        return fake as any;
+                    },
+                }
+            );
+            await expect(agent.preflight()).rejects.toThrow(/transient factory failure/);
+            // The failed init must not poison the agent — a second call retries.
+            await expect(agent.preflight()).resolves.toBeUndefined();
+            expect(attempts).toBe(2);
+        });
     });
 
     describe("option pass-through", () => {

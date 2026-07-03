@@ -211,7 +211,7 @@ export class ElizaAgent {
         if (this.#runtime) return this.#runtime;
         if (this.#initPromise) return this.#initPromise;
 
-        this.#initPromise = this.#runtimeFactory(this.#opts).then(
+        const initPromise = this.#runtimeFactory(this.#opts).then(
             async (rt) => {
                 await rt.initialize();
                 if (this.#stopped) {
@@ -224,8 +224,15 @@ export class ElizaAgent {
                 return rt;
             }
         );
+        this.#initPromise = initPromise;
+        // Clear the memo if init fails so a later call retries instead of being
+        // permanently poisoned by a cached rejected promise. Guard against
+        // clobbering a newer init that may have started in the meantime.
+        initPromise.catch(() => {
+            if (this.#initPromise === initPromise) this.#initPromise = null;
+        });
 
-        return this.#initPromise;
+        return initPromise;
     }
 
     /**
