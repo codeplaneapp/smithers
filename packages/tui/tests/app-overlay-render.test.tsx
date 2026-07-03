@@ -1,8 +1,8 @@
 /** @jsxImportSource @opentui/react */
-import { describe, it, expect } from "bun:test";
+import { it, expect } from "bun:test";
 import { useState, act } from "react";
 import { useKeyboard } from "@opentui/react";
-import { renderForTest } from "./renderHelpers.tsx";
+import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import { AppBody } from "../src/App.tsx";
 import { TimelineView } from "../src/modes/TimelineMode.tsx";
@@ -47,7 +47,7 @@ function OverlayHarness({ events }: { events: GatewayEventFrame[] }) {
   );
 }
 
-describe("Help overlay – keeps the mode mounted and swallows its keys (CI-safe)", () => {
+describeHeadlessRender("Help overlay – keeps the mode mounted and swallows its keys (CI-safe)", () => {
   it("preserves the Timeline scrub position across open/close and blocks leaked keys", async () => {
     const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
       await renderForTest(<OverlayHarness events={EVENTS} />, { width: 120, height: 30 });

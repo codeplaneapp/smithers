@@ -270,7 +270,7 @@ function flatRow(i: number): FlatNode {
   };
 }
 
-describe("TreePanel – scroll window follows the focused row (CI-safe, no gateway)", () => {
+describeHeadlessRender("TreePanel – scroll window follows the focused row (CI-safe, no gateway)", () => {
   const rows = Array.from({ length: 40 }, (_, i) => flatRow(i));
 
   it("keeps a focused row past the fold visible", async () => {
