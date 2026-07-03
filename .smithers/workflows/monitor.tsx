@@ -277,7 +277,16 @@ async function resolveRunId(explicit: string | null): Promise<string> {
     const r = row as Record<string, unknown>;
     return !TERMINAL.has(asString(r.status ?? r.state ?? r.dbStatus).toLowerCase());
   };
-  const pick = (list.find(isActive) ?? list[0]) as Record<string, unknown>;
+  // Never auto-target another monitor run (or this one): with no explicit id,
+  // "latest active run" would otherwise resolve to whichever monitor launched
+  // last, and monitors end up monitoring each other / themselves.
+  const isMonitor = (row: unknown) => {
+    const r = row as Record<string, unknown>;
+    return asString(r.workflowId ?? r.workflow) === "monitor";
+  };
+  const candidates = list.filter((row) => !isMonitor(row));
+  if (candidates.length === 0) return "";
+  const pick = (candidates.find(isActive) ?? candidates[0]) as Record<string, unknown>;
   return asString(pick.id ?? pick.runId);
 }
 

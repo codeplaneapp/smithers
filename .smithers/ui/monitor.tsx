@@ -237,7 +237,20 @@ function App() {
       artifactOut.refetch(),
     ]);
   }
+  const runningMonitors = monitorRuns.filter((r) => (r.status ?? "").toLowerCase() === "running");
+
   async function launch() {
+    // Each click starts a NEW durable monitor run. Guard against accidentally
+    // stacking duplicates: with one already running, make the user confirm.
+    if (
+      runningMonitors.length > 0 &&
+      !window.confirm(
+        `${runningMonitors.length} monitor run(s) are already running. ` +
+          "Start another one anyway? (Each click of Monitor launches a new run.)",
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       const input: Record<string, unknown> = { autofix };
@@ -277,7 +290,7 @@ function App() {
           />
           <label className="check"><input type="checkbox" checked={autofix} onChange={(e) => setAutofix(e.currentTarget.checked)} /> autofix</label>
           <button className="button" data-testid="monitor-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
-          <button className="button primary" data-testid="monitor-launch" onClick={() => void launch()} disabled={busy}>Monitor</button>
+          <button className="button primary" data-testid="monitor-launch" onClick={() => void launch()} disabled={busy}>Start monitor run</button>
         </div>
       </header>
 
