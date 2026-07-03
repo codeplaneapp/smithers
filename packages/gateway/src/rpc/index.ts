@@ -86,6 +86,7 @@ export type GatewayRpcMethod =
   | "listDocs"
   | "streamRunEvents"
   | "streamDevTools"
+  | "getDevToolsSnapshot"
   | "getNodeOutput"
   | "getNodeDiff"
   | "cronList"
@@ -286,6 +287,13 @@ export type StreamDevToolsRequest = {
   afterSeq?: number;
   fromSeq?: number;
 };
+
+export type GetDevToolsSnapshotRequest = {
+  runId: string;
+  frameNo?: number;
+};
+
+export type GetDevToolsSnapshotResponse = Record<string, unknown>;
 
 export type NodeRequest = {
   runId: string;
@@ -878,6 +886,26 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
   },
   {
     version: SMITHERS_API_VERSION,
+    method: "getDevToolsSnapshot",
+    title: "Get DevTools Snapshot",
+    description: "Fetch a DevTools snapshot tree for a run, optionally pinned to a frame number.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "observability:read",
+    requestSchema: objectSchema({ runId, frameNo: integerSchema("Target frame number.", 0) }, ["runId"]),
+    responseSchema: objectSchema({}, [], "DevTools snapshot payload.", true),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "FrameOutOfRange", "PayloadTooLarge", "Internal"],
+    exampleRequest: { runId: "run_01", frameNo: 4 },
+    exampleResponse: {
+      version: 1,
+      runId: "run_01",
+      frameNo: 4,
+      seq: 18,
+      root: { id: 0, type: "workflow", name: "deploy", props: {}, children: [], depth: 0 },
+    },
+  },
+  {
+    version: SMITHERS_API_VERSION,
     method: "getNodeOutput",
     title: "Get Node Output",
     description: "Fetch a task node output payload.",
@@ -1179,9 +1207,6 @@ export function getRequiredScopeForGatewayMethod(method: string): GatewayScope |
   }
   if (method === "runs.diff" || method === "frames.list" || method === "frames.get" || method === "attempts.list" || method === "attempts.get") {
     return "run:read";
-  }
-  if (method === "getDevToolsSnapshot") {
-    return "observability:read";
   }
   if (method === "runs.rerun") {
     return "run:write";

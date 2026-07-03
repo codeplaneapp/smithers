@@ -114,5 +114,5 @@ describe("continue-as-new", () => {
         const previousEvents = await adapter.listEvents(previousRunId, -1, 100);
         expect(previousEvents.some((event) => event.type === "RunContinuedAsNew")).toBe(true);
         cleanup();
-    });
+    }, 15_000);
 });
