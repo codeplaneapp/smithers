@@ -25,6 +25,7 @@
 
 import React from "react";
 import { Effect } from "effect";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { Task } from "@smithers-orchestrator/components";
 import { OnCallbackQuery } from "./OnMessage.js";
 import { SendMessage, TelegramSendResultSchema } from "./SendMessage.js";
@@ -97,11 +98,25 @@ function outcomeText(request, spec, decision, by) {
 }
 
 /**
+ * Coerce a forum-topic `threadId` to the numeric `message_thread_id` the Bot API
+ * expects. A non-numeric string would otherwise become `NaN` and get sent
+ * silently, so reject it up front with `INVALID_INPUT`.
  * @param {number | string | undefined} threadId
  * @returns {number | undefined}
  */
 function threadIdAsNumber(threadId) {
-  return threadId != null ? Number(threadId) : undefined;
+  if (threadId == null) {
+    return undefined;
+  }
+  const numeric = Number(threadId);
+  if (!Number.isFinite(numeric)) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `Telegram.TelegramApproval threadId must be numeric (a forum-topic message_thread_id); received ${JSON.stringify(threadId)}.`,
+      { threadId },
+    );
+  }
+  return numeric;
 }
 
 /**
