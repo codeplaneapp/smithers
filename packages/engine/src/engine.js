@@ -1865,6 +1865,72 @@ function assertResumeDurabilityMetadata(existingRun, existingConfig, current, wo
     }
 }
 /**
+ * Claim-owner prefix the supervisor stamps on runs it resumes:
+ * apps/cli/src/supervisor.js builds `supervisor:<supervisorId>` when it claims a
+ * run for an unattended resume. The engine keys "unattended timer wake"
+ * detection off this cross-package contract, so keep the two in sync.
+ */
+const SUPERVISOR_CLAIM_OWNER_PREFIX = "supervisor:";
+/**
+ * `triggeredBy` the gateway stamps on its default-active timer sweep:
+ * packages/server/src/gateway.js `processDueTimers` resumes each due
+ * `waiting-timer` run through `resumeRunIfNeeded` -> `startRun`, which surfaces
+ * this marker as `config.gatewayTriggeredBy`. That sweep carries no
+ * `resumeClaim`, so the engine keys "unattended timer wake" detection off this
+ * cross-package contract too — keep the two in sync.
+ */
+const GATEWAY_TIMER_TRIGGERED_BY = "timer:gateway";
+/**
+ * An unattended timer wake that hits a resume-durability mismatch must fail the
+ * run instead of leaving it parked forever while the waker retries silently.
+ * Two default-active wakers reach this path on a source-changed run:
+ *   - the supervisor sweep (apps/cli/src/supervisor.js), which claims the run and
+ *     resumes it with a `supervisor:<id>` `resumeClaim.claimOwnerId`; and
+ *   - the gateway timer sweep (packages/server/src/gateway.js `processDueTimers`),
+ *     which resumes with no `resumeClaim` but `config.gatewayTriggeredBy ===
+ *     "timer:gateway"` and whose `startRun.catch` only broadcasts a transient
+ *     failed event without persisting `status: failed` (issue #494).
+ * Interactive `--resume` mismatches still throw without failing the run.
+ *
+ * @param {RunRow | null | undefined} existingRun
+ * @param {RunOptions} opts
+ * @returns {boolean}
+ */
+function shouldFailTimerWakeResume(existingRun, opts) {
+    if (existingRun?.status !== "waiting-timer")
+        return false;
+    if (opts.resumeClaim?.claimOwnerId?.startsWith(SUPERVISOR_CLAIM_OWNER_PREFIX) === true)
+        return true;
+    return opts.config?.gatewayTriggeredBy === GATEWAY_TIMER_TRIGGERED_BY;
+}
+/**
+ * @param {SmithersDb} adapter
+ * @param {EventBus} eventBus
+ * @param {string} runId
+ * @param {unknown} error
+ */
+async function markTimerWakeResumeFailed(adapter, eventBus, runId, error) {
+    const errorInfo = errorToJson(error);
+    await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
+    const failedAtMs = nowMs();
+    await Effect.runPromise(adapter.updateRun(runId, {
+        status: "failed",
+        finishedAtMs: failedAtMs,
+        heartbeatAtMs: null,
+        runtimeOwnerId: null,
+        cancelRequestedAtMs: null,
+        hijackRequestedAtMs: null,
+        hijackTarget: null,
+        errorJson: JSON.stringify(errorInfo),
+    }));
+    await Effect.runPromise(eventBus.emitEventWithPersist({
+        type: "RunFailed",
+        runId,
+        error: errorInfo,
+        timestampMs: failedAtMs,
+    }));
+}
+/**
  * @param {AbortController} controller
  * @param {AbortSignal} [signal]
  */
@@ -5629,7 +5695,22 @@ async function runWorkflowBodyDriver(workflow, opts) {
             },
         });
         if (opts.resume && existingRun) {
-            assertResumeDurabilityMetadata(existingRun, existingConfig, runMetadata, resolvedWorkflowPath);
+            try {
+                assertResumeDurabilityMetadata(existingRun, existingConfig, runMetadata, resolvedWorkflowPath);
+            }
+            catch (error) {
+                if (shouldFailTimerWakeResume(existingRun, opts)) {
+                    try {
+                        await markTimerWakeResumeFailed(adapter, eventBus, runId, error);
+                    }
+                    catch {
+                        // If persisting the failed status itself fails (e.g. a
+                        // transient DB error), still surface the original mismatch
+                        // rather than swallowing it behind the write error.
+                    }
+                }
+                throw error;
+            }
         }
         else if (opts.resume && !existingRun) {
             throw new SmithersError("RUN_NOT_FOUND", `Cannot resume run ${runId} because it does not exist.`, { runId });
