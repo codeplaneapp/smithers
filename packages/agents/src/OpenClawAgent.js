@@ -54,6 +54,8 @@ export class OpenClawAgent extends BaseCliAgent {
   /** @type {AgentCapabilityRegistry} */
   capabilities;
   cliEngine = "openclaw";
+  /** @type {string | undefined} */
+  issuedSessionId;
 
   /**
    * @param {OpenClawAgentOptions} [opts]
@@ -69,15 +71,28 @@ export class OpenClawAgent extends BaseCliAgent {
    */
   createOutputInterpreter() {
     let emittedStarted = false;
+    let sessionId = this.issuedSessionId;
     return {
-      onStdoutLine: () => {
+      onStdoutLine: (line) => {
+        sessionId = extractOpenClawSessionId(line) ?? sessionId;
         if (emittedStarted) return [];
         emittedStarted = true;
-        return [{ type: "started", engine: this.cliEngine, title: "OpenClaw" }];
+        return [{
+          type: "started",
+          engine: this.cliEngine,
+          title: "OpenClaw",
+          resume: sessionId,
+        }];
       },
       onExit: (result) => {
+        sessionId = extractOpenClawSessionId(result.stdout) ?? sessionId;
         const started = !emittedStarted
-          ? [{ type: "started", engine: this.cliEngine, title: "OpenClaw" }]
+          ? [{
+            type: "started",
+            engine: this.cliEngine,
+            title: "OpenClaw",
+            resume: sessionId,
+          }]
           : [];
         const ok = !result.exitCode || result.exitCode === 0;
         const answer = ok ? extractOpenClawAnswer(result.stdout) : undefined;
@@ -88,6 +103,7 @@ export class OpenClawAgent extends BaseCliAgent {
             engine: this.cliEngine,
             ok,
             answer: answer || undefined,
+            resume: sessionId,
             error:
               ok
                 ? undefined
@@ -106,10 +122,11 @@ export class OpenClawAgent extends BaseCliAgent {
 
     const resumeSession =
       typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
-    const session = resumeSession ?? this.opts.session;
+    const session = resumeSession ?? this.opts.sessionId ?? this.opts.session;
+    this.issuedSessionId = session;
 
     pushFlag(args, "--agent", this.opts.agent);
-    pushFlag(args, "--session", session);
+    pushFlag(args, "--session-id", session);
     if (this.opts.continueSession) args.push("--continue");
     pushFlag(args, "--workspace", this.opts.workspace ?? params.cwd);
 
@@ -137,7 +154,7 @@ function extractOpenClawAnswer(stdout) {
   const parsed = parseJson(trimmed);
   if (!isRecord(parsed)) return trimmed;
 
-  for (const key of ["text", "reply", "answer", "message", "output", "content"]) {
+  for (const key of ["text", "reply", "answer", "message", "output", "content", "payloads", "payload"]) {
     const value = parsed[key];
     const text = typeof value === "string" ? value : extractTextFromJsonValue(value);
     if (text) return text;
@@ -145,7 +162,7 @@ function extractOpenClawAnswer(stdout) {
 
   const result = parsed.result;
   if (isRecord(result)) {
-    for (const key of ["text", "reply", "answer", "message", "output", "content"]) {
+    for (const key of ["text", "reply", "answer", "message", "output", "content", "payloads", "payload"]) {
       const value = result[key];
       const text = typeof value === "string" ? value : extractTextFromJsonValue(value);
       if (text) return text;
@@ -162,6 +179,40 @@ function extractOpenClawError(stdout) {
   const parsed = parseJson(stdout.trim());
   if (!isRecord(parsed)) return "";
   return asString(parsed.error) ?? asString(parsed.message) ?? "";
+}
+
+/**
+ * @param {string} stdout
+ */
+function extractOpenClawSessionId(stdout) {
+  const parsed = parseJson(stdout.trim());
+  if (!isRecord(parsed)) return undefined;
+  return extractSessionIdFromRecord(parsed);
+}
+
+/**
+ * @param {Record<string, unknown>} record
+ * @returns {string | undefined}
+ */
+function extractSessionIdFromRecord(record) {
+  const direct = asString(record.sessionId) ?? asString(record.session_id);
+  if (direct) return direct;
+
+  const session = record.session;
+  if (typeof session === "string") return session;
+  if (isRecord(session)) {
+    const nested = extractSessionIdFromRecord(session);
+    if (nested) return nested;
+  }
+
+  for (const key of ["meta", "result", "data"]) {
+    const value = record[key];
+    if (!isRecord(value)) continue;
+    const nested = extractSessionIdFromRecord(value);
+    if (nested) return nested;
+  }
+
+  return undefined;
 }
 
 /**

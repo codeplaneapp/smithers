@@ -64,7 +64,7 @@ describe("OpenClaw CLI agent", () => {
     }
   });
 
-  test("OpenClawAgent maps resumeSession to --session", async () => {
+  test("OpenClawAgent maps resumeSession to --session-id", async () => {
     const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-openclaw-args-"));
     const argsFile = join(argsFileDir, "args.json");
     const fake = await makeFakeOpenClaw(captureScript);
@@ -80,7 +80,8 @@ describe("OpenClaw CLI agent", () => {
         resumeSession: "run-session",
       });
       const capturedArgs = JSON.parse(await readFile(argsFile, "utf8"));
-      expect(capturedArgs).toContain("--session");
+      expect(capturedArgs).toContain("--session-id");
+      expect(capturedArgs).not.toContain("--session");
       expect(capturedArgs).toContain("run-session");
       expect(capturedArgs).not.toContain("configured");
     } finally {
@@ -98,6 +99,32 @@ describe("OpenClaw CLI agent", () => {
         messages: [{ role: "user", content: "do work" }],
       });
       expect(result.text).toBe("openclaw finished");
+    } finally {
+      await rm(fake.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("OpenClawAgent reads payload text and session metadata from JSON output", async () => {
+    const fake = await makeFakeOpenClaw(
+      `process.stdout.write(JSON.stringify({ payloads: [{ text: "report ready" }], meta: { sessionId: "openclaw-session" } }) + "\\n");`,
+    );
+    try {
+      process.env.PATH = prependPath(fake.dir, originalPath);
+      const events = [];
+      const agent = new OpenClawAgent({ env: { PATH: process.env.PATH } });
+      const result = await agent.generate({
+        messages: [{ role: "user", content: "do work" }],
+        onEvent: (event) => events.push(event),
+      });
+      expect(result.text).toBe("report ready");
+      expect(events).toContainEqual({
+        type: "completed",
+        engine: "openclaw",
+        ok: true,
+        answer: "report ready",
+        resume: "openclaw-session",
+        error: undefined,
+      });
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
     }

@@ -460,11 +460,11 @@ export const CLI_AGENT_SURFACE_MANIFEST = [
     binary: "openclaw",
     packageExport: "OpenClawAgent",
     defaultOutputFormat: "json",
-    docsUrls: ["https://docs.openclaw.ai/concepts/messages"],
+    docsUrls: ["https://docs.openclaw.ai/cli/agent"],
     emittedFlags: [
       "agent",
       "--agent",
-      "--session",
+      "--session-id",
       "--continue",
       "--workspace",
       "--json",
@@ -474,14 +474,15 @@ export const CLI_AGENT_SURFACE_MANIFEST = [
     unsupportedFlags: [],
     optionMappings: [
       { option: "agent", flag: "--agent" },
-      { option: "session", flag: "--session" },
-      { option: "resumeSession", flag: "--session" },
+      { option: "sessionId", flag: "--session-id" },
+      { option: "session", flag: "--session-id" },
+      { option: "resumeSession", flag: "--session-id" },
       { option: "workspace", flag: "--workspace" },
     ],
     resume: {
       kind: "flag",
-      emitted: ["--session"],
-      notes: "Smithers sends prompts through `openclaw agent --session <id>` when a session id is supplied.",
+      emitted: ["--session-id"],
+      notes: "Smithers sends prompts through `openclaw agent --session-id <id>` when a session id is supplied.",
     },
   },
 ];
