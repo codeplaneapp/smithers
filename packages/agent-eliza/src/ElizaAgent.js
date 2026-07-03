@@ -224,13 +224,13 @@ export class ElizaAgent {
                 return rt;
             }
         );
-        this.#initPromise = initPromise;
-        // Clear the memo if init fails so a later call retries instead of being
-        // permanently poisoned by a cached rejected promise. Guard against
-        // clobbering a newer init that may have started in the meantime.
+        // A rejected init must not poison the agent forever. Clear the memo on
+        // failure so a later call retries. Guard the identity check so we never
+        // clobber a newer attempt (e.g. one already started after stop()/reset).
         initPromise.catch(() => {
             if (this.#initPromise === initPromise) this.#initPromise = null;
         });
+        this.#initPromise = initPromise;
 
         return initPromise;
     }

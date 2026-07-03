@@ -96,23 +96,59 @@ describe("ElizaAgent", () => {
             expect(fake.getInitCount()).toBe(1);
         });
 
-        test("retries init after a failure instead of caching the rejected promise", async () => {
-            let attempts = 0;
+        test("a failed init is not memoized: a later call retries after the cause is gone", async () => {
+            let attempt = 0;
             const fake = createFakeRuntime();
             const agent = new ElizaAgent(
                 { character: testCharacter },
                 {
                     runtimeFactory: async () => {
-                        attempts += 1;
-                        if (attempts === 1) throw new Error("transient factory failure");
+                        attempt++;
+                        // First attempt fails (transient), later attempts succeed.
+                        if (attempt === 1) {
+                            throw new Error("transient boot failure");
+                        }
                         return fake as any;
                     },
                 }
             );
-            await expect(agent.preflight()).rejects.toThrow(/transient factory failure/);
-            // The failed init must not poison the agent — a second call retries.
+
+            await expect(agent.preflight()).rejects.toThrow(/transient boot failure/);
+            // The second call must retry instead of re-throwing the memoized error.
             await expect(agent.preflight()).resolves.toBeUndefined();
-            expect(attempts).toBe(2);
+            expect(attempt).toBe(2);
+            expect(fake.getInitCount()).toBe(1);
+        });
+
+        test("retries when the runtime's initialize() rejects on the first attempt", async () => {
+            let attempt = 0;
+            let initCount = 0;
+            const agent = new ElizaAgent(
+                { character: testCharacter },
+                {
+                    runtimeFactory: async () => {
+                        attempt++;
+                        const shouldFailInit = attempt === 1;
+                        return {
+                            async initialize() {
+                                if (shouldFailInit) {
+                                    throw new Error("initialize exploded");
+                                }
+                                initCount++;
+                            },
+                            async useModel() {
+                                return "ok";
+                            },
+                            async stop() {},
+                        } as any;
+                    },
+                }
+            );
+
+            await expect(agent.preflight()).rejects.toThrow(/initialize exploded/);
+            await expect(agent.preflight()).resolves.toBeUndefined();
+            expect(attempt).toBe(2);
+            expect(initCount).toBe(1);
         });
     });
 
