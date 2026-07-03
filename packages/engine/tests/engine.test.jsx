@@ -79,16 +79,39 @@ describe("Parallel concurrency", () => {
         const { smithers, outputs, cleanup } = buildSmithers();
         let current = 0;
         let max = 0;
+        let started = 0;
+        const releases = [];
+        let runSettled = false;
+        async function waitForStarted(count) {
+            for (let i = 0; i < 1000; i += 1) {
+                if (started >= count)
+                    return;
+                if (runSettled)
+                    break;
+                await Bun.sleep(1);
+            }
+            throw new Error(`expected ${count} parallel tasks to start, saw ${started}`);
+        }
+        function releaseOne() {
+            const release = releases.shift();
+            if (!release)
+                throw new Error("no parallel task waiting to release");
+            release();
+        }
         const agent = {
             id: "fake",
             tools: {},
             generate: async () => {
                 current += 1;
+                started += 1;
                 if (current > max)
                     max = current;
-                await sleep(50);
-                current -= 1;
-                return { output: { value: 1 } };
+                return await new Promise((resolve) => {
+                    releases.push(() => {
+                        current -= 1;
+                        resolve({ output: { value: 1 } });
+                    });
+                });
             },
         };
         const workflow = smithers((_ctx) => (<Workflow name="parallel">
@@ -98,10 +121,24 @@ describe("Parallel concurrency", () => {
             </Task>))}
         </Parallel>
       </Workflow>));
-        const result = await Effect.runPromise(runWorkflow(workflow, {
+        const run = Effect.runPromise(runWorkflow(workflow, {
             input: {},
             maxConcurrency: 4,
-        }));
+        })).finally(() => {
+            runSettled = true;
+        });
+        await waitForStarted(2);
+        expect(current).toBe(2);
+        releaseOne();
+        releaseOne();
+        await waitForStarted(4);
+        expect(max).toBeLessThanOrEqual(2);
+        releaseOne();
+        releaseOne();
+        await waitForStarted(5);
+        expect(max).toBeLessThanOrEqual(2);
+        releaseOne();
+        const result = await run;
         expect(result.status).toBe("finished");
         expect(max).toBeLessThanOrEqual(2);
         cleanup();

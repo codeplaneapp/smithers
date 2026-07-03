@@ -7,16 +7,24 @@ import { HotWorkflowController, __hotWorkflowControllerInternals, } from "../src
 function makeTempDir() {
     return mkdtempSync(join(tmpdir(), "smithers-hot-ctrl-"));
 }
+function useNoopWatcher(ctrl) {
+    ctrl.watcher = {
+        waitEffect: () => Effect.succeed([]),
+        startEffect: () => Effect.void,
+        close: () => { },
+    };
+    return ctrl;
+}
 describe("HotWorkflowController", () => {
     const cleanups = [];
     afterEach(async () => {
-        for (const fn of cleanups) {
+        while (cleanups.length > 0) {
+            const fn = cleanups.pop();
             try {
-                await fn();
+                await fn?.();
             }
             catch { }
         }
-        cleanups.length = 0;
     });
     test("initializes with generation 0", async () => {
         const dir = makeTempDir();
@@ -26,6 +34,7 @@ describe("HotWorkflowController", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         expect(ctrl.gen).toBe(0);
         await ctrl.init();
@@ -38,6 +47,7 @@ describe("HotWorkflowController", () => {
         const entryPath = join(dir, "workflow.ts");
         writeFileSync(entryPath, "export default { build: () => null };");
         const ctrl = new HotWorkflowController(entryPath, { outDir });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         expect(existsSync(outDir)).toBe(false);
         await ctrl.init();
@@ -67,6 +77,7 @@ describe("HotWorkflowController", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         await ctrl.init();
         const event = await ctrl.reload(["workflow.ts"]);
@@ -81,6 +92,7 @@ describe("HotWorkflowController", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         await ctrl.init();
         const event = await ctrl.reload(["workflow.ts"]);
@@ -96,6 +108,7 @@ describe("HotWorkflowController", () => {
             rootDir: missingRoot,
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         const event = await ctrl.reload(["workflow.ts"]);
         expect(event.type).toBe("failed");
@@ -112,6 +125,7 @@ describe("HotWorkflowController", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         await ctrl.init();
         const event = await ctrl.reload(["workflow.ts"]);
@@ -127,6 +141,7 @@ describe("HotWorkflowController", () => {
         const entryPath = join(dir, "workflow.ts");
         writeFileSync(entryPath, "export default { build: () => null };");
         const ctrl = new HotWorkflowController(entryPath, { outDir });
+        useNoopWatcher(ctrl);
         await ctrl.init();
         expect(existsSync(outDir)).toBe(true);
         await ctrl.close();
@@ -140,6 +155,7 @@ describe("HotWorkflowController", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         await ctrl.init();
         await ctrl.close();
         await ctrl.close(); // should not throw
@@ -150,6 +166,7 @@ describe("HotWorkflowController", () => {
         const entryPath = join(dir, "workflow.ts");
         writeFileSync(entryPath, "ok");
         const ctrl = new HotWorkflowController(entryPath);
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         // The controller should have been created without errors
         expect(ctrl.gen).toBe(0);
@@ -162,6 +179,7 @@ describe("HotWorkflowController", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         await ctrl.init();
         await ctrl.reload(["a.ts"]);

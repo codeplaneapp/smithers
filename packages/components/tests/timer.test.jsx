@@ -1,11 +1,13 @@
 /** @jsxImportSource smithers-orchestrator */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Effect } from "effect";
 import { Parallel, Ralph, Sequence, Task, Timer, Workflow, runWorkflow } from "smithers-orchestrator";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { createTestSmithers, sleep } from "./helpers.js";
 import { z } from "zod";
 import { dirname } from "node:path";
+
+setDefaultTimeout(15_000);
 /**
  * @param {any} workflow
  * @param {string} dbPath
@@ -177,7 +179,7 @@ describe("timer runtime", () => {
             <Task id="left-task" output={outputs.left}>{{ v: 1 }}</Task>
           </Sequence>
           <Sequence>
-            <Timer id="right-timer" duration="1600ms"/>
+            <Timer id="right-timer" duration="5000ms"/>
             <Task id="right-task" output={outputs.right}>{{ v: 2 }}</Task>
           </Sequence>
         </Parallel>
@@ -196,8 +198,8 @@ describe("timer runtime", () => {
         expect(leftRowsAfterSecond).toHaveLength(1);
         expect(rightRowsAfterSecond).toHaveLength(0);
         const third = await resumeUntilDone(workflow, dbPath, first.runId, {
-            maxAttempts: 20,
-            intervalMs: 120,
+            maxAttempts: 36,
+            intervalMs: 160,
         });
         expect(third.status).toBe("finished");
         const leftRows = await db.select().from(tables.left);

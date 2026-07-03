@@ -405,7 +405,10 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             return Effect.fail(timeoutError);
         });
         const watchdog = Effect.repeat(checkHeartbeat, Schedule.spaced(Duration.millis(TASK_HEARTBEAT_TIMEOUT_CHECK_MS))).pipe(Effect.flatMap(() => Effect.never));
-        const raced = await Effect.runPromise(Effect.race(Effect.either(taskEffect), Effect.either(watchdog)), { signal: taskSignal });
+        // The watchdog aborts taskSignal itself. Running the supervisor race with
+        // the same signal can interrupt the race before it returns the timeout
+        // error, which leaves cleanup dependent on runtime timing.
+        const raced = await Effect.runPromise(Effect.race(Effect.either(taskEffect), Effect.either(watchdog)));
         if (Either.isLeft(raced)) {
             throw raced.left;
         }

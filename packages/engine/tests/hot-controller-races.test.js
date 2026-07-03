@@ -2,10 +2,19 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { HotWorkflowController } from "../src/hot/HotWorkflowController.js";
 
 function makeTempDir() {
     return mkdtempSync(join(tmpdir(), "smithers-hot-races-"));
+}
+function useNoopWatcher(ctrl) {
+    ctrl.watcher = {
+        waitEffect: () => Effect.succeed([]),
+        startEffect: () => Effect.void,
+        close: () => {},
+    };
+    return ctrl;
 }
 
 describe("HotWorkflowController race conditions", () => {
@@ -28,6 +37,7 @@ describe("HotWorkflowController race conditions", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         await ctrl.init();
 
@@ -53,6 +63,7 @@ describe("HotWorkflowController race conditions", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         await ctrl.init();
 
@@ -72,6 +83,7 @@ describe("HotWorkflowController race conditions", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         await ctrl.init();
 
@@ -96,6 +108,7 @@ describe("HotWorkflowController race conditions", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         await ctrl.init();
 
         // Start a reload, then close immediately. Both promises must settle
@@ -118,6 +131,7 @@ describe("HotWorkflowController race conditions", () => {
         const ctrl = new HotWorkflowController(entryPath, {
             outDir: join(dir, ".hmr"),
         });
+        useNoopWatcher(ctrl);
         cleanups.push(() => ctrl.close());
         await ctrl.init();
 

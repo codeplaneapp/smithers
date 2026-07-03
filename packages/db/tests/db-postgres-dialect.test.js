@@ -151,6 +151,46 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         expect(row.done).toBe(true);
     });
 
+    test("pending approval fallback works through SmithersDb on postgres storage", async () => {
+        const adapter = new SmithersDb(new Database(":memory:"));
+        adapter.internalStorage = storage;
+        await adapter.insertRun({
+            runId: "run-pg-approval-fallback",
+            workflowName: "pg-workflow",
+            status: "waiting-approval",
+            createdAtMs: 1717000000100,
+        });
+        await adapter.insertNode({
+            runId: "run-pg-approval-fallback",
+            nodeId: "pg-gate",
+            iteration: 0,
+            state: "waiting-approval",
+            lastAttempt: null,
+            updatedAtMs: 1717000000200,
+            outputTable: "",
+            label: "PG gate",
+        });
+
+        const runApprovals = await adapter.listPendingApprovals("run-pg-approval-fallback");
+        expect(runApprovals).toHaveLength(1);
+        expect(runApprovals[0]).toMatchObject({
+            runId: "run-pg-approval-fallback",
+            nodeId: "pg-gate",
+            status: "requested",
+            requestedAtMs: 1717000000200,
+            autoApproved: false,
+        });
+
+        const allApprovals = await adapter.listAllPendingApprovals();
+        const found = allApprovals.find((approval) => approval.runId === "run-pg-approval-fallback");
+        expect(found).toMatchObject({
+            nodeId: "pg-gate",
+            workflowName: "pg-workflow",
+            runStatus: "waiting-approval",
+            nodeLabel: "PG gate",
+        });
+    });
+
     test("bytea columns round-trip as Buffers", async () => {
         const embedding = Buffer.from([0x01, 0x02, 0x03, 0x04]);
         await storage.upsert(

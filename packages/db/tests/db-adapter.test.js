@@ -467,6 +467,45 @@ describe("SmithersDb adapter", () => {
             note: "needs operator review",
         });
     });
+    test("pending approval lists include waiting nodes with no request row", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertRun(runRow("r1", "waiting-approval", {
+            workflowName: "workflow-a",
+        }));
+        await adapter.insertRun(runRow("cancelled-run", "cancelled", {
+            workflowName: "workflow-c",
+        }));
+        await adapter.insertNode(nodeRow("r1", "mounted-gate", "waiting-approval", {
+            label: "Mounted gate",
+            updatedAtMs: now - 500,
+        }));
+        await adapter.insertNode(nodeRow("cancelled-run", "old-gate", "waiting-approval", {
+            label: "Old gate",
+            updatedAtMs: now - 250,
+        }));
+
+        const runApprovals = await adapter.listPendingApprovals("r1");
+        expect(runApprovals).toHaveLength(1);
+        expect(runApprovals[0]).toMatchObject({
+            runId: "r1",
+            nodeId: "mounted-gate",
+            iteration: 0,
+            status: "requested",
+            requestedAtMs: now - 500,
+            requestJson: null,
+            autoApproved: false,
+        });
+
+        const allApprovals = await adapter.listAllPendingApprovals();
+        expect(allApprovals).toHaveLength(1);
+        expect(allApprovals[0]).toMatchObject({
+            runId: "r1",
+            nodeId: "mounted-gate",
+            workflowName: "workflow-a",
+            runStatus: "waiting-approval",
+            nodeLabel: "Mounted gate",
+        });
+    });
     test("insertCache and getCache", async () => {
         const { adapter } = createTestDb();
         await adapter.insertCache(cacheRow("key1"));

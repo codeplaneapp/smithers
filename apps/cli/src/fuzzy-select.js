@@ -138,6 +138,18 @@ function limitOptions({ cursor, options, maxItems, rows, style }) {
     });
 }
 
+function applyBackspaceControls(input) {
+    let output = "";
+    for (const char of String(input ?? "")) {
+        if (char === "\x7f" || char === "\b") {
+            output = output.slice(0, -1);
+            continue;
+        }
+        output += char;
+    }
+    return output;
+}
+
 /** process.stdout.rows is undefined when not a TTY (CI/piped); fall back to 24. */
 function terminalRows() {
     return process.stdout.rows || 24;
@@ -207,6 +219,17 @@ class FuzzySelectPrompt extends Prompt {
             if (this.optionCursor > this.filtered.length - 1) {
                 this.optionCursor = Math.max(0, this.filtered.length - 1);
             }
+        });
+
+        this.on("key", (_seq, key) => {
+            if (key?.name !== "backspace" && key?.name !== "delete") return;
+            const normalized = applyBackspaceControls(this.userInput);
+            if (normalized === this.userInput) return;
+            if (this.rl) {
+                this.rl.line = normalized;
+                this.rl.cursor = Math.min(this.rl.cursor ?? normalized.length, normalized.length);
+            }
+            this._setUserInput(normalized);
         });
 
         // Arrow keys (and only arrow keys, since trackValue=true) emit "cursor".
