@@ -1,0 +1,111 @@
+---
+title: Cloudflare
+description: Run Smithers on Cloudflare Workers with Durable Object SQLite or D1 storage and a Sandbox SDK provider.
+---
+
+`@smithers-orchestrator/cloudflare` runs Smithers inside Cloudflare Workers. It
+provides a SQLite descriptor over Durable Object storage or D1, a factory that
+builds the Smithers API against that descriptor, and a sandbox provider backed
+by the Cloudflare Sandbox SDK.
+
+Import `createSmithersCloudflare` from the main package subpath; the descriptor
+and provider helpers are available from either the subpath or the scoped
+package:
+
+```ts
+import {
+  createSmithersCloudflare,
+  createCloudflareDurableObjectSqliteDescriptor,
+  createCloudflareD1SqliteDescriptor,
+  createCloudflareSandboxProvider,
+} from "smithers-orchestrator/cloudflare";
+```
+
+## Create the Smithers API
+
+`createSmithersCloudflare(schemas, { db })` mirrors
+[`createSmithers`](/reference/authoring) but takes a Cloudflare SQLite
+descriptor as its storage:
+
+```ts
+type CreateSmithersCloudflareOptions = CreateSmithersOptions & {
+  db: CloudflareSqliteDescriptor;  // required
+  close?: () => Promise<void> | void;
+};
+
+const { smithers, outputs } = await createSmithersCloudflare(
+  { input: inputSchema, result: resultSchema },
+  { db: createCloudflareDurableObjectSqliteDescriptor(ctx.storage) },
+);
+```
+
+It is `async` (it provisions the schema and per-output tables through the
+descriptor) and returns the same API surface as `createSmithers` plus an
+optional `close()`. Omitting `db` throws `INVALID_INPUT`.
+
+## Storage: Durable Object SQLite (recommended)
+
+`createCloudflareDurableObjectSqliteDescriptor(storage)` wraps a Durable
+Object's SQLite store. Pass the Durable Object's `ctx.storage` (or its
+`ctx.storage.sql` handle):
+
+```ts
+export class SmithersDurableObject {
+  constructor(ctx, env) {
+    this.descriptor = createCloudflareDurableObjectSqliteDescriptor(ctx.storage);
+  }
+}
+```
+
+This is the durable choice. When `storage` exposes a `transaction` method the
+descriptor binds and forwards it, so Smithers gets real interactive
+transactions (`BEGIN` / `COMMIT` / `ROLLBACK`). Frame commits, run-state
+checkpoints, and task completion all rely on that atomicity.
+
+## Storage: D1 (read-mostly only)
+
+`createCloudflareD1SqliteDescriptor(database)` wraps a D1 binding:
+
+```ts
+const descriptor = createCloudflareD1SqliteDescriptor(env.DB);
+```
+
+<Warning>
+  D1 has no interactive transactions. Its `prepare`/`bind`/`run` API cannot hold
+  an open `BEGIN`/`COMMIT`/`ROLLBACK` across round-trips, so the descriptor's
+  `transaction()` is a non-atomic pass-through: it just runs the operation with
+  no transaction. A failure partway through leaves earlier writes committed.
+  Smithers' durable run-of-record writes assume transactional commits, so a
+  mid-transaction failure on D1 can leave partial state. Do not back durable run
+  state with D1. Use `createCloudflareDurableObjectSqliteDescriptor` for
+  durability and reserve D1 for read-mostly use.
+</Warning>
+
+## Sandbox provider
+
+Runtime `"cloudflare"` is provider-backed: it has no built-in transport, so a
+[`<Sandbox>`](/components/sandbox) that requests it needs a provider.
+`createCloudflareSandboxProvider(options)` builds one over the Cloudflare
+Sandbox SDK (`@cloudflare/sandbox`, an optional dependency imported lazily):
+
+```ts
+const provider = createCloudflareSandboxProvider({ binding: env.Sandbox });
+```
+
+Pass the provider where the runtime is resolved. Requesting runtime
+`"cloudflare"` without a provider throws `INVALID_INPUT` ("Sandbox runtime
+\"cloudflare\" requires a provider from smithers-orchestrator/cloudflare, e.g.
+createCloudflareSandboxProvider()."). The provider's id is
+`CLOUDFLARE_SANDBOX_PROVIDER_ID` (`"cloudflare-sandbox"`), which becomes the
+selected runtime.
+
+`options.binding` (or `(request) => binding`) must be the Durable Object binding
+for the Sandbox SDK. Other options cover the sandbox id, workdir (default
+`/workspace`), command, env, setup files, execution mode (`exec` or `process`),
+and cleanup (`destroy` or `keep`).
+
+## Notes
+
+- The package exports no Durable Object class and no Worker entry helper. You write the Worker and Durable Object; the package supplies the storage descriptors and sandbox provider.
+- `createMockCloudflareSandboxEnvironment(handler)` is exported for tests: it implements the subset of the Sandbox SDK the provider uses.
+- The descriptor helpers are also exported from `@smithers-orchestrator/cloudflare`; only `createSmithersCloudflare` requires the `smithers-orchestrator/cloudflare` subpath.

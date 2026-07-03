@@ -262,6 +262,7 @@
           "integrations/serve",
           "integrations/telegram",
           "integrations/gateway",
+          "integrations/cloudflare",
           "integrations/custom-ui",
           "integrations/mcp-server",
           "integrations/claude-code-plugin",

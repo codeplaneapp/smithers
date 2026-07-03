@@ -3,7 +3,7 @@ title: Integrations
 description: Three patterns for connecting Smithers to external services.
 ---
 
-Smithers ships no first-party clients for Linear, Notion, Slack, or similar services. Treat them as external integrations your app owns and pick one of three wirings: tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If a service already exposes an MCP server and you are using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
+Smithers ships first-party event sources for GitHub, Linear, and Telegram (the `@smithers-orchestrator/integrations` package) that turn provider webhooks into durable workflow signals. For services it does not cover (Notion, Slack, and similar), treat them as external integrations your app owns and pick one of three wirings: tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If a service already exposes an MCP server and you are using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
 
 ## Pattern 1: Pass tools to an SDK agent
 

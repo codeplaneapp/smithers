@@ -14,7 +14,9 @@ From inside your project:
 bunx smithers-orchestrator init
 ```
 
-This creates `.smithers/` and seeds **`.smithers/prompts/hello.mdx`** - your editable hello-world workflow. Open it, change the instruction, and the next run picks it up. No TypeScript required.
+In a terminal, `init` opens a short picker: choose which workflows to install (grouped, with the **hello** starter first) and which agents get the Smithers skill. It then scaffolds `.smithers/` into your repo, installs its dependencies, and adds `smithers.db` to your `.gitignore` so the run store never lands in a commit. Piped or non-interactive callers (CI, agents, `--yes`) skip the picker and install the defaults.
+
+The star of the scaffold is **`.smithers/prompts/hello.mdx`** - your editable hello-world workflow. Open it, change the instruction, and the next run picks it up. No TypeScript required. Re-running `init` later remembers what you picked and only offers to update files that drifted.
 
 </Step>
 
@@ -45,6 +47,8 @@ You don't run Smithers yourself - your coding agent does. Ask it, in plain langu
 > **"Run the hello workflow with Smithers and show me the output."**
 
 Your agent runs `bunx smithers-orchestrator workflow run hello`, a durable run completes, and it reports the output back to you. Edit `.smithers/prompts/hello.mdx`, ask it to run again, watch the output change.
+
+When you run it yourself in a terminal, a cheap, fast model narrates the result: a short recap in the terminal plus a self-contained HTML summary that opens in your browser (written under `.smithers/reports/`). Pass `--no-report`, or set `SMITHERS_NO_REPORT=1`, to skip it.
 
 <Note>
 This runs the coding agent `init` detected (Claude Code, Codex, ...), so have one installed and signed in. From here on, your agent drives Smithers for you - you describe outcomes, it picks and runs the workflow.

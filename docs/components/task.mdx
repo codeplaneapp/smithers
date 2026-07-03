@@ -15,6 +15,7 @@ type TaskProps = {
   dependsOn?: string[];
   needs?: Record<string, string>;
   deps?: Record<string, OutputTarget>; // typed render-time upstream outputs
+  depsOptional?: boolean; // render even when some deps are unresolved (skip them)
   fork?: string; // start from another task's final agent session snapshot
   allowTools?: string[]; // CLI-agent tool allowlist
   key?: string;
@@ -122,6 +123,7 @@ Three props express upstream dependencies. They compose.
 - **`dependsOn: string[]`**: ordering only. The task waits until every listed task id is terminal. No values are passed in.
 - **`needs: Record<string, string>`**: named dependencies. Each value is an upstream task id; each key is the name that value is looked up under.
 - **`deps: Record<string, OutputTarget>`**: typed render-time outputs. The task gates on each dependency and passes the resolved rows to a `children` callback via `{(deps) => ...}`.
+- **`depsOptional: boolean`**: tolerate unresolved deps. By default a task with `deps` defers until every dependency has an output row. With `depsOptional`, the task renders as soon as it can, and any dependency that has no row (for example an upstream `continueOnFail` task that failed) is simply absent from the `deps` object. Read those values defensively: `deps.summary?.text`, because an unresolved dep is missing, not present-but-undefined.
 
 The detail that bites people: **a `deps` key is treated as the upstream task's id.** `deps={{ analyze: outputs.analysis }}` depends on a task whose id is `analyze`. If your dep name differs from the upstream id, remap it with `needs`:
 
