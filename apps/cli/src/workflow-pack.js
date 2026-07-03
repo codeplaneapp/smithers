@@ -14,7 +14,7 @@ import { WORKFLOW_UI_SOURCES } from "./workflowUiSources.js";
 // scripts/generate-workflow-pack.ts (single source of truth — no hand-embedding).
 import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
 /**
- * @typedef {{ onSkip?: (relPath: string) => void; scaffolded?: (counts: { writtenCount: number; skippedCount: number; preservedCount: number }) => void; skillInstalled?: (result: import("./installCuratedSkill.js").CuratedSkillResult) => void; agentDocsNoted?: (result: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary) => void; installStart?: () => void; installDone?: (result: InitInstallResult, captured?: { stdout: string; stderr: string }) => void; }} InitReporter
+ * @typedef {{ onSkip?: (relPath: string) => void; scaffolded?: (counts: { writtenCount: number; skippedCount: number; preservedCount: number }) => void; skillInstalled?: (result: import("./installCuratedSkill.js").CuratedSkillResult) => void; agentDocsNoted?: (result: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary) => void; gitignoreEnsured?: (result: RootGitignoreResult) => void; installStart?: () => void; installDone?: (result: InitInstallResult, captured?: { stdout: string; stderr: string }) => void; }} InitReporter
  */
 /**
  * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; env?: NodeJS.ProcessEnv; selectedWorkflows?: string[]; selectedSkillTargets?: string[]; selectedAgentDocs?: string[]; scaffoldCustomAgent?: boolean; }} InitOptions
@@ -24,7 +24,8 @@ import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
  */
 /**
  * @typedef {{ path: string; absolutePath: string; contents: string; isComponent: boolean; importedBy: string[] }} ChangedPackFile
- * @typedef {{ rootDir: string; writtenFiles: string[]; skippedFiles: string[]; preservedPaths: string[]; changedFiles: ChangedPackFile[]; updatedFiles?: string[]; install: InitInstallResult; skill?: import("./installCuratedSkill.js").CuratedSkillResult; agentDocs?: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary; }} InitResult
+ * @typedef {{ status: "created" | "updated" | "unchanged" | "skipped"; path: string; reason?: string; }} RootGitignoreResult
+ * @typedef {{ rootDir: string; writtenFiles: string[]; skippedFiles: string[]; preservedPaths: string[]; changedFiles: ChangedPackFile[]; updatedFiles?: string[]; install: InitInstallResult; skill?: import("./installCuratedSkill.js").CuratedSkillResult; agentDocs?: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary; gitignore?: RootGitignoreResult; }} InitResult
  */
 /**
  * @typedef {{ command: string; description: string; }} WorkflowCta
@@ -1311,7 +1312,7 @@ function renderComponents(componentNames) {
         },
         {
             path: ".smithers/components/roles.ts",
-            contents: "// smithers-source: seeded\n//\n// Central role registry for the plan-implement family. Defines WHO plays each\n// role so the workflows stay declarative:\n//\n//   - implementer  — the heavy implementation tier. Prefers Gemini when its CLI\n//                    is installed, otherwise the latest Sonnet, with Codex as a\n//                    final fallback. This is where \"use Sonnet more often\" lives.\n//   - panelists    — the model-diverse pair for the PLAN and REVIEW panels\n//                    (Claude + Codex by default, or whatever 2 CLIs are present).\n//                    Deliberately NOT Sonnet: planning and reviewing stay on the\n//                    stronger Opus/Codex tier.\n//   - synthesizer  — the panel MODERATOR that merges panelist outputs. Usually\n//                    Codex.\n//\n// These are self-contained agent instances (not the generated `../agents`\n// providers) so the file is robust regardless of which accounts a given user\n// has registered.\nimport { spawnSync } from \"node:child_process\";\nimport {\n  type AgentLike,\n  AntigravityAgent,\n  ClaudeCodeAgent,\n  CodexAgent,\n} from \"smithers-orchestrator\";\n\n// The implementer model. Sonnet is the strong default for the implementation\n// tier. Claude Sonnet 5 (`claude-sonnet-5`) shipped 2026-06-29 and is now the\n// newest Sonnet (verified against the live Anthropic Models API: id\n// `claude-sonnet-5`, created_at 2026-06-29, 1M context), so it is the default\n// implementer. Override with SMITHERS_IMPLEMENTER_MODEL to pin another model.\nexport const IMPLEMENTER_MODEL =\n  process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || \"claude-sonnet-5\";\n\n// Gemini is reached through Antigravity's `agy` CLI (the legacy `gemini` CLI is\n// sunset in Smithers and only throws), so we probe for `agy`, not `gemini`.\nexport const GEMINI_MODEL =\n  process.env.SMITHERS_GEMINI_MODEL?.trim() || \"gemini-3.1-pro-preview\";\n\nfunction commandExists(command: string): boolean {\n  const probe =\n    process.platform === \"win32\"\n      ? spawnSync(\"where\", [command], { stdio: \"ignore\" })\n      : spawnSync(\"which\", [command], { stdio: \"ignore\" });\n  return probe.status === 0;\n}\n\nconst hasGemini = commandExists(\"agy\");\nconst hasCodex = commandExists(\"codex\");\nconst hasClaude = commandExists(\"claude\");\n\nconst sonnet = new ClaudeCodeAgent({ model: IMPLEMENTER_MODEL });\nconst opus = new ClaudeCodeAgent({ model: \"claude-opus-4-8\" });\nconst codex = new CodexAgent({ model: \"gpt-5.5\", skipGitRepoCheck: true });\nconst gemini = new AntigravityAgent({ model: GEMINI_MODEL });\n\n// Implementer failover chain: prefer Gemini if available, then Sonnet, then\n// Codex. Sonnet always stays in the chain as the guaranteed strong fallback so\n// the implementer works even with no Gemini/Codex CLI installed.\nexport const implementer: AgentLike[] = [\n  ...(hasGemini ? [gemini] : []),\n  sonnet,\n  ...(hasCodex ? [codex] : []),\n];\n\n// Plan & review panel: a model-diverse pair. Claude (Opus) + Codex by default,\n// or whatever 2 CLIs are installed (never Sonnet). Falls back to the static\n// Opus+Codex pair when fewer than 2 CLIs are detected (e.g. CI without agent\n// CLIs) so panel structure and graph-rendering never break.\nconst detectedPanel: AgentLike[] = [\n  ...(hasClaude ? [opus] : []),\n  ...(hasGemini ? [gemini] : []),\n  ...(hasCodex ? [codex] : []),\n];\nexport const panelists: AgentLike[] =\n  detectedPanel.length >= 2 ? detectedPanel.slice(0, 2) : [opus, codex];\n\n// The panel moderator / synthesizer — prefer another detected subscription CLI\n// (Gemini, then Codex) before falling back to Opus, so a stray/fake\n// OPENAI_API_KEY does not make Codex preflight fail when another CLI can do the\n// job. Opus is the always-present fallback. This is a failover chain (not a\n// single agent), but be precise about HOW the fallback engages: the engine\n// advances a failover chain across retry attempts, and a preflight/auth failure\n// is non-retryable, so the chain does NOT by itself walk from Codex to Opus on a\n// moderator-only Codex auth failure. What actually makes the shipped panels\n// resilient is the engine's per-run circuit breaker combined with the invariant\n// below: `panelists` always includes the SAME Codex instance, so when Codex auth\n// is stale a panelist fails preflight first and disables that instance run-wide;\n// the moderator (which runs after the panelists) then finds Codex disabled and\n// selects the next healthy agent on its first attempt. Keeping Opus in the chain\n// guarantees a healthy fallback exists for that path. Custom panels that use a\n// Codex moderator WITHOUT Codex among the panelists are not covered by this and\n// can still fail to produce a verdict — the review UI surfaces that terminal\n// no-verdict state explicitly.\nexport const synthesizer: AgentLike[] = [\n  ...(hasGemini ? [gemini] : []),\n  ...(hasCodex ? [codex] : []),\n  opus,\n];\n",
+            contents: "// smithers-source: seeded\n//\n// Central role registry for the plan-implement family. Defines WHO plays each\n// role so the workflows stay declarative:\n//\n//   - implementer  — the heavy implementation tier: Codex first, Sonnet as the\n//                    guaranteed fallback (the middle of the fable sandwich).\n//   - panelists    — the model-diverse pair for the PLAN and REVIEW panels,\n//                    led by Fable 5 (Fable + Codex by default). Planning and\n//                    reviewing stay on the strongest tier.\n//   - synthesizer  — the panel MODERATOR that merges panelist outputs. Usually\n//                    Codex.\n//\n// These are self-contained agent instances (not the generated `../agents`\n// providers) so the file is robust regardless of which accounts a given user\n// has registered.\nimport { spawnSync } from \"node:child_process\";\nimport {\n  type AgentLike,\n  AntigravityAgent,\n  ClaudeCodeAgent,\n  CodexAgent,\n} from \"smithers-orchestrator\";\n\n// The implementer model. Sonnet is the strong default for the implementation\n// tier. Claude Sonnet 5 (`claude-sonnet-5`) shipped 2026-06-29 and is now the\n// newest Sonnet (verified against the live Anthropic Models API: id\n// `claude-sonnet-5`, created_at 2026-06-29, 1M context), so it is the default\n// implementer. Override with SMITHERS_IMPLEMENTER_MODEL to pin another model.\nexport const IMPLEMENTER_MODEL =\n  process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || \"claude-sonnet-5\";\n\n// Gemini is reached through Antigravity's `agy` CLI (the legacy `gemini` CLI is\n// sunset in Smithers and only throws), so we probe for `agy`, not `gemini`.\nexport const GEMINI_MODEL =\n  process.env.SMITHERS_GEMINI_MODEL?.trim() || \"gemini-3.1-pro-preview\";\n\nfunction commandExists(command: string): boolean {\n  const probe =\n    process.platform === \"win32\"\n      ? spawnSync(\"where\", [command], { stdio: \"ignore\" })\n      : spawnSync(\"which\", [command], { stdio: \"ignore\" });\n  return probe.status === 0;\n}\n\nconst hasGemini = commandExists(\"agy\");\nconst hasCodex = commandExists(\"codex\");\nconst hasClaude = commandExists(\"claude\");\n\nconst sonnet = new ClaudeCodeAgent({ model: IMPLEMENTER_MODEL });\nconst opus = new ClaudeCodeAgent({ model: \"claude-opus-4-8\" });\n// Fable 5: the planning/review tier of the fable sandwich (subscription access\n// verified 2026-07-02). Fable plans and reviews; Codex implements.\nconst fable = new ClaudeCodeAgent({ model: \"claude-fable-5\" });\nconst codex = new CodexAgent({ model: \"gpt-5.5\", skipGitRepoCheck: true });\nconst gemini = new AntigravityAgent({ model: GEMINI_MODEL });\n\n// Implementer failover chain (the middle of the fable sandwich): Codex leads\n// when its CLI is installed, Sonnet is the guaranteed strong fallback so the\n// implementer works even with no Codex/Gemini CLI installed.\nexport const implementer: AgentLike[] = [\n  ...(hasCodex ? [codex] : []),\n  sonnet,\n  ...(hasGemini ? [gemini] : []),\n];\n\n// Plan & review panel: a model-diverse pair. Claude (Opus) + Codex by default,\n// or whatever 2 CLIs are installed (never Sonnet). Falls back to the static\n// Opus+Codex pair when fewer than 2 CLIs are detected (e.g. CI without agent\n// CLIs) so panel structure and graph-rendering never break.\n// Fable leads the panel (the bread of the fable sandwich); the second seat\n// goes to a model-diverse CLI (Codex, then Gemini).\nconst detectedPanel: AgentLike[] = [\n  ...(hasClaude ? [fable] : []),\n  ...(hasCodex ? [codex] : []),\n  ...(hasGemini ? [gemini] : []),\n];\nexport const panelists: AgentLike[] =\n  detectedPanel.length >= 2 ? detectedPanel.slice(0, 2) : [fable, codex];\n\n// The panel moderator / synthesizer — prefer another detected subscription CLI\n// (Gemini, then Codex) before falling back to Opus, so a stray/fake\n// OPENAI_API_KEY does not make Codex preflight fail when another CLI can do the\n// job. Opus is the always-present fallback. This is a failover chain (not a\n// single agent), but be precise about HOW the fallback engages: the engine\n// advances a failover chain across retry attempts, and a preflight/auth failure\n// is non-retryable, so the chain does NOT by itself walk from Codex to Opus on a\n// moderator-only Codex auth failure. What actually makes the shipped panels\n// resilient is the engine's per-run circuit breaker combined with the invariant\n// below: `panelists` always includes the SAME Codex instance, so when Codex auth\n// is stale a panelist fails preflight first and disables that instance run-wide;\n// the moderator (which runs after the panelists) then finds Codex disabled and\n// selects the next healthy agent on its first attempt. Keeping Opus in the chain\n// guarantees a healthy fallback exists for that path. Custom panels that use a\n// Codex moderator WITHOUT Codex among the panelists are not covered by this and\n// can still fail to produce a verdict — the review UI surfaces that terminal\n// no-verdict state explicitly.\nexport const synthesizer: AgentLike[] = [\n  ...(hasGemini ? [gemini] : []),\n  ...(hasCodex ? [codex] : []),\n  opus,\n];\n\n// The end-of-feature polish reviewer: Fable reviews the WHOLE implemented\n// feature once it is complete (the closing slice of the fable sandwich).\n// Opus stays in the chain as the always-present fallback.\nexport const polishReviewer: AgentLike[] = [fable, opus];\n",
         },
         {
             path: ".smithers/components/PlanPanel.tsx",
@@ -4648,6 +4649,7 @@ function renderTemplateFiles(versions, env, projectRoot, closure, options = {}) 
                 "node_modules/",
                 "executions/",
                 "runs/",
+                "reports/",
                 "sandboxes/",
                 "remote/",
                 "state/",
@@ -4772,10 +4774,14 @@ function packSelectionsPath(rootDir) {
 }
 
 /**
+ * Read the persisted à-la-carte deselection for the pack at `rootDir`.
+ * Exported so the interactive init wizard seeds its checkboxes from what the
+ * user chose last time instead of re-checking everything (which would persist
+ * as "select all" on confirm and silently wipe the earlier opt-outs).
  * @param {string} rootDir
  * @returns {{ deselectedWorkflows: string[]; deselectedAgentDocs: string[] }}
  */
-function loadPackSelections(rootDir) {
+export function loadPackSelections(rootDir) {
     try {
         const parsed = JSON.parse(readFileSync(packSelectionsPath(rootDir), "utf8"));
         return {
@@ -4826,6 +4832,52 @@ function survivingAgentDocs(deselectedAgentDocs) {
  */
 export function resolveEffectiveAgentDocs(rootDir) {
     return survivingAgentDocs(loadPackSelections(rootDir).deselectedAgentDocs);
+}
+
+/**
+ * Run-store files smithers creates in the PROJECT root (not under `.smithers/`,
+ * whose own scaffolded `.gitignore` already covers everything inside it). The
+ * sqlite workspace db lands next to the pack, so without this a brand-new
+ * user's `git status` fills with `smithers.db*` after their first run.
+ */
+const ROOT_GITIGNORE_MARKER = "# Smithers run store (ephemeral — never commit)";
+const ROOT_GITIGNORE_ENTRIES = ["smithers.db", "smithers.db-shm", "smithers.db-wal"];
+
+/**
+ * Ensure the project root `.gitignore` covers the run-store files smithers
+ * writes next to `.smithers/`. Idempotent: appends one marker block, and only
+ * when the repo (git or jj) doesn't already ignore `smithers.db`. Best-effort —
+ * a failure here never blocks init.
+ *
+ * @param {string} projectRoot
+ * @returns {RootGitignoreResult}
+ */
+export function ensureRootGitignore(projectRoot) {
+    const gitignorePath = resolve(projectRoot, ".gitignore");
+    try {
+        if (!existsSync(resolve(projectRoot, ".git")) && !existsSync(resolve(projectRoot, ".jj"))) {
+            return { status: "skipped", path: gitignorePath, reason: "not a git/jj repository" };
+        }
+        let current = "";
+        if (existsSync(gitignorePath)) {
+            current = readFileSync(gitignorePath, "utf8");
+            // Respect an existing rule (exact entry, our marker, or a broad *.db).
+            if (current.includes(ROOT_GITIGNORE_MARKER) ||
+                /^\s*\*?\.?\/?smithers\.db\*?\s*$/m.test(current) ||
+                /^\s*\*\.db\s*$/m.test(current)) {
+                return { status: "unchanged", path: gitignorePath };
+            }
+        }
+        const block = `${ROOT_GITIGNORE_MARKER}\n${ROOT_GITIGNORE_ENTRIES.join("\n")}\n`;
+        const next = current.length === 0
+            ? block
+            : `${current}${current.endsWith("\n") ? "" : "\n"}\n${block}`;
+        writeFileSync(gitignorePath, next, "utf8");
+        return { status: current.length === 0 ? "created" : "updated", path: gitignorePath };
+    }
+    catch (err) {
+        return { status: "skipped", path: gitignorePath, reason: err?.message ?? String(err) };
+    }
 }
 
 /**
@@ -4934,6 +4986,14 @@ export function initWorkflowPack(options = {}) {
         skippedCount: skippedFiles.length,
         preservedCount: preservedPaths.length,
     });
+    // Keep the user's repo clean: the run store (smithers.db*) is written to the
+    // project root, outside `.smithers/`'s own .gitignore. Local packs only —
+    // a global (~/.smithers) init has no project repo to protect.
+    let gitignore;
+    if (!options.agentsOnly && !options.global) {
+        gitignore = ensureRootGitignore(projectRoot);
+        options.reporter?.gitignoreEnsured?.(gitignore);
+    }
     // Drop the curated `smithers` skill into each detected coding agent so the
     // user never hand-runs mkdir + curl. Opt-in (the CLI `init` command sets it):
     // direct callers and tests default to off so they don't write to ~/.
@@ -5014,6 +5074,7 @@ export function initWorkflowPack(options = {}) {
         install,
         ...(skill ? { skill } : {}),
         ...(agentDocs ? { agentDocs } : {}),
+        ...(gitignore ? { gitignore } : {}),
     };
 }
 
