@@ -110,6 +110,18 @@ describe("telegramApprovalDecision mapping", () => {
   });
 });
 
+describe("TelegramApproval threadId validation", () => {
+  const baseProps = { id: "gate", chatId: 777, request: { title: "Deploy?" }, config: telegramConfig };
+  test("rejects a non-numeric threadId instead of sending NaN", () => {
+    expect(() => TelegramApproval({ ...baseProps, threadId: "general" })).toThrow(/threadId must be numeric/);
+  });
+  test("accepts a numeric threadId (number or numeric string) and no threadId", () => {
+    expect(() => TelegramApproval({ ...baseProps, threadId: 42 })).not.toThrow();
+    expect(() => TelegramApproval({ ...baseProps, threadId: "42" })).not.toThrow();
+    expect(() => TelegramApproval(baseProps)).not.toThrow();
+  });
+});
+
 describe("TelegramApproval end-to-end through the real engine", () => {
   async function runApproval({ mode, outputKey, data, options }) {
     const api = makeApi();
