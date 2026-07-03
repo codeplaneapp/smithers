@@ -1,27 +1,26 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { fetchOidcToken } from "../../action/src/fetchOidcToken";
 
-const savedUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-const savedToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+const missingEnv = {};
+const runnerEnv = (url: string) => ({
+  ACTIONS_ID_TOKEN_REQUEST_URL: url,
+  ACTIONS_ID_TOKEN_REQUEST_TOKEN: "runner_token",
+});
 
 afterEach(() => {
-  if (savedUrl === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-  else process.env.ACTIONS_ID_TOKEN_REQUEST_URL = savedUrl;
-  if (savedToken === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-  else process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = savedToken;
+  delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+  delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
 });
 
 describe("fetchOidcToken", () => {
   test("throws when env vars are missing", async () => {
-    delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-    await expect(fetchOidcToken()).rejects.toThrow("ACTIONS_ID_TOKEN_REQUEST_URL");
+    await expect(fetchOidcToken({ env: missingEnv })).rejects.toThrow("ACTIONS_ID_TOKEN_REQUEST_URL");
   });
 
   test("throws when only REQUEST_URL is set", async () => {
-    process.env.ACTIONS_ID_TOKEN_REQUEST_URL = "http://example.invalid";
-    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-    await expect(fetchOidcToken()).rejects.toThrow("ACTIONS_ID_TOKEN_REQUEST_TOKEN");
+    await expect(
+      fetchOidcToken({ env: { ACTIONS_ID_TOKEN_REQUEST_URL: "http://example.invalid" } }),
+    ).rejects.toThrow("ACTIONS_ID_TOKEN_REQUEST_TOKEN");
   });
 
   test("makes a real HTTP request and returns the token value", async () => {
@@ -38,11 +37,10 @@ describe("fetchOidcToken", () => {
       },
     });
 
-    process.env.ACTIONS_ID_TOKEN_REQUEST_URL = `http://127.0.0.1:${server.port}`;
-    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = "runner_token";
+    const env = runnerEnv(`http://127.0.0.1:${server.port}`);
 
     try {
-      const token = await fetchOidcToken();
+      const token = await fetchOidcToken({ env });
       expect(token).toBe("oidc.jwt.token");
       expect(capture.auth).toBe("Bearer runner_token");
       expect(capture.url).toContain("audience=smithers-review");
@@ -61,11 +59,10 @@ describe("fetchOidcToken", () => {
       },
     });
 
-    process.env.ACTIONS_ID_TOKEN_REQUEST_URL = `http://127.0.0.1:${server.port}`;
-    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = "runner_token";
+    const env = runnerEnv(`http://127.0.0.1:${server.port}`);
 
     try {
-      const token = await fetchOidcToken({ audience: "my-service" });
+      const token = await fetchOidcToken({ audience: "my-service", env });
       expect(token).toBe("oidc.custom.token");
       expect(capture.url).toContain("audience=my-service");
       expect(capture.url).not.toContain("smithers-review");
@@ -80,11 +77,10 @@ describe("fetchOidcToken", () => {
       fetch: () => new Response("forbidden", { status: 403 }),
     });
 
-    process.env.ACTIONS_ID_TOKEN_REQUEST_URL = `http://127.0.0.1:${server.port}`;
-    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = "runner_token";
+    const env = runnerEnv(`http://127.0.0.1:${server.port}`);
 
     try {
-      await expect(fetchOidcToken()).rejects.toThrow("HTTP 403");
+      await expect(fetchOidcToken({ env })).rejects.toThrow("HTTP 403");
     } finally {
       server.stop(true);
     }
@@ -96,24 +92,23 @@ describe("fetchOidcToken", () => {
       fetch: () => Response.json({ token: "wrong_field" }),
     });
 
-    process.env.ACTIONS_ID_TOKEN_REQUEST_URL = `http://127.0.0.1:${server.port}`;
-    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = "runner_token";
+    const env = runnerEnv(`http://127.0.0.1:${server.port}`);
 
     try {
-      await expect(fetchOidcToken()).rejects.toThrow("missing `value`");
+      await expect(fetchOidcToken({ env })).rejects.toThrow("missing `value`");
     } finally {
       server.stop(true);
     }
   });
 
   test("custom fetchImpl is used instead of global fetch", async () => {
-    process.env.ACTIONS_ID_TOKEN_REQUEST_URL = "http://unreachable.invalid";
-    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = "runner_token";
-
     const fakeImpl = async (_url: string | URL | Request, _init?: RequestInit) =>
       Response.json({ value: "injected-token" });
 
-    const token = await fetchOidcToken({ fetchImpl: fakeImpl as typeof fetch });
+    const token = await fetchOidcToken({
+      env: runnerEnv("http://unreachable.invalid"),
+      fetchImpl: fakeImpl as typeof fetch,
+    });
     expect(token).toBe("injected-token");
   });
 
@@ -127,11 +122,10 @@ describe("fetchOidcToken", () => {
       },
     });
 
-    process.env.ACTIONS_ID_TOKEN_REQUEST_URL = `http://127.0.0.1:${server.port}?existing=1`;
-    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = "runner_token";
+    const env = runnerEnv(`http://127.0.0.1:${server.port}?existing=1`);
 
     try {
-      await fetchOidcToken();
+      await fetchOidcToken({ env });
       expect(capture.url).toContain("existing=1");
       expect(capture.url).toContain("audience=smithers-review");
       // Should use & not ? since there is already a query string
