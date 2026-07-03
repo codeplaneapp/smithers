@@ -28,11 +28,25 @@ function defaultRevert(commitId, cwd) {
 }
 
 /**
+ * A durability checkpoint row as returned by `listWorkspaceCheckpoints`.
+ * @typedef {{
+ *   nodeId: string,
+ *   iteration?: number,
+ *   seq: number,
+ *   attempt?: number,
+ *   jjCommitId: string,
+ *   jjCwd: string,
+ *   createdAtMs?: number,
+ * }} Checkpoint
+ */
+
+/**
  * Pick the target checkpoint deterministically: filter by node (+optional
  * iteration/seq), then the chronologically latest (ties broken by attempt then
  * seq, since seq resets per attempt).
- * @param {Array<Record<string, any>>} checkpoints
+ * @param {Array<Checkpoint>} checkpoints
  * @param {{ nodeId: string, iteration?: number, seq?: number }} sel
+ * @returns {Checkpoint | null}
  */
 export function pickTargetCheckpoint(checkpoints, sel) {
     let cands = checkpoints.filter((c) => c.nodeId === sel.nodeId);
@@ -48,11 +62,12 @@ export function pickTargetCheckpoint(checkpoints, sel) {
 
 /**
  * @param {{
- *   adapter: { listWorkspaceCheckpoints: (runId: string) => Promise<Array<Record<string, any>>> },
+ *   adapter?: { listWorkspaceCheckpoints: (runId: string) => Promise<Array<Checkpoint>> },
  *   runId: string,
  *   nodeId: string,
  *   iteration?: number,
  *   seq?: number,
+ *   target?: Checkpoint,
  *   stdout: { write: (s: string) => void },
  *   stderr: { write: (s: string) => void },
  *   revert?: (commitId: string, cwd: string) => Promise<{ success: boolean, error?: string }>,
@@ -63,8 +78,12 @@ export async function runRestoreOnce(opts) {
     const { adapter, runId, nodeId, iteration, seq, stdout, stderr } = opts;
     const revert = opts.revert ?? defaultRevert;
 
-    const checkpoints = await adapter.listWorkspaceCheckpoints(runId);
-    const target = pickTargetCheckpoint(checkpoints, { nodeId, iteration, seq });
+    // Reuse a preselected target when the caller already picked one (the
+    // semantic tool reports it), so we never re-list and risk selecting a
+    // different checkpoint than the one reported. Otherwise list and pick.
+    const target = opts.target ?? (adapter
+        ? pickTargetCheckpoint(await adapter.listWorkspaceCheckpoints(runId), { nodeId, iteration, seq })
+        : null);
     if (!target) {
         stderr.write(`No matching durability checkpoint for run ${runId} node ${nodeId}${seq !== undefined ? ` seq ${seq}` : ""}\n`);
         return { exitCode: 1 };
