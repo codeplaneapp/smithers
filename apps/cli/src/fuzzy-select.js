@@ -143,6 +143,18 @@ function terminalRows() {
     return process.stdout.rows || 24;
 }
 
+function applyTrackedBackspaces(value) {
+    let normalized = "";
+    for (const ch of String(value ?? "")) {
+        if (ch === "\x7f" || ch === "\b") {
+            normalized = normalized.slice(0, -1);
+        } else {
+            normalized += ch;
+        }
+    }
+    return normalized;
+}
+
 /**
  * A type-to-filter picker built on clack's `Prompt` base class. We subclass
  * `Prompt` directly (NOT `SelectPrompt`) with `trackValue=true` so the base
@@ -199,10 +211,10 @@ class FuzzySelectPrompt extends Prompt {
             if (i >= 0) this.optionCursor = i;
         }
 
-        // Re-filter on every keystroke. Typing AND backspace both edit rl.line,
-        // so the base re-emits "userInput" for both — this covers backspace free.
+        // Re-filter on every keystroke. Normal terminals edit rl.line before
+        // this event; fake streams can leak DEL/BS characters, so normalize them.
         this.on("userInput", () => {
-            this.query = this.userInput ?? "";
+            this.query = applyTrackedBackspaces(this.userInput);
             this.filtered = fuzzyFilter(this.query, this.allOptions);
             if (this.optionCursor > this.filtered.length - 1) {
                 this.optionCursor = Math.max(0, this.filtered.length - 1);

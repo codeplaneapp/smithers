@@ -1,15 +1,21 @@
 {
   "name": "@smithers-orchestrator/review",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.26.1",
   "description": "Code review plus story-form HTML walkthrough, built on the OpenCodeReview-derived review flow",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "smithers-review": "./src/cli/main.ts"
   },
   "exports": {
+    "./cli": "./src/cli/main.ts",
     "./diffs": "./src/diffs/index.ts"
   },
+  "files": [
+    "src/",
+    "README.md",
+    "CONTRIBUTING.md"
+  ],
   "scripts": {
     "start": "bun ./src/cli/main.ts",
     "test": "bun test tests",
@@ -25,7 +31,6 @@
     "effect": "3.21.4",
     "mermaid": "^11.16.0",
     "smithers-orchestrator": "workspace:*",
-    "smithers-workflows": "workspace:*",
     "zod": "4.4.3"
   },
   "devDependencies": {

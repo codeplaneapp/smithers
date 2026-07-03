@@ -1,4 +1,4 @@
-import { reviewCommentSeveritySchema } from "smithers-workflows/lib/open-code-review";
+import { reviewCommentSeveritySchema } from "./openCodeReview";
 import { z } from "zod/v4";
 
 // index defaults to -1 so a verdict missing its index is ignored instead of

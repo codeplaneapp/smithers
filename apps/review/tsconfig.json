@@ -19,8 +19,7 @@
       "smithers-orchestrator/jsx-runtime": ["../../packages/smithers/src/jsx-runtime.js"],
       "smithers-orchestrator/jsx-dev-runtime": ["../../packages/smithers/src/jsx-runtime.js"],
       "@smithers-orchestrator/engine": ["../../packages/engine/src/index.js"],
-      "@smithers-orchestrator/db/snapshot": ["../../packages/db/src/snapshot.js"],
-      "smithers-workflows/*": ["../../.smithers/*"]
+      "@smithers-orchestrator/db/snapshot": ["../../packages/db/src/snapshot.js"]
     }
   },
   "include": ["src/**/*", "tests/**/*", "action/src/**/*", "alchemy.run.ts"]

@@ -1,4 +1,4 @@
-import type { ReviewCommentSeverity } from "smithers-workflows/lib/open-code-review";
+import type { ReviewCommentSeverity } from "./openCodeReview";
 import type { FindingVerdict } from "./verifyVerdictsSchema";
 
 const severitySteps: ReviewCommentSeverity[] = ["critical", "major", "minor", "info"];

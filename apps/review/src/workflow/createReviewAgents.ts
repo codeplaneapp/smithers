@@ -1,5 +1,5 @@
 import { ClaudeCodeAgent, CodexAgent, type AgentLike } from "smithers-orchestrator";
-import { nativeReviewAgentOutputSchema } from "smithers-workflows/lib/open-code-review";
+import { nativeReviewAgentOutputSchema } from "./openCodeReview";
 import { quizSchema } from "../quiz/quizSchema";
 import { storySchema } from "../walkthrough/storySchema";
 import { verifyVerdictsSchema } from "./verifyVerdictsSchema";

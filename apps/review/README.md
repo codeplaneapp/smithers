@@ -129,37 +129,39 @@ multi-tenant service from one seat. For that, fund the platform API key.
 
 ## Run it from the terminal
 
-The CLI runs from a checkout of this repository against any repo on your
+The CLI runs through the main Smithers binary against any repo on your
 machine, with your own Claude credentials (a logged-in `claude` CLI, a
 `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or an
 `ANTHROPIC_API_KEY`):
 
 ```sh
-git clone https://github.com/smithersai/smithers
-cd smithers && pnpm install
+bunx smithers-orchestrator review --help
 ```
 
 ```sh
 # review the working tree of a repo, write .smithers-review/walkthrough.html
-bun apps/review/src/cli/main.ts /path/to/repo
+bunx smithers-orchestrator review /path/to/repo
 
 # review a branch against main, open the walkthrough when done
-bun apps/review/src/cli/main.ts /path/to/repo --from main --to HEAD --open
+bunx smithers-orchestrator review /path/to/repo --from main --to HEAD --open
 
 # review one commit
-bun apps/review/src/cli/main.ts /path/to/repo --commit abc1234
+bunx smithers-orchestrator review /path/to/repo --commit abc1234
 
 # review GitHub PR #123 and post the review onto it (via gh)
-bun apps/review/src/cli/main.ts /path/to/repo --pr 123
+bunx smithers-orchestrator review /path/to/repo --pr 123
 
 # publish the walkthrough to the share service and print an unlisted URL
-bun apps/review/src/cli/main.ts /path/to/repo --pr 123 --publish
+bunx smithers-orchestrator review /path/to/repo --pr 123 --publish
 
 # no agents: deterministic story, no review findings (works offline)
-bun apps/review/src/cli/main.ts /path/to/repo --no-review --no-narrate
+bunx smithers-orchestrator review /path/to/repo --no-review --no-narrate
 ```
 
-The repo path defaults to the current directory. Run `--help` for all
+The standalone package bin, `smithers-review`, accepts the same options and
+remains useful for package-level testing in this monorepo.
+
+The repo path defaults to the current directory. Run `bunx smithers-orchestrator review --help` for all
 options. `--publish` needs a publish service URL in
 `SMITHERS_REVIEW_PUBLISH_URL` and an API key (`srk_…`, operator-issued) in
 `SMITHERS_REVIEW_PUBLISH_TOKEN`; both can also be set in

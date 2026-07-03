@@ -1,4 +1,4 @@
-import type { ReviewRunOutput } from "smithers-workflows/lib/open-code-review";
+import type { ReviewRunOutput } from "../workflow/openCodeReview";
 import type { ChangedFile } from "./changedFileSchema";
 import { perFileExcerptLimit } from "./perFileExcerptLimit";
 

@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseQuizColumn } from "../../src/cli/main";
+import { parseQuizColumn, runReviewCli } from "../../src/cli/main";
 
 const MAIN_TS = fileURLToPath(new URL("../../src/cli/main.ts", import.meta.url));
 const PKG_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -132,6 +132,23 @@ describe("parseQuizColumn", () => {
     expect(parsed).not.toBeNull();
     expect(parsed!.impact.level).toBe("high");
     expect(parsed!.questions).toHaveLength(1);
+  });
+});
+
+describe("runReviewCli", () => {
+  test("custom command name is reflected in help", async () => {
+    const logs: string[] = [];
+    const originalLog = console.log;
+    try {
+      console.log = (line?: unknown) => {
+        logs.push(String(line ?? ""));
+      };
+      await runReviewCli(["--help"], { command: "smithers review" });
+    } finally {
+      console.log = originalLog;
+    }
+    expect(logs.join("\n")).toContain("Usage: smithers review [repo] [options]");
+    expect(logs.join("\n")).toContain("smithers review --from main --to HEAD");
   });
 });
 

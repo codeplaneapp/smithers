@@ -148,6 +148,7 @@
     "@smithers-orchestrator/pi-plugin": "workspace:*",
     "@smithers-orchestrator/protocol": "workspace:*",
     "@smithers-orchestrator/react-reconciler": "workspace:*",
+    "@smithers-orchestrator/review": "workspace:*",
     "@smithers-orchestrator/sandbox": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/scorers": "workspace:*",

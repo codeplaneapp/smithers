@@ -12,7 +12,7 @@ import {
   resolveReviewTarget,
   reviewRunOutputSchema,
   reviewTargetSchema,
-} from "smithers-workflows/lib/open-code-review";
+} from "./openCodeReview";
 import { z } from "zod/v4";
 import { pluralize } from "../text/pluralize";
 import { assessChangeImpact } from "../quiz/assessChangeImpact";

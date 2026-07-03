@@ -50,6 +50,7 @@
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/openapi": "workspace:*",
     "@smithers-orchestrator/protocol": "workspace:*",
+    "@smithers-orchestrator/review": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/server": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",

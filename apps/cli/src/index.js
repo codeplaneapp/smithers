@@ -4817,6 +4817,16 @@ const cli = Cli.create({
     },
 })
     // =========================================================================
+    // smithers review [repo]
+    // =========================================================================
+    .command("review", {
+    description: "Run code review plus story-form HTML walkthrough generation for a repo or PR.",
+    async run() {
+        const { runReviewCli } = await import("@smithers-orchestrator/review/cli");
+        await runReviewCli([], { command: "smithers review" });
+    },
+})
+    // =========================================================================
     // smithers gateway
     // =========================================================================
     .command("gateway", {
@@ -8385,6 +8395,11 @@ async function main() {
     if (command && !KNOWN_COMMANDS.has(command)) {
         console.error(`Unknown command: ${command}`);
         process.exit(4);
+    }
+    if (command === "review") {
+        const { runReviewCli } = await import("@smithers-orchestrator/review/cli");
+        await runReviewCli(argv.slice(commandIndex + 1), { command: "smithers review" });
+        return;
     }
     // Self-heal the curated agent skill on a normal human-facing invocation:
     // keep ~/.claude/skills (and Pi) in sync with the bundled skill and evict
