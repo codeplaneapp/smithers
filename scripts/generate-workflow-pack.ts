@@ -22,7 +22,7 @@
  * workflow ships it to init automatically.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,7 +61,7 @@ const SEEDED_WORKFLOW_IDS = [
   "post-failure",
 ];
 
-type TemplateFile = { path: string; contents: string };
+type TemplateFile = { path: string; contents: string; owners?: string[] };
 
 /** Prompts a workflow imports from `../prompts/<name>.mdx`. */
 function promptImportsOf(source: string): string[] {
@@ -91,14 +91,16 @@ function libRelativeImportsOf(source: string, fromLibPath: string): string[] {
   const re = /from\s+["'](\.\.?\/[^"']+)["']/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(source)) !== null) {
-    const joined = resolve("/lib", dirname(fromLibPath), m[1]);
-    if (!joined.startsWith("/lib/")) {
+    // Import specifiers are POSIX regardless of host OS; normalize in POSIX
+    // space so the escape check cannot be confused by win32 drive letters.
+    const joined = posix.normalize(posix.join(posix.dirname(fromLibPath), m[1]));
+    if (joined.startsWith("..")) {
       throw new Error(
         `Seeded lib module .smithers/lib/${fromLibPath} imports ${m[1]}, which escapes .smithers/lib/. ` +
           "Seeded lib helpers must be self-contained under .smithers/lib/.",
       );
     }
-    names.add(joined.slice("/lib/".length));
+    names.add(joined);
   }
   return [...names];
 }
@@ -127,12 +129,24 @@ function readOrThrow(absPath: string, label: string): string {
 
 function build(): TemplateFile[] {
   const files: TemplateFile[] = [];
-  const seenPaths = new Set<string>();
+  const byPath = new Map<string, TemplateFile>();
 
-  const push = (path: string, contents: string) => {
-    if (seenPaths.has(path)) return; // dedup shared prompts across workflows
-    seenPaths.add(path);
-    files.push({ path, contents });
+  // Dedup shared files across workflows; `owner` records which seeded
+  // workflow(s) pull the file in so init can install lib helpers only with
+  // the workflows that import them.
+  const push = (path: string, contents: string, owner?: string) => {
+    const existing = byPath.get(path);
+    if (existing) {
+      if (owner) {
+        existing.owners ??= [];
+        if (!existing.owners.includes(owner)) existing.owners.push(owner);
+      }
+      return;
+    }
+    const file: TemplateFile = { path, contents };
+    if (owner) file.owners = [owner];
+    byPath.set(path, file);
+    files.push(file);
   };
 
   for (const id of SEEDED_WORKFLOW_IDS) {
@@ -158,12 +172,13 @@ function build(): TemplateFile[] {
     // a fresh init — a workflow shipped without its lib imports fails
     // `smithers graph` with a module-not-found the moment it is seeded.
     const libQueue = libImportsOf(workflowSource).map((specifier) => resolveLibFile(specifier));
+    const visitedLibs = new Set<string>();
     while (libQueue.length > 0) {
       const { relPath, absPath } = libQueue.shift()!;
-      const packPath = `.smithers/lib/${relPath}`;
-      if (seenPaths.has(packPath)) continue;
+      if (visitedLibs.has(relPath)) continue;
+      visitedLibs.add(relPath);
       const libSource = readOrThrow(absPath, `lib module ${relPath} for workflow ${id}`);
-      push(packPath, libSource);
+      push(`.smithers/lib/${relPath}`, libSource, id);
       for (const nested of libRelativeImportsOf(libSource, relPath)) {
         libQueue.push(resolveLibFile(nested));
       }

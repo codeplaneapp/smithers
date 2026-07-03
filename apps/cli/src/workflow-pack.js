@@ -30,7 +30,7 @@ import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
  * @typedef {{ command: string; description: string; }} WorkflowCta
  */
 /**
- * @typedef {{ path: string; contents: string; preserveExisting?: boolean; }} TemplateFile
+ * @typedef {{ path: string; contents: string; preserveExisting?: boolean; owners?: string[]; }} TemplateFile
  */
 
 const FALLBACK_SMITHERS_SPEC = "latest";
@@ -340,8 +340,10 @@ function computeClosure(selectedWorkflows) {
 }
 /**
  * Filter GENERATED_SEEDED_FILES to only include files owned by a selected
- * seeded workflow. Each seeded workflow owns its .tsx file and any prompt
- * whose path starts with `.smithers/prompts/<id>` (exact or `<id>-*`).
+ * seeded workflow. Generated entries with explicit `owners` (lib helpers)
+ * install only alongside a workflow that imports them; otherwise each seeded
+ * workflow owns its .tsx file and any prompt whose path starts with
+ * `.smithers/prompts/<id>` (exact or `<id>-*`).
  *
  * @param {TemplateFile[]} files
  * @param {Set<string>} workflowIds
@@ -355,6 +357,9 @@ function filterSeededFiles(files, workflowIds) {
         .map((w) => w.id)
         .sort((a, b) => b.length - a.length);
     return files.filter((f) => {
+        if (Array.isArray(f.owners) && f.owners.length > 0) {
+            return f.owners.some((id) => workflowIds.has(id));
+        }
         if (f.path.startsWith(".smithers/workflows/")) {
             const id = f.path.replace(".smithers/workflows/", "").replace(/\.tsx$/, "");
             return workflowIds.has(id);
