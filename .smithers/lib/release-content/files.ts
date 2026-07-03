@@ -259,6 +259,54 @@ export function recordApprovalArtifact(params: {
   };
 }
 
+function compareSemver(a: string, b: string): number {
+  const pa = a.split(".").map((n) => Number.parseInt(n, 10) || 0);
+  const pb = b.split(".").map((n) => Number.parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/**
+ * Register `changelogs/<version>` in the docs sidebar (docs/docs.json), keeping
+ * the existing newest-first order. Historically this was a separate manual
+ * commit after every release (e.g. "docs: register 0.26.1 changelog in the
+ * sidebar") and easy to forget, which left the published changelog page
+ * unreachable. Edits line-by-line rather than re-serializing the JSON so the
+ * diff stays minimal. No-ops (returns null) when docs/docs.json is absent —
+ * the pack also runs in repos without this docs site — when the entry already
+ * exists, or when no changelog entries are present to anchor the group.
+ */
+export function registerChangelogInSidebar(root: string, version: string): string | null {
+  const docsJsonPath = "docs/docs.json";
+  const abs = safeJoin(root, docsJsonPath);
+  if (!existsSync(abs)) return null;
+  const raw = readFileSync(abs, "utf8");
+  if (raw.includes(`"changelogs/${version}"`)) return null;
+  const lines = raw.split("\n");
+  const entryRe = /^(\s*)"changelogs\/(\d+\.\d+\.\d+)"(,?)\s*$/;
+  const entries: Array<{ line: number; indent: string; version: string; hasComma: boolean }> = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i]!.match(entryRe);
+    if (match) entries.push({ line: i, indent: match[1]!, version: match[2]!, hasComma: match[3] === "," });
+  }
+  if (entries.length === 0) return null;
+  const before = entries.find((entry) => compareSemver(entry.version, version) < 0);
+  if (before) {
+    lines.splice(before.line, 0, `${before.indent}"changelogs/${version}",`);
+  } else {
+    const last = entries[entries.length - 1]!;
+    if (!last.hasComma) lines[last.line] = `${lines[last.line]!.trimEnd()},`;
+    lines.splice(last.line + 1, 0, `${last.indent}"changelogs/${version}"${last.hasComma ? "," : ""}`);
+  }
+  const next = lines.join("\n");
+  JSON.parse(next);
+  writeFileSync(abs, next, "utf8");
+  return docsJsonPath;
+}
+
 export function publishFiles(params: {
   input: ReleaseContentInput;
   probe: Probe;
@@ -279,6 +327,10 @@ export function publishFiles(params: {
   const files: string[] = [];
   if (content.changelog && !input.skip.publishChangelog) {
     files.push(writeText(root, probe.changelogPath, content.changelog.markdown, input.output.overwrite));
+    if (probe.changelogPath === `docs/changelogs/${probe.version}.mdx`) {
+      const sidebar = registerChangelogInSidebar(root, probe.version);
+      if (sidebar) files.push(sidebar);
+    }
   }
   if (content.blogPost && !input.skip.publishBlog) {
     files.push(writeText(root, probe.blogPath, content.blogPost.markdown, input.output.overwrite));
