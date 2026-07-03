@@ -32,13 +32,25 @@ def smithers_run(args: dict, **kwargs) -> str:
     workflow = str(args.get("workflow", "")).strip()
     if not workflow:
         return json.dumps({"error": "workflow is required"})
-    cli_args = ["workflow", "run", workflow] if not workflow.endswith(".tsx") else ["up", workflow]
+    is_tsx = workflow.endswith(".tsx")
+    cli_args = ["up", workflow] if is_tsx else ["workflow", "run", workflow]
     prompt = args.get("prompt")
-    if isinstance(prompt, str) and prompt.strip():
-        cli_args += ["--prompt", prompt]
+    prompt = prompt.strip() if isinstance(prompt, str) else ""
     user_input = args.get("input")
-    if isinstance(user_input, dict) and user_input:
-        cli_args += ["--input", json.dumps(user_input)]
+    user_input = dict(user_input) if isinstance(user_input, dict) else {}
+    if is_tsx:
+        # `smithers up` has no --prompt flag; fold any prompt into the workflow
+        # input JSON (the workflow reads it from input) so the launch is not
+        # rejected. `workflow run` DOES accept --prompt, so keep it there.
+        if prompt:
+            user_input.setdefault("prompt", prompt)
+        if user_input:
+            cli_args += ["--input", json.dumps(user_input)]
+    else:
+        if prompt:
+            cli_args += ["--prompt", prompt]
+        if user_input:
+            cli_args += ["--input", json.dumps(user_input)]
     if args.get("detach", True):
         cli_args.append("--detach")
     # Runs can take a while to acknowledge; give the launch a generous window.
@@ -91,10 +103,12 @@ def smithers_output(args: dict, **kwargs) -> str:
     run_id = str(args.get("run_id", "")).strip()
     if not run_id:
         return json.dumps({"error": "run_id is required"})
-    cli_args = ["output", run_id]
-    if args.get("node"):
-        cli_args += ["--node", str(args["node"])]
-    return _result_json(smithers_cli.run(cli_args))
+    # `smithers output` takes runId and nodeId as required POSITIONAL args (there
+    # is no --node flag, and nodeId is not optional).
+    node = str(args.get("node", "")).strip()
+    if not node:
+        return json.dumps({"error": "node is required (the CLI output command needs a node id)"})
+    return _result_json(smithers_cli.run(["output", run_id, node]))
 
 
 def smithers_human_answer(args: dict, **kwargs) -> str:
