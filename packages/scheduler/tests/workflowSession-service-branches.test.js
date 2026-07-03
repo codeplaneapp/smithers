@@ -80,6 +80,24 @@ describe("WorkflowSessionService direct methods", () => {
     expect(afterSignal.result.output).toEqual({ done: true });
   });
 
+  test("day-unit and uppercase durations resume at the deadline, not immediately", () => {
+    // Regression: the scheduler's parser lacked `d` and was case-sensitive, so a
+    // valid "1d"/"2H" timer parsed to null and fell through to "resume now",
+    // firing immediately and re-deciding forever. It must match the engine
+    // grammar (ms/s/m/h/d, case-insensitive).
+    for (const [duration, expectedResumeAtMs] of [
+      ["1d", 1_000 + 86_400_000],
+      ["2H", 1_000 + 2 * 3_600_000],
+      ["500MS", 1_000 + 500],
+    ]) {
+      const task = descriptor("timer", { meta: { __timer: true, __timerDuration: duration } });
+      const session = makeWorkflowSession({ nowMs: () => 1_000 });
+      expect(run(session.submitGraph(graph([task], workflow([
+        el("smithers:timer", { id: "timer" }),
+      ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: expectedResumeAtMs } });
+    }
+  });
+
   test("timerFired records the fired timestamp and finishes timer tasks", () => {
     const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });
     const session = makeWorkflowSession({ nowMs: () => 1_000 });

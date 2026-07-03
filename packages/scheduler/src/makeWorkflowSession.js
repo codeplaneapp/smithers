@@ -153,29 +153,29 @@ function timerResumeAtMs(descriptor, nowMs) {
     return nowMs;
 }
 /**
+ * Parse a timer duration string to milliseconds, or null when invalid.
+ *
+ * MUST accept exactly the grammar the engine's authoritative parser writes
+ * (`parseTimerDurationMs` in engine/effect/deferred-state-bridge.js): units
+ * ms/s/m/h/d, case-insensitive, floored, non-negative. It previously omitted
+ * `d` and was case-sensitive, so a valid `1d`/`2H` timer parsed to null here and
+ * fell through to "resume now", which fired the timer immediately and re-decided
+ * forever — a busy loop that never parked. Keep this table in lockstep with the
+ * engine (importing it would be a scheduler->engine dependency cycle).
  * @param {string} value
  * @returns {number | null}
  */
+const DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 function parseDurationMs(value) {
-    const trimmed = value.trim();
-    const match = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/.exec(trimmed);
+    const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec(value.trim().toLowerCase());
     if (!match)
         return null;
     const amount = Number(match[1]);
     const unit = match[2] ?? "ms";
-    if (!Number.isFinite(amount))
+    const ms = Math.floor(amount * DURATION_UNIT_MS[unit]);
+    if (!Number.isFinite(ms) || ms < 0)
         return null;
-    switch (unit) {
-        case "h":
-            return amount * 60 * 60 * 1000;
-        case "m":
-            return amount * 60 * 1000;
-        case "s":
-            return amount * 1000;
-        case "ms":
-        default:
-            return amount;
-    }
+    return ms;
 }
 /**
  * @param {TaskDescriptor} descriptor
