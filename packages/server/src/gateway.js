@@ -1025,7 +1025,11 @@ function decodeBase64UrlJson(value) {
  * @returns {{ ok: true; payload: Record<string, unknown> } | { ok: false; message: string }}
  */
 function verifyJwtToken(token, config) {
-    const [encodedHeader, encodedPayload, encodedSignature] = token.split(".");
+    const segments = token.split(".");
+    if (segments.length !== 3) {
+        return { ok: false, message: "JWT must have three segments" };
+    }
+    const [encodedHeader, encodedPayload, encodedSignature] = segments;
     if (!encodedHeader || !encodedPayload || !encodedSignature) {
         return { ok: false, message: "JWT must have three segments" };
     }
@@ -1039,14 +1043,16 @@ function verifyJwtToken(token, config) {
     }
     const expectedSignature = createHmac("sha256", config.secret)
         .update(`${encodedHeader}.${encodedPayload}`)
-        .digest("base64url");
-    if (encodedSignature !== expectedSignature) {
+        .digest();
+    if (!/^[A-Za-z0-9_-]+$/.test(encodedSignature)) {
         return { ok: false, message: "JWT signature verification failed" };
     }
     const actualSignature = Buffer.from(encodedSignature, "base64url");
-    const expectedSignatureBuffer = Buffer.from(expectedSignature, "base64url");
-    if (actualSignature.length !== expectedSignatureBuffer.length ||
-        !timingSafeEqual(actualSignature, expectedSignatureBuffer)) {
+    if (actualSignature.toString("base64url") !== encodedSignature) {
+        return { ok: false, message: "JWT signature verification failed" };
+    }
+    if (actualSignature.length !== expectedSignature.length ||
+        !timingSafeEqual(actualSignature, expectedSignature)) {
         return { ok: false, message: "JWT signature verification failed" };
     }
     const now = Math.floor(Date.now() / 1_000);
