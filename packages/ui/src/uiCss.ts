@@ -1,0 +1,283 @@
+/**
+ * The complete stylesheet for @smithers-orchestrator/ui, as a plain string.
+ *
+ * CSS travels as a JS string (never an `import "./x.css"`) because the gateway
+ * UI bundler keeps only the JS output of `Bun.build` and silently drops CSS
+ * artifacts. Consumers render {@link file://./styles.tsx SmithersUiStyles} once,
+ * and every component also self-injects this sheet idempotently in the browser
+ * via `useInjectUiCss`, so a forgotten style tag still renders styled output.
+ *
+ * Rules:
+ * - Every class is namespaced `sui-` so nothing can collide with the
+ *   ui-styleguide page vocabulary (`.button`, `.badge`, `.card`, ...) or with
+ *   consumer CSS.
+ * - Every color resolves through the {@link file://./tokens.ts tokens} bridge:
+ *   `var(--house-token, #lightFallback)` chains, tints only via
+ *   `color-mix(in srgb, token N%, transparent)`. No raw hex outside fallback
+ *   position, no `rgba(255,255,255,...)`-style theme leaks, no `:root` token
+ *   emission. Enforced by tests/css-contract.test.ts.
+ * - All rules are document-global (never scoped under a shell class) so Radix
+ *   portal content mounted on `document.body` stays styled.
+ * - Exact metrics are lifted from `workflowUiThemeCss` (32px controls, 6px
+ *   control radius, 8px card radius, 22px badges, 13px body, tinted primary)
+ *   so components are pixel-compatible with the legacy class vocabulary.
+ */
+import { tokens as t } from "./tokens";
+
+const shadowCard = `0 1px 2px rgb(${t.shadowRgb} / 0.04), 0 8px 24px rgb(${t.shadowRgb} / 0.06)`;
+const shadowOverlay = `0 4px 12px rgb(${t.shadowRgb} / 0.10), 0 16px 48px rgb(${t.shadowRgb} / 0.16)`;
+const focusRing = `outline:none; border-color:${t.ringBorder}; box-shadow:0 0 0 3px ${t.ring};`;
+
+/* -------------------------------------------------------------------------- */
+/* Button                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export const buttonCss = `
+.sui-button { min-height:32px; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 12px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; text-decoration:none; cursor:pointer; white-space:nowrap; user-select:none; }
+.sui-button:hover { background:${t.secondary}; }
+.sui-button:focus-visible { ${focusRing} }
+.sui-button:disabled, .sui-button[aria-disabled='true'] { cursor:not-allowed; opacity:.45; }
+.sui-button svg { flex:none; }
+.sui-button-default { border-color:color-mix(in srgb, ${t.primary} 40%, transparent); background:color-mix(in srgb, ${t.primary} 10%, ${t.card}); color:${t.primary}; font-weight:650; }
+.sui-button-default:hover { background:color-mix(in srgb, ${t.primary} 16%, ${t.card}); }
+.sui-button-solid { border-color:${t.primary}; background:${t.primary}; color:${t.primaryForeground}; font-weight:650; }
+.sui-button-solid:hover { background:color-mix(in srgb, ${t.primary} 88%, ${t.foreground}); }
+.sui-button-secondary { border-color:transparent; background:${t.secondary}; color:${t.foreground}; }
+.sui-button-secondary:hover { background:color-mix(in srgb, ${t.foreground} 6%, ${t.secondary}); }
+.sui-button-outline { }
+.sui-button-ghost { border-color:transparent; background:transparent; }
+.sui-button-ghost:hover { background:${t.secondary}; }
+.sui-button-destructive { border-color:color-mix(in srgb, ${t.destructive} 38%, transparent); background:${t.card}; color:${t.destructive}; }
+.sui-button-destructive:hover { background:color-mix(in srgb, ${t.destructive} 8%, ${t.card}); }
+.sui-button-link { min-height:auto; border:none; padding:0; background:transparent; color:${t.primary}; text-decoration:underline; text-underline-offset:3px; }
+.sui-button-link:hover { background:transparent; text-decoration-thickness:2px; }
+.sui-button-sm { min-height:26px; padding:0 9px; font-size:12px; }
+.sui-button-lg { min-height:38px; padding:0 16px; }
+.sui-button-icon-size { min-height:32px; width:32px; padding:0; }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Badge + StatusPill                                                         */
+/* -------------------------------------------------------------------------- */
+
+export const badgeCss = `
+.sui-badge { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; min-height:22px; padding:1px 10px; border:1px solid ${t.border}; border-radius:999px; background:transparent; color:${t.mutedForeground}; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sui-badge-default { border-color:color-mix(in srgb, ${t.primary} 33%, transparent); background:color-mix(in srgb, ${t.primary} 12%, transparent); color:${t.primary}; }
+.sui-badge-secondary { border-color:${t.border}; background:${t.hoverSubtle}; color:${t.mutedForeground}; }
+.sui-badge-outline { border-color:${t.input}; color:${t.foreground}; }
+.sui-badge-success { border-color:color-mix(in srgb, ${t.success} 33%, transparent); background:color-mix(in srgb, ${t.success} 12%, transparent); color:${t.success}; }
+.sui-badge-warning { border-color:color-mix(in srgb, ${t.warning} 33%, transparent); background:color-mix(in srgb, ${t.warning} 12%, transparent); color:${t.warning}; }
+.sui-badge-destructive { border-color:color-mix(in srgb, ${t.destructive} 33%, transparent); background:color-mix(in srgb, ${t.destructive} 12%, transparent); color:${t.destructive}; }
+.sui-badge-muted { border-color:${t.border}; background:color-mix(in srgb, ${t.mutedForeground} 12%, transparent); color:${t.mutedForeground}; }
+.sui-status-dot { width:6px; height:6px; flex:none; border-radius:999px; background:currentColor; }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Card                                                                       */
+/* -------------------------------------------------------------------------- */
+
+export const cardCss = `
+.sui-card { min-width:0; display:grid; align-content:start; gap:10px; padding:14px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; box-shadow:${shadowCard}; }
+.sui-card-header { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.sui-card-title { min-width:0; color:${t.cardForeground}; font-size:14px; font-weight:700; }
+.sui-card-description { min-width:0; color:${t.mutedForeground}; font-size:12px; line-height:1.45; }
+.sui-card-action { display:flex; align-items:center; gap:8px; flex:none; }
+.sui-card-content { min-width:0; display:grid; align-content:start; gap:8px; }
+.sui-card-footer { min-width:0; display:flex; align-items:center; gap:8px; }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Form controls: Input, Textarea, Label, Field                               */
+/* -------------------------------------------------------------------------- */
+
+export const formCss = `
+.sui-input { min-width:0; min-height:32px; padding:0 10px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; outline:none; }
+.sui-input:focus-visible { ${focusRing} }
+.sui-input::placeholder { color:${t.placeholder}; }
+.sui-input:disabled { cursor:not-allowed; opacity:.45; }
+.sui-textarea { min-width:0; min-height:88px; padding:10px 12px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; line-height:1.45; resize:vertical; outline:none; }
+.sui-textarea:focus-visible { ${focusRing} }
+.sui-textarea::placeholder { color:${t.placeholder}; }
+.sui-textarea:disabled { cursor:not-allowed; opacity:.45; }
+.sui-label { color:${t.mutedForeground}; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; }
+.sui-field { min-width:0; display:grid; gap:5px; }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Alert                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export const alertCss = `
+.sui-alert { min-width:0; display:grid; gap:4px; padding:12px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.mutedForeground}; font-size:13px; }
+.sui-alert-title { color:${t.foreground}; font-size:13px; font-weight:650; }
+.sui-alert-description { color:${t.mutedForeground}; line-height:1.45; }
+.sui-alert-success { border-color:color-mix(in srgb, ${t.success} 45%, transparent); }
+.sui-alert-success .sui-alert-title { color:${t.success}; }
+.sui-alert-warning { border-color:color-mix(in srgb, ${t.warning} 45%, transparent); }
+.sui-alert-warning .sui-alert-title { color:${t.warning}; }
+.sui-alert-destructive { border-color:color-mix(in srgb, ${t.destructive} 45%, transparent); color:${t.destructive}; }
+.sui-alert-destructive .sui-alert-title { color:${t.destructive}; }
+.sui-alert-destructive .sui-alert-description { color:color-mix(in srgb, ${t.destructive} 80%, ${t.foreground}); }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Table                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export const tableCss = `
+.sui-table-container { min-width:0; width:100%; overflow-x:auto; }
+.sui-table { width:100%; border-collapse:collapse; font-size:13px; }
+.sui-table th, .sui-table td { padding:8px 9px; border-bottom:1px solid ${t.border}; text-align:left; vertical-align:top; }
+.sui-table th { color:${t.mutedForeground}; font-size:11px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; }
+.sui-table caption { padding:8px 9px; color:${t.mutedForeground}; font-size:11px; text-align:left; caption-side:bottom; }
+.sui-table tbody tr:hover { background:${t.hoverSubtle}; }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Tabs                                                                       */
+/* -------------------------------------------------------------------------- */
+
+export const tabsCss = `
+.sui-tabs { min-width:0; display:grid; align-content:start; gap:10px; }
+.sui-tabs-list { display:flex; align-items:center; gap:2px; min-width:0; overflow-x:auto; border-bottom:1px solid ${t.border}; }
+.sui-tabs-trigger { display:inline-flex; align-items:center; gap:6px; padding:7px 10px; border:none; border-bottom:2px solid transparent; margin-bottom:-1px; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
+.sui-tabs-trigger:hover { color:${t.foreground}; }
+.sui-tabs-trigger:focus-visible { ${focusRing} border-radius:${t.radiusControl}; }
+.sui-tabs-trigger[data-state='active'] { color:${t.foreground}; border-bottom-color:${t.primary}; }
+.sui-tabs-trigger:disabled { cursor:not-allowed; opacity:.45; }
+.sui-tab-count { font-family:${t.fontMono}; font-size:10px; color:${t.mutedForeground}; border:1px solid ${t.border}; border-radius:999px; padding:0 6px; min-width:18px; text-align:center; }
+.sui-tabs-trigger[data-state='active'] .sui-tab-count { color:${t.primary}; border-color:color-mix(in srgb, ${t.primary} 33%, transparent); }
+.sui-tabs-content { min-width:0; }
+.sui-tabs-content:focus-visible { outline:none; }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Dialog                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export const dialogCss = `
+.sui-dialog-overlay { position:fixed; inset:0; z-index:50; background:color-mix(in srgb, rgb(${t.shadowRgb}) 45%, transparent); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px); }
+.sui-dialog-content { position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:50; display:grid; gap:10px; width:calc(100vw - 32px); max-width:480px; max-height:calc(100vh - 48px); overflow:auto; padding:16px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; box-shadow:${shadowOverlay}; }
+.sui-dialog-header { min-width:0; display:grid; gap:4px; padding-right:28px; }
+.sui-dialog-title { color:${t.cardForeground}; font-size:14px; font-weight:700; }
+.sui-dialog-description { color:${t.mutedForeground}; font-size:12.5px; line-height:1.45; }
+.sui-dialog-footer { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+.sui-dialog-close { position:absolute; top:10px; right:10px; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; cursor:pointer; }
+.sui-dialog-close:hover { background:${t.secondary}; color:${t.foreground}; }
+.sui-dialog-close:focus-visible { ${focusRing} }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Tooltip                                                                    */
+/* -------------------------------------------------------------------------- */
+
+export const tooltipCss = `
+.sui-tooltip-content { z-index:60; max-width:320px; padding:4px 8px; border-radius:${t.radiusControl}; background:${t.inverseBg}; color:${t.inverseText}; font-size:11px; line-height:1.4; box-shadow:${shadowCard}; }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Select                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export const selectCss = `
+.sui-select-trigger { min-width:0; min-height:32px; display:inline-flex; align-items:center; justify-content:space-between; gap:8px; padding:0 10px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; cursor:pointer; white-space:nowrap; }
+.sui-select-trigger:focus-visible { ${focusRing} }
+.sui-select-trigger:disabled { cursor:not-allowed; opacity:.45; }
+.sui-select-trigger[data-placeholder] { color:${t.placeholder}; }
+.sui-select-icon { color:${t.mutedForeground}; flex:none; }
+.sui-select-content { z-index:60; min-width:var(--radix-select-trigger-width, 8rem); max-height:var(--radix-select-content-available-height, 320px); overflow:hidden; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.popover}; color:${t.popoverForeground}; box-shadow:${shadowOverlay}; }
+.sui-select-viewport { padding:4px; }
+.sui-select-item { position:relative; display:flex; align-items:center; gap:6px; padding:6px 8px 6px 26px; border-radius:${t.radiusControl}; color:${t.foreground}; font-size:13px; cursor:pointer; user-select:none; outline:none; }
+.sui-select-item[data-highlighted] { background:${t.secondary}; }
+.sui-select-item[data-disabled] { opacity:.45; cursor:not-allowed; }
+.sui-select-item-indicator { position:absolute; left:7px; display:inline-flex; align-items:center; color:${t.primary}; }
+.sui-select-label { padding:6px 8px; color:${t.mutedForeground}; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; }
+.sui-select-separator { height:1px; margin:4px 0; background:${t.border}; }
+.sui-select-scroll-button { display:flex; align-items:center; justify-content:center; height:20px; color:${t.mutedForeground}; cursor:default; }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Progress, Skeleton, Spinner, Separator                                     */
+/* -------------------------------------------------------------------------- */
+
+export const progressCss = `
+.sui-progress { position:relative; width:100%; height:6px; overflow:hidden; border-radius:999px; background:${t.secondary}; }
+.sui-progress-indicator { width:100%; height:100%; border-radius:999px; background:${t.primary}; transition:transform .3s ease; }
+`;
+
+export const skeletonCss = `
+.sui-skeleton { display:block; min-height:14px; border-radius:${t.radiusControl}; background:color-mix(in srgb, ${t.mutedForeground} 14%, transparent); animation:sui-skeleton-pulse 1.6s ease-in-out infinite; }
+@keyframes sui-skeleton-pulse { 0%, 100% { opacity:1; } 50% { opacity:.45; } }
+`;
+
+export const spinnerCss = `
+.sui-spinner { display:inline-block; width:14px; height:14px; flex:none; border:2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color:currentColor; border-radius:999px; animation:sui-spin .7s linear infinite; }
+.sui-spinner-sm { width:11px; height:11px; border-width:1.5px; }
+.sui-spinner-lg { width:20px; height:20px; }
+@keyframes sui-spin { to { transform:rotate(360deg); } }
+`;
+
+export const separatorCss = `
+.sui-separator { flex:none; background:${t.border}; }
+.sui-separator[data-orientation='horizontal'] { height:1px; width:100%; }
+.sui-separator[data-orientation='vertical'] { width:1px; align-self:stretch; }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* House compositions: EmptyState, SectionHeader, Eyebrow, RowButton, KpiStat */
+/* -------------------------------------------------------------------------- */
+
+export const emptyStateCss = `
+.sui-empty { min-width:0; display:grid; justify-items:center; gap:6px; padding:24px; color:${t.mutedForeground}; text-align:center; }
+.sui-empty-icon { color:${t.textFaint}; }
+.sui-empty-title { color:${t.foreground}; font-size:13px; font-weight:650; }
+.sui-empty-description { color:${t.mutedForeground}; font-size:12.5px; line-height:1.45; max-width:420px; }
+.sui-empty-action { margin-top:6px; }
+`;
+
+export const sectionHeaderCss = `
+.sui-section-header { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.sui-section-header-main { min-width:0; display:grid; gap:2px; }
+.sui-section-header-title { min-width:0; color:${t.foreground}; font-size:14px; font-weight:700; }
+.sui-section-header-actions { display:flex; align-items:center; gap:8px; flex:none; }
+.sui-eyebrow { color:${t.mutedForeground}; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; }
+`;
+
+export const rowButtonCss = `
+.sui-row-button { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; padding:10px 12px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; text-align:left; cursor:pointer; box-shadow:0 1px 2px rgb(${t.shadowRgb} / 0.04); transition:border-color .12s ease, background .12s ease; }
+.sui-row-button:hover { background:${t.secondary}; }
+.sui-row-button:focus-visible { ${focusRing} }
+.sui-row-button[data-active='true'] { background:${t.secondary}; border-color:color-mix(in srgb, ${t.primary} 40%, transparent); box-shadow:inset 2px 0 0 ${t.primary}, 0 1px 2px rgb(${t.shadowRgb} / 0.04); }
+.sui-row-button:disabled { cursor:not-allowed; opacity:.45; }
+`;
+
+export const kpiStatCss = `
+.sui-kpi { min-width:0; display:grid; gap:4px; padding:14px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; box-shadow:${shadowCard}; }
+.sui-kpi-value { color:${t.foreground}; font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+.sui-kpi-label { color:${t.mutedForeground}; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; }
+.sui-kpi-hint { color:${t.textFaint}; font-size:11px; }
+`;
+
+/** All component sheets, composed in a stable order. */
+export const smithersUiCss = [
+  buttonCss,
+  badgeCss,
+  cardCss,
+  formCss,
+  alertCss,
+  tableCss,
+  tabsCss,
+  dialogCss,
+  tooltipCss,
+  selectCss,
+  progressCss,
+  skeletonCss,
+  spinnerCss,
+  separatorCss,
+  emptyStateCss,
+  sectionHeaderCss,
+  rowButtonCss,
+  kpiStatCss,
+]
+  .map((block) => block.trim())
+  .join("\n");

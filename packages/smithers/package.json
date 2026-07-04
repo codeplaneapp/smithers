@@ -59,6 +59,11 @@
       "import": "./src/gateway-ui.js",
       "default": "./src/gateway-ui.js"
     },
+    "./ui": {
+      "types": "./src/ui.d.ts",
+      "import": "./src/ui.js",
+      "default": "./src/ui.js"
+    },
     "./sandbox": {
       "types": "./src/sandbox.d.ts",
       "import": "./src/sandbox.js",
@@ -135,6 +140,7 @@
     "@smithers-orchestrator/telegram": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
     "@smithers-orchestrator/tool-context": "workspace:*",
+    "@smithers-orchestrator/ui": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
     "ai": "^7.0.10",
     "diff": "^9.0.0",
