@@ -44,9 +44,74 @@ Three pieces collaborate:
 
 Both SDKs talk to the same Gateway. The vanilla SDK is published as `@smithers-orchestrator/gateway-client`; the React layer is `@smithers-orchestrator/gateway-react` and adds providers plus hooks over the TanStack DB collections.
 
+## The shared component library
+
+Before styling anything by hand, reach for `smithers-orchestrator/ui` (the published `@smithers-orchestrator/ui` package). It ships shadcn-anatomy components (variant props, `asChild` slots, Radix behavior for dialogs, tabs, tooltips, and selects) that are styled entirely through the [workflow UI theme tokens](/guides/workflow-ui-design), so every component is correct in light and dark automatically: the OS `prefers-color-scheme` is respected, and an explicit `?theme=dark|light` on the host page always wins.
+
+```tsx .smithers/ui/triage.tsx
+/** @jsxImportSource react */
+import { useState } from "react";
+import { createGatewayReactRoot, useGatewayActions, useGatewayRuns } from "smithers-orchestrator/gateway-react";
+import { WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import {
+  Button,
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Input,
+  RowButton,
+  SmithersUiStyles,
+  StatusPill,
+} from "smithers-orchestrator/ui";
+
+function App() {
+  const [prompt, setPrompt] = useState("");
+  const runs = useGatewayRuns({ filter: { limit: 20 } });
+  const actions = useGatewayActions();
+  return (
+    <WorkflowUiShell title="Triage">
+      <SmithersUiStyles />
+      <Card>
+        <CardHeader>
+          <CardTitle>Launch</CardTitle>
+        </CardHeader>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Input style={{ flex: 1 }} value={prompt} onChange={(e) => setPrompt(e.currentTarget.value)} placeholder="Optional prompt..." />
+          <Button onClick={() => void actions.launchRun({ workflow: "triage", input: { prompt } })}>Start</Button>
+        </div>
+      </Card>
+      {(runs.data ?? []).length === 0 ? (
+        <EmptyState title="No runs yet" description="Launch one to see it here." />
+      ) : (
+        (runs.data ?? []).map((r) => (
+          <RowButton key={r.runId}>
+            <span className="mono">{r.runId.slice(0, 8)}</span>
+            <StatusPill status={r.status} />
+          </RowButton>
+        ))
+      )}
+    </WorkflowUiShell>
+  );
+}
+
+createGatewayReactRoot(<App />);
+```
+
+The important mechanics:
+
+- **Styles travel as a JS string, never a `.css` import.** The Gateway bundler keeps only the JS output, so `import "./x.css"` is silently dropped. Render `<SmithersUiStyles/>` once at the root; every component also self-injects the sheet in the browser as a fallback, so a missing style tag degrades gracefully instead of unstyled.
+- **All classes are namespaced `sui-*`**, so they can never collide with the styleguide page vocabulary (`.button`, `.badge`, `.card`) or your own CSS. Your escape hatch for custom rules is `<SmithersUiStyles extra=".mine { ... }" />` or a plain `<style>` string of your own.
+- **Standalone hosts** (pages the Gateway shell does not serve) pass `withTheme` to prepend the token block: `<SmithersUiStyles withTheme />`.
+- **The status vocabulary is shared.** `normalizeStatus`, `statusClass`, `formatStatus`, and `isTerminalRunStatus` are exported from `smithers-orchestrator/ui` (and re-exported by `gateway-ui`), so stop re-implementing them per UI.
+
+The component set: `Button` (the default variant is the house tinted-brand primary; `solid` is the filled look), `Card` family, `Badge` and `StatusPill`, `Tabs` (with a `count` slot per trigger), `Dialog` (backdrop, Esc, focus trap for free), `Tooltip`, `Select`, `Input`/`Textarea`/`Label`/`Field`, `Alert` (the honest-degradation surface), `Table`, `Progress`, `Skeleton`, `Spinner`, `Separator`, `EmptyState`, `SectionHeader`/`Eyebrow`, `RowButton`, and `KpiStat`.
+
+For run-aware building blocks that already talk to the Gateway (`RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`, `SimpleWorkflowDashboard`), use [`@smithers-orchestrator/gateway-ui`](/reference/gateway-ui); it is built on the same tokens and re-exports the status helpers.
+
 ## The boot config
 
-Every page the Gateway serves at `/workflows/<key>` (and `/inspector/<runId>` for the built-in inspector) sets a global before your bundle parses:
+Every page the Gateway serves at `/workflows/<key>` (and `/inspector/RUN_ID` for the built-in inspector) sets a global before your bundle parses:
 
 ```ts
 declare global {
@@ -164,7 +229,7 @@ A custom UI almost never holds a token. The Gateway accepts auth via three mecha
 
 In practice this means one of:
 
-- **Local smithers ui.** The CLI opens the Gateway-served `/workflows/<key>?runId=<id>` page directly. The browser sees one origin and the Gateway can use the local token or key configured for that process. See [Local dev setup](#local-dev-setup).
+- **Local bunx smithers-orchestrator ui.** The CLI opens the Gateway-served `/workflows/<key>?runId=<id>` page directly. The browser sees one origin and the Gateway can use the local token or key configured for that process. See [Local dev setup](#local-dev-setup).
 - **Your own host.** Put the Gateway behind a reverse proxy that serves `/v1/rpc`, `/health`, and `/workflows/*` on the same origin as the page embedding the UI. A trusted proxy can terminate the user's session, strip browser-supplied identity headers, and forward only the identity headers it validated. See [Trusted same-origin proxy](#trusted-same-origin-proxy).
 - **Bring-your-own token.** Pass `new SmithersGatewayClient({ token, baseUrl })` if you really do hold a token at the UI layer. Useful for tooling and one-off bots; avoid it in user-facing surfaces.
 
@@ -234,7 +299,7 @@ If you build your own read on top of `useGatewayRpc` (via the `deps` option) or 
 
 ## Same-origin proxy patterns
 
-Custom UIs may be embedded in an iframe, or opened directly by smithers ui. The robust path is to serve the UI shell and Gateway RPC from the same origin, so the page's `fetch("/v1/rpc/...")` and `new WebSocket("wss://<host>/")` both hit the Gateway without CORS or token shuttling.
+Custom UIs may be embedded in an iframe, or opened directly by bunx smithers-orchestrator ui. The robust path is to serve the UI shell and Gateway RPC from the same origin, so the page's `fetch("/v1/rpc/...")` and `new WebSocket("wss://<host>/")` both hit the Gateway without CORS or token shuttling.
 
 ### Local dev setup
 

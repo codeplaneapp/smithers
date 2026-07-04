@@ -9,6 +9,12 @@ The reference implementation is the Smithers product UI. The rules below are ext
 
 <Note>Most reference UIs in this repo (`.smithers/ui/vcs.tsx`, `grill-me.tsx`, `ultragrill.tsx`) ship a single inline `<style>` string. That is fine. The point is not *where* the CSS lives; it is that the *values* come from the shared token set below instead of ad-hoc hex codes.</Note>
 
+## Components first
+
+The fastest way to comply with everything in this guide is to not hand-write the CSS at all: `smithers-orchestrator/ui` ships shared components (Button, Card, Badge, StatusPill, Tabs, Dialog, Tooltip, Select, Input, Alert, Table, Progress, Skeleton, Spinner, EmptyState, and more) whose styling is generated from the token set below, with the exact house recipes (tinted primary button, brand focus halo, 22px status pills, 8px card radius). They are correct in light and dark by construction, and Radix supplies the accessibility behavior. See [the shared component library](/guides/custom-workflow-ui#the-shared-component-library) for usage.
+
+Everything below remains the contract those components implement, and what you follow whenever you write custom CSS next to them.
+
 ## Start from the token set
 
 Every UI declares the same custom properties and reads them everywhere. Never hardcode a color, a tint, or a shadow alpha inline; reach for a token (or derive one with `color-mix`). This is what makes light and dark "just work" and what keeps two different workflow UIs from drifting apart.
