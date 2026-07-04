@@ -92,6 +92,27 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "}",
         "",
     ].join("\n"));
+    repo.write(".smithers/types/smithers-orchestrator-gateway-ui.d.ts", [
+        'declare module "smithers-orchestrator/gateway-ui" {',
+        "  export const WorkflowUiShell: any;",
+        "  export const WorkflowUiStyles: any;",
+        "  export const SimpleWorkflowDashboard: any;",
+        "  export const StatusPill: any;",
+        "}",
+        "",
+    ].join("\n"));
+    repo.write(".smithers/types/smithers-orchestrator-ui.d.ts", [
+        'declare module "smithers-orchestrator/ui" {',
+        "  export const Button: any;",
+        "  export const Card: any;",
+        "  export const EmptyState: any;",
+        "  export const Input: any;",
+        "  export const RowButton: any;",
+        "  export const SmithersUiStyles: any;",
+        "  export const StatusPill: any;",
+        "}",
+        "",
+    ].join("\n"));
     repo.write(".smithers/tsconfig.e2e.json", JSON.stringify({
         extends: "./tsconfig.json",
         compilerOptions: {
@@ -103,6 +124,8 @@ function writeWorkflowPackTypecheckHarness(repo) {
                 "~/*": ["./*"],
                 "smithers-orchestrator": ["./types/smithers-orchestrator.d.ts"],
                 "smithers-orchestrator/gateway-react": ["./types/smithers-orchestrator-gateway-react.d.ts"],
+                "smithers-orchestrator/gateway-ui": ["./types/smithers-orchestrator-gateway-ui.d.ts"],
+                "smithers-orchestrator/ui": ["./types/smithers-orchestrator-ui.d.ts"],
                 "smithers-orchestrator/jsx-runtime": ["./types/smithers-orchestrator-jsx-runtime.d.ts"],
             },
         },

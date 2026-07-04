@@ -1838,9 +1838,16 @@ const UI_WORKFLOWS = [
 const DEDICATED_UI_KEYS = new Set(["kanban", "plan", "vcs"]);
 
 function renderGenericWorkflowUiSource(key) {
+    // Theme-correct by construction: the gateway host page inlines the
+    // styleguide theme tokens (light AND dark via prefers-color-scheme, with
+    // the ?theme= data-theme override), WorkflowUiShell renders the styleguide
+    // classes, and the shared smithers-orchestrator/ui components style
+    // through those tokens. No hardcoded colors anywhere.
     return `/** @jsxImportSource react */
 import { useState } from "react";
 import { createGatewayReactRoot, useGatewayActions, useGatewayRuns } from "smithers-orchestrator/gateway-react";
+import { WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { Button, EmptyState, Input, RowButton, SmithersUiStyles, StatusPill } from "smithers-orchestrator/ui";
 
 const WORKFLOW_KEY = ${JSON.stringify(key)};
 
@@ -1859,25 +1866,25 @@ function App() {
     finally { setBusy(false); }
   }
   return (
-    <main style={{ fontFamily: "-apple-system,BlinkMacSystemFont,sans-serif", fontSize: 13, background: "#0c0c0e", color: "#eee", minHeight: "100vh", padding: "20px" }}>
-      <h2 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 16px" }}>{WORKFLOW_KEY}</h2>
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        <input style={{ flex: 1, padding: "6px 10px", border: "1px solid #333", borderRadius: 6, background: "#151518", color: "#eee", fontSize: 13 }} value={prompt} onChange={(e) => setPrompt(e.currentTarget.value)} placeholder="Optional prompt..." />
-        <button style={{ padding: "6px 14px", border: "1px solid #5e6ad2", borderRadius: 6, background: "#5e6ad2", color: "#fff", cursor: "pointer" }} disabled={busy} onClick={() => void start()}>Start</button>
+    <WorkflowUiShell title={WORKFLOW_KEY}>
+      <SmithersUiStyles />
+      <div style={{ display: "flex", gap: 8 }}>
+        <Input style={{ flex: 1 }} value={prompt} onChange={(e) => setPrompt(e.currentTarget.value)} placeholder="Optional prompt..." />
+        <Button disabled={busy} onClick={() => void start()}>Start</Button>
       </div>
       {runs.length === 0 ? (
-        <div style={{ color: "#888", textAlign: "center", padding: 48 }}>No runs yet.</div>
+        <EmptyState title="No runs yet" description="Launch one to see it here." />
       ) : (
-        <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+        <div style={{ display: "grid", gap: 8 }}>
           {runs.map((r) => (
-            <li key={r.runId} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: "#151518", border: "1px solid #262629", borderRadius: 8, marginBottom: 8 }}>
-              <span style={{ fontFamily: "ui-monospace,monospace", fontSize: 12 }}>{shortId(r.runId)}</span>
-              <span style={{ fontSize: 11, color: "#8a8a8e" }}>{r.status ?? "running"}</span>
-            </li>
+            <RowButton key={r.runId}>
+              <span className="mono" style={{ fontSize: 12 }}>{shortId(r.runId)}</span>
+              <StatusPill status={r.status ?? "running"} />
+            </RowButton>
           ))}
-        </ul>
+        </div>
       )}
-    </main>
+    </WorkflowUiShell>
   );
 }
 
