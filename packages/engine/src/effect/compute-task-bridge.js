@@ -163,6 +163,25 @@ function heartbeatTimeoutReasonFromAbort(signal, err) {
  * @param {unknown} err
  * @returns {boolean}
  */
+function isTaskTimeoutError(err) {
+    if (err instanceof TaskTimeout) {
+        return true;
+    }
+    if (err instanceof SmithersError && err.code === "TASK_TIMEOUT") {
+        return true;
+    }
+    const taggedCandidate = fromTaggedError(err);
+    if (taggedCandidate?.code === "TASK_TIMEOUT") {
+        return true;
+    }
+    return Boolean(err &&
+        typeof err === "object" &&
+        err.code === "TASK_TIMEOUT");
+}
+/**
+ * @param {unknown} err
+ * @returns {boolean}
+ */
 function isHeartbeatPayloadValidationError(err) {
     if (err instanceof SmithersError) {
         return (err.code === "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE" ||
@@ -479,7 +498,7 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             workflowName,
             taskRoot: toolConfig.rootDir,
         }, "engine:task");
-        let computeEffect = Effect.tryPromise({
+        const computeEffect = Effect.tryPromise({
             try: (effectSignal) => {
                 const computeAbortController = new AbortController();
                 const removeTaskAbortForwarder = wireAbortSignal(computeAbortController, taskSignal);
@@ -504,16 +523,39 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             },
             catch: (error) => error,
         });
+        const runCompute = () => runWithHeartbeatWatchdog(computeEffect);
         const timeoutMs = desc.timeoutMs;
+        let payload;
         if (timeoutMs) {
-            computeEffect = computeEffect.pipe(Effect.timeout(Duration.millis(timeoutMs)), Effect.catchIf(Cause.isTimeoutException, () => Effect.fail(new TaskTimeout({
+            const timeoutError = new TaskTimeout({
                 message: `Compute callback timed out after ${timeoutMs}ms`,
                 attempt: attemptNo,
                 nodeId: desc.nodeId,
                 timeoutMs,
-            }))));
+            });
+            let timeout;
+            const computePromise = runCompute();
+            computePromise.catch(() => { });
+            try {
+                payload = await Promise.race([
+                    computePromise,
+                    new Promise((_, reject) => {
+                        timeout = setTimeout(() => {
+                            taskAbortController.abort(timeoutError);
+                            reject(timeoutError);
+                        }, timeoutMs);
+                    }),
+                ]);
+            }
+            finally {
+                if (timeout) {
+                    clearTimeout(timeout);
+                }
+            }
         }
-        let payload = await runWithHeartbeatWatchdog(computeEffect);
+        else {
+            payload = await runCompute();
+        }
         payload = stripAutoColumns(payload);
         const payloadWithKeys = buildOutputRow(desc.outputTable, runId, desc.nodeId, desc.iteration, payload);
         let validation = validateOutput(desc.outputTable, payloadWithKeys);
@@ -600,7 +642,8 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             }, "engine:task-events");
         }
         const heartbeatTimeoutError = heartbeatTimeoutReasonFromAbort(taskSignal, err);
-        const aborted = !heartbeatTimeoutError && (taskSignal.aborted || isAbortError(err));
+        const taskTimeoutError = isTaskTimeoutError(err);
+        const aborted = !heartbeatTimeoutError && !taskTimeoutError && (taskSignal.aborted || isAbortError(err));
         const effectiveError = heartbeatTimeoutError ??
             (aborted && taskSignal.reason !== undefined
                 ? taskSignal.reason
