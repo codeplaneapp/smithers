@@ -13,6 +13,8 @@ The reference implementation is the Smithers product UI. The rules below are ext
 
 Every UI declares the same custom properties and reads them everywhere. Never hardcode a color, a tint, or a shadow alpha inline; reach for a token (or derive one with `color-mix`). This is what makes light and dark "just work" and what keeps two different workflow UIs from drifting apart.
 
+<Note>The Gateway's HTML shell already injects this exact token block (the canonical `workflowUiThemeCss` from `@smithers-orchestrator/ui-styleguide`) into every `/workflows/<key>` page, and stamps `data-theme` on `<html>` from a `?theme=dark|light` query param before first paint. So a workflow UI that just *reads* the tokens is themed automatically, including for hosts that embed the page in an iframe and force a theme via the query param. Declaring the block yourself (as below, or via `WorkflowUiStyles` from `gateway-ui`) is still correct and keeps the UI portable outside the shell; duplicate declarations are harmless.</Note>
+
 Paste this `:root` block at the top of your `<style>` (it carries the canonical light values, the dark overrides for both the explicit toggle and the OS preference, and the typographic base):
 
 ```css

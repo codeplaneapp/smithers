@@ -15,6 +15,16 @@ Import them from the `smithers-orchestrator/gateway-ui` subpath, alongside
 inline styles (no CSS import), so it bundles cleanly through the Gateway's
 bundler, and every component accepts `className` and `style` to override.
 
+The inline styles are theme-following: every color is a
+`var(--token, #lightFallback)` expression over the
+[workflow UI style-guide tokens](/guides/workflow-ui-design), which the
+Gateway's HTML shell injects into every `/workflows/<key>` page. Components
+therefore render light or dark with the rest of the page, following the OS
+`prefers-color-scheme` or an explicit `data-theme="dark|light"` on `<html>`
+(which the shell sets from a `?theme=` query param). Outside a themed page the
+fallbacks reproduce the light look. Tints derive via `color-mix` over the same
+tokens, never hex-plus-alpha.
+
 ## Components
 
 | Component | What it renders | Key props |
