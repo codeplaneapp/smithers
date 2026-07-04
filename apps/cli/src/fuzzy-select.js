@@ -144,6 +144,24 @@ function terminalRows() {
 }
 
 /**
+ * Some readline paths can surface delete keys as raw control bytes in the
+ * tracked input. Treat them as edits before running the fuzzy filter.
+ *
+ * @param {string | undefined} input
+ */
+function normalizeTrackedInput(input) {
+    const chars = [];
+    for (const char of String(input ?? "")) {
+        if (char === "\x7f" || char === "\b") {
+            chars.pop();
+        } else {
+            chars.push(char);
+        }
+    }
+    return chars.join("");
+}
+
+/**
  * A type-to-filter picker built on clack's `Prompt` base class. We subclass
  * `Prompt` directly (NOT `SelectPrompt`) with `trackValue=true` so the base
  * pipes readline and keeps `this.value` in sync with the typed query — letters
@@ -199,10 +217,10 @@ class FuzzySelectPrompt extends Prompt {
             if (i >= 0) this.optionCursor = i;
         }
 
-        // Re-filter on every keystroke. Typing AND backspace both edit rl.line,
-        // so the base re-emits "userInput" for both — this covers backspace free.
-        this.on("userInput", () => {
-            this.query = this.userInput ?? "";
+        // Re-filter on every keystroke. Delete keys may arrive either as an
+        // edited readline buffer or as raw control bytes, depending on the stream.
+        this.on("userInput", (input) => {
+            this.query = normalizeTrackedInput(input);
             this.filtered = fuzzyFilter(this.query, this.allOptions);
             if (this.optionCursor > this.filtered.length - 1) {
                 this.optionCursor = Math.max(0, this.filtered.length - 1);

@@ -392,10 +392,10 @@ function makeHarness(adapterState = {}) {
         cwd,
         state,
         tools,
-        async call(name, input = {}) {
+        async call(name, input = {}, extra = undefined) {
             const tool = tools.get(name);
             if (!tool) throw new Error(`missing tool ${name}`);
-            return tool.handler(tool.inputSchema.parse(input));
+            return tool.handler(tool.inputSchema.parse(input), extra);
         },
     };
 }
@@ -575,6 +575,28 @@ describe("semantic tool definitions", () => {
         });
         expect(polled.structuredContent.data.reachedTerminal).toBe(true);
         expect(polled.structuredContent.data.pollCount).toBe(1);
+
+        const abortHarness = makeHarness({
+            runs: [runRow({ runId: "run-1", status: "running" })],
+            nodes: [],
+            approvals: [],
+            attempts: [],
+        });
+        const abort = new AbortController();
+        const aborted = abortHarness.call(
+            "watch_run",
+            {
+                runId: "run-1",
+                intervalMs: 60_000,
+                timeoutMs: 60_000,
+            },
+            { signal: abort.signal },
+        );
+        abort.abort();
+        const abortedResult = await aborted;
+        expect(abortedResult.isError).toBe(true);
+        expect(abortedResult.structuredContent.error.code).toBe("TASK_ABORTED");
+        expect(abortHarness.state.cleanupCalls).toBe(1);
 
         const explanation = await harness.call("explain_run", { runId: "run-1" });
         expect(explanation.structuredContent.data.diagnosis.runId).toBe("run-1");

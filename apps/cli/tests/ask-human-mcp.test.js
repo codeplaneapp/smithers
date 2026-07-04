@@ -93,4 +93,41 @@ describe("ask_human semantic tool", () => {
             sqlite.close();
         }
     });
+
+    test("stops waiting when the caller aborts", async () => {
+        const { sqlite, adapter, askHuman } = makeHarness();
+        try {
+            const abort = new AbortController();
+            const callPromise = askHuman.handler(
+                askHuman.inputSchema.parse({
+                    prompt: "Proceed?",
+                    runId: "run-1",
+                    nodeId: "n",
+                    iteration: 0,
+                    pollSeconds: 60,
+                }),
+                { signal: abort.signal },
+            );
+
+            let requestId;
+            for (let i = 0; i < 60 && !requestId; i += 1) {
+                const pending = await adapter.listPendingHumanRequests();
+                if (pending.length > 0) {
+                    requestId = pending[0].requestId;
+                } else {
+                    await new Promise((r) => setTimeout(r, 25));
+                }
+            }
+            expect(requestId).toBeTruthy();
+
+            abort.abort();
+            const result = await callPromise;
+            expect(result.structuredContent.ok).toBe(true);
+            expect(result.structuredContent.data.requestId).toBe(requestId);
+            expect(result.structuredContent.data.status).toBe("aborted");
+            expect(result.structuredContent.data.decision).toBe("blocked");
+        } finally {
+            sqlite.close();
+        }
+    });
 });

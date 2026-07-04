@@ -37,6 +37,7 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
  * @typedef {(adapter: SmithersDb, dbPath: string) => Promise<T>} WithDbCallback
  */
 /** @typedef {import("./SemanticToolDefinition.ts").SemanticToolDefinition} SemanticToolDefinition */
+/** @typedef {import("./SemanticToolDefinition.ts").SemanticToolCallExtra} SemanticToolCallExtra */
 
 export const SEMANTIC_TOOL_NAMES = [
     "list_workflows",
@@ -539,11 +540,31 @@ const getRunEventsDataSchema = z.object({
     events: z.array(eventSchema),
 });
 /**
- * @param {number} ms
+ * @param {AbortSignal | undefined} signal
  */
-function sleep(ms) {
-    return new Promise((resolvePromise) => {
-        setTimeout(resolvePromise, ms);
+function throwIfAborted(signal) {
+    if (signal?.aborted) {
+        throw new SmithersError("TASK_ABORTED", "MCP tool call was aborted.");
+    }
+}
+/**
+ * @param {number} ms
+ * @param {AbortSignal} [signal]
+ */
+function sleep(ms, signal) {
+    throwIfAborted(signal);
+    return new Promise((resolvePromise, rejectPromise) => {
+        const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolvePromise();
+        }, ms);
+        const onAbort = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            rejectPromise(new SmithersError("TASK_ABORTED", "MCP tool call was aborted."));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) onAbort();
     });
 }
 /**
@@ -797,10 +818,12 @@ async function loadWorkflowById(workflowId, cwd) {
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {number} waitForStartMs
+ * @param {AbortSignal} [signal]
  */
-async function waitForObservedRun(adapter, runId, waitForStartMs) {
+async function waitForObservedRun(adapter, runId, waitForStartMs, signal) {
     const deadline = Date.now() + Math.max(0, waitForStartMs);
     while (true) {
+        throwIfAborted(signal);
         const run = await adapter.getRun(runId);
         if (run) {
             return buildRunSummary(adapter, run);
@@ -808,7 +831,7 @@ async function waitForObservedRun(adapter, runId, waitForStartMs) {
         if (Date.now() >= deadline) {
             return null;
         }
-        await sleep(25);
+        await sleep(25, signal);
     }
 }
 /**
@@ -982,7 +1005,7 @@ export function createSemanticToolDefinitions(options = {}) {
             inputSchema: runWorkflowInputSchema,
             outputSchema: resultSchema(runWorkflowDataSchema),
             annotations: { readOnlyHint: false, openWorldHint: true },
-            handler: (input) => executeSemanticTool("run_workflow", async () => {
+            handler: (input, extra) => executeSemanticTool("run_workflow", async () => {
                 const runId = input.runId ?? crypto.randomUUID();
                 const { workflow, summary } = await loadWorkflowById(input.workflowId, context.cwd());
                 const adapter = workflow.db
@@ -1016,6 +1039,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     maxOutputBytes: input.maxOutputBytes,
                     toolTimeoutMs: input.toolTimeoutMs,
                     hot: input.hot,
+                    signal: input.waitForTerminal ? extra?.signal : undefined,
                 })).then((result) => {
                     launchState.settled = true;
                     launchState.result = result;
@@ -1046,7 +1070,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     console.error(`[smithers:mcp] run_workflow background failure ${runId}: ${rendered.code} ${rendered.message}`);
                 });
                 const observedRun = adapter != null
-                    ? await waitForObservedRun(adapter, runId, input.waitForStartMs)
+                    ? await waitForObservedRun(adapter, runId, input.waitForStartMs, extra?.signal)
                     : null;
                 if (observedRun == null && launchState.settled) {
                     if (launchState.error) {
@@ -1110,12 +1134,13 @@ export function createSemanticToolDefinitions(options = {}) {
             inputSchema: watchRunInputSchema,
             outputSchema: resultSchema(watchRunDataSchema),
             annotations: { readOnlyHint: true },
-            handler: (input) => executeSemanticTool("watch_run", async () => withDb(context, async (adapter, dbPath) => {
+            handler: (input, extra) => executeSemanticTool("watch_run", async () => withDb(context, async (adapter, dbPath) => {
                 const intervalMs = Math.max(WATCH_MIN_INTERVAL_MS, input.intervalMs);
                 const deadline = Date.now() + input.timeoutMs;
                 const snapshots = [];
                 let pollCount = 0;
                 while (true) {
+                    throwIfAborted(extra?.signal);
                     const run = await adapter.getRun(input.runId);
                     if (!run) {
                         const dbHint = dbPath ? ` (db: ${dbPath})` : "";
@@ -1156,7 +1181,7 @@ export function createSemanticToolDefinitions(options = {}) {
                         };
                     }
                     pollCount += 1;
-                    await sleep(intervalMs);
+                    await sleep(intervalMs, extra?.signal);
                 }
             })),
         },
@@ -1249,7 +1274,8 @@ export function createSemanticToolDefinitions(options = {}) {
                 openWorldHint: true,
                 idempotentHint: false,
             },
-            handler: (input) => executeSemanticTool("ask_human", async () => withDb(context, async (adapter) => {
+            handler: (input, extra) => executeSemanticTool("ask_human", async () => withDb(context, async (adapter) => {
+                throwIfAborted(extra?.signal);
                 const ctx = await resolveAskHumanContext(adapter, {
                     runId: input.runId,
                     nodeId: input.nodeId,
@@ -1280,6 +1306,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     pollIntervalMs: typeof input.pollSeconds === "number" && input.pollSeconds > 0
                         ? Math.floor(input.pollSeconds * 1_000)
                         : undefined,
+                    signal: extra?.signal,
                 });
                 let response = null;
                 if (outcome.status === "answered" && outcome.responseJson != null) {
