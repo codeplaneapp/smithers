@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import type { ComponentProps } from "react";
 import { Badge, type BadgeProps } from "./badge";
 import { formatStatus, statusClass, type StatusClass } from "./status";

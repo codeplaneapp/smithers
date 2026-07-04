@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import type { ComponentProps } from "react";
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { cn } from "./cn";

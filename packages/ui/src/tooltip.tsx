@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import type { ComponentProps } from "react";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 import { cn } from "./cn";

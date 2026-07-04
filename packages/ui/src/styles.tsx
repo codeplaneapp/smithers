@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import { useInsertionEffect } from "react";
 import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
 import { smithersUiCss } from "./uiCss";
