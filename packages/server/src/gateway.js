@@ -45,6 +45,7 @@ import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
 import { apiCollectionNames, serializeAccountRow, serializeApprovalRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow, } from "@smithers-orchestrator/gateway/api";
 import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
 import { EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, GatewayExtensions, isExtensionMethod, } from "./GatewayExtensions.js";
+import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
 import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
 import { authorizeGatewayUiRequest } from "./gatewayUi/auth.js";
@@ -211,6 +212,15 @@ function escapeHtml(value) {
 function safeJsonScript(value) {
     return JSON.stringify(value).replaceAll("<", "\\u003c");
 }
+
+/**
+ * Pre-paint theme override for gateway-served UI pages. An embedding host (an
+ * iframe or a deep link) forces a theme with `?theme=dark` / `?theme=light`;
+ * the script stamps it as `data-theme` on `<html>` before first paint, which
+ * the injected style-guide tokens (and `color-scheme`) honor. Without the
+ * param the page follows the OS via `prefers-color-scheme`.
+ */
+const GATEWAY_UI_THEME_BOOTSTRAP_SCRIPT = '(function(){var t=new URLSearchParams(location.search).get("theme");if(t==="dark"||t==="light"){document.documentElement.dataset.theme=t;}})();';
 
 /**
  * @param {string | undefined} rawPath
@@ -1821,12 +1831,20 @@ export class Gateway {
         const title = mount.config.title ?? (mount.workflowKey ? `${mount.workflowKey} | Smithers` : "Smithers");
         const boot = this.uiBootConfig(mount);
         const assetSrc = joinUiPath(mount.config.path, `${GATEWAY_UI_ASSET_PREFIX}/client.js`);
+        // The style-guide token block ships in the host page itself so the
+        // document is themed (light AND dark, `color-scheme` included) before —
+        // and independently of — the client bundle: no white flash for dark
+        // users, and custom UIs inherit the tokens even if they never render
+        // `WorkflowUiStyles`. The bootstrap script honors `?theme=dark|light`
+        // by stamping `data-theme` on <html> pre-paint.
         return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>${escapeHtml(title)}</title>
+    <script>${GATEWAY_UI_THEME_BOOTSTRAP_SCRIPT}</script>
+    <style>${workflowUiThemeCss}</style>
   </head>
   <body>
     <div id="root"></div>
@@ -1918,6 +1936,10 @@ export class Gateway {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Smithers Gateway</title>
+    <script>${GATEWAY_UI_THEME_BOOTSTRAP_SCRIPT}</script>
+    <style>${workflowUiThemeCss}
+main { padding: 24px; display: grid; gap: 12px; }
+a { color: var(--brand); }</style>
   </head>
   <body>
     <main>

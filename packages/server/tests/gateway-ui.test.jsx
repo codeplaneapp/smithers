@@ -386,6 +386,17 @@ describe("Gateway UI", () => {
     expect(html).toContain('"workflowKey":"deploy"');
     expect(html).toContain('"mountPath":"/workflows/deploy"');
 
+    // The host page itself carries the light/dark theme: style-guide tokens
+    // (with the OS dark branch and the explicit data-theme override) plus the
+    // pre-paint ?theme=dark|light bootstrap, so the document is themed before
+    // the client bundle loads and regardless of whether the workflow UI renders
+    // WorkflowUiStyles.
+    expect(html).toContain("color-scheme:light");
+    expect(html).toContain("@media (prefers-color-scheme: dark)");
+    expect(html).toContain(":root[data-theme='dark']");
+    expect(html).toContain('new URLSearchParams(location.search).get("theme")');
+    expect(html).toContain("document.documentElement.dataset.theme=t");
+
     const listedResponse = await postRpc(port, "listWorkflows", { filter: { hasUi: true } });
     expect(listedResponse.status).toBe(200);
     const listed = await listedResponse.json();
