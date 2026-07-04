@@ -34,6 +34,7 @@ export {
   normalizeStatus,
   statusClass,
   formatStatus,
+  isTerminalRunStatus,
 } from "./theme";
 export {
   WorkflowUiStyles,

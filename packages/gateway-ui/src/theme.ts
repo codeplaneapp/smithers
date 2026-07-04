@@ -60,57 +60,17 @@ export const statusColors: Record<string, string> = {
   skipped: theme.textDim,
 };
 
-export function normalizeStatus(status: string | undefined): string {
-  return (status ?? "").trim().toLowerCase().replaceAll("_", "-");
-}
-
-export function statusClass(status: string | undefined): "ok" | "warn" | "bad" | "muted" {
-  const normalized = normalizeStatus(status);
-  if (["fixed", "ready", "done", "finished", "success", "ok", "complete", "completed", "closed"].includes(normalized)) return "ok";
-  if (["broken", "blocked", "failed", "failure", "error"].includes(normalized)) return "bad";
-  if (
-    ["partial", "missing-tests", "missing", "running", "pending", "queued", "waiting", "todo", "open"].includes(normalized) ||
-    normalized.startsWith("waiting-")
-  ) return "warn";
-  return "muted";
-}
-
-export function formatStatus(status: string | undefined): string {
-  const normalized = normalizeStatus(status);
-  if (!normalized) return "Unknown";
-  const labels: Record<string, string> = {
-    ok: "Complete",
-    success: "Complete",
-    complete: "Complete",
-    completed: "Complete",
-    fixed: "Fixed",
-    ready: "Ready",
-    done: "Done",
-    finished: "Finished",
-    running: "Running",
-    pending: "Pending",
-    queued: "Queued",
-    waiting: "Waiting",
-    "waiting-approval": "Waiting for approval",
-    "waiting-event": "Waiting for event",
-    "waiting-timer": "Waiting on timer",
-    partial: "Partial",
-    "missing-tests": "Missing e2e",
-    missing: "Missing",
-    broken: "Broken",
-    blocked: "Blocked",
-    failed: "Failed",
-    failure: "Failed",
-    error: "Error",
-    cancelled: "Cancelled",
-    canceled: "Cancelled",
-    skipped: "Skipped",
-    todo: "Todo",
-    open: "Open",
-    closed: "Closed",
-  };
-  return labels[normalized] ?? normalized.split("-").map((part) => part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part).join(" ");
-}
+// The status vocabulary (normalize/bucket/label + terminal detection) lives in
+// @smithers-orchestrator/ui so every consumer shares ONE copy; these re-exports
+// keep the long-standing gateway-ui import paths working unchanged.
+export {
+  normalizeStatus,
+  statusClass,
+  formatStatus,
+  isTerminalRunStatus,
+  type StatusClass,
+} from "@smithers-orchestrator/ui";
+import { normalizeStatus } from "@smithers-orchestrator/ui";
 
 /** The accent color for a status string, defaulting to the dim neutral. */
 export function statusColor(status: string | undefined): string {
