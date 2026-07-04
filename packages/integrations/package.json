@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/integrations",
-  "version": "0.26.1",
+  "version": "0.27.0",
   "description": "External service integrations (webhook + polling event sources) for Smithers workflows",
   "type": "module",
   "sideEffects": false,

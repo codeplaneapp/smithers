@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/tui",
-  "version": "0.26.1",
+  "version": "0.27.0",
   "description": "Terminal monitor UI for Smithers runs",
   "type": "module",
   "sideEffects": false,

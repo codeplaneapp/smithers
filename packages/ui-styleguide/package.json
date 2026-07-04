@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/ui-styleguide",
-  "version": "0.26.1",
+  "version": "0.27.0",
   "description": "Shared CSS tokens and layout primitives for Smithers browser UIs.",
   "type": "module",
   "sideEffects": false,
