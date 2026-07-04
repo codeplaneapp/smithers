@@ -31,8 +31,8 @@ export function StatusPill({ status, label, className, style }: StatusPillProps)
         fontSize: 12,
         fontWeight: 600,
         color,
-        background: `${color}1f`,
-        border: `1px solid ${color}55`,
+        background: `color-mix(in srgb, ${color} 12%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${color} 33%, transparent)`,
         ...style,
       }}
     >

@@ -39,7 +39,7 @@ export function RunTree({ runId, onSelectNode, activeNodeId, className, style }:
       {!runId ? (
         <div style={{ color: theme.textDim, fontSize: 13, padding: 10 }}>Select a run.</div>
       ) : null}
-      {error ? <div style={{ color: "#f85149", fontSize: 13, padding: 10 }}>{error.message}</div> : null}
+      {error ? <div style={{ color: theme.danger, fontSize: 13, padding: 10 }}>{error.message}</div> : null}
       {runId && isLoading && !root ? (
         <div style={{ color: theme.textDim, fontSize: 13, padding: 10 }}>Loading…</div>
       ) : null}

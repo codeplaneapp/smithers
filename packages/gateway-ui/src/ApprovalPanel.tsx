@@ -66,7 +66,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, className, style }: Appro
         ...style,
       }}
     >
-      {error ? <div style={{ color: "#f85149", fontSize: 13 }}>{error.message}</div> : null}
+      {error ? <div style={{ color: theme.danger, fontSize: 13 }}>{error.message}</div> : null}
       {!loading && approvals.length === 0 && !error ? (
         <div style={{ color: theme.textDim, fontSize: 13 }}>No approvals waiting.</div>
       ) : null}
@@ -100,7 +100,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, className, style }: Appro
                 type="button"
                 disabled={isBusy}
                 onClick={() => decide(row, true)}
-                style={btnStyle("#238636", isBusy)}
+                style={btnStyle(theme.success, isBusy)}
               >
                 Approve
               </button>
@@ -108,7 +108,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, className, style }: Appro
                 type="button"
                 disabled={isBusy}
                 onClick={() => decide(row, false)}
-                style={btnStyle("#da3633", isBusy)}
+                style={btnStyle(theme.danger, isBusy)}
               >
                 Deny
               </button>
@@ -126,7 +126,10 @@ function btnStyle(bg: string, disabled: boolean): CSSProperties {
     borderRadius: 6,
     border: "none",
     background: bg,
-    color: "#fff",
+    // Inverse text keeps contrast on the solid semantic button in both themes
+    // (white on the deep light-mode fills, near-black on the lighter dark-mode
+    // fills); falls back to white when the style guide CSS is absent.
+    color: "var(--inverse-text, #ffffff)",
     fontWeight: 600,
     fontSize: 13,
     cursor: disabled ? "default" : "pointer",

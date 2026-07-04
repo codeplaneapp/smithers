@@ -62,7 +62,7 @@ export function RunList({
       }}
     >
       {error ? (
-        <div style={{ color: "#f85149", fontSize: 13, padding: 8 }}>
+        <div style={{ color: theme.danger, fontSize: 13, padding: 8 }}>
           {error.message ?? "Failed to load runs."}
         </div>
       ) : null}
@@ -87,7 +87,7 @@ export function RunList({
               padding: "8px 10px",
               borderRadius: theme.radius,
               border: `1px solid ${active ? theme.accent : theme.border}`,
-              background: active ? `${theme.accent}1a` : theme.panel,
+              background: active ? `color-mix(in srgb, ${theme.accent} 10%, transparent)` : theme.panel,
               color: theme.text,
               cursor: "pointer",
               textAlign: "left",

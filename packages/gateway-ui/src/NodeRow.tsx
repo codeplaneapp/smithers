@@ -34,7 +34,7 @@ export function NodeRow({ node, depth, activeNodeId, onSelectNode }: NodeRowProp
           paddingLeft: 8 + depth * 16,
           border: "none",
           borderLeft: `2px solid ${active ? theme.accent : "transparent"}`,
-          background: active ? `${theme.accent}1a` : "transparent",
+          background: active ? `color-mix(in srgb, ${theme.accent} 10%, transparent)` : "transparent",
           color: theme.text,
           cursor: onSelectNode ? "pointer" : "default",
           textAlign: "left",

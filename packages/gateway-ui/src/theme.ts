@@ -1,23 +1,30 @@
 /**
  * Shared style tokens for gateway UI components.
  *
- * The values mirror the Multi app style guide: light by default, OS dark mode,
- * neutral surfaces, soft borders, restrained purple brand accent, and semantic
- * status colors. Components still carry inline fallback styles so they bundle in
- * custom workflow UIs with no CSS loader, while `WorkflowUiStyles` exposes the
- * full class-based style guide for richer screens.
+ * Every color token is a `var(--token, #lightFallback)` expression rather than a
+ * raw hex: when the workflow UI style guide (`WorkflowUiStyles` /
+ * `workflowUiThemeCss`, which the gateway host page also injects) defines the
+ * custom properties, inline styles resolve through them and follow the active
+ * theme — OS `prefers-color-scheme` and an explicit `data-theme="dark|light"`
+ * on `<html>` (settable via the host page's `?theme=` query param). Without the
+ * style guide the fallbacks reproduce the exact light values, so components
+ * still bundle standalone with no CSS loader.
+ *
+ * NOTE: because the values are `var()` expressions, never string-concatenate an
+ * alpha suffix onto them — derive tints with
+ * `color-mix(in srgb, ${token} N%, transparent)` instead.
  */
 export const theme = {
-  bg: "#ffffff",
-  panel: "#ffffff",
-  panelAlt: "#f4f4f4",
-  border: "#ededed",
-  text: "#0a0a0a",
-  textDim: "#525252",
-  accent: "#6d56d8",
-  success: "#0f8f78",
-  danger: "#e5484d",
-  warning: "#bf7100",
+  bg: "var(--bg, #ffffff)",
+  panel: "var(--surface, #ffffff)",
+  panelAlt: "var(--hover, #f4f4f4)",
+  border: "var(--border-solid, #ededed)",
+  text: "var(--text, #0a0a0a)",
+  textDim: "var(--text-muted, #525252)",
+  accent: "var(--brand, #6d56d8)",
+  success: "var(--success, #0f8f78)",
+  danger: "var(--danger, #e5484d)",
+  warning: "var(--warning, #bf7100)",
   radius: 8,
   fontMono:
     'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',

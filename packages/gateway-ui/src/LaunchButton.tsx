@@ -57,7 +57,7 @@ export function LaunchButton({
         borderRadius: theme.radius,
         border: "none",
         background: theme.accent,
-        color: "#fff",
+        color: "var(--inverse-text, #ffffff)",
         fontFamily: theme.fontSans,
         fontWeight: 600,
         fontSize: 13,

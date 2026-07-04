@@ -65,7 +65,7 @@ export function RunEventLog({
       {!runId ? (
         <div style={{ color: theme.textDim }}>Select a run to stream its events.</div>
       ) : null}
-      {error ? <div style={{ color: "#f85149" }}>{error.message}</div> : null}
+      {error ? <div style={{ color: theme.danger }}>{error.message}</div> : null}
       {runId && events.length === 0 && !error ? (
         <div style={{ color: theme.textDim }}>
           {streaming ? "Waiting for events…" : "No events."}
