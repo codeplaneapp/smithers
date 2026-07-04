@@ -44,6 +44,8 @@ export const buttonCss = `
 .sui-button-solid:hover { background:color-mix(in srgb, ${t.primary} 88%, ${t.foreground}); }
 .sui-button-secondary { border-color:transparent; background:${t.secondary}; color:${t.foreground}; }
 .sui-button-secondary:hover { background:color-mix(in srgb, ${t.foreground} 6%, ${t.secondary}); }
+/* Intentionally empty: the base .sui-button IS the outline look; the
+   variant class exists so consumers can target it. Do not clean up. */
 .sui-button-outline { }
 .sui-button-ghost { border-color:transparent; background:transparent; }
 .sui-button-ghost:hover { background:${t.secondary}; }

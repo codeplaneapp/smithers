@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/electric-proxy",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "Auth, scope, rate-limit, and observability proxy for Smithers ElectricSQL Shapes",
   "type": "module",
   "sideEffects": false,
