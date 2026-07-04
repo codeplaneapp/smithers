@@ -2,7 +2,12 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const reactSpecifierRe = /^react(?:\/.*)?$/;
+// Pin BOTH react and react-dom to the copy this server package resolves.
+// react-dom hard-requires a version-matched react, so deduping only `react`
+// (the old behavior) left react-dom resolving from the consumer workspace and
+// crashed with mixed React copies as soon as a UI imported react-dom directly
+// (portals, flushSync, createRoot in shared components).
+const reactSpecifierRe = /^react(?:-dom)?(?:\/.*)?$/;
 
 function resolveReactPeer(specifier) {
     try {

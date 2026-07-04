@@ -168,7 +168,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   border-radius: 999px;
   padding: 0 10px;
   color: var(--muted);
-  background: rgba(255,255,255,0.5);
+  background: color-mix(in srgb, var(--surface) 50%, transparent);
   font-size: 13px;
 }
 .pill.ok { color: var(--ok); border-color: rgba(47,107,63,0.35); }
@@ -228,7 +228,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   border-radius: 0;
 }
 .run-row:hover, .run-row.selected {
-  background: rgba(255,255,255,0.55);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
   border-left-color: var(--accent);
 }
 .run-row-main {
@@ -260,7 +260,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   color: var(--muted);
   border: 1px dashed var(--line);
   padding: 24px;
-  background: rgba(255,255,255,0.32);
+  background: color-mix(in srgb, var(--surface) 32%, transparent);
 }
 .detail-head {
   border-bottom: 1px solid var(--line);
@@ -288,7 +288,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--line);
-  background: rgba(255,255,255,0.38);
+  background: color-mix(in srgb, var(--surface) 38%, transparent);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -354,7 +354,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   text-align: left;
 }
 .event-row:hover {
-  background: rgba(255,255,255,0.5);
+  background: color-mix(in srgb, var(--surface) 50%, transparent);
 }
 .event-row.node { border-left-color: var(--blue); }
 .event-row.error { border-left-color: var(--danger); }

@@ -44,13 +44,14 @@
     "drizzle-orm": "^0.45.2",
     "effect": "3.21.4",
     "hono": "^4.12.27",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "ws": "^8.21.0"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.6",
     "@smithers-orchestrator/graph": "workspace:*",
     "@types/bun": "latest",
-    "react": "^19.2.7",
     "typescript": "~6.0.3",
     "zod": "^4.4.3"
   }
