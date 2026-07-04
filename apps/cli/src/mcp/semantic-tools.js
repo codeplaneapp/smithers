@@ -68,6 +68,7 @@ export const workflowSummarySchema = z.object({
     scope: z.enum(["local", "global"]),
     entryFile: z.string(),
     path: z.string(),
+    packDir: z.string().optional(),
     sourceType: z.string(),
     description: z.string(),
     tags: z.array(z.string()),

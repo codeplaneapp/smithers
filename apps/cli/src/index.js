@@ -3051,9 +3051,28 @@ async function runGatewayCommand(options) {
         : undefined;
     const localPackDir = resolvePackDirs(process.cwd()).find((dir) => dir.scope === "local")?.packDir;
     const localWorkspace = localPackDir ? dirname(localPackDir) : undefined;
-    const dbPath = localWorkspace
-        ? resolve(localWorkspace, "smithers.db")
-        : findSmithersDb(process.cwd());
+    /** @type {string} */
+    let dbPath;
+    if (localWorkspace) {
+        dbPath = resolve(localWorkspace, "smithers.db");
+    }
+    else {
+        try {
+            dbPath = findSmithersDb(process.cwd());
+        }
+        catch (error) {
+            if (!(error instanceof SmithersError) || error.code !== "CLI_DB_NOT_FOUND") {
+                throw error;
+            }
+            // No local pack AND no existing DB anywhere up the tree. That is
+            // still a servable workspace — a bare repo backed by the global
+            // ~/.smithers pack (the sandbox-VM shape: clone a repo with no
+            // .smithers, serve the `smithers init --global` catalog). Create
+            // the DB at the operator cwd, exactly where a local-pack boot
+            // would put it, instead of refusing to start.
+            dbPath = resolve(process.cwd(), "smithers.db");
+        }
+    }
     const workspace = localWorkspace ?? dirname(dbPath);
     const startLock = claimGatewayDaemonStartLock(workspace);
     if (!startLock) {
@@ -3140,10 +3159,16 @@ async function runGatewayCommand(options) {
             ensureSmithersTables(workflow.db);
             setupSqliteCleanup(workflow);
             backendCleanups.push(() => closeWorkflowBackend(workflow));
-            // Auto-mount a custom UI when the workspace provides
-            // .smithers/ui/<id>.tsx, so `smithers gateway` serves workflow UIs
-            // without requiring a hand-written .smithers/gateway.ts.
-            const uiEntry = resolve(workspace, ".smithers", "ui", `${discovered.id}.tsx`);
+            // Auto-mount a custom UI when the workflow's own pack provides
+            // ui/<id>.tsx, so `smithers gateway` serves workflow UIs without
+            // requiring a hand-written .smithers/gateway.ts. The UI must come
+            // from the SAME pack the workflow was discovered in: a global
+            // `~/.smithers` workflow ships its UI in `~/.smithers/ui`, which a
+            // workspace-only lookup would miss (e.g. a sandbox repo with no
+            // local .smithers served entirely from the global pack).
+            const uiEntry = discovered.packDir
+                ? resolve(discovered.packDir, "ui", `${discovered.id}.tsx`)
+                : resolve(workspace, ".smithers", "ui", `${discovered.id}.tsx`);
             if (existsSync(uiEntry)) {
                 gateway.register(discovered.id, workflow, {
                     ui: { entry: uiEntry, title: titleizeWorkflowId(discovered.id) },

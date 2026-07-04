@@ -37,6 +37,9 @@ test("workflow list merges the global ~/.smithers pack, local taking precedence"
     expect(ids).toContain("global-only");
     expect(globalWorkflows.find((w) => w.id === "ping")?.scope).toBe("global");
     expect(globalWorkflows.find((w) => w.id === "ping")?.entryFile).toBe(join(smithersHome, "workflows", "ping.tsx"));
+    // The discovery record names its owning pack, so pack-relative assets
+    // (e.g. the gateway's ui/<id>.tsx auto-mount) resolve from the right pack.
+    expect(globalWorkflows.find((w) => w.id === "ping")?.packDir).toBe(smithersHome);
 
     // A local workflow with the same id shadows the global one; global-only stays.
     repo.write(".smithers/workflows/ping.tsx", stubWorkflow("Local Ping"));
@@ -47,6 +50,7 @@ test("workflow list merges the global ~/.smithers pack, local taking precedence"
     const ping = merged.find((w) => w.id === "ping");
     expect(ping?.scope).toBe("local");
     expect(ping?.entryFile).toBe(repo.path(".smithers/workflows/ping.tsx"));
+    expect(ping?.packDir).toBe(repo.path(".smithers"));
     // The id appears exactly once (local shadows global, not duplicated).
     expect(merged.filter((w) => w.id === "ping")).toHaveLength(1);
     expect(merged.find((w) => w.id === "global-only")?.scope).toBe("global");

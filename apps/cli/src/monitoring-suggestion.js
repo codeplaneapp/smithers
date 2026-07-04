@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { basename, resolve } from "node:path";
+import { accountsRoot } from "@smithers-orchestrator/accounts";
 
 /**
  * When a workflow starts in the background (a detached `up`/`run`, or an MCP
@@ -24,7 +25,10 @@ export function workflowIdFromPath(workflowPath) {
 }
 
 /**
- * Does a custom `smithers ui` entry already exist for this workflow?
+ * Does a custom `smithers ui` entry already exist for this workflow? Probes
+ * the workspace pack (`<cwd>/.smithers/ui/`) and then the global pack
+ * (`~/.smithers/ui/`, honoring SMITHERS_HOME), matching how the gateway
+ * auto-mounts pack-relative `ui/<id>.tsx` files.
  * @param {string} workflowId
  * @param {string} cwd
  * @param {(p: string) => boolean} [exists]
@@ -32,7 +36,11 @@ export function workflowIdFromPath(workflowPath) {
  */
 export function hasCustomUi(workflowId, cwd, exists = existsSync) {
     if (!workflowId) return false;
-    return exists(resolve(cwd, ".smithers", "ui", `${workflowId}.tsx`));
+    const candidates = [
+        resolve(cwd, ".smithers", "ui", `${workflowId}.tsx`),
+        resolve(accountsRoot(), "ui", `${workflowId}.tsx`),
+    ];
+    return candidates.some((path) => exists(path));
 }
 
 /**

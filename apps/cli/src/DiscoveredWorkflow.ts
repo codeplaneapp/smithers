@@ -26,4 +26,6 @@ export type DiscoveredWorkflow = {
     ineligibleReasons: string[];
     entryFile: string;
     path: string;
+    /** The pack directory that owns this workflow (a repo's `.smithers` or the global `~/.smithers`). Pack-relative assets — e.g. the gateway's auto-mounted `ui/<id>.tsx` — resolve against this dir. Absent for `explicit` ($SMITHERS_WORKFLOW_PATHS) workflows, which have no owning pack. */
+    packDir?: string;
 };

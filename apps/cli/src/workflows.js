@@ -459,9 +459,10 @@ function parseMetadata(source, id, env = process.env) {
  * @param {string} entryFile Absolute path to the workflow's `.tsx` entry.
  * @param {DiscoveredWorkflow["scope"]} scope
  * @param {NodeJS.ProcessEnv} [env]
+ * @param {string} [packDir] The owning pack dir (`.smithers` / `~/.smithers`); omitted for explicit-path workflows.
  * @returns {DiscoveredWorkflow}
  */
-function buildWorkflow(id, entryFile, scope, env = process.env) {
+function buildWorkflow(id, entryFile, scope, env = process.env, packDir = undefined) {
     const metadata = parseMetadata(readFileSync(entryFile, "utf8"), id, env);
     return {
         id,
@@ -482,6 +483,7 @@ function buildWorkflow(id, entryFile, scope, env = process.env) {
         ineligibleReasons: metadata.ineligibleReasons,
         entryFile,
         path: entryFile,
+        ...(packDir ? { packDir } : {}),
     };
 }
 /**
@@ -493,7 +495,7 @@ function buildWorkflow(id, entryFile, scope, env = process.env) {
  */
 function workflowFromFile(file, packDir, scope, env = process.env) {
     const id = file.replace(/\.tsx$/, "");
-    return buildWorkflow(id, join(workflowsDirForPack(packDir), file), scope, env);
+    return buildWorkflow(id, join(workflowsDirForPack(packDir), file), scope, env, packDir);
 }
 /**
  * @param {string} name
@@ -520,12 +522,18 @@ const CURATED_SUBDIR = join("curated", "active");
  *
  * First occurrence of an id wins; later (lower-precedence) tiers are shadowed.
  *
+ * Each entry carries the pack directory it belongs to (absent for `explicit`
+ * paths, which have no owning pack) so callers can resolve pack-relative
+ * assets — e.g. the gateway auto-mounts `<packDir>/ui/<id>.tsx`, which must
+ * come from the SAME pack as the workflow, not always the workspace's local
+ * `.smithers` (a global `~/.smithers` workflow ships its UI in `~/.smithers/ui`).
+ *
  * @param {string} [from]
  * @param {NodeJS.ProcessEnv} [env]
- * @returns {{ scope: DiscoveredWorkflow["scope"]; dir: string }[]}
+ * @returns {{ scope: DiscoveredWorkflow["scope"]; dir: string; packDir?: string }[]}
  */
 export function resolveWorkflowDirs(from = process.cwd(), env = process.env) {
-    /** @type {{ scope: DiscoveredWorkflow["scope"]; dir: string }[]} */
+    /** @type {{ scope: DiscoveredWorkflow["scope"]; dir: string; packDir?: string }[]} */
     const dirs = [];
     const explicit = env.SMITHERS_WORKFLOW_PATHS ?? "";
     for (const raw of explicit.split(process.platform === "win32" ? ";" : ":")) {
@@ -533,11 +541,11 @@ export function resolveWorkflowDirs(from = process.cwd(), env = process.env) {
         if (trimmed)
             dirs.push({ scope: "explicit", dir: resolve(trimmed) });
     }
-    for (const { scope, packDir } of resolvePackDirs(from, env)) {
-        dirs.push({ scope: "curated", dir: join(workflowsDirForPack(packDir), CURATED_SUBDIR) });
+    for (const { packDir } of resolvePackDirs(from, env)) {
+        dirs.push({ scope: "curated", dir: join(workflowsDirForPack(packDir), CURATED_SUBDIR), packDir });
     }
     for (const { scope, packDir } of resolvePackDirs(from, env)) {
-        dirs.push({ scope, dir: workflowsDirForPack(packDir) });
+        dirs.push({ scope, dir: workflowsDirForPack(packDir), packDir });
     }
     return dirs;
 }
@@ -585,7 +593,7 @@ export function discoverWorkflows(from = process.cwd(), env = process.env) {
     /** @type {DiscoveredWorkflow[]} */
     const discovered = [];
     const seen = new Set();
-    for (const { scope, dir } of resolveWorkflowDirs(from, env)) {
+    for (const { scope, dir, packDir } of resolveWorkflowDirs(from, env)) {
         if (!existsSync(dir) || !statSync(dir).isDirectory())
             continue;
         for (const { id, entryFile } of enumerateWorkflowEntries(dir)) {
@@ -598,7 +606,7 @@ export function discoverWorkflows(from = process.cwd(), env = process.env) {
             // broken higher-precedence file can still fall back to a valid one.
             let entry;
             try {
-                entry = buildWorkflow(id, entryFile, scope, env);
+                entry = buildWorkflow(id, entryFile, scope, env, packDir);
             }
             catch (err) {
                 process.stderr.write(`⚠ Skipping workflow ${entryFile}: ${err instanceof Error ? err.message : String(err)}\n`);

@@ -240,6 +240,63 @@ test("gateway starts for an initialized workspace with no existing DB and listRu
     expect(stdout).toBe("");
 }, 15_000);
 
+// A workspace with NO local .smithers pack must still serve the global
+// (~/.smithers, here $SMITHERS_HOME) pack's workflows WITH their UIs: the
+// ui/<id>.tsx auto-mount resolves against the pack the workflow was discovered
+// in, not only the workspace. This is the sandbox-VM shape — a bare cloned repo
+// served entirely from a `smithers init --global` pack.
+test("gateway mounts a global-pack workflow's ui/<id>.tsx when the workspace has no local pack", async () => {
+    const globalHome = createTempRepo();
+    const smithersHome = join(globalHome.dir, ".smithers");
+    writeTestWorkflow(globalHome, ".smithers/workflows/globping.tsx");
+    globalHome.write(".smithers/ui/globping.tsx", [
+        "import React from \"react\";",
+        "",
+        "export default function GlobPingUi() {",
+        "  return <main>Global Ping UI</main>;",
+        "}",
+        "",
+    ].join("\n"));
+
+    const repo = createTempRepo();
+    const port = await findOpenPort();
+    const child = spawn(process.execPath, ["run", CLI_ENTRY, "gateway", "--host", "127.0.0.1", "--port", String(port)], {
+        cwd: repo.dir,
+        env: {
+            ...process.env,
+            NO_COLOR: "1",
+            FORCE_COLOR: "0",
+            SMITHERS_HOME: smithersHome,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const closePromise = new Promise((resolvePromise) => child.once("close", resolvePromise));
+    try {
+        await waitFor(() => stderr.includes("Registered workflows:"));
+        expect(stderr).toContain("globping");
+
+        const response = await fetch(`http://127.0.0.1:${port}/v1/rpc/listWorkflows`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({}),
+            signal: AbortSignal.timeout(3_000),
+        });
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.ok).toBe(true);
+        const globping = body.payload.find((workflow) => workflow.key === "globping");
+        expect(globping).toBeDefined();
+        expect(globping.hasUi).toBe(true);
+        expect(globping.uiPath).toBe("/workflows/globping");
+    }
+    finally {
+        await stopProcess(child, closePromise);
+    }
+}, 30_000);
+
 // Security regression: the Gateway control plane (launch/cancel/inspect every
 // run) was constructed with no auth, so it authenticated every request as
 // role=operator scopes=["*"]. `--host` accepted 0.0.0.0 unvalidated, so

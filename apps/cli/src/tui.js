@@ -385,14 +385,16 @@ export function buildNextStepsLines({ runId, workflowId, entryFile, uiExists }) 
 
 /**
  * Whether a custom `smithers ui` surface exists for this workflow id at the
- * `.smithers/ui/<workflowId>.tsx` convention (mirrors index.js resolution).
+ * pack-relative `ui/<workflowId>.tsx` convention (mirrors index.js resolution:
+ * the workspace's `.smithers/ui/`, then the global `~/.smithers/ui/`).
  * @param {string | undefined} workflowId
  * @param {string} [cwd]
  */
 export function customUiExists(workflowId, cwd = process.cwd()) {
     if (!workflowId) return false;
     try {
-        return existsSync(resolve(cwd, ".smithers", "ui", `${workflowId}.tsx`));
+        return resolvePackDirs(cwd).some(({ packDir }) => existsSync(resolve(packDir, "ui", `${workflowId}.tsx`)))
+            || existsSync(resolve(cwd, ".smithers", "ui", `${workflowId}.tsx`));
     } catch {
         return false;
     }
