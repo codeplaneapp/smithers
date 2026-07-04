@@ -904,9 +904,10 @@ function checkRunStateDocsMatchDerivationContract() {
     [runStateDoc, "Current `computeRunState` / `deriveRunState`"],
     [runStateDoc, "emits `approval`, `event`, `timer`,"],
     [runStateDoc, "view.blocked;     // present for waiting-* only when backing context is found"],
-    [runStateDoc, "view.unhealthy;   // present for stale/orphaned heartbeat expiry"],
+    [runStateDoc, "view.unhealthy;   // present for stale/orphaned heartbeat expiry or overdue timers"],
     [deriveSource, ': { ...base, state: "waiting-approval" };'],
-    [deriveSource, ': { ...base, state: "waiting-timer" };'],
+    [deriveSource, "return timerRunState(base, pendingTimer, now);"],
+    [deriveSource, 'kind: "timer-overdue",'],
     [deriveSource, ': { ...base, state: "waiting-event" };'],
     [computeFromRowSource, "pendingApproval = await loadPendingApproval(adapter, run.runId);"],
     [computeFromRowSource, "pendingTimer = await loadPendingTimer(adapter, run.runId);"],
@@ -922,6 +923,7 @@ function checkRunStateDocsMatchDerivationContract() {
     [runStateDoc, "`unhealthy` is set when `state` is `stale`, `orphaned`, or `recovering`."],
     [runStateDoc, 'view.blocked;     // present iff state is "waiting-*"'],
     [runStateDoc, 'view.unhealthy;   // present iff state is "stale" | "orphaned" | "recovering"'],
+    [runStateDoc, "view.unhealthy;   // present for stale/orphaned heartbeat expiry\n```"],
   ];
   const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
   const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));

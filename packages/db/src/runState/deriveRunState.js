@@ -46,17 +46,10 @@ export function deriveRunState(input) {
                   }
                 : { ...base, state: "waiting-approval" };
         case "waiting-timer":
-            return pendingTimer
-                ? {
-                      ...base,
-                      state: "waiting-timer",
-                      blocked: {
-                          kind: "timer",
-                          nodeId: pendingTimer.nodeId,
-                          wakeAt: new Date(pendingTimer.firesAtMs).toISOString(),
-                      },
-                  }
-                : { ...base, state: "waiting-timer" };
+            if (!pendingTimer) {
+                return { ...base, state: "waiting-timer" };
+            }
+            return timerRunState(base, pendingTimer, now);
         case "waiting-event":
             if (pendingEvent) {
                 return {
@@ -102,6 +95,36 @@ export function deriveRunState(input) {
         default:
             return { ...base, state: "unknown" };
     }
+}
+
+/**
+ * @param {{ runId: string; computedAt: string }} base
+ * @param {{ nodeId: string; firesAtMs: number }} pendingTimer
+ * @param {number} now
+ * @returns {RunStateView}
+ */
+function timerRunState(base, pendingTimer, now) {
+    const wakeAt = new Date(pendingTimer.firesAtMs).toISOString();
+    const view = {
+        ...base,
+        state: "waiting-timer",
+        blocked: {
+            kind: "timer",
+            nodeId: pendingTimer.nodeId,
+            wakeAt,
+        },
+    };
+    if (now <= pendingTimer.firesAtMs) {
+        return view;
+    }
+    return {
+        ...view,
+        unhealthy: {
+            kind: "timer-overdue",
+            wakeAt,
+            overdueMs: Math.floor(now - pendingTimer.firesAtMs),
+        },
+    };
 }
 
 /**

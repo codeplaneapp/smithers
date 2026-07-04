@@ -167,6 +167,28 @@ describe("deriveRunState — waiting states", () => {
             nodeId: "t-1",
             wakeAt: new Date(NOW + 60_000).toISOString(),
         });
+        expect(view.unhealthy).toBeUndefined();
+    });
+
+    test("waiting-timer with an overdue pendingTimer keeps the blocker and marks unhealthy", () => {
+        const wakeAtMs = NOW - 30_500;
+        const view = deriveRunState({
+            run: makeRun({ status: "waiting-timer" }),
+            pendingTimer: { nodeId: "t-1", firesAtMs: wakeAtMs },
+            now: NOW,
+        });
+
+        expect(view.state).toBe("waiting-timer");
+        expect(view.blocked).toEqual({
+            kind: "timer",
+            nodeId: "t-1",
+            wakeAt: new Date(wakeAtMs).toISOString(),
+        });
+        expect(view.unhealthy).toEqual({
+            kind: "timer-overdue",
+            wakeAt: new Date(wakeAtMs).toISOString(),
+            overdueMs: 30_500,
+        });
     });
 
     test("waiting-event with pendingEvent → blocked.event", () => {
