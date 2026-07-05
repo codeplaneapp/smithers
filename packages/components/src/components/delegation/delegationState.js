@@ -322,19 +322,20 @@ export function probesRequested(plans) {
 }
 
 /**
- * @typedef {{ type: "probe" | "user-edit"; ref: string; flagged: string; detail: Record<string, any> }} DeriskTrigger
+ * @typedef {{ type: "probe" | "user-edit" | "review-fail"; ref: string; flagged: string; detail: Record<string, any> }} DeriskTrigger
  */
 
 /**
- * Unaddressed replan triggers: probe findings whose planImpact is "changes"
- * and live user edits, minus anything a dcReplan row already answered
- * (matched by trigger.ref).
+ * Unaddressed replan triggers: probe findings whose planImpact is "changes",
+ * live user edits, and chunk-level gate failures (from `chunkGateFailures`),
+ * minus anything a dcReplan row already answered (matched by trigger.ref).
  * @param {Record<string, any>[]} probeRows
  * @param {Record<string, any>[]} editRows
  * @param {Record<string, any>[]} replanRows
+ * @param {ChunkGateFailure[]} [chunkFailures]
  * @returns {DeriskTrigger[]}
  */
-export function pendingTriggers(probeRows, editRows, replanRows) {
+export function pendingTriggers(probeRows, editRows, replanRows, chunkFailures = []) {
     const addressed = new Set(replanRows
         .map((row) => row?.trigger?.ref)
         .filter((ref) => typeof ref === "string"));
@@ -360,7 +361,37 @@ export function pendingTriggers(probeRows, editRows, replanRows) {
             });
         }
     }
+    for (const failure of chunkFailures) {
+        if (!addressed.has(failure.ref)) {
+            triggers.push({
+                type: "review-fail",
+                ref: failure.ref,
+                flagged: failure.logicalId,
+                detail: failure,
+            });
+        }
+    }
     return triggers;
+}
+
+/**
+ * Map a trigger's flagged id onto the plan tree. Two flagged ids are not plan
+ * nodes and would otherwise be silently swallowed by `planOwnerOf`:
+ * - a probe logical id (`<parent>#<risk>`) — a live edit on a probe's output
+ *   replans the probe's PARENT (the planning node that owns the risk);
+ * - the goal node (`"goal"`) — an edit to the approved goal after planning
+ *   started re-opens ROOT planning (the root plan is the goal's direct
+ *   consumer), unless a caller really planned a node named "goal".
+ * @param {string} flagged
+ * @param {Map<string, { plan: DcPlanRow; versions: number }>} plans
+ * @returns {string}
+ */
+export function triggerTargetOf(flagged, plans) {
+    const hash = flagged.indexOf("#");
+    const base = hash === -1 ? flagged : flagged.slice(0, hash);
+    if (base === "goal" && !plans.has("goal"))
+        return "root";
+    return base;
 }
 
 /**
@@ -519,8 +550,56 @@ export function leafComplete(opts) {
 }
 
 /**
+ * @typedef {{ logicalId: string; gateNodeId: string; ref: string; feedback: string }} ChunkGateFailure
+ */
+
+/**
+ * Chunk-level review-gate failures: for every planning (non-leaf) node with
+ * declared review gates, the gate nodes whose LATEST dcReview verdict is
+ * "fail" (a subsequent pass supersedes it). Leaf gate failures are handled by
+ * the leaf's own attempt loop (`leafAttemptState`); chunk reviews have no
+ * attempt loop, so a fail must become a derisk/replan trigger instead — each
+ * failure carries a deterministic `ref` (`<gateNodeId>#fail-<rowCount>`) that
+ * a dcReplan row addresses via `trigger.ref`, and a NEW failure after more
+ * rows re-triggers with a fresh ref.
+ * @param {{
+ *   idPrefix: string;
+ *   plans: Map<string, { plan: DcPlanRow; versions: number }>;
+ *   gates: Map<string, DcGatesRow>;
+ *   approvalPolicy: string | undefined;
+ *   reviewRows: Record<string, any>[];
+ * }} opts
+ * @returns {ChunkGateFailure[]}
+ */
+export function chunkGateFailures(opts) {
+    /** @type {ChunkGateFailure[]} */
+    const failures = [];
+    for (const node of nodeIndex(opts.plans).values()) {
+        if (node.kind === "leaf")
+            continue;
+        const { reviews } = splitGates(opts.gates.get(node.logicalId), opts.approvalPolicy);
+        for (let i = 0; i < reviews.length; i++) {
+            const gateNodeId = physicalId(opts.idPrefix, node.logicalId, `review-${i + 1}`);
+            const rows = rowsForNode(opts.reviewRows, gateNodeId);
+            const latest = rows[rows.length - 1];
+            if (latest && latest.verdict === "fail") {
+                failures.push({
+                    logicalId: node.logicalId,
+                    gateNodeId,
+                    ref: `${gateNodeId}#fail-${rows.length}`,
+                    feedback: String(latest.feedback ?? ""),
+                });
+            }
+        }
+    }
+    return failures;
+}
+
+/**
  * Whether the whole execution phase is complete: planning done, a non-empty
- * leaf frontier, and every leaf complete.
+ * leaf frontier, every leaf complete, and no chunk-level review gate stuck on
+ * a latest-fail — a chunk fail must be superseded by a later pass or answered
+ * by a dcReplan row (matched on `trigger.ref`) before scoring may start.
  * @param {{
  *   idPrefix: string;
  *   plans: Map<string, { plan: DcPlanRow; versions: number }>;
@@ -530,6 +609,7 @@ export function leafComplete(opts) {
  *   reviewRows: Record<string, any>[];
  *   approvalRows: Record<string, any>[];
  *   devPreviewRows?: Record<string, any>[];
+ *   replanRows?: Record<string, any>[];
  * }} opts
  * @returns {boolean}
  */
@@ -537,7 +617,15 @@ export function executionComplete(opts) {
     if (!planningComplete(opts.plans))
         return false;
     const leaves = frontierLeaves(opts.plans);
-    return leaves.length > 0 && leaves.every((leaf) => leafComplete({ ...opts, leaf }));
+    if (leaves.length === 0 || !leaves.every((leaf) => leafComplete({ ...opts, leaf })))
+        return false;
+    const failures = chunkGateFailures(opts);
+    if (failures.length === 0)
+        return true;
+    const addressed = new Set((opts.replanRows ?? [])
+        .map((row) => row?.trigger?.ref)
+        .filter((ref) => typeof ref === "string"));
+    return failures.every((failure) => addressed.has(failure.ref));
 }
 
 /**
@@ -563,6 +651,114 @@ export function agentForTier(agents, tier, tierOrder = DEFAULT_TIER_ORDER) {
             return candidate;
     }
     return undefined;
+}
+
+/**
+ * Synthesize the delegation event log the run scorers in
+ * `smithers-orchestrator/scorers` fold (`DelegationEvent[]` — the simulation
+ * contract's vocabulary) from the dc* rows the run actually wrote. Output
+ * rows carry no cross-table timestamps, so events are emitted in phase order
+ * with one documented approximation: probe/user-edit replans are treated as
+ * plan-phase (the derisk loop runs before execution), while review-fail
+ * replans are post-exec by construction (chunk reviews only run after their
+ * subtree executed) and are emitted after the execution events.
+ *
+ * Mapping (dc row → event `t`):
+ * - dcPlan.risks[*]                        → RISK_FLAGGED { node, risk }
+ * - dcPlan.risks[*] with probe poc/research → PROBE_SPAWNED { parent, probe: "<parent>#<risk>", kind }
+ * - dcProbe                                → FINDING_REPORTED { probe, toParent, planImpact }
+ * - dcReplan                               → REPLAN_REQUESTED { from, reason, trigger } then
+ *                                            NODE_INVALIDATED | NODE_REAFFIRMED { node }
+ * - dcExec first row per logicalId         → EXEC_STARTED { node }
+ * - dcExec subsequent rows (retries)       → REDELEGATED { node }
+ * - dcReview                               → GATE_FAILED | GATE_PASSED { node }
+ * - dcDevPreview with builtOk !== true     → GATE_FAILED { node, gate: "preview" }
+ * - every executed node, at the end        → NODE_DONE { node }
+ *
+ * @param {{
+ *   planRows: Record<string, any>[];
+ *   probeRows: Record<string, any>[];
+ *   replanRows: Record<string, any>[];
+ *   execRows: Record<string, any>[];
+ *   reviewRows: Record<string, any>[];
+ *   devPreviewRows?: Record<string, any>[];
+ * }} opts
+ * @returns {Record<string, any>[]}
+ */
+export function synthesizeDelegationEvents(opts) {
+    /** @type {Record<string, any>[]} */
+    const events = [];
+    // 1. Planning: every declared risk is a flag by its owner; probed risks
+    //    spawn probe nodes (`probe` carries the probe id so the scorers can
+    //    exclude probes from the planning-node set).
+    for (const row of opts.planRows) {
+        if (typeof row.logicalId !== "string")
+            continue;
+        for (const risk of row.risks ?? []) {
+            events.push({ t: "RISK_FLAGGED", node: row.logicalId, risk: String(risk?.id ?? "") });
+            if (risk?.probe === "poc" || risk?.probe === "research") {
+                events.push({
+                    t: "PROBE_SPAWNED",
+                    parent: row.logicalId,
+                    probe: probeIdFor(row.logicalId, String(risk.id)),
+                    kind: risk.probe,
+                });
+            }
+        }
+    }
+    // 2. Probe findings report to the nearest parent only.
+    for (const row of opts.probeRows) {
+        events.push({
+            t: "FINDING_REPORTED",
+            probe: String(row.probeId ?? ""),
+            toParent: String(row.parentLogicalId ?? ""),
+            planImpact: row.planImpact,
+        });
+    }
+    /** @param {Record<string, any>} row */
+    const pushReplan = (row) => {
+        const node = String(row.logicalId ?? "");
+        events.push({ t: "REPLAN_REQUESTED", from: node, reason: String(row.reason ?? ""), trigger: row.trigger });
+        events.push({ t: row.decision === "invalidated" ? "NODE_INVALIDATED" : "NODE_REAFFIRMED", node });
+    };
+    // 3. Plan-phase replan decisions (probe findings + live user edits).
+    for (const row of opts.replanRows) {
+        if (row?.trigger?.type !== "review-fail")
+            pushReplan(row);
+    }
+    // 4. Execution: the first attempt per node starts it; retries redelegate.
+    /** @type {Set<string>} */
+    const executed = new Set();
+    for (const row of opts.execRows) {
+        const node = String(row.logicalId ?? "");
+        if (executed.has(node)) {
+            events.push({ t: "REDELEGATED", node });
+        }
+        else {
+            executed.add(node);
+            events.push({ t: "EXEC_STARTED", node });
+        }
+    }
+    // 5. Gate verdicts (reviews/checks write dcReview; a dev preview that
+    //    failed to build fails its gate like a failed review).
+    for (const row of opts.reviewRows) {
+        events.push({ t: row.verdict === "fail" ? "GATE_FAILED" : "GATE_PASSED", node: String(row.logicalId ?? "") });
+    }
+    for (const row of opts.devPreviewRows ?? []) {
+        if (row.builtOk !== true) {
+            events.push({ t: "GATE_FAILED", node: String(row.logicalId ?? ""), gate: "preview" });
+        }
+    }
+    // 6. Post-exec replans (chunk review failures — see chunkGateFailures).
+    for (const row of opts.replanRows) {
+        if (row?.trigger?.type === "review-fail")
+            pushReplan(row);
+    }
+    // 7. Completion per executed node.
+    for (const node of executed) {
+        events.push({ t: "NODE_DONE", node });
+    }
+    return events;
 }
 
 /**

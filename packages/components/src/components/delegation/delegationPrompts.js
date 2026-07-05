@@ -300,7 +300,9 @@ export function replanPrompt(opts) {
     const triggerText = opts.triggers
         .map((t) => t.type === "probe"
             ? `probe ${t.ref}: planImpact=changes — ${String(t.detail.proposedChange ?? t.detail.answer ?? "")}\nReport:\n${String(t.detail.report ?? "")}`
-            : `user edit ${t.ref} on ${t.flagged}: ${String(t.detail.note ?? "")}\nEdited output:\n${JSON.stringify(t.detail.editedOutput ?? null)}`)
+            : t.type === "review-fail"
+                ? `chunk review FAILED on "${t.flagged}" (ref ${t.ref}):\n${String(t.detail.feedback ?? "")}`
+                : `user edit ${t.ref} on ${t.flagged}: ${String(t.detail.note ?? "")}\nEdited output:\n${JSON.stringify(t.detail.editedOutput ?? null)}`)
         .join("\n\n");
     return [
         `Replan decision (round ${opts.round}) for delegation node "${opts.logicalId}". Something changed; decide whether your plan survives.`,

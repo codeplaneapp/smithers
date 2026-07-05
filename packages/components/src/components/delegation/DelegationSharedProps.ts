@@ -48,7 +48,16 @@ export type DelegationScorers = {
 
 /** Props shared by every delegation phase composite. */
 export type DelegationSharedProps = {
-	/** Physical node-id prefix (`<idPrefix>:<logicalId>:<phase>`). Default "dc". */
+	/**
+	 * Physical node-id prefix (`<idPrefix>:<logicalId>:<phase>`). Default "dc".
+	 *
+	 * WARNING: the delegation fold and the `smithers ui` delegation UI
+	 * (`foldDelegation`/`delegationTableForNodeId` in
+	 * `@smithers-orchestrator/gateway-react`) only recognize the default
+	 * `"dc"` prefix. A custom prefix still executes correctly, but the run
+	 * renders NO delegation UI until the fold learns the new prefix — keep the
+	 * default unless you also extend the fold.
+	 */
 	idPrefix?: string;
 	/** Agent per tier. Missing tiers fall back to the nearest configured tier. */
 	agents: DelegationAgents;

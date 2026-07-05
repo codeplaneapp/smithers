@@ -45,6 +45,7 @@ export function DelegationEditListener(props) {
                     reviewRows: readRows(ctx, o.dcReview),
                     approvalRows: readRows(ctx, o.dcApproval ?? "dcApproval"),
                     devPreviewRows: readRows(ctx, o.dcDevPreview ?? "dcDevPreview"),
+                    replanRows: readRows(ctx, o.dcReplan),
                 });
         }
     }

@@ -42,8 +42,23 @@ import {
     gateSchema,
     tierSchema,
 } from "../src/components/delegation/delegationSchemas.ts";
-import { physicalId } from "../src/components/delegation/delegationState.js";
+import {
+    chunkGateFailures,
+    executionComplete,
+    foldGates,
+    foldPlans,
+    physicalId,
+    synthesizeDelegationEvents,
+    triggerTargetOf,
+} from "../src/components/delegation/delegationState.js";
 import { captureWorkingCopyCommit, withCommitRange } from "../src/components/delegation/withCommitRange.js";
+// The REAL run scorers (packages/scorers) — the synthesized run-score context
+// must satisfy their exact input shapes, so the tests run them unmocked.
+import { pocJudgmentScorer } from "../../scorers/src/pocJudgmentScorer.js";
+import { planSolidityScorer } from "../../scorers/src/planSolidityScorer.js";
+import { estimateAccuracyScorer } from "../../scorers/src/estimateAccuracyScorer.js";
+import { humanPollScorer } from "../../scorers/src/humanPollScorer.js";
+import { tierFitScorer } from "../../scorers/src/tierFitScorer.js";
 import {
     contextPrinciples,
     planPrompt,
@@ -444,6 +459,106 @@ describe("DeriskLoop", () => {
             { ...completePlans, ...deriskGates, dcProbe: [probeRow], dcReplan: exhausted });
         expect(ids(graph).filter((id) => id.startsWith("dc:root:core:replan-"))).toEqual([]);
     });
+
+    const chunkReviewGates = {
+        dcGates: [
+            gatesRow("root", []),
+            gatesRow("root/docs", [], ["root/core"]),
+            gatesRow("root/core", [{ method: "review", tier: "fable", brief: "judge core as a whole" }]),
+            gatesRow("root/core/a", []),
+            gatesRow("root/core/b", []),
+        ],
+    };
+    const chunkFailRow = {
+        nodeId: "dc:root:core:review-1", iteration: 0,
+        logicalId: "root/core", attempt: 1, verdict: "fail", feedback: "core misassembled",
+    };
+
+    test("a chunk review failure triggers review-fail replans for the chunk's owner and its dependents", async () => {
+        const graph = await renderWithOutputs(
+            <DeriskLoop agents={agents} outputs={outputs} />,
+            { ...completePlans, ...chunkReviewGates, dcReview: [chunkFailRow] });
+        const replanIds = ids(graph).filter((id) => id.includes(":replan-"));
+        // Flagged: root/core (owns its plan). Dependents: its leaves (owner
+        // root/core again) and root/docs via depsLogical (owner root).
+        expect(replanIds.sort()).toEqual(["dc:root:core:replan-1", "dc:root:replan-1"]);
+        const direct = graph.tasks.find((t) => t.nodeId === "dc:root:core:replan-1");
+        expect(direct.prompt).toContain("core misassembled");
+        expect(direct.prompt).toContain("chunk review FAILED");
+        expect(direct.prompt).toContain('trigger { type: "review-fail", ref: "dc:root:core:review-1#fail-1" }');
+    });
+
+    test("a chunk review fail stops triggering once addressed by a replan or superseded by a pass", async () => {
+        const addressed = await renderWithOutputs(
+            <DeriskLoop agents={agents} outputs={outputs} />,
+            {
+                ...completePlans,
+                ...chunkReviewGates,
+                dcReview: [chunkFailRow],
+                dcReplan: [{
+                    nodeId: "dc:root:core:replan-1", iteration: 0, round: 1, logicalId: "root/core",
+                    decision: "reaffirmed", reason: "leaf-local fix, plan holds",
+                    trigger: { type: "review-fail", ref: "dc:root:core:review-1#fail-1" },
+                }],
+            });
+        expect(ids(addressed).filter((id) => id.includes(":replan-"))).toEqual([]);
+        const passed = await renderWithOutputs(
+            <DeriskLoop agents={agents} outputs={outputs} />,
+            {
+                ...completePlans,
+                ...chunkReviewGates,
+                dcReview: [chunkFailRow, { ...chunkFailRow, iteration: 1, verdict: "pass", feedback: "fixed" }],
+            });
+        expect(ids(passed).filter((id) => id.includes(":replan-"))).toEqual([]);
+    });
+
+    test("chunk review-fail replans stay bounded by maxDeriskRounds", async () => {
+        const exhausted = [1, 2].map((round) => ({
+            nodeId: `dc:root:core:replan-${round}`, iteration: 0, round, logicalId: "root/core",
+            decision: "reaffirmed", reason: "r", trigger: { type: "user-edit", ref: `e${round}` },
+        }));
+        const graph = await renderWithOutputs(
+            <DeriskLoop agents={agents} outputs={outputs} maxDeriskRounds={2} />,
+            { ...completePlans, ...chunkReviewGates, dcReview: [chunkFailRow], dcReplan: exhausted });
+        expect(ids(graph).filter((id) => id.startsWith("dc:root:core:replan-"))).toEqual([]);
+    });
+
+    test("a live edit on a probe node replans the probe's parent (not swallowed)", async () => {
+        const graph = await renderWithOutputs(
+            <DeriskLoop agents={agents} outputs={outputs} />,
+            {
+                ...completePlans,
+                ...deriskGates,
+                dcEdit: [{ nodeId: DC_EDIT_SIGNAL, iteration: 0, editId: "e-probe", logicalId: "root/core#h1", editedOutput: "probe conclusion was wrong", note: "use human requests" }],
+            });
+        const replanIds = ids(graph).filter((id) => id.includes(":replan-"));
+        // "root/core#h1" is the probe of root/core: the parent replans, and its
+        // dependents (root/docs -> owner root) cascade as usual.
+        expect(replanIds.sort()).toEqual(["dc:root:core:replan-1", "dc:root:replan-1"]);
+        const direct = graph.tasks.find((t) => t.nodeId === "dc:root:core:replan-1");
+        expect(direct.prompt).toContain("use human requests");
+    });
+
+    test("a goal edit after approval replans the root plan owner", async () => {
+        const graph = await renderWithOutputs(
+            <DeriskLoop agents={agents} outputs={outputs} />,
+            {
+                ...completePlans,
+                ...deriskGates,
+                dcEdit: [{ nodeId: DC_EDIT_SIGNAL, iteration: 0, editId: "e-goal", logicalId: "goal", editedOutput: "tighter goal", note: "narrow the scope" }],
+            });
+        const replanIds = ids(graph).filter((id) => id.includes(":replan-"));
+        expect(replanIds).toContain("dc:root:replan-1");
+        const root = graph.tasks.find((t) => t.nodeId === "dc:root:replan-1");
+        expect(root.prompt).toContain("narrow the scope");
+    });
+
+    test("triggerTargetOf maps probe ids and the goal node onto the plan tree", () => {
+        const plans = foldPlans([rootPlan, corePlan]);
+        expect(triggerTargetOf("root/core#h1", plans)).toBe("root/core");
+        expect(triggerTargetOf("goal", plans)).toBe("root");
+        expect(triggerTargetOf("root/core/a", plans)).toBe("root/core/a");
+    });
 });
 
 describe("DelegationExecution", () => {
@@ -811,27 +926,162 @@ describe("DelegationScoring", () => {
         ],
     };
 
-    test("renders nothing until execution completes, then run score + poll", async () => {
+    const pollAnswered = {
+        dcPoll: [{
+            nodeId: "dc:root:poll", iteration: 0,
+            answers: [{ question: "satisfied?", rating: 5 }, { question: "trust the process?", rating: 4 }],
+            comment: "nice",
+        }],
+    };
+
+    test("renders nothing until execution completes, then poll FIRST, run score after the poll lands", async () => {
         const early = await renderWithOutputs(
             <DelegationScoring agents={agents} outputs={outputs} />, { ...completePlans, ...scoringGates });
         expect(early.tasks).toHaveLength(0);
+        // Poll before score: the run scorers (humanPollScorer) need the poll row.
         const done = await renderWithOutputs(
             <DelegationScoring agents={agents} outputs={outputs} />,
             { ...completePlans, ...scoringGates, ...allDone });
-        expect(ids(done)).toEqual(["dc:root:score", "dc:root:poll"]);
-        const score = done.tasks.find((t) => t.nodeId === "dc:root:score");
+        expect(ids(done)).toEqual(["dc:root:poll"]);
+        expect(done.tasks[0].kind).toBe("human");
+        const scored = await renderWithOutputs(
+            <DelegationScoring agents={agents} outputs={outputs} />,
+            { ...completePlans, ...scoringGates, ...allDone, ...pollAnswered });
+        expect(ids(scored)).toEqual(["dc:root:poll", "dc:root:score"]);
+        const score = scored.tasks.find((t) => t.nodeId === "dc:root:score");
         const digest = score.computeFn();
         expect(digest.logicalId).toBe("root");
         expect(JSON.parse(digest.summary).execAttempts).toBe(3);
-        const poll = done.tasks.find((t) => t.nodeId === "dc:root:poll");
-        expect(poll.kind).toBe("human");
     });
 
-    test("poll={false} skips the satisfaction poll", async () => {
+    test("poll={false} skips the satisfaction poll and scores immediately", async () => {
         const done = await renderWithOutputs(
             <DelegationScoring agents={agents} outputs={outputs} poll={false} />,
             { ...completePlans, ...scoringGates, ...allDone });
         expect(ids(done)).toEqual(["dc:root:score"]);
+    });
+
+    test("the run-score context feeds every REAL run scorer — none skip, tierFit sees a real tier", async () => {
+        const scorerGates = {
+            dcGates: [
+                gatesRow("root", []),
+                gatesRow("root/core", []),
+                gatesRow("root/docs", []),
+                gatesRow("root/core/a", [{ method: "review", tier: "fable", brief: "verify A" }]),
+                gatesRow("root/core/b", []),
+            ],
+        };
+        const rows = {
+            ...completePlans,
+            ...scorerGates,
+            dcProbe: [{
+                nodeId: "dc:root:core:probe-1", iteration: 0,
+                probeId: "root/core#h1", parentLogicalId: "root/core", kind: "research",
+                question: "q", answer: "no", report: "## sourced", planImpact: "changes",
+            }],
+            dcReplan: [{
+                nodeId: "dc:root:core:replan-1", iteration: 0, round: 1, logicalId: "root/core",
+                decision: "invalidated", reason: "plumbing", trigger: { type: "probe", ref: "root/core#h1" },
+            }],
+            dcExec: [
+                { nodeId: "dc:root:core:a:exec", iteration: 0, logicalId: "root/core/a", attempt: 1, summary: "a1", artifacts: [], actual: { tokens: 1000, costUsd: 0.5, minutes: 3 } },
+                { nodeId: "dc:root:core:a:exec", iteration: 1, logicalId: "root/core/a", attempt: 2, summary: "a2", artifacts: [], actual: { tokens: 2000, costUsd: 1, minutes: 6 } },
+                { nodeId: "dc:root:core:b:exec", iteration: 0, logicalId: "root/core/b", attempt: 1, summary: "b", artifacts: [], actual: { tokens: 1000, costUsd: 0.5, minutes: 3 } },
+                { nodeId: "dc:root:docs:exec", iteration: 0, logicalId: "root/docs", attempt: 1, summary: "docs", artifacts: [], actual: { tokens: 1000, costUsd: 0.5, minutes: 3 } },
+            ],
+            dcReview: [
+                { nodeId: "dc:root:core:a:review-1", iteration: 0, logicalId: "root/core/a", attempt: 1, verdict: "fail", feedback: "broken" },
+                { nodeId: "dc:root:core:a:review-1", iteration: 1, logicalId: "root/core/a", attempt: 2, verdict: "pass", feedback: "ok" },
+            ],
+            ...pollAnswered,
+        };
+        const graph = await renderWithOutputs(
+            <DelegationScoring agents={agents} outputs={outputs} />, rows);
+        const score = graph.tasks.find((t) => t.nodeId === "dc:root:score");
+        expect(score).toBeDefined();
+        const output = score.computeFn();
+        const context = score.context;
+
+        // pocJudgment: root flagged risks with no downstream effect (falsePositive),
+        // root/core's probe finding CHANGED the plan (correctPositiveChanged).
+        const poc = await pocJudgmentScorer().score({ input: null, output, context });
+        expect(poc.meta?.skipped).toBeUndefined();
+        expect(poc.meta.counts.correctPositiveChanged).toBe(1);
+        expect(poc.meta.counts.falsePositive).toBe(1);
+        // Leaves and probes are never judged as planning nodes.
+        expect(Object.keys(poc.meta.nodes).sort()).toEqual(["root", "root/core"]);
+
+        // planSolidity: the probe replan is plan-phase (free); the retry
+        // (REDELEGATED, 0.08) and failed review (GATE_FAILED, 0.05) are post-exec.
+        const solidity = await planSolidityScorer().score({ input: null, output, context });
+        expect(solidity.meta?.skipped).toBeUndefined();
+        expect(solidity.meta.execStartedIndex).not.toBeNull();
+        expect(solidity.meta.planPhase.NODE_INVALIDATED).toBe(1);
+        expect(solidity.meta.postExec.REDELEGATED).toBe(1);
+        expect(solidity.meta.postExec.GATE_FAILED).toBe(1);
+        expect(solidity.score).toBeCloseTo(0.87, 5);
+
+        // estimateAccuracy: a under-delivered 2x (ratio 0.5); b and docs were
+        // forecast exactly (ratio 1); root/core has no exec actuals -> skipped node.
+        const estimate = await estimateAccuracyScorer().score({ input: null, output, context });
+        expect(estimate.meta?.skipped).toBeUndefined();
+        expect(estimate.meta.nodes).toHaveLength(3);
+        expect(estimate.score).toBeCloseTo((0.5 * 0.5 + 1 * 0.5 + 1 * 0.5) / 1.5, 5);
+
+        // humanPoll: ratings 5 and 4 -> (1 + 0.75) / 2.
+        const poll = await humanPollScorer().score({ input: null, output, context });
+        expect(poll.meta?.skipped).toBeUndefined();
+        expect(poll.score).toBeCloseTo(0.875, 5);
+
+        // tierFit: the judge must see the ROOT node's real tier, not "unknown".
+        let judged = "";
+        const judge = {
+            id: "judge",
+            generate: async ({ prompt }) => {
+                judged = prompt;
+                return { text: '{"score": 0.9, "reason": "fit"}' };
+            },
+        };
+        const tierFit = await tierFitScorer(judge).score({ input: null, output, context });
+        expect(tierFit.score).toBeCloseTo(0.9, 5);
+        expect(judged).toContain('Tier: "fable"');
+        expect(judged).not.toContain('Tier: "unknown"');
+    });
+
+    test("synthesizeDelegationEvents maps every dc row to the scorers' event vocabulary", () => {
+        const events = synthesizeDelegationEvents({
+            planRows: [rootPlan, corePlan],
+            probeRows: [{ probeId: "root/core#h1", parentLogicalId: "root/core", planImpact: "changes" }],
+            replanRows: [
+                { logicalId: "root/core", decision: "invalidated", reason: "r", trigger: { type: "probe", ref: "root/core#h1" } },
+                { logicalId: "root/core", decision: "reaffirmed", reason: "r", trigger: { type: "review-fail", ref: "dc:root:core:review-1#fail-1" } },
+            ],
+            execRows: [
+                { logicalId: "root/core/a", attempt: 1 },
+                { logicalId: "root/core/a", attempt: 2 },
+            ],
+            reviewRows: [
+                { logicalId: "root/core/a", verdict: "fail" },
+                { logicalId: "root/core/a", verdict: "pass" },
+            ],
+            devPreviewRows: [{ logicalId: "root", builtOk: false, summary: "boom" }],
+        });
+        const tags = events.map((e) => e.t);
+        // rootPlan flags r1 (poc) + r2 (probe: null — still a flag), corePlan flags h1.
+        expect(tags.filter((t) => t === "RISK_FLAGGED")).toHaveLength(3);
+        expect(tags.filter((t) => t === "PROBE_SPAWNED")).toHaveLength(2);
+        expect(events.find((e) => e.t === "PROBE_SPAWNED" && e.parent === "root").probe).toBe("root#r1");
+        expect(events.find((e) => e.t === "FINDING_REPORTED").toParent).toBe("root/core");
+        // Probe-triggered replan is plan-phase: before EXEC_STARTED.
+        const execStart = tags.indexOf("EXEC_STARTED");
+        expect(tags.indexOf("NODE_INVALIDATED")).toBeLessThan(execStart);
+        // review-fail replan is post-exec by construction: after EXEC_STARTED.
+        expect(tags.indexOf("NODE_REAFFIRMED")).toBeGreaterThan(execStart);
+        expect(tags.filter((t) => t === "REDELEGATED")).toHaveLength(1);
+        // dcReview fail + dcDevPreview builtOk:false both fail gates.
+        expect(tags.filter((t) => t === "GATE_FAILED")).toHaveLength(2);
+        expect(tags.filter((t) => t === "GATE_PASSED")).toHaveLength(1);
+        expect(events.filter((e) => e.t === "NODE_DONE").map((e) => e.node)).toEqual(["root/core/a"]);
     });
 });
 

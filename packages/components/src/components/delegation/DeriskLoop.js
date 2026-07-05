@@ -8,7 +8,7 @@ import { Sequence } from "../Sequence.js";
 import { Parallel } from "../Parallel.js";
 import { Task } from "../Task.js";
 import { DEFAULT_TIER_ORDER } from "./delegationSchemas.ts";
-import { agentForTier, delegatingTierFor, dependentsOf, foldGates, foldPlans, nodeIndex, pendingTriggers, physicalId, planOwnerOf, planningComplete, probeIdFor, readRows, replanCountFor, } from "./delegationState.js";
+import { agentForTier, chunkGateFailures, delegatingTierFor, dependentsOf, foldGates, foldPlans, nodeIndex, pendingTriggers, physicalId, planOwnerOf, planningComplete, probeIdFor, readRows, replanCountFor, triggerTargetOf, } from "./delegationState.js";
 import { planPrompt, probePrompt, replanPrompt } from "./delegationPrompts.js";
 /** @typedef {import("./delegationState.js").DeriskTrigger} DeriskTrigger */
 
@@ -47,9 +47,12 @@ export function probeNumbers(planRows) {
  *
  * 1. Every risk with `probe != null` in a CURRENT plan spawns a probe task
  *    (haiku research / sonnet poc) reporting to its nearest parent only.
- * 2. Probe findings with `planImpact: "changes"` and delivered `dc-edit`
- *    signal rows are triggers. Affected = the flagged node + its dependents
- *    (child AND dep edges), each mapped to its plan-owning ancestor.
+ * 2. Probe findings with `planImpact: "changes"`, delivered `dc-edit`
+ *    signal rows, and chunk-level review-gate failures (trigger type
+ *    "review-fail") are triggers. Edits on probe outputs (`<parent>#<risk>`)
+ *    map to the probe's parent; post-approval goal edits map to the root.
+ *    Affected = the flagged node + its dependents (child AND dep edges),
+ *    each mapped to its plan-owning ancestor.
  * 3. Each affected owner gets a replan-decision task
  *    (`<p>:<id>:replan-<k>`, k = its per-node round counter); an
  *    `invalidated` decision mounts a fresh plan task (`<p>:<id>:plan-<k>`)
@@ -75,6 +78,7 @@ export function DeriskLoop(props) {
     const probeRows = readRows(ctx, o.dcProbe);
     const editRows = readRows(ctx, o.dcEdit);
     const replanRows = readRows(ctx, o.dcReplan);
+    const reviewRows = readRows(ctx, o.dcReview);
     const numbers = probeNumbers(planRows);
     const children = [];
     // 1. Probes for every current flagged risk.
@@ -109,16 +113,28 @@ export function DeriskLoop(props) {
         children.push(React.createElement(Parallel, { key: `${p}:probes`, maxConcurrency }, ...probeTasks));
     }
     // 2. Unaddressed triggers -> replan decisions per affected plan owner.
-    const triggers = pendingTriggers(probeRows, editRows, replanRows);
+    //    Chunk review-gate failures replan like probe findings (finding a
+    //    chunk-level defect IS new information about the plan).
+    const failures = chunkGateFailures({
+        idPrefix: p,
+        plans,
+        gates,
+        approvalPolicy: props.approvalPolicy,
+        reviewRows,
+    });
+    const triggers = pendingTriggers(probeRows, editRows, replanRows, failures);
     /** @type {Map<string, DeriskTrigger[]>} */
     const byOwner = new Map();
     for (const trigger of triggers) {
-        const flaggedOwner = planOwnerOf(trigger.flagged, plans);
+        // Probe-output edits and goal edits are not plan nodes: map them onto
+        // the plan tree first, or the trigger is silently swallowed.
+        const target = triggerTargetOf(trigger.flagged, plans);
+        const flaggedOwner = planOwnerOf(target, plans);
         /** @type {Array<{ owner: string; direct: boolean }>} */
         const affected = [];
         if (flaggedOwner)
             affected.push({ owner: flaggedOwner, direct: true });
-        for (const dependent of dependentsOf(trigger.flagged, plans, gates)) {
+        for (const dependent of dependentsOf(target, plans, gates)) {
             const owner = planOwnerOf(dependent, plans);
             if (owner && owner !== flaggedOwner)
                 affected.push({ owner, direct: false });
