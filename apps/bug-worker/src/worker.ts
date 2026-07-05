@@ -96,7 +96,7 @@ async function handlePostBug(request: Request, env: BugWorkerEnv, now: number): 
 
   const ip = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for") ?? "unknown";
   if (!(await checkRateLimit(env, ip, now))) {
-    return json(429, { error: "rate limit exceeded (20 reports per hour per IP)" });
+    return json(429, { error: `rate limit exceeded (${RATE_LIMIT_PER_HOUR} reports per hour per IP)` });
   }
 
   const raw = await readBodyBounded(request, MAX_PAYLOAD_BYTES);
