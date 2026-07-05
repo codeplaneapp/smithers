@@ -2,25 +2,6 @@ import { workflowUiThemeCss } from "@smithers-orchestrator/gateway-ui/styleguide
 import type { DigestRow } from "./service.ts";
 import { digestJsonFromRow } from "./service.ts";
 
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case "\"":
-        return "&quot;";
-      case "'":
-        return "&#39;";
-      default:
-        return char;
-    }
-  });
-}
-
 export function digestPayload(row: DigestRow | null): Record<string, unknown> | null {
   if (!row) return null;
   return {
@@ -415,5 +396,5 @@ export function json(value: unknown, init: ResponseInit = {}): Response {
 }
 
 export function notFound(): Response {
-  return new Response(escapeHtml("Not found"), { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
+  return new Response("Not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
 }

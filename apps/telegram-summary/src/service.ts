@@ -3,8 +3,20 @@ import { ensureSchema } from "./schema.ts";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 const MOONSHOT_CHAT_COMPLETIONS = "https://api.moonshot.ai/v1/chat/completions";
+// Telegram sendMessage rejects texts over 4096 chars; 3800 leaves headroom so
+// splitTelegramText's trim/newline handling can never overshoot.
 const TELEGRAM_SEND_LIMIT = 3800;
 const STATE_LAST_UPDATE_ID = "telegram.last_update_id";
+// Must stay in sync with the KIMI_MODEL binding default in alchemy.run.ts.
+const DEFAULT_KIMI_MODEL = "kimi-k2.6";
+// getUpdates page size; also the ingest loop's exit check (a short page means
+// Telegram has no more updates), so both uses must agree.
+const GETUPDATES_PAGE_SIZE = 100;
+// Bounds one cron invocation; any remaining backlog is picked up by the next run.
+const MAX_GETUPDATES_BATCHES_PER_RUN = 5;
+// Caps the prompt payload sent to Kimi; transcriptFor keeps the TAIL (the most
+// recent messages) when over budget.
+const TRANSCRIPT_MAX_CHARS = 120000;
 
 export interface MessageRecord {
   updateId: number;
@@ -100,16 +112,6 @@ function compact(value: string | undefined | null): string | null {
   return trimmed ? trimmed : null;
 }
 
-function envNumber(value: string | undefined, fallback: number, min: number, max: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(max, Math.max(min, Math.floor(parsed)));
-}
-
-function cleanText(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
 function safeJson(value: unknown): string {
   try {
     return JSON.stringify(value);
@@ -190,7 +192,7 @@ function messageFromUpdate(update: TelegramUpdate): MessageRecord | null {
     null;
   const updateId = typeof update.update_id === "number" ? update.update_id : null;
   if (!message || updateId === null) return null;
-  const text = cleanText(extractText(message.text) || extractText(message.caption));
+  const text = (extractText(message.text) || extractText(message.caption)).replace(/\s+/g, " ").trim(); // collapse whitespace to one line
   if (!text) return null;
   const date = typeof message.date === "number" ? message.date * 1000 : null;
   const messageId = typeof message.message_id === "number" ? message.message_id : null;
@@ -281,10 +283,10 @@ export async function ingestTelegramUpdates(env: TelegramSummaryEnv, nowMs = Dat
   let maxSeen: number | null = null;
   const wantedChat = sourceChatId(env);
 
-  for (let i = 0; i < 5; i += 1) {
+  for (let i = 0; i < MAX_GETUPDATES_BATCHES_PER_RUN; i += 1) {
     const updates = await telegramCall<TelegramUpdate[]>(token, "getUpdates", {
       offset,
-      limit: 100,
+      limit: GETUPDATES_PAGE_SIZE,
       timeout: 0,
       allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post"],
     });
@@ -302,13 +304,14 @@ export async function ingestTelegramUpdates(env: TelegramSummaryEnv, nowMs = Dat
       await setState(env.DB, STATE_LAST_UPDATE_ID, String(maxSeen), nowMs);
       offset = maxSeen + 1;
     }
-    if (updates.length < 100) break;
+    if (updates.length < GETUPDATES_PAGE_SIZE) break;
   }
 
   return { batches, updateCount, storedMessages, lastUpdateId: maxSeen, warning: null };
 }
 
 async function selectMessagesForDigest(db: D1Database, startMs: number, endMs: number): Promise<MessageRow[]> {
+  // LIMIT 1200 is the row-count companion to the TRANSCRIPT_MAX_CHARS char cap.
   const rows = await db
     .prepare(
       `SELECT update_id, chat_id, message_id, author, text, at_ms, url
@@ -330,6 +333,7 @@ function transcriptFor(messages: MessageRow[], maxChars: number): string {
   });
   const body = lines.join("\n");
   if (body.length <= maxChars) return body;
+  // Keep the tail so the most recent messages survive truncation.
   return body.slice(body.length - maxChars);
 }
 
@@ -393,7 +397,7 @@ async function createKimiDigest(
 ): Promise<DigestJson> {
   const apiKey = compact(env.MOONSHOT_API_KEY);
   if (!apiKey) throw new Error("MOONSHOT_API_KEY is not configured.");
-  const model = compact(env.KIMI_MODEL) ?? "kimi-k2.6";
+  const model = compact(env.KIMI_MODEL) ?? DEFAULT_KIMI_MODEL;
   const hint = compact(env.DIGEST_TOPIC_HINT);
   const body: Record<string, unknown> = {
     model,
@@ -431,7 +435,7 @@ async function createKimiDigest(
             notableLinks: [{ label: "label", url: "https://example.com", context: "why it came up" }],
             caveats: ["uncertainty or low confidence note"],
           },
-          transcript: transcriptFor(messages, 120000),
+          transcript: transcriptFor(messages, TRANSCRIPT_MAX_CHARS),
         }),
       },
     ],
@@ -567,10 +571,12 @@ async function markDigestPosted(db: D1Database, id: string, postedAtMs: number |
 
 export async function runDailyDigest(env: TelegramSummaryEnv, nowMs = Date.now()): Promise<DigestRunResult> {
   await ensureSchema(env.DB);
-  const hours = envNumber(env.DIGEST_WINDOW_HOURS, 24, 1, 168);
+  // DIGEST_WINDOW_HOURS: default 24h, clamped to 1h..168h (one week).
+  const parsedHours = Number(env.DIGEST_WINDOW_HOURS);
+  const hours = Number.isFinite(parsedHours) ? Math.min(168, Math.max(1, Math.floor(parsedHours))) : 24;
   const periodEndMs = nowMs;
   const periodStartMs = nowMs - hours * 60 * 60 * 1000;
-  const model = compact(env.KIMI_MODEL) ?? "kimi-k2.6";
+  const model = compact(env.KIMI_MODEL) ?? DEFAULT_KIMI_MODEL;
   const messages = await selectMessagesForDigest(env.DB, periodStartMs, periodEndMs);
   if (messages.length === 0) {
     return {
@@ -665,7 +671,7 @@ export async function status(env: TelegramSummaryEnv): Promise<Record<string, un
     digests: digestRow?.count ?? 0,
     lastUpdateId: offset ? Number(offset) : null,
     latestDigestId: latest?.id ?? null,
-    model: compact(env.KIMI_MODEL) ?? "kimi-k2.6",
+    model: compact(env.KIMI_MODEL) ?? DEFAULT_KIMI_MODEL,
     kimiConfigured: Boolean(compact(env.MOONSHOT_API_KEY)),
     telegramConfigured: Boolean(compact(env.TELEGRAM_BOT_TOKEN)),
     outputChatConfigured: Boolean(outputChatId(env)),
