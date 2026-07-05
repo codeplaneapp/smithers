@@ -5,11 +5,7 @@ import { FrameScrubber } from "./FrameScrubber.js";
 import { Header } from "./Header.js";
 import { NodeInspector } from "./NodeInspector.js";
 import { RunTree } from "./RunTree.js";
-
-type Theme = {
-  fg?: (color: string, value: string) => string;
-  bold?: (value: string) => string;
-};
+import { type Theme, paint, stripAnsi } from "./theme.js";
 
 type FocusPane = "tree" | "inspector" | "scrubber";
 
@@ -19,14 +15,6 @@ type RunInspectorOptions = {
   onClose?: () => void;
   onNotify?: (message: string, level?: "info" | "warning" | "error") => void;
 };
-
-function paint(theme: Theme, color: string, value: string) {
-  return theme.fg ? theme.fg(color, value) : value;
-}
-
-function stripAnsi(value: string) {
-  return value.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
-}
 
 function padRight(value: string, width: number) {
   const plain = stripAnsi(value);

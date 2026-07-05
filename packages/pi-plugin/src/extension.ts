@@ -69,6 +69,7 @@ function defaultLogMcpEvent(record: McpLogRecord) {
   }
 }
 
+// Default local gateway address; matches the smithers gateway default port and the --smithers-url flag default.
 const DEFAULT_BASE = "http://127.0.0.1:7331";
 const requireFromHere = createRequire(import.meta.url);
 
@@ -103,25 +104,17 @@ function loadSmithersDocs() {
     return smithersDocs;
   }
   const thisDir = dirname(fileURLToPath(import.meta.url));
+  // Prefer the full bundle over the index; for each, check in-repo, then cwd,
+  // then the installed package.
   const candidates = [
     resolve(thisDir, "../../../docs/llms-full.txt"),
     resolve(process.cwd(), "docs/llms-full.txt"),
     resolve(process.cwd(), "node_modules/smithers-orchestrator/docs/llms-full.txt"),
-  ];
-  for (const candidate of candidates) {
-    try {
-      smithersDocs = readFileSync(candidate, "utf8");
-      return smithersDocs;
-    } catch {
-      // try next
-    }
-  }
-  const fallbacks = [
     resolve(thisDir, "../../../docs/llms.txt"),
     resolve(process.cwd(), "docs/llms.txt"),
     resolve(process.cwd(), "node_modules/smithers-orchestrator/docs/llms.txt"),
   ];
-  for (const candidate of fallbacks) {
+  for (const candidate of candidates) {
     try {
       smithersDocs = readFileSync(candidate, "utf8");
       return smithersDocs;
@@ -232,12 +225,10 @@ async function listMcpTools() {
   return tools;
 }
 
-async function ensureSmithersToolContract() {
-  if (smithersToolContract) {
-    return smithersToolContract;
-  }
-  const tools = await listMcpTools();
-  smithersToolContract = createSmithersAgentContract({
+// The `tui` tool is interactive-only, so it is excluded from the contract the
+// system prompt advertises (mirroring the registration loop's skip).
+function contractFromTools(tools: Awaited<ReturnType<typeof listMcpTools>>) {
+  return createSmithersAgentContract({
     serverName: "smithers",
     toolSurface: "semantic",
     tools: tools
@@ -247,6 +238,13 @@ async function ensureSmithersToolContract() {
         description: tool.description,
       })),
   });
+}
+
+async function ensureSmithersToolContract() {
+  if (smithersToolContract) {
+    return smithersToolContract;
+  }
+  smithersToolContract = contractFromTools(await listMcpTools());
   return smithersToolContract;
 }
 
@@ -436,13 +434,7 @@ async function registerMcpTools(pi: ExtensionAPI, ctx: ExtensionContext) {
 async function registerMcpToolsInner(pi: ExtensionAPI, ctx: ExtensionContext) {
   try {
     const tools = await listMcpTools();
-    smithersToolContract = createSmithersAgentContract({
-      serverName: "smithers",
-      toolSurface: "semantic",
-      tools: tools
-        .filter((tool) => tool.name !== "tui")
-        .map((tool) => ({ name: tool.name, description: tool.description })),
-    });
+    smithersToolContract = contractFromTools(tools);
 
     for (const tool of tools) {
       if (tool.name === "tui") {

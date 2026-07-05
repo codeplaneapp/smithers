@@ -74,6 +74,7 @@ type PendingRequest = {
   reject: (error: Error) => void;
 };
 
+// Default local gateway address; matches the smithers gateway default port and the --smithers-url flag default.
 const DEFAULT_BASE = "http://127.0.0.1:7331";
 const AUDIT_ROW_ID_KEYS = new Set([
   "auditRowId",
@@ -186,12 +187,10 @@ class GatewayWsConnection {
 
   private constructor(private readonly ws: WebSocket) {
     ws.on("message", (raw) => this.handleMessage(raw));
-    // A clean remote close (gateway restart, idle/keepalive timeout, server-
-    // initiated close) emits "close", NOT "error". Previously this only drained
-    // event waiters via closeWaiters(), leaving any in-flight request() promise
-    // (e.g. the initial connect/streamDevTools call) unsettled forever, so the
-    // consuming generator parked at its await and never reached the reconnect
-    // path. Reject pending requests on close too, so the stream can reconnect.
+    // A clean remote close (gateway restart, idle timeout) emits "close", NOT
+    // "error". Reject in-flight request() promises here too — draining only
+    // event waiters would leave the initial connect/streamDevTools await parked
+    // forever, so the consuming generator never reaches its reconnect path.
     ws.on("close", () => this.rejectAll(new SmithersError("PI_GATEWAY_CLOSED", "Gateway connection closed before the in-flight request completed.")));
     ws.on("error", (error) => this.rejectAll(error instanceof Error ? error : new Error(String(error))));
   }

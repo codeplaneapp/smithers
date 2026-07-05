@@ -10,6 +10,7 @@ type FetchOptions = {
   body?: unknown;
 };
 
+// Default local gateway address; matches the smithers gateway default port and the --smithers-url flag default.
 const DEFAULT_BASE = "http://127.0.0.1:7331";
 
 function buildHeaders(opts: RequestOptions, withJson: boolean) {

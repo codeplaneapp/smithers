@@ -1,14 +1,6 @@
 import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
 import type { DevToolsStore } from "../runtime/DevToolsStore.js";
-
-type Theme = {
-  fg?: (color: string, value: string) => string;
-  bold?: (value: string) => string;
-};
-
-function paint(theme: Theme, color: string, value: string) {
-  return theme.fg ? theme.fg(color, value) : value;
-}
+import { type Theme, paint } from "./theme.js";
 
 export class FrameScrubber {
   constructor(private readonly store: DevToolsStore) {}

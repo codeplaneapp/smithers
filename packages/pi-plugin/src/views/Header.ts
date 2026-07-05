@@ -1,18 +1,6 @@
 import { truncateToWidth } from "@mariozechner/pi-tui";
 import type { DevToolsStore } from "../runtime/DevToolsStore.js";
-
-type Theme = {
-  fg?: (color: string, value: string) => string;
-  bold?: (value: string) => string;
-};
-
-function paint(theme: Theme, color: string, value: string) {
-  return theme.fg ? theme.fg(color, value) : value;
-}
-
-function bold(theme: Theme, value: string) {
-  return theme.bold ? theme.bold(value) : value;
-}
+import { type Theme, bold, paint, stripAnsi } from "./theme.js";
 
 function stateColor(status: string) {
   switch (status) {
@@ -135,9 +123,8 @@ export class Header {
       paint(theme, "dim", `seq ${this.store.seq}`),
       connection,
     ].filter(Boolean).join("  ");
-    const ansiPattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
-    const plainLeft = left.replace(ansiPattern, "");
-    const plainRight = right.replace(ansiPattern, "");
+    const plainLeft = stripAnsi(left);
+    const plainRight = stripAnsi(right);
     const gap = Math.max(1, W - plainLeft.length - plainRight.length - 2);
     return [truncateToWidth(` ${left}${" ".repeat(gap)}${right} `, W)];
   }

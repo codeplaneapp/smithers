@@ -1,36 +1,21 @@
 import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
 import type { DevToolsNode } from "@smithers-orchestrator/protocol";
+import { normalizeState } from "../runtime/normalizeState.js";
 import type { DevToolsStore } from "../runtime/DevToolsStore.js";
-
-type Theme = {
-  fg?: (color: string, value: string) => string;
-  bold?: (value: string) => string;
-};
+import { type Theme, bold, paint } from "./theme.js";
 
 type TreeRow = {
   node: DevToolsNode;
   depth: number;
 };
 
-function paint(theme: Theme, color: string, value: string) {
-  return theme.fg ? theme.fg(color, value) : value;
-}
-
-function bold(theme: Theme, value: string) {
-  return theme.bold ? theme.bold(value) : value;
-}
-
 function stateOf(node: DevToolsNode) {
   const raw = node.props.state;
   return typeof raw === "string" ? raw : "unknown";
 }
 
-function normalizedState(node: DevToolsNode) {
-  return stateOf(node).trim().toLowerCase().replace(/[_\s]/g, "-");
-}
-
 function stateIcon(node: DevToolsNode) {
-  switch (normalizedState(node)) {
+  switch (normalizeState(stateOf(node))) {
     case "running":
     case "in-progress":
       return ">";

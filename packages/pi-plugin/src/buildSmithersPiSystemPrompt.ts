@@ -5,8 +5,10 @@ import {
 import type { SmithersPiRunContext } from "./SmithersPiRunContext.js";
 import { normalizeState } from "./runtime/normalizeState.js";
 
-function toolRef(contract: SmithersAgentContract, name: string, prefix = "smithers_") {
-  return contract.tools.some((tool) => tool.name === name) ? `\`${prefix}${name}\`` : undefined;
+// The "smithers_" prefix matches the toolNamePrefix passed to
+// renderSmithersAgentPromptGuidance below.
+function toolRef(contract: SmithersAgentContract, name: string) {
+  return contract.tools.some((tool) => tool.name === name) ? `\`smithers_${name}\`` : undefined;
 }
 
 function buildTypicalWorkflowGuidance(contract: SmithersAgentContract) {

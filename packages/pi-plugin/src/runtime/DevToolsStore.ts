@@ -46,16 +46,11 @@ type LiveRunDevToolsMode = { kind: "live" } | { kind: "historical"; frameNo: num
 
 type StoreListener = (store: DevToolsStore) => void;
 
+// Bounds memory held for unmounted (ghost) subtrees; oldest unmount is evicted
+// first. Overridable via SMITHERS_DEVTOOLS_GHOST_CAP.
 const DEFAULT_GHOST_NODE_CAP = 256;
+// Grace period before the stale banner shows, so quick reconnects don't flicker it.
 const DEFAULT_STALE_BANNER_DELAY_MS = 2_000;
-
-function cloneNode(node: DevToolsNode) {
-  return structuredClone(node);
-}
-
-function cloneSnapshot(snapshot: SnapshotWithRunState) {
-  return structuredClone(snapshot);
-}
 
 function findNode(root: DevToolsNode | undefined, id: number): DevToolsNode | undefined {
   if (!root) {
@@ -340,7 +335,7 @@ export class DevToolsStore {
   }
 
   applyGapResync(gapResync: DevToolsGapResync) {
-    const preservedTree = this.tree ? cloneNode(this.tree) : undefined;
+    const preservedTree = this.tree ? structuredClone(this.tree) : undefined;
     const preservedSeq = this.seq;
     this.liveSnapshot = undefined;
     this.awaitingSnapshotAfterGapResync = true;
@@ -589,7 +584,7 @@ export class DevToolsStore {
     }
 
     this.awaitingSnapshotAfterGapResync = false;
-    this.liveSnapshot = cloneSnapshot(snapshot);
+    this.liveSnapshot = structuredClone(snapshot);
     this.liveLatestFrameNo = Math.max(this.liveLatestFrameNo, snapshot.frameNo);
     this.runStateView = snapshot.runState;
     this.runStatus = runStatusForSnapshot(snapshot, this.runStatus);
@@ -835,7 +830,7 @@ export class DevToolsStore {
     const mountedFrameNo = this.mountedFrameByGhostKey.get(key) ?? unmountedFrameNo;
     this.ghostNodes.set(key, {
       key,
-      node: cloneNode(node),
+      node: structuredClone(node),
       mountedFrameNo,
       unmountedFrameNo,
       unmountedSeq,

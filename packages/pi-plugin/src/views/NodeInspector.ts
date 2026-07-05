@@ -1,21 +1,9 @@
 import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
 import type { DevToolsNode } from "@smithers-orchestrator/protocol";
 import type { DevToolsStore } from "../runtime/DevToolsStore.js";
-
-type Theme = {
-  fg?: (color: string, value: string) => string;
-  bold?: (value: string) => string;
-};
+import { type Theme, bold, paint } from "./theme.js";
 
 type InspectorTab = "output" | "diff" | "logs";
-
-function paint(theme: Theme, color: string, value: string) {
-  return theme.fg ? theme.fg(color, value) : value;
-}
-
-function bold(theme: Theme, value: string) {
-  return theme.bold ? theme.bold(value) : value;
-}
 
 function compact(value: unknown) {
   if (typeof value === "string") {
