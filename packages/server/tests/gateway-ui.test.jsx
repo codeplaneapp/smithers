@@ -281,9 +281,16 @@ describe("Gateway UI", () => {
     GlobalRegistrator.register({ url: `http://127.0.0.1:${port}/console` });
     domRegistered = true;
     const intervals = new Set();
+    // The console client also schedules bare setTimeout retries (e.g.
+    // retryDevToolsStream); an untracked one firing after the happy-dom
+    // globals unregister crashes bun with "document is not defined" between
+    // tests, so timeouts get the same tracking as intervals.
+    const timeouts = new Set();
     const sockets = new Set();
     const nativeSetInterval = globalThis.setInterval;
     const nativeClearInterval = globalThis.clearInterval;
+    const nativeSetTimeout = globalThis.setTimeout;
+    const nativeClearTimeout = globalThis.clearTimeout;
     const NativeWebSocket = globalThis.WebSocket;
     globalThis.setInterval = (...args) => {
       const id = nativeSetInterval(...args);
@@ -293,6 +300,15 @@ describe("Gateway UI", () => {
     globalThis.clearInterval = (id) => {
       intervals.delete(id);
       return nativeClearInterval(id);
+    };
+    globalThis.setTimeout = (...args) => {
+      const id = nativeSetTimeout(...args);
+      timeouts.add(id);
+      return id;
+    };
+    globalThis.clearTimeout = (id) => {
+      timeouts.delete(id);
+      return nativeClearTimeout(id);
     };
     globalThis.WebSocket = class TrackedWebSocket extends NativeWebSocket {
       constructor(...args) {
@@ -306,12 +322,18 @@ describe("Gateway UI", () => {
         nativeClearInterval(interval);
       }
       intervals.clear();
+      for (const timeout of timeouts) {
+        nativeClearTimeout(timeout);
+      }
+      timeouts.clear();
       for (const socket of sockets) {
         socket.close();
       }
       sockets.clear();
       globalThis.setInterval = nativeSetInterval;
       globalThis.clearInterval = nativeClearInterval;
+      globalThis.setTimeout = nativeSetTimeout;
+      globalThis.clearTimeout = nativeClearTimeout;
       globalThis.WebSocket = NativeWebSocket;
     };
     document.body.innerHTML = '<div id="root"></div>';
