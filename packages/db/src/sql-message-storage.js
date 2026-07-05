@@ -34,23 +34,6 @@ import { camelToSnake } from "./utils/camelToSnake.js";
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
 /**
- * @param {unknown} cause
- */
-function formatSqlCause(cause) {
-    if (cause instanceof Error && cause.message) {
-        return cause.message;
-    }
-    if (typeof cause === "string") {
-        return cause;
-    }
-    try {
-        return JSON.stringify(cause);
-    }
-    catch {
-        return String(cause);
-    }
-}
-/**
  * @param {string} dialect
  * @param {string} operation
  * @param {string} statement
@@ -61,7 +44,25 @@ function formatSqlErrorMessage(dialect, operation, statement, cause) {
     const clippedStatement = compactStatement.length > 500
         ? `${compactStatement.slice(0, 497)}...`
         : compactStatement;
-    return `Failed to execute ${dialect} ${operation}: ${formatSqlCause(cause)}; sql=${clippedStatement}`;
+    // Cause rendering is best-effort: prefer Error.message, then a raw string,
+    // then JSON, falling back to String() for circular values. The resulting
+    // message shape is pinned by tests/db-sql-error-message.test.js.
+    let causeText;
+    if (cause instanceof Error && cause.message) {
+        causeText = cause.message;
+    }
+    else if (typeof cause === "string") {
+        causeText = cause;
+    }
+    else {
+        try {
+            causeText = JSON.stringify(cause);
+        }
+        catch {
+            causeText = String(cause);
+        }
+    }
+    return `Failed to execute ${dialect} ${operation}: ${causeText}; sql=${clippedStatement}`;
 }
 const CREATE_TABLE_STATEMENTS = [
     `CREATE TABLE IF NOT EXISTS _smithers_runs (
@@ -622,31 +623,31 @@ function createConnection(sqlite) {
     };
 }
 /**
- * @param {Database} sqlite
- * @returns {Effect.Effect<SqlClient.SqlClient, never>}
+ * Wraps a raw connection in a scoped `SqlClient` layer. All three drivers
+ * (bun-sqlite, external sqlite, postgres) share this body: a one-permit
+ * semaphore serializes access to the single underlying connection.
+ *
+ * The compiler is only exercised by the `sql``` tagged template, which this
+ * storage never uses — every query is a pre-built string run through the raw
+ * connection (where the Postgres `?`→`$n` rewrite happens), so the SQLite
+ * compiler is an inert placeholder for every dialect.
+ * @param {Connection} connection
+ * @param {string} dbSystemName OpenTelemetry `db.system.name` span attribute value.
  */
-function makeSqlClientEffect(sqlite) {
-    const compiler = Statement.makeCompilerSqlite(camelToSnake);
-    const connection = createConnection(sqlite);
-    return Effect.gen(function* () {
+function makeSqlClientLayer(connection, dbSystemName) {
+    return Layer.scoped(SqlClient.SqlClient, Effect.gen(function* () {
         const semaphore = yield* Effect.makeSemaphore(1);
         const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
         const transactionAcquirer = Effect.uninterruptibleMask((restore) => Effect.as(Effect.zipRight(restore(semaphore.take(1)), Effect.tap(Effect.scope, (scope) => Scope.addFinalizer(scope, semaphore.release(1)))), connection));
         const reactivity = yield* Reactivity.make;
         return yield* SqlClient.make({
             acquirer,
-            compiler,
+            compiler: Statement.makeCompilerSqlite(camelToSnake),
             transactionAcquirer,
-            spanAttributes: [[ATTR_DB_SYSTEM_NAME, "sqlite"]],
+            spanAttributes: [[ATTR_DB_SYSTEM_NAME, dbSystemName]],
             transformRows: transformRowKeys,
         }).pipe(Effect.provideService(Reactivity.Reactivity, reactivity));
-    });
-}
-/**
- * @param {Database} sqlite
- */
-function makeSqlClientLayer(sqlite) {
-    return Layer.scoped(SqlClient.SqlClient, makeSqlClientEffect(sqlite));
+    }));
 }
 /**
  * @param {ExternalSqliteDescriptor} descriptor
@@ -701,33 +702,6 @@ function createExternalSqliteConnection(descriptor) {
         executeUnprepared: (statement, params, transformRows) => run(statement, params, transformRows),
         executeStream: (statement, params, transformRows) => Stream.fromIterableEffect(run(statement, params, transformRows)),
     };
-}
-/**
- * @param {ExternalSqliteDescriptor} descriptor
- * @returns {Effect.Effect<SqlClient.SqlClient, never>}
- */
-function makeExternalSqliteClientEffect(descriptor) {
-    const compiler = Statement.makeCompilerSqlite(camelToSnake);
-    const connection = createExternalSqliteConnection(descriptor);
-    return Effect.gen(function* () {
-        const semaphore = yield* Effect.makeSemaphore(1);
-        const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
-        const transactionAcquirer = Effect.uninterruptibleMask((restore) => Effect.as(Effect.zipRight(restore(semaphore.take(1)), Effect.tap(Effect.scope, (scope) => Scope.addFinalizer(scope, semaphore.release(1)))), connection));
-        const reactivity = yield* Reactivity.make;
-        return yield* SqlClient.make({
-            acquirer,
-            compiler,
-            transactionAcquirer,
-            spanAttributes: [[ATTR_DB_SYSTEM_NAME, "sqlite"]],
-            transformRows: transformRowKeys,
-        }).pipe(Effect.provideService(Reactivity.Reactivity, reactivity));
-    });
-}
-/**
- * @param {ExternalSqliteDescriptor} descriptor
- */
-function makeExternalSqliteClientLayer(descriptor) {
-    return Layer.scoped(SqlClient.SqlClient, makeExternalSqliteClientEffect(descriptor));
 }
 /**
  * @param {SqliteParam} value
@@ -790,37 +764,6 @@ function createPostgresConnection(pgConn) {
         executeStream: (statement, params, transformRows) => Stream.fromIterableEffect(run(statement, params, transformRows)),
     };
 }
-/**
- * @param {object} pgConn
- * @returns {Effect.Effect<SqlClient.SqlClient, never>}
- */
-function makePostgresSqlClientEffect(pgConn) {
-    // The compiler is only exercised by the `sql``` tagged template, which this
-    // storage never uses — every query is a pre-built string run through the raw
-    // connection, where the `?`→`$n` rewrite happens. So the SQLite compiler is
-    // an inert placeholder here.
-    const compiler = Statement.makeCompilerSqlite(camelToSnake);
-    const connection = createPostgresConnection(pgConn);
-    return Effect.gen(function* () {
-        const semaphore = yield* Effect.makeSemaphore(1);
-        const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
-        const transactionAcquirer = Effect.uninterruptibleMask((restore) => Effect.as(Effect.zipRight(restore(semaphore.take(1)), Effect.tap(Effect.scope, (scope) => Scope.addFinalizer(scope, semaphore.release(1)))), connection));
-        const reactivity = yield* Reactivity.make;
-        return yield* SqlClient.make({
-            acquirer,
-            compiler,
-            transactionAcquirer,
-            spanAttributes: [[ATTR_DB_SYSTEM_NAME, "postgresql"]],
-            transformRows: transformRowKeys,
-        }).pipe(Effect.provideService(Reactivity.Reactivity, reactivity));
-    });
-}
-/**
- * @param {object} pgConn
- */
-function makePostgresSqlClientLayer(pgConn) {
-    return Layer.scoped(SqlClient.SqlClient, makePostgresSqlClientEffect(pgConn));
-}
 export class SqlMessageStorage {
     sqlite;
     /** @type {import("./dialect.js").Dialect} */
@@ -845,7 +788,7 @@ export class SqlMessageStorage {
             this.pgConn = /** @type {any} */ (db).connection;
             this.sqlite = null;
             this.externalSqlite = null;
-            this.runtime = ManagedRuntime.make(makePostgresSqlClientLayer(this.pgConn));
+            this.runtime = ManagedRuntime.make(makeSqlClientLayer(createPostgresConnection(this.pgConn), "postgresql"));
         }
         else if (isExternalSqliteDescriptor(db)) {
             this.dialect = SQLITE;
@@ -853,7 +796,7 @@ export class SqlMessageStorage {
             this.sqlite = null;
             this.pgConn = null;
             this.externalSqlite = db;
-            this.runtime = ManagedRuntime.make(makeExternalSqliteClientLayer(db));
+            this.runtime = ManagedRuntime.make(makeSqlClientLayer(createExternalSqliteConnection(db), "sqlite"));
         }
         else {
             this.dialect = SQLITE;
@@ -861,12 +804,12 @@ export class SqlMessageStorage {
             this.sqlite = resolveSqliteDatabase(db);
             this.pgConn = null;
             this.externalSqlite = null;
-            this.runtime = ManagedRuntime.make(makeSqlClientLayer(this.sqlite));
+            this.runtime = ManagedRuntime.make(makeSqlClientLayer(createConnection(this.sqlite), "sqlite"));
         }
     }
     /**
    * @param {string} table
-   * @returns {Set<string>}
+   * @returns {Set<string> | null}
    */
     getTableColumns(table) {
         const cached = this.tableColumnsCache.get(table);

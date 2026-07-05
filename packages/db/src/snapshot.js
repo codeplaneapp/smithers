@@ -70,12 +70,6 @@ function coerceBooleanColumns(rows, boolKeys) {
     });
 }
 /**
- * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {_Table} inputTable
- * @param {string} runId
- * @returns {Effect.Effect<Record<string, unknown> | undefined, SmithersError>}
- */
-/**
  * @param {unknown} db
  * @returns {boolean}
  */
@@ -114,6 +108,12 @@ export function pgRowToDrizzle(row, jsonKeys) {
     }
     return out;
 }
+/**
+ * @param {BunSQLiteDatabase<Record<string, unknown>>} db
+ * @param {_Table} inputTable
+ * @param {string} runId
+ * @returns {Effect.Effect<Record<string, unknown> | undefined, SmithersError>}
+ */
 export function loadInputEffect(db, inputTable, runId) {
     return Effect.suspend(() => {
         const cols = getTableColumns(inputTable);

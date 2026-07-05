@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
-import { POSTGRES, translateDdl } from "./dialect.js";
+import { POSTGRES, quoteIdentifier, translateDdl } from "./dialect.js";
 import { smithersSchemaMigrations } from "./internal-schema/smithersSchemaMigrations.js";
 
 const MIGRATION_TABLE_SQL = `CREATE TABLE IF NOT EXISTS _smithers_schema_migrations (
@@ -142,14 +142,6 @@ const EXTRA_INDEX_STATEMENTS = [
     `CREATE INDEX IF NOT EXISTS _smithers_alerts_fingerprint_idx ON _smithers_alerts (fingerprint)`,
     `CREATE INDEX IF NOT EXISTS _smithers_alerts_run_status_idx ON _smithers_alerts (run_id, status)`,
 ];
-
-/**
- * @param {string} identifier
- * @returns {string}
- */
-function quoteIdentifier(identifier) {
-    return `"${identifier.replace(/"/g, "\"\"")}"`;
-}
 
 /**
  * @param {import("bun:sqlite").Database} sqlite

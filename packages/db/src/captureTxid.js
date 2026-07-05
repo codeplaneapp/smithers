@@ -8,9 +8,11 @@ const realPostgresCache = new WeakMap();
 /** @type {AsyncLocalStorage<Record<string | symbol, unknown>>} */
 const txidCaptureStorage = new AsyncLocalStorage();
 
+/** @typedef {{ [TXID_CAPTURE_MARKER]: true; adapter: object; txid: string | null; waiters: Set<(txid: string | null) => void> }} TxidCapture */
+
 /**
  * @param {unknown} value
- * @returns {value is { [TXID_CAPTURE_MARKER]: true; adapter: object; txid: string | null; waiters: Set<(txid: string | null) => void> }}
+ * @returns {value is TxidCapture}
  */
 function isTxidCapture(value) {
     return Boolean(value && typeof value === "object" && value[TXID_CAPTURE_MARKER] === true);
@@ -47,7 +49,7 @@ export async function isRealPostgresAdapter(adapter) {
 
 /**
  * @param {object} adapter
- * @returns {{ [TXID_CAPTURE_MARKER]: true; adapter: object; txid: string | null; waiters: Set<(txid: string | null) => void> }}
+ * @returns {TxidCapture}
  */
 export function createTxidCapture(adapter) {
     return {
@@ -60,7 +62,7 @@ export function createTxidCapture(adapter) {
 
 /**
  * @template T
- * @param {{ [TXID_CAPTURE_MARKER]: true; adapter: object; txid: string | null; waiters: Set<(txid: string | null) => void> }} capture
+ * @param {TxidCapture} capture
  * @param {() => Promise<T>} fn
  * @returns {Promise<T>}
  */

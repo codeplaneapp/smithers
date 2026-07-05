@@ -4,6 +4,7 @@ import { parseXmlJson } from "@smithers-orchestrator/graph/utils/xml";
 
 /** @typedef {import("./FrameDelta.ts").FrameDelta} FrameDelta */
 
+// Wire-format version. Must match parseFrameDelta.js, which rejects any other value.
 const FRAME_DELTA_VERSION = 1;
 /**
  * @param {string} previousXmlJson

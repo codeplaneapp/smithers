@@ -4,7 +4,7 @@ import { createSelectSchema } from "drizzle-zod";
 /**
  * @param {Table} table
  * @param {unknown} payload
- * @returns {{ ok: boolean; data?: any; error?: z.ZodError; }}
+ * @returns {{ ok: boolean; data?: any; error?: import("zod").ZodError; }}
  */
 export function validateExistingOutput(table, payload) {
     const schema = createSelectSchema(table);

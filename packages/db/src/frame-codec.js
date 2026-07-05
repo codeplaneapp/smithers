@@ -5,7 +5,11 @@ import { canonicalizeXml, parseXmlJson } from "@smithers-orchestrator/graph/util
 /** @typedef {import("./frame-codec/JsonPath.ts").JsonPath} JsonPath */
 /** @typedef {import("./frame-codec/JsonPathSegment.ts").JsonPathSegment} JsonPathSegment */
 
+// Every 50th frame is stored as a full keyframe so replaying a delta chain is
+// bounded to <50 applies (adapter.reconstructFrameXml fetches
+// FRAME_KEYFRAME_INTERVAL + 2 rows on this assumption).
 export const FRAME_KEYFRAME_INTERVAL = 50;
+// Wire-format gate: parseFrameDelta rejects any persisted delta whose version differs.
 const FRAME_DELTA_VERSION = 1;
 /**
  * @param {unknown} value

@@ -53,7 +53,11 @@ export function watchDocsDirectory(adapter, options) {
         mkdirSync(dir, { recursive: true });
     }
 
-    /** Map a `*.md` filename to its doc `path` (id) — drop the extension. */
+    /**
+     * Map a `*.md` filename to its doc `path` (id) — drop the extension.
+     * @param {string} file
+     * @returns {string}
+     */
     function pathForFile(file) {
         return file.endsWith(".md") ? file.slice(0, -3) : file;
     }

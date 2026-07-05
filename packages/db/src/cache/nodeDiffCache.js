@@ -5,18 +5,6 @@
 const NODE_DIFF_MAX_BYTES = 50 * 1024 * 1024;
 /** @type {WeakMap<object, Map<string, Promise<NodeDiffCacheResult>>>} */
 const inflightByDb = new WeakMap();
-/**
- * @param {object} dbKey
- * @returns {Map<string, Promise<NodeDiffCacheResult>>}
- */
-function getInflightMap(dbKey) {
-    const existing = inflightByDb.get(dbKey);
-    if (existing) return existing;
-    /** @type {Map<string, Promise<NodeDiffCacheResult>>} */
-    const created = new Map();
-    inflightByDb.set(dbKey, created);
-    return created;
-}
 export class NodeDiffTooLargeError extends Error {
     code = "DiffTooLarge";
     /** @type {number} */
@@ -78,7 +66,17 @@ export class NodeDiffCache {
         const hit = await this.get(key);
         if (hit) return { bundle: hit.bundle, sizeBytes: hit.sizeBytes, cacheResult: "hit" };
         const adapterWithDb = /** @type {_SmithersDb & { db?: object }} */ (this.adapter);
-        const inflight = getInflightMap(adapterWithDb.db ?? this.adapter);
+        // Inflight computes are keyed per underlying DB object (WeakMap): concurrent
+        // getOrCompute calls for the same {run,node,iteration,baseRef} against the
+        // same database share one compute, while distinct DB handles never collide.
+        const dbKey = adapterWithDb.db ?? this.adapter;
+        let inflight = inflightByDb.get(dbKey);
+        if (!inflight) {
+            /** @type {Map<string, Promise<NodeDiffCacheResult>>} */
+            const created = new Map();
+            inflightByDb.set(dbKey, created);
+            inflight = created;
+        }
         const inflightKey = NodeDiffCache.keyString(key);
         const pending = inflight.get(inflightKey);
         if (pending) return pending;

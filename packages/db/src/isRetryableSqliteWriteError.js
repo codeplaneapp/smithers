@@ -1,3 +1,5 @@
+/** @typedef {{ code: string; message: string }} SqliteErrorMetadata */
+
 /**
  * @param {unknown} error
  * @returns {SqliteErrorMetadata | null}

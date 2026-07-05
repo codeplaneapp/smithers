@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { Effect, Exit, FiberId, Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { getSqlMessageStorage } from "./sql-message-storage.js";
+import { sha256Hex } from "./sha256Hex.js";
 import { POSTGRES, beginTransactionSql } from "./dialect.js";
 import { alertsAcknowledgedTotal, alertsActive, alertsFiredTotal, dbQueryDuration, dbTransactionDuration, dbTransactionRollbacks, } from "@smithers-orchestrator/observability/metrics";
 import { assertOptionalStringMaxLength, assertPositiveFiniteNumber, } from "./input-bounds.js";
@@ -73,6 +74,8 @@ export const DB_ALERT_ALLOWED_STATUSES = [
     "resolved",
     "silenced",
 ];
+// Caps the per-adapter LRU of reconstructed frame XML strings: frames can be
+// multi-KB, so 512 bounds memory while keeping recent rewind/inflate reads hot.
 const FRAME_XML_CACHE_MAX = 512;
 const DOC_CONFLICT_KIND = "conflict";
 export const DB_RUN_ID_MAX_LENGTH = 256;
@@ -96,13 +99,6 @@ const ACTIVE_ALERT_STATUSES = new Set([
     "acknowledged",
     "silenced",
 ]);
-/**
- * @param {string} value
- * @returns {string}
- */
-function sha256Hex(value) {
-    return createHash("sha256").update(value).digest("hex");
-}
 /**
  * @param {string} path
  * @param {number} updatedAtMs
@@ -1334,7 +1330,7 @@ export class SmithersDb {
         });
     }
     /**
-   * @param {{ runId: string; expectedRuntimeOwnerId: string; expectedHeartbeatAtMs: number | null; patch: Record<string, unknown>; }} params
+   * @param {{ runId: string; expectedRuntimeOwnerId: string; expectedHeartbeatAtMs: number | null; expectedClaimedBy?: string | null; expectedClaimedAtMs?: number | null; patch: Record<string, unknown>; }} params
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
     updateClaimedRun(params) {

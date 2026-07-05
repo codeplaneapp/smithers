@@ -1,5 +1,7 @@
 
 /** @typedef {import("./FrameDelta.ts").FrameDelta} FrameDelta */
+// Wire-format version. Must match encodeFrameDelta.js; persisted deltas with any
+// other version are rejected.
 const FRAME_DELTA_VERSION = 1;
 /**
  * @param {string} deltaJson
