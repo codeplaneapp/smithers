@@ -42,20 +42,6 @@ function isUsableNumber(value) {
 }
 
 /**
- * Symmetric ratio accuracy for one dimension: `min / max`, so predicting
- * double costs the same as predicting half. Both zero is a perfect 1.
- *
- * @param {number} predicted
- * @param {number} actual
- * @returns {number}
- */
-function dimensionRatio(predicted, actual) {
-    if (predicted === 0 && actual === 0)
-        return 1;
-    return Math.min(predicted, actual) / Math.max(predicted, actual);
-}
-
-/**
  * Creates the delegation-chain estimate-accuracy scorer.
  *
  * Every delegation plan node predicts `{ tokens, costUsd, minutes }` for each
@@ -132,7 +118,8 @@ export function estimateAccuracyScorer() {
                     const a = actual[dim];
                     if (!isUsableNumber(p) || !isUsableNumber(a))
                         continue;
-                    const ratio = dimensionRatio(p, a);
+                    // Symmetric ratio (min/max): predicting double costs the same as predicting half; both zero is a perfect 1.
+                    const ratio = p === 0 && a === 0 ? 1 : Math.min(p, a) / Math.max(p, a);
                     dimensions[dim] = ratio;
                     dimTotal += ratio;
                     dimCount++;
