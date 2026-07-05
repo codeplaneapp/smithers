@@ -23,6 +23,7 @@ const SSE_USAGE = [
 ].join("\n");
 
 const SINGLE_CALL_COST_USD = 0.00153;
+let usageId = 0;
 
 const SSE_USAGE_WITH_CACHE = [
   'event: message_start',
@@ -63,6 +64,24 @@ async function seedSession(env: ReviewWorkerEnv, repo: string, spendCapUsd = 1) 
     .bind(hash, repo, 99, Date.now() + 60_000, spendCapUsd, 0, Date.now())
     .run();
   return token;
+}
+
+async function registerRepo(env: ReviewWorkerEnv, repo: string, prsPerMonth = 5, spendCapUsd = 1) {
+  await env.DB
+    .prepare(
+      "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(repo, "auto", prsPerMonth, spendCapUsd, Date.now())
+    .run();
+}
+
+async function seedUsage(env: ReviewWorkerEnv, repo: string, costUsd: number) {
+  await env.DB
+    .prepare(
+      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(`usage-${usageId++}`, repo, 1, "claude-sonnet-4-6", 0, 0, costUsd, "messages", Date.now())
+    .run();
 }
 
 const teardowns: (() => void)[] = [];
@@ -377,6 +396,7 @@ describe("anthropic proxy", () => {
     });
     const fixture = serveFixtureAnthropic({ contentType: "application/json", body: JSON_BODY });
     teardowns.push(() => fixture.stop());
+    await registerRepo(env, "octo/widgets");
     const apiKey = "srk_testoperatorkey";
     const keyHash = await sha256Hex(apiKey);
     await env.DB
@@ -472,6 +492,8 @@ describe("anthropic proxy", () => {
     });
     const fixture = serveFixtureAnthropic({ contentType: "application/json", body: JSON_BODY });
     teardowns.push(() => fixture.stop());
+    await registerRepo(env, "octo/widgets");
+    await registerRepo(env, "octo/wrenches");
     const apiKey = "srk_multirepo";
     await env.DB
       .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
@@ -533,6 +555,66 @@ describe("anthropic proxy", () => {
       env,
     );
     expect(res.status).toBe(403);
+    expect(fixture.requests.length).toBe(0);
+  });
+
+  test("403s srk_ proxy requests for unregistered repos", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
+    teardowns.push(() => fixture.stop());
+    const apiKey = "srk_unregistered";
+    await env.DB
+      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+      .bind(await sha256Hex(apiKey), "octo", JSON.stringify(["octo/missing"]), Date.now())
+      .run();
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "content-type": "application/json" },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toContain("repo not registered");
+    expect(fixture.requests.length).toBe(0);
+  });
+
+  test("402s srk_ proxy requests once the repo monthly spend cap is reached", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
+    teardowns.push(() => fixture.stop());
+    await registerRepo(env, REPO, 1, 0.01);
+    await seedUsage(env, REPO, 0.02);
+    const apiKey = "srk_spentrepo";
+    await env.DB
+      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+      .bind(await sha256Hex(apiKey), "octo", JSON.stringify([REPO]), Date.now())
+      .run();
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "content-type": "application/json" },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(res.status).toBe(402);
+    expect(((await res.json()) as { error: string }).error).toContain("monthly spend cap");
     expect(fixture.requests.length).toBe(0);
   });
 
@@ -640,5 +722,113 @@ describe("anthropic proxy", () => {
     expect(res.status).toBe(429);
     expect(res.headers.get("retry-after")).toBe("17");
     expect(res.headers.get("x-request-id")).toBe("req_abc123");
+  });
+
+  test("403s an x-smithers-repo hint from a key scoped to NO repos (no cross-tenant spend)", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
+    teardowns.push(() => fixture.stop());
+    // A registered victim repo the attacker would love to bill against.
+    await registerRepo(env, "victim/repo");
+    const apiKey = "srk_noreposkey";
+    // repos_json = [] — an unscoped key. Previously the hint check was
+    // `auth.repos.length > 0 && !includes(hint)`, which is vacuously false for
+    // an empty list, so the hint was accepted and the key could meter spend
+    // against ANY repo. Must 403 before any upstream call.
+    await env.DB
+      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+      .bind(await sha256Hex(apiKey), "octo", JSON.stringify([]), Date.now())
+      .run();
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "x-smithers-repo": "victim/repo",
+          "content-type": "application/json",
+        },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toContain("not scoped to any repo");
+    expect(fixture.requests.length).toBe(0);
+  });
+
+  test("403s a no-repos key with no hint with an actionable message (not 'repo not registered')", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
+    teardowns.push(() => fixture.stop());
+    const apiKey = "srk_noreposnohint";
+    await env.DB
+      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+      .bind(await sha256Hex(apiKey), "octo", JSON.stringify([]), Date.now())
+      .run();
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "content-type": "application/json" },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    // The old code fell back to auth.owner ("octo") and 403'd on the misleading
+    // "repo not registered"; now the message points at the real fix (mint a
+    // repo-scoped key).
+    expect(body.error).toContain("not scoped to any repo");
+    expect(body.error).not.toContain("repo not registered");
+    expect(fixture.requests.length).toBe(0);
+  });
+
+  test("402s at exactly spend == cap (>= boundary) and names repo + month", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
+    teardowns.push(() => fixture.stop());
+    // Ceiling = prs_per_month * spend_cap_usd = 1 * 0.01 = 0.01; spend exactly 0.01.
+    await registerRepo(env, REPO, 1, 0.01);
+    await seedUsage(env, REPO, 0.01);
+    const apiKey = "srk_boundarykey";
+    await env.DB
+      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+      .bind(await sha256Hex(apiKey), "octo", JSON.stringify([REPO]), Date.now())
+      .run();
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "content-type": "application/json" },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(res.status).toBe(402);
+    const body = (await res.json()) as { error: string; repo: string; month: string };
+    expect(body.error).toContain("monthly spend cap");
+    expect(body.repo).toBe(REPO);
+    expect(body.month).toMatch(/^\d{4}-\d{2}$/);
+    expect(fixture.requests.length).toBe(0);
   });
 });
