@@ -32,9 +32,12 @@ describe("case 30: Long-lived JJHub workspace, repeated runs; stable behavior", 
     "500 sequential run records written and read back with correct status; peak RSS within budget",
     async () => {
       const budget = (await loadBudget("memory")) as {
-        longLivedRuns500: { rssBytesMax: number };
+        longLivedRuns500: { rssGrowthBytesMax: number };
       };
-      const rssBudget = budget.longLivedRuns500.rssBytesMax;
+      // Growth over this test's own baseline, not absolute RSS: the faults
+      // suite shares one bun process, so absolute RSS reflects whatever ran
+      // before this file, not this path's leakage.
+      const rssGrowthBudget = budget.longLivedRuns500.rssGrowthBytesMax;
 
       const { adapter, sqlite } = buildDb();
 
@@ -85,11 +88,12 @@ describe("case 30: Long-lived JJHub workspace, repeated runs; stable behavior", 
         const finalRss = process.memoryUsage().rss;
         if (finalRss > peakRss) peakRss = finalRss;
 
+        const rssGrowth = peakRss - baselineRss;
         console.log(
-          `[case30] runs=${RUN_COUNT} baselineRss=${baselineRss} peakRss=${peakRss} budget=${rssBudget}`,
+          `[case30] runs=${RUN_COUNT} baselineRss=${baselineRss} peakRss=${peakRss} growth=${rssGrowth} growthBudget=${rssGrowthBudget}`,
         );
 
-        expect(peakRss).toBeLessThan(rssBudget);
+        expect(rssGrowth).toBeLessThan(rssGrowthBudget);
       } finally {
         clearInterval(sampleHandle);
         sqlite.close();

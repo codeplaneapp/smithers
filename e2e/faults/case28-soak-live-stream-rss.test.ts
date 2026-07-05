@@ -100,9 +100,12 @@ describe("case 28: 10+ min live stream on busy run; RSS within budget", () => {
       const wallCeilingMs = Math.min(HARD_CEILING_MS, durationMs + 2 * 60_000);
 
       const budget = (await loadBudget("memory")) as {
-        liveStream10min: { rssBytesMax: number };
+        liveStream10min: { rssGrowthBytesMax: number };
       };
-      const rssBudget = budget.liveStream10min.rssBytesMax;
+      // Growth over this test's own baseline, not absolute RSS: the faults
+      // suite shares one bun process, so absolute RSS reflects whatever ran
+      // before this file, not this path's leakage.
+      const rssGrowthBudget = budget.liveStream10min.rssGrowthBytesMax;
 
       // Boot a real Gateway over a real workflow store.
       const dbPath = makeDbPath();
@@ -206,12 +209,13 @@ describe("case 28: 10+ min live stream on busy run; RSS within budget", () => {
       expect(lastSeq).toBe(receivedCount);
 
       const elapsedMs = Date.now() - start;
+      const rssGrowth = peakRss - baselineRss;
       // eslint-disable-next-line no-console
       console.log(
-        `[case28] duration=${elapsedMs}ms emitted=${emitted} received=${receivedCount} baselineRss=${baselineRss} peakRss=${peakRss} budget=${rssBudget}`,
+        `[case28] duration=${elapsedMs}ms emitted=${emitted} received=${receivedCount} baselineRss=${baselineRss} peakRss=${peakRss} growth=${rssGrowth} growthBudget=${rssGrowthBudget}`,
       );
 
-      expect(peakRss).toBeLessThan(rssBudget);
+      expect(rssGrowth).toBeLessThan(rssGrowthBudget);
     },
     HARD_CEILING_MS + 60_000,
   );

@@ -1,14 +1,14 @@
 {
   "liveStream10min": {
-    "rssBytesMax": 314572800,
-    "comment": "300 MB ceiling for case 28"
+    "rssGrowthBytesMax": 134217728,
+    "comment": "case 28: 128 MB max RSS growth over the test's own baseline during a 10-minute live stream. Growth, not absolute: the faults suite shares one bun process, so absolute RSS measures suite size, not this path's leakage (2026-07 chronic red: baseline alone exceeded the old 300 MB absolute ceiling while observed growth was 0)."
   },
   "subscriberFanoutN5": {
-    "rssBytesMax": 524288000,
-    "comment": "500 MB for case 16"
+    "rssGrowthBytesMax": 134217728,
+    "comment": "case 16: 128 MB max RSS growth over baseline for 5 concurrent subscribers x 500 events."
   },
   "longLivedRuns500": {
-    "rssBytesMax": 314572800,
-    "comment": "300 MB ceiling for case 30 (500 sequential run records)"
+    "rssGrowthBytesMax": 134217728,
+    "comment": "case 30: 128 MB max RSS growth over baseline for 500 sequential run records (observed ~34 MB on CI, ~51 MB locally)."
   }
 }

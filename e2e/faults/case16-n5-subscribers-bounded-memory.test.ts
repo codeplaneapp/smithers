@@ -171,11 +171,14 @@ function tryGc(): void {
 }
 
 describe("case 16: N=5 subscribers on one run; bounded memory; consistent state", () => {
-  test("five concurrent subscribers see identical seq sets in order, peak RSS under budget", async () => {
+  test("five concurrent subscribers see identical seq sets in order, RSS growth under budget", async () => {
     const budget = (await loadBudget("memory")) as {
-      subscriberFanoutN5: { rssBytesMax: number };
+      subscriberFanoutN5: { rssGrowthBytesMax: number };
     };
-    const rssBudget = budget.subscriberFanoutN5.rssBytesMax;
+    // Growth over this test's own baseline, not absolute RSS: the faults
+    // suite shares one bun process, so absolute RSS reflects whatever ran
+    // before this file, not this path's leakage.
+    const rssGrowthBudget = budget.subscriberFanoutN5.rssGrowthBytesMax;
 
     const db = buildDb();
     let server: SubscriberServer | undefined;
@@ -235,10 +238,12 @@ describe("case 16: N=5 subscribers on one run; bounded memory; consistent state"
         expect(endFrame!.lastSeq).toBe(eventCount - 1);
       }
 
-      expect(peakRss).toBeLessThan(rssBudget);
-
-      const delta = peakRss - baselineRss;
-      expect(delta).toBeGreaterThanOrEqual(0);
+      const rssGrowth = peakRss - baselineRss;
+      console.log(
+        `[case16] subscribers=${subscriberCount} events=${eventCount} baselineRss=${baselineRss} peakRss=${peakRss} growth=${rssGrowth} growthBudget=${rssGrowthBudget}`,
+      );
+      expect(rssGrowth).toBeGreaterThanOrEqual(0);
+      expect(rssGrowth).toBeLessThan(rssGrowthBudget);
     } finally {
       for (const ws of sockets) {
         if (ws.readyState !== ws.CLOSED) ws.terminate();
