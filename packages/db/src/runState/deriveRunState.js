@@ -1,4 +1,5 @@
 import { RUN_STATE_HEARTBEAT_STALE_MS } from "./RUN_STATE_HEARTBEAT_STALE_MS.js";
+import { RUN_STATE_TIMER_OVERDUE_GRACE_MS } from "./RUN_STATE_TIMER_OVERDUE_GRACE_MS.js";
 
 /** @typedef {import("./DeriveRunStateInput.ts").DeriveRunStateInput} DeriveRunStateInput */
 /** @typedef {import("./RunStateView.ts").RunStateView} RunStateView */
@@ -16,6 +17,7 @@ export function deriveRunState(input) {
         parkedEventBlock = null,
         now = Date.now(),
         staleThresholdMs = RUN_STATE_HEARTBEAT_STALE_MS,
+        timerOverdueGraceMs = RUN_STATE_TIMER_OVERDUE_GRACE_MS,
     } = input;
 
     const computedAt = new Date(now).toISOString();
@@ -46,17 +48,10 @@ export function deriveRunState(input) {
                   }
                 : { ...base, state: "waiting-approval" };
         case "waiting-timer":
-            return pendingTimer
-                ? {
-                      ...base,
-                      state: "waiting-timer",
-                      blocked: {
-                          kind: "timer",
-                          nodeId: pendingTimer.nodeId,
-                          wakeAt: new Date(pendingTimer.firesAtMs).toISOString(),
-                      },
-                  }
-                : { ...base, state: "waiting-timer" };
+            if (!pendingTimer) {
+                return { ...base, state: "waiting-timer" };
+            }
+            return timerRunState(base, pendingTimer, now, timerOverdueGraceMs);
         case "waiting-event":
             if (pendingEvent) {
                 return {
@@ -102,6 +97,41 @@ export function deriveRunState(input) {
         default:
             return { ...base, state: "unknown" };
     }
+}
+
+/**
+ * @param {{ runId: string; computedAt: string }} base
+ * @param {{ nodeId: string; firesAtMs: number }} pendingTimer
+ * @param {number} now
+ * @param {number} graceMs grace window past the wake time before flagging overdue
+ * @returns {RunStateView}
+ */
+function timerRunState(base, pendingTimer, now, graceMs) {
+    const wakeAt = new Date(pendingTimer.firesAtMs).toISOString();
+    const view = {
+        ...base,
+        state: "waiting-timer",
+        blocked: {
+            kind: "timer",
+            nodeId: pendingTimer.nodeId,
+            wakeAt,
+        },
+    };
+    const overdueMs = now - pendingTimer.firesAtMs;
+    // A run is only unhealthy once it is overdue by MORE than the grace window;
+    // being a few ms/seconds past the wake time is normal poller lag, not a stuck
+    // timer, and flagging it immediately would flicker every run at its deadline.
+    if (overdueMs <= graceMs) {
+        return view;
+    }
+    return {
+        ...view,
+        unhealthy: {
+            kind: "timer-overdue",
+            wakeAt,
+            overdueMs: Math.floor(overdueMs),
+        },
+    };
 }
 
 /**

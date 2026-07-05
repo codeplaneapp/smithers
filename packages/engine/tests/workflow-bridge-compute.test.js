@@ -180,10 +180,12 @@ describe("workflow bridge compute-task contract", () => {
             const adapter = new SmithersDb(db);
             const runId = "bridge-compute-timeout";
             await insertRun(adapter, runId, "bridge-compute-timeout");
+            let callbackStarted = false;
             const desc = makeTaskDescriptor(tables.out, schema, {
                 timeoutMs: 20,
                 computeFn: async () => {
-                    await Bun.sleep(100);
+                    callbackStarted = true;
+                    await new Promise(() => { });
                     return { value: 1 };
                 },
             });
@@ -198,6 +200,7 @@ describe("workflow bridge compute-task contract", () => {
                 maxOutputBytes: 1_000_000,
                 toolTimeoutMs: 30_000,
             }, "bridge-compute-timeout", false);
+            expect(callbackStarted).toBe(true);
             const rows = await db.select().from(tables.out);
             expect(rows).toHaveLength(0);
             const attempts = await adapter.listAttempts(runId, desc.nodeId, 0);

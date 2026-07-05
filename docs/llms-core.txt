@@ -9365,6 +9365,7 @@ type ReasonBlocked =
 
 type ReasonUnhealthy =
   | { kind: "engine-heartbeat-stale"; lastHeartbeatAt: string }
+  | { kind: "timer-overdue"; wakeAt: string; overdueMs: number }
   | { kind: "ui-heartbeat-stale";     lastSeenAt: string }
   | { kind: "db-lock" }
   | { kind: "sandbox-unreachable" }
@@ -9373,9 +9374,9 @@ type ReasonUnhealthy =
 
 Timestamps are ISO-8601 strings. Current `computeRunState` / `deriveRunState`
 emits `approval`, `event`, `timer`, `approval-decided-resume-required`, and
-`external-trigger` blocked reasons, plus `engine-heartbeat-stale` unhealthy
-reasons. The other variants are reserved by the public type and may appear on
-future run-state surfaces.
+`external-trigger` blocked reasons, plus `engine-heartbeat-stale` and
+`timer-overdue` unhealthy reasons. The other variants are reserved by the
+public type and may appear on future run-state surfaces.
 
 ## RunStateView
 
@@ -9393,10 +9394,10 @@ type RunStateView = {
 matching pending approval/timer/event context, when a parked `waiting-event`
 run has no event-waiting node, or when that context is supplied to
 `deriveRunState`. A `waiting-*` state can be returned without `blocked` when
-the supporting row is unavailable. `unhealthy` is present for current `stale`
-and `orphaned` results. `recovering` is reserved by the type but is not
-currently emitted by the DB derivation. Terminal states (`succeeded`, `failed`,
-`cancelled`) carry neither.
+the supporting row is unavailable. `unhealthy` is present for current `stale`,
+`orphaned`, and overdue timer results. `recovering` is reserved by the type but
+is not currently emitted by the DB derivation. Terminal states (`succeeded`,
+`failed`, `cancelled`) carry neither.
 
 ## computeRunState
 
@@ -9406,7 +9407,7 @@ import { computeRunState } from "@smithers-orchestrator/db/runState";
 const view = await computeRunState(adapter, runId);
 view.state;       // "running" | ...
 view.blocked;     // present for waiting-* only when backing context is found
-view.unhealthy;   // present for stale/orphaned heartbeat expiry
+view.unhealthy;   // present for stale/orphaned heartbeat expiry or overdue timers
 ```
 
 `computeRunState` is pure over the DB plus the heartbeat / lease signals

@@ -167,6 +167,59 @@ describe("deriveRunState — waiting states", () => {
             nodeId: "t-1",
             wakeAt: new Date(NOW + 60_000).toISOString(),
         });
+        expect(view.unhealthy).toBeUndefined();
+    });
+
+    test("waiting-timer with an overdue pendingTimer keeps the blocker and marks unhealthy", () => {
+        const wakeAtMs = NOW - 30_500;
+        const view = deriveRunState({
+            run: makeRun({ status: "waiting-timer" }),
+            pendingTimer: { nodeId: "t-1", firesAtMs: wakeAtMs },
+            now: NOW,
+        });
+
+        expect(view.state).toBe("waiting-timer");
+        expect(view.blocked).toEqual({
+            kind: "timer",
+            nodeId: "t-1",
+            wakeAt: new Date(wakeAtMs).toISOString(),
+        });
+        expect(view.unhealthy).toEqual({
+            kind: "timer-overdue",
+            wakeAt: new Date(wakeAtMs).toISOString(),
+            overdueMs: 30_500,
+        });
+    });
+
+    test("waiting-timer overdue WITHIN the grace window is not yet unhealthy", () => {
+        // 20s past the wake time — normal poller lag, still under the 30s grace.
+        const view = deriveRunState({
+            run: makeRun({ status: "waiting-timer" }),
+            pendingTimer: { nodeId: "t-1", firesAtMs: NOW - 20_000 },
+            now: NOW,
+        });
+        expect(view.state).toBe("waiting-timer");
+        expect(view.blocked?.kind).toBe("timer");
+        expect(view.unhealthy).toBeUndefined();
+    });
+
+    test("waiting-timer exactly at the wake time (overdue 0) is not unhealthy", () => {
+        const view = deriveRunState({
+            run: makeRun({ status: "waiting-timer" }),
+            pendingTimer: { nodeId: "t-1", firesAtMs: NOW },
+            now: NOW,
+        });
+        expect(view.unhealthy).toBeUndefined();
+    });
+
+    test("timerOverdueGraceMs is configurable (0 flags any overdue immediately)", () => {
+        const view = deriveRunState({
+            run: makeRun({ status: "waiting-timer" }),
+            pendingTimer: { nodeId: "t-1", firesAtMs: NOW - 1 },
+            now: NOW,
+            timerOverdueGraceMs: 0,
+        });
+        expect(view.unhealthy).toMatchObject({ kind: "timer-overdue", overdueMs: 1 });
     });
 
     test("waiting-event with pendingEvent → blocked.event", () => {
