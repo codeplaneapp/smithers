@@ -11,16 +11,14 @@ import { resolve, dirname, parse } from "node:path";
 export function findVcsRoot(startDir) {
     let dir = resolve(startDir);
     const { root: fsRoot } = parse(dir);
-    while (dir !== fsRoot) {
+    // Single loop covers every ancestor INCLUDING the filesystem root.
+    for (;;) {
         if (existsSync(resolve(dir, ".jj")))
             return /** @type {{ type: "jj"; root: string }} */ ({ type: "jj", root: dir });
         if (existsSync(resolve(dir, ".git")))
             return /** @type {{ type: "git"; root: string }} */ ({ type: "git", root: dir });
+        if (dir === fsRoot)
+            return null;
         dir = dirname(dir);
     }
-    if (existsSync(resolve(dir, ".jj")))
-        return /** @type {{ type: "jj"; root: string }} */ ({ type: "jj", root: dir });
-    if (existsSync(resolve(dir, ".git")))
-        return /** @type {{ type: "git"; root: string }} */ ({ type: "git", root: dir });
-    return null;
 }

@@ -20,6 +20,8 @@ import { Duration, Effect, Fiber, Metric, Stream } from "effect";
 import { vcsDuration } from "@smithers-orchestrator/observability/metrics";
 import { resolveJjBinary } from "./resolveJjBinary.js";
 
+// Bounds every jj probe/snapshot call (getJjPointer, isJjRepo, captureWorkspaceSnapshot):
+// a hung jj must degrade to a failed probe, never stall the agent path — see withJjTimeout.
 const JJ_PROBE_TIMEOUT_MS = 1_500;
 /**
  * @param {Stream.Stream<Uint8Array, unknown, never>} stream
@@ -42,9 +44,9 @@ export function runJj(args, opts = {}) {
     if (opts.cwd) {
         command = Command.workingDirectory(command, opts.cwd);
     }
-    return Effect.scoped(Effect.gen(function* () {
+    return Effect.scoped(Effect.suspend(() => {
         const start = performance.now();
-        return yield* Effect.gen(function* () {
+        return Effect.gen(function* () {
             yield* Effect.logDebug(`jj ${args.join(" ")}`);
             const process = yield* Command.start(command);
             const stdoutFiber = yield* Effect.fork(collectUtf8(process.stdout));

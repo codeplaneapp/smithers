@@ -12,6 +12,8 @@ import { resolveGitBinary } from "./resolveGitBinary.js";
  * @property {boolean} ok true when at least one of jj or git is usable
  */
 
+// Caps each synchronous `<bin> --version` probe so `smithers doctor` and run
+// preflights stay responsive even when a broken binary hangs.
 const VERSION_PROBE_TIMEOUT_MS = 2_000;
 
 /**
