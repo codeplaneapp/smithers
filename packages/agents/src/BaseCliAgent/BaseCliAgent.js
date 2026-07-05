@@ -5,16 +5,20 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { logDebug, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
 import { agentDurationMs, agentErrorsTotal, agentInvocationsTotal, agentRetriesTotal, agentTokensTotal, } from "@smithers-orchestrator/observability/metrics";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { nextWallClockInZone } from "./nextWallClockInZone.js";
 
 const QUOTA_PATTERNS = [
-    /\bhit\s+your\s+usage\s+limit\b/i,
+    /\bhit\s+your\s+(usage|session|weekly|daily|monthly|rate)\s+limit\b/i,
     /\busage\s+limit\s+exceeded\b/i,
     /\bquota\s+exceeded\b/i,
     /\brate\s+limit\s+exceeded\b/i,
-    /\byou('ve| have)\s+reached\s+(your\s+)?(usage|rate|quota)\b/i,
-    /\b(usage|quota|rate)\s+(cap|ceiling|limit)\s+(reached|exceeded|hit)\b/i,
+    /\byou('ve| have)\s+reached\s+(your\s+)?(usage|rate|quota|session|weekly|daily|monthly)\b/i,
+    /\b(usage|quota|rate|session|weekly|daily|monthly)\s+(cap|ceiling|limit)\s+(reached|exceeded|hit)\b/i,
     /\btoo\s+many\s+requests\b/i,
     /\b(429|rate.limit)\b[\s\S]{0,100}?try\s+again\b/i,
+    // Claude/Fable subscription banners (arrive on stdout, exit 0).
+    /\bout\s+of\s+usage\s+credits\b/i,
+    /\brun\s+\/usage-credits\b/i,
 ];
 
 /**
@@ -36,6 +40,9 @@ export function classifyQuotaError(message, command, context = {}) {
     let resetHint;
     // Format: "try again at Jun 18th, 2026 9:54 AM" — strip ordinal suffix before parsing
     const dateMatch = /try again at\s+([A-Z][a-z]+ \d+(?:st|nd|rd|th)?,?\s+\d{4}\s+\d+:\d+\s+(?:AM|PM))/i.exec(message);
+    // Format: "resets 1:30am (America/New_York)" — next occurrence of that
+    // wall-clock time in the named zone (Claude/Fable session-limit banner).
+    const clockMatch = /\bresets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(([^)]+)\)/i.exec(message);
     if (dateMatch) {
         const normalized = dateMatch[1].replace(/(\d+)(st|nd|rd|th)\b/gi, "$1");
         const parsed = Date.parse(normalized);
@@ -43,6 +50,15 @@ export function classifyQuotaError(message, command, context = {}) {
             quotaResetAtMs = parsed;
         }
         resetHint = dateMatch[0];
+    } else if (clockMatch) {
+        const meridiem = clockMatch[3].toLowerCase();
+        const hour = (Number(clockMatch[1]) % 12) + (meridiem === "pm" ? 12 : 0);
+        const minute = clockMatch[2] ? Number(clockMatch[2]) : 0;
+        const parsed = nextWallClockInZone({ hour, minute, timeZone: clockMatch[4].trim(), fromMs: now });
+        if (parsed != null && parsed > now) {
+            quotaResetAtMs = parsed;
+        }
+        resetHint = clockMatch[0];
     } else {
         // Format: "retry after N seconds"
         const secondsMatch = /retry after\s+(\d+)\s+second/i.exec(message);

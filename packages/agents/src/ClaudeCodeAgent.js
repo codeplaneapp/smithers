@@ -1,5 +1,6 @@
 import { BaseCliAgent, pushFlag, pushList, isRecord, asString, truncate, toolKindFromName, shouldSurfaceUnparsedStdout, isLikelyRuntimeMetadata, createSyntheticIdGenerator, } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList, } from "./capability-registry/index.js";
+import { classifyQuotaError } from "./BaseCliAgent/BaseCliAgent.js";
 import { logWarning } from "@smithers-orchestrator/observability/logging";
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
@@ -128,6 +129,11 @@ export class ClaudeCodeAgent extends BaseCliAgent {
         let didEmitStarted = false;
         let didEmitCompleted = false;
         let lastAssistantText = "";
+        // Claude/Fable print usage/session-limit banners as ordinary assistant
+        // text and still exit 0, so the banner never reaches the CLI error path.
+        // Capture it here to force an error result the engine classifies as a
+        // quota wait (pause + auto-resume) instead of a silent success.
+        let limitBannerText = "";
         const toolNameByUseId = new Map();
         const nextSyntheticId = createSyntheticIdGenerator();
         /**
@@ -210,6 +216,9 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                         const text = asString(block.text)?.trim();
                         if (payloadType === "assistant" && text) {
                             lastAssistantText = text;
+                            if (!limitBannerText && classifyQuotaError(text, this.cliEngine)) {
+                                limitBannerText = text;
+                            }
                             events.push({
                                 type: "action",
                                 engine: this.cliEngine,
@@ -303,16 +312,19 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                 })
                     .filter((event) => Boolean(event));
                 const subtype = asString(payload.subtype) ?? "success";
-                const isError = payload.is_error === true || subtype === "error";
                 const resultText = asString(payload.result);
                 const resultError = asString(payload.error);
+                if (!limitBannerText && resultText && classifyQuotaError(resultText, this.cliEngine)) {
+                    limitBannerText = resultText;
+                }
+                const isError = payload.is_error === true || subtype === "error" || Boolean(limitBannerText);
                 didEmitCompleted = true;
                 events.push({
                     type: "completed",
                     engine: this.cliEngine,
                     ok: !isError,
                     answer: !isError ? resultText || lastAssistantText || undefined : undefined,
-                    error: isError ? resultError || "Claude run failed" : undefined,
+                    error: isError ? limitBannerText || resultError || "Claude run failed" : undefined,
                     resume: asString(payload.session_id) ?? sessionId,
                     usage: isRecord(payload.usage) ? payload.usage : undefined,
                 });
@@ -334,14 +346,16 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                     return [];
                 }
                 didEmitCompleted = true;
-                const isSuccess = (result.exitCode ?? 0) === 0;
+                const isSuccess = (result.exitCode ?? 0) === 0 && !limitBannerText;
                 return [
                     {
                         type: "completed",
                         engine: this.cliEngine,
                         ok: isSuccess,
                         answer: isSuccess ? lastAssistantText || undefined : undefined,
-                        error: isSuccess ? undefined : `Claude exited with code ${result.exitCode ?? -1}`,
+                        error: isSuccess
+                            ? undefined
+                            : limitBannerText || `Claude exited with code ${result.exitCode ?? -1}`,
                         resume: sessionId,
                     },
                 ];

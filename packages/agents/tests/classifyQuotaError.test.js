@@ -53,6 +53,19 @@ describe("classifyQuotaError — pattern detection", () => {
         expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
     });
 
+    test("detects Claude/Fable 'hit your session limit' banner", () => {
+        const msg = "You've hit your session limit · resets 1:30am (America/New_York)";
+        const err = classifyQuotaError(msg, "claude-code", ctx);
+        expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+        expect(err?.details?.failureQuota).toBe(true);
+    });
+
+    test("detects Claude/Fable 'out of usage credits' banner", () => {
+        const msg = "You're out of usage credits. Run /usage-credits to keep using Fable 5 or /model to switch models";
+        const err = classifyQuotaError(msg, "claude-code", ctx);
+        expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+    });
+
     test("returns null for generic errors", () => {
         expect(classifyQuotaError("network timeout", "codex", ctx)).toBeNull();
         expect(classifyQuotaError("model not found", "codex", ctx)).toBeNull();
@@ -71,6 +84,18 @@ describe("classifyQuotaError — reset time parsing", () => {
         // Should have parsed a reset time (date is in the future relative to nowMs=1000)
         expect(typeof err?.details?.quotaResetAtMs).toBe("number");
         expect(err?.details?.quotaResetAtMs).toBeGreaterThan(0);
+    });
+
+    test("parses 'resets 1:30am (America/New_York)' zoned clock format", () => {
+        // 2025-06-15T12:00:00Z — well before the next 1:30am ET occurrence.
+        const noonUtc = Date.parse("2025-06-15T12:00:00Z");
+        const msg = "You've hit your session limit · resets 1:30am (America/New_York)";
+        const err = classifyQuotaError(msg, "claude-code", { nowMs: () => noonUtc });
+        expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+        const resetAt = err?.details?.quotaResetAtMs;
+        expect(typeof resetAt).toBe("number");
+        // 1:30am ET on 2025-06-16 (EDT, UTC-4) is 05:30 UTC the next day.
+        expect(resetAt).toBe(Date.parse("2025-06-16T05:30:00Z"));
     });
 
     test("parses 'retry after N seconds' format", () => {
