@@ -1484,6 +1484,7 @@ async function continueRunAsNew(params) {
         continueAsNewEvery: continuation.continueAsNewEvery ?? null,
         payload: continuation.statePayload ?? null,
         ralph: ralphStateToObject(carriedRalphState),
+        ...(continuation.nextTimerStarts ? { timerStarts: continuation.nextTimerStarts } : {}),
         timestampMs: ts,
     };
     const carriedStateJson = JSON.stringify(continuationEnvelope);
@@ -5022,6 +5023,75 @@ function ralphStateFromDriverTransition(transition) {
     return state;
 }
 /**
+ * Reads duration-timer anchors off the scheduler transition's dedicated
+ * `timerStarts` field (a sibling of `statePayload`). Kept separate from
+ * `statePayload` so a user-supplied `stateJson` never overwrites the anchors —
+ * exactly how `ralphState` is threaded via `nextRalphState`.
+ * @param {unknown} transition
+ * @returns {Record<string, number> | undefined}
+ */
+function timerStartsFromDriverTransition(transition) {
+    const raw = transition &&
+        typeof transition === "object" &&
+        "timerStarts" in transition
+        ? transition.timerStarts
+        : undefined;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return undefined;
+    }
+    const timerStarts = {};
+    for (const [key, value] of Object.entries(raw)) {
+        if (key.length > 0 && typeof value === "number" && Number.isFinite(value)) {
+            timerStarts[key] = value;
+        }
+    }
+    return Object.keys(timerStarts).length > 0 ? timerStarts : undefined;
+}
+/**
+ * Continuation state (ralph iterations, duration-timer anchors) is carried on a
+ * dedicated envelope field so a user-supplied `<ContinueAsNew state={...}>`
+ * payload can never clobber it — mirroring how `ralph` is carried separately
+ * from the user-visible `payload`.
+ * @param {unknown} input
+ * @returns {Record<string, unknown> | undefined}
+ */
+function continuationEnvelopeFromInput(input) {
+    const normalized = normalizeInputRow(input);
+    const envelope = normalized.__smithersContinuation;
+    if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+        return undefined;
+    }
+    return /** @type {Record<string, unknown>} */ (envelope);
+}
+/**
+ * @param {Record<string, unknown>} config
+ * @returns {Record<string, unknown> | undefined}
+ */
+function continuationEnvelopeFromConfig(config) {
+    const continuation = config.continuation;
+    if (!continuation || typeof continuation !== "object" || Array.isArray(continuation)) {
+        return undefined;
+    }
+    return /** @type {Record<string, unknown>} */ (continuation);
+}
+/**
+ * @param {Record<string, unknown> | undefined} envelope
+ * @returns {Map<string, number> | undefined}
+ */
+function timerStartsFromContinuationEnvelope(envelope) {
+    const raw = envelope && "timerStarts" in envelope ? envelope.timerStarts : undefined;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return undefined;
+    }
+    const timerStarts = new Map();
+    for (const [key, value] of Object.entries(raw)) {
+        if (key.length > 0 && typeof value === "number" && Number.isFinite(value)) {
+            timerStarts.set(key, value);
+        }
+    }
+    return timerStarts.size > 0 ? timerStarts : undefined;
+}
+/**
  * @template Schema
  * @param {SmithersWorkflow<Schema>} workflow
  * @param {RunOptions} opts
@@ -5951,11 +6021,15 @@ async function runWorkflowBodyDriver(workflow, opts) {
             const maxRalphIteration = [...ralphState.values()].reduce((max, state) => Math.max(max, state.iteration), 0);
             defaultIteration = Math.max(defaultIteration, maxRalphIteration);
         }
+        const activeInput = await loadInput(db, inputTable, runId);
+        const activeRun = await Effect.runPromise(adapter.getRun(runId));
+        const continuationEnvelope = continuationEnvelopeFromInput(activeInput) ??
+            continuationEnvelopeFromConfig(parseRunConfigJson(activeRun?.configJson));
         budgetTracker = await setupBudgetTracker({
             adapter,
             runId,
             eventBus,
-            runStartMs: (await Effect.runPromise(adapter.getRun(runId)))?.createdAtMs ?? nowMs(),
+            runStartMs: activeRun?.createdAtMs ?? nowMs(),
         });
         workflowSession = makeWorkflowSession({
             runId,
@@ -5963,6 +6037,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             requireStableFinish: true,
             requireRerenderOnOutputChange: opts.requireRerenderOnOutputChange ?? true,
             initialRalphState: ralphState,
+            initialTimerStarts: timerStartsFromContinuationEnvelope(continuationEnvelope),
             evaluateAspectBudget: (descriptor) => budgetTracker
                 ? evaluateAspectBudget(descriptor.aspects, budgetTracker.snapshot(nowMs()))
                 : null,
@@ -6056,7 +6131,6 @@ async function runWorkflowBodyDriver(workflow, opts) {
             ...workflowRef,
             build: (ctx) => withWorkflowVersioningRuntime(workflowVersioning, () => workflowRef.build(ctx)),
         };
-        const activeInput = await loadInput(db, inputTable, runId);
         const driver = new ReactWorkflowDriver({
             workflow: driverWorkflow,
             runtime: { runPromise: Effect.runPromise },
@@ -6090,6 +6164,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                     return { runId, status: "cancelled" };
                 }
                 const nextRalphState = ralphStateFromDriverTransition(transition);
+                const nextTimerStarts = timerStartsFromDriverTransition(transition);
                 const continuationIteration = typeof transition?.iteration === "number"
                     ? transition.iteration
                     : defaultIteration;
@@ -6112,6 +6187,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                         iteration: continuationIteration,
                         statePayload,
                         nextRalphState,
+                        nextTimerStarts,
                     },
                     ralphState,
                 });
@@ -6313,6 +6389,10 @@ export const __engineInternals = {
     validateRunOptions,
     iterationsToMap,
     ralphStateFromDriverTransition,
+    timerStartsFromDriverTransition,
+    continuationEnvelopeFromInput,
+    continuationEnvelopeFromConfig,
+    timerStartsFromContinuationEnvelope,
     resolveTaskOutputs,
     resolveWorkflowOutputTable,
     buildDescriptorMap,

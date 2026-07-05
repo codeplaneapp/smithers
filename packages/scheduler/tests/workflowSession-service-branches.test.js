@@ -157,6 +157,45 @@ describe("WorkflowSessionService direct methods", () => {
     expect(afterReDecide).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
   });
 
+  test("duration timer start is carried in continuation state", () => {
+    let now = 1_000;
+    const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });
+    const session = makeWorkflowSession({ nowMs: () => now });
+
+    expect(run(session.submitGraph(graph([task], workflow([
+      el("smithers:timer", { id: "timer" }),
+    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+
+    const decision = run(session.submitGraph(graph([task], workflow([
+      el("smithers:parallel", {}, [
+        el("smithers:timer", { id: "timer" }),
+        el("smithers:continue-as-new", {}),
+      ]),
+    ]))));
+
+    expect(decision).toMatchObject({
+      _tag: "ContinueAsNew",
+      transition: {
+        reason: "explicit",
+        timerStarts: { "timer::0": 1_000 },
+      },
+    });
+    // The anchor lives on the dedicated `timerStarts` field, not inside the
+    // user-visible `statePayload`, so an explicit continue-as-new state cannot
+    // clobber it.
+    expect(decision.transition.statePayload).toBeUndefined();
+
+    now = 4_000;
+    const nextSession = makeWorkflowSession({
+      nowMs: () => now,
+      initialTimerStarts: new Map(Object.entries(decision.transition.timerStarts)),
+    });
+
+    expect(run(nextSession.submitGraph(graph([task], workflow([
+      el("smithers:timer", { id: "timer" }),
+    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+  });
+
   test("hotReloaded cancels unmounted in-progress work and runs newly mounted tasks", () => {
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 

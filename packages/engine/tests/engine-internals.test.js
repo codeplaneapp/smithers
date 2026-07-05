@@ -498,6 +498,20 @@ describe("engine internals: durability, options and graph helpers", () => {
         expect(I.iterationsToMap({ a: 1 })).toEqual(new Map([["a", 1]]));
         expect(I.ralphStateFromDriverTransition({ statePayload: { ralphState: { loop: { iteration: "2", done: true } } } })).toEqual(new Map([["loop", { iteration: 2, done: true }]]));
         expect(I.ralphStateFromDriverTransition({ statePayload: { ralphState: [] } })).toBeUndefined();
+        // timerStarts rides on a dedicated `timerStarts` envelope field, never inside `payload`,
+        // so a user-supplied continue-as-new `state` can't clobber the anchors.
+        expect(I.timerStartsFromDriverTransition({ timerStarts: { "timer::0": 1000, bad: "nope" } })).toEqual({ "timer::0": 1000 });
+        expect(I.timerStartsFromDriverTransition({ statePayload: { timerStarts: { "timer::0": 1000 } } })).toBeUndefined();
+        expect(I.continuationEnvelopeFromInput({ payload: { __smithersContinuation: { timerStarts: { "timer::0": 1000 } } } })).toEqual({
+            timerStarts: { "timer::0": 1000 },
+        });
+        expect(I.continuationEnvelopeFromConfig({ continuation: { timerStarts: { "timer::0": 1000 } } })).toEqual({
+            timerStarts: { "timer::0": 1000 },
+        });
+        // Numeric strings are rejected (typeof-number only), and non-object shapes yield undefined.
+        expect(I.timerStartsFromContinuationEnvelope({ timerStarts: { "timer::0": 1000, bad: "nope", weird: "1000" } })).toEqual(new Map([["timer::0", 1000]]));
+        expect(I.timerStartsFromContinuationEnvelope({ timerStarts: [] })).toBeUndefined();
+        expect(I.timerStartsFromContinuationEnvelope(undefined)).toBeUndefined();
 
         const state = new Map([
             ["outer", { iteration: 1, done: false }],
@@ -537,6 +551,47 @@ describe("engine internals: durability, options and graph helpers", () => {
         expect(I.isRetryableTaskFailure({ errorJson: '{"code":"AGENT_CONFIG_INVALID"}' })).toBe(false);
         expect(I.isRetryableTaskFailure({ metaJson: '{"kind":"compute"}', errorJson: '{"code":"INVALID_OUTPUT"}' })).toBe(false);
         expect(I.isRetryableTaskFailure({ metaJson: '{"kind":"agent"}', errorJson: '{"code":"INVALID_OUTPUT"}' })).toBe(true);
+    });
+
+    test("duration-timer anchors survive a continue-as-new handoff even when the user supplies continuation state", () => {
+        // Reproduces the clobber bug: an explicit `<ContinueAsNew state={...}>`
+        // sets `stateJson`, which the engine JSON-parses into `payload`. Anchors
+        // must ride the dedicated `timerStarts` field so they are never lost.
+        const userState = { keepMe: 42, timerStarts: { spoofed: 1 } };
+        const transition = {
+            reason: "explicit",
+            stateJson: JSON.stringify(userState),
+            timerStarts: { "timer::0": 1_000, "timer::1": 2_000 },
+        };
+
+        // Extraction reads the dedicated field, unaffected by the user payload.
+        const carried = I.timerStartsFromDriverTransition(transition);
+        expect(carried).toEqual({ "timer::0": 1_000, "timer::1": 2_000 });
+
+        // The envelope the engine writes carries `payload` (user state) AND the
+        // dedicated `timerStarts` field side by side, exactly like `ralph`.
+        const envelope = {
+            payload: JSON.parse(transition.stateJson),
+            ralph: {},
+            timerStarts: carried,
+        };
+
+        // Next run reads the anchors off the dedicated field — the spoofed
+        // `payload.timerStarts` is ignored entirely.
+        const fromInput = I.continuationEnvelopeFromInput({
+            payload: { __smithersContinuation: envelope },
+        });
+        expect(I.timerStartsFromContinuationEnvelope(fromInput)).toEqual(new Map([
+            ["timer::0", 1_000],
+            ["timer::1", 2_000],
+        ]));
+
+        // The config-carried copy of the envelope resolves identically.
+        const fromConfig = I.continuationEnvelopeFromConfig({ continuation: envelope });
+        expect(I.timerStartsFromContinuationEnvelope(fromConfig)).toEqual(new Map([
+            ["timer::0", 1_000],
+            ["timer::1", 2_000],
+        ]));
     });
 
     test("resolveWorkflowOutputTable resolves declared outputs and fails fast on unregistered targets", () => {

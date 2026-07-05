@@ -358,7 +358,7 @@ export function makeWorkflowSession(options = {}) {
         /** @type {Map<string, number>} Maps state key → quota reset timestamp (ms) */
         quotaResetTimes: new Map(),
         /** @type {Map<string, number>} Maps state key → duration-timer start (ms), the anchor its deadline is computed from */
-        timerStarts: new Map(),
+        timerStarts: new Map([...(options.initialTimerStarts ?? [])].filter(([, startMs]) => Number.isFinite(startMs))),
         schedule: null,
         cancelled: false,
         lastMountedSignature: null,
@@ -622,6 +622,21 @@ export function makeWorkflowSession(options = {}) {
         };
     }
     /**
+     * Duration-timer anchors carried across a continue-as-new boundary. Emitted
+     * as a dedicated `timerStarts` field on the transition (a sibling of
+     * `statePayload`), never folded into the user-visible payload — so an
+     * explicit `<ContinueAsNew state={...}>` can't clobber the anchors.
+     * @returns {Record<string, number> | undefined}
+     */
+    function timerStartsField() {
+        const timerStarts = [...state.timerStarts.entries()]
+            .filter(([, startMs]) => Number.isFinite(startMs))
+            .sort(([left], [right]) => left.localeCompare(right));
+        return timerStarts.length > 0
+            ? Object.fromEntries(timerStarts)
+            : undefined;
+    }
+    /**
    * @param {number} [depth] recursion depth; a safety net for a true decision
    *   cycle (a non-monotonic transition bug)
    * @returns {EngineDecision}
@@ -655,11 +670,13 @@ export function makeWorkflowSession(options = {}) {
             };
         }
         if (schedule.continuation) {
+            const timerStarts = timerStartsField();
             return {
                 _tag: "ContinueAsNew",
                 transition: {
                     reason: "explicit",
                     stateJson: schedule.continuation.stateJson,
+                    ...(timerStarts ? { timerStarts } : {}),
                 },
             };
         }
@@ -805,12 +822,14 @@ export function makeWorkflowSession(options = {}) {
                 }
                 state.ralphState.set(ralph.id, { iteration: nextIteration, done: false });
                 if (wantsContinueAsNew) {
+                    const timerStarts = timerStartsField();
                     return {
                         _tag: "ContinueAsNew",
                         transition: {
                             reason: "loop-threshold",
                             iteration: nextIteration,
                             statePayload: ralphStatePayload(),
+                            ...(timerStarts ? { timerStarts } : {}),
                         },
                     };
                 }
