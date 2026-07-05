@@ -21,6 +21,8 @@ export function ContinueAsNew(props) {
 /**
  * Convenience helper for conditional continuation inside workflow JSX:
  * `{shouldContinue ? continueAsNew({ cursor }) : null}`
+ * @param {unknown} [state]
+ * @returns {React.ReactElement}
  */
 export function continueAsNew(state) {
     return React.createElement(ContinueAsNew, { state });

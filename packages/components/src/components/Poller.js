@@ -9,6 +9,10 @@ import { Loop } from "./Ralph.js";
  * This effectively controls the interval between polls by setting
  * the task's timeoutMs, giving the agent/compute time proportional
  * to the backoff delay.
+ * @param {number} attempt
+ * @param {number} baseMs
+ * @param {"fixed" | "linear" | "exponential"} strategy
+ * @returns {number}
  */
 function computeTimeoutMs(attempt, baseMs, strategy) {
     switch (strategy) {

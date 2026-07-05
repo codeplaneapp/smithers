@@ -186,9 +186,7 @@ export function DeriskLoop(props) {
         const owner = row.logicalId;
         const round = Number(row.round) || 1;
         const node = nodes.get(owner);
-        const tier = node?.kind === "leaf"
-            ? delegatingTierFor(node, nodes, tierOrder)
-            : node?.tier ?? tierOrder[0];
+        const tier = delegatingTierFor(node, nodes, tierOrder);
         newPlanTasks.push(React.createElement(Task, {
             key: physicalId(p, owner, `plan-${round}`),
             id: physicalId(p, owner, `plan-${round}`),

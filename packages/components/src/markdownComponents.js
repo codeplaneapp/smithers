@@ -1,6 +1,6 @@
 import React from "react";
 /**
- * @param {any[]} ...parts
+ * @param {...any} parts
  */
 function fragment(...parts) {
     return React.createElement(React.Fragment, null, ...parts);

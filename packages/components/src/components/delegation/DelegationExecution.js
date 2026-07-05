@@ -17,6 +17,9 @@ import { withCommitRange } from "./withCommitRange.js";
 /** @typedef {import("./delegationSchemas.ts").Gate} Gate */
 /** @typedef {import("./delegationState.js").DelegationNodeInfo} DelegationNodeInfo */
 
+// dcBudget contract: emit a "warn" row at >= 80% of a hard limit (see dcBudgetSchema).
+const BUDGET_WARN_RATIO = 0.8;
+
 /**
  * <DelegationExecution> — walk the leaf frontier with max parallelism
  * (frames 8-9).
@@ -124,10 +127,10 @@ export function DelegationExecution(props) {
         const commitRanges = ownExecRows
             .map((row) => row?.commitRange)
             .filter((range) => range && typeof range === "object");
+        const latestExecRow = ownExecRows.at(-1);
         const gateElements = [...reviews, ...checks].map((gate, i) => {
             const gateNodeId = gateNodeIds[i];
             if (gate.method === "review") {
-                const latestExec = ownExecRows.at(-1);
                 return React.createElement(Task, {
                     key: gateNodeId,
                     id: gateNodeId,
@@ -149,7 +152,7 @@ export function DelegationExecution(props) {
                         // Prefer the freshest render-time row (deps resolution
                         // inside a loop can lag an attempt); fall back to the
                         // injected dep row.
-                        execOutput: /** @type {Record<string, any> | undefined} */ (latestExec ?? deps.exec),
+                        execOutput: /** @type {Record<string, any> | undefined} */ (latestExecRow ?? deps.exec),
                         commitRanges,
                     }),
                 });
@@ -186,7 +189,6 @@ export function DelegationExecution(props) {
         // Developer previews run AFTER exec + review/check gates, inside the
         // attempt loop: a failed build (builtOk=false) fails the attempt like a
         // failed review and redelegates with the failure folded in.
-        const latestExecRow = rowsForNode(execRows, execId).at(-1);
         const previewElements = previews.map((gate, i) => devPreviewTask(leaf, gate, i, {
             attempt: Math.max(state.attempts, 1),
             execSummaries: latestExecRow ? [String(latestExecRow.summary ?? "")] : [],
@@ -225,7 +227,7 @@ export function DelegationExecution(props) {
         // dcExec actuals against the caller budget — hard error over the
         // limit, warning row at >= 80%.
         if (budget && (budget.maxUsd !== undefined || budget.maxMinutes !== undefined) &&
-            rowsForNode(execRows, execId).length > 0) {
+            ownExecRows.length > 0) {
             const totals = actualTotals(execRows);
             const guardId = physicalId(p, leaf.logicalId, "budget");
             pipelineChildren.push(React.createElement(Task, {
@@ -239,8 +241,8 @@ export function DelegationExecution(props) {
                     if (overUsd || overMinutes) {
                         throw new SmithersError("INVALID_INPUT", `Delegation budget exceeded: $${totals.costUsd.toFixed(2)} of $${budget.maxUsd ?? "∞"} / ${totals.minutes.toFixed(1)}min of ${budget.maxMinutes ?? "∞"}min.`);
                     }
-                    const warnUsd = budget.maxUsd !== undefined && totals.costUsd >= budget.maxUsd * 0.8;
-                    const warnMinutes = budget.maxMinutes !== undefined && totals.minutes >= budget.maxMinutes * 0.8;
+                    const warnUsd = budget.maxUsd !== undefined && totals.costUsd >= budget.maxUsd * BUDGET_WARN_RATIO;
+                    const warnMinutes = budget.maxMinutes !== undefined && totals.minutes >= budget.maxMinutes * BUDGET_WARN_RATIO;
                     return {
                         logicalId: leaf.logicalId,
                         level: warnUsd || warnMinutes ? "warn" : "ok",
