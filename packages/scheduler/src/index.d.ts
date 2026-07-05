@@ -243,6 +243,7 @@ type WorkflowSessionOptions$2 = {
         readonly iteration: number;
         readonly done: boolean;
     }>;
+    readonly initialTimerStarts?: ReadonlyMap<string, number>;
     /**
      * Evaluate a runnable task's Aspects budgets against the run's accumulated
      * usage. Return the first breach, or `null`/`undefined` when within budget.
