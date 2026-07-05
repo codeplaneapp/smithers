@@ -9,6 +9,7 @@ import {
   createGatewayReactRoot,
   useDelegationChain,
   useGatewayActions,
+  useGatewayApprovals,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
 import { crepeThemeCss } from "./crepeTheme.generated";
@@ -24,6 +25,7 @@ import {
   ScoresPanel,
   SkipPreviewsButton,
   dcCss,
+  goalApprovalPendingOf,
   runIdFromUrl,
 } from "./delegation-chain/dc-shared";
 
@@ -65,13 +67,28 @@ function App() {
 
   const { graph, loading, errors, actions } = useDelegationChain({ runId: activeRunId ?? "" });
 
+  // Pending human approvals (physical node ids) for the active run: gates the
+  // question forms (prefetched rows are not answerable until their HumanTask
+  // mounts) — see QuestionsPanel.
+  const approvalsQuery = useGatewayApprovals(activeRunId ? { filter: { runId: activeRunId } } : {});
+  const pendingApprovalIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const approval of approvalsQuery.data ?? []) {
+      if (!activeRunId || approval.runId !== activeRunId) continue;
+      ids.add(approval.nodeId);
+    }
+    return ids;
+  }, [approvalsQuery.data, activeRunId]);
+
   const selectedNode = selectedNodeId ? graph.nodes[selectedNodeId] : undefined;
   const unresolvedQuestions = useMemo(
     () => graph.pendingQuestions.filter((question) => !question.resolved),
     [graph.pendingQuestions],
   );
-  const showRefinedPrompt =
-    graph.phase === "goal" && Boolean(graph.refinedPrompt) && unresolvedQuestions.length === 0;
+  // Renders whenever the goal approval is pending — including a degraded
+  // agent's EMPTY refined prompt (the surface shows a warning instead of
+  // leaving the paused run with nothing actionable).
+  const showRefinedPrompt = goalApprovalPendingOf(graph);
   const showPoll = (graph.phase === "scoring" || graph.phase === "done") && !pollSubmitted;
   const nodeCount = Object.keys(graph.nodes).length;
 
@@ -209,9 +226,13 @@ function App() {
             )}
           </div>
           <aside className="dc-rail" data-testid="dc-rail">
-            <QuestionsPanel questions={graph.pendingQuestions} actions={actions} />
+            <QuestionsPanel
+              questions={graph.pendingQuestions}
+              actions={actions}
+              pendingApprovalIds={pendingApprovalIds}
+            />
             {showRefinedPrompt ? (
-              <RefinedPromptApproval key={graph.refinedPrompt} graph={graph} actions={actions} />
+              <RefinedPromptApproval key={graph.refinedPrompt ?? ""} graph={graph} actions={actions} />
             ) : null}
             {selectedNode ? (
               <NodeInspector node={selectedNode} actions={actions} onClose={() => setSelectedNodeId(null)} />

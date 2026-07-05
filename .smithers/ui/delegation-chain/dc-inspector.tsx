@@ -386,7 +386,12 @@ export function NodeInspector({
   const activeEntry = versionsSorted.find((entry) => entry.version === activeVersion);
   const isCurrent = activeVersion === node.version;
   const outputMarkdown = outputToMarkdown(node.output);
-  const probe = node.kind === "poc" || node.kind === "research" ? probeReportOf(node.output) : null;
+  const isProbe = node.kind === "poc" || node.kind === "research";
+  const probe = isProbe ? probeReportOf(node.output) : null;
+  // The goal's output IS the approved refined prompt: editable only while the
+  // approval is pending (awaiting-human). After approval it is the contract
+  // the plan was built from — edits go to the plan nodes instead.
+  const goalEditLocked = node.kind === "goal" && node.status !== "awaiting-human";
 
   async function save() {
     setBusy(true);
@@ -482,15 +487,17 @@ export function NodeInspector({
 
           <DevPreviewPanel node={node} actions={actions} />
 
-          {outputMarkdown !== null && !probe ? (
+          {outputMarkdown !== null ? (
             <section className="dc-section" data-testid="dc-output">
               <div className="dc-section-head">
-                <h3>Output</h3>
+                <h3>{probe ? "Probe output (raw)" : "Output"}</h3>
                 {!editing ? (
                   <button
                     type="button"
                     className="button"
                     data-testid="dc-edit-toggle"
+                    disabled={goalEditLocked}
+                    title={goalEditLocked ? "goal is locked after approval — edit the plan nodes instead" : undefined}
                     onClick={() => {
                       setDraft(outputMarkdown);
                       setResetKey((key) => key + 1);
@@ -501,6 +508,16 @@ export function NodeInspector({
                   </button>
                 ) : null}
               </div>
+              {isProbe ? (
+                <span className="muted" data-testid="dc-probe-edit-hint">
+                  edits to a probe replan its parent
+                </span>
+              ) : null}
+              {goalEditLocked ? (
+                <span className="muted" data-testid="dc-goal-edit-hint">
+                  goal is locked after approval — edit the plan nodes instead
+                </span>
+              ) : null}
               {editing ? (
                 <div className="dc-editor" data-testid="dc-editor">
                   <DcMarkdownEditor
@@ -535,7 +552,9 @@ export function NodeInspector({
                     {error ? <span className="badge bad" data-testid="dc-edit-error">{error}</span> : null}
                   </div>
                 </div>
-              ) : (
+              ) : probe ? null : (
+                // Parsed probe rows already render as the sourced report above;
+                // the raw row only shows here while editing.
                 <MarkdownPreview markdown={outputMarkdown} />
               )}
             </section>

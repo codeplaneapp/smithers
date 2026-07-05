@@ -8,6 +8,7 @@ import {
   DcMarkdownEditor,
   goalApprovalTarget,
   isRecord,
+  pendingQuestionSeqsOf,
   questionTarget,
   type DcActions,
   type DcPollAnswer,
@@ -33,10 +34,13 @@ function recommendedBoolean(recommended: string): boolean {
 export function QuestionForm({
   question,
   busy = false,
+  disabled = false,
   onAnswer,
 }: {
   question: DcQuestion;
   busy?: boolean;
+  /** Blocks submit without the busy label (e.g. HumanTask not mounted yet). */
+  disabled?: boolean;
   onAnswer: (value: unknown) => void;
 }) {
   const options = optionsOf(question);
@@ -111,7 +115,7 @@ export function QuestionForm({
         type="button"
         className="button primary"
         data-testid={`dc-question-${question.seq}-submit`}
-        disabled={busy || (question.kind === "select" && !selected)}
+        disabled={busy || disabled || (question.kind === "select" && !selected)}
         onClick={() => onAnswer(value)}
       >
         {busy ? "Submitting..." : "Answer"}
@@ -123,14 +127,24 @@ export function QuestionForm({
 /**
  * Lists pending questions in seq order: the first unresolved one is the live
  * form; the rest are the prefetched queue ("N more prepared" — haiku renders
- * form metadata ahead of the user).
+ * form metadata ahead of the user). Prefetched rows exist BEFORE their
+ * HumanTask mounts (question N's form only mounts after N-1 is answered), so
+ * when `pendingApprovalIds` is provided, submit is only enabled once the
+ * active question's own approval is actually pending — otherwise a submit
+ * targets a not-yet-mounted form and errors.
  */
 export function QuestionsPanel({
   questions,
   actions,
+  pendingApprovalIds,
 }: {
   questions: DcQuestion[];
   actions: Pick<DcActions, "answerHuman">;
+  /**
+   * Physical node ids with a pending human approval (useGatewayApprovals).
+   * Omit (dev harnesses / older callers) to keep submits always enabled.
+   */
+  pendingApprovalIds?: ReadonlySet<string>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +154,21 @@ export function QuestionsPanel({
   );
   if (unresolved.length === 0) return null;
   const [active, ...prepared] = unresolved;
+
+  // The seq we are actually waiting on: an earlier question whose row has not
+  // arrived yet (its approval is pending below the lowest existing row), or
+  // the active row itself while its HumanTask has not mounted. null = the
+  // active form is live and submittable.
+  const activeTarget = questionTarget(active);
+  const pendingSeqs = pendingApprovalIds === undefined ? null : pendingQuestionSeqsOf(pendingApprovalIds);
+  const waitingForSeq =
+    pendingSeqs === null
+      ? null
+      : pendingSeqs.length > 0 && pendingSeqs[0]! < active.seq
+        ? pendingSeqs[0]!
+        : pendingApprovalIds!.has(activeTarget.nodeId)
+          ? null
+          : active.seq;
 
   async function answer(question: DcQuestion, value: unknown) {
     setBusy(true);
@@ -162,7 +191,18 @@ export function QuestionsPanel({
           {prepared.length} more prepared
         </span>
       </div>
-      <QuestionForm key={active.seq} question={active} busy={busy} onAnswer={(value) => void answer(active, value)} />
+      <QuestionForm
+        key={active.seq}
+        question={active}
+        busy={busy}
+        disabled={waitingForSeq !== null}
+        onAnswer={(value) => void answer(active, value)}
+      />
+      {waitingForSeq !== null ? (
+        <span className="badge warn" data-testid="dc-question-waiting">
+          waiting for question {waitingForSeq}…
+        </span>
+      ) : null}
       {error ? <span className="badge bad" data-testid="dc-questions-error">{error}</span> : null}
       {prepared.length > 0 ? (
         <div className="dc-question-queue">
@@ -180,8 +220,14 @@ export function QuestionsPanel({
 /**
  * Full-width refined-prompt review: the prompt arrives as editable markdown;
  * Approve answers the goal approval human request with the (possibly edited)
- * prompt. Remount with `key={graph.refinedPrompt}` from the caller so a
- * re-refined prompt reseeds the editor.
+ * prompt, Reject submits `{ approved: false, reason }` — the workflow contract
+ * ENDS a rejected run. Renders even when the prompt is empty (degraded agent /
+ * schema defaults): the editor shows with a warning so the paused run always
+ * has something actionable. After a successful submit the buttons lock
+ * ("Approved — planning starting…") so the residue panel (visible until the
+ * first plan row arrives) cannot double-submit. Remount with
+ * `key={graph.refinedPrompt ?? ""}` from the caller so a re-refined prompt
+ * reseeds the editor.
  */
 export function RefinedPromptApproval({
   graph,
@@ -194,14 +240,18 @@ export function RefinedPromptApproval({
   const [draft, setDraft] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (!initial) return null;
+  const [submitted, setSubmitted] = useState<"approved" | "rejected" | null>(null);
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
 
-  async function approve() {
+  async function submit(value: unknown, outcome: "approved" | "rejected") {
     setBusy(true);
     setError(null);
     try {
       const target = goalApprovalTarget(graph);
-      await actions.answerHuman(target.nodeId, target.iteration, { approved: true, refinedPrompt: draft });
+      await actions.answerHuman(target.nodeId, target.iteration, value);
+      setSubmitted(outcome);
+      setRejecting(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -213,15 +263,71 @@ export function RefinedPromptApproval({
     <section className="card dc-refined" data-testid="dc-refined-prompt">
       <div className="card-head">
         <h3>Refined prompt</h3>
-        <span className="badge warn">awaiting approval</span>
+        <span
+          className={"badge " + (submitted === "approved" ? "ok" : submitted === "rejected" ? "bad" : "warn")}
+          data-testid="dc-refined-status"
+        >
+          {submitted === "approved" ? "approved" : submitted === "rejected" ? "rejected — run ends" : "awaiting approval"}
+        </span>
       </div>
+      {initial === "" && submitted === null ? (
+        <div className="dc-banner-bad" data-testid="dc-refined-empty">
+          agent returned no refined prompt — write or reject
+        </div>
+      ) : null}
       <DcMarkdownEditor value={initial} resetKey="dc-refined-prompt" onChange={setDraft} />
       <div className="dc-editor-actions">
-        <button type="button" className="button primary" data-testid="dc-refined-approve" disabled={busy} onClick={() => void approve()}>
-          {busy ? "Submitting..." : "Approve"}
+        <button
+          type="button"
+          className="button primary"
+          data-testid="dc-refined-approve"
+          disabled={busy || submitted !== null || !draft.trim()}
+          onClick={() => void submit({ approved: true, refinedPrompt: draft }, "approved")}
+        >
+          {submitted === "approved" ? "Approved — planning starting…" : busy ? "Submitting..." : "Approve"}
         </button>
-        {error ? <span className="badge bad">{error}</span> : null}
+        {submitted === null ? (
+          <button
+            type="button"
+            className="button danger"
+            data-testid="dc-refined-reject-toggle"
+            disabled={busy}
+            onClick={() => setRejecting((current) => !current)}
+          >
+            Reject…
+          </button>
+        ) : null}
+        {submitted === "rejected" ? (
+          <span className="badge bad" data-testid="dc-refined-rejected">
+            Rejected — the run ends here
+          </span>
+        ) : null}
+        {error ? <span className="badge bad" data-testid="dc-refined-error">{error}</span> : null}
       </div>
+      {rejecting && submitted === null ? (
+        <div className="dc-section" data-testid="dc-refined-reject">
+          <p className="muted">Rejecting ends the run — the workflow stops here instead of planning.</p>
+          <textarea
+            className="input"
+            data-testid="dc-refined-reject-reason"
+            placeholder="Why reject? (recorded on the decision)"
+            value={reason}
+            onInput={(event) => setReason(event.currentTarget.value)}
+            onChange={(event) => setReason(event.currentTarget.value)}
+          />
+          <div className="dc-editor-actions">
+            <button
+              type="button"
+              className="button danger"
+              data-testid="dc-refined-reject-confirm"
+              disabled={busy}
+              onClick={() => void submit({ approved: false, reason: reason.trim() || "rejected by human" }, "rejected")}
+            >
+              {busy ? "Submitting..." : "Reject & end run"}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

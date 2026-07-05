@@ -31,7 +31,9 @@ const {
   devPreviewOf,
   estimateChipModel,
   gateLabel,
+  goalApprovalPendingOf,
   goalApprovalTarget,
+  pendingQuestionSeqsOf,
   questionTarget,
 } = await import("./dc-shared");
 const { DcNodeCardBody, delegationToFlow, findAttentionTarget } = await import("./dc-graph");
@@ -443,6 +445,65 @@ describe("NodeInspector", () => {
     expect(report.textContent).toContain("Sources");
     expect(report.textContent).toContain("confirms");
   });
+
+  test("probe nodes keep Edit but hint that edits replan the parent", async () => {
+    const edits: Array<{ logicalId: string; editedOutput: unknown; note?: string }> = [];
+    const probeNode = makeNode({
+      logicalId: "p1",
+      kind: "poc",
+      tier: "haiku",
+      status: "done",
+      output: {
+        probeId: "p1",
+        parentLogicalId: "root",
+        kind: "poc",
+        question: "does the spike hold?",
+        answer: "yes",
+        report: "## Spike\n\nholds",
+        planImpact: "confirms",
+      },
+    });
+    await mount(
+      <NodeInspector
+        node={probeNode}
+        actions={{ submitEdit: async (logicalId, editedOutput, note) => void edits.push({ logicalId, editedOutput, note }) }}
+      />,
+    );
+    expect(byTestId("dc-probe-edit-hint").textContent).toContain("edits to a probe replan its parent");
+    const toggle = byTestId("dc-edit-toggle") as HTMLButtonElement;
+    expect(toggle.disabled).toBe(false);
+    await click(toggle);
+    const editor = byTestId("dc-editor-fallback") as HTMLTextAreaElement;
+    expect(editor.value).toContain("probeId");
+    await setInputValue(editor, "revised probe finding");
+    await click(byTestId("dc-edit-save"));
+    expect(edits).toEqual([{ logicalId: "p1", editedOutput: "revised probe finding", note: undefined }]);
+  });
+
+  test("goal output edit locks after approval with a hint; stays editable while awaiting-human", async () => {
+    const approvedGoal = makeNode({
+      logicalId: "goal",
+      kind: "goal",
+      tier: "fable",
+      status: "done",
+      output: "Approved refined prompt.",
+    });
+    const harness = await mount(<NodeInspector node={approvedGoal} actions={{ submitEdit: async () => {} }} />);
+    expect((byTestId("dc-edit-toggle") as HTMLButtonElement).disabled).toBe(true);
+    expect(byTestId("dc-goal-edit-hint").textContent).toContain("goal is locked after approval — edit the plan nodes instead");
+    // Pre-approval (goal approval pending → awaiting-human) the prompt is
+    // still the human's to shape.
+    const pendingGoal = makeNode({
+      logicalId: "goal",
+      kind: "goal",
+      tier: "fable",
+      status: "awaiting-human",
+      output: "Draft refined prompt.",
+    });
+    await harness.render(<NodeInspector node={pendingGoal} actions={{ submitEdit: async () => {} }} />);
+    expect((byTestId("dc-edit-toggle") as HTMLButtonElement).disabled).toBe(false);
+    expect(maybeByTestId("dc-goal-edit-hint")).toBe(null);
+  });
 });
 
 describe("question flow", () => {
@@ -486,8 +547,52 @@ describe("question flow", () => {
     const recommended = byTestId("dc-question-1-option-feature+ui").querySelector("input") as HTMLInputElement;
     expect(recommended.checked).toBe(true);
     expect(byTestId("dc-question-1").textContent).toContain("the canvas is the point");
+    // No pendingApprovalIds prop (legacy/dev harness): submit stays enabled.
+    expect(maybeByTestId("dc-question-waiting")).toBe(null);
     await click(byTestId("dc-question-1-submit"));
     expect(answers).toEqual([{ nodeId: "dc:root:question-1", iteration: 0, value: "feature+ui" }]);
+  });
+
+  test("pendingQuestionSeqsOf parses question seqs out of pending approval node ids", () => {
+    expect(pendingQuestionSeqsOf(["dc:root:question-3", "dc:goal:approve", "dc:root:question-1", "dc-poll"])).toEqual([1, 3]);
+    expect(pendingQuestionSeqsOf([])).toEqual([]);
+  });
+
+  test("prefetched question forms are not submittable until their HumanTask mounts", async () => {
+    // q1 was answered (resolved rows are dropped from pendingQuestions);
+    // q2/q3 rows were prefetched by haiku, but q2's HumanTask has not mounted
+    // yet — submitting now would error.
+    const answers: Array<{ nodeId: string; value: unknown }> = [];
+    const actions = {
+      answerHuman: async (nodeId: string, _iteration: number, value: unknown) => void answers.push({ nodeId, value }),
+    };
+    const harness = await mount(
+      <QuestionsPanel questions={[preparedA, preparedB]} actions={actions} pendingApprovalIds={new Set<string>()} />,
+    );
+    expect((byTestId("dc-question-2-submit") as HTMLButtonElement).disabled).toBe(true);
+    expect(byTestId("dc-question-waiting").textContent).toContain("waiting for question 2");
+    // The HumanTask arrives → the same form becomes submittable.
+    await harness.render(
+      <QuestionsPanel questions={[preparedA, preparedB]} actions={actions} pendingApprovalIds={new Set(["dc:root:question-2"])} />,
+    );
+    expect(maybeByTestId("dc-question-waiting")).toBe(null);
+    expect((byTestId("dc-question-2-submit") as HTMLButtonElement).disabled).toBe(false);
+    await click(byTestId("dc-question-2-submit"));
+    expect(answers).toEqual([{ nodeId: "dc:root:question-2", value: "feature+ui" }]);
+  });
+
+  test("a pending earlier question whose row has not arrived blocks later prefetched forms", async () => {
+    // The live HumanTask is q1, but only the q2/q3 rows exist locally: the
+    // panel must wait for q1's row instead of letting q2 submit early.
+    await mount(
+      <QuestionsPanel
+        questions={[preparedA, preparedB]}
+        actions={{ answerHuman: async () => {} }}
+        pendingApprovalIds={new Set(["dc:root:question-1"])}
+      />,
+    );
+    expect((byTestId("dc-question-2-submit") as HTMLButtonElement).disabled).toBe(true);
+    expect(byTestId("dc-question-waiting").textContent).toContain("waiting for question 1");
   });
 
   test("confirm questions submit booleans; text questions submit the typed string", async () => {
@@ -535,6 +640,81 @@ describe("question flow", () => {
         value: { approved: true, refinedPrompt: "Build the delegation-chain feature. Plue migration is run #1." },
       },
     ]);
+    // Residue lock: the panel keeps rendering until the first plan row lands,
+    // so a successful submit disables the button (no double-submit) and drops
+    // the reject affordance.
+    const approve = byTestId("dc-refined-approve") as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(approve.textContent).toContain("Approved — planning starting");
+    expect(byTestId("dc-refined-status").textContent).toBe("approved");
+    expect(maybeByTestId("dc-refined-reject-toggle")).toBe(null);
+  });
+
+  test("empty refined prompt still shows the approval editor with a warning; Approve requires text", async () => {
+    const goal = makeNode({ logicalId: "goal", kind: "goal", tier: "fable", status: "awaiting-human", attention: { self: true, descendants: 0 } });
+    const graph = makeGraph([goal], [], { phase: "goal", refinedPrompt: "" });
+    // App-level gating: a degraded agent (schema defaults) must still surface
+    // the approval instead of leaving the paused run with nothing actionable.
+    expect(goalApprovalPendingOf(graph)).toBe(true);
+    const answers: Array<{ nodeId: string; iteration: number; value: unknown }> = [];
+    await mount(
+      <RefinedPromptApproval
+        graph={graph}
+        actions={{ answerHuman: async (nodeId, iteration, value) => void answers.push({ nodeId, iteration, value }) }}
+      />,
+    );
+    expect(byTestId("dc-refined-empty").textContent).toContain("agent returned no refined prompt — write or reject");
+    expect((byTestId("dc-refined-approve") as HTMLButtonElement).disabled).toBe(true);
+    const editor = byTestId("dc-editor-fallback") as HTMLTextAreaElement;
+    expect(editor.value).toBe("");
+    await setInputValue(editor, "Write the goal myself.");
+    expect((byTestId("dc-refined-approve") as HTMLButtonElement).disabled).toBe(false);
+    await click(byTestId("dc-refined-approve"));
+    expect(answers).toEqual([
+      { nodeId: "dc:goal:approve", iteration: 0, value: { approved: true, refinedPrompt: "Write the goal myself." } },
+    ]);
+    // Warning clears once the decision is in.
+    expect(maybeByTestId("dc-refined-empty")).toBe(null);
+  });
+
+  test("Reject warns that the run ends and submits approved:false with the reason", async () => {
+    const goal = makeNode({ logicalId: "goal", kind: "goal", tier: "fable", status: "awaiting-human" });
+    const graph = makeGraph([goal], [], { phase: "goal", refinedPrompt: "Build X." });
+    const answers: Array<{ nodeId: string; iteration: number; value: unknown }> = [];
+    await mount(
+      <RefinedPromptApproval
+        graph={graph}
+        actions={{ answerHuman: async (nodeId, iteration, value) => void answers.push({ nodeId, iteration, value }) }}
+      />,
+    );
+    await click(byTestId("dc-refined-reject-toggle"));
+    expect(byTestId("dc-refined-reject").textContent).toContain("Rejecting ends the run");
+    await setInputValue(byTestId("dc-refined-reject-reason") as HTMLTextAreaElement, "wrong direction entirely");
+    await click(byTestId("dc-refined-reject-confirm"));
+    expect(answers).toEqual([
+      { nodeId: "dc:goal:approve", iteration: 0, value: { approved: false, reason: "wrong direction entirely" } },
+    ]);
+    // Post-reject state: form closes, status flips, approve stays locked.
+    expect(maybeByTestId("dc-refined-reject")).toBe(null);
+    expect(byTestId("dc-refined-rejected").textContent).toContain("run ends here");
+    expect(byTestId("dc-refined-status").textContent).toContain("rejected");
+    expect((byTestId("dc-refined-approve") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test("goalApprovalPendingOf gates the surface on questions, phase, and goal status", () => {
+    const unresolvedQuestion = { ...selectQuestion } as DelegationGraph["pendingQuestions"][number];
+    const pendingGoal = makeNode({ logicalId: "goal", kind: "goal", tier: "fable", status: "awaiting-human" });
+    const doneGoal = makeNode({ logicalId: "goal", kind: "goal", tier: "fable", status: "done" });
+    // Unresolved questions win: the question forms are the actionable surface.
+    expect(
+      goalApprovalPendingOf(makeGraph([pendingGoal], [], { phase: "goal", refinedPrompt: "x", pendingQuestions: [unresolvedQuestion] })),
+    ).toBe(false);
+    // Goal awaiting-human suffices even before/without a dcGoal row.
+    expect(goalApprovalPendingOf(makeGraph([pendingGoal], [], { phase: "goal" }))).toBe(true);
+    // Goal phase + dcGoal row (refinedPrompt may be "") without status support.
+    expect(goalApprovalPendingOf(makeGraph([doneGoal], [], { phase: "goal", refinedPrompt: "" }))).toBe(true);
+    // Approved and planning: surface goes away.
+    expect(goalApprovalPendingOf(makeGraph([doneGoal], [], { phase: "planning", refinedPrompt: "x" }))).toBe(false);
   });
 });
 

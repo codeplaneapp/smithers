@@ -529,6 +529,38 @@ export function goalApprovalTarget(graph: DelegationGraph): { nodeId: string; it
   return { nodeId, iteration };
 }
 
+/**
+ * Whether the goal (refined-prompt) approval surface should render. True when
+ * the goal approval is pending: the goal node folded to `awaiting-human`
+ * (approval gates on `approve`/`approval-<n>` phases fold into node status),
+ * OR the run sits in the goal phase with every question resolved and a dcGoal
+ * row present (`refinedPrompt !== undefined`). A degraded agent can return
+ * `refinedPrompt: ""` — the surface must STILL render (with a warning) so the
+ * paused run always has something actionable on screen.
+ */
+export function goalApprovalPendingOf(graph: DelegationGraph): boolean {
+  if (graph.pendingQuestions.some((question) => !question.resolved)) return false;
+  const goal = Object.values(graph.nodes).find((node) => node.kind === "goal");
+  if (goal?.status === "awaiting-human") return true;
+  return graph.phase === "goal" && graph.refinedPrompt !== undefined;
+}
+
+/**
+ * Question seqs whose HumanTask form is actually mounted, parsed from the
+ * pending-approval physical node ids (`dc:<logicalId>:question-<seq>`).
+ * Sorted ascending. Question ROWS prefetch ahead of the forms (haiku writes
+ * form metadata early), so a row's existence does NOT mean it is answerable —
+ * only a pending approval does.
+ */
+export function pendingQuestionSeqsOf(pendingApprovalIds: Iterable<string>): number[] {
+  const seqs: number[] = [];
+  for (const nodeId of pendingApprovalIds) {
+    const match = /:question-(\d+)$/.exec(nodeId);
+    if (match) seqs.push(Number(match[1]));
+  }
+  return seqs.sort((a, b) => a - b);
+}
+
 // ---------------------------------------------------------------------------
 // Phase indicator + preview-skip control.
 // ---------------------------------------------------------------------------
