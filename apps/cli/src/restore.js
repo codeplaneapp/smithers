@@ -90,7 +90,11 @@ export async function runRestoreOnce(opts) {
     if (opts.target) {
         target = pickTargetCheckpoint([opts.target], selection);
         if (!target) {
-            stderr.write(`Preselected checkpoint (node ${opts.target.nodeId} seq ${opts.target.seq}) does not match requested run ${runId} node ${nodeId}${iteration !== undefined ? ` iteration ${iteration}` : ""}${seq !== undefined ? ` seq ${seq}` : ""}\n`);
+            // Include the target's own iteration/seq so an iteration-only
+            // mismatch is legible. Checkpoint rows carry no runId, so the
+            // predicate matches on node/iteration/seq only — `run ${runId}` is
+            // context, not something validated here.
+            stderr.write(`Preselected checkpoint (node ${opts.target.nodeId} iteration ${opts.target.iteration ?? 0} seq ${opts.target.seq}) does not match requested node ${nodeId}${iteration !== undefined ? ` iteration ${iteration}` : ""}${seq !== undefined ? ` seq ${seq}` : ""} for run ${runId}\n`);
             return { exitCode: 1 };
         }
     }

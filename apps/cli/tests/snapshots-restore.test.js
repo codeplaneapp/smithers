@@ -118,7 +118,63 @@ describe("smithers restore", () => {
         // A mis-reported preselected target gets a distinct, actionable message
         // rather than the generic listing-miss text.
         expect(err.get()).toContain("Preselected checkpoint");
-        expect(err.get()).toContain("does not match requested run r1 node n2");
+        expect(err.get()).toContain("does not match requested node n2");
+        expect(err.get()).toContain("for run r1");
+    });
+
+    test("rejects a preselected target whose iteration differs, naming both iterations", async () => {
+        const reverted = [];
+        const err = capture();
+        const r = await runRestoreOnce({
+            runId: "r1",
+            nodeId: "n1",
+            iteration: 1,
+            target: cps[0], // n1 iteration 0 — right node, wrong iteration
+            stdout: capture(),
+            stderr: err,
+            revert: async (commitId, cwd) => {
+                reverted.push([commitId, cwd]);
+                return { success: true };
+            },
+        });
+
+        expect(r.exitCode).toBe(1);
+        expect(reverted).toEqual([]);
+        // Both the target's iteration and the requested iteration are named so
+        // an iteration-only mismatch isn't two identical-looking checkpoints.
+        expect(err.get()).toContain("iteration 0");
+        expect(err.get()).toContain("iteration 1");
+    });
+
+    test("a rejected preselect does NOT fall back to listing from the adapter", async () => {
+        const reverted = [];
+        const err = capture();
+        let listed = false;
+        const r = await runRestoreOnce({
+            // An adapter that WOULD supply a matching checkpoint is present, but a
+            // rejected preselect must fail loudly, never silently list-and-pick a
+            // different checkpoint than the one the caller reported.
+            adapter: {
+                async listWorkspaceCheckpoints() {
+                    listed = true;
+                    return cps;
+                },
+            },
+            runId: "r1",
+            nodeId: "n2", // cps[2] (d0) would match if we fell back to listing
+            target: cps[0], // preselected n1 — mismatched, must be rejected
+            stdout: capture(),
+            stderr: err,
+            revert: async (commitId, cwd) => {
+                reverted.push([commitId, cwd]);
+                return { success: true };
+            },
+        });
+
+        expect(r.exitCode).toBe(1);
+        expect(reverted).toEqual([]);
+        expect(listed).toBe(false);
+        expect(err.get()).toContain("Preselected checkpoint");
     });
 
     test("rejects a preselected target whose seq differs from the requested --seq", async () => {
