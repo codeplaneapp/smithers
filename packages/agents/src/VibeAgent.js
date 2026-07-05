@@ -6,9 +6,10 @@ import {
   createSyntheticIdGenerator,
 } from "./BaseCliAgent/index.js";
 
-/** @typedef {import("./BaseCliAgent/index.ts").BaseCliAgentOptions} BaseCliAgentOptions */
-/** @typedef {import("./capability-registry/index.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
-/** @typedef {import("./BaseCliAgent/index.ts").CliOutputInterpreter} CliOutputInterpreter */
+/** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
+/** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
+/** @typedef {import("./BaseCliAgent/AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
+/** @typedef {import("./VibeAgentOptions.ts").VibeAgentOptions} VibeAgentOptions */
 
 /**
  * @param {VibeAgentOptions} [opts]
@@ -36,18 +37,6 @@ export function createVibeCapabilityRegistry(opts = {}) {
     builtIns: ["default"],
   };
 }
-
-/**
- * @typedef {BaseCliAgentOptions & {
- *   agent?: string;
- *   maxTurns?: number;
- *   maxPrice?: number;
- *   maxTokens?: number;
- *   enabledTools?: string[];
- *   sessionId?: string;
- *   continueSession?: boolean;
- * }} VibeAgentOptions
- */
 
 export class VibeAgent extends BaseCliAgent {
   /** @type {VibeAgentOptions} */
@@ -79,7 +68,7 @@ export class VibeAgent extends BaseCliAgent {
 
     /**
      * @param {string} line
-     * @returns {import("./BaseCliAgent/index.ts").AgentCliEvent[]}
+     * @returns {AgentCliEvent[]}
      */
     const parseLine = (line) => {
       const trimmed = line.trim();

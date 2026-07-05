@@ -23,6 +23,7 @@ export function asNumber(value) {
 }
 /**
  * @param {string} value
+ * @param {number} [maxLength]
  * @returns {string}
  */
 export function truncate(value, maxLength = 240) {

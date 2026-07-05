@@ -7,7 +7,7 @@ import { runDiagnostics } from "./runDiagnostics.js";
  * @param {Record<string, string>} env
  * @param {string} cwd
  * @param {{ provider?: string; model?: string; apiKey?: string }} [hints]
- * @returns {Promise<DiagnosticReport> | null}
+ * @returns {Promise<DiagnosticReport | null> | null}
  */
 export function launchDiagnostics(command, env, cwd, hints) {
     const strategy = getDiagnosticStrategy(command, hints);

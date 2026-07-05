@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { normalizeCapabilityRegistry } from "./normalizeCapabilityRegistry.js";
 /** @typedef {import("./AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 
+/** @typedef {null | boolean | number | string | StableJson[] | { [key: string]: StableJson }} StableJson */
 /**
  * @param {unknown} value
  * @returns {StableJson}

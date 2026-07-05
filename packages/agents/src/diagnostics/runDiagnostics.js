@@ -1,13 +1,7 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-/** @typedef {import("./DiagnosticCheckId.ts").DiagnosticCheckId} DiagnosticCheckId */
-
-/**
- * @typedef {{ agentId: string; command: string; checks: DiagnosticCheckDef[]; }} AgentDiagnosticStrategy
- */
+/** @typedef {import("./getDiagnosticStrategy.js").AgentDiagnosticStrategy} AgentDiagnosticStrategy */
 /** @typedef {import("./DiagnosticCheck.ts").DiagnosticCheck} DiagnosticCheck */
-/**
- * @typedef {{ id: DiagnosticCheckId; run: (ctx: DiagnosticContext) => Promise<DiagnosticCheck>; }} DiagnosticCheckDef
- */
+/** @typedef {import("./getDiagnosticStrategy.js").DiagnosticCheckDef} DiagnosticCheckDef */
 /** @typedef {import("./DiagnosticContext.ts").DiagnosticContext} DiagnosticContext */
 /** @typedef {import("./DiagnosticReport.ts").DiagnosticReport} DiagnosticReport */
 

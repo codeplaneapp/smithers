@@ -4,6 +4,7 @@ import { normalizeCapabilityStringList, } from "./capability-registry/index.js";
 import { getCliAgentSurfaceManifestEntry } from "./cli-surface/index.js";
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
+/** @typedef {import("./BaseCliAgent/AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
 /** @typedef {import("./AntigravityAgentOptions.ts").AntigravityAgentOptions} AntigravityAgentOptions */
 
 const ANTIGRAVITY_SURFACE = getCliAgentSurfaceManifestEntry("antigravity");

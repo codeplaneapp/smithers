@@ -508,16 +508,13 @@ function openaiRateLimitCheck({ codexCliAuth }) {
 }
 // Codex resolves auth from `<CODEX_HOME>/auth.json` (subscription tokens or a
 // stored API key) when OPENAI_API_KEY is absent, so its checks honor that.
-const codexApiKeyAndRateLimitCheck = [
-    openaiApiKeyCheck({ codexCliAuth: true }),
-    openaiRateLimitCheck({ codexCliAuth: true }),
-];
 const codexStrategy = {
     agentId: "codex",
     command: "codex",
     checks: [
         checkCliInstalled("codex", "Codex"),
-        ...codexApiKeyAndRateLimitCheck,
+        openaiApiKeyCheck({ codexCliAuth: true }),
+        openaiRateLimitCheck({ codexCliAuth: true }),
     ],
 };
 // ---------------------------------------------------------------------------

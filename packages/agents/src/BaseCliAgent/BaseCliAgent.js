@@ -6,6 +6,16 @@ import { logDebug, logInfo, logWarning } from "@smithers-orchestrator/observabil
 import { agentDurationMs, agentErrorsTotal, agentInvocationsTotal, agentRetriesTotal, agentTokensTotal, } from "@smithers-orchestrator/observability/metrics";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { nextWallClockInZone } from "./nextWallClockInZone.js";
+import { launchDiagnostics, enrichReportWithErrorAnalysis, formatDiagnosticSummary } from "../diagnostics/index.js";
+import { extractPrompt } from "./extractPrompt.js";
+import { resolveTimeouts } from "./resolveTimeouts.js";
+import { combineNonEmpty } from "./combineNonEmpty.js";
+import { tryParseJson } from "./tryParseJson.js";
+import { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
+import { createAgentStdoutTextEmitter } from "./createAgentStdoutTextEmitter.js";
+import { buildGenerateResult } from "./buildGenerateResult.js";
+import { runCommandEffect } from "./runCommandEffect.js";
+import { taskContextEnv } from "./taskContextEnv.js";
 
 const QUOTA_PATTERNS = [
     /\bhit\s+your\s+(usage|session|weekly|daily|monthly|rate)\s+limit\b/i,
@@ -83,16 +93,76 @@ export function classifyQuotaError(message, command, context = {}) {
         ...(quotaResetAtMs != null ? { quotaResetAtMs } : {}),
     });
 }
-import { launchDiagnostics, enrichReportWithErrorAnalysis, formatDiagnosticSummary } from "../diagnostics/index.js";
-import { extractPrompt } from "./extractPrompt.js";
-import { resolveTimeouts } from "./resolveTimeouts.js";
-import { combineNonEmpty } from "./combineNonEmpty.js";
-import { tryParseJson } from "./tryParseJson.js";
-import { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
-import { createAgentStdoutTextEmitter } from "./createAgentStdoutTextEmitter.js";
-import { buildGenerateResult } from "./buildGenerateResult.js";
-import { runCommandEffect } from "./runCommandEffect.js";
-import { taskContextEnv } from "./taskContextEnv.js";
+
+// Config/auth errors where retrying cannot help — fail fast with a fix hint.
+const NON_RETRYABLE_AGENT_ERROR_PATTERNS = [
+    { re: /\bLLM not set\b/i, hint: "the agent's model name is not present in the CLI's configured providers" },
+    { re: /\bLLM not supported\b/i, hint: "the agent's model is not supported by this CLI build" },
+    { re: /\bmodel\s+['"]?[^'"\s]+['"]?\s+not found\b/i, hint: "the requested model is not registered with the CLI" },
+    { re: /\bunknown model\b/i, hint: "the requested model is not registered with the CLI" },
+    { re: /\b401\b[\s\S]{0,200}?(invalid[_\s-]?authentication|unauthorized|invalid[_\s-]?api[_\s-]?key)/i, hint: `the CLI's stored credentials are invalid or expired — re-authenticate (e.g. for kimi run \`kimi login\`)` },
+    { re: /\bAPI\s*Key\b[\s\S]{0,120}?(invalid|expired|may have expired)/i, hint: `the CLI's stored credentials are invalid or expired — re-authenticate (e.g. for kimi run \`kimi login\`)` },
+    { re: /\b(access|auth(entication)?|oauth|bearer)\s+token\b[\s\S]{0,80}?(expired|invalid|revoked)/i, hint: `the CLI's auth token is no longer valid — re-authenticate (e.g. for kimi run \`kimi login\`)` },
+    { re: /\binvalid[_\s-]?authentication[_\s-]?error\b/i, hint: `the CLI's stored credentials are invalid — re-authenticate (e.g. for kimi run \`kimi login\`)` },
+];
+
+/**
+ * Detects non-retryable configuration/auth errors and returns a SmithersError
+ * with AGENT_CONFIG_INVALID code so the engine fails fast instead of retrying.
+ *
+ * @param {string} message
+ * @param {string} command
+ * @param {{ agentId?: string; agentModel?: string; agentEngine?: string }} [context]
+ * @returns {SmithersError | null}
+ */
+function classifyNonRetryableAgentError(message, command, context = {}) {
+    if (!message)
+        return null;
+    const { agentId, agentModel, agentEngine } = context;
+    for (const { re, hint } of NON_RETRYABLE_AGENT_ERROR_PATTERNS) {
+        if (re.test(message)) {
+            const modelLabel = agentModel ?? "<unset>";
+            const idLabel = agentId ?? "<anonymous>";
+            const summary = `Agent "${idLabel}" (${command}, model=${modelLabel}) failed with non-retryable configuration error: ${message.slice(0, 300)}. Hint: ${hint}. Fix the agent's model in .smithers/agents.ts (or the CLI's config) — retrying will not help.`;
+            return new SmithersError("AGENT_CONFIG_INVALID", summary, {
+                failureRetryable: false,
+                agentId: idLabel,
+                agentEngine,
+                agentModel: modelLabel,
+                command,
+                underlying: message.slice(0, 500),
+            });
+        }
+    }
+    return null;
+}
+
+/**
+ * @param {string} stderr
+ * @param {ReadonlyArray<RegExp>} [extraPatterns]
+ * @returns {string}
+ */
+function filterBenignStderr(stderr, extraPatterns) {
+    const benignPatterns = [
+        /^.*state db missing rollout path.*$/gm,
+        /^.*codex_core::rollout::list.*$/gm,
+        /^.*failed to record rollout items: failed to queue rollout items: channel closed.*$/gim,
+        /^.*Failed to shutdown rollout recorder.*$/gm,
+        /^.*failed to renew cache TTL: Operation not permitted.*$/gim,
+    ];
+    let filtered = stderr;
+    for (const pattern of benignPatterns) {
+        filtered = filtered.replace(pattern, "");
+    }
+    if (extraPatterns?.length) {
+        for (const pattern of extraPatterns) {
+            const regex = new RegExp(pattern.source, pattern.flags);
+            filtered = filtered.replace(regex, "");
+        }
+    }
+    // Clean up extra blank lines
+    return filtered.replace(/\n{3,}/g, "\n\n").trim();
+}
 /** @typedef {import("./AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
 
 /** @typedef {import("./AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
@@ -805,67 +875,8 @@ export class BaseCliAgent {
         let cleanup;
         let commandLogAnnotations = {};
         const recordDurationMetric = () => Effect.sync(() => performance.now() - invocationStart).pipe(Effect.flatMap((durationMs) => Metric.update(taggedMetric(agentDurationMs, metricTags), durationMs)));
-        /**
-     * @param {string} stderr
-     * @param {ReadonlyArray<RegExp>} [extraPatterns]
-     * @returns {string}
-     */
-        const agentId = this.id;
-        const agentModel = this.model;
-        const agentEngine = resolveAgentEngineTag(this);
-        const agentCtx = { agentId, agentModel, agentEngine };
+        const agentCtx = { agentId: this.id, agentModel: this.model, agentEngine: resolveAgentEngineTag(this) };
         const classifyQuota = (message, command) => classifyQuotaError(message, command, agentCtx);
-        function classifyNonRetryableAgentError(message, command) {
-            if (!message)
-                return null;
-            const nonRetryablePatterns = [
-                { re: /\bLLM not set\b/i, hint: "the agent's model name is not present in the CLI's configured providers" },
-                { re: /\bLLM not supported\b/i, hint: "the agent's model is not supported by this CLI build" },
-                { re: /\bmodel\s+['"]?[^'"\s]+['"]?\s+not found\b/i, hint: "the requested model is not registered with the CLI" },
-                { re: /\bunknown model\b/i, hint: "the requested model is not registered with the CLI" },
-                { re: /\b401\b[\s\S]{0,200}?(invalid[_\s-]?authentication|unauthorized|invalid[_\s-]?api[_\s-]?key)/i, hint: `the CLI's stored credentials are invalid or expired — re-authenticate (e.g. for kimi run \`kimi login\`)` },
-                { re: /\bAPI\s*Key\b[\s\S]{0,120}?(invalid|expired|may have expired)/i, hint: `the CLI's stored credentials are invalid or expired — re-authenticate (e.g. for kimi run \`kimi login\`)` },
-                { re: /\b(access|auth(entication)?|oauth|bearer)\s+token\b[\s\S]{0,80}?(expired|invalid|revoked)/i, hint: `the CLI's auth token is no longer valid — re-authenticate (e.g. for kimi run \`kimi login\`)` },
-                { re: /\binvalid[_\s-]?authentication[_\s-]?error\b/i, hint: `the CLI's stored credentials are invalid — re-authenticate (e.g. for kimi run \`kimi login\`)` },
-            ];
-            for (const { re, hint } of nonRetryablePatterns) {
-                if (re.test(message)) {
-                    const modelLabel = agentModel ?? "<unset>";
-                    const idLabel = agentId ?? "<anonymous>";
-                    const summary = `Agent "${idLabel}" (${command}, model=${modelLabel}) failed with non-retryable configuration error: ${message.slice(0, 300)}. Hint: ${hint}. Fix the agent's model in .smithers/agents.ts (or the CLI's config) — retrying will not help.`;
-                    return new SmithersError("AGENT_CONFIG_INVALID", summary, {
-                        failureRetryable: false,
-                        agentId: idLabel,
-                        agentEngine,
-                        agentModel: modelLabel,
-                        command,
-                        underlying: message.slice(0, 500),
-                    });
-                }
-            }
-            return null;
-        }
-        function filterBenignStderr(stderr, extraPatterns) {
-            const benignPatterns = [
-                /^.*state db missing rollout path.*$/gm,
-                /^.*codex_core::rollout::list.*$/gm,
-                /^.*failed to record rollout items: failed to queue rollout items: channel closed.*$/gim,
-                /^.*Failed to shutdown rollout recorder.*$/gm,
-                /^.*failed to renew cache TTL: Operation not permitted.*$/gim,
-            ];
-            let filtered = stderr;
-            for (const pattern of benignPatterns) {
-                filtered = filtered.replace(pattern, "");
-            }
-            if (extraPatterns?.length) {
-                for (const pattern of extraPatterns) {
-                    const regex = new RegExp(pattern.source, pattern.flags);
-                    filtered = filtered.replace(regex, "");
-                }
-            }
-            // Clean up extra blank lines
-            return filtered.replace(/\n{3,}/g, "\n\n").trim();
-        }
         const program = Effect.all([
             Metric.increment(taggedMetric(agentInvocationsTotal, metricTags)),
             ...(retryHint.isRetry
@@ -1040,7 +1051,7 @@ export class BaseCliAgent {
                         if (quota) {
                             return yield* Effect.fail(quota);
                         }
-                        const nonRetryable = classifyNonRetryableAgentError(errorText, commandSpec.command);
+                        const nonRetryable = classifyNonRetryableAgentError(errorText, commandSpec.command, agentCtx);
                         if (nonRetryable) {
                             return yield* Effect.fail(nonRetryable);
                         }
@@ -1095,7 +1106,7 @@ export class BaseCliAgent {
                         const regex = new RegExp(pattern.source, pattern.flags);
                         if (regex.test(rawText)) {
                             const stdoutErrText = `CLI agent error (stdout): ${rawText.slice(0, 500)}`;
-                            const nonRetryable = classifyNonRetryableAgentError(rawText, commandSpec.command);
+                            const nonRetryable = classifyNonRetryableAgentError(rawText, commandSpec.command, agentCtx);
                             return yield* Effect.fail(nonRetryable ?? new SmithersError("AGENT_CLI_ERROR", stdoutErrText));
                         }
                     }

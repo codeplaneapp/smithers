@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { BaseCliAgent, normalizeCodexConfig, pushFlag, pushList, isRecord, asString, asNumber, truncate, shouldSurfaceUnparsedStdout, createSyntheticIdGenerator, } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList, } from "./capability-registry/index.js";
-import { assertZodV4 } from "@smithers-orchestrator/errors/assertZodV4";
-import { sanitizeForOpenAI } from "./sanitizeForOpenAI.js";
+import { zodToOpenAISchema } from "./zodToOpenAISchema.js";
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./BaseCliAgent/CodexConfigOverrides.ts").CodexConfigOverrides} CodexConfigOverrides */
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
+/** @typedef {import("./BaseCliAgent/AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
 /** @typedef {import("./CodexAgentOptions.ts").CodexAgentOptions} CodexAgentOptions */
 
 /**
@@ -565,13 +565,7 @@ export class CodexAgent extends BaseCliAgent {
         let schemaCleanupFile = null;
         if (!resumeSession && this.opts.nativeStructuredOutput === true && !this.opts.outputSchema && params.options?.outputSchema) {
             const schema = params.options.outputSchema;
-            // z.toJSONSchema() reads Zod v4 internals; a v3 schema throws a cryptic
-            // `schema._zod.def` TypeError. Surface a clear, actionable error instead.
-            assertZodV4(schema);
-            const { z } = await import("zod");
-            let jsonSchema = z.toJSONSchema(schema);
-            // Sanitize for OpenAI structured output compatibility
-            sanitizeForOpenAI(jsonSchema);
+            const jsonSchema = await zodToOpenAISchema(schema);
             const schemaFile = join(tmpdir(), `smithers-schema-${randomUUID()}.json`);
             await fs.writeFile(schemaFile, JSON.stringify(jsonSchema), "utf8");
             pushFlag(args, "--output-schema", schemaFile);

@@ -5,6 +5,7 @@
 import { BaseCliAgent, pushFlag, isRecord, asString, toolKindFromName, createSyntheticIdGenerator, } from "./BaseCliAgent/index.js";
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
+/** @typedef {import("./BaseCliAgent/AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
 
 /**
  * @returns {AgentCapabilityRegistry}

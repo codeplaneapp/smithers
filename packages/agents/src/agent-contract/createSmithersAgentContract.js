@@ -119,10 +119,7 @@ function inferCategory(name) {
     if (DEBUG_TOOL_NAMES.has(name)) {
         return "debug";
     }
-    if (name.startsWith("memory_") || name.startsWith("cron_")) {
-        return "admin";
-    }
-    return "admin";
+    return "admin"; // memory_*/cron_* and anything unrecognized are admin
 }
 /**
  * @param {string} name

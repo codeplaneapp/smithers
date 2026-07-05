@@ -26,6 +26,11 @@ function kimiOAuthHost() {
  */
 const inflightRefreshes = new Map();
 
+/**
+ * @param {string} credsDir
+ * @param {string} fileName
+ * @returns {Promise<{ ok: boolean; refreshed?: boolean; deduped?: boolean; reason?: string; expiredAt?: string | null }>}
+ */
 async function refreshKimiTokenIfNeeded(credsDir, fileName) {
     const path = join(credsDir, fileName);
     /** @type {{access_token?: string, refresh_token?: string, expires_at?: number, token_type?: string, scope?: string} | null} */
@@ -188,11 +193,9 @@ async function ensureKimiCredentialsUsable(shareDir, agentId, agentModel) {
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
+/** @typedef {import("./BaseCliAgent/AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
 /** @typedef {import("./KimiAgentOptions.ts").KimiAgentOptions} KimiAgentOptions */
 
-function resolveKimiBuiltIns() {
-    return ["default"];
-}
 /**
  * @param {KimiAgentOptions} [opts]
  * @returns {AgentCapabilityRegistry}
@@ -216,7 +219,7 @@ export function createKimiCapabilityRegistry(opts = {}) {
             supportsUiRequests: false,
             methods: [],
         },
-        builtIns: resolveKimiBuiltIns(),
+        builtIns: ["default"],
     };
 }
 export class KimiAgent extends BaseCliAgent {

@@ -14,6 +14,9 @@
  *
  * This function fixes these issues in-place so any agent (Codex, future
  * OpenAI-backed agents, etc.) can safely use a JSON Schema for OpenAI.
+ *
+ * @param {unknown} node - JSON Schema node; mutated in place.
+ * @returns {void}
  */
 export function sanitizeForOpenAI(node) {
     if (node == null || typeof node !== "object")

@@ -4,6 +4,11 @@ import { dynamicTool, jsonSchema } from "ai";
 /** @typedef {import("./DocumentParsingToolset.ts").DocumentParsingToolset} DocumentParsingToolset */
 /** @typedef {import("./DocumentParsingToolsetOptions.ts").DocumentParsingToolsetOptions} DocumentParsingToolsetOptions */
 
+// LlamaParse agentic parses are async: after job creation we poll its status,
+// bounded to ~20s total (attempts x interval) before the tool errors out.
+const LLAMAPARSE_POLL_MAX_ATTEMPTS = 20;
+const LLAMAPARSE_POLL_INTERVAL_MS = 1000;
+
 const inputSchema = {
   type: "object",
   additionalProperties: false,
@@ -280,7 +285,7 @@ async function postMultipart(request, url, apiKey, body) {
  */
 async function pollLlamaParseJob(request, baseUrl, apiKey, jobId, outputFormat) {
   const expand = outputFormat === "text" ? "text_full,metadata" : "markdown_full,text_full,metadata";
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < LLAMAPARSE_POLL_MAX_ATTEMPTS; attempt += 1) {
     const json = await getJson(request, `${baseUrl}/api/v2/parse/${encodeURIComponent(jobId)}?expand=${expand}`, apiKey);
     const job = pickObject(json, "job") ?? json;
     const status = pickString(job, "status");
@@ -288,7 +293,7 @@ async function pollLlamaParseJob(request, baseUrl, apiKey, jobId, outputFormat) 
     if (status === "FAILED" || status === "failed" || status === "CANCELLED" || status === "cancelled") {
       throw new Error(`LlamaParse job ${jobId} ${status}: ${pickString(job, "error_message") ?? "no error details"}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, LLAMAPARSE_POLL_INTERVAL_MS));
   }
   throw new Error(`LlamaParse job ${jobId} did not complete before timeout`);
 }
