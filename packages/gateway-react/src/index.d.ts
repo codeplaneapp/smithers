@@ -339,4 +339,366 @@ declare function useGatewayConnectionStatus(): UseGatewayConnectionStatusResult;
 
 declare function useSmithersCollections(): SmithersCollectionsContextValue;
 
-export { type GatewayAsyncState, type GatewayConnectionState, type GatewayConnectionStatus, type GatewayExtensionStreamState, type NodeStatus, SmithersCollectionsContext, type SmithersCollectionsContextValue, SmithersCollectionsProvider, SmithersGatewayContext, SmithersGatewayProvider, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, createGatewayReactRoot, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayCrons, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMemoryFacts, useGatewayMutation, useGatewayNodeOutput, useGatewayPrompts, useGatewayRpc, useGatewayRun, useGatewayRunEvents, useGatewayRunTree, useGatewayRuns, useGatewayScores, useGatewayTickets, useGatewayWorkflows, useSmithersCollections, useSmithersGateway };
+/**
+ * UI-facing types for the delegation-chain folded state (the flux store the
+ * `delegation-chain` workflow UIs render from). These mirror the frozen build
+ * contract; the zod row schemas live in `packages/components` — this module is
+ * plain TypeScript plus the narrow runtime guards `foldDelegation` uses to
+ * tolerate malformed rows without throwing.
+ */
+type Tier = "fable" | "opus" | "sonnet" | "haiku";
+declare const DELEGATION_TIERS: readonly Tier[];
+/**
+ * The five developer-preview flavors a `preview` gate / `dcDevPreview` row can
+ * carry: `app` = the built thing itself (or a UI rendering it), `terminal` =
+ * a rendered terminal + instructions for driving a CLI, `api` = an explorer
+ * UI for a built API, `throwaway-ui` = a disposable UI over the work,
+ * `slideshow` = an HTML slideshow of what was done (the no-runnable-code
+ * fallback).
+ */
+type DevPreviewKind = "app" | "terminal" | "api" | "throwaway-ui" | "slideshow";
+type Gate = {
+    method: "review";
+    tier: Tier;
+    brief: string;
+} | {
+    method: "check";
+    command: string;
+} | {
+    method: "approval";
+    policyMatch: string;
+}
+/**
+ * Developer preview: post-execution backpressure. A successful build
+ * (`dcDevPreview.builtOk`) is REQUIRED for the node to pass; the rendered
+ * artifact carries user invalidate / request-changes affordances in the UI
+ * (which emit `dc-edit` rounds).
+ */
+ | {
+    method: "preview";
+    kind: DevPreviewKind;
+    brief: string;
+};
+/** Predicted (or measured) resource envelope for a node/subtree. */
+type Estimate = {
+    tokens: number;
+    costUsd: number;
+    minutes: number;
+};
+type DcGoalRow = {
+    logicalId: string;
+    refinedPrompt: string;
+    assumptions: string[];
+    questionsAsked: number;
+};
+type DcQuestionRow = {
+    logicalId: string;
+    seq: number;
+    question: string;
+    header: string;
+    kind: "select" | "confirm" | "text";
+    options?: Array<{
+        label: string;
+        description: string;
+    }>;
+    recommended: string;
+    reason: string;
+    resolved: boolean;
+};
+type DcPlanChild = {
+    logicalId: string;
+    tier: Tier;
+    kind: "chunk" | "leaf";
+    title: string;
+    brief: string;
+    estimate: Estimate;
+};
+type DcPlanRisk = {
+    id: string;
+    description: string;
+    /** `null` means "considered, judged routine" — that judgment is scored. */
+    probe: "poc" | "research" | null;
+    reason: string;
+};
+type DcPlanRow = {
+    logicalId: string;
+    tier: Tier;
+    title: string;
+    brief: string;
+    children: DcPlanChild[];
+    subtreeEstimate: Estimate;
+    risks: DcPlanRisk[];
+    orchestration?: "tasks" | "workflow";
+};
+type DcPreviewRow = {
+    logicalId: string;
+    /** Markdown/pseudocode — ALWAYS shown with a "never executed" warning. */
+    expectedOutput: string;
+};
+type DcGatesRow = {
+    logicalId: string;
+    gates: Gate[];
+    depsLogical: string[];
+};
+/**
+ * Developer-preview build result (physical node phase `dev-preview`,
+ * `dc:<logicalId>:dev-preview`). `builtOk: false` fails the gate like a
+ * failed review — the node is redelegated with the failure folded in.
+ */
+type DcDevPreviewRow = {
+    logicalId: string;
+    kind: DevPreviewKind;
+    title: string;
+    builtOk: boolean;
+    artifact: {
+        type: "html" | "url" | "markdown";
+        content?: string;
+        url?: string;
+    };
+    instructions?: string;
+    summary: string;
+};
+type DcProbeRow = {
+    probeId: string;
+    parentLogicalId: string;
+    kind: "poc" | "research";
+    question: string;
+    answer: string;
+    /** Well-sourced markdown; delivered to the NEAREST PARENT only. */
+    report: string;
+    planImpact: "changes" | "confirms" | "none";
+    proposedChange?: string;
+};
+type DcReplanRow = {
+    round: number;
+    logicalId: string;
+    decision: "invalidated" | "reaffirmed";
+    reason: string;
+    trigger: {
+        type: "probe" | "user-edit" | "review-fail";
+        ref: string;
+    };
+};
+type DcExecRow = {
+    logicalId: string;
+    attempt: number;
+    summary: string;
+    artifacts: string[];
+    /** Best-effort measured usage from engine data, where available. */
+    actual?: Partial<Estimate>;
+    /** The VCS commits this attempt produced; reviews use it to inspect the work. */
+    commitRange?: {
+        from: string;
+        to: string;
+        vcs: "jj" | "git";
+    };
+};
+type DcReviewRow = {
+    logicalId: string;
+    attempt: number;
+    verdict: "pass" | "fail";
+    feedback: string;
+};
+/** Signal payload delivered on correlation key `dc-edit`. */
+type DcEditRow = {
+    editId: string;
+    logicalId: string;
+    editedOutput: unknown;
+    note?: string;
+};
+/** Signal payload delivered on correlation key `dc-skip-preview`. */
+type DcSkipRow = {
+    skipped: true;
+};
+type DcPollAnswer = {
+    question: string;
+    rating: 1 | 2 | 3 | 4 | 5;
+};
+/** HumanTask json-form payload for the end-of-run poll. */
+type DcPollRow = {
+    answers: DcPollAnswer[];
+    comment?: string;
+};
+/**
+ * One durable row the reducer folds: `table` names the output table the row
+ * was written to, `nodeId` is the PHYSICAL smithers node id
+ * (`dc:<logicalId>:<phase>`), `iteration` is the loop/retry attempt of that
+ * physical node, and `row` is the untrusted row payload (validated by the
+ * guards below). `seq` is an optional global ordering hint (gateway event
+ * seq); the fold stays deterministic without it.
+ */
+type DelegationOutputRecord = {
+    table: string;
+    nodeId: string;
+    iteration: number;
+    row: unknown;
+    seq?: number;
+};
+/** Pending-human marker for a physical node (from the approvals surface). */
+type DelegationApprovalRecord = {
+    table: "_approval";
+    nodeId: string;
+    iteration?: number;
+    pending: boolean;
+    seq?: number;
+};
+type DelegationRecord = DelegationOutputRecord | DelegationApprovalRecord;
+type DelegationNodeKind = "goal" | "chunk" | "leaf" | "poc" | "research" | "score";
+type DelegationNodeStatus = "planned" | "previewing" | "derisking" | "ready" | "running" | "awaiting-human" | "invalidated" | "done" | "failed";
+/**
+ * One archived (or current) version of a node. Version bumps happen on
+ * plan-level invalidations ONLY (`dcReplan` decision `"invalidated"`); review
+ * failures retry as new attempts WITHIN a version. The current version is the
+ * last entry (no `invalidatedBy`); every prior entry carries the `dcReplan`
+ * row that killed it.
+ */
+type DelegationVersionSnapshot = {
+    version: number;
+    plan?: DcPlanRow;
+    gates?: DcGatesRow;
+    exec?: DcExecRow[];
+    review?: DcReviewRow[];
+    invalidatedBy?: DcReplanRow;
+};
+type DelegationNodeState = {
+    logicalId: string;
+    parentId: string | null;
+    tier: Tier;
+    kind: DelegationNodeKind;
+    title: string;
+    brief: string;
+    status: DelegationNodeStatus;
+    /** Current version number (1-based). */
+    version: number;
+    versions: DelegationVersionSnapshot[];
+    deps: string[];
+    gates: Gate[];
+    preview?: string;
+    /** Latest developer-preview build for the current version. */
+    devPreview?: DcDevPreviewRow;
+    output?: unknown;
+    /** Latest prediction for this node/subtree — replans supersede. */
+    estimate?: Estimate;
+    /** Rolled-up actuals so far (self + descendants' `dcExec.actual`). */
+    actual?: Partial<Estimate>;
+    /** Pending-human rollup: `self` for this node, `descendants` counts strict descendants. */
+    attention: {
+        self: boolean;
+        descendants: number;
+    };
+};
+type DelegationEdge = {
+    from: string;
+    to: string;
+    kind: "child" | "dep" | "gate" | "probe";
+};
+type DelegationPhase = "goal" | "planning" | "preview" | "gates" | "derisk" | "execution" | "scoring" | "done";
+type DelegationGraph = {
+    nodes: Record<string, DelegationNodeState>;
+    rootId: string | null;
+    edges: DelegationEdge[];
+    phase: DelegationPhase;
+    pendingQuestions: DcQuestionRow[];
+    refinedPrompt?: string;
+    /**
+     * Run-level rollup: `predicted` uses the LATEST plan/replan estimates (a
+     * child's own re-forecast supersedes its parent's stale estimate for it);
+     * `actual` sums every reported `dcExec.actual`. Drives the
+     * "$actual of $latestPredicted" progress bar.
+     */
+    budget: {
+        predicted: Estimate | null;
+        actual: Partial<Estimate>;
+    };
+    scores?: Record<string, unknown>;
+};
+declare function isTier(value: unknown): value is Tier;
+declare function isEstimate(value: unknown): value is Estimate;
+declare function isDevPreviewKind(value: unknown): value is DevPreviewKind;
+declare function isGate(value: unknown): value is Gate;
+declare function isDcGoalRow(value: unknown): value is DcGoalRow;
+declare function isDcQuestionRow(value: unknown): value is DcQuestionRow;
+declare function isDcPlanChild(value: unknown): value is DcPlanChild;
+declare function isDcPlanRow(value: unknown): value is DcPlanRow;
+declare function isDcPreviewRow(value: unknown): value is DcPreviewRow;
+declare function isDcGatesRow(value: unknown): value is DcGatesRow;
+declare function isDcDevPreviewRow(value: unknown): value is DcDevPreviewRow;
+declare function isDcProbeRow(value: unknown): value is DcProbeRow;
+declare function isDcReplanRow(value: unknown): value is DcReplanRow;
+declare function isDcExecRow(value: unknown): value is DcExecRow;
+declare function isDcReviewRow(value: unknown): value is DcReviewRow;
+declare function isDcEditRow(value: unknown): value is DcEditRow;
+declare function isDcSkipRow(value: unknown): value is DcSkipRow;
+declare function isDcPollRow(value: unknown): value is DcPollRow;
+declare function isDelegationApprovalRecord(record: DelegationRecord): record is DelegationApprovalRecord;
+
+/**
+ * Pure, non-React reducer that folds durable delegation rows into the
+ * `DelegationGraph` flux state the UI renders. Deterministic and
+ * order-insensitive: records are sorted internally by
+ * (table-priority, iteration, intrinsic row seq, seq, row identity), and the
+ * fold itself is structural (versions, cascades, and rollups are derived from
+ * the full record set, not from arrival order), so shuffling the input yields
+ * a deep-equal graph.
+ *
+ * Tolerance: unknown tables are ignored; malformed rows are reported through
+ * `options.onIgnored` and skipped — the reducer never throws on bad data.
+ */
+
+type DelegationFoldIssue = {
+    record: DelegationRecord;
+    reason: "unknown-table" | "malformed-row";
+};
+type FoldDelegationOptions = {
+    /** Called for every ignored record (unknown table / malformed row). */
+    onIgnored?: (issue: DelegationFoldIssue) => void;
+};
+/**
+ * Parse a physical delegation node id (`dc:<logicalId>:<phase>`) into its
+ * logical id and phase. Returns null for anything that is not a delegation
+ * node id.
+ */
+declare function parseDelegationNodeId(nodeId: string): {
+    logicalId: string;
+    phase: string;
+} | null;
+/**
+ * The output table a physical delegation node writes to, derived from the
+ * `dc:<logicalId>:<phase>` naming contract (plus the signal/poll listener
+ * node ids `dc-edit` / `dc-skip-preview` / `dc-poll`). Null when the node is
+ * not part of a delegation chain.
+ */
+declare function delegationTableForNodeId(nodeId: string): string | null;
+declare function foldDelegation(records: DelegationRecord[], options?: FoldDelegationOptions): DelegationGraph;
+
+type UseDelegationChainResult = {
+    graph: DelegationGraph;
+    loading: boolean;
+    errors: unknown[];
+    actions: {
+        /** Deliver a live user edit of a node's output (Signal `dc-edit`). */
+        submitEdit(logicalId: string, editedOutput: unknown, note?: string): Promise<void>;
+        /** Skip the zero-backpressure preview phase (Signal `dc-skip-preview`). */
+        skipPreviews(): Promise<void>;
+        /** Answer a durable human request; `value` rides as JSON in `decision.note`. */
+        answerHuman(nodeId: string, iteration: number, value: unknown): Promise<void>;
+        /** Answer the end-of-run poll (the pending poll HumanTask). */
+        submitPoll(answers: DcPollAnswer[], comment?: string): Promise<void>;
+    };
+};
+/**
+ * Folded delegation-chain state for one run, per the frozen contract.
+ *
+ * Record assembly: the live run tree (`useGatewayRunTree`) enumerates every
+ * physical `dc:*` node (with loop/retry iterations), `getNodeOutput` fetches
+ * each node's durable row exactly once (re-checked when a `node.finished` /
+ * `node.failed` event for that node arrives — `useGatewayRunEvents` provides
+ * the liveness tick), and `useGatewayApprovals` supplies the `_approval`
+ * pending markers. The pure `foldDelegation` reducer turns those records into
+ * the graph; malformed/unknown rows surface in `errors` instead of throwing.
+ */
+declare function useDelegationChain(params: {
+    runId: string | undefined;
+}): UseDelegationChainResult;
+
+export { DELEGATION_TIERS, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcGatesRow, type DcGoalRow, type DcPlanChild, type DcPlanRisk, type DcPlanRow, type DcPollAnswer, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcSkipRow, type DelegationApprovalRecord, type DelegationEdge, type DelegationFoldIssue, type DelegationGraph, type DelegationNodeKind, type DelegationNodeState, type DelegationNodeStatus, type DelegationOutputRecord, type DelegationPhase, type DelegationRecord, type DelegationVersionSnapshot, type DevPreviewKind, type Estimate, type FoldDelegationOptions, type Gate, type GatewayAsyncState, type GatewayConnectionState, type GatewayConnectionStatus, type GatewayExtensionStreamState, type NodeStatus, SmithersCollectionsContext, type SmithersCollectionsContextValue, SmithersCollectionsProvider, SmithersGatewayContext, SmithersGatewayProvider, type Tier, type UseDelegationChainResult, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, createGatewayReactRoot, delegationTableForNodeId, foldDelegation, isDcDevPreviewRow, isDcEditRow, isDcExecRow, isDcGatesRow, isDcGoalRow, isDcPlanChild, isDcPlanRow, isDcPollRow, isDcPreviewRow, isDcProbeRow, isDcQuestionRow, isDcReplanRow, isDcReviewRow, isDcSkipRow, isDelegationApprovalRecord, isDevPreviewKind, isEstimate, isGate, isTier, parseDelegationNodeId, useDelegationChain, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayCrons, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMemoryFacts, useGatewayMutation, useGatewayNodeOutput, useGatewayPrompts, useGatewayRpc, useGatewayRun, useGatewayRunEvents, useGatewayRunTree, useGatewayRuns, useGatewayScores, useGatewayTickets, useGatewayWorkflows, useSmithersCollections, useSmithersGateway };
