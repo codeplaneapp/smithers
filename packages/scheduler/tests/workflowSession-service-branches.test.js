@@ -177,14 +177,18 @@ describe("WorkflowSessionService direct methods", () => {
       _tag: "ContinueAsNew",
       transition: {
         reason: "explicit",
-        statePayload: { timerStarts: { "timer::0": 1_000 } },
+        timerStarts: { "timer::0": 1_000 },
       },
     });
+    // The anchor lives on the dedicated `timerStarts` field, not inside the
+    // user-visible `statePayload`, so an explicit continue-as-new state cannot
+    // clobber it.
+    expect(decision.transition.statePayload).toBeUndefined();
 
     now = 4_000;
     const nextSession = makeWorkflowSession({
       nowMs: () => now,
-      initialTimerStarts: new Map(Object.entries(decision.transition.statePayload.timerStarts)),
+      initialTimerStarts: new Map(Object.entries(decision.transition.timerStarts)),
     });
 
     expect(run(nextSession.submitGraph(graph([task], workflow([
