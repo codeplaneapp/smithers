@@ -64,8 +64,8 @@ export function Header({ runId, compact }: { runId: string; compact: boolean }) 
   const { data, loading } = useRun(runId);
   const [now, setNow] = useState(() => Date.now());
 
-  const status = loading ? "connecting" : ((data?.["status"] as string | undefined) ?? "unknown");
-  const live = isRunningStatus(status);
+  const headerData = buildRunHeaderData(data as Record<string, unknown> | undefined, runId, now, loading);
+  const live = headerData.live;
 
   useEffect(() => {
     if (!live) return;
@@ -76,6 +76,5 @@ export function Header({ runId, compact }: { runId: string; compact: boolean }) 
     return () => clearInterval(timer);
   }, [live]);
 
-  const headerData = buildRunHeaderData(data as Record<string, unknown> | undefined, runId, now, loading);
   return <RunHeaderView data={headerData} compact={compact} />;
 }

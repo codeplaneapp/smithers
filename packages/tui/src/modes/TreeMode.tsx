@@ -70,6 +70,10 @@ function getPlainStyle(): SyntaxStyle {
 
 const COMPACT_WIDTH = 100;
 
+// Cap the inspector Logs tab to the newest rows so a chatty node can't make the
+// pane render thousands of lines per frame.
+const NODE_LOG_TAIL = 500;
+
 // ─── Approval Banner ─────────────────────────────────────────────────────────
 
 const MAX_OPTION_ROWS = 6;
@@ -373,7 +377,7 @@ function NodeInspector({
 
   // Iteration-aware so loop/retry attempts don't show mixed logs (node output
   // and approvals are already iteration-scoped); see nodeLogEvents.
-  const nodeLogs = nodeLogEvents(events, node.id, node.iteration).slice(-500);
+  const nodeLogs = nodeLogEvents(events, node.id, node.iteration).slice(-NODE_LOG_TAIL);
   const outputText = deriveOutputText(outputData, node);
   const propsText = JSON.stringify(
     {

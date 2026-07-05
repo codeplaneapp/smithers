@@ -14,12 +14,6 @@ export function runningNodes(nodes: readonly GatewayRunNode[]): GatewayRunNode[]
   return nodes.filter((n) => RUNNING_STATUSES.has(n.status ?? ""));
 }
 
-function eventNodeId(payload: Record<string, unknown> | undefined): string | undefined {
-  if (!payload) return undefined;
-  const raw = payload["nodeId"] ?? payload["node_id"];
-  return typeof raw === "string" ? raw : undefined;
-}
-
 const START_HINTS = ["node.start", "node.begin", "nodestarted", "agent.start", "tool.use", "toolcallstarted"];
 const END_HINTS = [
   "node.end",
@@ -49,7 +43,11 @@ export function activeNodeIdsFromEvents(events: readonly GatewayEventFrame[]): S
   for (const ev of events) {
     const { name: rawName, payload } = unwrapEvent(ev);
     const name = rawName.toLowerCase();
-    const nodeId = eventNodeId(payload);
+    // Deliberately only the nodeId/node_id keys — NOT the `nodeid` variant that
+    // normalizeFrame/extractNodeId also accept — to keep this signal's matching
+    // behavior unchanged.
+    const rawNodeId = payload?.["nodeId"] ?? payload?.["node_id"];
+    const nodeId = typeof rawNodeId === "string" ? rawNodeId : undefined;
     if (!nodeId) continue;
     if (matchesAny(name, END_HINTS)) {
       active.delete(nodeId);

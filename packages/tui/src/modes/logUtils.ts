@@ -3,6 +3,12 @@ import { normalizeFrame } from "./eventFrame.ts";
 
 export type AttemptKey = string; // `${nodeId}:${iteration}`
 
+// Cap for text/content/message fields so one giant agent message can't blow up
+// a single log row.
+const TEXT_PREVIEW_MAX = 200;
+// Cap for the JSON.stringify fallback preview of an arbitrary payload.
+const JSON_PREVIEW_MAX = 120;
+
 export function extractNodeId(payload: unknown): string | null {
   const p = payload as Record<string, unknown> | null | undefined;
   if (!p) return null;
@@ -21,15 +27,15 @@ export function extractEventText(event: string, payload: unknown): string {
   const p = payload as Record<string, unknown> | null | undefined;
   if (!p) return event;
 
-  if (typeof p["text"] === "string") return p["text"].slice(0, 200);
-  if (typeof p["content"] === "string") return p["content"].slice(0, 200);
-  if (typeof p["message"] === "string") return p["message"].slice(0, 200);
+  if (typeof p["text"] === "string") return p["text"].slice(0, TEXT_PREVIEW_MAX);
+  if (typeof p["content"] === "string") return p["content"].slice(0, TEXT_PREVIEW_MAX);
+  if (typeof p["message"] === "string") return p["message"].slice(0, TEXT_PREVIEW_MAX);
 
   const toolName = String(p["name"] ?? p["tool"] ?? p["toolName"] ?? p["tool_name"] ?? "");
   if (toolName) return `${toolName}(…)`;
 
   const str = JSON.stringify(p);
-  return str.length > 120 ? str.slice(0, 117) + "…" : str;
+  return str.length > JSON_PREVIEW_MAX ? str.slice(0, JSON_PREVIEW_MAX - 3) + "…" : str;
 }
 
 export function makeAttemptKey(nodeId: string, iteration: number | null): AttemptKey {

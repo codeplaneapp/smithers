@@ -115,13 +115,9 @@ const AUTOSTART_PROBE_TIMEOUT_MS = 1000;
 // authenticates the same way the RPC/WS client will — a gateway that gates
 // /health behind auth then answers consistently instead of the probe passing
 // while every later call is rejected.
-function probeHeaders(candidate: GatewayCandidate): Record<string, string> | undefined {
-  return candidate.token ? { authorization: `Bearer ${candidate.token}` } : undefined;
-}
-
 async function probeGateway(candidate: GatewayCandidate, timeoutMs = PROBE_REQUEST_TIMEOUT_MS): Promise<boolean> {
   return fetch(`${candidate.base}/health`, {
-    headers: probeHeaders(candidate),
+    headers: candidate.token ? { authorization: `Bearer ${candidate.token}` } : undefined,
     signal: AbortSignal.timeout(timeoutMs),
   }).then((r) => r.ok, () => false);
 }

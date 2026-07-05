@@ -1,8 +1,6 @@
 import type { GatewayEventFrame } from "../data.ts";
 import { unwrapEvent } from "./eventFrame.ts";
 
-export { unwrapEvent };
-
 export type FrameMarker = "notable" | "gate" | "normal";
 
 export type NodeSnapshot = {

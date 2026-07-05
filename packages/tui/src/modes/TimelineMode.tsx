@@ -10,8 +10,8 @@ import {
   nodeStatusGlyph,
   nodeStatusColor,
   snapshotKey,
-  unwrapEvent,
 } from "./timelineUtils.ts";
+import { unwrapEvent } from "./eventFrame.ts";
 import { isModifiedKeyEvent } from "./treeUtils.ts";
 import { useOverlayOpen } from "../OverlayContext.tsx";
 
@@ -95,7 +95,6 @@ function SnapshotPanel({
 }) {
   const snapshots = useMemo(
     () => extractNodeSnapshots(events, upToSeq),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [events, upToSeq],
   );
 
