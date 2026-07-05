@@ -4,6 +4,10 @@ import { LogLevel } from "effect";
 /** @typedef {import("./ResolvedSmithersObservabilityOptions.ts").ResolvedSmithersObservabilityOptions} ResolvedSmithersObservabilityOptions */
 /** @typedef {import("./SmithersObservabilityOptions.ts").SmithersObservabilityOptions} SmithersObservabilityOptions */
 
+// 4318 is the OTLP/HTTP receiver port of the local collector started by
+// `smithers observability` (docker-compose.otel.yml).
+const DEFAULT_OTLP_HTTP_ENDPOINT = "http://localhost:4318";
+
 /**
  * @param {LogLevel.LogLevel | string | undefined} value
  * @returns {LogLevel.LogLevel}
@@ -69,7 +73,7 @@ export function resolveSmithersObservabilityOptions(options = {}) {
         enabled: resolveEnabled(options.enabled),
         endpoint: options.endpoint ??
             process.env.OTEL_EXPORTER_OTLP_ENDPOINT ??
-            "http://localhost:4318",
+            DEFAULT_OTLP_HTTP_ENDPOINT,
         serviceName: options.serviceName ?? process.env.OTEL_SERVICE_NAME ?? "smithers",
         logFormat: options.logFormat
             ? resolveLogFormat(options.logFormat)

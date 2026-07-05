@@ -1,6 +1,9 @@
 import { Effect, Metric, MetricState, Option } from "effect";
 import { smithersMetricCatalog, toPrometheusMetricName, updateProcessMetrics, } from "./metrics/index.js";
-/** @typedef {import("./SmithersMetricDefinition.ts").SmithersMetricDefinition} SmithersMetricDefinition */
+/** @typedef {import("./metrics/SmithersMetricDefinition.ts").SmithersMetricDefinition} SmithersMetricDefinition */
+/** @typedef {{ boundary: number; count: number | bigint }} PrometheusBucket */
+/** @typedef {"counter" | "gauge" | "histogram" | "summary"} PrometheusMetricType */
+/** @typedef {{ type: PrometheusMetricType; help: string | undefined; lines: string[] }} PrometheusMetricRecord */
 
 /**
  * @param {string} text
@@ -86,13 +89,6 @@ function histogramBuckets(metricState) {
         buckets.push({ boundary, count });
     }
     return buckets.sort((left, right) => left.boundary - right.boundary);
-}
-/**
- * @param {SmithersMetricDefinition} definition
- * @returns {string | undefined}
- */
-function defaultMetricHelp(definition) {
-    return definition.description ?? definition.label;
 }
 /**
  * @param {SmithersMetricDefinition} definition
@@ -191,7 +187,8 @@ export function renderPrometheusMetrics() {
         }
     }
     for (const definition of smithersMetricCatalog) {
-        const metric = registerPrometheusMetric(registry, definition.prometheusName, definition.type, defaultMetricHelp(definition));
+        // description is the long-form HELP text; label is the required short human name.
+        const metric = registerPrometheusMetric(registry, definition.prometheusName, definition.type, definition.description ?? definition.label);
         if (metric.lines.length === 0) {
             metric.lines.push(...defaultPrometheusMetricLines(definition));
         }

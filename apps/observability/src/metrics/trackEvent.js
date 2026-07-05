@@ -66,6 +66,8 @@ import { agentErrorsTotal } from "./agentErrorsTotal.js";
 import { agentRetriesTotal } from "./agentRetriesTotal.js";
 import { agentTokensTotal } from "./agentTokensTotal.js";
 /** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {Extract<SmithersEvent, { type: "AgentEvent" }>["event"]} AgentEventPayload */
+/** @typedef {{ inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number; totalTokens?: number }} AgentUsageTotals */
 
 /**
  * @param {unknown} value
@@ -449,18 +451,9 @@ export function trackEvent(event) {
                 tags.model = event.model;
             if (event.agent && event.agent !== "unknown")
                 tags.agent = event.agent;
-            /**
-       * @template A
-       * @param {A} m
-       * @returns {A}
-       */
-            const tagMetric = (m) => {
-                let res = m;
-                for (const [k, v] of Object.entries(tags)) {
-                    res = Metric.tagged(res, k, v);
-                }
-                return res;
-            };
+            // tags only ever holds non-empty strings, so tagMetricWithTags' falsy-skip is a no-op here.
+            /** @type {<A>(m: A) => A} */
+            const tagMetric = (m) => tagMetricWithTags(m, tags);
             if (event.inputTokens > 0) {
                 effects.push(Metric.incrementBy(tagMetric(tokensInputTotal), event.inputTokens), Metric.update(tagMetric(tokensInputPerCall), event.inputTokens));
             }

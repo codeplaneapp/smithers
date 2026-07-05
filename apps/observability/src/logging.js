@@ -90,7 +90,7 @@ function toEffectLogLevel(level) {
  * @param {Effect.Effect<void, never, never>} effect
  * @param {LogAnnotations} [annotations]
  * @param {string} [span]
- * @returns {Effect.Effect<void, never, never> | null}
+ * @returns {Effect.Effect<void, never, never>}
  */
 function buildLogProgram(effect, annotations, span) {
     const correlationAnnotations = correlationContextToLogAnnotations(getCurrentCorrelationContext());
@@ -121,7 +121,6 @@ function buildLogProgram(effect, annotations, span) {
 function emitLog(effect, annotations, span, level = LOG_LEVEL_INFO) {
     if (level < minLevel) return;
     const program = buildLogProgram(effect, annotations, span);
-    if (!program) return;
     try {
         void getLogRunner().runFork(program.pipe(Logger.withMinimumLogLevel(toEffectLogLevel(level))));
     } catch {
@@ -139,7 +138,6 @@ function emitLog(effect, annotations, span, level = LOG_LEVEL_INFO) {
 async function emitLogAwait(effect, annotations, span, level = LOG_LEVEL_INFO) {
     if (level < minLevel) return;
     const program = buildLogProgram(effect, annotations, span);
-    if (!program) return;
     try {
         await getLogRunner().runPromise(program.pipe(Logger.withMinimumLogLevel(toEffectLogLevel(level))));
     } catch {

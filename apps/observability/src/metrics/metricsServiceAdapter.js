@@ -1,4 +1,3 @@
-import {} from "../_coreMetrics.js";
 import { renderPrometheusSamples, } from "../_corePrometheus.js";
 import { Effect, Metric, MetricState } from "effect";
 import { toPrometheusMetricName } from "./toPrometheusMetricName.js";
@@ -89,19 +88,12 @@ function metricsServiceLabels(metricKey) {
         .sort(([left], [right]) => left.localeCompare(right))));
 }
 /**
- * @param {MetricLabels} labels
- * @returns {string}
- */
-function metricsServiceLabelsKey(labels) {
-    return JSON.stringify(Object.entries(labels).sort(([left], [right]) => left.localeCompare(right)));
-}
-/**
  * @param {string} name
  * @param {MetricLabels} labels
  * @returns {string}
  */
 function metricsServiceSnapshotKey(name, labels) {
-    return `${name}|${metricsServiceLabelsKey(labels)}`;
+    return `${name}|${JSON.stringify(Object.entries(labels).sort(([left], [right]) => left.localeCompare(right)))}`;
 }
 /**
  * @returns {PrometheusSample[]}
