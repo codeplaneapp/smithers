@@ -9,8 +9,17 @@
  *
  * Tolerance: unknown tables are ignored; malformed rows are reported through
  * `options.onIgnored` and skipped — the reducer never throws on bad data.
+ *
+ * Internals are an Effect-native state machine: each record is classified
+ * into a `DelegationEvent` (`Data.TaggedEnum`, see `delegationEvents.ts`),
+ * the bucket stage dispatches with `Match.tagsExhaustive` over event tags,
+ * and the fold phases (bucket → version assembly → cascade closure →
+ * attention rollup → budget rollup) are composable pure stages piped through
+ * one `Effect` that `foldDelegation` runs synchronously at the boundary —
+ * the public function stays a synchronous pure fold.
  */
 
+import { Effect, Match } from "effect";
 import type {
   DcDevPreviewRow,
   DcEditRow,
@@ -37,49 +46,20 @@ import type {
   Tier,
 } from "./types.ts";
 import {
-  isDcDevPreviewRow,
-  isDcEditRow,
-  isDcExecRow,
-  isDcGatesRow,
-  isDcGoalRow,
-  isDcPlanRow,
-  isDcPollRow,
-  isDcPreviewRow,
-  isDcProbeRow,
-  isDcQuestionRow,
-  isDcReplanRow,
-  isDcReviewRow,
-  isDcSkipRow,
-  isDelegationApprovalRecord,
-} from "./types.ts";
+  classifyDelegationRecord,
+  DelegationEvent,
+  TABLE_PRIORITY,
+  type DelegationIgnoreReason,
+} from "./delegationEvents.ts";
 
 export type DelegationFoldIssue = {
   record: DelegationRecord;
-  reason: "unknown-table" | "malformed-row";
+  reason: DelegationIgnoreReason;
 };
 
 export type FoldDelegationOptions = {
   /** Called for every ignored record (unknown table / malformed row). */
   onIgnored?: (issue: DelegationFoldIssue) => void;
-};
-
-/** Phase-ordered table priority — the sort key's leading component. */
-const TABLE_PRIORITY: Record<string, number> = {
-  dcGoal: 0,
-  dcQuestion: 1,
-  dcPlan: 2,
-  dcPreview: 3,
-  dcGates: 4,
-  dcProbe: 5,
-  dcEdit: 6,
-  dcReplan: 7,
-  dcExec: 8,
-  dcReview: 9,
-  dcDevPreview: 10,
-  dcSkip: 11,
-  dcPoll: 12,
-  dcScore: 13,
-  _approval: 14,
 };
 
 const PHASE_SUFFIX_TO_TABLE: Record<string, string> = {
@@ -228,7 +208,7 @@ function hasAnyField(partial: Partial<Estimate>): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// The fold
+// Fold state threaded through the stages
 // ---------------------------------------------------------------------------
 
 type InternalNode = {
@@ -255,80 +235,97 @@ type InternalNode = {
   cascadeRound?: number;
 };
 
+/** Mutable accumulator threaded through the fold's composable stages. */
+type FoldState = {
+  readonly sorted: readonly DelegationRecord[];
+  readonly onIgnored: (record: DelegationRecord, reason: DelegationIgnoreReason) => void;
+  readonly nodes: Map<string, InternalNode>;
+  readonly questionsByKey: Map<string, DcQuestionRow>;
+  readonly scores: Record<string, unknown>;
+  readonly approvalByKey: Map<string, boolean>;
+  refinedPrompt: string | undefined;
+  previewsSkipped: boolean;
+  pollSubmitted: boolean;
+  // Filled by the materialize/rollup stages.
+  states: Record<string, DelegationNodeState>;
+  structuralIds: Set<string>;
+  childrenOf: Map<string, string[]>;
+  rootId: string | null;
+  edges: DelegationEdge[];
+  budgetPredicted: Estimate | null;
+  budgetActual: Partial<Estimate>;
+};
+
+function makeFoldState(records: DelegationRecord[], options: FoldDelegationOptions): FoldState {
+  return {
+    sorted: [...records].sort(compareRecords),
+    onIgnored: (record, reason) => {
+      options.onIgnored?.({ record, reason });
+    },
+    nodes: new Map(),
+    questionsByKey: new Map(),
+    scores: {},
+    approvalByKey: new Map(),
+    refinedPrompt: undefined,
+    previewsSkipped: false,
+    pollSubmitted: false,
+    states: {},
+    structuralIds: new Set(),
+    childrenOf: new Map(),
+    rootId: null,
+    edges: [],
+    budgetPredicted: null,
+    budgetActual: {},
+  };
+}
+
+function ensureNode(nodes: Map<string, InternalNode>, logicalId: string): InternalNode {
+  let node = nodes.get(logicalId);
+  if (!node) {
+    node = {
+      logicalId,
+      parentId: null,
+      declarationCount: 0,
+      planRows: [],
+      gatesRows: [],
+      execRows: [],
+      reviewRows: [],
+      devPreviews: [],
+      isGoal: false,
+      invalidations: [],
+      reaffirms: [],
+      edits: [],
+      approvalPending: false,
+    };
+    nodes.set(logicalId, node);
+  }
+  return node;
+}
+
 function lastOf<T>(items: readonly T[]): T | undefined {
   return items.length ? items[items.length - 1] : undefined;
 }
 
-export function foldDelegation(records: DelegationRecord[], options: FoldDelegationOptions = {}): DelegationGraph {
-  const ignore = (record: DelegationRecord, reason: DelegationFoldIssue["reason"]) => {
-    options.onIgnored?.({ record, reason });
-  };
+// ---------------------------------------------------------------------------
+// Stage 1 — bucket: classify each sorted record into a DelegationEvent and
+// dispatch it into the accumulator with an exhaustive Match over event tags.
+// ---------------------------------------------------------------------------
 
-  const sorted = [...records].sort(compareRecords);
-
-  const nodes = new Map<string, InternalNode>();
-  const ensure = (logicalId: string): InternalNode => {
-    let node = nodes.get(logicalId);
-    if (!node) {
-      node = {
-        logicalId,
-        parentId: null,
-        declarationCount: 0,
-        planRows: [],
-        gatesRows: [],
-        execRows: [],
-        reviewRows: [],
-        devPreviews: [],
-        isGoal: false,
-        invalidations: [],
-        reaffirms: [],
-        edits: [],
-        approvalPending: false,
-      };
-      nodes.set(logicalId, node);
-    }
-    return node;
-  };
-
-  const questionsByKey = new Map<string, DcQuestionRow>();
-  const scores: Record<string, unknown> = {};
-  const approvalByKey = new Map<string, boolean>();
-  let refinedPrompt: string | undefined;
-  let previewsSkipped = false;
-  let pollSubmitted = false;
-
-  for (const record of sorted) {
-    if (record.table === "_approval") {
-      if (!isDelegationApprovalRecord(record)) {
-        ignore(record, "malformed-row");
-        continue;
-      }
-      approvalByKey.set(`${record.nodeId} ${record.iteration ?? 0}`, record.pending);
-      continue;
-    }
-    const priority = TABLE_PRIORITY[record.table];
-    if (priority === undefined) {
-      ignore(record, "unknown-table");
-      continue;
-    }
-    const row = (record as { row?: unknown }).row;
-    switch (record.table) {
-      case "dcGoal": {
-        if (!isDcGoalRow(row)) { ignore(record, "malformed-row"); break; }
+function applyDelegationEvent(state: FoldState): (event: DelegationEvent) => void {
+  const ensure = (logicalId: string) => ensureNode(state.nodes, logicalId);
+  return Match.type<DelegationEvent>().pipe(
+    Match.tagsExhaustive({
+      GoalRefined: ({ row }) => {
         const node = ensure(row.logicalId);
         node.isGoal = true;
         node.goalRow = row;
-        refinedPrompt = row.refinedPrompt;
-        break;
-      }
-      case "dcQuestion": {
-        if (!isDcQuestionRow(row)) { ignore(record, "malformed-row"); break; }
+        state.refinedPrompt = row.refinedPrompt;
+      },
+      QuestionAsked: ({ row }) => {
         ensure(row.logicalId).isGoal = true;
-        questionsByKey.set(`${row.logicalId} ${row.seq}`, row);
-        break;
-      }
-      case "dcPlan": {
-        if (!isDcPlanRow(row)) { ignore(record, "malformed-row"); break; }
+        state.questionsByKey.set(`${row.logicalId} ${row.seq}`, row);
+      },
+      PlanDeclared: ({ row }) => {
         const node = ensure(row.logicalId);
         node.planRows.push(row);
         for (const child of row.children) {
@@ -337,99 +334,92 @@ export function foldDelegation(records: DelegationRecord[], options: FoldDelegat
           childNode.declared = child;
           childNode.declarationCount += 1;
         }
-        break;
-      }
-      case "dcPreview": {
-        if (!isDcPreviewRow(row)) { ignore(record, "malformed-row"); break; }
+      },
+      PreviewWritten: ({ row }) => {
         ensure(row.logicalId).previewRow = row;
-        break;
-      }
-      case "dcGates": {
-        if (!isDcGatesRow(row)) { ignore(record, "malformed-row"); break; }
+      },
+      GatesDeclared: ({ row }) => {
         ensure(row.logicalId).gatesRows.push(row);
-        break;
-      }
-      case "dcProbe": {
-        if (!isDcProbeRow(row)) { ignore(record, "malformed-row"); break; }
+      },
+      ProbeReported: ({ row }) => {
         const node = ensure(row.probeId);
         node.probeRow = row;
         node.parentId = row.parentLogicalId;
         ensure(row.parentLogicalId);
-        break;
-      }
-      case "dcReplan": {
-        if (!isDcReplanRow(row)) { ignore(record, "malformed-row"); break; }
+      },
+      ReplanDecided: ({ row }) => {
         const node = ensure(row.logicalId);
         (row.decision === "invalidated" ? node.invalidations : node.reaffirms).push(row);
-        break;
-      }
-      case "dcExec": {
-        if (!isDcExecRow(row)) { ignore(record, "malformed-row"); break; }
+      },
+      ExecFinished: ({ row }) => {
         ensure(row.logicalId).execRows.push(row);
-        break;
-      }
-      case "dcReview": {
-        if (!isDcReviewRow(row)) { ignore(record, "malformed-row"); break; }
+      },
+      ReviewVerdict: ({ row }) => {
         ensure(row.logicalId).reviewRows.push(row);
-        break;
-      }
-      case "dcDevPreview": {
-        if (!isDcDevPreviewRow(row)) { ignore(record, "malformed-row"); break; }
-        ensure(row.logicalId).devPreviews.push({ row, iteration: record.iteration });
-        break;
-      }
-      case "dcEdit": {
-        if (!isDcEditRow(row)) { ignore(record, "malformed-row"); break; }
+      },
+      DevPreviewBuilt: ({ row, iteration }) => {
+        ensure(row.logicalId).devPreviews.push({ row, iteration });
+      },
+      EditDelivered: ({ row }) => {
         ensure(row.logicalId).edits.push(row);
-        break;
-      }
-      case "dcSkip": {
-        if (!isDcSkipRow(row)) { ignore(record, "malformed-row"); break; }
-        previewsSkipped = true;
-        break;
-      }
-      case "dcPoll": {
-        if (!isDcPollRow(row)) { ignore(record, "malformed-row"); break; }
-        pollSubmitted = true;
-        break;
-      }
-      case "dcScore": {
-        const key =
-          typeof row === "object" && row !== null && typeof (row as Record<string, unknown>).logicalId === "string"
-            ? ((row as Record<string, unknown>).logicalId as string)
-            : record.nodeId;
-        scores[key] = row;
-        break;
-      }
-      default:
-        ignore(record, "unknown-table");
-    }
-  }
+      },
+      PreviewsSkipped: () => {
+        state.previewsSkipped = true;
+      },
+      PollSubmitted: () => {
+        state.pollSubmitted = true;
+      },
+      ScoreReported: ({ key, row }) => {
+        state.scores[key] = row;
+      },
+      ApprovalMarked: ({ nodeId, iteration, pending }) => {
+        state.approvalByKey.set(`${nodeId} ${iteration}`, pending);
+      },
+      Ignored: ({ record, reason }) => {
+        state.onIgnored(record, reason);
+      },
+    }),
+  );
+}
+
+function bucketStage(state: FoldState): FoldState {
+  const apply = applyDelegationEvent(state);
+  for (const record of state.sorted) apply(classifyDelegationRecord(record));
 
   // Pending-approval flags: dedupe latest-per-(nodeId, iteration), then map
   // physical node ids onto logical nodes.
-  for (const [key, pending] of approvalByKey) {
+  for (const [key, pending] of state.approvalByKey) {
     if (!pending) continue;
-    const nodeId = key.split(" ")[0]!;
+    const nodeId = key.split(" ")[0]!;
     const parsed = parseDelegationNodeId(nodeId);
     if (!parsed) continue;
-    ensure(parsed.logicalId).approvalPending = true;
+    ensureNode(state.nodes, parsed.logicalId).approvalPending = true;
   }
 
   // Keep bucket ordering canonical regardless of table interleaving.
-  for (const node of nodes.values()) {
+  for (const node of state.nodes.values()) {
     node.invalidations.sort((a, b) => a.round - b.round);
     node.reaffirms.sort((a, b) => a.round - b.round);
     node.execRows.sort((a, b) => a.attempt - b.attempt);
     node.reviewRows.sort((a, b) => a.attempt - b.attempt);
     node.devPreviews.sort((a, b) => a.iteration - b.iteration);
   }
+  return state;
+}
 
-  // -------------------------------------------------------------------------
-  // Invalidation cascade: dependents of an invalidated node (via child AND
-  // dep/gate edges, transitively) downgrade to "derisking" until a reaffirm
-  // or a replan of their own in the SAME or later round appears.
-  // -------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Stage 2 — invalidation cascade: dependents of an invalidated node (via
+// child AND dep/gate edges, transitively) downgrade to "derisking" until a
+// reaffirm or a replan of their own in the SAME or later round appears.
+// ---------------------------------------------------------------------------
+
+/** The plan row of a node's CURRENT version (undefined while awaiting replan). */
+function currentPlanOf(node: InternalNode): DcPlanRow | undefined {
+  return lastOf(node.planRows.slice(node.invalidations.length));
+}
+
+function cascadeStage(state: FoldState): FoldState {
+  const { nodes } = state;
   const dependents = new Map<string, Set<string>>();
   const addDependent = (of: string, dependent: string) => {
     if (of === dependent) return;
@@ -445,9 +435,6 @@ export function foldDelegation(records: DelegationRecord[], options: FoldDelegat
   const cascadeResolved = (node: InternalNode, round: number): boolean =>
     node.reaffirms.some((row) => row.round >= round) ||
     node.invalidations.some((row) => row.round >= round);
-  /** The plan row of a node's CURRENT version (undefined while awaiting replan). */
-  const currentPlanOf = (node: InternalNode): DcPlanRow | undefined =>
-    lastOf(node.planRows.slice(node.invalidations.length));
   /** A replanned parent's current plan re-declaring a child reaffirms it. */
   const redeclaredByReplannedParent = (parent: InternalNode, childId: string): boolean =>
     parent.invalidations.length > 0 &&
@@ -477,10 +464,16 @@ export function foldDelegation(records: DelegationRecord[], options: FoldDelegat
       }
     }
   }
+  return state;
+}
 
-  // -------------------------------------------------------------------------
-  // Materialize node states
-  // -------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Stage 3 — version assembly: materialize each node's version snapshots and
+// its own-lifecycle status.
+// ---------------------------------------------------------------------------
+
+function materializeStage(state: FoldState): FoldState {
+  const { nodes } = state;
   const states: Record<string, DelegationNodeState> = {};
   const structuralIds = new Set<string>();
   const kindOf = (node: InternalNode): DelegationNodeKind => {
@@ -601,15 +594,25 @@ export function foldDelegation(records: DelegationRecord[], options: FoldDelegat
     };
   }
 
-  // Structural statuses (nodes with no own lifecycle evidence yet): roll up
-  // from children — all children done means done; any execution activity in
-  // the subtree means running; otherwise ready/previewing/planned.
+  state.states = states;
+  state.structuralIds = structuralIds;
+  return state;
+}
+
+// ---------------------------------------------------------------------------
+// Stage 4 — structural statuses (nodes with no own lifecycle evidence yet):
+// roll up from children — all children done means done; any execution
+// activity in the subtree means running; otherwise ready/previewing/planned.
+// ---------------------------------------------------------------------------
+
+function structuralRollupStage(state: FoldState): FoldState {
+  const { nodes, states, structuralIds } = state;
   const childrenOf = new Map<string, string[]>();
-  for (const state of Object.values(states)) {
-    if (state.parentId !== null && states[state.parentId]) {
-      const list = childrenOf.get(state.parentId) ?? [];
-      list.push(state.logicalId);
-      childrenOf.set(state.parentId, list);
+  for (const nodeState of Object.values(states)) {
+    if (nodeState.parentId !== null && states[nodeState.parentId]) {
+      const list = childrenOf.get(nodeState.parentId) ?? [];
+      list.push(nodeState.logicalId);
+      childrenOf.set(nodeState.parentId, list);
     }
   }
   const structuralOrder = Object.keys(states).sort(
@@ -617,7 +620,7 @@ export function foldDelegation(records: DelegationRecord[], options: FoldDelegat
   );
   for (const id of structuralOrder) {
     if (!structuralIds.has(id)) continue;
-    const state = states[id]!;
+    const nodeState = states[id]!;
     const internal = nodes.get(id)!;
     const childIds = (childrenOf.get(id) ?? []).filter((childId) => {
       const child = states[childId]!;
@@ -625,77 +628,96 @@ export function foldDelegation(records: DelegationRecord[], options: FoldDelegat
     });
     const childStates = childIds.map((childId) => states[childId]!.status);
     if (childStates.length > 0 && childStates.every((childStatus) => childStatus === "done")) {
-      state.status = "done";
+      nodeState.status = "done";
     } else if (childStates.some((childStatus) => childStatus === "running" || childStatus === "done" || childStatus === "failed")) {
-      state.status = "running";
+      nodeState.status = "running";
     } else if (internal.gatesRows.length > 0) {
-      state.status = "ready";
+      nodeState.status = "ready";
     } else if (internal.previewRow) {
-      state.status = "previewing";
+      nodeState.status = "previewing";
     } else {
-      state.status = "planned";
+      nodeState.status = "planned";
     }
   }
+  state.childrenOf = childrenOf;
+  return state;
+}
 
-  // Attention rollup: descendants counts self-pending nodes strictly below.
-  for (const state of Object.values(states)) {
-    if (!state.attention.self) continue;
-    let parentId = state.parentId;
-    const seen = new Set<string>([state.logicalId]);
+// ---------------------------------------------------------------------------
+// Stage 5 — attention rollup: descendants counts self-pending nodes strictly
+// below.
+// ---------------------------------------------------------------------------
+
+function attentionRollupStage(state: FoldState): FoldState {
+  const { states } = state;
+  for (const nodeState of Object.values(states)) {
+    if (!nodeState.attention.self) continue;
+    let parentId = nodeState.parentId;
+    const seen = new Set<string>([nodeState.logicalId]);
     while (parentId !== null && states[parentId] && !seen.has(parentId)) {
       seen.add(parentId);
       states[parentId]!.attention.descendants += 1;
       parentId = states[parentId]!.parentId;
     }
   }
+  return state;
+}
 
-  // -------------------------------------------------------------------------
-  // Root & edges
-  // -------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Stage 6 — root & edges
+// ---------------------------------------------------------------------------
+
+function rootAndEdgeStage(state: FoldState): FoldState {
+  const { nodes, states } = state;
   const rootCandidates = Object.values(states)
-    .filter((state) => state.parentId === null && state.kind !== "goal" && state.kind !== "poc" && state.kind !== "research")
+    .filter((nodeState) => nodeState.parentId === null && nodeState.kind !== "goal" && nodeState.kind !== "poc" && nodeState.kind !== "research")
     .sort((a, b) => {
       const planned = (nodes.get(b.logicalId)!.planRows.length ? 1 : 0) - (nodes.get(a.logicalId)!.planRows.length ? 1 : 0);
       if (planned !== 0) return planned;
       return a.logicalId.localeCompare(b.logicalId);
     });
-  const rootId = rootCandidates[0]?.logicalId ?? null;
+  state.rootId = rootCandidates[0]?.logicalId ?? null;
 
   const edgeSet = new Map<string, DelegationEdge>();
   const addEdge = (edge: DelegationEdge) => {
-    edgeSet.set(`${edge.kind} ${edge.from} ${edge.to}`, edge);
+    edgeSet.set(`${edge.kind} ${edge.from} ${edge.to}`, edge);
   };
-  for (const state of Object.values(states)) {
-    if (state.parentId !== null && states[state.parentId]) {
+  for (const nodeState of Object.values(states)) {
+    if (nodeState.parentId !== null && states[nodeState.parentId]) {
       // v2 higher-order orchestration: when dcPlan.orchestration === "workflow"
       // lands, a workflow-orchestrated child keeps this same child edge but the
       // UI renders its subtree as a nested authored subgraph (collapsed
       // <Subflow> graph) instead of task rows. The optional field is accepted
       // and ignored today.
       addEdge({
-        from: state.parentId,
-        to: state.logicalId,
-        kind: state.kind === "poc" || state.kind === "research" ? "probe" : "child",
+        from: nodeState.parentId,
+        to: nodeState.logicalId,
+        kind: nodeState.kind === "poc" || nodeState.kind === "research" ? "probe" : "child",
       });
     }
-    for (const dep of state.deps) {
-      if (states[dep]) addEdge({ from: state.logicalId, to: dep, kind: "dep" });
+    for (const dep of nodeState.deps) {
+      if (states[dep]) addEdge({ from: nodeState.logicalId, to: dep, kind: "dep" });
     }
     // Backpressure (gate) edges: review gates that name another node via an
     // optional logical reference. The frozen Gate shapes carry none, so this
     // only materializes for forward-compatible gate rows that do.
-    for (const gate of state.gates) {
+    for (const gate of nodeState.gates) {
       const ref = (gate as { logicalId?: unknown }).logicalId;
-      if (typeof ref === "string" && states[ref]) addEdge({ from: state.logicalId, to: ref, kind: "gate" });
+      if (typeof ref === "string" && states[ref]) addEdge({ from: nodeState.logicalId, to: ref, kind: "gate" });
     }
   }
-  const edges = [...edgeSet.values()].sort(
+  state.edges = [...edgeSet.values()].sort(
     (a, b) => a.kind.localeCompare(b.kind) || a.from.localeCompare(b.from) || a.to.localeCompare(b.to),
   );
+  return state;
+}
 
-  // -------------------------------------------------------------------------
-  // Estimates (latest-wins) & actual rollups
-  // -------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Stage 7 — estimates (latest-wins) & actual rollups
+// ---------------------------------------------------------------------------
+
+function budgetStage(state: FoldState): FoldState {
+  const { nodes, states, childrenOf } = state;
   const predictedMemo = new Map<string, Estimate | undefined>();
   const predicted = (id: string, visiting: Set<string>): Estimate | undefined => {
     if (predictedMemo.has(id)) return predictedMemo.get(id);
@@ -739,27 +761,33 @@ export function foldDelegation(records: DelegationRecord[], options: FoldDelegat
     return total;
   };
 
-  for (const state of Object.values(states)) {
-    const estimate = predicted(state.logicalId, new Set());
-    if (estimate) state.estimate = estimate;
-    const actual = rollupActual(state.logicalId, new Set());
-    if (hasAnyField(actual)) state.actual = actual;
+  for (const nodeState of Object.values(states)) {
+    const estimate = predicted(nodeState.logicalId, new Set());
+    if (estimate) nodeState.estimate = estimate;
+    const actual = rollupActual(nodeState.logicalId, new Set());
+    if (hasAnyField(actual)) nodeState.actual = actual;
   }
 
   let budgetActual: Partial<Estimate> = {};
   for (const node of nodes.values()) budgetActual = addPartial(budgetActual, ownActual(node));
-  const budgetPredicted = rootId ? predicted(rootId, new Set()) ?? null : null;
+  state.budgetActual = budgetActual;
+  state.budgetPredicted = state.rootId ? predicted(state.rootId, new Set()) ?? null : null;
+  return state;
+}
 
-  // -------------------------------------------------------------------------
-  // Graph-level fields
-  // -------------------------------------------------------------------------
-  const pendingQuestions = [...questionsByKey.values()]
+// ---------------------------------------------------------------------------
+// Stage 8 — graph-level fields
+// ---------------------------------------------------------------------------
+
+function assembleGraphStage(state: FoldState): DelegationGraph {
+  const { nodes, scores } = state;
+  const pendingQuestions = [...state.questionsByKey.values()]
     .filter((question) => !question.resolved)
     .sort((a, b) => a.seq - b.seq || a.logicalId.localeCompare(b.logicalId));
 
   const has = {
     plan: [...nodes.values()].some((node) => node.planRows.length > 0),
-    preview: previewsSkipped || [...nodes.values()].some((node) => node.previewRow !== undefined),
+    preview: state.previewsSkipped || [...nodes.values()].some((node) => node.previewRow !== undefined),
     gates: [...nodes.values()].some((node) => node.gatesRows.length > 0),
     derisk: [...nodes.values()].some(
       (node) => node.probeRow !== undefined || node.invalidations.length > 0 || node.reaffirms.length > 0 || node.edits.length > 0,
@@ -769,7 +797,7 @@ export function foldDelegation(records: DelegationRecord[], options: FoldDelegat
     ),
     scoring: Object.keys(scores).length > 0,
   };
-  const phase: DelegationPhase = pollSubmitted
+  const phase: DelegationPhase = state.pollSubmitted
     ? "done"
     : has.scoring
       ? "scoring"
@@ -786,15 +814,39 @@ export function foldDelegation(records: DelegationRecord[], options: FoldDelegat
                 : "goal";
 
   return {
-    nodes: states,
-    rootId,
-    edges,
+    nodes: state.states,
+    rootId: state.rootId,
+    edges: state.edges,
     phase,
     pendingQuestions,
-    ...(refinedPrompt !== undefined ? { refinedPrompt } : {}),
-    budget: { predicted: budgetPredicted, actual: budgetActual },
+    ...(state.refinedPrompt !== undefined ? { refinedPrompt: state.refinedPrompt } : {}),
+    budget: { predicted: state.budgetPredicted, actual: state.budgetActual },
     ...(Object.keys(scores).length ? { scores } : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// The fold — the stages piped as one Effect, run synchronously at the boundary
+// ---------------------------------------------------------------------------
+
+function foldDelegationEffect(
+  records: DelegationRecord[],
+  options: FoldDelegationOptions,
+): Effect.Effect<DelegationGraph> {
+  return Effect.sync(() => makeFoldState(records, options)).pipe(
+    Effect.map(bucketStage),
+    Effect.map(cascadeStage),
+    Effect.map(materializeStage),
+    Effect.map(structuralRollupStage),
+    Effect.map(attentionRollupStage),
+    Effect.map(rootAndEdgeStage),
+    Effect.map(budgetStage),
+    Effect.map(assembleGraphStage),
+  );
+}
+
+export function foldDelegation(records: DelegationRecord[], options: FoldDelegationOptions = {}): DelegationGraph {
+  return Effect.runSync(foldDelegationEffect(records, options));
 }
 
 function depthOf(states: Record<string, DelegationNodeState>, id: string): number {

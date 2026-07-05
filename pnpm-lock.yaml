@@ -1289,6 +1289,9 @@ importers:
       '@tanstack/react-query':
         specifier: 5.101.2
         version: 5.101.2(react@19.2.7)
+      effect:
+        specifier: 3.21.4
+        version: 3.21.4
     devDependencies:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
