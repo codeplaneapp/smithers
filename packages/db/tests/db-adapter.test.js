@@ -506,6 +506,51 @@ describe("SmithersDb adapter", () => {
             nodeLabel: "Mounted gate",
         });
     });
+    test("a decided approval is never resurfaced by the waiting-node fallback", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertRun(runRow("r1", "waiting-approval", { workflowName: "workflow-a" }));
+        // Node still reads waiting-approval (mirror lag), but a real approval row
+        // already decided it. The fallback's anti-join (a.run_id IS NULL) must
+        // exclude it so a granted approval doesn't reappear as pending.
+        await adapter.insertNode(nodeRow("r1", "gate", "waiting-approval", {
+            label: "Gate",
+            updatedAtMs: now - 500,
+        }));
+        await adapter.insertOrUpdateApproval({
+            runId: "r1",
+            nodeId: "gate",
+            iteration: 0,
+            status: "approved",
+            requestedAtMs: now - 600,
+            decidedAtMs: now - 100,
+        });
+
+        expect(await adapter.listPendingApprovals("r1")).toHaveLength(0);
+        expect(await adapter.listAllPendingApprovals()).toHaveLength(0);
+    });
+    test("pending lists mix real requested rows and fallback rows without duplicating", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertRun(runRow("r1", "waiting-approval", { workflowName: "workflow-a" }));
+        // A real requested approval (with a request payload)…
+        await adapter.insertNode(nodeRow("r1", "real-gate", "waiting-approval", { updatedAtMs: now - 400 }));
+        await adapter.insertOrUpdateApproval({
+            runId: "r1",
+            nodeId: "real-gate",
+            iteration: 0,
+            status: "requested",
+            requestedAtMs: now - 400,
+            requestJson: JSON.stringify({ mode: "decision", options: ["a", "b"] }),
+        });
+        // …plus a waiting node with no approval row (the fallback case).
+        await adapter.insertNode(nodeRow("r1", "fallback-gate", "waiting-approval", { updatedAtMs: now - 300 }));
+
+        const pending = await adapter.listPendingApprovals("r1");
+        expect(pending).toHaveLength(2);
+        const byNode = Object.fromEntries(pending.map((p) => [p.nodeId, p]));
+        // The real row keeps its request payload; the fallback row has none.
+        expect(byNode["real-gate"].requestJson).toContain("decision");
+        expect(byNode["fallback-gate"].requestJson).toBeNull();
+    });
     test("insertCache and getCache", async () => {
         const { adapter } = createTestDb();
         await adapter.insertCache(cacheRow("key1"));

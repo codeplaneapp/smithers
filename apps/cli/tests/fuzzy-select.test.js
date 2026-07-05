@@ -145,12 +145,8 @@ class FakeInput extends EventEmitter {
     on(event, cb) {
         return super.on(event, cb);
     }
-    /** Drive the same readline path a real TTY uses, including line editing. */
+    /** Drive the prompt's onKeypress directly, mirroring readline keypress events. */
     keypress(seq, key) {
-        if (typeof seq === "string") {
-            this.emit("data", Buffer.from(seq));
-            return;
-        }
         this.emit("keypress", seq, key);
     }
 }
