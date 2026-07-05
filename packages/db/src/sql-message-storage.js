@@ -77,6 +77,7 @@ const CREATE_TABLE_STATEMENTS = [
     heartbeat_at_ms INTEGER,
     runtime_owner_id TEXT,
     cancel_requested_at_ms INTEGER,
+    pause_requested_at_ms INTEGER,
     hijack_requested_at_ms INTEGER,
     hijack_target TEXT,
     vcs_type TEXT,

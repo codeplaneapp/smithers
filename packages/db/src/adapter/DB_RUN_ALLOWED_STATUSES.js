@@ -4,6 +4,7 @@ export const DB_RUN_ALLOWED_STATUSES = [
     "waiting-event",
     "waiting-timer",
     "waiting-quota",
+    "paused",
     "finished",
     "failed",
     "cancelled",

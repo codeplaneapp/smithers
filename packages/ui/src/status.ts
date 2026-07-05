@@ -18,7 +18,7 @@ export function statusClass(status: string | undefined): StatusClass {
   if (["fixed", "ready", "done", "finished", "success", "ok", "complete", "completed", "closed"].includes(normalized)) return "ok";
   if (["broken", "blocked", "failed", "failure", "error"].includes(normalized)) return "bad";
   if (
-    ["partial", "missing-tests", "missing", "running", "pending", "queued", "waiting", "todo", "open"].includes(normalized) ||
+    ["partial", "missing-tests", "missing", "running", "pending", "queued", "waiting", "paused", "todo", "open"].includes(normalized) ||
     normalized.startsWith("waiting-")
   ) return "warn";
   return "muted";
@@ -44,6 +44,7 @@ export function formatStatus(status: string | undefined): string {
     "waiting-approval": "Waiting for approval",
     "waiting-event": "Waiting for event",
     "waiting-timer": "Waiting on timer",
+    paused: "Paused",
     partial: "Partial",
     "missing-tests": "Missing e2e",
     missing: "Missing",

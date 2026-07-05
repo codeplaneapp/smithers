@@ -536,6 +536,26 @@ describe("DB migration edges", () => {
     }
   });
 
+  test("forward migration adds pause_requested_at_ms to a legacy runs table", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      sqlite.exec(`CREATE TABLE _smithers_runs (
+        run_id TEXT PRIMARY KEY,
+        workflow_name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        cancel_requested_at_ms INTEGER
+      )`);
+      const db = drizzle(sqlite);
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+
+      const cols = sqlite.query('PRAGMA table_info("_smithers_runs")').all().map((c) => c.name);
+      expect(cols).toContain("pause_requested_at_ms");
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("v0.19-shaped DB upgrades through FK rebuild once and records dropped row counts", () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);

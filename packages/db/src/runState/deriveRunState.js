@@ -29,6 +29,8 @@ export function deriveRunState(input) {
             return { ...base, state: "failed" };
         case "cancelled":
             return { ...base, state: "cancelled" };
+        case "paused":
+            return { ...base, state: "paused" };
         case "waiting-approval":
             return pendingApproval
                 ? {

@@ -4,6 +4,7 @@ export type RunState =
   | "waiting-event"
   | "waiting-timer"
   | "waiting-quota"
+  | "paused"
   | "recovering"
   | "stale"
   | "orphaned"

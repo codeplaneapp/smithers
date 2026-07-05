@@ -1957,8 +1957,9 @@ function wireAbortSignal(controller, signal) {
  * @param {string} runtimeOwnerId
  * @param {AbortController} controller
  * @param {HijackState} hijackState
+ * @param {AbortController} [pauseController]
  */
-function startRunSupervisor(adapter, runId, runtimeOwnerId, controller, hijackState) {
+function startRunSupervisor(adapter, runId, runtimeOwnerId, controller, hijackState, pauseController) {
     let closed = false;
     const heartbeat = setInterval(() => {
         if (closed || controller.signal.aborted)
@@ -1988,6 +1989,17 @@ function startRunSupervisor(adapter, runId, runtimeOwnerId, controller, hijackSt
                         hijackRequestedAtMs: run.hijackRequestedAtMs,
                         hijackTarget: run.hijackTarget ?? null,
                     }, "engine:hijack-watch");
+                }
+                if (run?.pauseRequestedAtMs && pauseController && !pauseController.signal.aborted) {
+                    logInfo("detected durable run pause request", {
+                        runId,
+                        runtimeOwnerId,
+                        pauseRequestedAtMs: run.pauseRequestedAtMs,
+                    }, "engine:pause-watch");
+                    // Signal the driver to stop scheduling and drain; do NOT abort
+                    // the run controller (that would kill in-flight tasks). Keep
+                    // watching so a later cancel still hard-stops the run.
+                    pauseController.abort();
                 }
                 if (run?.cancelRequestedAtMs) {
                     logInfo("detected durable run cancellation", {
@@ -2072,6 +2084,7 @@ const RESUMABLE_RUN_STATUSES = new Set([
     "waiting-event",
     "waiting-timer",
     "waiting-quota",
+    "paused",
     "cancelled",
     "finished",
     "failed",
@@ -5118,6 +5131,10 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const allowNetwork = Boolean(opts.allowNetwork);
     const runtimeOwnerId = buildRuntimeOwnerId();
     const runAbortController = new AbortController();
+    // A graceful pause stops the driver from scheduling new tasks but, unlike
+    // cancel, does NOT abort in-flight tasks — so it gets its own signal that is
+    // never wired to task execution.
+    const pauseAbortController = new AbortController();
     const hijackState = {
         request: null,
         completion: null,
@@ -5689,6 +5706,28 @@ async function runWorkflowBodyDriver(workflow, opts) {
             result.status === "waiting-quota") {
             return result;
         }
+        if (result.status === "paused") {
+            // Graceful pause: the driver already drained in-flight tasks and left
+            // remaining work pending. Park the run resumably — do NOT set
+            // finishedAtMs, and clear the pause request so a resume starts clean.
+            await Effect.runPromise(adapter.updateRun(runId, {
+                status: "paused",
+                heartbeatAtMs: null,
+                runtimeOwnerId: null,
+                pauseRequestedAtMs: null,
+                cancelRequestedAtMs: null,
+                hijackRequestedAtMs: null,
+                hijackTarget: null,
+            }));
+            await Effect.runPromise(eventBus.emitEventWithPersist({
+                type: "RunStatusChanged",
+                runId,
+                status: "paused",
+                timestampMs: nowMs(),
+            }));
+            await annotateRunSpan({ status: "paused" });
+            return { runId, status: "paused" };
+        }
         if (result.status === "cancelled") {
             const hijackError = hijackState.completion
                 ? {
@@ -5952,7 +5991,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             }));
             runOwnedByCurrentProcess = true;
         }
-        stopSupervisor = startRunSupervisor(adapter, runId, runtimeOwnerId, runAbortController, hijackState);
+        stopSupervisor = startRunSupervisor(adapter, runId, runtimeOwnerId, runAbortController, hijackState, pauseAbortController);
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "RunStarted",
             runId,
@@ -6230,6 +6269,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             workflowPath: resolvedWorkflowPath ?? opts.workflowPath,
             auth: runAuth,
             signal: runAbortController.signal,
+            pauseSignal: pauseAbortController.signal,
         });
         return finalizeDriverResult(result, runStartPerformanceMs);
     }

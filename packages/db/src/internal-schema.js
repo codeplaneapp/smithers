@@ -12,6 +12,7 @@ export const smithersRuns = sqliteTable("_smithers_runs", {
     heartbeatAtMs: integer("heartbeat_at_ms"),
     runtimeOwnerId: text("runtime_owner_id"),
     cancelRequestedAtMs: integer("cancel_requested_at_ms"),
+    pauseRequestedAtMs: integer("pause_requested_at_ms"),
     hijackRequestedAtMs: integer("hijack_requested_at_ms"),
     hijackTarget: text("hijack_target"),
     vcsType: text("vcs_type"),

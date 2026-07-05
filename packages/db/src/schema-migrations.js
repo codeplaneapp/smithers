@@ -771,6 +771,27 @@ function buildMigrations(context) {
                 return { tables: ["_smithers_integration_deliveries", "_smithers_integration_cursors"] };
             },
         },
+        {
+            id: "0020_run_pause_column",
+            name: "Add graceful-pause request column to runs",
+            checksum: "packages/db/migrations/0020_run_pause_column.sql",
+            isApplied: (sqlite) => tableColumnNames(sqlite, "_smithers_runs").has("pause_requested_at_ms"),
+            isAppliedPostgres: async (pgConn) => (await tableColumnNamesPostgres(pgConn, "_smithers_runs")).has("pause_requested_at_ms"),
+            up: (sqlite) => {
+                if (!tableExists(sqlite, "_smithers_runs")) {
+                    return { table: "_smithers_runs", addedColumns: [] };
+                }
+                const added = addColumnIfMissing(sqlite, "_smithers_runs", "pause_requested_at_ms", "pause_requested_at_ms INTEGER");
+                return { table: "_smithers_runs", addedColumns: added ? ["pause_requested_at_ms"] : [] };
+            },
+            upPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_runs"))) {
+                    return { table: "_smithers_runs", addedColumns: [] };
+                }
+                const added = await addColumnIfMissingPostgres(pgConn, "_smithers_runs", "pause_requested_at_ms", "pause_requested_at_ms INTEGER");
+                return { table: "_smithers_runs", addedColumns: added ? ["pause_requested_at_ms"] : [] };
+            },
+        },
     ];
 }
 

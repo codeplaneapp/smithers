@@ -83,6 +83,7 @@ export const DB_RUN_ALLOWED_STATUSES = [
     "waiting-event",
     "waiting-timer",
     "waiting-quota",
+    "paused",
     "finished",
     "failed",
     "cancelled",
@@ -334,6 +335,7 @@ function validateRunRow(row) {
     validateOptionalPositiveTimestamp(r, "finishedAtMs");
     validateOptionalPositiveTimestamp(r, "heartbeatAtMs");
     validateOptionalPositiveTimestamp(r, "cancelRequestedAtMs");
+    validateOptionalPositiveTimestamp(r, "pauseRequestedAtMs");
     validateOptionalPositiveTimestamp(r, "hijackRequestedAtMs");
 }
 /**
@@ -354,6 +356,7 @@ function validateRunPatch(patch) {
     validateOptionalPositiveTimestamp(p, "finishedAtMs");
     validateOptionalPositiveTimestamp(p, "heartbeatAtMs");
     validateOptionalPositiveTimestamp(p, "cancelRequestedAtMs");
+    validateOptionalPositiveTimestamp(p, "pauseRequestedAtMs");
     validateOptionalPositiveTimestamp(p, "hijackRequestedAtMs");
 }
 
@@ -1116,6 +1119,14 @@ export class SmithersDb {
    */
     requestRunCancel(runId, cancelRequestedAtMs) {
         return this.write(`cancel run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", { cancelRequestedAtMs }, "run_id = ?", [runId]));
+    }
+    /**
+   * @param {string} runId
+   * @param {number} pauseRequestedAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    requestRunPause(runId, pauseRequestedAtMs) {
+        return this.write(`pause run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", { pauseRequestedAtMs }, "run_id = ?", [runId]));
     }
     /**
    * @param {string} runId

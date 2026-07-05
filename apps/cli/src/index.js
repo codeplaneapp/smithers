@@ -1783,7 +1783,7 @@ const bugOptions = z.object({
     endpoint: z.string().optional().describe("Bug endpoint URL (default https://bug.smithers.sh/api/bugs; the SMITHERS_BUG_ENDPOINT env var takes precedence)"),
 });
 const psOptions = z.object({
-    status: z.string().optional().describe("Filter by status: running, waiting-approval, waiting-event, waiting-timer, continued, finished, failed, cancelled"),
+    status: z.string().optional().describe("Filter by status: running, waiting-approval, waiting-event, waiting-timer, paused, continued, finished, failed, cancelled"),
     limit: z.number().int().min(1).default(20).describe("Maximum runs to return"),
     all: z.boolean().default(false).describe("Include all statuses"),
     watch: z.boolean().default(false).describe("Watch mode: refresh output continuously"),
@@ -1893,6 +1893,9 @@ const signalOptions = z.object({
 });
 const cancelArgs = z.object({
     runId: z.string().describe("Run ID to cancel"),
+});
+const pauseArgs = z.object({
+    runId: z.string().describe("Run ID to pause"),
 });
 const hijackArgs = z.object({
     runId: z.string().describe("Run ID whose latest agent session should be hijacked"),
@@ -6786,6 +6789,57 @@ const cli = Cli.create({
         }
         catch (err) {
             return fail({ code: "CANCEL_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
+    },
+})
+    // =========================================================================
+    // smithers pause
+    // =========================================================================
+    .command("pause", {
+    description: "Gracefully pause a run: stop scheduling new tasks, let in-flight tasks finish, then park it resumably.",
+    args: pauseArgs,
+    async run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        try {
+            const { adapter, cleanup } = await findAndOpenDb();
+            try {
+                const run = await adapter.getRun(c.args.runId);
+                if (!run) {
+                    return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${c.args.runId}`, exitCode: 4 });
+                }
+                if (run.status === "paused") {
+                    return c.ok({ runId: c.args.runId, status: "paused" });
+                }
+                // Graceful pause only makes sense for a run a live engine is actively
+                // driving: the engine's pause-watcher stops scheduling, lets in-flight
+                // tasks finish, then writes the resumable "paused" status. A suspended
+                // run (waiting-*) is already parked; use `smithers cancel` to stop it.
+                if (run.status !== "running" || !isRunHeartbeatFresh(run)) {
+                    return fail({ code: "RUN_NOT_ACTIVE", message: `Run is not actively executing (status: ${run.status}); only a live run can be gracefully paused.`, exitCode: 4 });
+                }
+                await adapter.requestRunPause(c.args.runId, Date.now());
+                process.exitCode = 2;
+                return c.ok({
+                    runId: c.args.runId,
+                    status: "pause-requested",
+                }, {
+                    cta: {
+                        commands: [
+                            { command: `ps`, description: "See when it reaches paused" },
+                            { command: `up --resume ${c.args.runId} -d`, description: "Resume the paused run" },
+                        ],
+                    },
+                });
+            }
+            finally {
+                cleanup();
+            }
+        }
+        catch (err) {
+            return fail({ code: "PAUSE_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
 })

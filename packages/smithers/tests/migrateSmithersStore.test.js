@@ -275,7 +275,7 @@ describe("migrateSmithersStore", () => {
     expect(result.backend).toBe("pglite");
     expect(result.dbPath).toBe(dbPath);
     expect(result.runCount).toBe(1);
-    expect(result.schemaVersion).toBe("0019");
+    expect(result.schemaVersion).toBe("0020");
     expect(existsSync(result.markerPath)).toBe(true);
     expect(existsSync(dbPath)).toBe(true);
     expect(progress.some((event) => event.type === "table-copied" && event.table === "result")).toBe(true);
@@ -787,7 +787,7 @@ describe("migrateSmithersStore", () => {
     }
 
     const result = await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite" });
-    expect(result.schemaVersion).toBe("0019");
+    expect(result.schemaVersion).toBe("0020");
 
     // The migration itself upgraded the source schema before copying.
     sqlite = new Database(dbPath, { readonly: true });
@@ -927,7 +927,7 @@ describe("migrateSmithersStore real postgres", () => {
       expect(result.source.backend).toBe("sqlite");
       expect(result.target).toMatchObject({ backend: "postgres", url: "set" });
       expect(result.runCount).toBe(1);
-      expect(result.schemaVersion).toBe("0019");
+      expect(result.schemaVersion).toBe("0020");
       expect(existsSync(result.markerPath)).toBe(true);
 
       const api = await openSmithersBackend({}, { cwd, backend: "postgres", connectionString: url, env: {} });

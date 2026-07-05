@@ -140,6 +140,7 @@ type RunRow$1 = {
     heartbeatAtMs: number | null;
     runtimeOwnerId: string | null;
     cancelRequestedAtMs: number | null;
+    pauseRequestedAtMs?: number | null;
     hijackRequestedAtMs: number | null;
     hijackTarget: string | null;
     vcsType: string | null;
@@ -649,6 +650,12 @@ declare class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
     requestRunCancel(runId: string, cancelRequestedAtMs: number): RunnableEffect<void, SmithersError$1>;
+    /**
+   * @param {string} runId
+   * @param {number} pauseRequestedAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    requestRunPause(runId: string, pauseRequestedAtMs: number): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {number} hijackRequestedAtMs

@@ -18,6 +18,7 @@ type RunState =
   | "waiting-approval"  // blocked on a human decision
   | "waiting-event"     // blocked on an external signal
   | "waiting-timer"     // blocked on a scheduled wakeup
+  | "paused"            // gracefully paused; resume with `up --resume`
   | "recovering"        // supervisor replaying / resuming
   | "stale"             // owner heartbeat expired, not yet recovered
   | "orphaned"          // owner gone, no supervisor candidate
@@ -38,6 +39,7 @@ The legacy run-row `status` column maps to `RunState` like this:
 | `waiting-approval`      | `waiting-approval`             |
 | `waiting-event`         | `waiting-event`                |
 | `waiting-timer`         | `waiting-timer`                |
+| `paused`                | `paused`                       |
 | `finished`              | `succeeded`                    |
 | `continued`             | `succeeded`                    |
 | `failed`                | `failed`                       |

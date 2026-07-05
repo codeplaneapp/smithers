@@ -96,7 +96,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[85]:
+commands[86]:
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal a wizard first lets you pick workflows and skill targets; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -286,7 +286,7 @@ commands[85]:
   - name: ps
     purpose: List active, paused, and recently completed runs
     flags[5]{name,short,type,default,desc}:
-      status,s,string,,"Filter: running|waiting-approval|waiting-event|waiting-timer|continued|finished|failed|cancelled"
+      status,s,string,,"Filter: running|waiting-approval|waiting-event|waiting-timer|paused|continued|finished|failed|cancelled"
       limit,l,number,20,Max rows
       all,a,boolean,false,Include all statuses
       watch,w,boolean,false,Refresh continuously
@@ -413,6 +413,10 @@ commands[85]:
       by,,string,,Signal sender identifier
   - name: cancel
     purpose: Safely halt agents and terminate one active run
+    args[1]{name,type,required,desc}:
+      runId,string,true,Run ID
+  - name: pause
+    purpose: Gracefully pause a run; let in-flight tasks finish, then park it resumably
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID
   - name: down

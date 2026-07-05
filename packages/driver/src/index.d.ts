@@ -64,6 +64,7 @@ type RunOptions$2 = {
     requireRerenderOnOutputChange?: boolean;
     onProgress?: (e: SmithersEvent) => void;
     signal?: AbortSignal;
+    pauseSignal?: AbortSignal;
     resume?: boolean;
     force?: boolean;
     workflowPath?: string;
@@ -88,7 +89,7 @@ type RunOptions$2 = {
     };
 };
 
-type RunStatus$1 = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "finished" | "continued" | "failed" | "cancelled";
+type RunStatus$1 = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused" | "finished" | "continued" | "failed" | "cancelled";
 
 type RunResult$2 = {
     readonly runId: string;

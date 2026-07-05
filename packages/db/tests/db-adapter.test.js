@@ -740,6 +740,21 @@ describe("SmithersDb adapter", () => {
         const run = await adapter.getRun("r1");
         expect(run.cancelRequestedAtMs).toBe(now + 500);
     });
+    test("requestRunPause sets pauseRequestedAtMs without touching cancel", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertRun(runRow("r1"));
+        await adapter.requestRunPause("r1", now + 700);
+        const run = await adapter.getRun("r1");
+        expect(run.pauseRequestedAtMs).toBe(now + 700);
+        expect(run.cancelRequestedAtMs).toBeNull();
+    });
+    test("paused is an accepted run status", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertRun(runRow("r1"));
+        await adapter.updateRun("r1", { status: "paused" });
+        const run = await adapter.getRun("r1");
+        expect(run.status).toBe("paused");
+    });
     test("getRun returns undefined for missing run", async () => {
         const { adapter } = createTestDb();
         const run = await adapter.getRun("nonexistent");

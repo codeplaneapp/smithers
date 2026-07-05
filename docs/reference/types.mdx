@@ -173,6 +173,7 @@ type RunOptions = {
   requireRerenderOnOutputChange?: boolean;  // default true; re-render the frame on every task completion
   onProgress?: (e: SmithersEvent) => void;
   signal?: AbortSignal;
+  pauseSignal?: AbortSignal;        // graceful pause: stop scheduling, let in-flight finish, park `paused`
   resume?: boolean;
   force?: boolean;                  // resume even if marked running
   workflowPath?: string;

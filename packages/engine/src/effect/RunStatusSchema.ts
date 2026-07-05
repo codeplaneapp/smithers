@@ -3,6 +3,7 @@ export type RunStatusSchema =
 	| "waiting-approval"
 	| "waiting-event"
 	| "waiting-timer"
+	| "paused"
 	| "finished"
 	| "continued"
 	| "failed"

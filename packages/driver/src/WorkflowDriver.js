@@ -327,6 +327,14 @@ export class WorkflowDriver {
             if (this.activeOptions?.signal?.aborted) {
                 return this.cancelRun();
             }
+            // Graceful pause: stop scheduling new tasks, let already-started tasks
+            // settle (drainInflight never aborts them), then park the run resumably.
+            // The pause signal is separate from the abort signal so in-flight work
+            // completes instead of being killed.
+            if (this.activeOptions?.pauseSignal?.aborted) {
+                await this.drainInflight();
+                return { runId, status: "paused" };
+            }
             switch (decision._tag) {
                 case "Execute": {
                     const next = await this.executeTasks(decision.tasks);

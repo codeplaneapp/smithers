@@ -23,6 +23,12 @@ export type RunOptions = {
   requireRerenderOnOutputChange?: boolean;
   onProgress?: (e: SmithersEvent) => void;
   signal?: AbortSignal;
+  /**
+   * Separate from {@link signal}: aborting this asks the driver to stop
+   * scheduling new tasks and park the run `paused` once in-flight tasks settle,
+   * WITHOUT aborting those tasks. Used by graceful pause.
+   */
+  pauseSignal?: AbortSignal;
   resume?: boolean;
   force?: boolean;
   workflowPath?: string;

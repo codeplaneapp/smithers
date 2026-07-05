@@ -65,7 +65,7 @@ export function normalizeStatus(status: string | undefined): string {
 export function toneForStatus(status: string | undefined): Tone {
   const s = normalizeStatus(status);
   if (s === "running" || s === "in-progress" || s === "continued" || s === "recovering") return "running";
-  if (s.startsWith("waiting") || s === "pending" || s === "queued") return "waiting";
+  if (s.startsWith("waiting") || s === "paused" || s === "pending" || s === "queued") return "waiting";
   if (s === "finished" || s === "succeeded" || s === "ok" || s === "success") return "ok";
   if (s === "failed" || s === "error" || s === "stale" || s === "orphaned") return "failed";
   if (s === "cancelled" || s === "canceled" || s === "skipped") return "idle";
@@ -105,7 +105,7 @@ export const GROUP_TITLES: Record<RunGroup, string> = {
 
 export function groupForStatus(status: string | undefined): RunGroup {
   const s = normalizeStatus(status);
-  if (s.startsWith("waiting")) return "attention";
+  if (s.startsWith("waiting") || s === "paused") return "attention";
   if (s === "finished" || s === "succeeded") return "completed";
   if (s === "failed" || s === "stale" || s === "orphaned") return "failed";
   if (s === "cancelled" || s === "canceled") return "cancelled";
@@ -175,7 +175,7 @@ export function isCancellable(status: string | undefined): boolean {
 
 export function isResumable(status: string | undefined): boolean {
   const s = normalizeStatus(status);
-  return s === "failed" || s === "cancelled" || s === "canceled" || s === "stale" || s === "orphaned";
+  return s === "failed" || s === "cancelled" || s === "canceled" || s === "stale" || s === "orphaned" || s === "paused";
 }
 
 export type RunProgress = { done: number; failed: number; total: number; fraction: number };

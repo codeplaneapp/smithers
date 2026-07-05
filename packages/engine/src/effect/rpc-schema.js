@@ -15,7 +15,7 @@
 import * as Rpc from "@effect/rpc/Rpc";
 import * as RpcGroup from "@effect/rpc/RpcGroup";
 import { Schema } from "effect";
-export const RunStatusSchema = Schema.Literal("running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled");
+export const RunStatusSchema = Schema.Literal("running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled");
 export const ApprovalPayloadSchema = Schema.Struct({
     runId: Schema.String,
     nodeId: Schema.String,

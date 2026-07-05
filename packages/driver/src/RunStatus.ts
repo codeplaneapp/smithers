@@ -4,6 +4,7 @@ export type RunStatus =
   | "waiting-event"
   | "waiting-timer"
   | "waiting-quota"
+  | "paused"
   | "finished"
   | "continued"
   | "failed"

@@ -5086,7 +5086,7 @@ a { color: var(--brand); }</style>
         const runs = await this.listRunsAcrossWorkflows(1_000);
         const approvals = await this.listPendingApprovals();
         return {
-            runs: runs.filter((run) => ["running", "waiting-approval", "waiting-event", "waiting-timer"].includes(run.status)),
+            runs: runs.filter((run) => ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused"].includes(run.status)),
             approvals,
             stateVersion: this.stateVersion,
         };
