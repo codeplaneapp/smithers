@@ -1,6 +1,9 @@
 export const CLOUDFLARE_SANDBOX_PROVIDER_ID = "cloudflare-sandbox";
 
 const DEFAULT_WORKDIR = "/workspace";
+// Contract with the in-sandbox entry command: it reads the request JSON and
+// writes the result JSON at these workdir-relative paths (also handed to it via
+// SMITHERS_SANDBOX_REQUEST_PATH / SMITHERS_SANDBOX_RESULT_PATH).
 const DEFAULT_REQUEST_FILE = ".smithers/sandbox-request.json";
 const DEFAULT_RESULT_FILE = ".smithers/sandbox-result.json";
 
@@ -92,7 +95,7 @@ export function createCloudflareDurableObjectSqliteDescriptor(storage) {
  * transaction bodies are interactive read-then-write (e.g. read the current
  * event seq, then insert), which a fixed batch array cannot express.
  *
- * @param {{ prepare: (statement: string) => { bind: (...params: unknown[]) => { all: () => Promise<{ results?: Record<string, unknown>[] }>; raw?: () => Promise<unknown[][]>; run: () => Promise<unknown> } } } }} database
+ * @param {{ prepare: (statement: string) => { bind: (...params: unknown[]) => { all: () => Promise<{ results?: Record<string, unknown>[] }>; raw?: () => Promise<unknown[][]>; run: () => Promise<unknown> } } }} database
  */
 export function createCloudflareD1SqliteDescriptor(database) {
 	return {
@@ -125,7 +128,7 @@ export function createCloudflareD1SqliteDescriptor(database) {
 
 /**
  * @param {unknown} value
- * @returns {string}
+ * @returns {Promise<string>}
  */
 async function readFileContent(value) {
 	if (typeof value === "string") return value;
@@ -158,16 +161,6 @@ async function resolveCloudflareGetSandbox() {
 }
 
 /**
- * @param {string} command
- * @returns {string}
- */
-function normalizeCommand(command) {
-	const trimmed = command.trim();
-	if (!trimmed) throw new Error("Cloudflare sandbox command must not be empty.");
-	return trimmed;
-}
-
-/**
  * Builds a Smithers SandboxProvider backed by Cloudflare Sandbox SDK.
  *
  * @param {{
@@ -189,7 +182,8 @@ function normalizeCommand(command) {
 export function createCloudflareSandboxProvider(options = {}) {
 	const id = options.id ?? CLOUDFLARE_SANDBOX_PROVIDER_ID;
 	const workdir = options.workdir ?? DEFAULT_WORKDIR;
-	const command = normalizeCommand(options.command ?? "node /workspace/run-smithers-sandbox.js");
+	const command = (options.command ?? "node /workspace/run-smithers-sandbox.js").trim();
+	if (!command) throw new Error("Cloudflare sandbox command must not be empty.");
 	const cleanup = options.cleanup ?? "destroy";
 	const active = new Map();
 
