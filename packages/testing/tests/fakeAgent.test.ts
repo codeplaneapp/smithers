@@ -67,4 +67,30 @@ describe("fakeAgent", () => {
 
     await expect(agent.generate()).rejects.toThrow("failed validation");
   });
+
+  test("honors a wrapper (output+files) even under a permissive schema", async () => {
+    // A fully-permissive schema would let the WHOLE wrapper validate as the bare
+    // output, silently swallowing text/files. The wrapper must win when its
+    // nested `output` validates.
+    const dir = await mkdtemp(join(tmpdir(), "smithers-testing-"));
+    try {
+      const agent = fakeAgent(z.any(), {
+        output: { ok: true },
+        files: { "note.txt": "hi\n" },
+      });
+      const result = await agent.generate({ rootDir: dir });
+      expect(result.output).toEqual({ ok: true });
+      await expect(readFile(join(dir, "note.txt"), "utf8")).resolves.toBe("hi\n");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("treats a bare output whose own fields are named output/text as the output", async () => {
+    // The schema itself has `output`/`text` fields — the value must be read as
+    // the bare output, not misparsed as the {output,text,files} wrapper.
+    const nestedSchema = z.object({ output: z.string(), text: z.string() });
+    const agent = fakeAgent(nestedSchema, { output: "payload", text: "note" });
+    await expect(agent.generate()).resolves.toEqual({ output: { output: "payload", text: "note" } });
+  });
 });

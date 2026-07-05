@@ -98,14 +98,26 @@ function normalizeResult<T>(schema: SafeSchema<T>, result: FakeAgentResult<T> | 
   if (isAuto(result)) {
     return { output: schemaExample(schema) };
   }
-  // Prefer interpreting the value as the bare task output: if it validates
-  // against the output schema directly, it IS the output — even when the domain
-  // output happens to have its own `output`/`text`/`files` keys, which would
-  // otherwise be misread as the {output,text,files} wrapper shape.
+  // Disambiguate the {output,text,files} wrapper from a bare task output.
+  // Treat it as a wrapper only when it carries wrapper keys AND its nested
+  // `output` validates as the schema — this dominates both tricky cases: a
+  // genuine wrapper's `output` matches the schema (so files/text are honored
+  // even under a permissive/all-optional schema), while a bare output whose own
+  // fields happen to be named output/text/files does NOT have a nested `output`
+  // that validates, so it falls through to the bare-output path below.
+  if (hasResponseKeys(result) && "output" in result && schema.safeParse(result.output).success) {
+    const response: FakeAgentResult<T> = { output: schema.safeParse(result.output).data as T };
+    if (typeof result.text === "string") response.text = result.text;
+    if (result.files) response.files = result.files;
+    return response;
+  }
+  // Otherwise interpret the whole value as the bare task output when it validates.
   const asOutput = schema.safeParse(result);
   if (asOutput.success) {
     return { output: asOutput.data };
   }
+  // A wrapper carrying only text/files (no valid output), or a bad bare output
+  // (assertSchema throws a clear validation error).
   if (hasResponseKeys(result)) {
     const response: FakeAgentResult<T> = {};
     if ("output" in result) response.output = assertSchema(schema, result.output);
