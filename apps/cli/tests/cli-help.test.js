@@ -9,6 +9,27 @@ test("help surface advertises the ui command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("\n  ui ");
 });
+test("help surface advertises the review command", () => {
+    const repo = createTempRepo();
+    const result = runSmithers(["--help"], {
+        cwd: repo.dir,
+        format: null,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("\n  review ");
+});
+test("review --help delegates to the review CLI help", () => {
+    const repo = createTempRepo();
+    const result = runSmithers(["review", "--help"], {
+        cwd: repo.dir,
+        format: null,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Usage: smithers review [repo] [options]");
+    expect(result.stdout).toContain("--pr <number|url>");
+    expect(result.stdout).toContain("SMITHERS_REVIEW_ENGINE");
+    expect(result.stdout).toContain("smithers review --from main --to HEAD");
+});
 test("monitor --help describes the live all-runs web UI, not a workflow", () => {
     const repo = createTempRepo();
     const result = runSmithers(["monitor", "--help"], { cwd: repo.dir, format: null });

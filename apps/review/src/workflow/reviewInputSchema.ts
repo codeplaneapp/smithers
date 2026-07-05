@@ -1,4 +1,4 @@
-import { openCodeReviewInputSchema } from "smithers-workflows/lib/open-code-review";
+import { openCodeReviewInputSchema } from "./openCodeReview";
 import { z } from "zod/v4";
 
 export const reviewInputSchema = openCodeReviewInputSchema.extend({

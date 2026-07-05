@@ -117,6 +117,9 @@ importers:
       '@smithers-orchestrator/react-reconciler':
         specifier: workspace:*
         version: link:packages/react-reconciler
+      '@smithers-orchestrator/review':
+        specifier: workspace:*
+        version: link:apps/review
       '@smithers-orchestrator/sandbox':
         specifier: workspace:*
         version: link:packages/sandbox
@@ -234,6 +237,9 @@ importers:
       '@smithers-orchestrator/components':
         specifier: workspace:*
         version: link:../packages/components
+      '@smithers-orchestrator/review':
+        specifier: workspace:*
+        version: link:../apps/review
       '@smithers-orchestrator/scorers':
         specifier: workspace:*
         version: link:../packages/scorers
@@ -390,6 +396,9 @@ importers:
       '@smithers-orchestrator/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@smithers-orchestrator/review':
+        specifier: workspace:*
+        version: link:../review
       '@smithers-orchestrator/scheduler':
         specifier: workspace:*
         version: link:../../packages/scheduler
@@ -563,6 +572,9 @@ importers:
       '@pierre/diffs':
         specifier: ^1.2.12
         version: 1.2.12(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@smithers-orchestrator/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
       '@smithers-orchestrator/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -581,9 +593,6 @@ importers:
       smithers-orchestrator:
         specifier: workspace:*
         version: link:../../packages/smithers
-      smithers-workflows:
-        specifier: workspace:*
-        version: link:../../.smithers
       zod:
         specifier: 4.4.3
         version: 4.4.3

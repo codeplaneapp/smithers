@@ -6,7 +6,7 @@ import {
   resolveReviewTarget,
   type OpenCodeReviewInput,
   type PreviewOutput,
-} from "smithers-workflows/lib/open-code-review";
+} from "../workflow/openCodeReview";
 import type { Changes } from "./changesSchema";
 
 /**

@@ -78,9 +78,10 @@ function packageVersion(): string {
   }
 }
 
-const USAGE = `smithers review — code review + story-form HTML walkthrough
+function usage(command: string): string {
+  return `smithers review — code review + story-form HTML walkthrough
 
-Usage: smithers-review [repo] [options]
+Usage: ${command} [repo] [options]
 
 What to review (default: workspace changes, tracked + untracked)
   --from <ref> --to <ref>   review a ref range (merge-base diff)
@@ -122,23 +123,26 @@ Environment
   SMITHERS_REVIEW_SUMMARY_PATH   write a machine-readable JSON run summary here
 
 Examples
-  smithers-review                              review the working tree
-  smithers-review --from main --to HEAD        review a branch against main
-  smithers-review --pr 42 --publish            review PR #42 and post it
-  smithers-review --no-review --no-narrate     walkthrough only, no agents`;
+  ${command}                              review the working tree
+  ${command} --from main --to HEAD        review a branch against main
+  ${command} --pr 42 --publish            review PR #42 and post it
+  ${command} --no-review --no-narrate     walkthrough only, no agents`;
+}
 
-async function main() {
+export async function runReviewCli(argv: string[] = process.argv.slice(2), options: { command?: string } = {}) {
+  const command = options.command ?? "smithers-review";
+  const helpText = usage(command);
   let args: ReviewArgs;
   try {
-    args = parseReviewArgs(process.argv.slice(2));
+    args = parseReviewArgs(argv);
   } catch (error) {
-    console.error(`smithers-review: ${(error as Error).message}\n`);
-    console.error(USAGE);
+    console.error(`${command}: ${(error as Error).message}\n`);
+    console.error(helpText);
     process.exit(1);
     return;
   }
   if (args.help) {
-    console.log(USAGE);
+    console.log(helpText);
     return;
   }
   if (args.version) {
@@ -391,7 +395,7 @@ async function main() {
 
 // Guarded so tests can import the exported helpers without running the CLI.
 if (import.meta.main) {
-  main().catch((error) => {
+  runReviewCli().catch((error) => {
     console.error(`smithers-review: ${(error as Error)?.message ?? String(error)}`);
     process.exit(1);
   });

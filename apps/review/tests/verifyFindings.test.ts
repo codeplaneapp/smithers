@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ReviewCommentSeverity } from "smithers-workflows/lib/open-code-review";
+import type { ReviewCommentSeverity } from "../src/workflow/openCodeReview";
 import { applyFindingVerdicts } from "../src/workflow/applyFindingVerdicts";
 import { buildVerifyFindingsPrompt, type VerifiableFinding } from "../src/workflow/verifyFindings";
 import { verifyVerdictsSchema } from "../src/workflow/verifyVerdictsSchema";

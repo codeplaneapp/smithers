@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { normalizeOpenCodeReviewInput, previewOpenCodeReview } from "smithers-workflows/lib/open-code-review";
+import { normalizeOpenCodeReviewInput, previewOpenCodeReview } from "../src/workflow/openCodeReview";
 import { collectChanges } from "../src/walkthrough/collectChanges";
 
 const tempDirs: string[] = [];

@@ -1,4 +1,4 @@
-import type { ReviewRunOutput } from "smithers-workflows/lib/open-code-review";
+import type { ReviewRunOutput } from "../workflow/openCodeReview";
 import type { Quiz } from "../quiz/quizSchema";
 import { fenceFor } from "../text/fenceFor";
 import { pluralize } from "../text/pluralize";

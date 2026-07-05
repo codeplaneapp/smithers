@@ -4817,6 +4817,26 @@ const cli = Cli.create({
     },
 })
     // =========================================================================
+    // smithers review [repo]
+    // =========================================================================
+    .command("review", {
+    description: "Run code review plus story-form HTML walkthrough generation for a repo or PR.",
+    async run() {
+        // Real execution is handled by the raw-argv intercept in main() so the
+        // review CLI sees the actual flags; this registration exists so the
+        // command shows up in `smithers --help`. If it is ever reached directly,
+        // forward the real args (minus the `review` token) rather than starting a
+        // review with none.
+        const { runReviewCli } = await import("@smithers-orchestrator/review/cli");
+        const args = process.argv.slice(2);
+        const reviewIndex = args.indexOf("review");
+        const forwarded = reviewIndex >= 0
+            ? [...args.slice(0, reviewIndex), ...args.slice(reviewIndex + 1)]
+            : args;
+        await runReviewCli(forwarded, { command: "smithers review" });
+    },
+})
+    // =========================================================================
     // smithers gateway
     // =========================================================================
     .command("gateway", {
@@ -8385,6 +8405,14 @@ async function main() {
     if (command && !KNOWN_COMMANDS.has(command)) {
         console.error(`Unknown command: ${command}`);
         process.exit(4);
+    }
+    if (command === "review") {
+        const { runReviewCli } = await import("@smithers-orchestrator/review/cli");
+        // Forward every arg except the `review` token itself — including any flags
+        // that preceded it (e.g. `smithers --help review`), so the review CLI can
+        // render its own help instead of eagerly starting a review.
+        await runReviewCli([...argv.slice(0, commandIndex), ...argv.slice(commandIndex + 1)], { command: "smithers review" });
+        return;
     }
     // Self-heal the curated agent skill on a normal human-facing invocation:
     // keep ~/.claude/skills (and Pi) in sync with the bundled skill and evict

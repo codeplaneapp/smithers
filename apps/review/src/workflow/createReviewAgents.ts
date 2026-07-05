@@ -1,5 +1,7 @@
-import { ClaudeCodeAgent, CodexAgent, type AgentLike } from "smithers-orchestrator";
-import { nativeReviewAgentOutputSchema } from "smithers-workflows/lib/open-code-review";
+import type { AgentLike } from "@smithers-orchestrator/agents";
+import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
+import { CodexAgent } from "@smithers-orchestrator/agents/CodexAgent";
+import { nativeReviewAgentOutputSchema } from "./openCodeReview";
 import { quizSchema } from "../quiz/quizSchema";
 import { storySchema } from "../walkthrough/storySchema";
 import { verifyVerdictsSchema } from "./verifyVerdictsSchema";
@@ -46,9 +48,7 @@ export function createReviewAgents(repoDir: string): {
     // survives. (#277-adjacent.)
     const maxOutputBytes = 64 * 1024 * 1024;
     const base = { model, cwd: repoDir, skipGitRepoCheck: true, maxOutputBytes, ...(configDir ? { configDir } : {}) };
-    // Per-task --output-schema: review, narrate, verify, and quiz tasks each
-    // have their own shape, and codex enforces the schema file so gpt-5.5
-    // returns the JSON the pipeline needs instead of a prose summary.
+    // Per-task --output-schema keeps each stage pinned to its expected JSON.
     const review = new CodexAgent({ ...base, outputSchema: writeOpenAiSchemaFile(nativeReviewAgentOutputSchema) });
     const narrate = new CodexAgent({ ...base, outputSchema: writeOpenAiSchemaFile(storySchema) });
     const verify = new CodexAgent({ ...base, outputSchema: writeOpenAiSchemaFile(verifyVerdictsSchema) });
