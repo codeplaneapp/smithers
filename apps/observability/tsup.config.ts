@@ -11,5 +11,8 @@ export default defineConfig({
   outDir: "src",
   clean: false,
   format: ["esm"],
+  // NOTE: multi-entry dts rollup emits a shared, content-hashed chunk
+  // (src/<name>-<hash>.d.ts). The hash is deterministic for identical content;
+  // the build script rm's src/*-*.d.ts first so stale chunks never linger.
   silent: true,
 });
