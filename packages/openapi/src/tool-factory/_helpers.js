@@ -14,6 +14,11 @@ import { SPEC_SOURCE_URL } from "../specSourceUrl.js";
 /** @typedef {import("../OpenApiToolsOptions.ts").OpenApiToolsOptions} OpenApiToolsOptions */
 /** @typedef {import("../ParsedOperation.ts").ParsedOperation} ParsedOperation */
 
+// Last-resort base URL, used only when the spec declares no servers[] and the
+// caller passed no `baseUrl` option — requests then fail loudly against
+// localhost instead of silently hitting an arbitrary host.
+const FALLBACK_BASE_URL = "http://localhost";
+
 // ---------------------------------------------------------------------------
 // HTTP execution
 // ---------------------------------------------------------------------------
@@ -216,10 +221,11 @@ export async function executeRequest(operation, args, baseUrl, options) {
     };
     // Request body — read from the SAME non-colliding key the schema used, so a
     // parameter named `body` (or `requestBody`) cannot shadow the actual body.
+    // serializeRequestBody mutates `headers` in place and fetchInit already
+    // references that object, so its Content-Type adjustments apply automatically.
     const requestBodyArgName = getRequestBodyArgName(operation.parameters);
     if (args[requestBodyArgName] !== undefined) {
         fetchInit.body = serializeRequestBody(args[requestBodyArgName], operation.requestBodyMediaType, headers);
-        fetchInit.headers = headers;
     }
     const response = await fetch(url, fetchInit);
     const contentType = response.headers.get("content-type") ?? "";
@@ -260,11 +266,13 @@ export function executeToolEffect(operation, args, baseUrl, options) {
         });
     }).pipe(
         Effect.ensuring(Effect.suspend(() => Metric.update(openApiToolDuration, nowMs() - started))),
-        Effect.tapError(() => Metric.increment(openApiToolCallErrorsTotal)), Effect.annotateLogs({
-        toolName: `openapi:${operation.operationId}`,
-        method: operation.method,
-        path: operation.path,
-    }), Effect.withLogSpan(`openapi:${operation.operationId}`));
+        Effect.tapError(() => Metric.increment(openApiToolCallErrorsTotal)),
+        Effect.annotateLogs({
+            toolName: `openapi:${operation.operationId}`,
+            method: operation.method,
+            path: operation.path,
+        }),
+        Effect.withLogSpan(`openapi:${operation.operationId}`));
 }
 // ---------------------------------------------------------------------------
 // Tool creation
@@ -406,7 +414,7 @@ export function resolveBaseUrl(spec, options) {
         return options.baseUrl;
     if (spec.servers && spec.servers.length > 0)
         return resolveServerUrl(spec.servers[0].url, spec);
-    return "http://localhost";
+    return FALLBACK_BASE_URL;
 }
 /**
  * @param {OpenApiSpec} spec

@@ -1,8 +1,7 @@
 // ---------------------------------------------------------------------------
 // listOperations — list all operations from an OpenAPI spec
 // ---------------------------------------------------------------------------
-import { loadSpecSync } from "../spec-parser.js";
-import { extractOperations } from "../spec-parser.js";
+import { loadSpecSync, extractOperations } from "../spec-parser.js";
 
 /** @typedef {import("../OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
 
