@@ -19,6 +19,8 @@ export const FAKE_AGENT_RESPONSE = JSON.stringify({
     allTestsPassing: true,
     allPassed: true,
     failingSummary: null,
+    polished: true,
+    changesMade: [],
     steps: ["inspect", "implement", "verify"],
     tickets: [],
 });

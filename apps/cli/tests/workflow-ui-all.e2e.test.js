@@ -132,12 +132,19 @@ workflowUiTest("every init-pack workflow UI builds + boots; the output-verified 
     HOME: repo.dir,
     PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
     ANTHROPIC_API_KEY: "",
-    OPENAI_API_KEY: "sk-test-openai-key",
+    OPENAI_API_KEY: "",
     GEMINI_API_KEY: "",
     GOOGLE_API_KEY: "",
   };
   repo.write(".claude/.credentials.json", "{}\n");
-  repo.write(".codex/auth.json", "{}\n");
+  repo.write(
+    ".codex/auth.json",
+    JSON.stringify({
+      auth_mode: "chatgpt",
+      OPENAI_API_KEY: null,
+      tokens: { access_token: "fake-access-token", account_id: "acct_test" },
+    }) + "\n",
+  );
   repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
 
   expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
@@ -150,7 +157,12 @@ workflowUiTest("every init-pack workflow UI builds + boots; the output-verified 
     if (r.exitCode === 0 && typeof r.json?.runId === "string") {
       runIdByKey[d.key] = r.json.runId;
     } else {
-      runFailures.push(`${d.key}: run exit=${r.exitCode}`);
+      const detail = `${r.stdout}\n${r.stderr}`
+        .split("\n")
+        .slice(-20)
+        .join(" ")
+        .slice(0, 1600);
+      runFailures.push(`${d.key}: run exit=${r.exitCode}, status=${String(r.json?.status)}: ${detail}`);
     }
   }
 

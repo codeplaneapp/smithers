@@ -109,8 +109,18 @@ export class SmithersGatewayConnection {
     }
     signal?.addEventListener("abort", abort, { once: true });
     try {
+      // Re-check the signal on both sides of the await: an abort that fires
+      // while `shift()` is pending must stop iteration rather than drain and
+      // yield frames that were already queued before the abort. `close()` alone
+      // is not enough — the loop keeps going while `this.queue` still has items.
       while (!this.closed || this.queue.length > 0) {
+        if (signal?.aborted) {
+          return;
+        }
         const next = await this.shift();
+        if (signal?.aborted) {
+          return;
+        }
         if (!next || next.kind === "close") {
           return;
         }
