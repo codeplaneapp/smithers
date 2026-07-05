@@ -260,6 +260,8 @@ export class DevToolsRunStore {
             }
             case "NodeRetrying": {
                 const task = this.ensureTask(run, event.nodeId, event.iteration);
+                // Deliberately no isTerminalTask guard: NodeRetrying is the
+                // explicit transition OUT of a terminal failed task (retry-task).
                 task.status = "retrying";
                 task.attempt = event.attempt;
                 refreshRunWaitingStatus(run);

@@ -4,6 +4,7 @@
 
 import { SNAPSHOT_SERIALIZER_DEFAULT_MAX_DEPTH } from "./SNAPSHOT_SERIALIZER_DEFAULT_MAX_DEPTH.js";
 
+/** Default cap on total values traversed per snapshotSerialize call, so one huge props object cannot stall a snapshot. Overflow serializes as "[MaxEntries]". */
 const SNAPSHOT_SERIALIZER_DEFAULT_MAX_ENTRIES = 100_000;
 
 /**
@@ -93,7 +94,10 @@ function serializeInternal(value, state, depth, path) {
         }
         if (!isPlainObject(value)) {
             const ctorName = value.constructor?.name;
-            if (ctorName && ctorName !== "Object") return warn("UnsupportedType", path, state.onWarning, ctorName), `[${ctorName}]`;
+            if (ctorName && ctorName !== "Object") {
+                warn("UnsupportedType", path, state.onWarning, ctorName);
+                return `[${ctorName}]`;
+            }
         }
         /** @type {Record<string, unknown>} */
         const out = {};
