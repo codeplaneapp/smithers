@@ -34,6 +34,9 @@
       "smithers-orchestrator/tools": [
         "./packages/smithers/src/tools.js"
       ],
+      "smithers-orchestrator/testing": [
+        "./packages/smithers/src/testing.ts"
+      ],
       "smithers-orchestrator/cloudflare": [
         "./packages/smithers/src/cloudflare.js"
       ],
@@ -259,6 +262,12 @@
       "@smithers-orchestrator/usage/*": [
         "./packages/usage/src/*.js",
         "./packages/usage/src/*/index.js"
+      ],
+      "@smithers-orchestrator/testing": [
+        "./packages/testing/src/index.ts"
+      ],
+      "@smithers-orchestrator/testing/*": [
+        "./packages/testing/src/*.ts"
       ],
       "@smithers-orchestrator/tool-context": [
         "./packages/tool-context/src/index.js"

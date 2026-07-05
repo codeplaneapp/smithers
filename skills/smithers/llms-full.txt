@@ -8330,6 +8330,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/jsx-runtime` | `./src/jsx-runtime.js` | JSX runtime (auto-resolved by `jsxImportSource`) |
 | `smithers-orchestrator/jsx-dev-runtime` | `./src/jsx-runtime.js` | JSX dev runtime (auto-resolved in dev mode) |
 | `smithers-orchestrator/tools` | `./src/tools.js` | Tool sandbox: `defineTool`, `read`, `grep`, `bash`, `edit`, `write` |
+| `smithers-orchestrator/testing` | `./src/testing.ts` | Workflow test helpers: `fakeAgent`, `renderWorkflow`, `renderPrompt`, and `runTask` |
 | `smithers-orchestrator/server` | `./src/server.js` | HTTP server for run management and event streaming |
 | `smithers-orchestrator/observability` | `./src/observability.js` | OpenTelemetry traces, metrics, and Prometheus integration |
 | `smithers-orchestrator/mdx-plugin` | `./src/mdx-plugin.js` | Bun preload plugin for `.mdx` imports |
@@ -8405,6 +8406,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/telegram` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes | Telegram |
 | `@smithers-orchestrator/telegram-site` | Private Cloudflare Worker deployment for the Smithers on Telegram marketing site, including the reference approval Mini App | Telegram, Ecosystem |
 | `@smithers-orchestrator/telegram-summary` | Private Cloudflare app: Telegram Bot API ingestion, Kimi daily digests, D1 storage, and the `telegram-summary.smithers.sh` dashboard | Custom Workflow UI, CLI Overview |
+| `@smithers-orchestrator/testing` | Source-shipped workflow test helpers for fake agents, frame rendering, prompt rendering, and descriptor task execution | This page, Render Frame |
 | `@smithers-orchestrator/time-travel` | Snapshots, diffs, forks, replay, timelines, VCS tags, rewind locks/audits, and time-travel metrics | Time Travel, Time Travel Quickstart |
 | `@smithers-orchestrator/tool-context` | AsyncLocalStorage tool-execution context (run/node/idempotency keys, durability snapshot hook) shared by the engine and `smithers-orchestrator` without a dependency cycle | Execution Model |
 | `@smithers-orchestrator/tui` | Full-screen OpenTUI + React single-run monitor launched by `bunx smithers-orchestrator up --interactive`; reuses the gateway-react hooks for live tree, graph, logs, timeline, and hijack views of one run | CLI Overview |
@@ -8422,6 +8424,9 @@ import { createSmithers, openSmithersBackend, runWorkflow } from "smithers-orche
 
 // Tools
 import { defineTool, bash, read, write } from "smithers-orchestrator/tools";
+
+// Workflow tests
+import { fakeAgent, renderWorkflow } from "smithers-orchestrator/testing";
 
 // Scorers
 import { createScorer, llmJudge } from "smithers-orchestrator/scorers";

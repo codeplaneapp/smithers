@@ -44,6 +44,11 @@
       "import": "./src/tools.js",
       "default": "./src/tools.js"
     },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "import": "./src/testing.ts",
+      "default": "./src/testing.ts"
+    },
     "./gateway-client": {
       "types": "./src/gateway-client.d.ts",
       "import": "./src/gateway-client.js",
@@ -143,6 +148,7 @@
     "@smithers-orchestrator/scorers": "workspace:*",
     "@smithers-orchestrator/server": "workspace:*",
     "@smithers-orchestrator/telegram": "workspace:*",
+    "@smithers-orchestrator/testing": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
     "@smithers-orchestrator/tool-context": "workspace:*",
     "@smithers-orchestrator/ui": "workspace:*",
