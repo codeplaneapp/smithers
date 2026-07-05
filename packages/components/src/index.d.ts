@@ -23,7 +23,8 @@ import React__default from 'react';
 import * as zod from 'zod';
 import { z } from 'zod';
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
-import { AgentLike } from '@smithers-orchestrator/agents/AgentLike';
+import * as _smithers_orchestrator_agents_AgentLike from '@smithers-orchestrator/agents/AgentLike';
+import { AgentLike as AgentLike$2 } from '@smithers-orchestrator/agents/AgentLike';
 import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
 import { ScorersMap as ScorersMap$1 } from '@smithers-orchestrator/graph/types';
 import { TaskMemoryConfig } from '@smithers-orchestrator/memory/types';
@@ -128,9 +129,9 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
      */
     outputSchema?: z.ZodObject<z.ZodRawShape>;
     /** Agent or array of agents [primary, fallback1, fallback2, ...]. Tries in order on retries. */
-    agent?: AgentLike | AgentLike[];
+    agent?: AgentLike$2 | AgentLike$2[];
     /** Convenience alias for a single retry fallback without exposing array syntax in JSX. */
-    fallbackAgent?: AgentLike;
+    fallbackAgent?: AgentLike$2;
     /** Explicit dependency on other task node IDs. The task will not run until all listed tasks complete. */
     dependsOn?: string[];
     /** Named dependencies on other tasks. Keys become context keys, values are task node IDs. */
@@ -194,9 +195,9 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
 type SupervisorProps$2 = {
     id?: string;
     /** Agent that plans, delegates, and reviews worker results. */
-    boss: AgentLike;
+    boss: AgentLike$2;
     /** Map of worker type names to agents (e.g., { coder, tester, docs }). */
-    workers: Record<string, AgentLike>;
+    workers: Record<string, AgentLike$2>;
     /** Output schema for the boss's plan. Must include `tasks: Array<{ id, workerType, instructions }>`. */
     planOutput: OutputTarget$1;
     /** Output schema for individual worker results. */
@@ -222,7 +223,7 @@ type SuperSmithersProps$2 = {
     /** Markdown string or MDX component describing the intervention strategy. */
     strategy: string | React__default.ReactElement;
     /** Agent that reads code and decides modifications. */
-    agent: AgentLike;
+    agent: AgentLike$2;
     /** Glob patterns of files the agent can modify. */
     targetFiles?: string[];
     /** Output schema for the intervention report (Zod object). */
@@ -262,7 +263,7 @@ type SubflowProps$2 = {
 };
 
 type SourceDef$1 = {
-    agent: AgentLike;
+    agent: AgentLike$2;
     /** Prompt for this source. A string or ReactNode. */
     prompt?: string;
     /** Output schema for this specific source. Overrides `gatherOutput`. */
@@ -290,8 +291,8 @@ type SignalProps$2<Schema extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.Zod
 
 type SidecarProps$2 = {
     id?: string;
-    agent: AgentLike;
-    sidecar: AgentLike;
+    agent: AgentLike$2;
+    sidecar: AgentLike$2;
     output: OutputTarget$1;
     sidecarOutput?: OutputTarget$1;
     scorers?: ScorersMap$1;
@@ -325,11 +326,11 @@ type ScanFixVerifyProps$2 = {
     /** ID prefix for generated task/component ids. */
     id?: string;
     /** Agent that scans for problems. */
-    scanner: AgentLike;
+    scanner: AgentLike$2;
     /** Agent (or agents) that fixes problems. When an array is provided, agents are cycled across issues. */
-    fixer: AgentLike | AgentLike[];
+    fixer: AgentLike$2 | AgentLike$2[];
     /** Agent that verifies the fixes were applied correctly. */
-    verifier: AgentLike;
+    verifier: AgentLike$2;
     /** Output schema for scan results. Should include `issues: Array`. */
     scanOutput: OutputTarget$1;
     /** Output schema for each individual fix. */
@@ -442,7 +443,7 @@ type RunbookStep$1 = {
     /** Unique step identifier. */
     id: string;
     /** Agent for this step (falls back to `defaultAgent`). */
-    agent?: AgentLike;
+    agent?: AgentLike$2;
     /** Shell command or instruction for the step. */
     command?: string;
     /** Risk classification: safe auto-executes, risky/critical require approval. */
@@ -464,7 +465,7 @@ type RunbookProps$2 = {
     /** Ordered steps to execute. */
     steps: RunbookStep$1[];
     /** Default agent for steps that don't specify one. */
-    defaultAgent?: AgentLike;
+    defaultAgent?: AgentLike$2;
     /** Default output schema for step results. */
     stepOutput: OutputTarget$1;
     /** Template for approval requests on risky/critical steps. */
@@ -477,9 +478,9 @@ type RunbookProps$2 = {
 type ReviewLoopProps$2 = {
     id?: string;
     /** Agent that produces or fixes the work each iteration. */
-    producer: AgentLike;
+    producer: AgentLike$2;
     /** Agent (or agents) that reviews the produced work. */
-    reviewer: AgentLike | AgentLike[];
+    reviewer: AgentLike$2 | AgentLike$2[];
     /** Output schema for the produced work. */
     produceOutput: OutputTarget$1;
     /** Output schema for the review result. Must include an `approved: boolean` field. */
@@ -512,7 +513,7 @@ type PollerProps$2 = {
     /** ID prefix for generated task/component ids. */
     id?: string;
     /** Agent or compute function that checks the condition. */
-    check: AgentLike | (() => unknown | Promise<unknown>);
+    check: AgentLike$2 | (() => unknown | Promise<unknown>);
     /** Output schema for the check result. Must include `satisfied: boolean`. */
     checkOutput: OutputTarget$1;
     /** Maximum poll attempts. Default 30. */
@@ -540,7 +541,7 @@ type ParallelProps$2 = {
 
 type PanelistConfig$1 = {
     /** A single agent, or a failover CHAIN (`AgentLike[]`) run as one panelist. */
-    agent: AgentLike | AgentLike[];
+    agent: AgentLike$2 | AgentLike$2[];
     role?: string;
     label?: string;
 };
@@ -559,8 +560,8 @@ type PanelProps$2 = {
      * failover CHAIN (`AgentLike[]`). A chain becomes one panelist whose task
      * runs it as a failover sequence.
      */
-    panelists: Array<PanelistConfig$1 | AgentLike | AgentLike[]>;
-    moderator: AgentLike | AgentLike[];
+    panelists: Array<PanelistConfig$1 | AgentLike$2 | AgentLike$2[]>;
+    moderator: AgentLike$2 | AgentLike$2[];
     panelistOutput: OutputTarget$1;
     moderatorOutput: OutputTarget$1;
     strategy?: "synthesize" | "vote" | "consensus";
@@ -577,9 +578,9 @@ type PanelProps$2 = {
 type OptimizerProps$2 = {
     id?: string;
     /** Agent that generates or improves candidates each iteration. */
-    generator: AgentLike;
+    generator: AgentLike$2;
     /** Agent (or compute function) that scores candidates. */
-    evaluator: AgentLike | ((candidate: unknown) => unknown | Promise<unknown>);
+    evaluator: AgentLike$2 | ((candidate: unknown) => unknown | Promise<unknown>);
     /** Output schema for generated candidates. */
     generateOutput: OutputTarget$1;
     /** Output schema for evaluation results. Must include a `score: number` field. */
@@ -610,7 +611,7 @@ type MergeQueueProps$2 = {
 type ColumnTaskProps = Omit<Partial<TaskProps$2<unknown>>, "agent" | "children" | "id" | "key" | "output" | "smithersContext">;
 type ColumnDef$1 = {
     name: string;
-    agent: AgentLike;
+    agent: AgentLike$2;
     /** Output schema for tasks in this column. */
     output: OutputTarget$1;
     /** Prompt template. Receives `{ item, column }` and returns a string. */
@@ -632,7 +633,7 @@ type KanbanProps$2 = {
         [key: string]: unknown;
     }>;
     /** Record mapping column names to agents. Overrides column-level agents. */
-    agents?: Record<string, AgentLike>;
+    agents?: Record<string, AgentLike$2>;
     /** Max items processed in parallel per column. */
     maxConcurrency?: number;
     /** Callback output schema when an item reaches the final column. */
@@ -674,7 +675,7 @@ type GatherAndSynthesizeProps$2 = {
     /** Record mapping source names to source definitions. */
     sources: Record<string, SourceDef$1>;
     /** Agent that synthesizes gathered data. */
-    synthesizer: AgentLike;
+    synthesizer: AgentLike$2;
     /** Default output schema for each source gather task. */
     gatherOutput: OutputTarget$1;
     /** Output schema for the synthesis task. */
@@ -691,7 +692,7 @@ type GatherAndSynthesizeProps$2 = {
 
 type EscalationLevel$1 = {
     /** Agent to handle this escalation level. */
-    agent: AgentLike;
+    agent: AgentLike$2;
     /** Output target for this level's result. */
     output: OutputTarget$1;
     /** Display label for this level. */
@@ -720,9 +721,9 @@ type DriftDetectorProps$2 = {
     /** ID prefix for generated task/component ids. */
     id?: string;
     /** Agent that captures the current state snapshot. */
-    captureAgent: AgentLike;
+    captureAgent: AgentLike$2;
     /** Agent that compares current state against the baseline. */
-    compareAgent: AgentLike;
+    compareAgent: AgentLike$2;
     /** Output schema for the captured state. */
     captureOutput: OutputTarget$1;
     /** Output schema for the comparison result. Should include `drifted: boolean` and `significance: string`. */
@@ -741,6 +742,776 @@ type DriftDetectorProps$2 = {
     };
     /** Skip the entire component. */
     skipIf?: boolean;
+};
+
+/**
+ * Delegation-chain output tables — the single source of truth for every
+ * `dc*` row shape (see the delegation-chain contract). Core, components, and
+ * UI builders import these; nothing redefines them.
+ *
+ * Register the whole set in `createSmithers` and hand the resulting
+ * `outputs` subset to the delegation composites:
+ *
+ * ```ts
+ * const { smithers, outputs } = createSmithers({ ...delegationSchemas, ...own });
+ * <DelegationChain outputs={outputs} ... />
+ * ```
+ */
+/** Intelligence tiers, strongest → cheapest. Labels only; each maps to an AgentLike via the `agents` prop. */
+declare const tierSchema: z.ZodEnum<{
+    fable: "fable";
+    opus: "opus";
+    sonnet: "sonnet";
+    haiku: "haiku";
+}>;
+type Tier$3 = z.infer<typeof tierSchema>;
+/** Default tier ladder: fable plans root, opus plans chunks, sonnet executes leaves, haiku previews/probes. */
+declare const DEFAULT_TIER_ORDER: readonly Tier$3[];
+/** Durable signal event name for live user edits (fixed by contract — the UI submits to this key). */
+declare const DC_EDIT_SIGNAL = "dc-edit";
+/** Durable signal event name for skipping the zero-backpressure preview phase. */
+declare const DC_SKIP_PREVIEW_SIGNAL = "dc-skip-preview";
+/** A delegation node's predicted (or measured) resource envelope. */
+declare const estimateSchema: z.ZodObject<{
+    tokens: z.ZodNumber;
+    costUsd: z.ZodNumber;
+    minutes: z.ZodNumber;
+}, z.core.$strip>;
+type Estimate$1 = z.infer<typeof estimateSchema>;
+/** Developer-preview gate kinds: what artifact proves the node's work is showable. */
+declare const devPreviewKindSchema: z.ZodEnum<{
+    app: "app";
+    terminal: "terminal";
+    api: "api";
+    "throwaway-ui": "throwaway-ui";
+    slideshow: "slideshow";
+}>;
+type DevPreviewKind$1 = z.infer<typeof devPreviewKindSchema>;
+/**
+ * A declared backpressure gate. Approval gates are only honored when an
+ * approvalPolicy prompt was provided. A `preview` gate is a DEVELOPER
+ * PREVIEW: it runs AFTER the node's execution, its successful build
+ * (`builtOk`) is REQUIRED for the node to pass, and its artifact carries the
+ * UI's invalidate / request-changes affordances (which emit dc-edit rounds).
+ */
+declare const gateSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    method: z.ZodLiteral<"review">;
+    tier: z.ZodEnum<{
+        fable: "fable";
+        opus: "opus";
+        sonnet: "sonnet";
+        haiku: "haiku";
+    }>;
+    brief: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    method: z.ZodLiteral<"check">;
+    command: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    method: z.ZodLiteral<"approval">;
+    policyMatch: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    method: z.ZodLiteral<"preview">;
+    kind: z.ZodEnum<{
+        app: "app";
+        terminal: "terminal";
+        api: "api";
+        "throwaway-ui": "throwaway-ui";
+        slideshow: "slideshow";
+    }>;
+    brief: z.ZodString;
+}, z.core.$strip>], "method">;
+type Gate$1 = z.infer<typeof gateSchema>;
+/** Final refined goal. Written by the goal-refinement agent, then re-written by the human approval HumanTask. */
+declare const dcGoalSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    refinedPrompt: z.ZodString;
+    assumptions: z.ZodArray<z.ZodString>;
+    questionsAsked: z.ZodNumber;
+}, z.core.$strip>;
+type DcGoalRow$1 = z.infer<typeof dcGoalSchema>;
+/** Rendered form metadata for one goal-refinement question (haiku prefetch renders these ahead of the user). */
+declare const dcQuestionSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    seq: z.ZodNumber;
+    question: z.ZodString;
+    header: z.ZodString;
+    kind: z.ZodEnum<{
+        select: "select";
+        text: "text";
+        confirm: "confirm";
+    }>;
+    options: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        label: z.ZodString;
+        description: z.ZodString;
+    }, z.core.$strip>>>;
+    recommended: z.ZodString;
+    reason: z.ZodString;
+    resolved: z.ZodBoolean;
+}, z.core.$strip>;
+type DcQuestionRow$1 = z.infer<typeof dcQuestionSchema>;
+/**
+ * The goal agent's upfront question forecast (raw JSON batch). Internal to the
+ * components package: a smithers task writes exactly one row, so the batch of
+ * questions rides one dcForecast row and per-question haiku tasks fan out
+ * dcQuestion rows from it.
+ */
+declare const dcForecastSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    total: z.ZodNumber;
+    questions: z.ZodArray<z.ZodObject<{
+        seq: z.ZodNumber;
+        question: z.ZodString;
+        kind: z.ZodEnum<{
+            select: "select";
+            text: "text";
+            confirm: "confirm";
+        }>;
+        options: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            label: z.ZodString;
+            description: z.ZodString;
+        }, z.core.$strip>>>;
+        recommended: z.ZodString;
+        reason: z.ZodString;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+type DcForecastRow$1 = z.infer<typeof dcForecastSchema>;
+/**
+ * The human's refined-prompt approval (internal): the delegation UI submits
+ * `{ approved, refinedPrompt }` to the `dc:<goal>:approve` HumanTask, and the
+ * (possibly edited) refinedPrompt becomes the root planning brief.
+ */
+declare const dcGoalApprovalSchema: z.ZodObject<{
+    approved: z.ZodBoolean;
+    refinedPrompt: z.ZodString;
+}, z.core.$strip>;
+type DcGoalApprovalRow$1 = z.infer<typeof dcGoalApprovalSchema>;
+/** One row per delegating node: its children, risks, and resource estimates. Replans append superseding rows. */
+declare const dcPlanSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    tier: z.ZodEnum<{
+        fable: "fable";
+        opus: "opus";
+        sonnet: "sonnet";
+        haiku: "haiku";
+    }>;
+    title: z.ZodString;
+    brief: z.ZodString;
+    children: z.ZodArray<z.ZodObject<{
+        logicalId: z.ZodString;
+        tier: z.ZodEnum<{
+            fable: "fable";
+            opus: "opus";
+            sonnet: "sonnet";
+            haiku: "haiku";
+        }>;
+        kind: z.ZodEnum<{
+            chunk: "chunk";
+            leaf: "leaf";
+        }>;
+        title: z.ZodString;
+        brief: z.ZodString;
+        estimate: z.ZodObject<{
+            tokens: z.ZodNumber;
+            costUsd: z.ZodNumber;
+            minutes: z.ZodNumber;
+        }, z.core.$strip>;
+    }, z.core.$strip>>;
+    subtreeEstimate: z.ZodObject<{
+        tokens: z.ZodNumber;
+        costUsd: z.ZodNumber;
+        minutes: z.ZodNumber;
+    }, z.core.$strip>;
+    risks: z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        description: z.ZodString;
+        probe: z.ZodNullable<z.ZodEnum<{
+            poc: "poc";
+            research: "research";
+        }>>;
+        reason: z.ZodString;
+    }, z.core.$strip>>;
+    orchestration: z.ZodOptional<z.ZodEnum<{
+        workflow: "workflow";
+        tasks: "tasks";
+    }>>;
+}, z.core.$strip>;
+type DcPlanRow$2 = z.infer<typeof dcPlanSchema>;
+/** Zero-backpressure haiku render of a leaf's expected output. NEVER executed — calibration only. */
+declare const dcPreviewSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    expectedOutput: z.ZodString;
+}, z.core.$strip>;
+type DcPreviewRow$1 = z.infer<typeof dcPreviewSchema>;
+/** A node's declared backpressure gates and logical dependencies. */
+declare const dcGatesSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    gates: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        method: z.ZodLiteral<"review">;
+        tier: z.ZodEnum<{
+            fable: "fable";
+            opus: "opus";
+            sonnet: "sonnet";
+            haiku: "haiku";
+        }>;
+        brief: z.ZodString;
+    }, z.core.$strip>, z.ZodObject<{
+        method: z.ZodLiteral<"check">;
+        command: z.ZodString;
+    }, z.core.$strip>, z.ZodObject<{
+        method: z.ZodLiteral<"approval">;
+        policyMatch: z.ZodString;
+    }, z.core.$strip>, z.ZodObject<{
+        method: z.ZodLiteral<"preview">;
+        kind: z.ZodEnum<{
+            app: "app";
+            terminal: "terminal";
+            api: "api";
+            "throwaway-ui": "throwaway-ui";
+            slideshow: "slideshow";
+        }>;
+        brief: z.ZodString;
+    }, z.core.$strip>], "method">>;
+    depsLogical: z.ZodArray<z.ZodString>;
+}, z.core.$strip>;
+type DcGatesRow$2 = z.infer<typeof dcGatesSchema>;
+/**
+ * A developer-preview gate's built artifact (physical node phase
+ * `dev-preview`). `builtOk: false` fails the gate like a failed review —
+ * the node redelegates with the failure folded into the next attempt.
+ */
+declare const dcDevPreviewSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    kind: z.ZodEnum<{
+        app: "app";
+        terminal: "terminal";
+        api: "api";
+        "throwaway-ui": "throwaway-ui";
+        slideshow: "slideshow";
+    }>;
+    title: z.ZodString;
+    builtOk: z.ZodBoolean;
+    artifact: z.ZodObject<{
+        type: z.ZodEnum<{
+            html: "html";
+            url: "url";
+            markdown: "markdown";
+        }>;
+        content: z.ZodOptional<z.ZodString>;
+        url: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>;
+    instructions: z.ZodOptional<z.ZodString>;
+    summary: z.ZodString;
+}, z.core.$strip>;
+type DcDevPreviewRow$1 = z.infer<typeof dcDevPreviewSchema>;
+/** A risk probe's finding. The report is delivered to the NEAREST PARENT only. */
+declare const dcProbeSchema: z.ZodObject<{
+    probeId: z.ZodString;
+    parentLogicalId: z.ZodString;
+    kind: z.ZodEnum<{
+        poc: "poc";
+        research: "research";
+    }>;
+    question: z.ZodString;
+    answer: z.ZodString;
+    report: z.ZodString;
+    planImpact: z.ZodEnum<{
+        changes: "changes";
+        confirms: "confirms";
+        none: "none";
+    }>;
+    proposedChange: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+type DcProbeRow$1 = z.infer<typeof dcProbeSchema>;
+/** A replan decision for one affected node. `invalidated` bumps the node version; prior versions stay archived. */
+declare const dcReplanSchema: z.ZodObject<{
+    round: z.ZodNumber;
+    logicalId: z.ZodString;
+    decision: z.ZodEnum<{
+        invalidated: "invalidated";
+        reaffirmed: "reaffirmed";
+    }>;
+    reason: z.ZodString;
+    trigger: z.ZodObject<{
+        type: z.ZodEnum<{
+            probe: "probe";
+            "user-edit": "user-edit";
+            "review-fail": "review-fail";
+        }>;
+        ref: z.ZodString;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+type DcReplanRow$1 = z.infer<typeof dcReplanSchema>;
+/**
+ * One execution attempt of a leaf. `actual` is best-effort self-reported
+ * usage; `commitRange` is the working-copy commit measured before/after the
+ * attempt (captured by the exec agent wrapper — omitted whenever capture
+ * fails, never a reason to fail the exec).
+ */
+declare const dcExecSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    attempt: z.ZodNumber;
+    summary: z.ZodString;
+    artifacts: z.ZodArray<z.ZodString>;
+    actual: z.ZodOptional<z.ZodObject<{
+        tokens: z.ZodOptional<z.ZodNumber>;
+        costUsd: z.ZodOptional<z.ZodNumber>;
+        minutes: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    commitRange: z.ZodOptional<z.ZodObject<{
+        from: z.ZodString;
+        to: z.ZodString;
+        vcs: z.ZodEnum<{
+            jj: "jj";
+            git: "git";
+        }>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+type DcExecRow$1 = z.infer<typeof dcExecSchema>;
+/** A review/check gate verdict for one execution attempt. */
+declare const dcReviewSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    attempt: z.ZodNumber;
+    verdict: z.ZodEnum<{
+        fail: "fail";
+        pass: "pass";
+    }>;
+    feedback: z.ZodString;
+}, z.core.$strip>;
+type DcReviewRow$1 = z.infer<typeof dcReviewSchema>;
+/**
+ * Approval-gate decision rows (only materialized when an approvalPolicy was
+ * provided). Shape mirrors the stock `<Approval>` decision payload.
+ */
+declare const dcApprovalSchema: z.ZodObject<{
+    approved: z.ZodBoolean;
+    note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    decidedBy: z.ZodNullable<z.ZodString>;
+    decidedAt: z.ZodNullable<z.ZodString>;
+}, z.core.$strip>;
+type DcApprovalRow$1 = z.infer<typeof dcApprovalSchema>;
+/** Live user-edit signal payload (event name `dc-edit`). Each edit triggers a replan round. */
+declare const dcEditSchema: z.ZodObject<{
+    editId: z.ZodString;
+    logicalId: z.ZodString;
+    editedOutput: z.ZodUnknown;
+    note: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+type DcEditRow$1 = z.infer<typeof dcEditSchema>;
+/** Skip-previews signal payload (event name `dc-skip-preview`). */
+declare const dcSkipSchema: z.ZodObject<{
+    skipped: z.ZodBoolean;
+}, z.core.$strip>;
+type DcSkipRow$1 = z.infer<typeof dcSkipSchema>;
+/** End-of-run satisfaction poll (HumanTask json form). */
+declare const dcPollSchema: z.ZodObject<{
+    answers: z.ZodArray<z.ZodObject<{
+        question: z.ZodString;
+        rating: z.ZodNumber;
+    }, z.core.$strip>>;
+    comment: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+type DcPollRow$1 = z.infer<typeof dcPollSchema>;
+/**
+ * Budget-guard checkpoints (internal, written only when a `budget` prop is
+ * set): rolled-up dcExec actuals compared against the caller's budget. A hard
+ * breach fails the guard task (error into the run); >= 80% emits a `warn` row.
+ */
+declare const dcBudgetSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    level: z.ZodEnum<{
+        warn: "warn";
+        ok: "ok";
+    }>;
+    totalUsd: z.ZodNumber;
+    maxUsd: z.ZodNullable<z.ZodNumber>;
+    totalMinutes: z.ZodNumber;
+    maxMinutes: z.ZodNullable<z.ZodNumber>;
+}, z.core.$strip>;
+type DcBudgetRow$1 = z.infer<typeof dcBudgetSchema>;
+/** Run-level scoring digest (internal): the row delegation run scorers evaluate. */
+declare const dcScoreSchema: z.ZodObject<{
+    logicalId: z.ZodString;
+    summary: z.ZodString;
+}, z.core.$strip>;
+type DcScoreRow$1 = z.infer<typeof dcScoreSchema>;
+/**
+ * All delegation-chain tables keyed by table name — spread into
+ * `createSmithers({ ...delegationSchemas })` to register them.
+ */
+declare const delegationSchemas: {
+    readonly dcGoal: z.ZodObject<{
+        logicalId: z.ZodString;
+        refinedPrompt: z.ZodString;
+        assumptions: z.ZodArray<z.ZodString>;
+        questionsAsked: z.ZodNumber;
+    }, z.core.$strip>;
+    readonly dcQuestion: z.ZodObject<{
+        logicalId: z.ZodString;
+        seq: z.ZodNumber;
+        question: z.ZodString;
+        header: z.ZodString;
+        kind: z.ZodEnum<{
+            select: "select";
+            text: "text";
+            confirm: "confirm";
+        }>;
+        options: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            label: z.ZodString;
+            description: z.ZodString;
+        }, z.core.$strip>>>;
+        recommended: z.ZodString;
+        reason: z.ZodString;
+        resolved: z.ZodBoolean;
+    }, z.core.$strip>;
+    readonly dcForecast: z.ZodObject<{
+        logicalId: z.ZodString;
+        total: z.ZodNumber;
+        questions: z.ZodArray<z.ZodObject<{
+            seq: z.ZodNumber;
+            question: z.ZodString;
+            kind: z.ZodEnum<{
+                select: "select";
+                text: "text";
+                confirm: "confirm";
+            }>;
+            options: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                label: z.ZodString;
+                description: z.ZodString;
+            }, z.core.$strip>>>;
+            recommended: z.ZodString;
+            reason: z.ZodString;
+        }, z.core.$strip>>;
+    }, z.core.$strip>;
+    readonly dcGoalApproval: z.ZodObject<{
+        approved: z.ZodBoolean;
+        refinedPrompt: z.ZodString;
+    }, z.core.$strip>;
+    readonly dcPlan: z.ZodObject<{
+        logicalId: z.ZodString;
+        tier: z.ZodEnum<{
+            fable: "fable";
+            opus: "opus";
+            sonnet: "sonnet";
+            haiku: "haiku";
+        }>;
+        title: z.ZodString;
+        brief: z.ZodString;
+        children: z.ZodArray<z.ZodObject<{
+            logicalId: z.ZodString;
+            tier: z.ZodEnum<{
+                fable: "fable";
+                opus: "opus";
+                sonnet: "sonnet";
+                haiku: "haiku";
+            }>;
+            kind: z.ZodEnum<{
+                chunk: "chunk";
+                leaf: "leaf";
+            }>;
+            title: z.ZodString;
+            brief: z.ZodString;
+            estimate: z.ZodObject<{
+                tokens: z.ZodNumber;
+                costUsd: z.ZodNumber;
+                minutes: z.ZodNumber;
+            }, z.core.$strip>;
+        }, z.core.$strip>>;
+        subtreeEstimate: z.ZodObject<{
+            tokens: z.ZodNumber;
+            costUsd: z.ZodNumber;
+            minutes: z.ZodNumber;
+        }, z.core.$strip>;
+        risks: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            description: z.ZodString;
+            probe: z.ZodNullable<z.ZodEnum<{
+                poc: "poc";
+                research: "research";
+            }>>;
+            reason: z.ZodString;
+        }, z.core.$strip>>;
+        orchestration: z.ZodOptional<z.ZodEnum<{
+            workflow: "workflow";
+            tasks: "tasks";
+        }>>;
+    }, z.core.$strip>;
+    readonly dcPreview: z.ZodObject<{
+        logicalId: z.ZodString;
+        expectedOutput: z.ZodString;
+    }, z.core.$strip>;
+    readonly dcDevPreview: z.ZodObject<{
+        logicalId: z.ZodString;
+        kind: z.ZodEnum<{
+            app: "app";
+            terminal: "terminal";
+            api: "api";
+            "throwaway-ui": "throwaway-ui";
+            slideshow: "slideshow";
+        }>;
+        title: z.ZodString;
+        builtOk: z.ZodBoolean;
+        artifact: z.ZodObject<{
+            type: z.ZodEnum<{
+                html: "html";
+                url: "url";
+                markdown: "markdown";
+            }>;
+            content: z.ZodOptional<z.ZodString>;
+            url: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+        instructions: z.ZodOptional<z.ZodString>;
+        summary: z.ZodString;
+    }, z.core.$strip>;
+    readonly dcGates: z.ZodObject<{
+        logicalId: z.ZodString;
+        gates: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            method: z.ZodLiteral<"review">;
+            tier: z.ZodEnum<{
+                fable: "fable";
+                opus: "opus";
+                sonnet: "sonnet";
+                haiku: "haiku";
+            }>;
+            brief: z.ZodString;
+        }, z.core.$strip>, z.ZodObject<{
+            method: z.ZodLiteral<"check">;
+            command: z.ZodString;
+        }, z.core.$strip>, z.ZodObject<{
+            method: z.ZodLiteral<"approval">;
+            policyMatch: z.ZodString;
+        }, z.core.$strip>, z.ZodObject<{
+            method: z.ZodLiteral<"preview">;
+            kind: z.ZodEnum<{
+                app: "app";
+                terminal: "terminal";
+                api: "api";
+                "throwaway-ui": "throwaway-ui";
+                slideshow: "slideshow";
+            }>;
+            brief: z.ZodString;
+        }, z.core.$strip>], "method">>;
+        depsLogical: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>;
+    readonly dcProbe: z.ZodObject<{
+        probeId: z.ZodString;
+        parentLogicalId: z.ZodString;
+        kind: z.ZodEnum<{
+            poc: "poc";
+            research: "research";
+        }>;
+        question: z.ZodString;
+        answer: z.ZodString;
+        report: z.ZodString;
+        planImpact: z.ZodEnum<{
+            changes: "changes";
+            confirms: "confirms";
+            none: "none";
+        }>;
+        proposedChange: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>;
+    readonly dcReplan: z.ZodObject<{
+        round: z.ZodNumber;
+        logicalId: z.ZodString;
+        decision: z.ZodEnum<{
+            invalidated: "invalidated";
+            reaffirmed: "reaffirmed";
+        }>;
+        reason: z.ZodString;
+        trigger: z.ZodObject<{
+            type: z.ZodEnum<{
+                probe: "probe";
+                "user-edit": "user-edit";
+                "review-fail": "review-fail";
+            }>;
+            ref: z.ZodString;
+        }, z.core.$strip>;
+    }, z.core.$strip>;
+    readonly dcExec: z.ZodObject<{
+        logicalId: z.ZodString;
+        attempt: z.ZodNumber;
+        summary: z.ZodString;
+        artifacts: z.ZodArray<z.ZodString>;
+        actual: z.ZodOptional<z.ZodObject<{
+            tokens: z.ZodOptional<z.ZodNumber>;
+            costUsd: z.ZodOptional<z.ZodNumber>;
+            minutes: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        commitRange: z.ZodOptional<z.ZodObject<{
+            from: z.ZodString;
+            to: z.ZodString;
+            vcs: z.ZodEnum<{
+                jj: "jj";
+                git: "git";
+            }>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>;
+    readonly dcReview: z.ZodObject<{
+        logicalId: z.ZodString;
+        attempt: z.ZodNumber;
+        verdict: z.ZodEnum<{
+            fail: "fail";
+            pass: "pass";
+        }>;
+        feedback: z.ZodString;
+    }, z.core.$strip>;
+    readonly dcApproval: z.ZodObject<{
+        approved: z.ZodBoolean;
+        note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        decidedBy: z.ZodNullable<z.ZodString>;
+        decidedAt: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>;
+    readonly dcEdit: z.ZodObject<{
+        editId: z.ZodString;
+        logicalId: z.ZodString;
+        editedOutput: z.ZodUnknown;
+        note: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>;
+    readonly dcSkip: z.ZodObject<{
+        skipped: z.ZodBoolean;
+    }, z.core.$strip>;
+    readonly dcPoll: z.ZodObject<{
+        answers: z.ZodArray<z.ZodObject<{
+            question: z.ZodString;
+            rating: z.ZodNumber;
+        }, z.core.$strip>>;
+        comment: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>;
+    readonly dcBudget: z.ZodObject<{
+        logicalId: z.ZodString;
+        level: z.ZodEnum<{
+            warn: "warn";
+            ok: "ok";
+        }>;
+        totalUsd: z.ZodNumber;
+        maxUsd: z.ZodNullable<z.ZodNumber>;
+        totalMinutes: z.ZodNumber;
+        maxMinutes: z.ZodNullable<z.ZodNumber>;
+    }, z.core.$strip>;
+    readonly dcScore: z.ZodObject<{
+        logicalId: z.ZodString;
+        summary: z.ZodString;
+    }, z.core.$strip>;
+};
+
+/** One agent (or failover chain) per intelligence tier. Tiers are labels only. */
+type DelegationAgents$1 = Partial<Record<Tier$3, AgentLike$2 | AgentLike$2[]>>;
+/**
+ * Output targets for the delegation tables — pass the matching subset of
+ * `createSmithers({ ...delegationSchemas }).outputs`. `dcApproval` is only
+ * needed with an `approvalPolicy`, `dcBudget` only with a `budget`, and
+ * `dcScore` only with run-level `scorers`.
+ */
+type DelegationOutputs$1 = {
+    dcGoal: OutputTarget$1;
+    dcQuestion: OutputTarget$1;
+    dcForecast: OutputTarget$1;
+    dcGoalApproval: OutputTarget$1;
+    dcPlan: OutputTarget$1;
+    dcPreview: OutputTarget$1;
+    dcDevPreview?: OutputTarget$1;
+    dcGates: OutputTarget$1;
+    dcProbe: OutputTarget$1;
+    dcReplan: OutputTarget$1;
+    dcExec: OutputTarget$1;
+    dcReview: OutputTarget$1;
+    dcApproval?: OutputTarget$1;
+    dcEdit: OutputTarget$1;
+    dcSkip: OutputTarget$1;
+    dcPoll: OutputTarget$1;
+    dcBudget?: OutputTarget$1;
+    dcScore?: OutputTarget$1;
+};
+/** Run budget. Exceeding a hard limit raises an error into the run; >= 80% emits a warning row. */
+type DelegationBudget$1 = {
+    maxUsd?: number;
+    maxMinutes?: number;
+};
+/** Caller-provided scorers wired onto exec tasks, review tasks, and the run-level scoring task. */
+type DelegationScorers$1 = {
+    exec?: ScorersMap$1;
+    review?: ScorersMap$1;
+    run?: ScorersMap$1;
+};
+/** Props shared by every delegation phase composite. */
+type DelegationSharedProps$1 = {
+    /** Physical node-id prefix (`<idPrefix>:<logicalId>:<phase>`). Default "dc". */
+    idPrefix?: string;
+    /** Agent per tier. Missing tiers fall back to the nearest configured tier. */
+    agents: DelegationAgents$1;
+    /** Output targets for the delegation tables (register `delegationSchemas` in createSmithers). */
+    outputs: DelegationOutputs$1;
+    /** When set, delegating agents may declare approval gates where this policy applies (and pass a clarified policy to children). Absent = fully automatic. */
+    approvalPolicy?: string;
+    /** Tier ladder, strongest first. Default ["fable", "opus", "sonnet", "haiku"]. */
+    tierOrder?: Tier$3[];
+    /** Max decomposition depth (default 3). */
+    maxDepth?: number;
+    /** Max parallel tasks per fan-out phase (default 4). */
+    maxConcurrency?: number;
+    /** Max replan rounds per node (default 3). */
+    maxDeriskRounds?: number;
+    /** Render the end-of-run satisfaction poll (default true). */
+    poll?: boolean;
+    /** Run budget, enforced from rolled-up dcExec actuals (and wall-clock via Aspects for maxMinutes). */
+    budget?: DelegationBudget$1;
+    /** Delegation scorers (e.g. from `smithers-orchestrator/scorers`). */
+    scorers?: DelegationScorers$1;
+    skipIf?: boolean;
+};
+
+type GoalRefinementProps$2 = DelegationSharedProps$1 & {
+    /** The user's original (possibly ambiguous) ask. */
+    prompt: string;
+    /** Max user-preference questions the goal agent may forecast (default 10). */
+    maxQuestions?: number;
+    /** How many question forms haiku renders ahead of the user (default 10). */
+    prefetchDepth?: number;
+};
+
+type DeriskLoopProps$2 = DelegationSharedProps$1;
+
+type BackpressurePlanningProps$2 = DelegationSharedProps$1;
+
+type DelegationScoringProps$2 = DelegationSharedProps$1;
+
+type DelegationPreviewProps$2 = DelegationSharedProps$1;
+
+type DelegationPlanningProps$2 = DelegationSharedProps$1 & {
+    /**
+     * Root brief for standalone use. When omitted, planning waits for the
+     * approved dcGoal row from the GoalRefinement phase and uses its
+     * refinedPrompt.
+     */
+    prompt?: string;
+};
+
+type DelegationExecutionProps$2 = DelegationSharedProps$1 & {
+    /** Max exec/review attempts per leaf (default 3). Attempt = loop iteration. */
+    maxAttempts?: number;
+};
+
+type DelegationEditListenerProps$2 = DelegationSharedProps$1 & {
+    /**
+     * Stop listening when true (unmounts the armed signal wait so the run can
+     * finish). DelegationChain flips this once scoring completes; standalone
+     * callers compute their own condition.
+     */
+    until?: boolean;
+    /** Max live edits accepted in one run (default 25). */
+    maxEdits?: number;
+};
+
+type DelegationChainProps$2 = DelegationSharedProps$1 & {
+    /** The user's original (possibly ambiguous) ask. Goal refinement turns it into the root context contract. */
+    prompt: string;
+    /** Max user-preference questions in goal refinement (default 10). */
+    maxQuestions?: number;
+    /** How many question forms haiku renders ahead of the user (default 10). */
+    prefetchDepth?: number;
+    /** Max exec/review attempts per leaf (default 3). */
+    maxAttempts?: number;
+    /** Max live edits accepted in one run (default 25). */
+    maxEdits?: number;
 };
 
 type DecisionRule$1 = {
@@ -766,9 +1537,9 @@ type DecisionTableProps$2 = {
 
 type DebateProps$2 = {
     id?: string;
-    proposer: AgentLike;
-    opponent: AgentLike;
-    judge: AgentLike;
+    proposer: AgentLike$2;
+    opponent: AgentLike$2;
+    judge: AgentLike$2;
     rounds?: number;
     argumentOutput: OutputTarget$1;
     verdictOutput: OutputTarget$1;
@@ -787,7 +1558,7 @@ type ContentPipelineStage$1 = {
     /** Unique identifier for this stage. */
     id: string;
     /** Agent that performs this stage's work. */
-    agent: AgentLike;
+    agent: AgentLike$2;
     /** Output schema for this stage. */
     output: OutputTarget$1;
     /** Human-readable label for the stage (used as task label). */
@@ -805,7 +1576,7 @@ type ContentPipelineProps$2 = {
 };
 
 type CategoryConfig$1 = {
-    agent: AgentLike;
+    agent: AgentLike$2;
     /** Output schema for this category's route handler. Overrides `routeOutput`. */
     output?: OutputTarget$1;
     /** Optional prompt for the route handler. Receives the classified item. */
@@ -817,9 +1588,9 @@ type ClassifyAndRouteProps$2 = {
     /** Items to classify. A single item or an array of items. */
     items: unknown | unknown[];
     /** Record mapping category names to agents or config objects. */
-    categories: Record<string, AgentLike | CategoryConfig$1>;
+    categories: Record<string, AgentLike$2 | CategoryConfig$1>;
     /** Agent that classifies items into categories. */
-    classifierAgent: AgentLike;
+    classifierAgent: AgentLike$2;
     /** Output schema for the classification task. */
     classifierOutput: OutputTarget$1;
     /** Default output schema for routed work. Can be overridden per-category. */
@@ -840,7 +1611,7 @@ type ClassifyAndRouteProps$2 = {
 
 type CheckConfig$1 = {
     id: string;
-    agent?: AgentLike;
+    agent?: AgentLike$2;
     command?: string;
     label?: string;
 };
@@ -1515,6 +2286,800 @@ declare function SuperSmithers(props: SuperSmithersProps$1): React__default.Reac
 }, string | React__default.JSXElementConstructor<any>> | null;
 type SuperSmithersProps$1 = SuperSmithersProps$2;
 
+/**
+ * <DelegationChain> — the full delegation-chain workflow composite.
+ *
+ * A `<Sequence>` of the seven phases (goal refinement → recursive planning →
+ * zero-backpressure previews → backpressure planning → derisk probes/replans
+ * → gated execution → scoring + poll) in `<Parallel>` with the live
+ * `dc-edit` signal listener. Every phase is reactive: it derives its slice of
+ * the tree from the dc* output rows each render, so fan-out materializes
+ * level by level as rows land, and user edits/probe findings replan the
+ * affected subtree without restarting anything.
+ *
+ * When `budget.maxMinutes` is set the whole chain is wrapped in `<Aspects>`
+ * with a wall-clock `latencySlo` (engine-enforced at task dispatch); dollar
+ * budgets are enforced by per-leaf guard tasks comparing rolled-up dcExec
+ * actuals (hard error over the limit, warning row at >= 80%).
+ *
+ * Register `delegationSchemas` in `createSmithers` and pass the matching
+ * `outputs` subset:
+ *
+ * ```tsx
+ * const { smithers, outputs } = createSmithers({ ...delegationSchemas });
+ * <DelegationChain
+ *   prompt={ctx.input.prompt}
+ *   agents={{ fable, opus, sonnet, haiku }}
+ *   outputs={outputs}
+ * />
+ * ```
+ * @param {DelegationChainProps} props
+ */
+declare function DelegationChain(props: DelegationChainProps$1): React__default.FunctionComponentElement<ParallelProps$2> | React__default.FunctionComponentElement<AspectsProps$2> | null;
+type DelegationChainProps$1 = DelegationChainProps$2;
+
+/**
+ * <GoalRefinement> — phase 0 of the delegation chain.
+ *
+ * The strongest tier forecasts every genuine user-preference question upfront
+ * (one dcForecast row); haiku tasks render form metadata (unresolved
+ * dcQuestion rows) up to `prefetchDepth` questions ahead; the user answers one
+ * durable json form at a time (each answer folds into a RESOLVED dcQuestion
+ * row); then the goal agent writes the refined prompt (dcGoal) and a final
+ * HumanTask lets the human edit + approve it (`{ approved, refinedPrompt }` —
+ * the approved refinedPrompt is what planning builds from).
+ *
+ * Node ids: `<p>:goal:forecast` (internal), `<p>:goal:forms:question-<seq>`
+ * (haiku form metadata), `<p>:goal:question-<seq>` (human answer — the id the
+ * delegation UI targets), `<p>:goal:goal` (refine), `<p>:goal:approve`
+ * (refined-prompt approval — UI-targeted).
+ * @param {GoalRefinementProps} props
+ */
+declare function GoalRefinement(props: GoalRefinementProps$1): React__default.FunctionComponentElement<SequenceProps$2> | null;
+type GoalRefinementProps$1 = GoalRefinementProps$2;
+
+/**
+ * <DelegationPlanning> — recursive decomposition fan-out.
+ *
+ * The strongest tier plans `root`; every child declared as a chunk fans out
+ * into its own plan task (re-render materializes the next level as each plan
+ * row lands) until the frontier is all leaves or `maxDepth` forces leaves.
+ * Fan-out gating is by construction: a child's plan task only mounts once its
+ * parent's dcPlan row exists, and its brief is captured from that row —
+ * strictly stronger gating than a dependsOn edge, with the same minimal
+ * working set per child.
+ *
+ * Node ids: `<p>:<logicalId>:plan` (path `/` encoded as `:`).
+ * @param {DelegationPlanningProps} props
+ */
+declare function DelegationPlanning(props: DelegationPlanningProps$1): React__default.FunctionComponentElement<SequenceProps$2> | null;
+type DelegationPlanningProps$1 = DelegationPlanningProps$2;
+
+/**
+ * <DelegationPreview> — zero-backpressure expected-output previews.
+ *
+ * Once planning completes, haiku renders every leaf's expected output
+ * (dcPreview rows — ALWAYS displayed with a "never executed — calibration
+ * only" warning). A durable `dc-skip-preview` signal (delivered by the UI's
+ * skip button) suppresses the phase: once a dcSkip row exists, no further
+ * preview tasks mount. The signal listener is async and unmounts once every
+ * preview landed, so it never wedges the run.
+ *
+ * Node ids: `<p>:<leaf>:preview`; the skip listener is the fixed signal node
+ * `dc-skip-preview`.
+ * @param {DelegationPreviewProps} props
+ */
+declare function DelegationPreview(props: DelegationPreviewProps$1): React__default.FunctionComponentElement<SequenceProps$2> | null;
+type DelegationPreviewProps$1 = DelegationPreviewProps$2;
+
+/**
+ * <BackpressurePlanning> — every node declares its gates and dependencies
+ * BEFORE execution (frame 4 of the design simulation).
+ *
+ * One dcGates task per node in the planned tree, in parallel: delegating
+ * nodes declare their own gates; a leaf's gates are declared by its parent's
+ * tier. Approval gates are only permitted when an approvalPolicy prompt was
+ * provided (the prompt says so explicitly either way).
+ *
+ * Node ids: `<p>:<logicalId>:gates`.
+ * @param {BackpressurePlanningProps} props
+ */
+declare function BackpressurePlanning(props: BackpressurePlanningProps$1): React__default.FunctionComponentElement<SequenceProps$2> | null;
+type BackpressurePlanningProps$1 = BackpressurePlanningProps$2;
+
+/**
+ * Physical smithers node id for a logical node + phase:
+ * `<idPrefix>:<logicalId>:<phase>`, with `/` path separators encoded as `:`
+ * — gateway node-id validation only allows `[a-zA-Z0-9:_-]`, and the
+ * delegation fold parses any `:`-joined middle segments back into the
+ * logical id slot. Row `logicalId` FIELDS keep the contract's `/` form.
+ * @param {string} idPrefix
+ * @param {string} logicalId
+ * @param {string} phase
+ * @returns {string}
+ */
+declare function physicalId(idPrefix: string, logicalId: string, phase: string): string;
+/**
+ * Fold dcPlan rows into the current plan per logical id (last row per node
+ * wins — replans append superseding rows) plus the version count.
+ * @param {Record<string, any>[]} planRows
+ * @returns {Map<string, { plan: DcPlanRow; versions: number }>}
+ */
+declare function foldPlans(planRows: Record<string, any>[]): Map<string, {
+    plan: DcPlanRow$1;
+    versions: number;
+}>;
+/**
+ * @typedef {{
+ *   logicalId: string;
+ *   parentId: string | null;
+ *   tier: Tier;
+ *   kind: "chunk" | "leaf";
+ *   title: string;
+ *   brief: string;
+ *   estimate?: import("./delegationSchemas.ts").Estimate;
+ * }} DelegationNodeInfo
+ */
+/**
+ * Every node declared so far (each plan row's own node plus its children;
+ * a child's own plan row supersedes the parent's declaration of it).
+ * @param {Map<string, { plan: DcPlanRow; versions: number }>} plans
+ * @returns {Map<string, DelegationNodeInfo>}
+ */
+declare function nodeIndex(plans: Map<string, {
+    plan: DcPlanRow$1;
+    versions: number;
+}>): Map<string, DelegationNodeInfo$1>;
+/**
+ * Children declared as chunks that have no plan row of their own yet — the
+ * next planning fan-out frontier.
+ * @param {Map<string, { plan: DcPlanRow; versions: number }>} plans
+ * @returns {DelegationNodeInfo[]}
+ */
+declare function unplannedChunks(plans: Map<string, {
+    plan: DcPlanRow$1;
+    versions: number;
+}>): DelegationNodeInfo$1[];
+/**
+ * The current execution frontier: every child declared as a leaf (and not
+ * superseded by its own plan row).
+ * @param {Map<string, { plan: DcPlanRow; versions: number }>} plans
+ * @returns {DelegationNodeInfo[]}
+ */
+declare function frontierLeaves(plans: Map<string, {
+    plan: DcPlanRow$1;
+    versions: number;
+}>): DelegationNodeInfo$1[];
+/**
+ * Planning is complete when a root plan exists and every declared chunk has
+ * produced its own plan row (the frontier is all leaves).
+ * @param {Map<string, { plan: DcPlanRow; versions: number }>} plans
+ * @returns {boolean}
+ */
+declare function planningComplete(plans: Map<string, {
+    plan: DcPlanRow$1;
+    versions: number;
+}>): boolean;
+/**
+ * Latest dcGates row per logical id.
+ * @param {Record<string, any>[]} gatesRows
+ * @returns {Map<string, DcGatesRow>}
+ */
+declare function foldGates(gatesRows: Record<string, any>[]): Map<string, DcGatesRow$1>;
+/**
+ * Transitive dependents of a node: everything reachable by walking child
+ * edges down from it plus reverse `depsLogical` edges (invalidation cascades
+ * along BOTH — see the simulation's calibration delta #3). Excludes the node.
+ * @param {string} logicalId
+ * @param {Map<string, { plan: DcPlanRow; versions: number }>} plans
+ * @param {Map<string, DcGatesRow>} gates
+ * @returns {string[]}
+ */
+declare function dependentsOf(logicalId: string, plans: Map<string, {
+    plan: DcPlanRow$1;
+    versions: number;
+}>, gates: Map<string, DcGatesRow$1>): string[];
+/**
+ * Map a logical id to the nearest ancestor-or-self that owns a plan row (the
+ * delegating node responsible for replanning it). Leaves map to their parent.
+ * @param {string} logicalId
+ * @param {Map<string, { plan: DcPlanRow; versions: number }>} plans
+ * @returns {string | null}
+ */
+declare function planOwnerOf(logicalId: string, plans: Map<string, {
+    plan: DcPlanRow$1;
+    versions: number;
+}>): string | null;
+/**
+ * All frontier leaves at or under a logical id (a chunk-level dependency
+ * expands to every leaf beneath it).
+ * @param {string} logicalId
+ * @param {Map<string, { plan: DcPlanRow; versions: number }>} plans
+ * @returns {DelegationNodeInfo[]}
+ */
+declare function leavesUnder(logicalId: string, plans: Map<string, {
+    plan: DcPlanRow$1;
+    versions: number;
+}>): DelegationNodeInfo$1[];
+/**
+ * Deterministic probe id for a plan risk.
+ * @param {string} parentLogicalId
+ * @param {string} riskId
+ * @returns {string}
+ */
+declare function probeIdFor(parentLogicalId: string, riskId: string): string;
+/**
+ * Risks across the current plans that request a probe.
+ * @param {Map<string, { plan: DcPlanRow; versions: number }>} plans
+ * @returns {Array<{ parentLogicalId: string; probeId: string; kind: "poc" | "research"; risk: DcPlanRow["risks"][number] }>}
+ */
+declare function probesRequested(plans: Map<string, {
+    plan: DcPlanRow$1;
+    versions: number;
+}>): Array<{
+    parentLogicalId: string;
+    probeId: string;
+    kind: "poc" | "research";
+    risk: DcPlanRow$1["risks"][number];
+}>;
+/**
+ * @typedef {{ type: "probe" | "user-edit"; ref: string; flagged: string; detail: Record<string, any> }} DeriskTrigger
+ */
+/**
+ * Unaddressed replan triggers: probe findings whose planImpact is "changes"
+ * and live user edits, minus anything a dcReplan row already answered
+ * (matched by trigger.ref).
+ * @param {Record<string, any>[]} probeRows
+ * @param {Record<string, any>[]} editRows
+ * @param {Record<string, any>[]} replanRows
+ * @returns {DeriskTrigger[]}
+ */
+declare function pendingTriggers(probeRows: Record<string, any>[], editRows: Record<string, any>[], replanRows: Record<string, any>[]): DeriskTrigger$1[];
+/**
+ * How many replan decisions a node has already made (its per-node round counter).
+ * @param {Record<string, any>[]} replanRows
+ * @param {string} logicalId
+ * @returns {number}
+ */
+declare function replanCountFor(replanRows: Record<string, any>[], logicalId: string): number;
+/**
+ * Sum best-effort actuals across dcExec rows.
+ * @param {Record<string, any>[]} execRows
+ * @returns {{ tokens: number; costUsd: number; minutes: number }}
+ */
+declare function actualTotals(execRows: Record<string, any>[]): {
+    tokens: number;
+    costUsd: number;
+    minutes: number;
+};
+/**
+ * Split a dcGates row into ordered gate lists. Approval gates are only kept
+ * when an approval policy was provided (contract: approval gates exist ONLY
+ * under an approvalPolicy).
+ * @param {DcGatesRow | undefined} gatesRow
+ * @param {string | undefined} approvalPolicy
+ */
+declare function splitGates(gatesRow: DcGatesRow$1 | undefined, approvalPolicy: string | undefined): {
+    reviews: {
+        method: "review";
+        tier: "fable" | "opus" | "sonnet" | "haiku";
+        brief: string;
+    }[];
+    checks: {
+        method: "check";
+        command: string;
+    }[];
+    approvals: {
+        method: "approval";
+        policyMatch: string;
+    }[];
+    previews: {
+        method: "preview";
+        kind: "app" | "terminal" | "api" | "throwaway-ui" | "slideshow";
+        brief: string;
+    }[];
+};
+/**
+ * Physical node id for a node's i-th developer-preview gate
+ * (`dev-preview`, then `dev-preview-2`, ...).
+ * @param {string} idPrefix
+ * @param {string} logicalId
+ * @param {number} index zero-based gate index
+ * @returns {string}
+ */
+declare function devPreviewNodeId(idPrefix: string, logicalId: string, index: number): string;
+/**
+ * Attempt-state of one leaf, derived from dcExec/dcReview rows: the attempt
+ * loop's `until` condition, the verdict feedback folded into retries, and the
+ * attempt number surfaced in prompts. Gate rows are matched by physical node
+ * id + loop iteration, so agent-reported `attempt` fields never gate control
+ * flow.
+ * @param {{
+ *   execRows: Record<string, any>[];
+ *   reviewRows: Record<string, any>[];
+ *   execId: string;
+ *   gateNodeIds: string[];
+ *   devPreviewRows?: Record<string, any>[];
+ *   previewNodeIds?: string[];
+ * }} opts
+ */
+declare function leafAttemptState(opts: {
+    execRows: Record<string, any>[];
+    reviewRows: Record<string, any>[];
+    execId: string;
+    gateNodeIds: string[];
+    devPreviewRows?: Record<string, any>[];
+    previewNodeIds?: string[];
+}): {
+    attempts: number;
+    latestIteration: number;
+    allPass: boolean;
+    failedFeedback: string[];
+};
+/**
+ * Whether one leaf is fully complete: latest attempt's exec + every declared
+ * review/check gate passed, and (under an approvalPolicy) every approval gate
+ * approved.
+ * @param {{
+ *   idPrefix: string;
+ *   leaf: DelegationNodeInfo;
+ *   gates: Map<string, DcGatesRow>;
+ *   approvalPolicy: string | undefined;
+ *   execRows: Record<string, any>[];
+ *   reviewRows: Record<string, any>[];
+ *   approvalRows: Record<string, any>[];
+ *   devPreviewRows?: Record<string, any>[];
+ * }} opts
+ * @returns {boolean}
+ */
+declare function leafComplete(opts: {
+    idPrefix: string;
+    leaf: DelegationNodeInfo$1;
+    gates: Map<string, DcGatesRow$1>;
+    approvalPolicy: string | undefined;
+    execRows: Record<string, any>[];
+    reviewRows: Record<string, any>[];
+    approvalRows: Record<string, any>[];
+    devPreviewRows?: Record<string, any>[];
+}): boolean;
+/**
+ * Whether the whole execution phase is complete: planning done, a non-empty
+ * leaf frontier, and every leaf complete.
+ * @param {{
+ *   idPrefix: string;
+ *   plans: Map<string, { plan: DcPlanRow; versions: number }>;
+ *   gates: Map<string, DcGatesRow>;
+ *   approvalPolicy: string | undefined;
+ *   execRows: Record<string, any>[];
+ *   reviewRows: Record<string, any>[];
+ *   approvalRows: Record<string, any>[];
+ *   devPreviewRows?: Record<string, any>[];
+ * }} opts
+ * @returns {boolean}
+ */
+declare function executionComplete(opts: {
+    idPrefix: string;
+    plans: Map<string, {
+        plan: DcPlanRow$1;
+        versions: number;
+    }>;
+    gates: Map<string, DcGatesRow$1>;
+    approvalPolicy: string | undefined;
+    execRows: Record<string, any>[];
+    reviewRows: Record<string, any>[];
+    approvalRows: Record<string, any>[];
+    devPreviewRows?: Record<string, any>[];
+}): boolean;
+/**
+ * Resolve a tier label to an agent from the `agents` prop, walking down the
+ * tier order for the nearest configured fallback.
+ * @param {Partial<Record<Tier, AgentLike | AgentLike[]>>} agents
+ * @param {Tier} tier
+ * @param {readonly Tier[]} [tierOrder]
+ * @returns {AgentLike | AgentLike[] | undefined}
+ */
+declare function agentForTier(agents: Partial<Record<Tier$2, AgentLike$1 | AgentLike$1[]>>, tier: Tier$2, tierOrder?: readonly Tier$2[]): AgentLike$1 | AgentLike$1[] | undefined;
+type AgentLike$1 = _smithers_orchestrator_agents_AgentLike.AgentLike;
+type DelegationNodeInfo$1 = {
+    logicalId: string;
+    parentId: string | null;
+    tier: Tier$2;
+    kind: "chunk" | "leaf";
+    title: string;
+    brief: string;
+    estimate?: Estimate$1;
+};
+type DeriskTrigger$1 = {
+    type: "probe" | "user-edit";
+    ref: string;
+    flagged: string;
+    detail: Record<string, any>;
+};
+type DcGatesRow$1 = DcGatesRow$2;
+type DcPlanRow$1 = DcPlanRow$2;
+type Tier$2 = Tier$3;
+
+/**
+ * <DeriskLoop> — risk hunting + replan cascades (frames 5-7).
+ *
+ * Reactive rounds instead of a `<Loop>` primitive (each round's tasks carry
+ * explicit round numbers, so ids stay stable and replay-friendly):
+ *
+ * 1. Every risk with `probe != null` in a CURRENT plan spawns a probe task
+ *    (haiku research / sonnet poc) reporting to its nearest parent only.
+ * 2. Probe findings with `planImpact: "changes"` and delivered `dc-edit`
+ *    signal rows are triggers. Affected = the flagged node + its dependents
+ *    (child AND dep edges), each mapped to its plan-owning ancestor.
+ * 3. Each affected owner gets a replan-decision task
+ *    (`<p>:<id>:replan-<k>`, k = its per-node round counter); an
+ *    `invalidated` decision mounts a fresh plan task (`<p>:<id>:plan-<k>`)
+ *    whose row supersedes the old version. Rounds stop at `maxDeriskRounds`
+ *    per node.
+ * @param {DeriskLoopProps} props
+ */
+declare function DeriskLoop(props: DeriskLoopProps$1): React__default.FunctionComponentElement<SequenceProps$2> | null;
+type DeriskLoopProps$1 = DeriskLoopProps$2;
+
+/** @typedef {import("./delegationSchemas.ts").Gate} Gate */
+/** @typedef {import("./delegationState.js").DelegationNodeInfo} DelegationNodeInfo */
+/**
+ * <DelegationExecution> — walk the leaf frontier with max parallelism
+ * (frames 8-9).
+ *
+ * Per leaf: a `<Loop>` (iteration = attempt) of exec Task then its declared
+ * gates — review gates at their declared tier, check gates as lean
+ * command-runner tasks, both writing dcReview rows and `dependsOn` the exec
+ * node. A failed gate loops with the verdict folded into the next attempt's
+ * brief. Approval gates (only under an approvalPolicy) materialize as
+ * `<Approval>` after the loop passes. Cross-leaf ordering comes from dcGates
+ * `depsLogical`: a leaf's pipeline only MOUNTS once every leaf under each of
+ * its logical deps is complete (render-gating — strictly stronger than a
+ * dependsOn edge, and safe across loop scopes).
+ *
+ * Node ids: `<p>:<leaf>:exec`, `<p>:<leaf>:review-<i>` (reviews then checks),
+ * `<p>:<leaf>:approval-<i>`, `<p>:<leaf>:budget` (internal guard).
+ * @param {DelegationExecutionProps} props
+ */
+declare function DelegationExecution(props: DelegationExecutionProps$1): React__default.FunctionComponentElement<SequenceProps$2> | null;
+type DelegationExecutionProps$1 = DelegationExecutionProps$2;
+
+/**
+ * <DelegationScoring> — end-of-run scoring + human poll (frame 10).
+ *
+ * Per-task scorers ride the exec/review tasks inside DelegationExecution
+ * (`scorers.exec` / `scorers.review`); this composite adds the run level:
+ * a compute task (`<p>:root:score`) that digests the whole run's rows into a
+ * dcScore row and carries the caller's `scorers.run` (e.g. built from
+ * `delegationRunScore` in `smithers-orchestrator/scorers`), and — when
+ * `poll` is enabled — the 3-question satisfaction poll HumanTask
+ * (`<p>:root:poll`), the run's final attention badge.
+ * @param {DelegationScoringProps} props
+ */
+declare function DelegationScoring(props: DelegationScoringProps$1): React__default.FunctionComponentElement<SequenceProps$2> | null;
+type DelegationScoringProps$1 = DelegationScoringProps$2;
+
+/**
+ * <DelegationEditListener> — the live-edit branch (frame 7).
+ *
+ * A `<Loop>` re-arming a durable `dc-edit` signal wait: every delivered edit
+ * writes a dcEdit row (`{ editId, logicalId, editedOutput, note? }` from the
+ * UI's WYSIWYG editors) which DeriskLoop picks up as a replan trigger — user
+ * edits ride the same invalidation path as probe findings. Renders in a
+ * `<Parallel>` branch beside the phase sequence; the loop's `until` flips
+ * once the run is effectively done (poll answered, or execution complete with
+ * the poll disabled), unmounting the armed wait so the run can finish.
+ * @param {DelegationEditListenerProps} props
+ */
+declare function DelegationEditListener(props: DelegationEditListenerProps$1): React__default.FunctionComponentElement<LoopProps$2> | null;
+type DelegationEditListenerProps$1 = DelegationEditListenerProps$2;
+
+/** @typedef {import("./delegationSchemas.ts").Tier} Tier */
+/** @typedef {import("./delegationState.js").DelegationNodeInfo} DelegationNodeInfo */
+/** @typedef {import("./delegationState.js").DeriskTrigger} DeriskTrigger */
+/**
+ * Prompt templates for every delegation-chain tier/phase. Prompt text lives IN
+ * this package (seeded workflow packs cannot import `.smithers/prompts`).
+ *
+ * Delegating-tier prompts (plan/replan/backpressure/review/goal) embed the
+ * distilled context-engineering principles; leaf (sonnet) and probe (haiku)
+ * prompts stay lean task briefs.
+ */
+/**
+ * The distilled context-engineering principles every DELEGATING-tier prompt
+ * carries (condensed from the layered model: prompt → context → harness →
+ * workflow → backpressure).
+ * @returns {string}
+ */
+declare function contextPrinciples(): string;
+/**
+ * Fable/opus goal-refinement question forecast.
+ * @param {{ prompt: string; maxQuestions: number; approvalPolicy?: string }} opts
+ * @returns {string}
+ */
+declare function goalQuestionsPrompt(opts: {
+    prompt: string;
+    maxQuestions: number;
+    approvalPolicy?: string;
+}): string;
+/**
+ * Haiku form-metadata render for one forecast question (lean brief).
+ * @param {{ question: Record<string, any> }} opts
+ * @returns {string}
+ */
+declare function questionFormPrompt(opts: {
+    question: Record<string, any>;
+}): string;
+/**
+ * Fable goal refinement after all questions are answered.
+ * @param {{ prompt: string; qa: Array<{ question: string; answer: string }>; approvalPolicy?: string }} opts
+ * @returns {string}
+ */
+declare function goalRefinePrompt(opts: {
+    prompt: string;
+    qa: Array<{
+        question: string;
+        answer: string;
+    }>;
+    approvalPolicy?: string;
+}): string;
+/**
+ * The refined-prompt approval form shown to the human.
+ * @param {{ goal: Record<string, any> }} opts
+ * @returns {string}
+ */
+declare function goalApprovalPrompt(opts: {
+    goal: Record<string, any>;
+}): string;
+/**
+ * Delegating-tier decomposition prompt (also used for replan-generated new
+ * plan versions via `replan`).
+ * @param {{
+ *   logicalId: string;
+ *   tier: Tier;
+ *   brief: string;
+ *   parent?: { logicalId: string; title: string } | undefined;
+ *   depth: number;
+ *   maxDepth: number;
+ *   tierOrder: readonly Tier[];
+ *   approvalPolicy?: string | undefined;
+ *   replan?: { round: number; reason: string; triggerRef: string } | undefined;
+ * }} opts
+ * @returns {string}
+ */
+declare function planPrompt(opts: {
+    logicalId: string;
+    tier: Tier$1;
+    brief: string;
+    parent?: {
+        logicalId: string;
+        title: string;
+    } | undefined;
+    depth: number;
+    maxDepth: number;
+    tierOrder: readonly Tier$1[];
+    approvalPolicy?: string | undefined;
+    replan?: {
+        round: number;
+        reason: string;
+        triggerRef: string;
+    } | undefined;
+}): string;
+/**
+ * Haiku zero-backpressure preview of a leaf's expected output (lean brief).
+ * @param {{ leaf: DelegationNodeInfo }} opts
+ * @returns {string}
+ */
+declare function previewPrompt(opts: {
+    leaf: DelegationNodeInfo;
+}): string;
+/**
+ * Delegating-tier backpressure declaration for one node.
+ * @param {{
+ *   node: DelegationNodeInfo;
+ *   knownNodeIds: string[];
+ *   approvalPolicy?: string | undefined;
+ * }} opts
+ * @returns {string}
+ */
+declare function gatesPrompt(opts: {
+    node: DelegationNodeInfo;
+    knownNodeIds: string[];
+    approvalPolicy?: string | undefined;
+}): string;
+/**
+ * Probe task brief (lean — haiku research / sonnet poc).
+ * @param {{
+ *   parentLogicalId: string;
+ *   probeId: string;
+ *   kind: "poc" | "research";
+ *   risk: { id: string; description: string; reason: string };
+ *   parentBrief: string;
+ * }} opts
+ * @returns {string}
+ */
+declare function probePrompt(opts: {
+    parentLogicalId: string;
+    probeId: string;
+    kind: "poc" | "research";
+    risk: {
+        id: string;
+        description: string;
+        reason: string;
+    };
+    parentBrief: string;
+}): string;
+/**
+ * Delegating-tier replan decision for one affected node.
+ * @param {{
+ *   logicalId: string;
+ *   round: number;
+ *   plan: Record<string, any> | undefined;
+ *   brief: string;
+ *   triggers: DeriskTrigger[];
+ *   approvalPolicy?: string | undefined;
+ * }} opts
+ * @returns {string}
+ */
+declare function replanPrompt(opts: {
+    logicalId: string;
+    round: number;
+    plan: Record<string, any> | undefined;
+    brief: string;
+    triggers: DeriskTrigger[];
+    approvalPolicy?: string | undefined;
+}): string;
+/**
+ * Leaf executor brief (lean, sonnet-tier).
+ * @param {{
+ *   leaf: DelegationNodeInfo;
+ *   gates: import("./delegationSchemas.ts").Gate[];
+ *   attempt: number;
+ *   feedback: string[];
+ * }} opts
+ * @returns {string}
+ */
+declare function execPrompt(opts: {
+    leaf: DelegationNodeInfo;
+    gates: Gate$1[];
+    attempt: number;
+    feedback: string[];
+}): string;
+/**
+ * Review-gate prompt (delegating tier — strict). The reviewer receives the
+ * reviewed node's structured output and its commit range(s), and inspects the
+ * commits itself.
+ * @param {{
+ *   leaf: DelegationNodeInfo;
+ *   gate: { method: "review"; tier: Tier; brief: string };
+ *   attempt: number;
+ *   execOutput: Record<string, any> | undefined;
+ *   commitRanges: Array<{ from: string; to: string; vcs: "jj" | "git" }>;
+ * }} opts
+ * @returns {string}
+ */
+declare function reviewPrompt(opts: {
+    leaf: DelegationNodeInfo;
+    gate: {
+        method: "review";
+        tier: Tier$1;
+        brief: string;
+    };
+    attempt: number;
+    execOutput: Record<string, any> | undefined;
+    commitRanges: Array<{
+        from: string;
+        to: string;
+        vcs: "jj" | "git";
+    }>;
+}): string;
+/**
+ * Chunk-level review-gate prompt: reviews a planning node's whole completed
+ * subtree against the union of its leaves' commit ranges.
+ * @param {{
+ *   node: DelegationNodeInfo;
+ *   gate: { method: "review"; tier: Tier; brief: string };
+ *   execOutputs: Array<Record<string, any>>;
+ *   commitRanges: Array<{ from: string; to: string; vcs: "jj" | "git" }>;
+ * }} opts
+ * @returns {string}
+ */
+declare function chunkReviewPrompt(opts: {
+    node: DelegationNodeInfo;
+    gate: {
+        method: "review";
+        tier: Tier$1;
+        brief: string;
+    };
+    execOutputs: Array<Record<string, any>>;
+    commitRanges: Array<{
+        from: string;
+        to: string;
+        vcs: "jj" | "git";
+    }>;
+}): string;
+/**
+ * Check-gate prompt (lean — run one command, report the verdict).
+ * @param {{
+ *   leaf: DelegationNodeInfo;
+ *   gate: { method: "check"; command: string };
+ *   attempt: number;
+ * }} opts
+ * @returns {string}
+ */
+declare function checkPrompt(opts: {
+    leaf: DelegationNodeInfo;
+    gate: {
+        method: "check";
+        command: string;
+    };
+    attempt: number;
+}): string;
+/**
+ * Developer-preview gate task (haiku/sonnet-tier, lean): build the showable
+ * artifact for a node after its execution.
+ * @param {{
+ *   logicalId: string;
+ *   title: string;
+ *   gate: { method: "preview"; kind: import("./delegationSchemas.ts").DevPreviewKind; brief: string };
+ *   attempt: number;
+ *   execSummaries: string[];
+ *   feedback: string[];
+ * }} opts
+ * @returns {string}
+ */
+declare function devPreviewPrompt(opts: {
+    logicalId: string;
+    title: string;
+    gate: {
+        method: "preview";
+        kind: DevPreviewKind$1;
+        brief: string;
+    };
+    attempt: number;
+    execSummaries: string[];
+    feedback: string[];
+}): string;
+/**
+ * End-of-run satisfaction poll form.
+ * @returns {string}
+ */
+declare function pollPrompt(): string;
+/**
+ * Answer form prompt for one question (shown by the durable human request;
+ * the UI renders the dcQuestion row's form metadata alongside).
+ * @param {{ question: Record<string, any> }} opts
+ * @returns {string}
+ */
+declare function answerPrompt(opts: {
+    question: Record<string, any>;
+}): string;
+type Tier$1 = Tier$3;
+type DelegationNodeInfo = DelegationNodeInfo$1;
+type DeriskTrigger = DeriskTrigger$1;
+
+type delegationPrompts_DelegationNodeInfo = DelegationNodeInfo;
+type delegationPrompts_DeriskTrigger = DeriskTrigger;
+declare const delegationPrompts_answerPrompt: typeof answerPrompt;
+declare const delegationPrompts_checkPrompt: typeof checkPrompt;
+declare const delegationPrompts_chunkReviewPrompt: typeof chunkReviewPrompt;
+declare const delegationPrompts_contextPrinciples: typeof contextPrinciples;
+declare const delegationPrompts_devPreviewPrompt: typeof devPreviewPrompt;
+declare const delegationPrompts_execPrompt: typeof execPrompt;
+declare const delegationPrompts_gatesPrompt: typeof gatesPrompt;
+declare const delegationPrompts_goalApprovalPrompt: typeof goalApprovalPrompt;
+declare const delegationPrompts_goalQuestionsPrompt: typeof goalQuestionsPrompt;
+declare const delegationPrompts_goalRefinePrompt: typeof goalRefinePrompt;
+declare const delegationPrompts_planPrompt: typeof planPrompt;
+declare const delegationPrompts_pollPrompt: typeof pollPrompt;
+declare const delegationPrompts_previewPrompt: typeof previewPrompt;
+declare const delegationPrompts_probePrompt: typeof probePrompt;
+declare const delegationPrompts_questionFormPrompt: typeof questionFormPrompt;
+declare const delegationPrompts_replanPrompt: typeof replanPrompt;
+declare const delegationPrompts_reviewPrompt: typeof reviewPrompt;
+declare namespace delegationPrompts {
+  export { type delegationPrompts_DelegationNodeInfo as DelegationNodeInfo, type delegationPrompts_DeriskTrigger as DeriskTrigger, type Tier$1 as Tier, delegationPrompts_answerPrompt as answerPrompt, delegationPrompts_checkPrompt as checkPrompt, delegationPrompts_chunkReviewPrompt as chunkReviewPrompt, delegationPrompts_contextPrinciples as contextPrinciples, delegationPrompts_devPreviewPrompt as devPreviewPrompt, delegationPrompts_execPrompt as execPrompt, delegationPrompts_gatesPrompt as gatesPrompt, delegationPrompts_goalApprovalPrompt as goalApprovalPrompt, delegationPrompts_goalQuestionsPrompt as goalQuestionsPrompt, delegationPrompts_goalRefinePrompt as goalRefinePrompt, delegationPrompts_planPrompt as planPrompt, delegationPrompts_pollPrompt as pollPrompt, delegationPrompts_previewPrompt as previewPrompt, delegationPrompts_probePrompt as probePrompt, delegationPrompts_questionFormPrompt as questionFormPrompt, delegationPrompts_replanPrompt as replanPrompt, delegationPrompts_reviewPrompt as reviewPrompt };
+}
+
 /** @typedef {import("./LoopProps.ts").LoopProps} LoopProps */
 /**
  * @param {LoopProps} props
@@ -1588,6 +3153,38 @@ declare namespace Saga {
 type SagaStepProps$1 = SagaStepProps$2;
 type SagaProps$1 = SagaProps$2;
 
+/**
+ * Best-effort working-copy commit probe. Tries jj first (this is how a
+ * colocated repo stays truthful — same probe shape as packages/vcs
+ * `getJjPointer`, but on `commit_id` so `from..to` ranges work for both jj
+ * and git tooling), then falls back to `git rev-parse HEAD`. Returns null
+ * when neither VCS answers — callers must treat that as "omit the field".
+ * @param {string} cwd
+ * @returns {Promise<{ commit: string; vcs: "jj" | "git" } | null>}
+ */
+declare function captureWorkingCopyCommit(cwd: string): Promise<{
+    commit: string;
+    vcs: "jj" | "git";
+} | null>;
+/**
+ * Wrap an exec agent so every structured output gains a measured
+ * `commitRange`: the working-copy commit is probed BEFORE `generate` runs and
+ * AFTER it finishes, and `{ from, to, vcs }` is merged into the returned
+ * `output` object. Strictly best-effort by contract: any probe failure, a
+ * non-object result, or a text-only result leaves the output untouched —
+ * commit capture must never fail an execution.
+ *
+ * Implemented as a Proxy so `instanceof`-based agent handling (CLI tool
+ * allowlists, engine capability checks) still sees the underlying agent.
+ * Caveat: code paths that RECONSTRUCT an agent from `agent.opts` (e.g. the
+ * explicit-only tool allowlist) drop the wrapper — capture is then simply
+ * absent, which the schema allows.
+ * @param {AgentLike | AgentLike[]} agent
+ * @returns {AgentLike | AgentLike[]}
+ */
+declare function withCommitRange(agent: AgentLike | AgentLike[]): AgentLike | AgentLike[];
+type AgentLike = _smithers_orchestrator_agents_AgentLike.AgentLike;
+
 type ApprovalAutoApprove = ApprovalAutoApprove$1;
 type ApprovalDecision = ApprovalDecision$1;
 type ApprovalGateProps = ApprovalGateProps$2;
@@ -1610,6 +3207,42 @@ type ContinueAsNewProps = ContinueAsNewProps$2;
 type DebateProps = DebateProps$2;
 type DecisionRule = DecisionRule$1;
 type DecisionTableProps = DecisionTableProps$2;
+type DelegationAgents = DelegationAgents$1;
+type DelegationBudget = DelegationBudget$1;
+type DelegationChainProps = DelegationChainProps$2;
+type DelegationEditListenerProps = DelegationEditListenerProps$2;
+type DelegationExecutionProps = DelegationExecutionProps$2;
+type DelegationOutputs = DelegationOutputs$1;
+type DelegationPlanningProps = DelegationPlanningProps$2;
+type DelegationPreviewProps = DelegationPreviewProps$2;
+type DelegationScoringProps = DelegationScoringProps$2;
+type DelegationScorers = DelegationScorers$1;
+type DelegationSharedProps = DelegationSharedProps$1;
+type BackpressurePlanningProps = BackpressurePlanningProps$2;
+type DeriskLoopProps = DeriskLoopProps$2;
+type GoalRefinementProps = GoalRefinementProps$2;
+type Tier = Tier$3;
+type Estimate = Estimate$1;
+type Gate = Gate$1;
+type DcGoalRow = DcGoalRow$1;
+type DcQuestionRow = DcQuestionRow$1;
+type DcForecastRow = DcForecastRow$1;
+type DcGoalApprovalRow = DcGoalApprovalRow$1;
+type DcPlanRow = DcPlanRow$2;
+type DcPreviewRow = DcPreviewRow$1;
+type DcDevPreviewRow = DcDevPreviewRow$1;
+type DevPreviewKind = DevPreviewKind$1;
+type DcGatesRow = DcGatesRow$2;
+type DcProbeRow = DcProbeRow$1;
+type DcReplanRow = DcReplanRow$1;
+type DcExecRow = DcExecRow$1;
+type DcReviewRow = DcReviewRow$1;
+type DcApprovalRow = DcApprovalRow$1;
+type DcEditRow = DcEditRow$1;
+type DcSkipRow = DcSkipRow$1;
+type DcPollRow = DcPollRow$1;
+type DcBudgetRow = DcBudgetRow$1;
+type DcScoreRow = DcScoreRow$1;
 type DepsSpec = DepsSpec$1;
 type DriftDetectorProps = DriftDetectorProps$2;
 type EscalationChainProps = EscalationChainProps$2;
@@ -1719,4 +3352,4 @@ type XmlElement = _smithers_orchestrator_graph.XmlElement;
 type XmlNode = _smithers_orchestrator_graph.XmlNode;
 type XmlText = _smithers_orchestrator_graph.XmlText;
 
-export { Approval, type ApprovalAutoApprove, type ApprovalDecision, ApprovalGate, type ApprovalGateProps, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, Aspects, type AspectsProps, Branch, type BranchProps, type CachePolicy, type CategoryConfig, type CheckConfig, CheckSuite, type CheckSuiteProps, ClassifyAndRoute, type ClassifyAndRouteProps, type ColumnDef, ContentPipeline, type ContentPipelineProps, type ContentPipelineStage, ContinueAsNew, type ContinueAsNewProps, Debate, type DebateProps, type DecisionRule, DecisionTable, type DecisionTableProps, type DepsSpec, DriftDetector, type DriftDetectorProps, type EngineDecision, EscalationChain, type EscalationChainProps, type EscalationLevel, type ExtractOptions, GatherAndSynthesize, type GatherAndSynthesizeProps, type HostElement, type HostNode, type HostText, HumanTask, type HumanTaskProps, type InferDeps, type InferOutputEntry, type InferRow, Kanban, type KanbanProps, Loop, type LoopProps, MergeQueue, type MergeQueueProps, Optimizer, type OptimizerProps, type OutputAccessor, type OutputKey, type OutputTarget, Panel, type PanelProps, type PanelistConfig, Parallel, type ParallelProps, Poller, type PollerProps, Ralph, type RalphProps, type RenderContext, type RetryPolicy, ReviewLoop, type ReviewLoopProps, type RunAuthContext, type RunOptions, type RunResult, Runbook, type RunbookProps, type RunbookStep, Saga, type SagaProps, SagaStep, type SagaStepDef, type SagaStepProps, Sandbox, type SandboxEgressConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, ScanFixVerify, type ScanFixVerifyProps, type SchemaRegistryEntry, type ScorersMap, Sequence, type SequenceProps, Sidecar, type SidecarDelta, type SidecarProps, Signal, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersErrorCode, type SmithersWorkflow, type SmithersWorkflowDriverOptions, type SmithersWorkflowOptions, type SourceDef, Subflow, type SubflowProps, SuperSmithers, type SuperSmithersProps, Supervisor, type SupervisorProps, Task, type TaskDescriptor, type TaskProps, Timer, type TimerProps, TryCatchFinally, type TryCatchFinallyProps, WaitForEvent, type WaitForEventProps, type WaitReason, Workflow, type WorkflowGraph, type WorkflowProps, type WorkflowRuntime, type WorkflowSession, Worktree, type WorktreeProps, type XmlElement, type XmlNode, type XmlText, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, computeSidecarDelta, continueAsNew, markdownComponents, renderMdx, zodSchemaToJsonExample };
+export { Approval, type ApprovalAutoApprove, type ApprovalDecision, ApprovalGate, type ApprovalGateProps, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, Aspects, type AspectsProps, BackpressurePlanning, type BackpressurePlanningProps, Branch, type BranchProps, type CachePolicy, type CategoryConfig, type CheckConfig, CheckSuite, type CheckSuiteProps, ClassifyAndRoute, type ClassifyAndRouteProps, type ColumnDef, ContentPipeline, type ContentPipelineProps, type ContentPipelineStage, ContinueAsNew, type ContinueAsNewProps, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_TIER_ORDER, type DcApprovalRow, type DcBudgetRow, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcForecastRow, type DcGatesRow, type DcGoalApprovalRow, type DcGoalRow, type DcPlanRow, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcScoreRow, type DcSkipRow, Debate, type DebateProps, type DecisionRule, DecisionTable, type DecisionTableProps, type DelegationAgents, type DelegationBudget, DelegationChain, type DelegationChainProps, DelegationEditListener, type DelegationEditListenerProps, DelegationExecution, type DelegationExecutionProps, type DelegationOutputs, DelegationPlanning, type DelegationPlanningProps, DelegationPreview, type DelegationPreviewProps, type DelegationScorers, DelegationScoring, type DelegationScoringProps, type DelegationSharedProps, type DepsSpec, DeriskLoop, type DeriskLoopProps, type DevPreviewKind, DriftDetector, type DriftDetectorProps, type EngineDecision, EscalationChain, type EscalationChainProps, type EscalationLevel, type Estimate, type ExtractOptions, type Gate, GatherAndSynthesize, type GatherAndSynthesizeProps, GoalRefinement, type GoalRefinementProps, type HostElement, type HostNode, type HostText, HumanTask, type HumanTaskProps, type InferDeps, type InferOutputEntry, type InferRow, Kanban, type KanbanProps, Loop, type LoopProps, MergeQueue, type MergeQueueProps, Optimizer, type OptimizerProps, type OutputAccessor, type OutputKey, type OutputTarget, Panel, type PanelProps, type PanelistConfig, Parallel, type ParallelProps, Poller, type PollerProps, Ralph, type RalphProps, type RenderContext, type RetryPolicy, ReviewLoop, type ReviewLoopProps, type RunAuthContext, type RunOptions, type RunResult, Runbook, type RunbookProps, type RunbookStep, Saga, type SagaProps, SagaStep, type SagaStepDef, type SagaStepProps, Sandbox, type SandboxEgressConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, ScanFixVerify, type ScanFixVerifyProps, type SchemaRegistryEntry, type ScorersMap, Sequence, type SequenceProps, Sidecar, type SidecarDelta, type SidecarProps, Signal, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersErrorCode, type SmithersWorkflow, type SmithersWorkflowDriverOptions, type SmithersWorkflowOptions, type SourceDef, Subflow, type SubflowProps, SuperSmithers, type SuperSmithersProps, Supervisor, type SupervisorProps, Task, type TaskDescriptor, type TaskProps, type Tier, Timer, type TimerProps, TryCatchFinally, type TryCatchFinallyProps, WaitForEvent, type WaitForEventProps, type WaitReason, Workflow, type WorkflowGraph, type WorkflowProps, type WorkflowRuntime, type WorkflowSession, Worktree, type WorktreeProps, type XmlElement, type XmlNode, type XmlText, actualTotals, agentForTier, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, captureWorkingCopyCommit, computeSidecarDelta, continueAsNew, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, dependentsOf, devPreviewKindSchema, devPreviewNodeId, estimateSchema, executionComplete, foldGates, foldPlans, frontierLeaves, gateSchema, leafAttemptState, leafComplete, leavesUnder, markdownComponents, nodeIndex, pendingTriggers, physicalId, planOwnerOf, planningComplete, probeIdFor, probesRequested, renderMdx, replanCountFor, splitGates, tierSchema, unplannedChunks, withCommitRange, zodSchemaToJsonExample };

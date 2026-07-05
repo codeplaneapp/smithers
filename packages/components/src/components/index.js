@@ -25,6 +25,42 @@
 /** @typedef {import("./DebateProps.ts").DebateProps} DebateProps */
 /** @typedef {import("./DecisionRule.ts").DecisionRule} DecisionRule */
 /** @typedef {import("./DecisionTableProps.ts").DecisionTableProps} DecisionTableProps */
+/** @typedef {import("./delegation/DelegationSharedProps.ts").DelegationAgents} DelegationAgents */
+/** @typedef {import("./delegation/DelegationSharedProps.ts").DelegationBudget} DelegationBudget */
+/** @typedef {import("./delegation/DelegationChainProps.ts").DelegationChainProps} DelegationChainProps */
+/** @typedef {import("./delegation/DelegationEditListenerProps.ts").DelegationEditListenerProps} DelegationEditListenerProps */
+/** @typedef {import("./delegation/DelegationExecutionProps.ts").DelegationExecutionProps} DelegationExecutionProps */
+/** @typedef {import("./delegation/DelegationSharedProps.ts").DelegationOutputs} DelegationOutputs */
+/** @typedef {import("./delegation/DelegationPlanningProps.ts").DelegationPlanningProps} DelegationPlanningProps */
+/** @typedef {import("./delegation/DelegationPreviewProps.ts").DelegationPreviewProps} DelegationPreviewProps */
+/** @typedef {import("./delegation/DelegationScoringProps.ts").DelegationScoringProps} DelegationScoringProps */
+/** @typedef {import("./delegation/DelegationSharedProps.ts").DelegationScorers} DelegationScorers */
+/** @typedef {import("./delegation/DelegationSharedProps.ts").DelegationSharedProps} DelegationSharedProps */
+/** @typedef {import("./delegation/BackpressurePlanningProps.ts").BackpressurePlanningProps} BackpressurePlanningProps */
+/** @typedef {import("./delegation/DeriskLoopProps.ts").DeriskLoopProps} DeriskLoopProps */
+/** @typedef {import("./delegation/GoalRefinementProps.ts").GoalRefinementProps} GoalRefinementProps */
+/** @typedef {import("./delegation/delegationSchemas.ts").Tier} Tier */
+/** @typedef {import("./delegation/delegationSchemas.ts").Estimate} Estimate */
+/** @typedef {import("./delegation/delegationSchemas.ts").Gate} Gate */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcGoalRow} DcGoalRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcQuestionRow} DcQuestionRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcForecastRow} DcForecastRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcGoalApprovalRow} DcGoalApprovalRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcPlanRow} DcPlanRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcPreviewRow} DcPreviewRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcDevPreviewRow} DcDevPreviewRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DevPreviewKind} DevPreviewKind */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcGatesRow} DcGatesRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcProbeRow} DcProbeRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcReplanRow} DcReplanRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcExecRow} DcExecRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcReviewRow} DcReviewRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcApprovalRow} DcApprovalRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcEditRow} DcEditRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcSkipRow} DcSkipRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcPollRow} DcPollRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcBudgetRow} DcBudgetRow */
+/** @typedef {import("./delegation/delegationSchemas.ts").DcScoreRow} DcScoreRow */
 /** @typedef {import("./DepsSpec.ts").DepsSpec} DepsSpec */
 /** @typedef {import("./DriftDetectorProps.ts").DriftDetectorProps} DriftDetectorProps */
 /** @typedef {import("./EscalationChainProps.ts").EscalationChainProps} EscalationChainProps */
@@ -124,3 +160,17 @@ export { TryCatchFinally } from "./TryCatchFinally.js";
 // --- Core Enhancements ---
 export { Aspects } from "./Aspects.js";
 export { SuperSmithers } from "./SuperSmithers.js";
+// --- Delegation Chain ---
+export { DelegationChain } from "./delegation/DelegationChain.js";
+export { GoalRefinement } from "./delegation/GoalRefinement.js";
+export { DelegationPlanning } from "./delegation/DelegationPlanning.js";
+export { DelegationPreview } from "./delegation/DelegationPreview.js";
+export { BackpressurePlanning } from "./delegation/BackpressurePlanning.js";
+export { DeriskLoop } from "./delegation/DeriskLoop.js";
+export { DelegationExecution } from "./delegation/DelegationExecution.js";
+export { DelegationScoring } from "./delegation/DelegationScoring.js";
+export { DelegationEditListener } from "./delegation/DelegationEditListener.js";
+export { delegationSchemas, tierSchema, estimateSchema, gateSchema, devPreviewKindSchema, dcGoalSchema, dcQuestionSchema, dcForecastSchema, dcGoalApprovalSchema, dcPlanSchema, dcPreviewSchema, dcDevPreviewSchema, dcGatesSchema, dcProbeSchema, dcReplanSchema, dcExecSchema, dcReviewSchema, dcApprovalSchema, dcEditSchema, dcSkipSchema, dcPollSchema, dcBudgetSchema, dcScoreSchema, DEFAULT_TIER_ORDER, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, } from "./delegation/delegationSchemas.ts";
+export * as delegationPrompts from "./delegation/delegationPrompts.js";
+export { withCommitRange, captureWorkingCopyCommit } from "./delegation/withCommitRange.js";
+export { foldPlans, nodeIndex, frontierLeaves, unplannedChunks, planningComplete, foldGates, dependentsOf, planOwnerOf, leavesUnder, probeIdFor, probesRequested, pendingTriggers, replanCountFor, actualTotals, physicalId, devPreviewNodeId, splitGates, leafAttemptState, leafComplete, executionComplete, agentForTier, } from "./delegation/delegationState.js";

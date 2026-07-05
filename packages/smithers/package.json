@@ -54,6 +54,11 @@
       "import": "./src/gateway-react.js",
       "default": "./src/gateway-react.js"
     },
+    "./scorers": {
+      "types": "./src/scorers.d.ts",
+      "import": "./src/scorers.js",
+      "default": "./src/scorers.js"
+    },
     "./gateway-ui": {
       "types": "./src/gateway-ui.d.ts",
       "import": "./src/gateway-ui.js",
