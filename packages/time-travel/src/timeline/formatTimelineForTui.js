@@ -1,9 +1,17 @@
 import pc from "picocolors";
-import { formatTimestamp } from "./_helpers.js";
 /** @typedef {import("../TimelineTree.ts").TimelineTree} TimelineTree */
 
 /**
+ * @param {number} ms
+ * @returns {string}
+ */
+function formatTimestamp(ms) {
+    return new Date(ms).toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
+}
+
+/**
  * @param {TimelineTree} tree
+ * @param {number} [indent] - recursion depth used when rendering forked child runs
  * @returns {string}
  */
 export function formatTimelineForTui(tree, indent = 0) {

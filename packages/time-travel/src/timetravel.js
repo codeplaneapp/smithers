@@ -5,6 +5,8 @@ import * as BunContext from "@effect/platform-bun/BunContext";
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./TimeTravelOptions.ts").TimeTravelOptions} TimeTravelOptions */
 /** @typedef {import("./TimeTravelResult.ts").TimeTravelResult} TimeTravelResult */
+/** @typedef {import("@smithers-orchestrator/db").AttemptRow} AttemptRow */
+/** @typedef {import("@smithers-orchestrator/db").NodeRow} NodeRow */
 
 /**
  * @param {string} nodeId
@@ -56,7 +58,7 @@ async function resolveResetNodes(adapter, opts) {
     if (!resetDependents) {
         return [targetNode];
     }
-    const nodes = await Effect.runPromise(adapter.listNodes(runId));
+    const nodes = await adapter.listNodes(runId);
     const targetKey = nodeKey(targetNode.nodeId, targetNode.iteration ?? 0);
     const targetAttemptOrder = findTargetAttemptOrder(targetAttempt, attemptsForRun);
     const targetIteration = targetNode.iteration ?? 0;
@@ -106,7 +108,7 @@ export async function timeTravel(adapter, opts) {
     const iteration = opts.iteration ?? 0;
     const resetDependents = opts.resetDependents ?? true;
     const restoreVcs = opts.restoreVcs ?? true;
-    const attempts = await Effect.runPromise(adapter.listAttempts(runId, nodeId, iteration));
+    const attempts = await adapter.listAttempts(runId, nodeId, iteration);
     const targetAttempt = selectAttempt(attempts, opts.attempt);
     if (!targetAttempt) {
         return {
@@ -118,7 +120,7 @@ export async function timeTravel(adapter, opts) {
     }
     const targetAttemptNo = targetAttempt.attempt;
     const jjPointer = targetAttempt.jjPointer ?? undefined;
-    const targetNode = await Effect.runPromise(adapter.getNode(runId, nodeId, iteration));
+    const targetNode = await adapter.getNode(runId, nodeId, iteration);
     if (!targetNode) {
         return {
             success: false,
@@ -164,7 +166,7 @@ export async function timeTravel(adapter, opts) {
             };
         }
     }
-    const attemptsForRun = await Effect.runPromise(adapter.listAttemptsForRun(runId));
+    const attemptsForRun = await adapter.listAttemptsForRun(runId);
     const resetNodes = await resolveResetNodes(adapter, {
         runId,
         targetNode,

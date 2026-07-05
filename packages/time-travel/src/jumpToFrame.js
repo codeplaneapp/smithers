@@ -718,8 +718,7 @@ export async function jumpToFrame(input) {
           // all commit together or roll back together. If the event insert throws
           // the frames truncation is reverted too, so DB is never left mutated
           // without an audit/event record.
-          const dbStats = await (async () =>
-              await input.adapter.withTransaction(
+          const dbStats = await input.adapter.withTransaction(
                 `jump to frame ${runId}:${targetFrameNo}`,
                 Effect.gen(function* () {
                   // Invalidate node-diff cache BEFORE we truncate frames /
@@ -851,7 +850,7 @@ export async function jumpToFrame(input) {
                     event,
                   };
                 }),
-              ))();
+          );
 
           // The durable jump is committed. Mark success and build the result up
           // front so any post-commit failure below cannot discard the rewind.
@@ -1095,21 +1094,20 @@ export async function jumpToFrame(input) {
     // Emit a final `error` log for VcsError/RewindFailed failures so operators
     // always see a crash in the log stream (complementing the partial-rollback
     // and audit-write logs emitted above).
-    if (finalError && finalError.code !== "Busy" && finalError.code !== "RateLimited") {
-      if (
-        finalError.code === "VcsError" ||
+    if (
+      finalError &&
+      (finalError.code === "VcsError" ||
         finalError.code === "RewindFailed" ||
-        finalError.code === "UnsupportedSandbox"
-      ) {
-        await emitLog(input.onLog, "error", "jumpToFrame failed", {
-          runId: runIdForAudit,
-          fromFrameNo: fromFrameNoForAudit,
-          toFrameNo: toFrameNoForAudit,
-          caller,
-          code: finalError.code,
-          message: finalError.message,
-        });
-      }
+        finalError.code === "UnsupportedSandbox")
+    ) {
+      await emitLog(input.onLog, "error", "jumpToFrame failed", {
+        runId: runIdForAudit,
+        fromFrameNo: fromFrameNoForAudit,
+        toFrameNo: toFrameNoForAudit,
+        caller,
+        code: finalError.code,
+        message: finalError.message,
+      });
     }
   }
 
