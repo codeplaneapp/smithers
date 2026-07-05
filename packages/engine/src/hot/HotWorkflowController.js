@@ -5,10 +5,9 @@
 import { resolve, dirname } from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { Effect } from "effect";
+import { Effect, Metric } from "effect";
 import { WatchTree } from "./watch.js";
 import { buildOverlayEffect, cleanupGenerationsEffect, resolveOverlayEntry, } from "./overlay.js";
-import { Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
 import { hotReloads, hotReloadFailures, hotReloadDuration } from "@smithers-orchestrator/observability/metrics";
@@ -18,6 +17,14 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 const DEFAULT_MAX_GENERATIONS = 3;
 const DEFAULT_DEBOUNCE_MS = 100;
 
+/**
+ * Classify a reload error: messages containing "Schema change detected" map to
+ * the "unsafe" event, everything else to "failed".
+ *
+ * @param {unknown} err
+ * @param {{ entryPath: string; generation: number; changedFiles: string[] }} ctx
+ * @returns {HotReloadEvent}
+ */
 function makeHotReloadFailureEvent(err, ctx) {
     const { entryPath, generation, changedFiles } = ctx;
     if (err instanceof Error && err.message?.includes("Schema change detected")) {

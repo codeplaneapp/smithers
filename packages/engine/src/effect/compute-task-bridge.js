@@ -19,8 +19,15 @@ import * as BunContext from "@effect/platform-bun/BunContext";
 /** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
 
+// Floor between heartbeat DB writes so a hot heartbeat() loop cannot hammer
+// sqlite; enforced in flushHeartbeat.
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
+// Hard cap on a serialized heartbeat payload; exceeding it throws
+// HEARTBEAT_PAYLOAD_TOO_LARGE into the compute callback and marks the attempt
+// non-retryable.
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
+// Watchdog poll cadence: the lower bound on how quickly a heartbeatTimeoutMs
+// breach is detected.
 const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
 /**
  * @param {unknown} err

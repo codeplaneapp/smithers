@@ -13,6 +13,15 @@ import { correlationContextToLogAnnotations, getCurrentCorrelationContext, merge
 /** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
 
+/**
+ * Run-scoped event bus with three emit flavors:
+ * - `emitEvent` — Effect: listener emit + metrics, plus a DB row when a db
+ *   handle exists (no ndjson log).
+ * - `emitEventWithPersist` — Effect: same, plus the ndjson stream log.
+ * - `emitEventQueued` — Promise: the listener emit is synchronous, but
+ *   persistence is serialized behind `persistTail`; a failed enqueued persist
+ *   is surfaced on the next `flush()` via `persistError`.
+ */
 export class EventBus extends EventEmitter {
     seq = 0;
     logDir;

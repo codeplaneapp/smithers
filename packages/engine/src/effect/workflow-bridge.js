@@ -1,3 +1,11 @@
+/**
+ * Engine ↔ Effect seam adapter.
+ *
+ * This file establishes the interface boundaries for bridging the Smithers engine
+ * with the Effect ecosystem. `executeTaskBridge` delegates to the engine's task
+ * execution; the Effect-native `Activity.make()` path now lives alongside it (see
+ * `activity-bridge.js`). Further engine boundaries are modeled as Workflows over time.
+ */
 import { Effect } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { makeWorkerTask, } from "./entity-worker.js";
@@ -26,14 +34,11 @@ export { CodeplaneSandboxExecutorLive, DockerSandboxExecutorLive, SandboxHttpRun
 export { BubblewrapSandboxExecutorLive, SandboxSocketRunner, } from "@smithers-orchestrator/sandbox/effect/socket-runner";
 export { isTaskResultFailure, makeWorkerTask, TaskResult, WorkerDispatchKind, WorkerTask, WorkerTaskKind, TaskWorkerEntity, } from "./entity-worker.js";
 export { dispatchWorkerTask, subscribeTaskWorkerDispatches, } from "./single-runner.js";
-/**
- * Engine ↔ Effect seam adapter.
- *
- * This file establishes the interface boundaries for bridging the Smithers engine
- * with the Effect ecosystem. `executeTaskBridge` delegates to the engine's task
- * execution; the Effect-native `Activity.make()` path now lives alongside it (see
- * `activity-bridge.js`). Further engine boundaries are modeled as Workflows over time.
- */
+// Dedupe caches keyed by bridgeKey. Completed executions are kept only until the
+// end of the current macrotask (see the setTimeout(..., 0) eviction in
+// `executeTaskBridge`): duplicate dispatches of the same bridgeKey issued in the
+// same tick coalesce onto one promise, while later re-dispatches (retries)
+// re-execute.
 const inflightTaskExecutions = new Map();
 const completedTaskExecutions = new Map();
 /**
@@ -75,7 +80,11 @@ function isRetryableBridgeTaskFailure(attempt) {
         return false;
     }
     const kind = typeof meta?.kind === "string" ? meta.kind : null;
-    return !(kind !== "agent" && errorCode === "INVALID_OUTPUT");
+    // INVALID_OUTPUT is only retryable for agent tasks.
+    if (kind !== "agent" && errorCode === "INVALID_OUTPUT") {
+        return false;
+    }
+    return true;
 }
 /**
  * @param {SmithersDb} adapter
@@ -111,6 +120,12 @@ const getNextTaskActivityAttempt = async (adapter, runId, desc) => {
     const latestAttempt = attempts[0]?.attempt ?? 0;
     return latestAttempt + 1;
 };
+/**
+ * Converts a RetriableTaskFailure into a non-terminal bridge result; rethrows every other error.
+ *
+ * @param {unknown} error
+ * @returns {{ terminal: false }}
+ */
 function taskBridgeResultForError(error) {
     if (error instanceof RetriableTaskFailure) {
         return { terminal: false };

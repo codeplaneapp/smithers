@@ -6,6 +6,12 @@ import { applyDiffBundle } from "./effect/diff-bundle.js";
 /** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
 /** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
 
+// Default cap on captured tool output for a <Sandbox> child workflow; other
+// sandbox call paths thread caller-provided values through instead.
+const SANDBOX_DEFAULT_MAX_OUTPUT_BYTES = 200_000;
+// Default per-tool timeout for a <Sandbox> child workflow.
+const SANDBOX_DEFAULT_TOOL_TIMEOUT_MS = 60_000;
+
 /**
  * @param {TaskDescriptor[]} tasks
  * @param {SmithersWorkflow<any>} workflow
@@ -83,8 +89,8 @@ export function attachSandboxComputeFns(tasks, workflow, opts = {}) {
             input: sandboxInput,
             rootDir: task.worktreePath ?? opts.rootDir ?? process.cwd(),
             allowNetwork: sandboxAllowNetwork,
-            maxOutputBytes: 200_000,
-            toolTimeoutMs: 60_000,
+            maxOutputBytes: SANDBOX_DEFAULT_MAX_OUTPUT_BYTES,
+            toolTimeoutMs: SANDBOX_DEFAULT_TOOL_TIMEOUT_MS,
             reviewDiffs: sandboxReviewDiffs,
             autoAcceptDiffs: sandboxAutoAcceptDiffs,
             allowNested: sandboxAllowNested,

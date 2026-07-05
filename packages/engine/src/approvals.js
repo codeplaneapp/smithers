@@ -48,20 +48,25 @@ function validateNodeWaitingForApproval(runId, nodeId, iteration, state) {
     return Effect.fail(new SmithersError("INVALID_INPUT", `Node ${nodeId} is not waiting for approval.`, { runId, nodeId, iteration, state: state ?? null }));
 }
 /**
+ * Shared core of approveNode/denyNode: persist the decision, move the node,
+ * emit the event, and signal the in-process deferred.
+ *
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {string} nodeId
  * @param {number} iteration
- * @param {string} [note]
- * @param {string} [decidedBy]
- * @param {unknown} [decision]
- * @param {boolean} [autoApproved]
+ * @param {string | undefined} note
+ * @param {string | undefined} decidedBy
+ * @param {unknown} decision
+ * @param {{ approved: boolean, autoApproved: boolean }} resolution
  * @returns {Effect.Effect<void, SmithersError, never>}
  */
-export function approveNode(adapter, runId, nodeId, iteration, note, decidedBy, decision, autoApproved = false) {
+function resolveApprovalNode(adapter, runId, nodeId, iteration, note, decidedBy, decision, { approved, autoApproved }) {
     const ts = nowMs();
     const event = {
-        type: autoApproved ? "ApprovalAutoApproved" : "ApprovalGranted",
+        type: approved
+            ? (autoApproved ? "ApprovalAutoApproved" : "ApprovalGranted")
+            : "ApprovalDenied",
         runId,
         nodeId,
         iteration,
@@ -76,7 +81,7 @@ export function approveNode(adapter, runId, nodeId, iteration, note, decidedBy, 
                 runId,
                 nodeId,
                 iteration,
-                status: "approved",
+                status: approved ? "approved" : "denied",
                 requestedAtMs: null,
                 decidedAtMs: ts,
                 note: note ?? null,
@@ -89,7 +94,8 @@ export function approveNode(adapter, runId, nodeId, iteration, note, decidedBy, 
                 runId,
                 nodeId,
                 iteration,
-                state: "pending",
+                // Approval re-arms the node to run; denial fails it.
+                state: approved ? "pending" : "failed",
                 lastAttempt: currentNode?.lastAttempt ?? null,
                 updatedAtMs: nowMs(),
                 outputTable: currentNode?.outputTable ?? "",
@@ -117,23 +123,26 @@ export function approveNode(adapter, runId, nodeId, iteration, note, decidedBy, 
             payloadJson: JSON.stringify(event),
         });
         yield* trackEvent(event);
-        yield* Effect.logInfo(autoApproved ? "approval auto-approved" : "approval granted");
+        yield* Effect.logInfo(approved
+            ? (autoApproved ? "approval auto-approved" : "approval granted")
+            : "approval denied");
         yield* Effect.promise(() =>
             bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
-                approved: true,
+                approved,
                 // Pass the note through as-is (string | undefined); bridgeApprovalResolve
                 // omits the `note` key when it is absent so optional string schemas validate.
                 note,
                 decidedBy: decidedBy ?? null,
                 decisionJson: serializeDecision(decision),
-                autoApproved,
+                // The deny payload carries no `autoApproved` key at all (not even false).
+                ...(approved ? { autoApproved } : {}),
             }).catch((bridgeError) => {
-                // The approval is already durably committed in the DB. A bridge
+                // The decision is already durably committed in the DB. A bridge
                 // failure here is non-fatal: the in-process deferred will not be
                 // signalled, but the run will recover on its next heartbeat/resume
                 // because the persisted approval row drives re-hydration. Failing
                 // the Effect here would strand the caller with an INTERNAL_ERROR
-                // while the approval is already consumed — worse than the bridge
+                // while the decision is already consumed — worse than the bridge
                 // being a no-op.
                 const message = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
                 console.warn(`[approvals] post-commit bridgeApprovalResolve failed (non-fatal, run will re-drive on resume): ${message}`);
@@ -143,9 +152,25 @@ export function approveNode(adapter, runId, nodeId, iteration, note, decidedBy, 
         runId,
         nodeId,
         iteration,
-        approvalStatus: autoApproved ? "auto-approved" : "approved",
+        approvalStatus: approved
+            ? (autoApproved ? "auto-approved" : "approved")
+            : "denied",
         approvalDecidedBy: decidedBy ?? null,
-    }), Effect.withLogSpan("approval:grant"));
+    }), Effect.withLogSpan(approved ? "approval:grant" : "approval:deny"));
+}
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {string} nodeId
+ * @param {number} iteration
+ * @param {string} [note]
+ * @param {string} [decidedBy]
+ * @param {unknown} [decision]
+ * @param {boolean} [autoApproved]
+ * @returns {Effect.Effect<void, SmithersError, never>}
+ */
+export function approveNode(adapter, runId, nodeId, iteration, note, decidedBy, decision, autoApproved = false) {
+    return resolveApprovalNode(adapter, runId, nodeId, iteration, note, decidedBy, decision, { approved: true, autoApproved });
 }
 /**
  * @param {SmithersDb} adapter
@@ -158,92 +183,7 @@ export function approveNode(adapter, runId, nodeId, iteration, note, decidedBy, 
  * @returns {Effect.Effect<void, SmithersError, never>}
  */
 export function denyNode(adapter, runId, nodeId, iteration, note, decidedBy, decision) {
-    const ts = nowMs();
-    const event = {
-        type: "ApprovalDenied",
-        runId,
-        nodeId,
-        iteration,
-        timestampMs: ts,
-    };
-    return Effect.gen(function* () {
-        const existing = yield* adapter.getApproval(runId, nodeId, iteration);
-        const currentNode = yield* adapter.getNode(runId, nodeId, iteration);
-        yield* validateNodeWaitingForApproval(runId, nodeId, iteration, currentNode?.state);
-        yield* adapter.withTransactionEffect("approval", Effect.gen(function* () {
-            yield* adapter.insertOrUpdateApproval({
-                runId,
-                nodeId,
-                iteration,
-                status: "denied",
-                requestedAtMs: null,
-                decidedAtMs: ts,
-                note: note ?? null,
-                decidedBy: decidedBy ?? null,
-                requestJson: existing?.requestJson ?? null,
-                decisionJson: serializeDecision(decision) ?? existing?.decisionJson ?? null,
-                autoApproved: false,
-            });
-            yield* adapter.insertNode({
-                runId,
-                nodeId,
-                iteration,
-                state: "failed",
-                lastAttempt: currentNode?.lastAttempt ?? null,
-                updatedAtMs: nowMs(),
-                outputTable: currentNode?.outputTable ?? "",
-                label: currentNode?.label ?? null,
-            });
-            const run = yield* adapter.getRun(runId);
-            if (run) {
-                const pending = yield* adapter.listPendingApprovals(runId);
-                const nextStatus = nextRunStatusForApproval(run.status, pending.length);
-                if (nextStatus && run.status !== nextStatus) {
-                    yield* adapter.updateRun(runId, { status: nextStatus });
-                }
-            }
-        }));
-        if (existing?.requestedAtMs) {
-            yield* Metric.update(approvalWaitDuration, ts - existing.requestedAtMs);
-        }
-        if (existing?.status === "requested" && isAsyncApprovalRequest(existing.requestJson)) {
-            yield* updateAsyncExternalWaitPending("approval", -1);
-        }
-        yield* adapter.insertEventWithNextSeq({
-            runId,
-            timestampMs: ts,
-            type: "ApprovalDenied",
-            payloadJson: JSON.stringify(event),
-        });
-        yield* trackEvent(event);
-        yield* Effect.logInfo("approval denied");
-        yield* Effect.promise(() =>
-            bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
-                approved: false,
-                // Pass the note through as-is (string | undefined); bridgeApprovalResolve
-                // omits the `note` key when it is absent so optional string schemas validate.
-                note,
-                decidedBy: decidedBy ?? null,
-                decisionJson: serializeDecision(decision),
-            }).catch((bridgeError) => {
-                // The denial is already durably committed in the DB. A bridge
-                // failure here is non-fatal: the in-process deferred will not be
-                // signalled, but the run will recover on its next heartbeat/resume
-                // because the persisted approval row drives re-hydration. Failing
-                // the Effect here would strand the caller with an INTERNAL_ERROR
-                // while the denial is already consumed — worse than the bridge
-                // being a no-op.
-                const message = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
-                console.warn(`[approvals] post-commit bridgeApprovalResolve failed (non-fatal, run will re-drive on resume): ${message}`);
-            })
-        );
-    }).pipe(Effect.annotateLogs({
-        runId,
-        nodeId,
-        iteration,
-        approvalStatus: "denied",
-        approvalDecidedBy: decidedBy ?? null,
-    }), Effect.withLogSpan("approval:deny"));
+    return resolveApprovalNode(adapter, runId, nodeId, iteration, note, decidedBy, decision, { approved: false, autoApproved: false });
 }
 export const __approvalInternals = {
     isAsyncApprovalRequest,

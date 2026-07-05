@@ -14,13 +14,23 @@ const DEFAULT_EXCLUDE = [
     ".DS_Store",
 ];
 
+/**
+ * @param {unknown} cause
+ * @param {string} operation
+ * @param {Record<string, unknown>} details
+ * @returns {SmithersError}
+ */
 function hotOverlayError(cause, operation, details) {
     return toSmithersError(cause, operation, {
         code: "HOT_OVERLAY_FAILED",
         details,
     });
 }
-
+/**
+ * @param {string} operation
+ * @param {Record<string, unknown>} details
+ * @returns {(cause: unknown) => SmithersError}
+ */
 function hotOverlayErrorMapper(operation, details) {
     return (cause) => hotOverlayError(cause, operation, details);
 }
@@ -70,6 +80,11 @@ export async function buildOverlay(hotRoot, outDir, generation, opts) {
 /**
  * Recursively mirror `src` into `dest`, using hardlinks where possible
  * and falling back to copy. Skips excluded directory basenames.
+ *
+ * @param {string} src
+ * @param {string} dest
+ * @param {Set<string>} exclude
+ * @returns {Effect.Effect<void, SmithersError>}
  */
 function mirrorTreeEffect(src, dest, exclude) {
     return Effect.gen(function* () {

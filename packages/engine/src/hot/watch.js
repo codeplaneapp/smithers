@@ -12,8 +12,13 @@ const DEFAULT_IGNORE = [
     ".jj",
     ".smithers",
 ];
+// Bounds for the adaptive poll backoff: the interval starts at
+// max(MIN_POLL_MS, debounceMs * 4) and doubles up to MAX_POLL_MS while idle.
 const MIN_POLL_MS = 1000;
 const MAX_POLL_MS = 10_000;
+// Above this file count polling is permanently disabled for the tree (see
+// HotWatchScanLimitError) to avoid O(n) rescans of huge roots; fs.watch
+// events still work.
 const MAX_POLL_FILES = 5000;
 class HotWatchScanLimitError extends Error {
     constructor() {

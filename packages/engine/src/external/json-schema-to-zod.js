@@ -89,7 +89,7 @@ function buildAnyOf(variants, root, visited, parent) {
         const other = variants[1 - nullIdx];
         const inner = convertNode(other, root, visited);
         const result = inner.nullable();
-        return parent.default !== undefined ? maybeDefault(maybeDescribe(result, parent), parent) : maybeDescribe(result, parent);
+        return maybeDefault(maybeDescribe(result, parent), parent);
     }
     return buildUnion(variants, root, visited, parent);
 }

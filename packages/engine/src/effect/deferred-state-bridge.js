@@ -10,6 +10,14 @@ import { markdownComponents } from "@smithers-orchestrator/components/markdownCo
 import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+// Reconciles the three bridge-managed deferred task kinds — Timer
+// (meta.__timer), WaitForEvent (meta.__waitForEvent), and approval-gated tasks
+// (desc.needsApproval) — against the durable attempt/node rows so the
+// scheduler treats them like ordinary tasks without executing anything.
+// resolveDeferredTaskStateBridge tries them in that order and returns
+// { handled: false } for a normal executable task. __deferredStateBridgeInternals
+// is the test seam (tests/deferred-state-bridge-internals.test.js): every
+// private helper must stay exported through it.
 /**
  * @typedef {"pending" | "waiting-approval" | "waiting-event" | "waiting-timer" | "finished" | "failed" | "skipped"} DeferredBridgeState
  */

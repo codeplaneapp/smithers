@@ -52,7 +52,7 @@ function makeBridgeWorkflow(workflow, runId) {
     });
 }
 /**
- * @param {RunResult["status"] | "continued"} status
+ * @param {string} status
  * @returns {status is "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota"}
  */
 function isSuspendingStatus(status) {
@@ -148,7 +148,7 @@ export function withWorkflowMakeBridgeRuntime(runtime, execute) {
     return runtimeStorage.run(runtime, execute);
 }
 /**
- * @returns {| WorkflowMakeBridgeRuntime | undefined}
+ * @returns {WorkflowMakeBridgeRuntime | undefined}
  */
 export function getWorkflowMakeBridgeRuntime() {
     return runtimeStorage.getStore();
@@ -192,7 +192,6 @@ export function createSchedulerWakeQueue() {
 export async function runWorkflowWithMakeBridge(workflow, opts, executeBody) {
     const adapter = new SmithersDb(workflow.db);
     const scope = await Effect.runPromise(Scope.make());
-    let closed = false;
     try {
         const engineContext = await Effect.runPromise(Layer.buildWithScope(WorkflowEngine.layerMemory, scope));
         const workflowBridge = makeBridgeWorkflow(workflow, opts.runId);
@@ -212,22 +211,14 @@ export async function runWorkflowWithMakeBridge(workflow, opts, executeBody) {
             throw Cause.squash(result.exit.cause);
         }
         const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
-        const status = run?.status === "waiting-approval" ||
-            run?.status === "waiting-event" ||
-            run?.status === "waiting-timer" ||
-            run?.status === "waiting-quota"
-            ? run.status
-            : "cancelled";
+        const status = run && isSuspendingStatus(run.status) ? run.status : "cancelled";
         return {
             runId: lastRunIdRef.current,
             status,
         };
     }
     finally {
-        if (!closed) {
-            closed = true;
-            await Effect.runPromise(Scope.close(scope, Exit.void));
-        }
+        await Effect.runPromise(Scope.close(scope, Exit.void));
     }
 }
 

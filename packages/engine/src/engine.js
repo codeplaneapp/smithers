@@ -5,7 +5,7 @@ import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
 import { loadInput, loadOutputs, loadRunOutputRowsEffect } from "@smithers-orchestrator/db/snapshot";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { selectOutputRow, validateOutput, validateExistingOutput, describeSchemaShape, buildOutputRow, stripAutoColumns, } from "@smithers-orchestrator/db/output";
+import { selectOutputRow, validateOutput, describeSchemaShape, buildOutputRow, stripAutoColumns, } from "@smithers-orchestrator/db/output";
 import { validateInput } from "@smithers-orchestrator/db/input";
 import { schemaSignature } from "@smithers-orchestrator/db/schema-signature";
 import { withSqliteWriteRetry } from "@smithers-orchestrator/db/write-retry";
@@ -15,9 +15,7 @@ import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertJsonPayloadWithinBounds, assertOptionalStringMaxLength, assertPositiveFiniteInteger, } from "@smithers-orchestrator/db/input-bounds";
-import { retryPolicyToSchedule } from "@smithers-orchestrator/scheduler/retryPolicyToSchedule";
-import { retryScheduleDelayMs } from "@smithers-orchestrator/scheduler/retryScheduleDelayMs";
-import { buildPlanTree, scheduleTasks, buildStateKey, } from "./scheduler.js";
+import { buildPlanTree, buildStateKey, } from "./scheduler.js";
 import { resolveForkSessionMessages } from "./resolveForkSessionMessages.js";
 import { getDefinedToolMetadata } from "./getDefinedToolMetadata.js";
 import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot, } from "@smithers-orchestrator/time-travel/snapshot";
@@ -32,17 +30,16 @@ import { appendGap, defaultGapSpoolPath } from "./durabilityGapSpool.js";
 import { runWithToolContext } from "@smithers-orchestrator/tool-context";
 import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
 import * as BunContext from "@effect/platform-bun/BunContext";
-import { eq, getTableName, isTable } from "drizzle-orm";
+import { getTableName, isTable } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
-import { Cause, Chunk, Duration, Effect, Exit, Fiber, Metric, Queue, Schedule } from "effect";
-import { attemptDuration, cacheHits, cacheMisses, nodeDuration, promptSizeBytes, responseSizeBytes, runDuration, runsResumedTotal, schedulerConcurrencyUtilization, schedulerQueueDepth, schedulerWaitDuration, trackEvent, } from "@smithers-orchestrator/observability/metrics";
+import { Cause, Duration, Effect, Exit, Fiber, Metric, Schedule } from "effect";
+import { attemptDuration, cacheHits, cacheMisses, nodeDuration, promptSizeBytes, responseSizeBytes, runDuration, runsResumedTotal, schedulerConcurrencyUtilization, schedulerWaitDuration, trackEvent, } from "@smithers-orchestrator/observability/metrics";
 import { runScorersAsync } from "@smithers-orchestrator/scorers/run-scorers";
 import { basename, dirname, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { logDebug, logError, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
-import { HotWorkflowController } from "./hot/index.js";
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { platform } from "node:os";
@@ -61,7 +58,6 @@ import { applyOptimizationArtifactToTasks } from "./optimization-artifact.js";
 import { extractBalancedJson, extractLastBalancedJson } from "./json-extraction.js";
 import { setupBudgetTracker } from "./aspects/setupBudgetTracker.js";
 import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
-import { enforceDispatchBudget } from "./aspects/enforceDispatchBudget.js";
 /** @typedef {import("@smithers-orchestrator/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
@@ -284,23 +280,6 @@ function cloneJsonValue(value) {
     catch {
         return undefined;
     }
-}
-/**
- * @param {readonly TaskDescriptor[]} tasks
- * @returns {Record<string, string>}
- */
-function buildWorktreePathLookup(tasks) {
-    /** @type {Record<string, string>} */
-    const lookup = {};
-    for (const task of tasks) {
-        if (!task.worktreePath)
-            continue;
-        lookup[task.nodeId] = task.worktreePath;
-        if (task.worktreeId && lookup[task.worktreeId] === undefined) {
-            lookup[task.worktreeId] = task.worktreePath;
-        }
-    }
-    return lookup;
 }
 /**
  * @param {string | null} [heartbeatDataJson]
@@ -852,7 +831,6 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch) {
 }
 const DEFAULT_MAX_CONCURRENCY = 4;
 const STALE_ATTEMPT_MS = 15 * 60 * 1000;
-const SCHEDULER_EXTERNAL_EVENT_POLL_MS = 250;
 const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
 const RUN_HEARTBEAT_MS = 1_000;
@@ -863,6 +841,8 @@ const RUN_CANCEL_POLL_MS = 250;
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
 const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
+// Poll for hijack-handoff readiness between agent events; keeps handoff latency low without hot-spinning.
+const HIJACK_COMPLETION_POLL_MS = 100;
 const MAX_CONTINUATION_STATE_BYTES = 10 * 1024 * 1024;
 /**
  * @param {Pick<TaskDescriptor, "nodeId" | "iteration">} task
@@ -1917,7 +1897,7 @@ function shouldFailTimerWakeResume(existingRun, opts) {
  */
 async function markTimerWakeResumeFailed(adapter, eventBus, runId, error) {
     const errorInfo = errorToJson(error);
-    await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
+    await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
     const failedAtMs = nowMs();
     await Effect.runPromise(adapter.updateRun(runId, {
         status: "failed",
@@ -2487,186 +2467,6 @@ function isQuotaTaskFailure(attempt) {
     return meta?.failureQuota === true;
 }
 /**
- * @param {SmithersDb} adapter
- * @param {BunSQLiteDatabase} db
- * @param {string} runId
- * @param {TaskDescriptor[]} tasks
- * @param {EventBus} eventBus
- * @param {Map<string, boolean>} ralphDone
- * @param {Set<string>} [budgetSkippedKeys] keys skipped by Aspects `skip-remaining`
- * @returns {Promise<{ stateMap: TaskStateMap; retryWait: Map<string, number> }>}
- */
-async function computeTaskStates(adapter, db, runId, tasks, eventBus, ralphDone, budgetSkippedKeys) {
-    const stateMap = new Map();
-    const retryWait = new Map();
-    const existing = await Effect.runPromise(adapter.listNodes(runId));
-    const existingState = new Map();
-    for (const node of existing) {
-        existingState.set(buildStateKey(node.nodeId, node.iteration ?? 0), node.state);
-    }
-    /**
-   * @param {TaskState} state
-   * @param {TaskDescriptor} desc
-   */
-    const maybeEmitStateEvent = async (state, desc) => {
-        const key = buildStateKey(desc.nodeId, desc.iteration);
-        const prev = existingState.get(key);
-        if (state === "pending" && prev !== "pending") {
-            await Effect.runPromise(eventBus.emitEventWithPersist({
-                type: "NodePending",
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration,
-                timestampMs: nowMs(),
-            }));
-            existingState.set(key, state);
-        }
-        if (state === "skipped" && prev !== "skipped") {
-            await Effect.runPromise(eventBus.emitEventWithPersist({
-                type: "NodeSkipped",
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration,
-                timestampMs: nowMs(),
-            }));
-            existingState.set(key, state);
-        }
-    };
-    for (const desc of tasks) {
-        const key = buildStateKey(desc.nodeId, desc.iteration);
-        if (desc.skipIf || budgetSkippedKeys?.has(key)) {
-            stateMap.set(key, "skipped");
-            await Effect.runPromise(adapter.insertNode({
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration,
-                state: "skipped",
-                lastAttempt: null,
-                updatedAtMs: nowMs(),
-                outputTable: desc.outputTableName,
-                label: desc.label ?? null,
-            }));
-            await maybeEmitStateEvent("skipped", desc);
-            continue;
-        }
-        const deferredState = await resolveDeferredTaskStateBridge(adapter, db, runId, desc, eventBus, (state) => maybeEmitStateEvent(state, desc));
-        if (deferredState.handled) {
-            stateMap.set(key, deferredState.state);
-            continue;
-        }
-        const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
-        // Check for a valid output row BEFORE checking attempt state.
-        // After hot reload (or resume/restart), a task may have a stale
-        // "in-progress" attempt in the DB even though its output was already
-        // written.  By checking the output first we let the Sequence
-        // fast-forward through already-completed children in the same render
-        // cycle instead of waiting for a completion event that will never fire.
-        if (desc.outputTable) {
-            const outputRow = await selectOutputRow(db, desc.outputTable, {
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration,
-            });
-            if (outputRow) {
-                const valid = validateExistingOutput(desc.outputTable, outputRow);
-                if (valid.ok) {
-                    stateMap.set(key, "finished");
-                    await Effect.runPromise(adapter.insertNode({
-                        runId,
-                        nodeId: desc.nodeId,
-                        iteration: desc.iteration,
-                        state: "finished",
-                        lastAttempt: attempts[0]?.attempt ?? null,
-                        updatedAtMs: nowMs(),
-                        outputTable: desc.outputTableName,
-                        label: desc.label ?? null,
-                    }));
-                    continue;
-                }
-            }
-        }
-        const inProgress = attempts.find((a) => a.state === "in-progress");
-        if (inProgress) {
-            stateMap.set(key, "in-progress");
-            await Effect.runPromise(adapter.insertNode({
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration,
-                state: "in-progress",
-                lastAttempt: inProgress.attempt,
-                updatedAtMs: nowMs(),
-                outputTable: desc.outputTableName,
-                label: desc.label ?? null,
-            }));
-            continue;
-        }
-        if (desc.ralphId && ralphDone.get(desc.ralphId)) {
-            stateMap.set(key, "skipped");
-            await Effect.runPromise(adapter.insertNode({
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration,
-                state: "skipped",
-                lastAttempt: attempts[0]?.attempt ?? null,
-                updatedAtMs: nowMs(),
-                outputTable: desc.outputTableName,
-                label: desc.label ?? null,
-            }));
-            await maybeEmitStateEvent("skipped", desc);
-            continue;
-        }
-        const maxAttempts = desc.retries + 1;
-        const failedAttempts = attempts.filter((a) => a.state === "failed");
-        const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
-        // Quota-limited attempts do not consume the retry budget; exclude them
-        // so a task paused by quota exhaustion resumes with its retries intact.
-        const retryConsumingFailedAttempts = failedAttempts.filter((a) => !isQuotaTaskFailure(a));
-        if (hasNonRetryableFailure || retryConsumingFailedAttempts.length >= maxAttempts) {
-            stateMap.set(key, "failed");
-            await Effect.runPromise(adapter.insertNode({
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration,
-                state: "failed",
-                lastAttempt: attempts[0]?.attempt ?? null,
-                updatedAtMs: nowMs(),
-                outputTable: desc.outputTableName,
-                label: desc.label ?? null,
-            }));
-            continue;
-        }
-        let waitingForRetry = false;
-        if (failedAttempts.length > 0 && desc.retryPolicy && !hasNonRetryableFailure) {
-            const lastFailed = failedAttempts[0];
-            const retrySchedule = retryPolicyToSchedule(desc.retryPolicy);
-            const delayMs = retryScheduleDelayMs(retrySchedule, lastFailed?.attempt ?? failedAttempts.length);
-            const finishedAtMs = lastFailed?.finishedAtMs ?? lastFailed?.startedAtMs;
-            if (delayMs > 0 && typeof finishedAtMs === "number") {
-                const nextRetryAtMs = finishedAtMs + delayMs;
-                if (nowMs() < nextRetryAtMs) {
-                    retryWait.set(key, nextRetryAtMs);
-                    waitingForRetry = true;
-                }
-            }
-        }
-        stateMap.set(key, "pending");
-        await Effect.runPromise(adapter.insertNode({
-            runId,
-            nodeId: desc.nodeId,
-            iteration: desc.iteration,
-            state: "pending",
-            lastAttempt: attempts[0]?.attempt ?? null,
-            updatedAtMs: nowMs(),
-            outputTable: desc.outputTableName,
-            label: desc.label ?? null,
-        }));
-        if (!waitingForRetry) {
-            await maybeEmitStateEvent("pending", desc);
-        }
-    }
-    return { stateMap, retryWait };
-}
-/**
  * Apply only the global maxConcurrency cap.
  *
  * Per-group caps (Parallel/MergeQueue) are enforced upstream by the scheduler
@@ -2737,15 +2537,6 @@ async function cancelInProgress(adapter, runId, eventBus) {
 /**
  * @param {SmithersDb} adapter
  * @param {string} runId
- * @param {EventBus} eventBus
- * @param {string} reason
- */
-async function cancelPendingTimers(adapter, runId, eventBus, reason) {
-    await cancelPendingTimersBridge(adapter, runId, eventBus, reason);
-}
-/**
- * @param {SmithersDb} adapter
- * @param {string} runId
  */
 async function cancelStaleAttempts(adapter, runId) {
     const inProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
@@ -2789,7 +2580,6 @@ async function cancelStaleAttempts(adapter, runId) {
  * @param {HijackState} [hijackState]
  */
 async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputTable, eventBus, toolConfig, workflowName, cacheEnabled, signal, disabledAgents, runAbortController, hijackState) {
-    // Legacy execution goes here (renamed function)
     const taskStartMs = performance.now();
     const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
     const previousHeartbeat = (() => {
@@ -3689,7 +3479,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         catch {
                             // Best-effort only; the normal event hooks still drive hijack.
                         }
-                    }, 100)
+                    }, HIJACK_COMPLETION_POLL_MS)
                     : undefined;
                 // Use fallback agent on retry attempts when available
                 const traceCollector = toolConfig.traceContext && effectiveAgent
@@ -4434,41 +4224,13 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             }
             if (retryOutput === undefined) {
                 // Try balanced JSON extraction as a last resort
-                const jsonStart = retryText.indexOf("{");
-                if (jsonStart !== -1) {
-                    let depth = 0;
-                    let inStr = false;
-                    let esc = false;
-                    for (let i = jsonStart; i < retryText.length; i++) {
-                        const c = retryText[i];
-                        if (esc) {
-                            esc = false;
-                            continue;
-                        }
-                        if (c === "\\") {
-                            esc = true;
-                            continue;
-                        }
-                        if (c === '"' && !esc) {
-                            inStr = !inStr;
-                            continue;
-                        }
-                        if (inStr)
-                            continue;
-                        if (c === "{")
-                            depth++;
-                        else if (c === "}") {
-                            depth--;
-                            if (depth === 0) {
-                                try {
-                                    retryOutput = JSON.parse(retryText.slice(jsonStart, i + 1));
-                                }
-                                catch {
-                                    // Balanced slice was not valid JSON; leave retryOutput undefined.
-                                }
-                                break;
-                            }
-                        }
+                const jsonStr = extractBalancedJson(retryText);
+                if (jsonStr) {
+                    try {
+                        retryOutput = JSON.parse(jsonStr);
+                    }
+                    catch {
+                        // Balanced slice was not valid JSON; leave retryOutput undefined.
                     }
                 }
             }
@@ -4982,16 +4744,7 @@ async function runWorkflowAsync(workflow, opts) {
     }, () => runWorkflowWithMakeBridge(workflow, {
         ...opts,
         runId,
-    }, runWorkflowBody));
-}
-/**
- * @template Schema
- * @param {SmithersWorkflow<Schema>} workflow
- * @param {RunOptions} opts
- * @returns {Promise<RunBodyResult>}
- */
-async function runWorkflowBody(workflow, opts) {
-    return runWorkflowBodyDriver(workflow, opts);
+    }, runWorkflowBodyDriver));
 }
 /**
  * @param {ReadonlyMap<string, number> | Record<string, number> | null} [iterations]
@@ -5181,7 +4934,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     };
     let frameNo = ((await adapter.getLastFrame(runId))?.frameNo ?? 0);
     let defaultIteration = 0;
-    let workflowRef = workflow;
+    const workflowRef = workflow;
     let lastGraph = null;
     let descriptorMap = new Map();
     let workflowName = "workflow";
@@ -5736,7 +5489,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 }
                 : null;
             await waitForAbortedTasksToSettle();
-            await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
+            await cancelPendingTimersBridge(adapter, runId, eventBus, "run-cancelled");
             await Effect.runPromise(adapter.updateRun(runId, {
                 status: "cancelled",
                 finishedAtMs: nowMs(),
@@ -5758,7 +5511,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         if (result.status === "failed") {
             const errorInfo = errorToJson(result.error ?? driverTaskError);
             if (runOwnedByCurrentProcess) {
-                await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
+                await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
                 await Effect.runPromise(adapter.updateRun(runId, {
                     status: "failed",
                     finishedAtMs: nowMs(),
@@ -6286,7 +6039,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 }
                 : errorToJson(err);
             await waitForAbortedTasksToSettle();
-            await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
+            await cancelPendingTimersBridge(adapter, runId, eventBus, "run-cancelled");
             await Effect.runPromise(adapter.updateRun(runId, {
                 status: "cancelled",
                 finishedAtMs: nowMs(),
@@ -6311,7 +6064,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         }, "engine:run");
         const errorInfo = errorToJson(err);
         if (runOwnedByCurrentProcess) {
-            await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
+            await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
             await Effect.runPromise(adapter.updateRun(runId, {
                 status: "failed",
                 finishedAtMs: nowMs(),
