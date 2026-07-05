@@ -4,6 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod/v4";
 
+// Keywords OpenAI / Codex strict structured output rejects. Zod v4's
+// toJSONSchema emits these for `.default()`, integer bounds, and the meta
+// header; leaving them in makes codex discard the schema and fall back to a
+// free-form (prose) final message.
+const STRIP_KEYS = ["default", "$schema", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "format"];
+
 /**
  * Make every object node strict the way OpenAI / Codex structured output
  * requires: `type: "object"`, `additionalProperties: false`, and every
@@ -11,12 +17,6 @@ import { z } from "zod/v4";
  * modeled as nullable). Mirrors `sanitizeForOpenAI` in @smithers-orchestrator/
  * agents, kept local so apps/review takes no extra workspace dependency.
  */
-// Keywords OpenAI / Codex strict structured output rejects. Zod v4's
-// toJSONSchema emits these for `.default()`, integer bounds, and the meta
-// header; leaving them in makes codex discard the schema and fall back to a
-// free-form (prose) final message.
-const STRIP_KEYS = ["default", "$schema", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "format"];
-
 function sanitizeForOpenAI(node: unknown): void {
   if (node == null || typeof node !== "object") return;
   const obj = node as Record<string, unknown>;

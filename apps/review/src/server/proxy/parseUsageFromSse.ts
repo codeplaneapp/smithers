@@ -1,5 +1,14 @@
 import type { UsageSummary } from "./parseUsage.ts";
 
+// Usage shape Anthropic puts on both message_start (inside `message`) and
+// message_delta (top-level `usage`).
+type SseUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+};
+
 /**
  * Streaming Anthropic Messages response: `event: message_start` carries the
  * model and prompt-side usage; subsequent `event: message_delta` frames
@@ -15,6 +24,16 @@ export function parseUsageFromSse(stream: string): UsageSummary | null {
   let cacheCreationTokens = 0;
   let cacheReadTokens = 0;
   let saw = false;
+  // Both frame kinds report the same usage fields; keep the latest value seen
+  // for each.
+  const takeUsage = (usage: SseUsage) => {
+    if (typeof usage.input_tokens === "number") inputTokens = usage.input_tokens;
+    if (typeof usage.output_tokens === "number") outputTokens = usage.output_tokens;
+    if (typeof usage.cache_creation_input_tokens === "number")
+      cacheCreationTokens = usage.cache_creation_input_tokens;
+    if (typeof usage.cache_read_input_tokens === "number")
+      cacheReadTokens = usage.cache_read_input_tokens;
+  };
   // Split on a blank line between frames. The SSE spec allows CRLF endings, so
   // match one-or-more `\r?\n` pairs — an LF-only split silently turns a CRLF
   // stream into one unparseable frame and drops the whole request's metering.
@@ -36,37 +55,12 @@ export function parseUsageFromSse(stream: string): UsageSummary | null {
     }
     if (eventName === "message_start") {
       saw = true;
-      const message = (payload.message ?? {}) as {
-        model?: string;
-        usage?: {
-          input_tokens?: number;
-          output_tokens?: number;
-          cache_creation_input_tokens?: number;
-          cache_read_input_tokens?: number;
-        };
-      };
+      const message = (payload.message ?? {}) as { model?: string; usage?: SseUsage };
       if (typeof message.model === "string") model = message.model;
-      const usage = message.usage ?? {};
-      if (typeof usage.input_tokens === "number") inputTokens = usage.input_tokens;
-      if (typeof usage.output_tokens === "number") outputTokens = usage.output_tokens;
-      if (typeof usage.cache_creation_input_tokens === "number")
-        cacheCreationTokens = usage.cache_creation_input_tokens;
-      if (typeof usage.cache_read_input_tokens === "number")
-        cacheReadTokens = usage.cache_read_input_tokens;
+      takeUsage(message.usage ?? {});
     } else if (eventName === "message_delta") {
       saw = true;
-      const usage = (payload.usage ?? {}) as {
-        input_tokens?: number;
-        output_tokens?: number;
-        cache_creation_input_tokens?: number;
-        cache_read_input_tokens?: number;
-      };
-      if (typeof usage.input_tokens === "number") inputTokens = usage.input_tokens;
-      if (typeof usage.output_tokens === "number") outputTokens = usage.output_tokens;
-      if (typeof usage.cache_creation_input_tokens === "number")
-        cacheCreationTokens = usage.cache_creation_input_tokens;
-      if (typeof usage.cache_read_input_tokens === "number")
-        cacheReadTokens = usage.cache_read_input_tokens;
+      takeUsage((payload.usage ?? {}) as SseUsage);
     }
   }
   if (!saw) return null;
