@@ -1,5 +1,5 @@
 import { readdir, mkdir, link, copyFile, rm } from "node:fs/promises";
-import { resolve, relative, join, dirname } from "node:path";
+import { resolve, relative, join, dirname, extname } from "node:path";
 import { existsSync } from "node:fs";
 import { Effect } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
@@ -13,6 +13,17 @@ const DEFAULT_EXCLUDE = [
     ".smithers",
     ".DS_Store",
 ];
+const SNAPSHOT_COPY_EXTENSIONS = new Set([
+    ".cjs",
+    ".cts",
+    ".js",
+    ".json",
+    ".jsx",
+    ".mjs",
+    ".mts",
+    ".ts",
+    ".tsx",
+]);
 
 /**
  * @param {unknown} cause
@@ -33,6 +44,9 @@ function hotOverlayError(cause, operation, details) {
  */
 function hotOverlayErrorMapper(operation, details) {
     return (cause) => hotOverlayError(cause, operation, details);
+}
+function shouldCopySnapshotFile(filePath) {
+    return SNAPSHOT_COPY_EXTENSIONS.has(extname(filePath).toLowerCase());
 }
 /**
  * Build a generation overlay by hardlinking (or copying) the hot root
@@ -113,6 +127,19 @@ function mirrorTreeEffect(src, dest, exclude) {
                 yield* mirrorTreeEffect(srcPath, destPath, exclude);
             }
             else if (entry.isFile()) {
+                const copyFileEffect = Effect.tryPromise({
+                    try: () => copyFile(srcPath, destPath),
+                    catch: hotOverlayErrorMapper("copy overlay file", {
+                        srcPath,
+                        destPath,
+                    }),
+                });
+                // Module and JSON files need an independent inode per generation.
+                // Hardlinks can keep old generations tied to in-place source edits.
+                if (shouldCopySnapshotFile(srcPath)) {
+                    yield* copyFileEffect;
+                    continue;
+                }
                 const linked = yield* Effect.either(Effect.tryPromise({
                     try: () => link(srcPath, destPath),
                     catch: hotOverlayErrorMapper("hardlink overlay file", {
@@ -128,13 +155,7 @@ function mirrorTreeEffect(src, dest, exclude) {
                             destPath,
                         }),
                     });
-                    yield* Effect.tryPromise({
-                        try: () => copyFile(srcPath, destPath),
-                        catch: hotOverlayErrorMapper("copy overlay file", {
-                            srcPath,
-                            destPath,
-                        }),
-                    });
+                    yield* copyFileEffect;
                 }
             }
         }
@@ -207,4 +228,5 @@ export const __overlayInternals = {
     hotOverlayError,
     hotOverlayErrorMapper,
     mirrorTreeEffect,
+    shouldCopySnapshotFile,
 };

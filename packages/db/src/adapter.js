@@ -2613,8 +2613,47 @@ export class SmithersDb {
    */
     listPendingApprovals(runId) {
         return this.read(`list pending approvals ${runId}`, () => this.internalStorage.queryAll(`SELECT *
-         FROM _smithers_approvals
-         WHERE run_id = ? AND status = ?`, [runId, "requested"], { booleanColumns: ["autoApproved"] }));
+         FROM (
+           SELECT
+             a.run_id,
+             a.node_id,
+             a.iteration,
+             a.status,
+             a.requested_at_ms,
+             a.decided_at_ms,
+             a.note,
+             a.decided_by,
+             a.request_json,
+             a.decision_json,
+             a.auto_approved
+           FROM _smithers_approvals a
+           WHERE a.run_id = ? AND a.status = ?
+           UNION ALL
+           SELECT
+             n.run_id,
+             n.node_id,
+             n.iteration,
+             'requested' AS status,
+             n.updated_at_ms AS requested_at_ms,
+             NULL AS decided_at_ms,
+             NULL AS note,
+             NULL AS decided_by,
+             NULL AS request_json,
+             NULL AS decision_json,
+             0 AS auto_approved
+           FROM _smithers_nodes n
+           INNER JOIN _smithers_runs r
+             ON n.run_id = r.run_id
+           LEFT JOIN _smithers_approvals a
+             ON a.run_id = n.run_id
+            AND a.node_id = n.node_id
+            AND a.iteration = n.iteration
+           WHERE n.run_id = ?
+             AND n.state = ?
+             AND r.status = ?
+             AND a.run_id IS NULL
+         ) pending
+         ORDER BY COALESCE(requested_at_ms, 0) ASC, run_id, node_id, iteration`, [runId, "requested", runId, "waiting-approval", "waiting-approval"], { booleanColumns: ["autoApproved"] }));
     }
     /**
    * @param {string} runId
@@ -2648,29 +2687,58 @@ export class SmithersDb {
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listAllPendingApprovals() {
-        return this.read("list all pending approvals", () => this.internalStorage.queryAll(`SELECT
-           a.run_id,
-           a.node_id,
-           a.iteration,
-           a.status,
-           a.requested_at_ms,
-           a.decided_at_ms,
-           a.note,
-           a.decided_by,
-           a.request_json,
-           a.decision_json,
-           a.auto_approved,
-           r.workflow_name,
-           r.status AS run_status,
-           n.label AS node_label
-         FROM _smithers_approvals a
-         LEFT JOIN _smithers_runs r ON a.run_id = r.run_id
-         LEFT JOIN _smithers_nodes n
-           ON a.run_id = n.run_id
-          AND a.node_id = n.node_id
-          AND a.iteration = n.iteration
-         WHERE a.status = ?
-         ORDER BY COALESCE(a.requested_at_ms, 0) ASC, a.run_id, a.node_id, a.iteration`, ["requested"], { booleanColumns: ["autoApproved"] }));
+        return this.read("list all pending approvals", () => this.internalStorage.queryAll(`SELECT *
+         FROM (
+           SELECT
+             a.run_id,
+             a.node_id,
+             a.iteration,
+             a.status,
+             a.requested_at_ms,
+             a.decided_at_ms,
+             a.note,
+             a.decided_by,
+             a.request_json,
+             a.decision_json,
+             a.auto_approved,
+             r.workflow_name,
+             r.status AS run_status,
+             n.label AS node_label
+           FROM _smithers_approvals a
+           LEFT JOIN _smithers_runs r ON a.run_id = r.run_id
+           LEFT JOIN _smithers_nodes n
+             ON a.run_id = n.run_id
+            AND a.node_id = n.node_id
+            AND a.iteration = n.iteration
+           WHERE a.status = ?
+           UNION ALL
+           SELECT
+             n.run_id,
+             n.node_id,
+             n.iteration,
+             'requested' AS status,
+             n.updated_at_ms AS requested_at_ms,
+             NULL AS decided_at_ms,
+             NULL AS note,
+             NULL AS decided_by,
+             NULL AS request_json,
+             NULL AS decision_json,
+             0 AS auto_approved,
+             r.workflow_name,
+             r.status AS run_status,
+             n.label AS node_label
+           FROM _smithers_nodes n
+           INNER JOIN _smithers_runs r
+             ON n.run_id = r.run_id
+           LEFT JOIN _smithers_approvals a
+             ON a.run_id = n.run_id
+            AND a.node_id = n.node_id
+            AND a.iteration = n.iteration
+           WHERE n.state = ?
+             AND r.status = ?
+             AND a.run_id IS NULL
+         ) pending
+         ORDER BY COALESCE(requested_at_ms, 0) ASC, run_id, node_id, iteration`, ["requested", "waiting-approval", "waiting-approval"], { booleanColumns: ["autoApproved"] }));
     }
     /**
    * @param {string} workflowName

@@ -50,6 +50,17 @@ describe("buildOverlay", () => {
         expect(existsSync(join(genDir, "src", "helper.ts"))).toBe(true);
         expect(readFileSync(join(genDir, "workflow.ts"), "utf8")).toBe("export default {}");
     });
+    test("keeps generated module files isolated from later source edits", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        const sourcePath = join(root, "workflow.ts");
+        writeFileSync(sourcePath, "export default { version: 1 };");
+        const genDir = await buildOverlay(root, outDir, 1);
+        const overlayPath = join(genDir, "workflow.ts");
+        writeFileSync(sourcePath, "export default { version: 2 };");
+        expect(readFileSync(overlayPath, "utf8")).toBe("export default { version: 1 };");
+    });
     test("excludes node_modules by default", async () => {
         const root = makeTempDir();
         const outDir = makeTempDir();

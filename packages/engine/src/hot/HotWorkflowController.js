@@ -3,7 +3,8 @@
 // @smithers-type-exports-end
 
 import { resolve, dirname } from "node:path";
-import { mkdir, rm } from "node:fs/promises";
+import { rmSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { Effect, Metric } from "effect";
 import { WatchTree } from "./watch.js";
@@ -211,24 +212,25 @@ export class HotWorkflowController {
     }
     /** Stop watchers and clean up overlay directory. */
     async close() {
-        await Effect.runPromise(this.closeEffect());
+        this.closeSync();
+    }
+    closeSync() {
+        if (this.closed)
+            return;
+        this.closed = true;
+        this.watcher.close();
+        try {
+            rmSync(this.outDir, { recursive: true, force: true });
+        }
+        catch { }
+        logInfo("closed hot workflow controller", {
+            entryPath: this.entryPath,
+            outDir: this.outDir,
+            generation: this.generation,
+        }, "hot:controller");
     }
     closeEffect() {
-        return Effect.gen(this, function* () {
-            if (this.closed)
-                return;
-            this.closed = true;
-            this.watcher.close();
-            yield* Effect.either(Effect.tryPromise({
-                try: () => rm(this.outDir, { recursive: true, force: true }),
-                catch: (cause) => toSmithersError(cause, "remove hot reload output dir"),
-            }));
-            logInfo("closed hot workflow controller", {
-                entryPath: this.entryPath,
-                outDir: this.outDir,
-                generation: this.generation,
-            }, "hot:controller");
-        }).pipe(Effect.annotateLogs({
+        return Effect.sync(() => this.closeSync()).pipe(Effect.annotateLogs({
             entryPath: this.entryPath,
             outDir: this.outDir,
             generation: this.generation,

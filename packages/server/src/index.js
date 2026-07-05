@@ -688,6 +688,52 @@ function buildMirrorOnProgress(adapter, runId, workflowName, workflowPath, confi
                     label: null,
                 });
                 break;
+            case "ApprovalRequested":
+                // Root cause: a detached run's mirror only ever saw
+                // NodeWaitingApproval, so `_smithers_approvals` stayed empty and
+                // `listPendingApprovals` fell back to deriving bare gates from
+                // node state — losing the request payload, so select/rank/decision
+                // approvals rendered as plain gates. Reconstruct the real row
+                // (with request_json) from the event.
+                yield* adapter.insertOrUpdateApproval({
+                    runId: event.runId,
+                    nodeId: event.nodeId,
+                    iteration: event.iteration,
+                    status: "requested",
+                    requestedAtMs: event.timestampMs,
+                    decidedAtMs: null,
+                    note: null,
+                    decidedBy: null,
+                    requestJson: event.request ? JSON.stringify(event.request) : null,
+                    decisionJson: null,
+                    autoApproved: false,
+                });
+                break;
+            case "ApprovalGranted":
+            case "ApprovalAutoApproved":
+            case "ApprovalDenied": {
+                // Flip the mirrored row to its decided state so it stops
+                // surfacing as pending. The decision events carry no
+                // note/decidedBy/decisionJson, so preserve whatever the request
+                // row already held rather than nulling it out.
+                const existing = yield* adapter.getApproval(event.runId, event.nodeId, event.iteration);
+                yield* adapter.insertOrUpdateApproval({
+                    runId: event.runId,
+                    nodeId: event.nodeId,
+                    iteration: event.iteration,
+                    status: event.type === "ApprovalDenied" ? "denied" : "approved",
+                    requestedAtMs: existing?.requestedAtMs ?? null,
+                    decidedAtMs: event.timestampMs,
+                    note: existing?.note ?? null,
+                    decidedBy: existing?.decidedBy ?? null,
+                    requestJson: existing?.requestJson ?? null,
+                    decisionJson: existing?.decisionJson ?? null,
+                    autoApproved: event.type === "ApprovalAutoApproved"
+                        ? true
+                        : (existing?.autoApproved ?? false),
+                });
+                break;
+            }
         }
     }).pipe(Effect.annotateLogs({
         runId,
@@ -706,6 +752,9 @@ function buildMirrorOnProgress(adapter, runId, workflowName, workflowPath, confi
         });
     };
 }
+// Exposed for tests: the detached-run mirror projector, so the
+// ApprovalRequested/Granted/Denied projection can be exercised directly.
+export const __serverTestInternals = { buildMirrorOnProgress };
 /**
  * @param {ServerOptions} [opts]
  */
