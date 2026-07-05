@@ -6,10 +6,6 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { openSmithersBackend } from "./openSmithersBackend.js";
 import { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";
 
-function sleep(ms) {
-    return new Promise((resolveFn) => setTimeout(resolveFn, ms));
-}
-
 async function openSqliteStore(dbPath, opts = {}) {
     const { Database } = await import("bun:sqlite");
     const { drizzle } = await import("drizzle-orm/bun-sqlite");
@@ -182,7 +178,7 @@ async function retryNotFound(fn, wait = {}) {
             if (elapsedMs >= timeoutMs) {
                 throw err;
             }
-            await sleep(Math.min(intervalMs, timeoutMs - elapsedMs));
+            await new Promise((resolveFn) => setTimeout(resolveFn, Math.min(intervalMs, timeoutMs - elapsedMs)));
         }
     }
 }

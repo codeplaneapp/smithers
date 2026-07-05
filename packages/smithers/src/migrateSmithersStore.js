@@ -14,18 +14,7 @@ const MIGRATION_MARKER_NAME = "migrated.json";
 
 /**
  * @typedef {"sqlite" | "pglite" | "postgres"} MigrateSmithersBackend
- * @typedef {{
- *   cwd?: string;
- *   dbPath?: string;
- *   from?: MigrateSmithersBackend;
- *   to?: MigrateSmithersBackend;
- *   url?: string;
- *   env?: Record<string, string | undefined>;
- *   pgliteDataDir?: string;
- *   keepSqlite?: boolean;
- *   batchSize?: number;
- *   onProgress?: (event: MigrationProgressEvent) => void | Promise<void>;
- * }} MigrateSmithersStoreOptions
+ * @typedef {import("./MigrateSmithersStoreOptions.ts").MigrateSmithersStoreOptions} MigrateSmithersStoreOptions
  * @typedef {{
  *   type: "table-start" | "table-copied" | "done";
  *   table?: string;
@@ -41,22 +30,12 @@ const MIGRATION_MARKER_NAME = "migrated.json";
  *   targetRows: number;
  *   durationMs: number;
  * }} MigrationTableResult
- * @typedef {{
- *   backend: MigrateSmithersBackend;
- *   source: { backend: MigrateSmithersBackend; dbPath?: string; dataDir?: string; url?: string };
- *   dbPath: string;
- *   markerPath: string;
- *   target: { backend: MigrateSmithersBackend; dbPath?: string; dataDir?: string; url?: string };
- *   runCount: number;
- *   schemaVersion: string;
- *   durationMs: number;
- *   tables: MigrationTableResult[];
- *   sqliteRemoved: boolean;
- * }} MigrateSmithersStoreResult
+ * @typedef {import("./SmithersMigrationResult.ts").SmithersMigrationResult} MigrateSmithersStoreResult
  */
 
 /**
  * @param {unknown} value
+ * @param {MigrateSmithersBackend} [fallback]
  * @returns {MigrateSmithersBackend}
  */
 function normalizeBackend(value, fallback = "sqlite") {
@@ -73,11 +52,10 @@ function normalizeBackend(value, fallback = "sqlite") {
 }
 
 /**
- * @param {string} dbPath
  * @param {string} workspaceRoot
  * @returns {string}
  */
-function markerPathFor(dbPath, workspaceRoot) {
+function markerPathFor(workspaceRoot) {
     return join(workspaceRoot, ".smithers", MIGRATION_MARKER_NAME);
 }
 
@@ -489,15 +467,6 @@ function writeBackendMarker(result) {
 }
 
 /**
- * @param {MigrateSmithersBackend} from
- * @param {MigrateSmithersBackend} to
- * @returns {string}
- */
-function agentFallbackText(from, to) {
-    return `\n\nRetry deterministic migration:\n  smithers migrate --from ${from} --to ${to}\n\nIf deterministic migration still fails, inspect the source and target stores for schema/data violations. Agent-assisted repair is tracked as a follow-up and is not available in this build.`;
-}
-
-/**
  * @param {unknown} error
  * @param {MigrateSmithersBackend} from
  * @param {MigrateSmithersBackend} to
@@ -514,7 +483,7 @@ function withAgentFallback(error, from, to) {
     const isWriteConflict = error instanceof SmithersError && error.code === "DB_WRITE_FAILED";
     const suffix = isWriteConflict
         ? `\n\nThe target store already contains data or is not writable; retrying the same command will fail again. Inspect or remove the conflicting target store before re-running the migration. Agent-assisted repair is tracked as a follow-up and is not available in this build.`
-        : agentFallbackText(from, to);
+        : `\n\nRetry deterministic migration:\n  smithers migrate --from ${from} --to ${to}\n\nIf deterministic migration still fails, inspect the source and target stores for schema/data violations. Agent-assisted repair is tracked as a follow-up and is not available in this build.`;
     if (error instanceof SmithersError) {
         return new SmithersError(error.code, `${message}${suffix}`, error.details, { cause: error });
     }
@@ -883,36 +852,6 @@ async function pgliteRunCountAt(cwd, workspaceRoot, opts) {
 }
 
 /**
- * Read the migration receipt (migrated.json) at the workspace root and return
- * the CURRENT backend it records. After a prior migration this receipt is the
- * AUTHORITY on which backend now holds the run store: earlier-backend stores
- * (e.g. a leftover smithers.db after sqlite->pglite) can still sit on disk, so
- * a run-count heuristic alone would misread the source. Returns undefined when
- * there is no usable receipt so callers can fall back to the heuristic.
- * @param {string} workspaceRoot
- * @returns {MigrateSmithersBackend | undefined}
- */
-/**
- * Read the source dbPath recorded in the migrated.json receipt from the last
- * forward migration. Returns undefined when there is no receipt or it does not
- * record a source dbPath (e.g. a reverse migration receipt).
- * @param {string} workspaceRoot
- * @returns {string | undefined}
- */
-function readReceiptSourceDbPath(workspaceRoot) {
-    const receiptPath = join(workspaceRoot, ".smithers", MIGRATION_MARKER_NAME);
-    if (!existsSync(receiptPath)) return undefined;
-    try {
-        const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
-        const dbPath = receipt?.source?.dbPath;
-        return typeof dbPath === "string" && dbPath.length > 0 ? dbPath : undefined;
-    }
-    catch {
-        return undefined;
-    }
-}
-
-/**
  * Read the source dbPath AND recorded size/mtime from the migrated.json receipt.
  * Returns undefined when there is no receipt or it does not record a source dbPath.
  * @param {string} workspaceRoot
@@ -937,6 +876,16 @@ function readReceiptSource(workspaceRoot) {
     }
 }
 
+/**
+ * Read the migration receipt (migrated.json) at the workspace root and return
+ * the CURRENT backend it records. After a prior migration this receipt is the
+ * AUTHORITY on which backend now holds the run store: earlier-backend stores
+ * (e.g. a leftover smithers.db after sqlite->pglite) can still sit on disk, so
+ * a run-count heuristic alone would misread the source. Returns undefined when
+ * there is no usable receipt so callers can fall back to the heuristic.
+ * @param {string} workspaceRoot
+ * @returns {MigrateSmithersBackend | undefined}
+ */
 function readReceiptCurrentBackend(workspaceRoot) {
     const receiptPath = join(workspaceRoot, ".smithers", MIGRATION_MARKER_NAME);
     if (!existsSync(receiptPath)) return undefined;
@@ -956,7 +905,7 @@ function readReceiptCurrentBackend(workspaceRoot) {
     }
 }
 
-async function inferSourceBackend(opts, cwd, workspaceRoot, dbPath, target) {
+async function inferSourceBackend(opts, cwd, workspaceRoot, dbPath) {
     if (opts.from) return normalizeBackend(opts.from);
     // The migration receipt is authoritative after a prior migration: trust the
     // backend it records over any leftover stores on disk. When the receipt's
@@ -1099,7 +1048,7 @@ async function migratePgToSqlite(opts, context) {
             backend: target,
             source: sourceBackend === "postgres" ? { backend: sourceBackend, url: "set" } : { backend: sourceBackend, dataDir },
             dbPath,
-            markerPath: markerPathFor(dbPath, workspaceRoot),
+            markerPath: markerPathFor(workspaceRoot),
             target: { backend: "sqlite", dbPath },
             runCount,
             schemaVersion,
@@ -1145,7 +1094,7 @@ export async function migrateSmithersStore(opts = {}) {
     const workspaceRoot = findSmithersAnchorDir(cwd) ?? cwd;
     const requestedDbPath = resolve(cwd, opts.dbPath ?? join(workspaceRoot, "smithers.db"));
     const target = normalizeBackend(opts.to, "sqlite");
-    const sourceBackend = await inferSourceBackend(opts, cwd, workspaceRoot, requestedDbPath, target);
+    const sourceBackend = await inferSourceBackend(opts, cwd, workspaceRoot, requestedDbPath);
     const dbPath = sourceBackend === "sqlite"
         ? inferSqliteSourceDbPath(requestedDbPath, workspaceRoot, Boolean(opts.dbPath))
         : requestedDbPath;
@@ -1184,7 +1133,7 @@ export async function migrateSmithersStore(opts = {}) {
             target,
         });
     }
-    const markerPath = markerPathFor(dbPath, workspaceRoot);
+    const markerPath = markerPathFor(workspaceRoot);
     const batchSize = Math.max(1, Math.floor(opts.batchSize ?? DEFAULT_BATCH_SIZE));
     const keepSqlite = opts.keepSqlite ?? true;
     let sourceStats = sourceFileStats(dbPath);
