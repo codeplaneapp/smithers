@@ -140,14 +140,13 @@ function resolveRetryConfig(raw, isAgent = false) {
     // failures (e.g. "thread <uuid> not found"). Give them at least one free
     // retry by default — even when the user opted into continueOnFail —
     // unless they explicitly requested noRetry.
-    const baseRetries = noRetry
+    const retries = noRetry
         ? 0
         : defaultNoRetryForContinueOnFail
             ? (isAgent ? 1 : 0)
             : hasExplicitRetries
                 ? /** @type {number} */ (raw.retries)
                 : Infinity;
-    const retries = baseRetries;
     const retryPolicy = hasExplicitRetryPolicy
         ? /** @type {import("../RetryPolicy.ts").RetryPolicy} */ (raw.retryPolicy)
         : retries > 0
@@ -261,7 +260,7 @@ export function extractFromHost(root, opts) {
                 throw new SmithersError("DUPLICATE_ID", `Duplicate Worktree id detected: ${id}`, { kind: "worktree", id });
             }
             seenWorktree.add(id);
-            let pathVal = String(node.rawProps?.path ?? "").trim();
+            const pathVal = String(node.rawProps?.path ?? "").trim();
             if (!pathVal) {
                 throw new SmithersError("WORKTREE_EMPTY_PATH", WORKTREE_EMPTY_PATH_ERROR);
             }

@@ -17,7 +17,7 @@ import { parseXmlJson } from "./utils/xml.js";
  * @returns {ClaudeWorkflowPhasePlan}
  */
 export function deriveClaudeWorkflowPhasesFromFrame(frame, options = {}) {
-    /** @type {XmlNodeOrNull} */
+    /** @type {import("./XmlNode.ts").XmlNode | null} */
     let xml = null;
     if (typeof frame.xmlJson === "string" && frame.xmlJson.length > 0 && frame.xmlJson !== "null") {
         try {
@@ -49,5 +49,3 @@ export function deriveClaudeWorkflowPhasesFromFrame(frame, options = {}) {
     }));
     return buildClaudeWorkflowPhasePlan(xml, tasks, { collapsePhases: options.collapsePhases });
 }
-
-/** @typedef {import("./XmlNode.ts").XmlNode | null} XmlNodeOrNull */

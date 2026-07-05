@@ -2,6 +2,7 @@ import { getTableName } from "drizzle-orm";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { validateForkSources } from "./validateForkSources.js";
 import { resolveWorktreePath } from "./worktree-path.js";
+import { resolveStableId } from "./utils/tree-ids.js";
 import { DEFAULT_MERGE_QUEUE_CONCURRENCY, WORKTREE_EMPTY_PATH_ERROR } from "./constants.js";
 /** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./XmlNode.ts").XmlNode} XmlNode */
@@ -27,28 +28,6 @@ function envHeartbeatTimeoutMs() {
 }
 const DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS = envHeartbeatTimeoutMs();
 const DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS = envHeartbeatTimeoutMs();
-/**
- * @param {string} prefix
- * @param {readonly number[]} path
- * @returns {string}
- */
-function stablePathId(prefix, path) {
-    if (path.length === 0)
-        return `${prefix}:root`;
-    return `${prefix}:${path.join(".")}`;
-}
-/**
- * @param {unknown} explicitId
- * @param {string} prefix
- * @param {readonly number[]} path
- * @returns {string}
- */
-function resolveStableId(explicitId, prefix, path) {
-    if (typeof explicitId === "string" && explicitId.trim().length > 0) {
-        return explicitId;
-    }
-    return stablePathId(prefix, path);
-}
 /**
  * @param {unknown} value
  * @returns {value is import("zod").ZodObject<any>}
@@ -256,14 +235,14 @@ function approvalAutoApprove(value) {
  * regardless of tracking).
  *
  * @param {unknown} value
- * @returns {import("./types").TaskAspects | undefined}
+ * @returns {import("./TaskAspects.ts").TaskAspects | undefined}
  */
 function aspects(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return undefined;
     }
     const raw = /** @type {Record<string, unknown>} */ (value);
-    /** @type {import("./types").TaskAspects} */
+    /** @type {import("./TaskAspects.ts").TaskAspects} */
     const out = {};
     const token = raw.tokenBudget;
     if (token && typeof token === "object" && !Array.isArray(token) &&
@@ -299,8 +278,12 @@ function aspects(value) {
  */
 function pushGroup(tag, raw, path, stack) {
     const id = resolveStableId(raw.id, tag, path);
+    // Coerce numeric strings (e.g. from MDX) in line with scheduler.parseNum
     const parsed = Number(raw.maxConcurrency);
     const rawMax = Number.isFinite(parsed) ? Math.floor(parsed) : undefined;
+    // Concurrency semantics: merge-queue defaults to DEFAULT_MERGE_QUEUE_CONCURRENCY
+    // and always clamps to >= 1; parallel treats undefined or <= 0 as unlimited
+    // (fractional values already floored).
     let max;
     if (tag === "merge-queue") {
         max = Math.max(1, rawMax ?? DEFAULT_MERGE_QUEUE_CONCURRENCY);

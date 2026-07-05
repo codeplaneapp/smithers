@@ -1,6 +1,6 @@
 /**
  * @param {string} prefix
- * @param {number[]} path
+ * @param {readonly number[]} path
  * @returns {string}
  */
 export function stablePathId(prefix, path) {
@@ -11,7 +11,7 @@ export function stablePathId(prefix, path) {
 /**
  * @param {unknown} explicitId
  * @param {string} prefix
- * @param {number[]} path
+ * @param {readonly number[]} path
  * @returns {string}
  */
 export function resolveStableId(explicitId, prefix, path) {
