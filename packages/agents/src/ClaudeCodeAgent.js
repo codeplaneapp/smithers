@@ -171,6 +171,14 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                 payload = JSON.parse(trimmedLine);
             }
             catch {
+                // Claude/Fable print usage/session-limit banners as RAW (non-JSON)
+                // stdout lines, so they never reach the assistant/result blocks
+                // below. Classify them here too, or the run treats the banner as a
+                // normal (empty) answer and fails on output-schema validation
+                // instead of parking as a resumable quota wait.
+                if (!limitBannerText && classifyQuotaError(trimmedLine, this.cliEngine)) {
+                    limitBannerText = trimmedLine;
+                }
                 if (!shouldSurfaceUnparsedStdout(trimmedLine)) {
                     return [];
                 }

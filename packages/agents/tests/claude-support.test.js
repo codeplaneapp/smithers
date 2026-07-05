@@ -105,6 +105,35 @@ process.stdout.write("done\\n");
             await rm(argsFileDir, { recursive: true, force: true });
         }
     });
+    test("classifies a raw (non-JSON) session-limit banner on stdout as a quota error", async () => {
+        // Claude/Fable print the session-limit banner as a RAW stdout line (not
+        // stream-json) and exit 0. It must become AGENT_QUOTA_EXCEEDED so the run
+        // parks as a resumable quota wait instead of failing output validation.
+        const fake = await makeFakeClaude(`
+process.stdout.write("You've hit your session limit \\u00b7 resets 5:50pm (America/New_York)\\n");
+process.exit(0);
+`);
+        try {
+            process.env.PATH = prependPath(fake.dir, originalPath);
+            const agent = new ClaudeCodeAgent({
+                model: "claude-fable-5",
+                env: { PATH: process.env.PATH },
+            });
+            let error;
+            try {
+                await agent.generate({ messages: [{ role: "user", content: "audit this" }] });
+            }
+            catch (err) {
+                error = err;
+            }
+            expect(error).toBeDefined();
+            expect(error?.code).toBe("AGENT_QUOTA_EXCEEDED");
+            expect(error?.details?.failureQuota).toBe(true);
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
     test("does not add --verbose for text output by default", async () => {
         const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-claude-args-"));
         const argsFile = join(argsFileDir, "args.json");
