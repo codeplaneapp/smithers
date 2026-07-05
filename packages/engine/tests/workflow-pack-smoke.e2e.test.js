@@ -2,11 +2,6 @@ import { expect, test } from "bun:test";
 import { delimiter } from "node:path";
 import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, } from "../../smithers/tests/e2e-helpers.js";
 const WORKFLOW_PACK_SMOKE_TIMEOUT_MS = 30_000;
-const FAKE_LOCAL_AUTH = {
-    auth_mode: "chatgpt",
-    OPENAI_API_KEY: null,
-    tokens: { access_token: "fake-access-token", account_id: "acct_test" },
-};
 /**
  * @param {string} homeDir
  */
@@ -19,17 +14,29 @@ function buildWorkflowPackEnv(homeDir) {
         HOME: homeDir,
         PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
         ANTHROPIC_API_KEY: "",
-        // Keep preflight on local fixture auth instead of probing a fake env key.
+        // Empty so Codex resolves subscription auth from .codex/auth.json below
+        // instead of probing a fake env key against the real OpenAI API (401 →
+        // non-retryable Codex preflight failure). The seeded implement workflow
+        // leads with Codex (the "fable sandwich"), so its first task must
+        // authenticate. Mirrors the canonical seeded-workflows-run.e2e setup.
         OPENAI_API_KEY: "",
         GEMINI_API_KEY: "",
         GOOGLE_API_KEY: "",
-        SMITHERS_POST_FAILURE: "0",
     };
 }
 function initWorkflowPack(repo = createTempRepo()) {
     const env = buildWorkflowPackEnv(repo.dir);
     repo.write(".claude/.credentials.json", "{}\n");
-    repo.write(".codex/auth.json", JSON.stringify(FAKE_LOCAL_AUTH, null, 2) + "\n");
+    // ChatGPT subscription auth: a tokens.access_token makes Codex preflight
+    // pass in subscription mode (no network probe), like a logged-in codex CLI.
+    repo.write(
+        ".codex/auth.json",
+        JSON.stringify({
+            auth_mode: "chatgpt",
+            OPENAI_API_KEY: null,
+            tokens: { access_token: "fake-access-token", account_id: "acct_test" },
+        }) + "\n",
+    );
     repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
     const initResult = runSmithers(["init"], {
         cwd: repo.dir,
@@ -46,9 +53,6 @@ test("seeded implement workflow runs end-to-end and writes logs under .smithers/
         format: "json",
         env,
     });
-    if (result.exitCode !== 0) {
-        throw new Error(`implement workflow exited ${result.exitCode}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-    }
     expect(result.exitCode).toBe(0);
     expect(result.json).toMatchObject({
         status: "finished",

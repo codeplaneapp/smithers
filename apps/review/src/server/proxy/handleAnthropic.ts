@@ -120,13 +120,23 @@ export async function handleAnthropic(
     }
   } else {
     const repoHint = request.headers.get("x-smithers-repo");
+    // A key with no authorized repos cannot resolve to a repo at all. Honoring
+    // an x-smithers-repo hint here would let such a key meter spend against ANY
+    // repo's monthly budget (cross-tenant spend / DoS); falling back to
+    // auth.owner would instead 403 forever on "repo not registered" (owner is
+    // not a repo). Reject up front with an actionable message either way.
+    if (auth.repos.length === 0) {
+      return jsonError(403, "api key is not scoped to any repo; mint a repo-scoped key", {
+        repo: repoHint ?? null,
+      });
+    }
     if (repoHint) {
-      if (auth.repos.length > 0 && !auth.repos.includes(repoHint)) {
+      if (!auth.repos.includes(repoHint)) {
         return jsonError(403, "api key not authorized for repo", { repo: repoHint });
       }
       repo = repoHint;
     } else {
-      repo = auth.repos[0] ?? auth.owner;
+      repo = auth.repos[0];
     }
     pr = 0;
 
@@ -138,6 +148,8 @@ export async function handleAnthropic(
     const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
     if (monthSpendUsd >= monthlyCapUsd) {
       return jsonError(402, "repo monthly spend cap exhausted", {
+        repo,
+        month: new Date(now).toISOString().slice(0, 7),
         monthlyCapUsd,
         spentUsd: monthSpendUsd,
       });
