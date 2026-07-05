@@ -3708,7 +3708,7 @@ function checkGatewaySdkDocsMatchExports() {
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "listApprovals: ListApprovalsResponse;"],
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "getNodeOutput: Record<string, unknown>;"],
     [GATEWAY_CLIENT_SOURCE, "async *streamDevTools("],
-    [GATEWAY_CLIENT_SOURCE, 'connection.request("streamDevTools", params)'],
+    [GATEWAY_CLIENT_SOURCE, 'this.subscribedStream(\n      "streamDevTools",\n      params,'],
     [gatewayServerSource, 'if (this.auth.mode === "token") {'],
     [gatewayServerSource, 'if (this.auth.mode === "trusted-proxy") {'],
     [gatewayServerSource, 'rpcPath: "/v1/rpc",'],

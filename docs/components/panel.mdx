@@ -99,9 +99,12 @@ export function Panel(props) {
     const { id, panelists, moderator, panelistOutput, moderatorOutput, strategy = "synthesize", minAgree, maxConcurrency, panelistTaskProps, moderatorTaskProps, children, } = props;
     const prefix = id ?? "panel";
     const normalized = panelists.map(normalizePanelist);
+    // Single source of the panelist task ids: the tasks, needs, and deps maps
+    // below all key off these, so the derivation can never drift.
+    const taskIds = normalized.map((p, i) => `${prefix}-${p.label ?? p.role ?? `panelist-${i}`}`);
     // Build parallel panelist tasks
     const panelistTasks = normalized.map((p, i) => {
-        const taskId = `${prefix}-${p.label ?? p.role ?? `panelist-${i}`}`;
+        const taskId = taskIds[i];
         return React.createElement(Task, {
             key: taskId,
             id: taskId,
@@ -117,8 +120,7 @@ export function Panel(props) {
     // moderator (via dependsOn) until every panelist node is terminal
     // (finished OR failed), regardless of whether its output resolves.
     const needs = {};
-    normalized.forEach((p, i) => {
-        const taskId = `${prefix}-${p.label ?? p.role ?? `panelist-${i}`}`;
+    taskIds.forEach((taskId) => {
         needs[taskId] = taskId;
     });
     // Build deps map (same keys as needs) so the moderator's prompt can be
@@ -126,8 +128,7 @@ export function Panel(props) {
     // panelist that failed (continueOnFail, no output row) is simply omitted
     // from the prompt rather than deferring the moderator forever.
     const deps = {};
-    normalized.forEach((p, i) => {
-        const taskId = `${prefix}-${p.label ?? p.role ?? `panelist-${i}`}`;
+    taskIds.forEach((taskId) => {
         deps[taskId] = panelistOutput;
     });
     // Moderator prompt includes strategy metadata
