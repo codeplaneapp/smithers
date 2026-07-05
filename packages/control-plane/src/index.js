@@ -17,7 +17,9 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * @typedef {import("./index.d.ts").ControlPlaneExport} ControlPlaneExport
  */
 
+// DNS-label shape: lowercase alphanumerics with interior hyphens, 1-64 chars (the {0,62} core plus the two anchor chars).
 const SLUG_RE = /^(?:[a-z0-9]|[a-z0-9][a-z0-9-]{0,62}[a-z0-9])$/;
+// Caller-supplied ids (uuid, prefixed ids like org_x): letters/digits/colon/underscore/hyphen, capped at 128 chars.
 const ID_RE = /^[A-Za-z0-9:_-]{1,128}$/;
 // The project_key column folds org-wide (project_id IS NULL) rows under this
 // sentinel. ID_RE happens to accept it, so a project literally named "__org__"
@@ -25,6 +27,8 @@ const ID_RE = /^[A-Za-z0-9:_-]{1,128}$/;
 // keys — silently overwriting and cross-leaking org-wide secrets/usage-limits.
 // It is therefore a reserved id, rejected by the id validators below.
 const ORG_WIDE_SENTINEL = "__org__";
+// Rolling quota-window lengths: checkUsageLimit defaults sinceMs to untilMs minus this span.
+// "monthly" is a fixed 30-day window, not a calendar month.
 const USAGE_LIMIT_PERIODS = new Map([
     ["daily", 24 * 60 * 60 * 1000],
     ["weekly", 7 * 24 * 60 * 60 * 1000],
@@ -186,12 +190,8 @@ CREATE INDEX IF NOT EXISTS _smithers_cp_audit_org_time_idx
 /**
  * @param {ControlPlaneSqlite} sqlite
  */
-function tableExists(sqlite, name) {
-    return Boolean(sqlite.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").get(name));
-}
-
 function migrateSecretRefsProjectKey(sqlite) {
-    const legacyExists = tableExists(sqlite, "_smithers_cp_secret_refs_legacy");
+    const legacyExists = Boolean(sqlite.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").get("_smithers_cp_secret_refs_legacy"));
     const columns = sqlite.query("PRAGMA table_info(_smithers_cp_secret_refs)").all();
     const hasProjectKey = columns.some((column) => String(column.name) === "project_key");
     // Already migrated and no interrupted migration to finish.
@@ -1076,7 +1076,7 @@ LIMIT 1
      */
     listSecretRefs(input) {
         const orgId = requiredId("orgId", input.orgId);
-        const projectId = input.projectId === undefined ? undefined : input.projectId;
+        const projectId = input.projectId;
         const sql = projectId === undefined
             ? `
 SELECT org_id AS orgId, project_id AS projectId, name, provider, ref, created_by AS createdBy, created_at_ms AS createdAtMs, rotated_at_ms AS rotatedAtMs
