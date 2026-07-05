@@ -26,7 +26,7 @@
       "default": "./src/classifyClaudeWorkflowNodeKind.js"
     },
     "./*": {
-      "types": "./src/index.d.ts",
+      "types": "./src/*.d.ts",
       "import": "./src/*.js",
       "default": "./src/*.js"
     }
@@ -35,7 +35,7 @@
     "src/"
   ],
   "scripts": {
-    "build": "tsup --dts-only",
+    "build": "node ../../scripts/clean-dts.mjs src && tsup",
     "test": "bun test tests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

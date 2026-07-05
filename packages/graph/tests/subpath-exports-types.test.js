@@ -21,6 +21,11 @@ const jsSubpaths = [
 ];
 
 describe("graph subpath exports have their own types mapping", () => {
+	test("wildcard export maps to per-subpath declarations", () => {
+		expect(pkg.exports["./*"].types).toBe("./src/*.d.ts");
+		expect(pkg.exports["./*"].types).not.toBe("./src/index.d.ts");
+	});
+
 	for (const { subpath, dts } of jsSubpaths) {
 		test(`${subpath} maps types to ${dts}, not the core index.d.ts`, () => {
 			const entry = pkg.exports[subpath];
@@ -75,13 +80,15 @@ describe("graph subpath types resolve through published exports", () => {
 			[
 				`import { DEFAULT_MERGE_QUEUE_CONCURRENCY, WORKTREE_EMPTY_PATH_ERROR } from "@smithers-orchestrator/graph/constants";`,
 				`import { canonicalizeXml, parseXmlJson } from "@smithers-orchestrator/graph/utils/xml";`,
+				`import { stablePathId } from "@smithers-orchestrator/graph/utils/tree-ids";`,
 				`import { classifyClaudeWorkflowNodeKind } from "@smithers-orchestrator/graph/classifyClaudeWorkflowNodeKind";`,
 				`const a: number = DEFAULT_MERGE_QUEUE_CONCURRENCY;`,
 				`const w: string = WORKTREE_EMPTY_PATH_ERROR;`,
 				`const c: string = canonicalizeXml(null);`,
 				`const p = parseXmlJson("null");`,
+				`const id: string = stablePathId("task", [1, 2]);`,
 				`const k = classifyClaudeWorkflowNodeKind;`,
-				`export { a, w, c, p, k };`,
+				`export { a, w, c, p, id, k };`,
 			].join("\n"),
 		);
 		expect(out).toBe("");
@@ -94,11 +101,14 @@ describe("graph subpath types resolve through published exports", () => {
 			[
 				`import { DEFAULT_MERGE_QUEUE_CONCURRENCY } from "@smithers-orchestrator/graph/constants";`,
 				`import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";`,
+				`import { stablePathId } from "@smithers-orchestrator/graph/utils/tree-ids";`,
 				// number assigned to string must fail
 				`const bad1: string = DEFAULT_MERGE_QUEUE_CONCURRENCY;`,
 				// string return assigned to number must fail
 				`const bad2: number = canonicalizeXml(null);`,
-				`export { bad1, bad2 };`,
+				// path entries must be numbers
+				`const bad3 = stablePathId("task", ["x"]);`,
+				`export { bad1, bad2, bad3 };`,
 			].join("\n"),
 		);
 		expect(code).not.toBe(0);
@@ -108,12 +118,10 @@ describe("graph subpath types resolve through published exports", () => {
 
 // The type-only `.ts` subpaths (`types`, `TaskDescriptor`, `XmlNode`,
 // `GraphSnapshot`) and the deep `dom/extract` module resolve through the `./*`
-// fallback, whose `types` points at the barrel `index.d.ts`. These are the
-// subpaths consumers actually import (react-reconciler, driver, scheduler,
-// smithers), so lock in that they resolve to their real declared types rather
-// than `any`. A separate tmp keeps these fixtures from cross-compiling with the
-// deliberately-broken fixtures above.
-describe("graph type-only subpaths resolve to real types through the barrel", () => {
+// fallback. These are the subpaths consumers actually import (react-reconciler,
+// driver, scheduler, smithers), so lock in that they resolve to their own real
+// declarations rather than `any` or the core barrel.
+describe("graph type-only subpaths resolve to real declarations", () => {
 	const tmp = mkdtempSync(join(tmpdir(), "graph-type-subpath-"));
 	afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 

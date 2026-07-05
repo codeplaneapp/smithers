@@ -1,287 +1,14 @@
-import { z } from 'zod';
-
-type XmlNode$1 = XmlElement$1 | XmlText$1;
-type XmlElement$1 = {
-    readonly kind: "element";
-    readonly tag: string;
-    readonly props: Record<string, string>;
-    readonly children: readonly XmlNode$1[];
-};
-type XmlText$1 = {
-    readonly kind: "text";
-    readonly text: string;
-};
-type HostNode$2 = HostElement$1 | HostText$1;
-type HostElement$1 = {
-    readonly kind: "element";
-    readonly tag: string;
-    readonly props: Record<string, string>;
-    readonly rawProps: Record<string, unknown>;
-    readonly children: readonly HostNode$2[];
-};
-type HostText$1 = {
-    readonly kind: "text";
-    readonly text: string;
-};
-type RetryPolicy$1 = {
-    backoff?: "fixed" | "linear" | "exponential";
-    initialDelayMs?: number;
-};
-type CachePolicy$1<Ctx = unknown> = {
-    by?: (ctx: Ctx) => unknown;
-    version?: string;
-    key?: string;
-    ttlMs?: number;
-    scope?: "run" | "workflow" | "global";
-    [key: string]: unknown;
-};
-type AgentLike$1 = {
-    id?: string;
-    tools?: Record<string, unknown>;
-    supportsNativeStructuredOutput?: boolean;
-    capabilities?: {
-        version: 1;
-        engine: string;
-        runtimeTools: Record<string, {
-            description?: string;
-            source?: string;
-        }>;
-        mcp: Record<string, unknown>;
-        skills: Record<string, unknown>;
-        humanInteraction: Record<string, unknown>;
-        builtIns: string[];
-    };
-    generate: (args: unknown) => Promise<unknown>;
-};
-type ScoreResult$1 = {
-    score: number;
-    reason?: string;
-    meta?: Record<string, unknown>;
-};
-type ScorerInput$1 = {
-    input: unknown;
-    output: unknown;
-    groundTruth?: unknown;
-    context?: unknown;
-    latencyMs?: number;
-    outputSchema?: z.ZodObject;
-};
-type ScorerFn$1 = (input: ScorerInput$1) => Promise<ScoreResult$1>;
-type Scorer$1 = {
-    id: string;
-    name: string;
-    description: string;
-    score: ScorerFn$1;
-};
-type SamplingConfig$1 = {
-    type: "all";
-} | {
-    type: "ratio";
-    rate: number;
-} | {
-    type: "none";
-};
-type ScorerBinding$1 = {
-    scorer: Scorer$1;
-    sampling?: SamplingConfig$1;
-};
-type ScorersMap$1 = Record<string, unknown>;
-type MemoryNamespaceKind$1 = "workflow" | "agent" | "user" | "global";
-type MemoryNamespace$1 = {
-    kind: MemoryNamespaceKind$1;
-    id: string;
-};
-type TaskMemoryConfig$1 = {
-    recall?: {
-        namespace?: MemoryNamespace$1;
-        query?: string;
-        topK?: number;
-    };
-    remember?: {
-        namespace?: MemoryNamespace$1;
-        key?: string;
-    };
-    threadId?: string;
-};
-type ApprovalOption$1 = {
-    key: string;
-    label: string;
-    summary?: string;
-    metadata?: Record<string, unknown>;
-};
-type TaskAspects$1 = {
-    tokenBudget?: {
-        max: number;
-        perTask?: number;
-        onExceeded?: "fail" | "warn" | "skip-remaining";
-    };
-    latencySlo?: {
-        maxMs: number;
-        perTask?: number;
-        onExceeded?: "fail" | "warn";
-    };
-};
-type TaskDescriptor$1 = {
-    nodeId: string;
-    ordinal: number;
-    iteration: number;
-    kind?: "agent" | "compute" | "static" | "human";
-    ralphId?: string;
-    dependsOn?: string[];
-    needs?: Record<string, string>;
-    /** Logical id of the task whose final agent session this task forks. Gates execution and seeds the session. */
-    forkSource?: string;
-    worktreeId?: string;
-    worktreePath?: string;
-    worktreeBranch?: string;
-    worktreeBaseBranch?: string;
-    outputTable: unknown | null;
-    outputTableName: string;
-    outputRef?: z.ZodObject;
-    outputSchema?: z.ZodObject;
-    parallelGroupId?: string;
-    parallelMaxConcurrency?: number;
-    needsApproval: boolean;
-    waitAsync?: boolean;
-    approvalMode?: "gate" | "decision" | "select" | "rank";
-    approvalOnDeny?: "fail" | "continue" | "skip";
-    approvalOptions?: ApprovalOption$1[];
-    approvalAllowedScopes?: string[];
-    approvalAllowedUsers?: string[];
-    approvalAutoApprove?: {
-        after?: number;
-        audit?: boolean;
-        conditionMet?: boolean;
-        revertOnMet?: boolean;
-    };
-    skipIf: boolean;
-    retries: number;
-    retryPolicy?: RetryPolicy$1;
-    timeoutMs: number | null;
-    heartbeatTimeoutMs: number | null;
-    continueOnFail: boolean;
-    cachePolicy?: CachePolicy$1;
-    hijack?: boolean;
-    onHijackExit?: "complete" | "reopen";
-    agent?: AgentLike$1 | AgentLike$1[];
-    prompt?: string;
-    staticPayload?: unknown;
-    computeFn?: () => unknown | Promise<unknown>;
-    label?: string;
-    meta?: Record<string, unknown>;
-    scorers?: ScorersMap$1;
-    groundTruth?: unknown;
-    context?: unknown;
-    memoryConfig?: TaskMemoryConfig$1;
-    aspects?: TaskAspects$1;
-};
-type WorkflowGraph$2 = {
-    readonly xml: XmlNode$1 | null;
-    readonly tasks: readonly TaskDescriptor$1[];
-    readonly mountedTaskIds: readonly string[];
-};
-type ExtractOptions$2 = {
-    readonly ralphIterations?: ReadonlyMap<string, number> | Record<string, number>;
-    readonly defaultIteration?: number;
-    readonly baseRootDir?: string;
-    readonly workflowPath?: string | null;
-};
-type ExtractGraph$1 = (root: HostNode$2 | null, opts?: ExtractOptions$2) => WorkflowGraph$2 | Promise<WorkflowGraph$2>;
-
-type GraphSnapshot$1 = {
-    runId: string;
-    frameNo: number;
-    xml: XmlNode$1 | null;
-    tasks: TaskDescriptor$1[];
-};
-type ClaudeWorkflowPhase$1 = {
-    title: string;
-    detail?: string;
-};
-type ClaudeWorkflowNodeKind$1 = "agent" | "compute" | "static" | "human" | "wait" | "timer" | "approval" | "subflow" | "sandbox" | "unknown";
-type ClaudeWorkflowNodePhase$1 = {
-    nodeId: string;
-    label: string;
-    phase: string;
-    kind: ClaudeWorkflowNodeKind$1;
-};
-type ClaudeWorkflowPhasePlan$1 = {
-    phases: readonly ClaudeWorkflowPhase$1[];
-    nodes: readonly ClaudeWorkflowNodePhase$1[];
-};
-
-/**
- * @param {HostNode | null} root
- * @param {ExtractOptions} [opts]
- * @returns {WorkflowGraph}
- */
-declare function extractGraph(root: HostNode$1 | null, opts?: ExtractOptions$1): WorkflowGraph$1;
-/**
- * @param {HostNode | null} root
- * @param {ExtractOptions} [opts]
- * @returns {WorkflowGraph}
- */
-declare function extractFromHost(root: HostNode$1 | null, opts?: ExtractOptions$1): WorkflowGraph$1;
-/**
- * @param {GraphSnapshot} snapshot
- * @param {{ collapsePhases?: boolean }} [options]
- * @returns {ClaudeWorkflowPhasePlan}
- */
-declare function deriveClaudeWorkflowPhases(snapshot: GraphSnapshot, options?: {
-    collapsePhases?: boolean;
-}): ClaudeWorkflowPhasePlan;
-type PhasePlanTask = {
-    nodeId: string;
-    label: string;
-    ordinal: number;
-    kind: string;
-};
-/**
- * Core phase-plan walk shared by the live-snapshot and persisted-frame
- * derivations. Tasks arrive pre-classified: `kind` is taken as-is.
- *
- * @param {XmlNode | null} xml
- * @param {readonly PhasePlanTask[]} inputTasks
- * @param {{ collapsePhases?: boolean }} [options]
- * @returns {ClaudeWorkflowPhasePlan}
- */
-declare function buildClaudeWorkflowPhasePlan(xml: XmlNode$1 | null, inputTasks: readonly PhasePlanTask[], options?: {
-    collapsePhases?: boolean;
-}): ClaudeWorkflowPhasePlan;
-/**
- * Derive a Claude Code /workflows phase plan from a persisted frame row
- * (`_smithers_frames.xml_json` + `task_index_json`), so the plan for a LIVE
- * run comes from the store alone, with no workflow-file execution.
- *
- * @param {{ xmlJson: string | null | undefined; taskIndexJson: string | null | undefined }} frame
- * @param {{ labels?: Record<string, string>; collapsePhases?: boolean }} [options]
- * @returns {ClaudeWorkflowPhasePlan}
- */
-declare function deriveClaudeWorkflowPhasesFromFrame(frame: {
-    xmlJson: string | null | undefined;
-    taskIndexJson: string | null | undefined;
-}, options?: {
-    labels?: Record<string, string>;
-    collapsePhases?: boolean;
-}): ClaudeWorkflowPhasePlan;
-/**
- * Resolve a <Worktree path> prop exactly the way graph extraction resolves it.
- * Relative paths are resolved against the launch root (`--root`, the nearest
- * `.smithers` anchor, or the operator cwd), never `dirname(workflowPath)`.
- * `workflowPath` is threaded through graph/engine rendering for workflow
- * identity and diagnostics only; it is not a worktree path resolution base.
- *
- * @param {unknown} path
- * @param {{ baseRootDir?: string; workflowPath?: string | null }} [opts]
- * @returns {string}
- */
-declare function resolveWorktreePath(path: unknown, opts?: {
-    baseRootDir?: string;
-    workflowPath?: string | null;
-}): string;
-type ExtractOptions$1 = ExtractOptions$2;
-type HostNode$1 = HostNode$2;
-type WorkflowGraph$1 = WorkflowGraph$2;
+import { AgentLike as AgentLike$1, ApprovalOption as ApprovalOption$1, CachePolicy as CachePolicy$1, ExtractGraph as ExtractGraph$1, ExtractOptions as ExtractOptions$1, HostElement as HostElement$1, HostNode as HostNode$1, HostText as HostText$1, MemoryNamespace as MemoryNamespace$1, MemoryNamespaceKind as MemoryNamespaceKind$1, RetryPolicy as RetryPolicy$1, SamplingConfig as SamplingConfig$1, ScoreResult as ScoreResult$1, Scorer as Scorer$1, ScorerBinding as ScorerBinding$1, ScorerFn as ScorerFn$1, ScorerInput as ScorerInput$1, ScorersMap as ScorersMap$1, TaskAspects as TaskAspects$1, TaskDescriptor as TaskDescriptor$1, TaskMemoryConfig as TaskMemoryConfig$1, WorkflowGraph as WorkflowGraph$1, XmlElement as XmlElement$1, XmlNode as XmlNode$1, XmlText as XmlText$1 } from './types.js';
+import { GraphSnapshot as GraphSnapshot$1 } from './GraphSnapshot.js';
+import { ClaudeWorkflowPhasePlan as ClaudeWorkflowPhasePlan$1 } from './ClaudeWorkflowPhasePlan.js';
+import { ClaudeWorkflowPhase as ClaudeWorkflowPhase$1 } from './ClaudeWorkflowPhase.js';
+import { ClaudeWorkflowNodeKind as ClaudeWorkflowNodeKind$1, ClaudeWorkflowNodePhase as ClaudeWorkflowNodePhase$1 } from './ClaudeWorkflowNodePhase.js';
+export { extractFromHost, extractGraph } from './extract.js';
+export { PhasePlanTask, buildClaudeWorkflowPhasePlan } from './buildClaudeWorkflowPhasePlan.js';
+export { deriveClaudeWorkflowPhases } from './deriveClaudeWorkflowPhases.js';
+export { deriveClaudeWorkflowPhasesFromFrame } from './deriveClaudeWorkflowPhasesFromFrame.js';
+export { resetRelativeWorktreePathWarningForTest, resolveWorktreePath } from './worktree-path.js';
+import 'zod';
 
 type AgentLike = AgentLike$1;
 type ApprovalOption = ApprovalOption$1;
@@ -291,10 +18,10 @@ type ClaudeWorkflowNodePhase = ClaudeWorkflowNodePhase$1;
 type ClaudeWorkflowPhase = ClaudeWorkflowPhase$1;
 type ClaudeWorkflowPhasePlan = ClaudeWorkflowPhasePlan$1;
 type ExtractGraph = ExtractGraph$1;
-type ExtractOptions = ExtractOptions$2;
+type ExtractOptions = ExtractOptions$1;
 type GraphSnapshot = GraphSnapshot$1;
 type HostElement = HostElement$1;
-type HostNode = HostNode$2;
+type HostNode = HostNode$1;
 type HostText = HostText$1;
 type MemoryNamespace = MemoryNamespace$1;
 type MemoryNamespaceKind = MemoryNamespaceKind$1;
@@ -306,12 +33,12 @@ type ScorerBinding = ScorerBinding$1;
 type ScorerFn = ScorerFn$1;
 type ScorerInput = ScorerInput$1;
 type ScorersMap = ScorersMap$1;
-type TaskAspects = TaskAspects$1;
 type TaskDescriptor = TaskDescriptor$1;
+type TaskAspects = TaskAspects$1;
 type TaskMemoryConfig = TaskMemoryConfig$1;
-type WorkflowGraph = WorkflowGraph$2;
+type WorkflowGraph = WorkflowGraph$1;
 type XmlElement = XmlElement$1;
 type XmlNode = XmlNode$1;
 type XmlText = XmlText$1;
 
-export { type AgentLike, type ApprovalOption, type CachePolicy, type ClaudeWorkflowNodeKind, type ClaudeWorkflowNodePhase, type ClaudeWorkflowPhase, type ClaudeWorkflowPhasePlan, type ExtractGraph, type ExtractOptions, type GraphSnapshot, type HostElement, type HostNode, type HostText, type MemoryNamespace, type MemoryNamespaceKind, type RetryPolicy, type SamplingConfig, type ScoreResult, type Scorer, type ScorerBinding, type ScorerFn, type ScorerInput, type ScorersMap, type TaskAspects, type TaskDescriptor, type TaskMemoryConfig, type WorkflowGraph, type XmlElement, type XmlNode, type XmlText, buildClaudeWorkflowPhasePlan, deriveClaudeWorkflowPhases, deriveClaudeWorkflowPhasesFromFrame, extractFromHost, extractGraph, resolveWorktreePath };
+export type { AgentLike, ApprovalOption, CachePolicy, ClaudeWorkflowNodeKind, ClaudeWorkflowNodePhase, ClaudeWorkflowPhase, ClaudeWorkflowPhasePlan, ExtractGraph, ExtractOptions, GraphSnapshot, HostElement, HostNode, HostText, MemoryNamespace, MemoryNamespaceKind, RetryPolicy, SamplingConfig, ScoreResult, Scorer, ScorerBinding, ScorerFn, ScorerInput, ScorersMap, TaskAspects, TaskDescriptor, TaskMemoryConfig, WorkflowGraph, XmlElement, XmlNode, XmlText };
