@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/review",
-  "version": "0.26.1",
+  "version": "0.28.0",
   "description": "Code review plus story-form HTML walkthrough, built on the OpenCodeReview-derived review flow",
   "license": "MIT",
   "type": "module",
@@ -9,7 +9,8 @@
   },
   "exports": {
     "./cli": "./src/cli/main.ts",
-    "./diffs": "./src/diffs/index.ts"
+    "./diffs": "./src/diffs/index.ts",
+    "./workflow/openCodeReview": "./src/workflow/openCodeReview.ts"
   },
   "files": [
     "src/",

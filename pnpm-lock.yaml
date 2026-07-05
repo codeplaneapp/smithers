@@ -237,6 +237,9 @@ importers:
       '@smithers-orchestrator/components':
         specifier: workspace:*
         version: link:../packages/components
+      '@smithers-orchestrator/review':
+        specifier: workspace:*
+        version: link:../apps/review
       '@smithers-orchestrator/scorers':
         specifier: workspace:*
         version: link:../packages/scorers

@@ -136,7 +136,7 @@ export async function runReviewCli(argv: string[] = process.argv.slice(2), optio
   try {
     args = parseReviewArgs(argv);
   } catch (error) {
-    console.error(`smithers-review: ${(error as Error).message}\n`);
+    console.error(`${command}: ${(error as Error).message}\n`);
     console.error(helpText);
     process.exit(1);
     return;

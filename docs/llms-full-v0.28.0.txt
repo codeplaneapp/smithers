@@ -2280,6 +2280,25 @@ commands[86]:
       body,,string,,Bug description body
       json,,boolean,false,Print the filed bug id, URL, and payload as JSON
       endpoint,,string,https://bug.smithers.sh/api/bugs,Bug endpoint URL; the SMITHERS_BUG_ENDPOINT env var takes precedence
+  - name: review
+    purpose: Run code review plus story-form HTML walkthrough generation for a repo or PR
+    args[1]{name,type,required,desc}:
+      repo,string,false,Repository path; defaults to the current directory
+    flags[14]{name,short,type,default,desc}:
+      from,,string,,Base ref for a merge-base diff
+      to,,string,,Head ref for a merge-base diff
+      commit,,string,,Review one commit
+      pr,,string,,Review a GitHub PR and post the review onto it
+      background,,string,,Requirement background for review and narration
+      no-review,,boolean,false,Skip review agents
+      no-narrate,,boolean,false,Skip the narrator agent
+      no-verify,,boolean,false,Skip verification over findings
+      quiz,,enum,auto,off|auto|on
+      concurrency,,number,8,Parallel file reviews
+      timeout,,number,10,Per-agent-task timeout in minutes
+      out,,string,,Output HTML path
+      publish,,boolean,false,Upload to the share service and print the share URL
+      open,,boolean,false,Open the walkthrough in the default browser
   - name: ps
     purpose: List active, paused, and recently completed runs
     flags[5]{name,short,type,default,desc}:
@@ -8376,7 +8395,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/plugins-site` | Private Cloudflare Worker deployment for the Smithers plugins marketing site (Claude Code and Codex) | Ecosystem |
 | `@smithers-orchestrator/protocol` | Shared contracts, small value types, and protocol-level errors for cross-package use | Types, Errors |
 | `@smithers-orchestrator/react-reconciler` | Custom React reconciler, host context, DOM renderer, DevTools preload, driver, and JSX runtime internals | Why React, Render Frame |
-| `@smithers-orchestrator/review` | Private code review app: review flow plus story-form HTML walkthrough, exposed through the `smithers-review` bin | CLI Overview |
+| `@smithers-orchestrator/review` | Review CLI package for code review, PR posting, and story-form HTML walkthrough generation, exposed through `bunx smithers-orchestrator review` and the `smithers-review` bin | CLI Overview |
 | `@smithers-orchestrator/sandbox` | Sandbox bundle, execute, and transport primitives used by the `Sandbox` component | Sandbox |
 | `@smithers-orchestrator/scheduler` | Pure workflow state machine: task state, scheduler decisions, retry/cache policies, wait reasons, and workflow session services | Workflow State, Suspend and Resume |
 | `@smithers-orchestrator/scorers` | Scorer definitions, LLM judges, batch execution, aggregation, persistence schema, and metrics | Evals, Evals Quickstart |
