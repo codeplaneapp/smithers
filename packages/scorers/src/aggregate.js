@@ -2,6 +2,9 @@
 /** @typedef {import("./AggregateOptions.js").AggregateOptions} AggregateOptions */
 /** @typedef {import("./types.js").AggregateScore} AggregateScore */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunResults} DelegationRunResults */
+/** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunScoreOptions} DelegationRunScoreOptions */
+/** @typedef {import("./types.js").ScoreResult} ScoreResult */
 // @smithers-type-exports-end
 
 /**
@@ -109,4 +112,87 @@ function computeStddev(values, mean) {
 function addFilter(conditions, params, column, value) {
     conditions.push(`${column} = ?`);
     params.push(value);
+}
+/**
+ * Combines named `ScoreResult`s into one weighted score.
+ *
+ * Components that are missing, `null` (e.g. sampled out or failed in
+ * `runScorersBatch`), or skipped (`meta.skipped`) are excluded and the
+ * remaining weights renormalize, so a not-applicable component never dilutes
+ * the total. When every component is excluded the combined result is itself
+ * skipped (score 1, `meta.skipped`), matching the built-in scorers' no-op
+ * convention.
+ *
+ * @param {Record<string, ScoreResult | null | undefined>} results
+ * @param {Record<string, number>} weights
+ * @returns {ScoreResult}
+ */
+export function weightedScore(results, weights) {
+    /** @type {Record<string, { weight: number; skipped: true } | { weight: number; appliedWeight: number; score: number; reason?: string }>} */
+    const components = {};
+    let total = 0;
+    let weightSum = 0;
+    for (const [key, weight] of Object.entries(weights)) {
+        const result = results[key];
+        if (weight <= 0 || result == null || result.meta?.skipped === true) {
+            components[key] = { weight, skipped: true };
+            continue;
+        }
+        total += result.score * weight;
+        weightSum += weight;
+        components[key] = {
+            weight,
+            appliedWeight: weight,
+            score: result.score,
+            reason: result.reason,
+        };
+    }
+    if (weightSum === 0) {
+        return {
+            score: 1,
+            reason: "All components skipped or missing; skipping",
+            meta: { skipped: true, components },
+        };
+    }
+    // Record the renormalized share each scored component contributed.
+    for (const component of Object.values(components)) {
+        if ("appliedWeight" in component) {
+            component.appliedWeight = component.weight / weightSum;
+        }
+    }
+    const score = Math.max(0, Math.min(1, total / weightSum));
+    const summary = Object.entries(components)
+        .map(([key, component]) => "score" in component
+        ? `${key} ${component.score.toFixed(2)}`
+        : `${key} skipped`)
+        .join(", ");
+    return {
+        score,
+        reason: `Weighted total of ${summary}`,
+        meta: { components },
+    };
+}
+/** @type {Record<"pocJudgment" | "planSolidity" | "estimateAccuracy" | "tierFit" | "humanPoll", number>} */
+const DELEGATION_RUN_WEIGHTS = {
+    pocJudgment: 0.25,
+    planSolidity: 0.25,
+    estimateAccuracy: 0.15,
+    tierFit: 0.15,
+    humanPoll: 0.2,
+};
+/**
+ * Combines the five delegation-chain scorer results into the run total shown
+ * in the scores panel: `pocJudgmentScorer`, `planSolidityScorer`,
+ * `estimateAccuracyScorer`, `tierFitScorer`, and `humanPollScorer`, weighted
+ * 0.25 / 0.25 / 0.15 / 0.15 / 0.2 by default. Built on `weightedScore`, so
+ * skipped or missing components (e.g. a poll the user never submitted) drop
+ * out and the remaining weights renormalize.
+ *
+ * @param {DelegationRunResults} results
+ * @param {DelegationRunScoreOptions} [opts]
+ * @returns {ScoreResult}
+ */
+export function delegationRunScore(results, opts) {
+    const weights = { ...DELEGATION_RUN_WEIGHTS, ...opts?.weights };
+    return weightedScore(results, weights);
 }

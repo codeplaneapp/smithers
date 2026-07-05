@@ -2,7 +2,19 @@
 /** @typedef {import("./AggregateOptions.js").AggregateOptions} AggregateOptions */
 /** @typedef {import("./types.js").AggregateScore} AggregateScore */
 /** @typedef {import("./CreateScorerConfig.js").CreateScorerConfig} CreateScorerConfig */
+/** @typedef {import("./DelegationEstimate.js").DelegationEstimate} DelegationEstimate */
+/** @typedef {import("./DelegationEstimate.js").DelegationEstimatePayload} DelegationEstimatePayload */
+/** @typedef {import("./DelegationEstimate.js").DelegationExecRowLike} DelegationExecRowLike */
+/** @typedef {import("./DelegationEstimate.js").DelegationPlanRowLike} DelegationPlanRowLike */
+/** @typedef {import("./DelegationEvent.js").DelegationEvent} DelegationEvent */
+/** @typedef {import("./DelegationEvent.js").DelegationEventsPayload} DelegationEventsPayload */
+/** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunComponent} DelegationRunComponent */
+/** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunResults} DelegationRunResults */
+/** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunScoreOptions} DelegationRunScoreOptions */
 /** @typedef {import("./LlmJudgeConfig.js").LlmJudgeConfig} LlmJudgeConfig */
+/** @typedef {import("./PlanSolidityOptions.js").PlanSolidityOptions} PlanSolidityOptions */
+/** @typedef {import("./PocJudgmentOptions.js").PocJudgmentClassification} PocJudgmentClassification */
+/** @typedef {import("./PocJudgmentOptions.js").PocJudgmentOptions} PocJudgmentOptions */
 /** @typedef {import("./types.js").SamplingConfig} SamplingConfig */
 /** @typedef {import("./types.js").Scorer} Scorer */
 /** @typedef {import("./types.js").ScorerBinding} ScorerBinding */
@@ -23,10 +35,17 @@ export { toxicityScorer } from "./toxicityScorer.js";
 export { faithfulnessScorer } from "./faithfulnessScorer.js";
 export { schemaAdherenceScorer } from "./schemaAdherenceScorer.js";
 export { latencyScorer } from "./latencyScorer.js";
+// Delegation-chain scorers
+export { pocJudgmentScorer } from "./pocJudgmentScorer.js";
+export { planSolidityScorer } from "./planSolidityScorer.js";
+export { estimateAccuracyScorer } from "./estimateAccuracyScorer.js";
+export { tierFitScorer } from "./tierFitScorer.js";
+export { humanPollScorer } from "./humanPollScorer.js";
+export { extractDelegationEvents, resolvePlanningNodes, } from "./delegationEvents.js";
 // Execution
 export { runScorersAsync, runScorersBatch } from "./run-scorers.js";
 // Aggregation
-export { aggregateScores } from "./aggregate.js";
+export { aggregateScores, weightedScore, delegationRunScore, } from "./aggregate.js";
 // Schema
 export { smithersScorers } from "./schema.js";
 // Metrics

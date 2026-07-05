@@ -352,6 +352,244 @@ declare const scorersFinished: Metric.Metric.Counter<number>;
 declare const scorersFailed: Metric.Metric.Counter<number>;
 declare const scorerDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
 
+/**
+ * A single delegation event emitted by a delegation-chain run.
+ *
+ * The delegation-chain workflow records the life of its plan graph as a flat
+ * event log (`RISK_FLAGGED`, `PROBE_SPAWNED`, `FINDING_REPORTED`,
+ * `NODE_INVALIDATED`, `EXEC_STARTED`, ...). The delegation scorers fold this
+ * log deterministically; only the fields relevant to scoring are typed here
+ * and every field except the tag is optional so partial logs still score.
+ */
+type DelegationEvent = {
+    /** Event tag, e.g. "RISK_FLAGGED", "EXEC_STARTED", "NODE_INVALIDATED". */
+    t: string;
+    /** Node the event applies to (RISK_FLAGGED, NODE_INVALIDATED, GATE_FAILED, ...). */
+    node?: string;
+    /** Parent node for PROBE_SPAWNED and CHILDREN_DECLARED. */
+    parent?: string;
+    /** Node that requested a replan (REPLAN_REQUESTED). */
+    from?: string;
+    /** Probe node that produced a finding (FINDING_REPORTED). */
+    probe?: string;
+    /** Planning node a probe finding is reported to (FINDING_REPORTED). */
+    toParent?: string;
+    /** Declared children (CHILDREN_DECLARED); used to learn node kinds. */
+    children?: {
+        id: string;
+        kind?: string;
+    }[];
+    [key: string]: unknown;
+};
+/**
+ * A payload the delegation scorers can read events (and optionally node
+ * metadata) from. Scorers accept either a bare `DelegationEvent[]` or this
+ * object shape in the scored output or context.
+ */
+type DelegationEventsPayload = {
+    /** The run's delegation event log, in emission order. */
+    events: DelegationEvent[];
+    /** Optional node metadata; `kind` decides which nodes are planning nodes. */
+    nodes?: {
+        id: string;
+        kind?: string;
+    }[];
+    [key: string]: unknown;
+};
+
+/**
+ * A delegation node's predicted (or measured) resource envelope. Plan nodes
+ * forecast one per child; exec rows report what actually happened. All
+ * dimensions are optional — accuracy is judged only on dimensions present on
+ * both sides.
+ */
+type DelegationEstimate = {
+    /** Total tokens (input + output). */
+    tokens?: number;
+    /** Dollar cost. */
+    costUsd?: number;
+    /** Wall-clock minutes. */
+    minutes?: number;
+};
+/**
+ * The shape `estimateAccuracyScorer` reads plan forecasts from: a dcPlan-like
+ * row whose `children[].estimate` carries the per-child prediction. Replans
+ * re-forecast, so later rows supersede earlier ones for the same child.
+ * `subtreeEstimate` is a derived rollup and is not scored directly.
+ */
+type DelegationPlanRowLike = {
+    logicalId?: string;
+    children?: {
+        logicalId?: string;
+        id?: string;
+        estimate?: DelegationEstimate;
+    }[];
+    subtreeEstimate?: DelegationEstimate;
+    [key: string]: unknown;
+};
+/** A dcExec-like row carrying the measured actuals for one node. */
+type DelegationExecRowLike = {
+    logicalId?: string;
+    id?: string;
+    actual?: DelegationEstimate;
+    [key: string]: unknown;
+};
+/**
+ * The payload `estimateAccuracyScorer` accepts in the scored output or
+ * context: plan rows under `plan` (or `plans`) and exec rows under `exec`
+ * (or `execs`).
+ */
+type DelegationEstimatePayload = {
+    plan?: DelegationPlanRowLike[];
+    plans?: DelegationPlanRowLike[];
+    exec?: DelegationExecRowLike[];
+    execs?: DelegationExecRowLike[];
+    [key: string]: unknown;
+};
+
+/**
+ * How a planning node's probe judgment was classified by
+ * `pocJudgmentScorer`.
+ *
+ * - `correctPositiveChanged` — flagged a risk, and the probe finding changed
+ *   the plan (a replan or self-invalidation followed the finding).
+ * - `correctPositiveConfirmed` — flagged a risk that proved real: either the
+ *   probe finding was folded in and the node reaffirmed, or the flagged risk
+ *   materialized in execution.
+ * - `correctNegative` — flagged nothing, and nothing in its domain was later
+ *   invalidated, redelegated, or gate-failed.
+ * - `falsePositive` — flagged a risk, but the probe found nothing (or the
+ *   finding had no downstream effect).
+ * - `falseNegative` — flagged nothing, but its node was later invalidated,
+ *   redelegated, or failed a gate. Punished hardest.
+ */
+type PocJudgmentClassification = "correctPositiveChanged" | "correctPositiveConfirmed" | "correctNegative" | "falsePositive" | "falseNegative";
+/** Options for `pocJudgmentScorer`. */
+type PocJudgmentOptions = {
+    /**
+     * Per-classification score contribution in [0, 1]. Defaults reward
+     * plan-changing findings hardest (1.0) and false negatives not at all (0).
+     */
+    values?: Partial<Record<PocJudgmentClassification, number>>;
+    /**
+     * Per-classification weight for the weighted mean over planning nodes.
+     * Defaults weight `falseNegative` highest so missed risks dominate.
+     */
+    weights?: Partial<Record<PocJudgmentClassification, number>>;
+};
+
+/** Options for `planSolidityScorer`. */
+type PlanSolidityOptions = {
+    /**
+     * Penalty subtracted from 1.0 for each churn event that occurs after the
+     * first `EXEC_STARTED` event. Plan-phase churn (before execution starts) is
+     * free — that is the process working. Defaults:
+     * `NODE_INVALIDATED` 0.10, `REDELEGATED` 0.08, `GATE_FAILED` 0.05,
+     * `REPLAN_REQUESTED` 0.04.
+     */
+    penalties?: Partial<Record<"NODE_INVALIDATED" | "REDELEGATED" | "GATE_FAILED" | "REPLAN_REQUESTED", number>>;
+};
+
+/** The component keys `delegationRunScore` combines. */
+type DelegationRunComponent = "pocJudgment" | "planSolidity" | "estimateAccuracy" | "tierFit" | "humanPoll";
+/**
+ * The per-component results fed to `delegationRunScore`. A component may be
+ * absent, `null` (e.g. sampled out or failed in `runScorersBatch`), or a
+ * `ScoreResult` with `meta.skipped` — all three are excluded from the
+ * weighted total and the remaining weights are renormalized.
+ */
+type DelegationRunResults = Partial<Record<DelegationRunComponent, ScoreResult$2 | null | undefined>>;
+/** Options for `delegationRunScore`. */
+type DelegationRunScoreOptions = {
+    /**
+     * Component weights. Defaults: pocJudgment 0.25, planSolidity 0.25,
+     * estimateAccuracy 0.15, tierFit 0.15, humanPoll 0.2.
+     */
+    weights?: Partial<Record<DelegationRunComponent, number>>;
+};
+
+/**
+ * Extracts a delegation event log from a scorer input.
+ *
+ * Accepts either a bare `DelegationEvent[]` or a `{ events, nodes? }` object
+ * in the scored `output` (preferred) or `context`. Returns `null` when
+ * neither carries events, so scorers can no-op per the package's skip
+ * convention.
+ */
+declare function extractDelegationEvents(input: Pick<ScorerInput$1, "output" | "context">): DelegationEventsPayload | null;
+/**
+ * Resolves the set of planning-node ids a delegation log describes.
+ *
+ * When node metadata is available (payload `nodes`, or `children` carried by
+ * `CHILDREN_DECLARED` events), only nodes whose `kind` is `goal` or `chunk`
+ * qualify. Otherwise the set is derived from the events: every id referenced
+ * as a planning actor minus known probe ids (`FINDING_REPORTED.probe`).
+ */
+declare function resolvePlanningNodes(payload: DelegationEventsPayload): string[];
+/**
+ * Creates the delegation-chain POC-judgment scorer.
+ *
+ * For each planning node (goal/chunk) in a delegation event log, classifies
+ * its risk judgment into one of five outcomes (see
+ * `PocJudgmentClassification`) and returns the weighted mean of the
+ * per-classification values. Findings that CHANGED the plan reward hardest;
+ * unflagged risks that later broke the node (false negatives) are punished
+ * hardest via both a zero value and the highest weight.
+ */
+declare function pocJudgmentScorer(opts?: PocJudgmentOptions): Scorer$8;
+/**
+ * Creates the delegation-chain plan-solidity scorer.
+ *
+ * Measures how solid the plan was once execution began. Churn during the
+ * planning phase (before the first `EXEC_STARTED` event) is free; every
+ * churn event after execution starts subtracts a configurable penalty from
+ * 1.0 and the score is clamped to [0, 1].
+ */
+declare function planSolidityScorer(opts?: PlanSolidityOptions): Scorer$8;
+/**
+ * Creates the delegation-chain estimate-accuracy scorer.
+ *
+ * For each node with both a latest estimate and actuals, accuracy is the
+ * symmetric ratio `min(predicted, actual) / max(predicted, actual)` per
+ * dimension, averaged over the dimensions present on both sides. The
+ * run-level score is the mean over nodes weighted by predicted `costUsd`.
+ * Replans re-forecast, so the LATEST estimate per node wins.
+ */
+declare function estimateAccuracyScorer(): Scorer$8;
+/**
+ * Creates the delegation-chain tier-fit scorer, an LLM judge that evaluates
+ * whether a node's intelligence tier (fable/opus/sonnet/haiku) matched its
+ * work. Over-tiering wastes cost on routine work; under-tiering risks quality
+ * on hard work.
+ */
+declare function tierFitScorer(judge: AgentLike$3): Scorer$8;
+/**
+ * Creates the delegation-chain human-poll scorer.
+ *
+ * Consumes a submitted end-of-run user poll — an array of
+ * `{ question, answer }` entries where answers are 1-5 ratings and/or
+ * booleans — and normalizes it to a mean score in [0, 1]. With no poll the
+ * scorer no-ops (score 1, `meta.skipped`).
+ */
+declare function humanPollScorer(): Scorer$8;
+/**
+ * Combines named `ScoreResult`s into one weighted score.
+ *
+ * Components that are missing, `null`, or skipped (`meta.skipped`) are
+ * excluded and the remaining weights renormalize. When every component is
+ * excluded the combined result is itself skipped (score 1, `meta.skipped`).
+ */
+declare function weightedScore(results: Record<string, ScoreResult$2 | null | undefined>, weights: Record<string, number>): ScoreResult$2;
+/**
+ * Combines the five delegation-chain scorer results into the run total:
+ * `pocJudgmentScorer`, `planSolidityScorer`, `estimateAccuracyScorer`,
+ * `tierFitScorer`, and `humanPollScorer`, weighted
+ * 0.25 / 0.25 / 0.15 / 0.15 / 0.2 by default. Built on `weightedScore`, so
+ * skipped or missing components drop out and the remaining weights
+ * renormalize.
+ */
+declare function delegationRunScore(results: DelegationRunResults, opts?: DelegationRunScoreOptions): ScoreResult$2;
+
 type AggregateOptions = AggregateOptions$2;
 type AggregateScore = AggregateScore$2;
 type CreateScorerConfig = CreateScorerConfig$2;
@@ -366,4 +604,4 @@ type ScorerInput = ScorerInput$1;
 type ScoreRow = ScoreRow$1;
 type ScorersMap = ScorersMap$2;
 
-export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type LlmJudgeConfig, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, faithfulnessScorer, latencyScorer, llmJudge, relevancyScorer, runScorersAsync, runScorersBatch, schemaAdherenceScorer, scorerDuration, scorersFailed, scorersFinished, scorersStarted, smithersScorers, toxicityScorer };
+export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, type LlmJudgeConfig, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, extractDelegationEvents, faithfulnessScorer, humanPollScorer, latencyScorer, llmJudge, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, scorerDuration, scorersFailed, scorersFinished, scorersStarted, smithersScorers, tierFitScorer, toxicityScorer, weightedScore };
