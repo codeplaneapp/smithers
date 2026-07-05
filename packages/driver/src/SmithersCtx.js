@@ -68,6 +68,16 @@ export class SmithersCtx {
     /** @type {Set<string>} */
     _currentScopes;
     /**
+     * Tasks that declared `deps` but could not resolve them this render, so
+     * they deferred (returned null) instead of mounting. The engine reads this
+     * after each render: a deferral is normal while an upstream is still
+     * producing, but one that survives to quiescence means the dependency can
+     * never resolve (e.g. a deps/needs key that maps to a node id no task
+     * produces) and the run would otherwise finish silently without it.
+     * @type {{ nodeId: string; waitingOn: string[] }[]}
+     */
+    _deferredDeps = [];
+    /**
      * @param {SmithersCtxOptions} opts
      */
     constructor(opts) {
@@ -81,16 +91,6 @@ export class SmithersCtx {
         this._outputs = opts.outputs;
         this._zodToKeyName = opts.zodToKeyName;
         this._currentScopes = buildCurrentScopes(this.iterations);
-        /**
-         * Tasks that declared `deps` but could not resolve them this render, so
-         * they deferred (returned null) instead of mounting. The engine reads this
-         * after each render: a deferral is normal while an upstream is still
-         * producing, but one that survives to quiescence means the dependency can
-         * never resolve (e.g. a deps/needs key that maps to a node id no task
-         * produces) and the run would otherwise finish silently without it.
-         * @type {{ nodeId: string; waitingOn: string[] }[]}
-         */
-        this._deferredDeps = [];
         /**
          * @param {string} table
          */

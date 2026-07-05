@@ -8,9 +8,20 @@ import { logDebug, logWarning } from "@smithers-orchestrator/observability/loggi
 /** @typedef {import("./SpawnCaptureOptions.ts").SpawnCaptureOptions} SpawnCaptureOptions */
 /** @typedef {import("./SpawnCaptureResult.ts").SpawnCaptureResult} SpawnCaptureResult */
 
+// Bounds captured stdout/stderr per stream when the caller does not set maxOutputBytes.
+const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
+// Bun can deliver child stdout/stderr chunks late on macOS; any configured idle
+// timeout >= BUN_IDLE_FLOOR_MIN_CONFIGURED_MS is floored up to BUN_IDLE_FLOOR_MS
+// under Bun so active CLI agents are not killed before their output reaches JS.
+const BUN_IDLE_FLOOR_MS = 5000;
+const BUN_IDLE_FLOOR_MIN_CONFIGURED_MS = 1000;
+
 /**
  * @param {string} text
  * @param {number} maxBytes
+ * @param {"head" | "tail"} [keep] Which end of the buffer to retain when truncating
+ *   (default "head"; stderr always keeps the head so failure classification can
+ *   read the leading error text).
  * @returns {string}
  */
 function truncateToBytes(text, maxBytes, keep = "head") {
@@ -70,7 +81,7 @@ function killChildTree(child, detached) {
  * @returns {Effect.Effect<SpawnCaptureResult, SmithersError>}
  */
 export function spawnCaptureEffect(command, args, options) {
-    const { cwd, env, input, signal, timeoutMs, idleTimeoutMs, maxOutputBytes = 200_000, truncateKeep = "head", detached = false, onStdout, onStderr, } = options;
+    const { cwd, env, input, signal, timeoutMs, idleTimeoutMs, maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES, truncateKeep = "head", detached = false, onStdout, onStderr, } = options;
     const errorDetails = {
         command,
         args,
@@ -128,10 +139,8 @@ export function spawnCaptureEffect(command, args, options) {
         let totalTimer;
         let idleTimer;
         let idleGeneration = 0;
-        // Bun can deliver child stdout/stderr chunks late on macOS; avoid
-        // killing active CLI agents before observable output reaches JS.
-        const effectiveIdleTimeoutMs = typeof process.versions.bun === "string" && idleTimeoutMs >= 1000
-            ? Math.max(idleTimeoutMs, 5000)
+        const effectiveIdleTimeoutMs = typeof process.versions.bun === "string" && idleTimeoutMs >= BUN_IDLE_FLOOR_MIN_CONFIGURED_MS
+            ? Math.max(idleTimeoutMs, BUN_IDLE_FLOOR_MS)
             : idleTimeoutMs;
         const resetIdle = () => {
             if (idleTimer)
@@ -267,7 +276,5 @@ export function spawnCaptureEffect(command, args, options) {
         });
     })).pipe(Effect.tap(({ truncationCount }) => truncationCount > 0
         ? Metric.incrementBy(toolOutputTruncatedTotal, truncationCount)
-        : Effect.void), Effect.map(({ result }) => result), Effect.annotateLogs({
-        ...logAnnotations,
-    }), Effect.withLogSpan(span));
+        : Effect.void), Effect.map(({ result }) => result), Effect.annotateLogs(logAnnotations), Effect.withLogSpan(span));
 }

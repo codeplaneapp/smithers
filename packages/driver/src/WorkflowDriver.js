@@ -95,16 +95,17 @@ function snapshotFromContext(context, knownOutputTables) {
         return normalizeOutputSnapshot(outputs);
     }
     const outputMap = outputs;
+    /** @type {Map<string, string | undefined>} nodeId -> outputTableName */
     const descriptors = new Map();
     for (const [nodeId, outputTableName] of knownOutputTables ?? []) {
-        descriptors.set(nodeId, { outputTableName });
+        descriptors.set(nodeId, outputTableName);
     }
     for (const task of context.graph?.tasks ?? []) {
-        descriptors.set(task.nodeId, { outputTableName: task.outputTableName });
+        descriptors.set(task.nodeId, task.outputTableName);
     }
     const snapshot = {};
     for (const output of outputMap.values()) {
-        const tableName = descriptors.get(output.nodeId)?.outputTableName;
+        const tableName = descriptors.get(output.nodeId);
         if (!tableName)
             continue;
         const row = output.output && typeof output.output === "object" && !Array.isArray(output.output)
