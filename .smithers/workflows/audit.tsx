@@ -7,11 +7,14 @@ import { agents } from "../agents";
 import { ForEachFeature, forEachFeatureMergeSchema, forEachFeatureResultSchema } from "../components/ForEachFeature";
 import AuditPrompt from "../prompts/audit.mdx";
 
+const agentTierSchema = z.enum(["cheapFast", "smart", "smartTool", "planning", "review", "implement"]);
+
 const inputSchema = z.object({
   features: z.record(z.string(), z.array(z.string())).default({}),
   focus: z.string().default("code review"),
   additionalContext: z.string().nullable().default(null),
   maxConcurrency: z.number().int().default(5),
+  agentTier: agentTierSchema.nullable().default(null),
 });
 
 const { Workflow, smithers } = createSmithers({
@@ -20,15 +23,18 @@ const { Workflow, smithers } = createSmithers({
   audit: forEachFeatureMergeSchema,
 });
 
-export default smithers((ctx) => (
-  <Workflow name="audit">
-    <ForEachFeature
-      idPrefix="audit"
-      agent={agents.smart}
-      features={ctx.input.features}
-      prompt={<AuditPrompt focus={ctx.input.focus} additionalContext={ctx.input.additionalContext} />}
-      maxConcurrency={ctx.input.maxConcurrency}
-      mergeAgent={agents.smart}
-    />
-  </Workflow>
-));
+export default smithers((ctx) => {
+  const tier = ctx.input.agentTier ?? "smart";
+  return (
+    <Workflow name="audit">
+      <ForEachFeature
+        idPrefix="audit"
+        agent={agents[tier]}
+        features={ctx.input.features}
+        prompt={<AuditPrompt focus={ctx.input.focus} additionalContext={ctx.input.additionalContext} />}
+        maxConcurrency={ctx.input.maxConcurrency}
+        mergeAgent={agents[tier]}
+      />
+    </Workflow>
+  );
+});
