@@ -1226,6 +1226,27 @@ function parseTimerFiresAtMs(metaJson) {
     }
 }
 /**
+ * Reset time (ms since epoch) a quota-blocked run should auto-resume at, read
+ * from the run's `errorJson` (the engine stores `{ resetAtMs }` there when it
+ * parks a run as `waiting-quota`). Returns null when the limit carries no known
+ * reset time — e.g. credit exhaustion, which needs manual intervention and must
+ * NOT be woken on a timer, or it would loop against the same wall.
+ * @param {string | null | undefined} errorJson
+ * @returns {number | null}
+ */
+function parseQuotaResetAtMs(errorJson) {
+    if (!errorJson) {
+        return null;
+    }
+    try {
+        const resetAtMs = Number(asObject(JSON.parse(errorJson))?.resetAtMs);
+        return Number.isFinite(resetAtMs) ? resetAtMs : null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
  * @param {unknown} source
  * @param {string | undefined} path
  * @returns {unknown}
@@ -4076,6 +4097,56 @@ a { color: var(--brand); }</style>
                             code: gatewayErrorCode(error),
                         }));
                         emitGatewayLog("error", "Gateway timer resume failed", {
+                            runId: run.runId,
+                            workflow: workflowKey,
+                            ...gatewayErrorAnnotations(error),
+                        }, "gateway:timer");
+                    }
+                }
+                // Quota-blocked runs (a provider usage/session limit) park as
+                // `waiting-quota` with the reset time on their errorJson. Resume
+                // them the same way once the limit window has elapsed. Runs
+                // without a known reset (credit exhaustion) are left for a human.
+                let quotaRuns;
+                try {
+                    quotaRuns = await adapter.listRuns(1_000, "waiting-quota");
+                    if (quotaRuns.length > 0) {
+                        this.hasPendingTimers = true;
+                    }
+                }
+                catch (error) {
+                    emitGatewayLog("error", "Gateway quota sweep failed to list runs", {
+                        ...gatewayErrorAnnotations(error),
+                    }, "gateway:timer");
+                    continue;
+                }
+                for (const run of quotaRuns) {
+                    if (this.activeRuns.has(run.runId)) {
+                        continue;
+                    }
+                    const resetAtMs = parseQuotaResetAtMs(run.errorJson);
+                    if (resetAtMs === null || resetAtMs > now) {
+                        continue;
+                    }
+                    const workflowKey = this.resolveRunWorkflowKey(run, registeredKeys, entry.key);
+                    try {
+                        await this.resumeRunIfNeeded(run.runId, workflowKey, adapter, {
+                            triggeredBy: "timer:gateway",
+                            scopes: ["*"],
+                            role: "system",
+                        });
+                        emitGatewayLog("info", "Gateway quota reset resumed run", {
+                            runId: run.runId,
+                            workflow: workflowKey,
+                            resetAtMs,
+                        }, "gateway:timer");
+                    }
+                    catch (error) {
+                        emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
+                            kind: "timer",
+                            code: gatewayErrorCode(error),
+                        }));
+                        emitGatewayLog("error", "Gateway quota resume failed", {
                             runId: run.runId,
                             workflow: workflowKey,
                             ...gatewayErrorAnnotations(error),

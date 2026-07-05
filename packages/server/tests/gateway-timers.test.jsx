@@ -83,6 +83,30 @@ async function seedWaitingTimerRun(adapter, runId, workflowName, firesAtMs) {
         jjCwd: null,
     });
 }
+/**
+ * Seed a run parked on a provider usage/session limit exactly the way the engine
+ * leaves it: run in `waiting-quota` with the reset time on the run's errorJson.
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {string} workflowName
+ * @param {number | null} resetAtMs
+ */
+async function seedWaitingQuotaRun(adapter, runId, workflowName, resetAtMs) {
+    const now = Date.now();
+    await adapter.insertRun({
+        runId,
+        workflowName,
+        workflowHash: "quota-hash",
+        status: "waiting-quota",
+        createdAtMs: now,
+    });
+    await adapter.updateRun(runId, {
+        errorJson: JSON.stringify({
+            quotaBlockedCount: 1,
+            ...(resetAtMs != null ? { resetAtMs } : {}),
+        }),
+    });
+}
 describe("Gateway timer sweep", () => {
     let gateway;
     let dbPaths = [];
@@ -153,6 +177,51 @@ describe("Gateway timer sweep", () => {
         const adapter = new SmithersDb(db);
         await seedWaitingTimerRun(adapter, "active-run", "report", Date.now() - 1_000);
         gateway.activeRuns.set("active-run", { abort: { abort() { } } });
+        await gateway.processDueTimers();
+        expect(resumed).toEqual([]);
+    });
+    test("resumes a waiting-quota run once its reset time has passed", async () => {
+        const dbPath = makeDbPath("quota-due");
+        dbPaths.push(dbPath);
+        const { workflow, db } = createTimerHostWorkflow(dbPath);
+        gateway = new Gateway();
+        gateway.register("report", workflow);
+        const resumed = [];
+        gateway.resumeRunIfNeeded = async (runId, workflowKey) => {
+            resumed.push({ runId, workflowKey });
+        };
+        const adapter = new SmithersDb(db);
+        await seedWaitingQuotaRun(adapter, "quota-due-run", "report", Date.now() - 1_000);
+        await gateway.processDueTimers();
+        expect(resumed).toEqual([{ runId: "quota-due-run", workflowKey: "report" }]);
+    });
+    test("leaves a waiting-quota run suspended until its reset time", async () => {
+        const dbPath = makeDbPath("quota-pending");
+        dbPaths.push(dbPath);
+        const { workflow, db } = createTimerHostWorkflow(dbPath);
+        gateway = new Gateway();
+        gateway.register("report", workflow);
+        const resumed = [];
+        gateway.resumeRunIfNeeded = async (runId, workflowKey) => {
+            resumed.push({ runId, workflowKey });
+        };
+        const adapter = new SmithersDb(db);
+        await seedWaitingQuotaRun(adapter, "quota-pending-run", "report", Date.now() + 3_600_000);
+        await gateway.processDueTimers();
+        expect(resumed).toEqual([]);
+    });
+    test("never auto-resumes a quota run with no known reset time (credit exhaustion)", async () => {
+        const dbPath = makeDbPath("quota-noreset");
+        dbPaths.push(dbPath);
+        const { workflow, db } = createTimerHostWorkflow(dbPath);
+        gateway = new Gateway();
+        gateway.register("report", workflow);
+        const resumed = [];
+        gateway.resumeRunIfNeeded = async (runId, workflowKey) => {
+            resumed.push({ runId, workflowKey });
+        };
+        const adapter = new SmithersDb(db);
+        await seedWaitingQuotaRun(adapter, "quota-noreset-run", "report", null);
         await gateway.processDueTimers();
         expect(resumed).toEqual([]);
     });
