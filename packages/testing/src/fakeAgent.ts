@@ -105,11 +105,14 @@ function normalizeResult<T>(schema: SafeSchema<T>, result: FakeAgentResult<T> | 
   // even under a permissive/all-optional schema), while a bare output whose own
   // fields happen to be named output/text/files does NOT have a nested `output`
   // that validates, so it falls through to the bare-output path below.
-  if (hasResponseKeys(result) && "output" in result && schema.safeParse(result.output).success) {
-    const response: FakeAgentResult<T> = { output: schema.safeParse(result.output).data as T };
-    if (typeof result.text === "string") response.text = result.text;
-    if (result.files) response.files = result.files;
-    return response;
+  if (hasResponseKeys(result) && "output" in result) {
+    const parsedOutput = schema.safeParse(result.output);
+    if (parsedOutput.success) {
+      const response: FakeAgentResult<T> = { output: parsedOutput.data };
+      if (typeof result.text === "string") response.text = result.text;
+      if (result.files) response.files = result.files;
+      return response;
+    }
   }
   // Otherwise interpret the whole value as the bare task output when it validates.
   const asOutput = schema.safeParse(result);
