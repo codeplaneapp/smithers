@@ -196,7 +196,9 @@ export class SmithersDevTools {
     options;
     /** @type {SmithersDevToolsCoreType} */
     core;
+    /** @type {boolean} */
     _active = false;
+    /** @type {(() => void) | null} */
     _cleanup = null;
     /**
    * @param {SmithersDevToolsOptions} [options]

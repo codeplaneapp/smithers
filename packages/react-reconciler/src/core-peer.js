@@ -1,6 +1,8 @@
 
 /** @typedef {import("@smithers-orchestrator/graph/types").ExtractGraph} ExtractGraph */
+/** @typedef {{ extractGraph?: ExtractGraph }} CoreModule */
 const GRAPH_SPECIFIER = "@smithers-orchestrator/graph";
+// In-repo dev fallback: resolves packages/graph/src when the workspace package specifier is not installed.
 const LOCAL_GRAPH_SPECIFIER = "../../graph/src/index.js";
 /**
  * @param {string} specifier

@@ -61,7 +61,11 @@ function createElement(type, props) {
         children: [],
     };
 }
-let currentUpdatePriority = 1;
+// Historical hardcoded lane value this headless host has always reported.
+// NOT react-reconciler's DefaultEventPriority (32 in 0.33.0; 1 is React 19's
+// SyncHydrationLane) — do not "correct" it, that would change scheduling.
+const HEADLESS_UPDATE_PRIORITY = 1;
+let currentUpdatePriority = HEADLESS_UPDATE_PRIORITY;
 /**
  * @param {readonly HostNode[]} roots
  * @returns {HostNode | null}
@@ -299,7 +303,7 @@ const hostConfig = {
    * @returns {number}
    */
     getCurrentEventPriority() {
-        return 1;
+        return HEADLESS_UPDATE_PRIORITY;
     },
     /**
    * @returns {boolean}
