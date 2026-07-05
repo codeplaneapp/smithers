@@ -102,23 +102,23 @@ export class SmithersGatewayConnection {
   }
 
   async *events(signal?: AbortSignal): AsyncGenerator<GatewayEventFrame> {
-    let aborted = false;
-    const abort = () => {
-      aborted = true;
-      this.close();
-    };
+    const abort = () => this.close();
     if (signal?.aborted) {
       this.close();
       return;
     }
     signal?.addEventListener("abort", abort, { once: true });
     try {
+      // Re-check the signal on both sides of the await: an abort that fires
+      // while `shift()` is pending must stop iteration rather than drain and
+      // yield frames that were already queued before the abort. `close()` alone
+      // is not enough — the loop keeps going while `this.queue` still has items.
       while (!this.closed || this.queue.length > 0) {
-        if (aborted || signal?.aborted) {
+        if (signal?.aborted) {
           return;
         }
         const next = await this.shift();
-        if (aborted || signal?.aborted) {
+        if (signal?.aborted) {
           return;
         }
         if (!next || next.kind === "close") {

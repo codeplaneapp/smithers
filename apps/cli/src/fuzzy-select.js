@@ -143,16 +143,10 @@ function terminalRows() {
     return process.stdout.rows || 24;
 }
 
-function isPrintableQueryInput(seq, key) {
-    if (typeof seq !== "string" || seq.length !== 1) return false;
-    if (key?.ctrl || key?.meta) return false;
-    if (key?.name && key.name.length > 1 && key.name !== "space") return false;
-    return seq >= " ";
-}
-
 /**
  * A type-to-filter picker built on clack's `Prompt` base class. We subclass
- * `Prompt` directly (NOT `SelectPrompt`) and own the typed query so letters
+ * `Prompt` directly (NOT `SelectPrompt`) with `trackValue=true` so the base
+ * pipes readline and keeps `this.value` in sync with the typed query — letters
  * (including j/k/h/l) become filter text, while arrow keys still move the cursor.
  *
  * Instance fields we own (separate from base `this.value`/`this._cursor`):
@@ -160,8 +154,12 @@ function isPrintableQueryInput(seq, key) {
  *  - `allOptions`   immutable input options.
  *  - `filtered`     current fuzzyFilter(query, allOptions) result.
  *  - `optionCursor` index into `filtered` (clamped), NOT into allOptions.
- *      We deliberately do NOT reuse the base's `_cursor`; this keeps the
- *      highlight independent of readline's text cursor.
+ *      We deliberately do NOT reuse the base's `_cursor`: @clack/core's
+ *      `Prompt.onKeypress` runs `this._cursor = this.rl?.cursor ?? 0` on every
+ *      tracked keypress (before it emits our "cursor" event), so the base's
+ *      readline text cursor would clobber our option index — arrow-down would
+ *      stick near the top and Enter could return a lower-ranked match. Owning
+ *      `optionCursor` keeps the highlight independent of readline.
  *  - `maxItems`     windowing budget.
  *
  * Enter, ctrl-c and escape flow to the base: Enter sets state="submit" and we
@@ -171,9 +169,13 @@ function isPrintableQueryInput(seq, key) {
  */
 class FuzzySelectPrompt extends Prompt {
     constructor(opts) {
-        // Own query editing instead of relying on readline's tracked line. The
-        // picker needs append/backspace-at-end behavior, plus Clack's submit,
-        // cancel, render, and arrow-key plumbing.
+        // Second arg `true` → trackValue (TextPrompt behavior): @clack/core v1
+        // defaults it to false when omitted, so we pass it explicitly. With it
+        // the base tracks typed input into `userInput` and emits "cursor" for
+        // arrow keys. We intentionally do NOT forward `initialValue`: the base
+        // would type it into the query box. We start the query empty and use
+        // initialValue only to position the initial cursor (below).
+        // `validate` is passed via options because v1 made `opts` private.
         super(
             {
                 render: opts.render,
@@ -182,7 +184,7 @@ class FuzzySelectPrompt extends Prompt {
                 output: opts.output,
                 validate: () => (this.filtered.length === 0 ? "No matches." : undefined),
             },
-            false,
+            true,
         );
 
         this.allOptions = Array.isArray(opts.options) ? opts.options : [];
@@ -197,7 +199,8 @@ class FuzzySelectPrompt extends Prompt {
             if (i >= 0) this.optionCursor = i;
         }
 
-        // Re-filter on every query edit.
+        // Re-filter on every keystroke. Typing AND backspace both edit rl.line,
+        // so the base re-emits "userInput" for both — this covers backspace free.
         this.on("userInput", () => {
             this.query = this.userInput ?? "";
             this.filtered = fuzzyFilter(this.query, this.allOptions);
@@ -206,20 +209,7 @@ class FuzzySelectPrompt extends Prompt {
             }
         });
 
-        this.on("key", (seq, key) => {
-            if (key?.name === "return") return;
-            if (key?.name === "backspace" || key?.sequence === "\x7F" || key?.sequence === "\b" || seq === "\x7F" || seq === "\b") {
-                this.optionCursor = 0;
-                this._setUserInput(this.query.slice(0, -1));
-                return;
-            }
-            if (isPrintableQueryInput(seq, key)) {
-                this.optionCursor = 0;
-                this._setUserInput(this.query + seq);
-            }
-        });
-
-        // Arrow keys emit "cursor" through the base prompt.
+        // Arrow keys (and only arrow keys, since trackValue=true) emit "cursor".
         // Wrap within the FILTERED array; guard the empty list.
         this.on("cursor", (key) => {
             if (this.filtered.length === 0) return;
