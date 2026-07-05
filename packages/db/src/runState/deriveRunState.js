@@ -1,4 +1,5 @@
 import { RUN_STATE_HEARTBEAT_STALE_MS } from "./RUN_STATE_HEARTBEAT_STALE_MS.js";
+import { RUN_STATE_TIMER_OVERDUE_GRACE_MS } from "./RUN_STATE_TIMER_OVERDUE_GRACE_MS.js";
 
 /** @typedef {import("./DeriveRunStateInput.ts").DeriveRunStateInput} DeriveRunStateInput */
 /** @typedef {import("./RunStateView.ts").RunStateView} RunStateView */
@@ -16,6 +17,7 @@ export function deriveRunState(input) {
         parkedEventBlock = null,
         now = Date.now(),
         staleThresholdMs = RUN_STATE_HEARTBEAT_STALE_MS,
+        timerOverdueGraceMs = RUN_STATE_TIMER_OVERDUE_GRACE_MS,
     } = input;
 
     const computedAt = new Date(now).toISOString();
@@ -49,7 +51,7 @@ export function deriveRunState(input) {
             if (!pendingTimer) {
                 return { ...base, state: "waiting-timer" };
             }
-            return timerRunState(base, pendingTimer, now);
+            return timerRunState(base, pendingTimer, now, timerOverdueGraceMs);
         case "waiting-event":
             if (pendingEvent) {
                 return {
@@ -101,9 +103,10 @@ export function deriveRunState(input) {
  * @param {{ runId: string; computedAt: string }} base
  * @param {{ nodeId: string; firesAtMs: number }} pendingTimer
  * @param {number} now
+ * @param {number} graceMs grace window past the wake time before flagging overdue
  * @returns {RunStateView}
  */
-function timerRunState(base, pendingTimer, now) {
+function timerRunState(base, pendingTimer, now, graceMs) {
     const wakeAt = new Date(pendingTimer.firesAtMs).toISOString();
     const view = {
         ...base,
@@ -114,7 +117,11 @@ function timerRunState(base, pendingTimer, now) {
             wakeAt,
         },
     };
-    if (now <= pendingTimer.firesAtMs) {
+    const overdueMs = now - pendingTimer.firesAtMs;
+    // A run is only unhealthy once it is overdue by MORE than the grace window;
+    // being a few ms/seconds past the wake time is normal poller lag, not a stuck
+    // timer, and flagging it immediately would flicker every run at its deadline.
+    if (overdueMs <= graceMs) {
         return view;
     }
     return {
@@ -122,7 +129,7 @@ function timerRunState(base, pendingTimer, now) {
         unhealthy: {
             kind: "timer-overdue",
             wakeAt,
-            overdueMs: Math.floor(now - pendingTimer.firesAtMs),
+            overdueMs: Math.floor(overdueMs),
         },
     };
 }

@@ -11,4 +11,6 @@ export type DeriveRunStateInput = {
     | null;
   now?: number;
   staleThresholdMs?: number;
+  /** Grace window (ms) past a timer's wake time before it is flagged overdue. */
+  timerOverdueGraceMs?: number;
 };

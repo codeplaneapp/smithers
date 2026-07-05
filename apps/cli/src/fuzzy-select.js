@@ -236,20 +236,6 @@ class FuzzySelectPrompt extends Prompt {
             }
         });
     }
-
-    onKeypress(seq, key) {
-        if (key?.name === "backspace" && this.rl) {
-            const delIndex = this.rl.line.indexOf("\x7f");
-            if (delIndex >= 0) {
-                // Fake keypress emitters can append DEL instead of letting readline erase.
-                this.rl.line = `${this.rl.line.slice(0, Math.max(0, delIndex - 1))}${this.rl.line.slice(delIndex + 1)}`;
-                this.rl.cursor = Math.max(0, delIndex - 1);
-            } else if (this.rl.line === this.userInput && this.rl.cursor > 0) {
-                this.rl.write(null, { ctrl: true, name: "h" });
-            }
-        }
-        super.onKeypress(seq, key);
-    }
 }
 
 /**

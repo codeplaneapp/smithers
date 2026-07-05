@@ -906,7 +906,7 @@ function checkRunStateDocsMatchDerivationContract() {
     [runStateDoc, "view.blocked;     // present for waiting-* only when backing context is found"],
     [runStateDoc, "view.unhealthy;   // present for stale/orphaned heartbeat expiry or overdue timers"],
     [deriveSource, ': { ...base, state: "waiting-approval" };'],
-    [deriveSource, "return timerRunState(base, pendingTimer, now);"],
+    [deriveSource, "return timerRunState(base, pendingTimer, now"],
     [deriveSource, 'kind: "timer-overdue",'],
     [deriveSource, ': { ...base, state: "waiting-event" };'],
     [computeFromRowSource, "pendingApproval = await loadPendingApproval(adapter, run.runId);"],
