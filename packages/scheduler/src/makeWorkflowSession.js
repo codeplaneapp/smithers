@@ -7,12 +7,19 @@ import { cloneTaskStateMap } from "./cloneTaskStateMap.js";
 import { computeRetryDelayMs } from "./computeRetryDelayMs.js";
 import { parseStateKey } from "./parseStateKey.js";
 import { scheduleTasks } from "./scheduleTasks.js";
+/** @typedef {import("@smithers-orchestrator/graph").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smithers-orchestrator/graph").WorkflowGraph} WorkflowGraph */
 /** @typedef {import("./ApprovalResolution.ts").ApprovalResolution} ApprovalResolution */
 /** @typedef {import("./EngineDecision.ts").EngineDecision} EngineDecision */
+/** @typedef {import("./PlanNode.ts").PlanNode} PlanNode */
+/** @typedef {import("./RalphStateMap.ts").RalphStateMap} RalphStateMap */
 /** @typedef {import("./RenderContext.ts").RenderContext} RenderContext */
+/** @typedef {import("./RetryWaitMap.ts").RetryWaitMap} RetryWaitMap */
 /** @typedef {import("./RunResult.ts").RunResult} RunResult */
 /** @typedef {import("./ScheduleResult.ts").ScheduleResult} ScheduleResult */
+/** @typedef {import("./ScheduleSnapshot.ts").ScheduleSnapshot} ScheduleSnapshot */
 /** @typedef {import("./TaskOutput.ts").TaskOutput} TaskOutput */
+/** @typedef {import("./TaskStateMap.ts").TaskStateMap} TaskStateMap */
 /** @typedef {import("./WaitReason.ts").WaitReason} WaitReason */
 
 /** @typedef {import("./WorkflowSessionOptions.ts").WorkflowSessionOptions} WorkflowSessionOptions */
@@ -50,7 +57,7 @@ function findDescriptor(state, nodeId, iteration) {
         (iteration == null || candidate.iteration === iteration));
 }
 /**
- * @param {Pick<TaskDescriptor, "nodeId" | "iteration">} descriptor
+ * @param {{ readonly nodeId: string; readonly iteration: number }} descriptor
  */
 function stateKeyFor(descriptor) {
     return buildStateKey(descriptor.nodeId, descriptor.iteration);
@@ -198,6 +205,13 @@ function parseDurationMs(value) {
     const ms = Math.floor(amount * multiplier);
     return Number.isFinite(ms) && ms >= 0 ? ms : null;
 }
+// These compute-task failure codes are deterministic (bad output shape / bad
+// heartbeat payload), so retrying cannot fix them.
+const NON_RETRYABLE_COMPUTE_CODES = new Set([
+    "INVALID_OUTPUT",
+    "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE",
+    "HEARTBEAT_PAYLOAD_TOO_LARGE",
+]);
 /**
  * @param {TaskDescriptor} descriptor
  * @param {unknown} error
@@ -217,12 +231,7 @@ function isRetryableFailure(descriptor, error) {
         return false;
     }
     const isAgentTask = Boolean(descriptor.agent);
-    const nonRetryableComputeCodes = new Set([
-        "INVALID_OUTPUT",
-        "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE",
-        "HEARTBEAT_PAYLOAD_TOO_LARGE",
-    ]);
-    if (!isAgentTask && nonRetryableComputeCodes.has(code)) {
+    if (!isAgentTask && NON_RETRYABLE_COMPUTE_CODES.has(code)) {
         return false;
     }
     return true;
@@ -337,11 +346,36 @@ function failedDecision(error, label) {
     };
 }
 /**
+ * Mutable per-run session state, owned exclusively by makeWorkflowSession.
+ * All maps/sets are keyed by the canonical task state key (`nodeId::iteration`)
+ * unless noted otherwise.
+ * @typedef {object} SessionState
+ * @property {string} runId
+ * @property {WorkflowGraph | null} graph
+ * @property {PlanNode | null} plan
+ * @property {Map<string, TaskDescriptor>} descriptors keyed by nodeId
+ * @property {TaskStateMap} states
+ * @property {Map<string, TaskOutput>} outputs
+ * @property {Map<string, unknown>} failures
+ * @property {Map<string, TaskDescriptor>} failureDescriptors
+ * @property {Map<string, number>} retryCounts
+ * @property {RetryWaitMap} retryWait state key → earliest retry time (ms)
+ * @property {Set<string>} approvals
+ * @property {RalphStateMap} ralphState keyed by ralph loop id
+ * @property {Map<string, number>} quotaResetTimes state key → quota reset timestamp (ms)
+ * @property {Map<string, number>} timerStarts state key → duration-timer start (ms), the anchor its deadline is computed from
+ * @property {ScheduleSnapshot | null} schedule
+ * @property {boolean} cancelled
+ * @property {string | null} lastMountedSignature
+ * @property {string | null} lastDeadlockSignature
+ */
+/**
  * @param {WorkflowSessionOptions} [options]
  * @returns {WorkflowSessionService}
  */
 export function makeWorkflowSession(options = {}) {
     const nowMs = options.nowMs ?? (() => Date.now());
+    /** @type {SessionState} */
     const state = {
         runId: options.runId ?? defaultRunId(),
         graph: null,
@@ -355,7 +389,6 @@ export function makeWorkflowSession(options = {}) {
         retryWait: new Map(),
         approvals: new Set(),
         ralphState: new Map(options.initialRalphState ?? []),
-        /** @type {Map<string, number>} Maps state key → quota reset timestamp (ms) */
         quotaResetTimes: new Map(),
         /** @type {Map<string, number>} Maps state key → duration-timer start (ms), the anchor its deadline is computed from */
         timerStarts: new Map([...(options.initialTimerStarts ?? [])].filter(([, startMs]) => Number.isFinite(startMs))),
@@ -364,13 +397,6 @@ export function makeWorkflowSession(options = {}) {
         lastMountedSignature: null,
         lastDeadlockSignature: null,
     };
-    /**
-   * @param {Pick<TaskOutput, "nodeId" | "iteration">} output
-   * @returns {string}
-   */
-    function outputKey(output) {
-        return buildStateKey(output.nodeId, output.iteration);
-    }
     /**
    * @param {RunResult["status"]} [status]
    * @returns {EngineDecision}
@@ -471,7 +497,7 @@ export function makeWorkflowSession(options = {}) {
    * @param {TaskOutput} output
    */
     function markTaskFinished(output) {
-        const key = outputKey(output);
+        const key = stateKeyFor(output);
         state.states.set(key, "finished");
         state.outputs.set(key, output);
         state.retryWait.delete(key);
@@ -591,6 +617,7 @@ export function makeWorkflowSession(options = {}) {
         });
     }
     /**
+   * @param {Set<string>} [recoveryKeys]
    * @returns {EngineDecision | null}
    */
     function unhandledFailureDecision(recoveryKeys = new Set()) {
@@ -1006,7 +1033,6 @@ export function makeWorkflowSession(options = {}) {
             markTaskFinished({
                 ...output,
                 usage: output.usage ?? null,
-                output: output.output,
             });
             return decideAfterOutputChange(output.iteration, {
                 reason: "cache-resolved",

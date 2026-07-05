@@ -64,6 +64,28 @@ export function buildPlanTree(xml, ralphState) {
     const ralphs = [];
     const seenRalph = new Set();
     /**
+   * Walk the element children of a region wrapper (saga-actions,
+   * saga-compensations, tcf-try/catch/finally) into `target`. Paths are
+   * numbered per element child, exactly like the generic child walk.
+   * @param {XmlNode} wrapper
+   * @param {readonly number[]} basePath
+   * @param {readonly { readonly ralphId: string; readonly iteration: number }[]} loopStack
+   * @param {PlanNode[]} target
+   */
+    function walkRegion(wrapper, basePath, loopStack, target) {
+        let nestedIndex = 0;
+        for (const nested of wrapper.children) {
+            const nestedPath = nested.kind === "element" ? [...basePath, nestedIndex++] : basePath;
+            const built = walk(nested, {
+                path: nestedPath,
+                parentIsRalph: false,
+                loopStack,
+            });
+            if (built)
+                target.push(built);
+        }
+    }
+    /**
    * @param {XmlNode} node
    * @param {{ readonly path: readonly number[]; readonly parentIsRalph: boolean; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; }} ctx
    * @returns {PlanNode | null}
@@ -92,35 +114,15 @@ export function buildPlanTree(xml, ralphState) {
             const compensationChildren = [];
             let specialIndex = 0;
             for (const child of node.children) {
-                const nextPath = child.kind === "element" ? [...ctx.path, specialIndex++] : ctx.path;
                 if (child.kind !== "element")
                     continue;
+                const nextPath = [...ctx.path, specialIndex++];
                 if (child.tag === "smithers:saga-actions") {
-                    let nestedIndex = 0;
-                    for (const nested of child.children) {
-                        const nestedPath = nested.kind === "element" ? [...nextPath, nestedIndex++] : nextPath;
-                        const built = walk(nested, {
-                            path: nestedPath,
-                            parentIsRalph: false,
-                            loopStack,
-                        });
-                        if (built)
-                            actionChildren.push(built);
-                    }
+                    walkRegion(child, nextPath, loopStack, actionChildren);
                     continue;
                 }
                 if (child.tag === "smithers:saga-compensations") {
-                    let nestedIndex = 0;
-                    for (const nested of child.children) {
-                        const nestedPath = nested.kind === "element" ? [...nextPath, nestedIndex++] : nextPath;
-                        const built = walk(nested, {
-                            path: nestedPath,
-                            parentIsRalph: false,
-                            loopStack,
-                        });
-                        if (built)
-                            compensationChildren.push(built);
-                    }
+                    walkRegion(child, nextPath, loopStack, compensationChildren);
                     continue;
                 }
                 const built = walk(child, {
@@ -146,9 +148,9 @@ export function buildPlanTree(xml, ralphState) {
             const finallyChildren = [];
             let specialIndex = 0;
             for (const child of node.children) {
-                const nextPath = child.kind === "element" ? [...ctx.path, specialIndex++] : ctx.path;
                 if (child.kind !== "element")
                     continue;
+                const nextPath = [...ctx.path, specialIndex++];
                 const target = child.tag === "smithers:tcf-catch"
                     ? catchChildren
                     : child.tag === "smithers:tcf-finally"
@@ -157,17 +159,7 @@ export function buildPlanTree(xml, ralphState) {
                 if (child.tag === "smithers:tcf-try" ||
                     child.tag === "smithers:tcf-catch" ||
                     child.tag === "smithers:tcf-finally") {
-                    let nestedIndex = 0;
-                    for (const nested of child.children) {
-                        const nestedPath = nested.kind === "element" ? [...nextPath, nestedIndex++] : nextPath;
-                        const built = walk(nested, {
-                            path: nestedPath,
-                            parentIsRalph: false,
-                            loopStack,
-                        });
-                        if (built)
-                            target.push(built);
-                    }
+                    walkRegion(child, nextPath, loopStack, target);
                     continue;
                 }
                 const built = walk(child, {
@@ -199,7 +191,10 @@ export function buildPlanTree(xml, ralphState) {
             if (built)
                 children.push(built);
         }
-        if (tag === "smithers:task") {
+        if (tag === "smithers:task" ||
+            tag === "smithers:sandbox" ||
+            tag === "smithers:wait-for-event" ||
+            tag === "smithers:timer") {
             const logicalId = node.props.id;
             if (!logicalId)
                 return null;
@@ -220,15 +215,6 @@ export function buildPlanTree(xml, ralphState) {
             if (mode === "inline") {
                 return { kind: "sequence", children };
             }
-            const logicalId = node.props.id;
-            if (!logicalId)
-                return null;
-            const ancestorScope = loopStack.length > 1 ? buildLoopScope(loopStack.slice(0, -1)) : "";
-            return { kind: "task", nodeId: logicalId + ancestorScope };
-        }
-        if (tag === "smithers:sandbox" ||
-            tag === "smithers:wait-for-event" ||
-            tag === "smithers:timer") {
             const logicalId = node.props.id;
             if (!logicalId)
                 return null;

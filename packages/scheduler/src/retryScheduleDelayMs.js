@@ -1,6 +1,6 @@
 import { Effect, ScheduleDecision, ScheduleIntervals } from "effect";
 /**
- * @param {Schedule.Schedule<unknown>} schedule
+ * @param {import("effect").Schedule.Schedule<unknown>} schedule
  * @param {number} attempt
  * @returns {number}
  */

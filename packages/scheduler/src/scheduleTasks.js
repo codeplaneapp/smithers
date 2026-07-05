@@ -1,4 +1,6 @@
 import { buildStateKey } from "./buildStateKey.js";
+import { isTerminalState } from "./isTerminalState.js";
+import { parseStateKey } from "./parseStateKey.js";
 /** @typedef {import("./TaskState.ts").TaskState} TaskState */
 
 /** @typedef {import("./PlanNode.ts").PlanNode} PlanNode */
@@ -13,20 +15,8 @@ import { buildStateKey } from "./buildStateKey.js";
  * @param {TaskDescriptor} descriptor
  * @returns {boolean}
  */
-function isTerminal(state, descriptor) {
-    if (state === "finished" || state === "skipped")
-        return true;
-    if (state === "failed")
-        return descriptor.continueOnFail;
-    return false;
-}
-/**
- * @param {TaskState} state
- * @param {TaskDescriptor} descriptor
- * @returns {boolean}
- */
 function isTraversalTerminal(state, descriptor) {
-    if (isTerminal(state, descriptor))
+    if (isTerminalState(state, descriptor))
         return true;
     return Boolean(descriptor.waitAsync &&
         (state === "waiting-approval" || state === "waiting-event"));
@@ -43,7 +33,7 @@ function dependenciesSatisfied(descriptor, states, descriptors) {
         if (!dependency)
             return false;
         const state = states.get(buildStateKey(dependency.nodeId, dependency.iteration));
-        if (!state || !isTerminal(state, dependency)) {
+        if (!state || !isTerminalState(state, dependency)) {
             return false;
         }
     }
@@ -79,7 +69,7 @@ function forkSourceTerminal(forkSource, states, descriptors) {
         if (logicalNodeId(descriptor.nodeId) !== forkSource)
             continue;
         const state = states.get(buildStateKey(descriptor.nodeId, descriptor.iteration));
-        if (state && isTerminal(state, descriptor)) {
+        if (state && isTerminalState(state, descriptor)) {
             return true;
         }
     }
@@ -110,8 +100,7 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
     for (const [stateKey, state] of states) {
         if (state !== "in-progress")
             continue;
-        const separator = stateKey.lastIndexOf("::");
-        const nodeId = separator >= 0 ? stateKey.slice(0, separator) : stateKey;
+        const { nodeId } = parseStateKey(stateKey);
         const descriptor = descriptors.get(nodeId);
         if (!descriptor)
             continue;
@@ -503,14 +492,13 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                     const collectTryFailureKeys = () => collectChildFailureKeys(node.tryChildren, {
                         includeContinuedFailures: true,
                     });
-                    let catchFailed = false;
                     collectTryFailureKeys();
                     const catchStatus = inspect({
                         kind: "sequence",
                         children: node.catchChildren,
                     });
                     failureRecoveryActive = true;
-                    catchFailed = catchStatus.failed;
+                    const catchFailed = catchStatus.failed;
                     if (!catchStatus.terminal) {
                         const catchResult = walkSequence(node.catchChildren);
                         if (!catchResult.terminal)
@@ -533,9 +521,6 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                         }
                         failureRecoveryActive = true;
                         return finallyResult;
-                    }
-                    if (catchFailed) {
-                        return { terminal: true };
                     }
                     return { terminal: true };
                 }
