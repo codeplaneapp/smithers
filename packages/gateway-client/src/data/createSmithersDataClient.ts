@@ -42,6 +42,25 @@ type EventSourceLike = {
 
 const unavailableFetch = (() => Promise.reject(new Error("fetch is not available in this environment."))) as unknown as typeof fetch;
 
+// Exponential backoff for the SSE change stream. Deliberately NOT
+// gatewayBackoffDelay — that helper applies symmetric ±jitter, while this
+// stream adds a small flat jitter on top of the capped exponential delay.
+const STREAM_RECONNECT_BASE_MS = 250;
+const STREAM_RECONNECT_MAX_MS = 10_000;
+const STREAM_RECONNECT_JITTER_MS = 100;
+
+// Bound on how long a mutation blocks waiting for its own change to stream back.
+const WAIT_FOR_SEQ_TIMEOUT_MS = 5_000;
+
+// The `{ ok, data | error, seq?, txid? }` envelope every `/v1/api/*` response wears.
+type ApiEnvelope<T> = {
+  ok?: boolean;
+  data?: T;
+  error?: { code?: string; message?: string; requiredScope?: string };
+  seq?: number;
+  txid?: string;
+};
+
 function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.replace(/\/+$/, "");
 }
@@ -209,7 +228,6 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
   const waiters = new Set<{
     seq: number;
     resolve: () => void;
-    reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
 
@@ -256,7 +274,8 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       if (closed || (streamListeners.size === 0 && waiters.size === 0)) return;
       const reconnectingSince = state.reconnectingSince ?? Date.now();
       setStatus({ status: "offline", reconnectingSince });
-      const backoff = Math.min(10_000, 250 * 2 ** reconnectAttempt) + Math.floor(Math.random() * 100);
+      const backoff = Math.min(STREAM_RECONNECT_MAX_MS, STREAM_RECONNECT_BASE_MS * 2 ** reconnectAttempt) +
+        Math.floor(Math.random() * STREAM_RECONNECT_JITTER_MS);
       // Surface every drop so a broken stream is observable rather than
       // reconnecting silently. reconnectAttempt is the attempt about to run.
       options.onError?.({
@@ -285,13 +304,11 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
     }
   };
 
-  async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const response = await fetchImpl(`${apiBaseUrl}${path}`, {
-      method,
-      headers: headers(mode.token, body !== undefined),
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const json = await response.json().catch(() => undefined) as { ok?: boolean; data?: T; error?: { code?: string; message?: string; requiredScope?: string }; seq?: number; txid?: string } | undefined;
+  // Shared `/v1/api/*` envelope handling for request/mutate: parse, flip to
+  // unauthorized on 401/403, and throw the gateway's error (or an HTTP
+  // fallback) when the envelope is not ok.
+  const readEnvelope = async <T>(path: string, response: Response): Promise<ApiEnvelope<T>> => {
+    const json = await response.json().catch(() => undefined) as ApiEnvelope<T> | undefined;
     if (!json?.ok) {
       if (response.status === 401 || response.status === 403) setStatus({ status: "unauthorized" });
       throw new GatewayRpcError({
@@ -302,6 +319,16 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
         requiredScope: json?.error?.requiredScope,
       });
     }
+    return json;
+  };
+
+  async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const response = await fetchImpl(`${apiBaseUrl}${path}`, {
+      method,
+      headers: headers(mode.token, body !== undefined),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const json = await readEnvelope<T>(path, response);
     return json.data as T;
   }
 
@@ -311,17 +338,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       headers: headers(mode.token, true),
       body: JSON.stringify(body ?? {}),
     });
-    const json = await response.json().catch(() => undefined) as { ok?: boolean; data?: T; error?: { code?: string; message?: string; requiredScope?: string }; seq?: number; txid?: string } | undefined;
-    if (!json?.ok) {
-      if (response.status === 401 || response.status === 403) setStatus({ status: "unauthorized" });
-      throw new GatewayRpcError({
-        method: path,
-        status: response.status,
-        code: json?.error?.code ?? "HTTP_ERROR",
-        message: json?.error?.message ?? `Gateway HTTP ${response.status}`,
-        requiredScope: json?.error?.requiredScope,
-      });
-    }
+    const json = await readEnvelope<T>(path, response);
     if (typeof json.seq === "number") await client.stream.waitForSeq(json.seq).catch(() => undefined);
     return {
       data: json.data as T,
@@ -390,17 +407,17 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       subscribe(handler) {
         streamListeners.add(handler);
         openStream();
-      return () => {
-        streamListeners.delete(handler);
-        if (streamListeners.size === 0 && waiters.size === 0) {
-          source?.close();
-          source = null;
-          if (reconnectTimer) clearTimeout(reconnectTimer);
-          reconnectTimer = null;
-          reconnectAttempt = 0;
-          setStatus({ status: "idle" });
-        }
-      };
+        return () => {
+          streamListeners.delete(handler);
+          if (streamListeners.size === 0 && waiters.size === 0) {
+            source?.close();
+            source = null;
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+            reconnectAttempt = 0;
+            setStatus({ status: "idle" });
+          }
+        };
       },
       subscribeStatus(handler) {
         statusListeners.add(handler);
@@ -416,14 +433,10 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
               clearTimeout(waiter.timer);
               resolve();
             },
-            reject: (error: Error) => {
-              clearTimeout(waiter.timer);
-              reject(error);
-            },
             timer: setTimeout(() => {
               waiters.delete(waiter);
               reject(new Error(`Timed out waiting for Smithers stream seq ${seq}.`));
-            }, 5_000),
+            }, WAIT_FOR_SEQ_TIMEOUT_MS),
           };
           waiters.add(waiter);
           openStream();

@@ -53,11 +53,22 @@ declare global {
   var __SMITHERS_GATEWAY_UI__: GatewayUiBootConfig | undefined;
 }
 
+// The default `smithers gateway` port, used when there is no browser origin to inherit.
+const DEFAULT_GATEWAY_BASE_URL = "http://127.0.0.1:7331";
+
+// Client version reported in the connect handshake when the caller does not supply one.
+const DEFAULT_CLIENT_VERSION = "0.17.0";
+
+// How long a connection must stay alive before streamRunEventsResilient treats
+// it as healthy and resets backoff — see the flap-protection paragraph on that
+// method's doc comment.
+const DEFAULT_HEALTHY_AFTER_MS = 1_000;
+
 function defaultBaseUrl() {
   if (typeof globalThis.location !== "undefined") {
     return globalThis.location.origin;
   }
-  return "http://127.0.0.1:7331";
+  return DEFAULT_GATEWAY_BASE_URL;
 }
 
 function isUnixWebSocketUrl(baseUrl: string) {
@@ -197,7 +208,7 @@ export class SmithersGatewayClient {
     this.WebSocketImpl = options.WebSocket ?? globalThis.WebSocket;
     this.client = {
       id: options.client?.id ?? "smithers-gateway-client",
-      version: options.client?.version ?? "0.17.0",
+      version: options.client?.version ?? DEFAULT_CLIENT_VERSION,
       platform: options.client?.platform ?? "browser",
     };
   }
@@ -290,36 +301,57 @@ export class SmithersGatewayClient {
     return connection;
   }
 
-  async *streamRunEvents(
-    params: GatewayRpcParams<"streamRunEvents">,
-    options: { signal?: AbortSignal } = {},
-  ): AsyncGenerator<GatewayEventFrame<StreamRunEventPayload>> {
+  /**
+   * Shared body of `streamRunEvents` / `streamDevTools`: connect subscribed to
+   * the run, subscribe via the given RPC method, then yield only the frames
+   * whose event name is expected AND whose payload carries this subscription's
+   * `streamId` — so a stale subscriber sharing the socket never sees frames
+   * meant for another stream. (`streamExtension` is deliberately separate: its
+   * initial-yield and error-frame semantics differ.)
+   */
+  private async *subscribedStream<Method extends "streamRunEvents" | "streamDevTools">(
+    method: Method,
+    params: GatewayRpcParams<Method>,
+    eventNames: readonly string[],
+    options: { signal?: AbortSignal },
+  ): AsyncGenerator<GatewayEventFrame> {
     const connection = await this.connect({ subscribe: [params.runId], signal: options.signal });
     try {
       const subscribed = await raceSignal(
-        connection.request("streamRunEvents", params),
+        connection.request(method, params),
         options.signal,
         "Gateway stream subscribe aborted.",
       );
       if (!isObject(subscribed) || typeof subscribed.streamId !== "string") {
-        throw invalidGatewayResponse("streamRunEvents", undefined, subscribed);
+        throw invalidGatewayResponse(method, undefined, subscribed);
       }
       for await (const frame of connection.events(options.signal)) {
         if (
-          (frame.event === "run.event" ||
-            frame.event === "run.gap_resync" ||
-            frame.event === "run.heartbeat" ||
-            frame.event === "run.error") &&
+          eventNames.includes(frame.event) &&
           typeof frame.payload === "object" &&
           frame.payload !== null &&
           "streamId" in frame.payload &&
           frame.payload.streamId === subscribed.streamId
         ) {
-          yield frame as GatewayEventFrame<StreamRunEventPayload>;
+          yield frame;
         }
       }
     } finally {
       connection.close();
+    }
+  }
+
+  async *streamRunEvents(
+    params: GatewayRpcParams<"streamRunEvents">,
+    options: { signal?: AbortSignal } = {},
+  ): AsyncGenerator<GatewayEventFrame<StreamRunEventPayload>> {
+    for await (const frame of this.subscribedStream(
+      "streamRunEvents",
+      params,
+      ["run.event", "run.gap_resync", "run.heartbeat", "run.error"],
+      options,
+    )) {
+      yield frame as GatewayEventFrame<StreamRunEventPayload>;
     }
   }
 
@@ -351,7 +383,7 @@ export class SmithersGatewayClient {
     options: StreamRunEventsResilientOptions = {},
   ): AsyncGenerator<GatewayEventFrame<StreamRunEventPayload>> {
     const signal = options.signal;
-    const healthyAfterMs = options.healthyAfterMs ?? 1_000;
+    const healthyAfterMs = options.healthyAfterMs ?? DEFAULT_HEALTHY_AFTER_MS;
     let lastSeq = typeof params.afterSeq === "number" ? params.afterSeq : undefined;
     let attempt = 0;
     while (!signal?.aborted) {
@@ -422,29 +454,13 @@ export class SmithersGatewayClient {
     params: GatewayRpcParams<"streamDevTools">,
     options: { signal?: AbortSignal } = {},
   ): AsyncGenerator<GatewayEventFrame<StreamDevToolsEventPayload>> {
-    const connection = await this.connect({ subscribe: [params.runId], signal: options.signal });
-    try {
-      const subscribed = await raceSignal(
-        connection.request("streamDevTools", params),
-        options.signal,
-        "Gateway stream subscribe aborted.",
-      );
-      if (!isObject(subscribed) || typeof subscribed.streamId !== "string") {
-        throw invalidGatewayResponse("streamDevTools", undefined, subscribed);
-      }
-      for await (const frame of connection.events(options.signal)) {
-        if (
-          (frame.event === "devtools.event" || frame.event === "devtools.error") &&
-          typeof frame.payload === "object" &&
-          frame.payload !== null &&
-          "streamId" in frame.payload &&
-          frame.payload.streamId === subscribed.streamId
-        ) {
-          yield frame as GatewayEventFrame<StreamDevToolsEventPayload>;
-        }
-      }
-    } finally {
-      connection.close();
+    for await (const frame of this.subscribedStream(
+      "streamDevTools",
+      params,
+      ["devtools.event", "devtools.error"],
+      options,
+    )) {
+      yield frame as GatewayEventFrame<StreamDevToolsEventPayload>;
     }
   }
 

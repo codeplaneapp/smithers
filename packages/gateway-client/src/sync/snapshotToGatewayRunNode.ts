@@ -200,14 +200,14 @@ function mapNode(
 export function snapshotToGatewayRunNode(
   snapshot: DevToolsSnapshot | null | undefined,
 ): GatewayRunNode | null {
-  const root = (snapshot as DevToolsSnapshot | null | undefined)?.root;
+  const root = snapshot?.root;
   if (!root) {
     return null;
   }
   if (root.id === 0 && root.name === "(empty)" && (root.children?.length ?? 0) === 0) {
     return null;
   }
-  const runState = asRecord((snapshot as DevToolsSnapshot).runState);
+  const runState = asRecord(snapshot.runState);
   const runStatus = toRunStatus(typeof runState.state === "string" ? runState.state : undefined);
   const blocked = asRecord(runState.blocked);
   const blockedNodeId = typeof blocked.nodeId === "string" ? blocked.nodeId : undefined;

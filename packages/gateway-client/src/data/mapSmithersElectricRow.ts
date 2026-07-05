@@ -95,6 +95,10 @@ export function mapSmithersElectricRow(collection: string, row: Record<string, u
       return serializeMemoryFactRow(row);
     case "crons":
       return serializeCronRow(row);
+    // Unlike the cases above there is no shared gateway serializer for node
+    // rows, so the Electric row is shaped here into the minimal GatewayRunNode
+    // the tree UI needs. `childIds: []` is intentional: flat Electric rows
+    // carry no tree links — links are rebuilt from parent/child keys downstream.
     case "nodes": {
       const runId = stringAt(row, "runId", "run_id") ?? "";
       const nodeId = stringAt(row, "nodeId", "node_id") ?? "";

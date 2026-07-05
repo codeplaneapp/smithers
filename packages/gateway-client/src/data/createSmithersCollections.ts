@@ -53,8 +53,12 @@ type MutationHandlers<TRow extends object, TKey extends string | number> = {
   onUpdate?: (params: { transaction: { mutations: Array<{ key: TKey; modified: TRow; original: TRow; changes?: Partial<TRow> }> } }) => Promise<unknown>;
   onDelete?: (params: { transaction: { mutations: Array<{ key: TKey; original: TRow }> } }) => Promise<unknown>;
 };
+type SubmitApprovalDecision = SubmitApprovalRequest["decision"];
 const RUN_EVENT_COLLECTION_MAX_ROWS = 1_024;
 const RUN_EVENT_API_FETCH_LIMIT = 10_000;
+// How long an optimistic mutation waits for its txid to appear in the Electric
+// shape stream before giving up.
+const ELECTRIC_TXID_MATCH_TIMEOUT_MS = 10_000;
 
 function isClient(value: SmithersDataClient | WorkspaceMode): value is SmithersDataClient {
   return "api" in value;
@@ -140,23 +144,23 @@ function withBoundedRunEventSync<TRow extends GatewayRunEventRow, TKey extends s
   };
 }
 
-function q(value: string): string {
+function quoteSqlLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
 function runWhere(runId: string): string {
-  return `run_id = ${q(runId)}`;
+  return `run_id = ${quoteSqlLiteral(runId)}`;
 }
 
 function kindWhere(kind: string | undefined): string | undefined {
-  return kind ? `kind = ${q(kind)}` : undefined;
+  return kind ? `kind = ${quoteSqlLiteral(kind)}` : undefined;
 }
 
 function txidMatch(result: { txid?: string } | undefined) {
   if (!result?.txid) throw new Error("Postgres domain API mutation did not return txid for Electric matching.");
   const txid = Number(result.txid);
   if (!Number.isInteger(txid)) throw new Error(`Invalid Postgres txid: ${result.txid}`);
-  return { txid, timeout: 10_000 };
+  return { txid, timeout: ELECTRIC_TXID_MATCH_TIMEOUT_MS };
 }
 
 async function loadSmithersElectricCollectionOptions(): Promise<SmithersElectricCollectionOptions> {
@@ -278,6 +282,16 @@ function createSmithersCollectionsWithClient(
     });
   };
 
+  const runTreeCollection = (runId: string) =>
+    getOrCreate<GatewayRunNode, string>(
+      smithersCollectionKeys.runTree(runId),
+      "nodes",
+      (row) => runNodeKey(row),
+      () => runId ? client.api.getRunTree({ runId }) : Promise.resolve([]),
+      (row) => mapSmithersElectricRow("nodes", row),
+      runId ? runWhere(runId) : undefined,
+    );
+
   return {
     client,
     runs: (params: ListRunsRequest = {}) =>
@@ -331,15 +345,7 @@ function createSmithersCollectionsWithClient(
         (row) => mapSmithersElectricRow("run", row),
         runId ? runWhere(runId) : undefined,
       ),
-    runTree: (runId: string) =>
-      getOrCreate<GatewayRunNode, string>(
-        smithersCollectionKeys.runTree(runId),
-        "nodes",
-        (row) => runNodeKey(row),
-        () => runId ? client.api.getRunTree({ runId }) : Promise.resolve([]),
-        (row) => mapSmithersElectricRow("nodes", row),
-        runId ? runWhere(runId) : undefined,
-      ),
+    runTree: runTreeCollection,
     approvals: (params: ListApprovalsRequest = {}) =>
       getOrCreate<GatewayApprovalRow, string>(
         smithersCollectionKeys.approvals(params),
@@ -425,7 +431,7 @@ function createSmithersCollectionsWithClient(
         (row) => `${row.namespace}:${row.key}`,
         () => client.api.listMemoryFacts(params),
         (row) => mapSmithersElectricRow("memoryFacts", row),
-        params.namespace ? `namespace = ${q(params.namespace)}` : undefined,
+        params.namespace ? `namespace = ${quoteSqlLiteral(params.namespace)}` : undefined,
       ),
     crons: (params: CronListRequest = {}) =>
       getOrCreate<GatewayCronRow, string>(
@@ -471,14 +477,8 @@ function createSmithersCollectionsWithClient(
           },
         },
       ),
-    nodes: (runId: string) => getOrCreate<GatewayRunNode, string>(
-      smithersCollectionKeys.runTree(runId),
-      "nodes",
-      (row) => runNodeKey(row),
-      () => runId ? client.api.getRunTree({ runId }) : Promise.resolve([]),
-      (row) => mapSmithersElectricRow("nodes", row),
-      runId ? runWhere(runId) : undefined,
-    ),
+    // Deliberate alias of runTree: same cache key, same rows.
+    nodes: runTreeCollection,
     runEvents: (runId: string, maxRows = RUN_EVENT_COLLECTION_MAX_ROWS) => {
       const limit = runEventMaxRows(maxRows);
       return getOrCreate<GatewayRunEventRow, string>(
@@ -502,8 +502,6 @@ function createSmithersCollectionsWithClient(
     },
   };
 }
-
-type SubmitApprovalDecision = SubmitApprovalRequest["decision"];
 
 export function createSmithersCollections(
   clientOrMode: Extract<WorkspaceMode, { kind: "local" }>,
