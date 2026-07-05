@@ -1,28 +1,23 @@
 export const TELEGRAM_API_ROOT = "https://api.telegram.org";
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
+// Deliberately below the 4096 hard cap: leaves headroom for MarkdownV2 escaping
+// and any prefixes callers prepend to a chunk.
 export const TELEGRAM_SAFE_CHUNK_LENGTH = 3800;
 export const TELEGRAM_WEBHOOK_SECRET_HEADER = "x-telegram-bot-api-secret-token";
 
+// Exactly the message-bearing update kinds normalizeTelegramUpdate understands
+// (messageFromUpdate mirrors this list).
 const DEFAULT_ALLOWED_UPDATES = ["message", "edited_message", "channel_post", "edited_channel_post"];
+// Full escape set required by the Bot API MarkdownV2 spec, including backslash itself.
 const MARKDOWN_V2_SPECIAL = /([_*\[\]()~`>#+\-=|{}.!\\])/g;
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function asString(value) {
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return String(value);
-  return null;
-}
-
 function compact(value) {
   const trimmed = typeof value === "string" ? value.trim() : "";
   return trimmed ? trimmed : null;
-}
-
-function cleanText(value) {
-  return String(value).replace(/\s+/g, " ").trim();
 }
 
 function bodyTextFromMessage(message) {
@@ -63,15 +58,9 @@ function messageFromUpdate(update) {
   return null;
 }
 
-function normalizeHeaders(headers) {
-  const out = {};
-  for (const [key, value] of Object.entries(headers ?? {})) {
-    if (value !== undefined) out[key] = value;
-  }
-  return out;
-}
-
 function telegramDelayMs(error, attempt, retryBaseMs) {
+  // Bot API `parameters.retry_after` is in seconds — honor it (converted to ms)
+  // over our exponential backoff.
   const retryAfter = error.payload?.parameters?.retry_after;
   if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
     return Math.ceil(retryAfter * 1000);
@@ -82,10 +71,6 @@ function telegramDelayMs(error, attempt, retryBaseMs) {
 function isRetryableTelegramError(error) {
   if (error instanceof TelegramNetworkError) return true;
   return error instanceof TelegramBotApiError && (error.status === 429 || error.status >= 500);
-}
-
-function defaultSleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class TelegramBotApiError extends Error {
@@ -169,6 +154,9 @@ export function isTelegramChatAllowed(chatId, allowedChats) {
   return parsed.chatIds.includes(String(chatId));
 }
 
+// XOR-accumulate over every character instead of early-exit comparison so
+// webhook-secret checks run in constant time for equal-length inputs
+// (timing-attack hardening).
 export function tokensEqual(actual, expected) {
   if (typeof actual !== "string" || typeof expected !== "string" || actual.length !== expected.length) {
     return false;
@@ -194,9 +182,11 @@ export function normalizeTelegramUpdate(update, options = {}) {
   const chat = isRecord(message.chat) ? message.chat : null;
   const from = isRecord(message.from) ? message.from : null;
   if (!chat || (from?.is_bot === true && options.includeBotMessages !== true)) return null;
-  const chatId = asString(chat.id);
+  // Telegram chat ids can arrive numeric; normalize to string so callers compare/route uniformly.
+  const chatId = typeof chat.id === "string" ? chat.id : typeof chat.id === "number" ? String(chat.id) : null;
   if (!chatId) return null;
-  const text = cleanText(bodyTextFromMessage(message));
+  // collapse internal whitespace so multi-line messages normalize to one searchable line
+  const text = bodyTextFromMessage(message).replace(/\s+/g, " ").trim();
   if (!text && options.includeEmptyText !== true) return null;
   return {
     updateId: update.update_id,
@@ -231,6 +221,8 @@ export function splitTelegramText(text, options = {}) {
     const newlineCut = remaining.lastIndexOf("\n", maxLength);
     const spaceCut = remaining.lastIndexOf(" ", maxLength);
     const softCut = Math.max(newlineCut, spaceCut);
+    // Prefer the last newline/space cut, but only if it lands past the midpoint —
+    // otherwise hard-cut at maxLength rather than emit tiny fragment chunks.
     const end = softCut > Math.floor(maxLength / 2) ? softCut : maxLength;
     chunks.push(remaining.slice(0, end).trimEnd());
     remaining = remaining.slice(end).trimStart();
@@ -261,7 +253,7 @@ export function createTelegramClient(options) {
   if (typeof fetchImpl !== "function") throw new Error("fetch is not available");
   const maxRetries = Math.max(0, Math.floor(options.maxRetries ?? 3));
   const retryBaseMs = Math.max(1, Math.floor(options.retryBaseMs ?? 500));
-  const sleep = options.sleep ?? defaultSleep;
+  const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
 
   async function call(method, body = {}, init = {}) {
     let lastError = null;
@@ -273,7 +265,8 @@ export function createTelegramClient(options) {
             method: "POST",
             headers: {
               "content-type": "application/json",
-              ...normalizeHeaders(init.headers),
+              // drop undefined overrides so they don't serialize as the string "undefined"
+              ...Object.fromEntries(Object.entries(init.headers ?? {}).filter(([, value]) => value !== undefined)),
             },
             body: JSON.stringify(body),
             signal: init.signal,
