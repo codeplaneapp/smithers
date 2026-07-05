@@ -983,6 +983,8 @@ import { schemaAdherenceScorer, latencyScorer } from "smithers-orchestrator/scor
 
 Five built-ins: `schemaAdherenceScorer`, `latencyScorer`, `relevancyScorer`, `toxicityScorer`, `faithfulnessScorer`. Sampling: `all` / `ratio` / `none`. Custom scorers and LLM-judge scorers with `createScorer` and `llmJudge`.
 
+Five delegation scorers back the delegation-chain workflow: `pocJudgmentScorer` (probe judgment; false negatives punished hardest), `planSolidityScorer` (post-execution replan churn), `estimateAccuracyScorer` (forecast vs. actual cost/time/tokens), `tierFitScorer` (was the intelligence tier right), and `humanPollScorer` (end-of-run user poll), combined by `delegationRunScore` / `weightedScore`, with `extractDelegationEvents` and `resolvePlanningNodes` as the shared event readers.
+
 The public scorer surface also exports `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smithersScorers` table, and scorer metrics (`scorersStarted`, `scorersFinished`, `scorersFailed`, `scorerDuration`).
 
 ```bash
@@ -5521,6 +5523,199 @@ const columns = [
 - Item tasks default to `continueOnFail={true}`; use `column.task` to add retries or override.
 - `useTickets` is called at render time; return different items per iteration for dynamic sources.
 - Use `until` with `ctx.outputMaybe()` to exit when all items reach the final column.
+
+---
+
+## <DelegationChain>
+
+> Recursive tiered delegation with risk probes, per-node backpressure, live edits, budgets, and scoring.
+
+`<DelegationChain>` is the composite behind the
+`delegation-chain` workflow: a `<Sequence>` of
+seven phases running in `<Parallel>` with a live-edit signal listener. Every
+phase is reactive: it re-derives its slice of the delegation tree from the
+`dc*` output rows on each render, so fan-out materializes level by level as
+rows land, and user edits or probe findings replan the affected subtree
+without restarting anything.
+
+```ts
+// Props
+import { DelegationChain } from "smithers-orchestrator";
+
+type Tier = "fable" | "opus" | "sonnet" | "haiku";
+type DelegationAgents = Partial<Record<Tier, AgentLike | AgentLike[]>>;
+
+type DelegationSharedProps = {
+  idPrefix?: string;              // physical node-id prefix; default "dc"
+  agents: DelegationAgents;       // one agent (or failover chain) per tier label
+  outputs: DelegationOutputs;     // the dc* output targets (see below)
+  approvalPolicy?: string;        // absent = no approval gates anywhere
+  tierOrder?: Tier[];             // strongest first; default ["fable","opus","sonnet","haiku"]
+  maxDepth?: number;              // default 3
+  maxConcurrency?: number;        // default 4
+  maxDeriskRounds?: number;       // default 3
+  poll?: boolean;                 // default true
+  budget?: { maxUsd?: number; maxMinutes?: number };
+  scorers?: { exec?: ScorersMap; review?: ScorersMap; run?: ScorersMap };
+  skipIf?: boolean;
+};
+
+type DelegationChainProps = DelegationSharedProps & {
+  prompt: string;                 // the original (possibly ambiguous) ask
+  maxQuestions?: number;          // default 10
+  prefetchDepth?: number;         // question forms rendered ahead; default 10
+  maxAttempts?: number;           // exec/review attempts per leaf; default 3
+  maxEdits?: number;              // live edits accepted per run; default 25
+};
+```
+
+```tsx
+import { ClaudeCodeAgent, DelegationChain, createSmithers, delegationSchemas } from "smithers-orchestrator";
+
+const { Workflow, smithers, outputs } = createSmithers({ ...delegationSchemas });
+
+// Tiers are labels, not model ids; point each at any agent or failover pool.
+// The seeded workflow maps them onto the generated `../agents` pools instead.
+const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
+const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
+const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+const haiku = new ClaudeCodeAgent({ model: "claude-haiku-4-5-20251001" });
+
+export default smithers((ctx) => (
+  <Workflow name="delegation-chain">
+    <DelegationChain
+      prompt={ctx.input?.prompt ?? ""}
+      agents={{ fable, opus, sonnet, haiku }}
+      outputs={outputs}
+    />
+  </Workflow>
+));
+```
+
+Register `delegationSchemas` in `createSmithers` and pass the matching
+`outputs` subset. Tiers are labels only; missing tiers fall back to the
+nearest configured tier in `tierOrder`. When `budget.maxMinutes` is set the
+whole chain is wrapped in `<Aspects>` with a wall-clock `latencySlo`; dollar
+budgets are enforced by per-leaf guard tasks over rolled-up `dcExec` actuals
+(hard error over the limit, warning row at 80%).
+
+## Phase composites
+
+Each phase is exported separately for standalone use and takes
+`DelegationSharedProps` (plus the extras noted):
+
+| Component | Phase | Extra props |
+| --- | --- | --- |
+| `<GoalRefinement>` | Question forecast, prefetched forms, one durable question at a time, refined-prompt approval | `prompt`, `maxQuestions`, `prefetchDepth` |
+| `<DelegationPlanning>` | Recursive decomposition fan-out until the frontier is all leaves | `prompt?` (standalone root brief; otherwise waits for the approved goal) |
+| `<DelegationPreview>` | Zero-backpressure expected-output previews, skippable via `dc-skip-preview` | none |
+| `<BackpressurePlanning>` | Every node declares gates and dependencies before execution | none |
+| `<DeriskLoop>` | Risk probes, findings to the nearest parent, replan/reaffirm cascades | none |
+| `<DelegationExecution>` | Dependency-ordered leaf pipelines: exec, gates, approvals, developer previews, budget guards | `maxAttempts` |
+| `<DelegationScoring>` | Run-level score digest plus the satisfaction poll | none |
+| `<DelegationEditListener>` | Re-arming `dc-edit` signal wait feeding the derisk loop | `until?`, `maxEdits` |
+
+## Output tables
+
+`delegationSchemas` (from `smithers-orchestrator`) registers every table;
+`DelegationOutputs` is the matching prop shape. `dcApproval` is only needed
+with an `approvalPolicy`, `dcBudget` only with a `budget`, and `dcScore` only
+with run-level `scorers`.
+
+| Table | One row per |
+| --- | --- |
+| `dcGoal` | Refined goal (prompt, assumptions, questions asked) |
+| `dcQuestion` | Rendered question form / resolved answer |
+| `dcForecast` | The goal agent's upfront question batch (internal) |
+| `dcGoalApproval` | The human's `{ approved, refinedPrompt }` decision |
+| `dcPlan` | A delegating node's plan: children, risks, estimates; replans append superseding rows |
+| `dcPreview` | A leaf's never-executed expected output |
+| `dcGates` | A node's declared gates and logical dependencies |
+| `dcProbe` | A probe's finding (`planImpact`: changes / confirms / none) |
+| `dcReplan` | A replan decision (`invalidated` or `reaffirmed`) with its trigger |
+| `dcExec` | One execution attempt, with best-effort `actual` usage and the measured `commitRange` |
+| `dcReview` | A review/check gate verdict for one attempt |
+| `dcDevPreview` | A developer-preview build (`builtOk` is required to pass) |
+| `dcApproval` | An approval-gate decision |
+| `dcEdit` | A live user edit (signal payload) |
+| `dcSkip` | The skip-previews signal payload |
+| `dcPoll` | The end-of-run poll answers |
+| `dcBudget` | A budget-guard checkpoint (`ok` or `warn`) |
+| `dcScore` | The run-level scoring digest |
+
+## Physical node ids
+
+Every task id follows `dc:<logicalId>:<phase>` (the `dc` prefix is
+`idPrefix`). Logical ids are `/`-separated paths (`root/core/reducer`); in
+physical ids the `/` is encoded as `:` because node ids only allow
+`[a-zA-Z0-9:_-]`. Row `logicalId` fields keep the `/` form. Phases:
+
+- Goal: `dc:goal:forecast`, `dc:goal:forms:question-<seq>`,
+  `dc:goal:question-<seq>` (the durable human answer),
+  `dc:goal:goal`, `dc:goal:approve`
+- Planning: `dc:<logicalId>:plan`, replan versions `dc:<logicalId>:plan-<k>`
+- Previews: `dc:<logicalId>:preview`
+- Gates: `dc:<logicalId>:gates`
+- Derisk: `dc:<logicalId>:probe-<n>`, `dc:<logicalId>:replan-<k>`
+- Execution: `dc:<logicalId>:exec`, `dc:<logicalId>:review-<i>` (reviews then
+  checks, in declared order), `dc:<logicalId>:approval-<i>`,
+  `dc:<logicalId>:dev-preview` (then `dev-preview-2`, ...),
+  `dc:<logicalId>:budget`
+- Scoring: `dc:root:score`, `dc:root:poll`
+
+## Signals
+
+Two fixed durable signal names (exported as `DC_EDIT_SIGNAL` and
+`DC_SKIP_PREVIEW_SIGNAL`):
+
+- `dc-edit` with payload `{ editId, logicalId, editedOutput, note? }`. Each
+  delivered edit writes a `dcEdit` row that the derisk loop treats exactly
+  like a plan-changing probe finding.
+- `dc-skip-preview` with payload `{ skipped: true }`. Once a `dcSkip` row
+  exists, no further preview tasks mount.
+
+## Gates
+
+A `dcGates` row declares an ordered list of gates:
+
+```ts
+type Gate =
+  | { method: "review"; tier: Tier; brief: string }
+  | { method: "check"; command: string }
+  | { method: "approval"; policyMatch: string }   // honored only under an approvalPolicy
+  | { method: "preview"; kind: "app" | "terminal" | "api" | "throwaway-ui" | "slideshow"; brief: string };
+```
+
+Review gates receive the node's output and its `dcExec.commitRange` values
+with instructions to inspect the commits themselves; chunk-level reviews get
+the union of their subtree's ranges (exec agents are wrapped with the
+exported `withCommitRange`, which measures the working-copy commit before and
+after the attempt, jj first with a git fallback). `preview` gates build a
+developer preview after execution; `builtOk: false` fails the attempt like a
+failed review. The gates prompt requires the root node to declare a
+`slideshow` preview, so a run always ends showable.
+
+## UI side
+
+`smithers-orchestrator/gateway-react` exports the matching read model:
+`useDelegationChain` folds a
+run's `dc*` rows into a `DelegationGraph` (nodes with status, versions,
+attention rollups, budget rollup, phase) and returns the `submitEdit`,
+`skipPreviews`, `answerHuman`, and `submitPoll` actions. The pure reducer
+`foldDelegation` is exported for tests and non-React use.
+
+## Notes
+
+- Approval gates require `outputs.dcApproval`; `<DelegationExecution>` throws
+  `INVALID_INPUT` if the policy produced approval gates without it.
+- `dcPlan.orchestration` (`"tasks" | "workflow"`) is reserved for planned
+  higher-order orchestration (a node authoring its own workflow as its
+  execution strategy); it is accepted and ignored today, and the store behind
+  `useDelegationChain` is planned to move to Effect.ts behind the same hook
+  signature.
+- Scoring wiring: `scorers.exec` / `scorers.review` ride the exec and review
+  tasks; `scorers.run` rides the digest task. The delegation scorers live in
+  `smithers-orchestrator/scorers` (see the scorer reference).
 
 ---
 

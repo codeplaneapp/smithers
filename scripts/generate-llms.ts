@@ -96,6 +96,7 @@ const CORE_PAGES = [
   "components/panel.mdx",
   "components/debate.mdx",
   "components/kanban.mdx",
+  "components/delegation-chain.mdx",
   // Recipes and reference
   "recipes.mdx",
   "guides/common-footguns.mdx",

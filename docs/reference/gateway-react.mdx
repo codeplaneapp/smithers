@@ -513,6 +513,69 @@ function useGatewayRpc<Method extends GatewayRpcMethod>(
 
 **Source** [`useGatewayRpc.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayRpc.ts) · **See also** [Gateway Client](/reference/gateway-client)
 
+### useDelegationChain
+
+Folded delegation-chain state for one run: the read model behind the
+[`delegation-chain`](/workflows/delegation-chain) workflow UI. Enumerates every
+physical `dc:*` node from the live run tree, fetches each node's durable output
+row once (re-checked when that node finishes or fails), folds the rows through
+the pure `foldDelegation` reducer, and returns the graph plus the delegation
+actions. Malformed or unknown rows surface in `errors` instead of throwing.
+
+```ts
+function useDelegationChain(params: { runId: string | undefined }): {
+  graph: DelegationGraph;
+  loading: boolean;
+  errors: unknown[];
+  actions: {
+    submitEdit(logicalId: string, editedOutput: unknown, note?: string): Promise<void>;
+    skipPreviews(): Promise<void>;
+    answerHuman(nodeId: string, iteration: number, value: unknown): Promise<void>;
+    submitPoll(answers: DcPollAnswer[], comment?: string): Promise<void>;
+  };
+};
+```
+
+<ParamField path="params.runId" type="string | undefined" required>
+  The run to fold. `undefined` (or an empty string) yields an empty graph.
+</ParamField>
+
+<ResponseField name="graph" type="DelegationGraph">
+  Nodes keyed by logical id (status, version history, gates, attention
+  rollups), edges, the current phase, pending question forms, the refined
+  prompt, the predicted-vs-actual budget rollup, and run scores.
+</ResponseField>
+<ResponseField name="loading" type="boolean">
+  True until the run tree and the first output sweep have hydrated.
+</ResponseField>
+<ResponseField name="errors" type="unknown[]">
+  Fold issues (ignored rows) plus any tree/event/output fetch errors.
+</ResponseField>
+<ResponseField name="actions" type="object">
+  <Expandable title="methods">
+    <ResponseField name="submitEdit" type="(logicalId, editedOutput, note?) => Promise<void>">
+      Deliver a live output edit on the durable `dc-edit` signal. The run
+      treats it exactly like a plan-changing probe finding.
+    </ResponseField>
+    <ResponseField name="skipPreviews" type="() => Promise<void>">
+      Skip the zero-backpressure preview phase (`dc-skip-preview` signal).
+    </ResponseField>
+    <ResponseField name="answerHuman" type="(nodeId, iteration, value) => Promise<void>">
+      Answer a durable human request; `value` rides as JSON in the approval
+      decision note.
+    </ResponseField>
+    <ResponseField name="submitPoll" type="(answers, comment?) => Promise<void>">
+      Answer the pending end-of-run poll HumanTask.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+The pure reducer is exported alongside it (`foldDelegation`,
+`parseDelegationNodeId`, `delegationTableForNodeId`) together with the
+`DelegationGraph` and `Dc*Row` types, for tests and non-React consumers.
+
+**Source** [`useDelegationChain.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/delegation/useDelegationChain.ts) · **See also** [`<DelegationChain>`](/components/delegation-chain)
+
 ## Action hooks
 
 ### useGatewayActions

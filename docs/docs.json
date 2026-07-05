@@ -137,6 +137,7 @@
               "workflows/hello",
               "workflows/implement",
               "workflows/research-plan-implement",
+              "workflows/delegation-chain",
               "workflows/mission",
               "workflows/kanban",
               "workflows/ralph",
@@ -235,6 +236,12 @@
               "components/continue-as-new",
               "components/saga",
               "components/try-catch-finally"
+            ]
+          },
+          {
+            "group": "Delegation",
+            "pages": [
+              "components/delegation-chain"
             ]
           },
           {

@@ -228,9 +228,8 @@ const tone = llmJudge({
 
 ## Built-in scorers
 
-Each built-in is a factory that returns a `Scorer`. The three judge-based
-scorers take an `AgentLike` judge; the two deterministic ones do not call an
-agent.
+Each built-in is a factory that returns a `Scorer`. Judge-based scorers take
+an `AgentLike` judge; the deterministic ones do not call an agent.
 
 | Scorer | What it measures | Factory |
 | --- | --- | --- |
@@ -239,6 +238,18 @@ agent.
 | `toxicityScorer` | Toxic, harmful, or inappropriate content (higher = more toxic) | `toxicityScorer(judge)` |
 | `schemaAdherenceScorer` | Output passes the task's `outputSchema` (1 valid, 0 invalid) | `schemaAdherenceScorer()` |
 | `latencyScorer` | Execution time vs. budget (1 at/below target, 0 at/above max) | `latencyScorer({ targetMs, maxMs })` |
+| `pocJudgmentScorer` | Delegation planning nodes' risk/probe judgment (plan-changing findings reward hardest, false negatives punished hardest) | `pocJudgmentScorer(options?)` |
+| `planSolidityScorer` | Delegation replan churn after execution started; plan-phase churn is free | `planSolidityScorer(options?)` |
+| `estimateAccuracyScorer` | Predicted tokens/costUsd/minutes vs. actuals per node (symmetric ratio, cost-weighted) | `estimateAccuracyScorer()` |
+| `tierFitScorer` | Whether a delegation node's intelligence tier matched its work | `tierFitScorer(judge)` |
+| `humanPollScorer` | End-of-run user poll (1-5 ratings and booleans) normalized to 0-1 | `humanPollScorer()` |
+
+The five delegation-chain scorers read their data from the scored output or
+context and no-op (score 1, `meta.skipped`) when it is absent. Their results
+combine into a run total with `delegationRunScore(results, { weights? })`
+(default weights 0.25 / 0.25 / 0.15 / 0.15 / 0.2), built on the generic
+`weightedScore(results, weights)` helper; missing or skipped components drop
+out and the remaining weights renormalize.
 
 ```ts
 const grounded = faithfulnessScorer(judge);
