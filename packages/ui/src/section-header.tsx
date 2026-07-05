@@ -3,7 +3,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "./cn";
 import { useInjectUiCss } from "./styles";
 
-/** The 5x-duplicated uppercase overline label. */
+/** Uppercase overline label — the pattern consumer UIs previously each hand-rolled. */
 export function Eyebrow({ className, ...props }: ComponentProps<"span">) {
   useInjectUiCss();
   return <span data-slot="eyebrow" className={cn("sui-eyebrow", className)} {...props} />;

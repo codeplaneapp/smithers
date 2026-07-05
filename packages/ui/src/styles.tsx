@@ -38,6 +38,8 @@ export function composeSmithersUiStyles({ withTheme = false, extra }: SmithersUi
  * tests), where effects never run and the injection fallback cannot help.
  */
 export function SmithersUiStyles(props: SmithersUiStylesProps = {}) {
+  // Literal attribute: JSX attribute names must be static, so this cannot use
+  // SMITHERS_UI_STYLE_ATTR — keep the two in sync (useInjectUiCss dedupes on it).
   return <style data-smithers-ui="">{composeSmithersUiStyles(props)}</style>;
 }
 

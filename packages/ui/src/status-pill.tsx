@@ -15,7 +15,7 @@ export type StatusPillProps = Omit<ComponentProps<"span">, "children"> & {
   status: string | undefined;
   /** Override the displayed label (defaults to the status, title-cased). */
   label?: string;
-  /** Hide the leading colored dot. */
+  /** Show the leading colored dot (default true); pass `false` to hide it. */
   withDot?: boolean;
 };
 

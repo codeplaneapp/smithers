@@ -48,7 +48,7 @@ export function DialogOverlay({ className, ...props }: ComponentProps<typeof Dia
 }
 
 export type DialogContentProps = ComponentProps<typeof DialogPrimitive.Content> & {
-  /** Hide the built-in top-right close button. */
+  /** Render the built-in top-right close button (default true); pass `false` to hide it. */
   showCloseButton?: boolean;
 };
 
