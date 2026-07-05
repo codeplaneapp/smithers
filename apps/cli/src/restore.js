@@ -80,10 +80,27 @@ export async function runRestoreOnce(opts) {
 
     // Reuse a preselected target when the caller already picked one (the
     // semantic tool reports it), so we never re-list and risk selecting a
-    // different checkpoint than the one reported. Otherwise list and pick.
-    const target = opts.target ?? (adapter
-        ? pickTargetCheckpoint(await adapter.listWorkspaceCheckpoints(runId), { nodeId, iteration, seq })
-        : null);
+    // different checkpoint than the one reported. But still validate it against
+    // the requested node/iteration/seq — a stale or mis-reported target must be
+    // rejected rather than silently reverting the wrong checkpoint. Validation
+    // runs the preselected row through the same predicate as the listing path
+    // (`pickTargetCheckpoint`) so the two can never diverge.
+    const selection = { nodeId, iteration, seq };
+    let target = null;
+    if (opts.target) {
+        target = pickTargetCheckpoint([opts.target], selection);
+        if (!target) {
+            // Include the target's own iteration/seq so an iteration-only
+            // mismatch is legible. Checkpoint rows carry no runId, so the
+            // predicate matches on node/iteration/seq only — `run ${runId}` is
+            // context, not something validated here.
+            stderr.write(`Preselected checkpoint (node ${opts.target.nodeId} iteration ${opts.target.iteration ?? 0} seq ${opts.target.seq}) does not match requested node ${nodeId}${iteration !== undefined ? ` iteration ${iteration}` : ""}${seq !== undefined ? ` seq ${seq}` : ""} for run ${runId}\n`);
+            return { exitCode: 1 };
+        }
+    }
+    else if (adapter) {
+        target = pickTargetCheckpoint(await adapter.listWorkspaceCheckpoints(runId), selection);
+    }
     if (!target) {
         stderr.write(`No matching durability checkpoint for run ${runId} node ${nodeId}${seq !== undefined ? ` seq ${seq}` : ""}\n`);
         return { exitCode: 1 };
