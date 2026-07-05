@@ -33,13 +33,7 @@ function requireSegment(value, label) {
  */
 export function integrationEventName(service, event) {
     const normalizedService = requireSegment(service, "service");
-    const normalizedEvent = typeof event === "string" ? event.trim() : "";
-    if (!normalizedEvent) {
-        throw new SmithersError("INVALID_INPUT", "Integration signal event must be a non-empty string.", { event });
-    }
-    if (normalizedEvent.includes(":")) {
-        throw new SmithersError("INVALID_INPUT", "Integration signal event must not contain \":\".", { event });
-    }
+    const normalizedEvent = requireSegment(event, "event");
     return `${INTEGRATION_SIGNAL_PREFIX}${normalizedService}:${normalizedEvent}`;
 }
 

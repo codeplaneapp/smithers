@@ -8,6 +8,17 @@
 // Telegram MarkdownV2 reserved characters that must be escaped in plain text.
 const TELEGRAM_RESERVED_REGEX = /([_*[\]()~`>#+\-=|{}.!\\])/g;
 
+// Sentinel scheme for convertMarkdownToTelegram: already-formatted segments
+// are stashed and replaced with `\u0000<index>\u0000` so the final escape pass
+// leaves them alone. cleanText() strips NULs from input first, so user text
+// can never collide with a sentinel. SENTINEL_TEST is non-global (RegExp.test
+// lastIndex is not involved) and split/replace with a global regex don't leak
+// lastIndex state, so these are safe to share across calls.
+const NULL_CHAR = String.fromCharCode(0);
+const SENTINEL_PATTERN = new RegExp(`(${NULL_CHAR}\\d+${NULL_CHAR})`, "g");
+const SENTINEL_TEST = new RegExp(`^${NULL_CHAR}\\d+${NULL_CHAR}$`);
+const SENTINEL_REPLACE = new RegExp(`${NULL_CHAR}(\\d+)${NULL_CHAR}`, "g");
+
 /**
  * Escape plain text for Telegram MarkdownV2 (every reserved character gets a
  * leading backslash).
@@ -84,7 +95,7 @@ export function convertMarkdownToTelegram(markdown) {
    * @returns {string}
    */
     function storeReplacement(formatted) {
-        const sentinel = `\u0000${replacements.length}\u0000`;
+        const sentinel = `${NULL_CHAR}${replacements.length}${NULL_CHAR}`;
         replacements.push(formatted);
         return sentinel;
     }
@@ -104,10 +115,6 @@ export function convertMarkdownToTelegram(markdown) {
     converted = converted.replace(/_([^_\n]+)_/g, (_match, content) => storeReplacement(`_${escapeMarkdownV2(content)}_`));
     // 7. Headers: "# Title" → bold "*Title*"
     converted = converted.replace(/^(#{1,6})\s*(.*)$/gm, (_match, _hashes, headerContent) => storeReplacement(`*${escapeMarkdownV2(String(headerContent).trim())}*`));
-    const NULL_CHAR = String.fromCharCode(0);
-    const SENTINEL_PATTERN = new RegExp(`(${NULL_CHAR}\\d+${NULL_CHAR})`, "g");
-    const SENTINEL_TEST = new RegExp(`^${NULL_CHAR}\\d+${NULL_CHAR}$`);
-    const SENTINEL_REPLACE = new RegExp(`${NULL_CHAR}(\\d+)${NULL_CHAR}`, "g");
     const finalEscaped = converted
         .split(SENTINEL_PATTERN)
         .map((segment) => SENTINEL_TEST.test(segment)

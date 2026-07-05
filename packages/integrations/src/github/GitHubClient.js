@@ -138,7 +138,7 @@ export function makeGitHubClient(config) {
    * @param {unknown} [body]
    * @returns {Effect.Effect<{ json: unknown; headers: Headers }, IntegrationError>}
    */
-    const attemptOnce = (method, url) => (body) => Effect.tryPromise({
+    const attemptOnce = (method, url, body) => Effect.tryPromise({
         try: async () => {
             /** @type {Record<string, string>} */
             const headers = {
@@ -195,7 +195,7 @@ export function makeGitHubClient(config) {
    * @param {string} url
    * @param {unknown} [body]
    */
-    const requestUrl = (method, url, body) => attemptOnce(method, url)(body).pipe(
+    const requestUrl = (method, url, body) => attemptOnce(method, url, body).pipe(
     // Honor Retry-After / x-ratelimit-reset exactly (sleep before the
     // schedule's own capped backoff decides whether to retry again).
     Effect.tapError((error) => {
