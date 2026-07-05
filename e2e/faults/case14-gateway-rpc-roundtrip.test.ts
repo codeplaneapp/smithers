@@ -199,7 +199,9 @@ describe("case 14: gateway authenticated RPC roundtrip", () => {
     const approvalAfter = await Effect.runPromise(adapter!.getApproval(RUN_ID, APPROVAL_NODE_ID, 0));
     expect(approvalAfter?.status).toBe("approved");
     expect(approvalAfter?.decidedBy).toBe("user:operator");
-  });
+    // 30s, not bun's 5s default: the waitFor polls allow 10s each, and under
+    // full-suite parallel load the round-trip legitimately exceeds 5s.
+  }, 30_000);
 
   test("real Gateway rejects viewer-scoped launchRun before dispatch", async () => {
     const denied = await postRpc(port, "launchRun", VIEWER_TOKEN, {
