@@ -20,6 +20,11 @@ type ApprovalRow = {
   requestSummary?: string;
 };
 
+// decide() and the render loop must derive the SAME key or the busy state never matches.
+function approvalKey(row: ApprovalRow): string {
+  return `${row.runId}:${row.nodeId}:${row.iteration}`;
+}
+
 /**
  * The pending approval-gate queue with one-click Approve / Deny. Reads
  * {@link useGatewayApprovals} and submits decisions through
@@ -32,6 +37,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, className, style }: Appro
   const [busy, setBusy] = useState<string | null>(null);
   const approvals = (data ?? []) as ApprovalRow[];
 
+  // listApprovals is pull-only on the local gateway path, so poll to stay live.
   useEffect(() => {
     if (pollMs <= 0 || typeof refetch !== "function") return;
     const handle = setInterval(refetch, pollMs);
@@ -39,8 +45,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, className, style }: Appro
   }, [refetch, pollMs]);
 
   const decide = async (row: ApprovalRow, approved: boolean) => {
-    const key = `${row.runId}:${row.nodeId}:${row.iteration}`;
-    setBusy(key);
+    setBusy(approvalKey(row));
     try {
       await actions.submitApproval({
         runId: row.runId,
@@ -71,7 +76,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, className, style }: Appro
         <div style={{ color: theme.textDim, fontSize: 13 }}>No approvals waiting.</div>
       ) : null}
       {approvals.map((row) => {
-        const key = `${row.runId}:${row.nodeId}:${row.iteration}`;
+        const key = approvalKey(row);
         const isBusy = busy === key;
         return (
           <div

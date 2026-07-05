@@ -10,7 +10,7 @@ export type NodeOutputViewProps = {
   style?: CSSProperties;
 };
 
-function render(data: unknown): string {
+function formatOutput(data: unknown): string {
   if (data == null) return "";
   if (typeof data === "string") return data;
   const record = data as Record<string, unknown>;
@@ -55,7 +55,7 @@ export function NodeOutputView({ runId, nodeId, iteration, className, style }: N
           ? error.message
           : loading
             ? "Loading…"
-            : render(data) || "No output."}
+            : formatOutput(data) || "No output."}
     </pre>
   );
 }
