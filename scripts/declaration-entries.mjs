@@ -3,12 +3,11 @@
 // wildcard). Walks `sourceRoot` and maps each `.js`/`.ts` module to its own
 // declaration entry.
 //
-// Throws rather than silently misbehaving on the two ways this can go wrong:
-//   - a `.js`/`.ts` twin sharing a basename (both map to the same key, so one's
-//     emitted `.d.ts` would clobber the other's — the classic runtime/type-twin
-//     collision), and
-//   - an unexpected file extension under the source tree (a signal the walk is
-//     picking up something the emit isn't set up to handle).
+// Non-source files under the tree (READMEs, JSON, assets) are skipped — only
+// `.js`/`.ts` modules become declaration entries. Throws on the one thing that
+// genuinely breaks the emit: a `.js`/`.ts` twin sharing a basename (both map to
+// the same key, so one's emitted `.d.ts` would clobber the other's — the classic
+// runtime/type-twin collision).
 import { readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
@@ -29,13 +28,10 @@ export function declarationEntries(sourceRoot = "src") {
         walk(path);
         continue;
       }
-      if (path.endsWith(".d.ts")) {
+      // Only .js/.ts modules produce declarations; skip .d.ts and any
+      // non-source file that legitimately lives under src/ (READMEs, JSON, …).
+      if (path.endsWith(".d.ts") || (!path.endsWith(".js") && !path.endsWith(".ts"))) {
         continue;
-      }
-      if (!path.endsWith(".js") && !path.endsWith(".ts")) {
-        throw new Error(
-          `declarationEntries: unexpected file extension at ${path}; only .js/.ts sources (and .d.ts, skipped) are supported under ${sourceRoot}/`,
-        );
       }
       const relativePath = relative(sourceRoot, path).split(sep).join("/");
       const key = relativePath.replace(/\.(js|ts)$/, "");

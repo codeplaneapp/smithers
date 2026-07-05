@@ -6,7 +6,7 @@ import { ClaudeWorkflowNodeKind as ClaudeWorkflowNodeKind$1, ClaudeWorkflowNodeP
 export { extractFromHost, extractGraph } from './extract.js';
 export { PhasePlanTask, buildClaudeWorkflowPhasePlan } from './buildClaudeWorkflowPhasePlan.js';
 export { deriveClaudeWorkflowPhases } from './deriveClaudeWorkflowPhases.js';
-export { XmlNodeOrNull, deriveClaudeWorkflowPhasesFromFrame } from './deriveClaudeWorkflowPhasesFromFrame.js';
+export { deriveClaudeWorkflowPhasesFromFrame } from './deriveClaudeWorkflowPhasesFromFrame.js';
 export { resetRelativeWorktreePathWarningForTest, resolveWorktreePath } from './worktree-path.js';
 import 'zod';
 

@@ -1,6 +1,4 @@
-import { XmlNode } from './types.js';
 import { ClaudeWorkflowPhasePlan as ClaudeWorkflowPhasePlan$1 } from './ClaudeWorkflowPhasePlan.js';
-import 'zod';
 import './ClaudeWorkflowNodePhase.js';
 import './ClaudeWorkflowPhase.js';
 
@@ -25,6 +23,5 @@ declare function deriveClaudeWorkflowPhasesFromFrame(frame: {
     collapsePhases?: boolean;
 }): ClaudeWorkflowPhasePlan;
 type ClaudeWorkflowPhasePlan = ClaudeWorkflowPhasePlan$1;
-type XmlNodeOrNull = XmlNode | null;
 
-export { type ClaudeWorkflowPhasePlan, type XmlNodeOrNull, deriveClaudeWorkflowPhasesFromFrame };
+export { type ClaudeWorkflowPhasePlan, deriveClaudeWorkflowPhasesFromFrame };
