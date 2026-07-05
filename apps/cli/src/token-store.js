@@ -1,18 +1,63 @@
+/**
+ * Persistent store for gateway bearer-token grants and the short-lived
+ * action-token handles minted from them. Lives at `~/.smithers/tokens.json`
+ * (override with `SMITHERS_TOKEN_STORE`). Token ids are the first 16 hex
+ * chars of the token's sha256, so an id is derivable from a presented secret
+ * without keeping a reverse map.
+ */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import crypto from "node:crypto";
 import { dirname, resolve } from "node:path";
 
+// v2 keys `tokens` by the bearer secret itself (v1 keyed by tokenId);
+// normalizeStore upgrades v1-shaped entries on read.
 const STORE_VERSION = 2;
+// Cap the audit trail so tokens.json cannot grow without bound.
 const MAX_AUDIT_ENTRIES = 1_000;
 
+/**
+ * @typedef {Object} TokenGrant
+ * @property {string} tokenId First 16 hex chars of the secret's sha256.
+ * @property {string[]} scopes
+ * @property {string} [role]
+ * @property {string} [userId]
+ * @property {number} [issuedAtMs]
+ * @property {number} [expiresAtMs]
+ * @property {string} [secret] The bearer secret backing this grant.
+ * @property {string} [tokenHash] Full sha256 hex of the secret.
+ * @property {number} [revokedAtMs]
+ */
+
+/**
+ * @typedef {Object} ActionToken
+ * @property {string} handle
+ * @property {string} tokenId Id of the backing grant.
+ * @property {string} actionId
+ * @property {string[]} scopes
+ * @property {number} issuedAtMs
+ * @property {number} [expiresAtMs]
+ * @property {number} [revokedAtMs]
+ */
+
+/**
+ * @typedef {Object} TokenStore
+ * @property {number} version
+ * @property {Record<string, TokenGrant>} tokens Keyed by bearer secret (v2).
+ * @property {Record<string, ActionToken>} actionTokens Keyed by handle.
+ * @property {Array<Record<string, any>>} audit Capped trail; every entry has a string `type`.
+ */
+
+/** @param {string} token */
 function tokenIdFor(token) {
     return crypto.createHash("sha256").update(token).digest("hex").slice(0, 16);
 }
 
+/** @param {string} token */
 function tokenHashFor(token) {
     return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+/** @returns {TokenStore} */
 function defaultStore() {
     return { version: STORE_VERSION, tokens: {}, actionTokens: {}, audit: [] };
 }
@@ -28,6 +73,14 @@ function normalizeAuditEntry(entry) {
     return entry;
 }
 
+/**
+ * Coerce arbitrary parsed JSON into a well-formed store: re-keys v1 grants by
+ * secret where recoverable, backfills tokenId/tokenHash, and drops malformed
+ * scopes/audit entries.
+ *
+ * @param {unknown} parsed
+ * @returns {TokenStore}
+ */
 function normalizeStore(parsed) {
     const store = defaultStore();
     const raw = asRecord(parsed);
@@ -82,10 +135,22 @@ function assertGrantActive(grant, nowMs) {
     }
 }
 
+/**
+ * Path of the on-disk store: `SMITHERS_TOKEN_STORE` if set, otherwise
+ * `~/.smithers/tokens.json`.
+ *
+ * @returns {string}
+ */
 export function smithersTokenStorePath() {
     return process.env.SMITHERS_TOKEN_STORE ?? resolve(process.env.HOME ?? process.cwd(), ".smithers", "tokens.json");
 }
 
+/**
+ * Load and normalize the on-disk store. A missing or corrupt file yields an
+ * empty store rather than an error.
+ *
+ * @returns {TokenStore}
+ */
 export function readSmithersTokenStore() {
     const path = smithersTokenStorePath();
     if (!existsSync(path)) {
@@ -100,12 +165,23 @@ export function readSmithersTokenStore() {
     }
 }
 
+/**
+ * Persist the store (creating parent directories; new files are mode 0600).
+ *
+ * @param {TokenStore} store
+ */
 export function writeSmithersTokenStore(store) {
     const path = smithersTokenStorePath();
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
 }
 
+/**
+ * Split a comma/whitespace-separated scope list into scope names.
+ *
+ * @param {string} raw
+ * @returns {string[]}
+ */
 export function parseTokenScopes(raw) {
     return raw
         .split(/[,\s]+/)
@@ -113,6 +189,23 @@ export function parseTokenScopes(raw) {
         .filter(Boolean);
 }
 
+/**
+ * Issue a new bearer-token grant plus a bootstrap action token bound to it.
+ * Mutates `options.store` in place when given (otherwise starts a new store).
+ *
+ * @param {{
+ *   role: string,
+ *   ttlMs: number,
+ *   scopes?: string[],
+ *   userId?: string,
+ *   token?: string,
+ *   actionId?: string,
+ *   nowMs?: number,
+ *   store?: TokenStore,
+ *   randomBytes?: (size: number) => Buffer,
+ * }} options
+ * @returns {{ token: string, grant: TokenGrant, actionToken: ActionToken, store: TokenStore }}
+ */
 export function issueSmithersBrokerToken(options) {
     const nowMs = options.nowMs ?? Date.now();
     const randomBytes = options.randomBytes ?? ((size) => crypto.randomBytes(size));
@@ -151,6 +244,21 @@ export function issueSmithersBrokerToken(options) {
     return { token, grant, actionToken, store };
 }
 
+/**
+ * Mint a short-lived action-token handle backed by an existing grant.
+ *
+ * @param {TokenStore} store Mutated in place (normalized, handle appended).
+ * @param {{
+ *   tokenId: string,
+ *   actionId: string,
+ *   scopes?: string[],
+ *   handle?: string,
+ *   nowMs?: number,
+ *   expiresAtMs?: number,
+ *   randomBytes?: (size: number) => Buffer,
+ * }} options
+ * @returns {ActionToken}
+ */
 export function mintSmithersActionToken(store, options) {
     const normalized = normalizeStore(store);
     Object.assign(store, normalized);
@@ -175,6 +283,16 @@ export function mintSmithersActionToken(store, options) {
     return actionToken;
 }
 
+/**
+ * Exchange an action-token handle for its backing bearer secret, enforcing
+ * revocation, expiry, action binding, and required scopes on both the handle
+ * and the backing grant. Throws on any violation.
+ *
+ * @param {TokenStore} store Mutated in place (normalized, audit appended).
+ * @param {string} handle
+ * @param {{ actionId?: string, scopes?: string[], nowMs?: number }} [options]
+ * @returns {{ token: string, grant: TokenGrant, actionToken: ActionToken }}
+ */
 export function resolveSmithersActionToken(store, handle, options = {}) {
     const normalized = normalizeStore(store);
     Object.assign(store, normalized);
@@ -211,6 +329,14 @@ export function resolveSmithersActionToken(store, handle, options = {}) {
     return { token: grant.secret, grant, actionToken };
 }
 
+/**
+ * Like `resolveSmithersActionToken`, but against the on-disk store, persisting
+ * the audit trail back to disk on success.
+ *
+ * @param {string} handle
+ * @param {{ actionId?: string, scopes?: string[], nowMs?: number }} [options]
+ * @returns {{ token: string, grant: TokenGrant, actionToken: ActionToken }}
+ */
 export function resolveSmithersActionTokenFromStore(handle, options = {}) {
     const store = readSmithersTokenStore();
     const resolved = resolveSmithersActionToken(store, handle, options);
@@ -218,6 +344,15 @@ export function resolveSmithersActionTokenFromStore(handle, options = {}) {
     return resolved;
 }
 
+/**
+ * Revoke a grant (looked up by secret, tokenId, or raw token) plus every
+ * action token minted from it.
+ *
+ * @param {TokenStore} store Mutated in place.
+ * @param {string} tokenOrId
+ * @param {number} [nowMs]
+ * @returns {TokenGrant | null} The revoked grant, or null if nothing matched.
+ */
 export function revokeSmithersToken(store, tokenOrId, nowMs = Date.now()) {
     const normalized = normalizeStore(store);
     Object.assign(store, normalized);

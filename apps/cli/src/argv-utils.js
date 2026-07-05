@@ -76,6 +76,7 @@ export function parseMcpSurfaceArgv(argv) {
 
 /**
  * @param {string[]} argv
+ * @param {number} [startIndex]
  * @returns {number}
  */
 export function findFirstPositionalIndex(argv, startIndex = 0) {

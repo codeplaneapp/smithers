@@ -291,13 +291,6 @@ function metadataText(raw, fallback) {
         .trim();
 }
 /**
- * @param {string} value
- * @returns {string}
- */
-function yamlString(value) {
-    return JSON.stringify(value);
-}
-/**
  * @param {unknown} schema
  * @returns {Record<string, unknown> | undefined}
  */
@@ -485,17 +478,6 @@ function buildWorkflow(id, entryFile, scope, env = process.env, packDir = undefi
         path: entryFile,
         ...(packDir ? { packDir } : {}),
     };
-}
-/**
- * @param {string} file
- * @param {string} packDir
- * @param {"local" | "global"} scope
- * @param {NodeJS.ProcessEnv} [env]
- * @returns {DiscoveredWorkflow}
- */
-function workflowFromFile(file, packDir, scope, env = process.env) {
-    const id = file.replace(/\.tsx$/, "");
-    return buildWorkflow(id, join(workflowsDirForPack(packDir), file), scope, env, packDir);
 }
 /**
  * @param {string} name
@@ -690,7 +672,8 @@ export function createWorkflowFile(name, from = process.cwd(), options = {}) {
         `export default smithers(() => <Workflow name="${name}" />);`,
         "",
     ].join("\n"));
-    return workflowFromFile(`${name}.tsx`, packDir, scope);
+    // buildWorkflow parses the just-written frontmatter and sets `path: entryFile`.
+    return buildWorkflow(name, entryFile, scope, process.env, packDir);
 }
 /**
  * @param {string} root
@@ -742,7 +725,8 @@ export function renderWorkflowSkill(workflow, options = {}) {
     return [
         "---",
         `name: ${workflow.id}`,
-        `description: ${yamlString(description)}`,
+        // JSON.stringify yields a double-quoted, escaped scalar — valid YAML for the frontmatter value.
+        `description: ${JSON.stringify(description)}`,
         "---",
         "",
         `# ${workflow.displayName}`,

@@ -131,7 +131,7 @@ export async function openSmithersDb(dbPath) {
  *
  * @param {string} [from]
  * @param {FindDbWaitOptions} [opts]
- * @returns {Promise<{ adapter: SmithersDb; dbPath: string; cleanup: () => void }>}
+ * @returns {Promise<Pick<import("smithers-orchestrator/OpenSmithersStoreResult").OpenSmithersStoreResult, "adapter" | "dbPath" | "cleanup" | "choice">>}
  */
 export async function findAndOpenDb(from, opts) {
     const opened = await openSmithersStore({ cwd: from ?? process.cwd(), mode: "read", wait: opts });

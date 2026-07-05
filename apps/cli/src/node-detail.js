@@ -445,23 +445,19 @@ export function aggregateNodeDetailEffect(adapter, params) {
                 : Effect.succeed([]),
         ]);
         const approvalRow = yield* adapter.getApproval(params.runId, params.nodeId, resolvedIteration);
-        const attemptsDesc = attemptRows;
-        const attempts = [...attemptsDesc].sort((left, right) => left.attempt - right.attempt);
-        const toolCallsRaw = toolCallRows;
-        const eventsRaw = tokenEventRows;
+        const attempts = [...attemptRows].sort((left, right) => left.attempt - right.attempt);
         const scorerRowsFiltered = scorerRows
             .filter((row) => row.iteration === resolvedIteration)
             .sort((left, right) => left.scoredAtMs - right.scoredAtMs);
-        const cacheRowsTyped = cacheRows;
         yield* Effect.logDebug("aggregated node detail").pipe(Effect.annotateLogs({
             runId: params.runId,
             nodeId: params.nodeId,
             iteration: resolvedIteration,
             attemptCount: attempts.length,
-            toolCallCount: toolCallsRaw.length,
+            toolCallCount: toolCallRows.length,
         }));
         const tokenByAttempt = new Map();
-        for (const eventRow of eventsRaw) {
+        for (const eventRow of tokenEventRows) {
             const parsed = parseTokenUsageEvent(eventRow, {
                 nodeId: params.nodeId,
                 iteration: resolvedIteration,
@@ -471,7 +467,7 @@ export function aggregateNodeDetailEffect(adapter, params) {
             const existing = tokenByAttempt.get(parsed.attempt) ?? emptyTokenUsage();
             tokenByAttempt.set(parsed.attempt, mergeTokenUsage(existing, parsed));
         }
-        const toolCalls = toolCallsRaw.map((call) => {
+        const toolCalls = toolCallRows.map((call) => {
             const parsedError = parseErrorSummary(call.errorJson);
             const finishedAtMs = asNumber(call.finishedAtMs);
             return {
@@ -536,7 +532,7 @@ export function aggregateNodeDetailEffect(adapter, params) {
             })),
         };
         const rawOutput = normalizeRawOutput(rawOutputRow ?? null);
-        const validatedOutput = pickValidatedOutput(rawOutput, cacheRowsTyped);
+        const validatedOutput = pickValidatedOutput(rawOutput, cacheRows);
         return {
             node: {
                 runId: node.runId,

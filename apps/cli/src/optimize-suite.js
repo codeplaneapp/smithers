@@ -27,6 +27,44 @@ export const OPTIMIZER_PROVIDER_IDS = [
     "forge",
     "openai-compatible",
 ];
+// Shared per-family configs. Every alias of a provider family maps to the
+// same (read-only) config object; callers never mutate these.
+// Aliases: openai-api, openai, openai-sdk, codex.
+const OPENAI_CONFIG = {
+    kind: "openai-compatible",
+    baseURL: "https://api.openai.com/v1",
+    apiKeyEnv: "OPENAI_API_KEY",
+    defaultModel: "gpt-5.5",
+};
+// Aliases: anthropic-api, anthropic, anthropic-sdk, claude-code, claude.
+const ANTHROPIC_CONFIG = {
+    kind: "anthropic",
+    baseURL: "https://api.anthropic.com/v1",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    defaultModel: "claude-fable-5",
+};
+// Aliases: gemini-api, gemini, antigravity.
+const GEMINI_CONFIG = {
+    kind: "gemini",
+    baseURL: "https://generativelanguage.googleapis.com/v1beta",
+    apiKeyEnv: "GEMINI_API_KEY",
+    fallbackApiKeyEnv: "GOOGLE_API_KEY",
+    defaultModel: "gemini-3.1-pro-preview",
+};
+// Aliases: kimi, moonshot.
+const MOONSHOT_CONFIG = {
+    kind: "openai-compatible",
+    baseURL: "https://api.moonshot.ai/v1",
+    apiKeyEnv: "MOONSHOT_API_KEY",
+    defaultModel: "kimi-k2.6",
+};
+// Endpoint supplied via env: amp, forge, openai-compatible (opencode and pi
+// extend it with a default model).
+const CUSTOM_ENDPOINT_CONFIG = {
+    kind: "openai-compatible",
+    baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
+    apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
+};
 const PROVIDER_CONFIGS = {
     heuristic: { kind: "heuristic" },
     cerebras: {
@@ -35,120 +73,25 @@ const PROVIDER_CONFIGS = {
         apiKeyEnv: "CEREBRAS_API_KEY",
         defaultModel: "zai-glm-4.7",
     },
-    "openai-api": {
-        kind: "openai-compatible",
-        baseURL: "https://api.openai.com/v1",
-        apiKeyEnv: "OPENAI_API_KEY",
-        defaultModel: "gpt-5.5",
-    },
-    openai: {
-        kind: "openai-compatible",
-        baseURL: "https://api.openai.com/v1",
-        apiKeyEnv: "OPENAI_API_KEY",
-        defaultModel: "gpt-5.5",
-    },
-    "openai-sdk": {
-        kind: "openai-compatible",
-        baseURL: "https://api.openai.com/v1",
-        apiKeyEnv: "OPENAI_API_KEY",
-        defaultModel: "gpt-5.5",
-    },
-    codex: {
-        kind: "openai-compatible",
-        baseURL: "https://api.openai.com/v1",
-        apiKeyEnv: "OPENAI_API_KEY",
-        defaultModel: "gpt-5.5",
-    },
-    "anthropic-api": {
-        kind: "anthropic",
-        baseURL: "https://api.anthropic.com/v1",
-        apiKeyEnv: "ANTHROPIC_API_KEY",
-        defaultModel: "claude-fable-5",
-    },
-    anthropic: {
-        kind: "anthropic",
-        baseURL: "https://api.anthropic.com/v1",
-        apiKeyEnv: "ANTHROPIC_API_KEY",
-        defaultModel: "claude-fable-5",
-    },
-    "anthropic-sdk": {
-        kind: "anthropic",
-        baseURL: "https://api.anthropic.com/v1",
-        apiKeyEnv: "ANTHROPIC_API_KEY",
-        defaultModel: "claude-fable-5",
-    },
-    "claude-code": {
-        kind: "anthropic",
-        baseURL: "https://api.anthropic.com/v1",
-        apiKeyEnv: "ANTHROPIC_API_KEY",
-        defaultModel: "claude-fable-5",
-    },
-    claude: {
-        kind: "anthropic",
-        baseURL: "https://api.anthropic.com/v1",
-        apiKeyEnv: "ANTHROPIC_API_KEY",
-        defaultModel: "claude-fable-5",
-    },
-    "gemini-api": {
-        kind: "gemini",
-        baseURL: "https://generativelanguage.googleapis.com/v1beta",
-        apiKeyEnv: "GEMINI_API_KEY",
-        fallbackApiKeyEnv: "GOOGLE_API_KEY",
-        defaultModel: "gemini-3.1-pro-preview",
-    },
-    gemini: {
-        kind: "gemini",
-        baseURL: "https://generativelanguage.googleapis.com/v1beta",
-        apiKeyEnv: "GEMINI_API_KEY",
-        fallbackApiKeyEnv: "GOOGLE_API_KEY",
-        defaultModel: "gemini-3.1-pro-preview",
-    },
-    antigravity: {
-        kind: "gemini",
-        baseURL: "https://generativelanguage.googleapis.com/v1beta",
-        apiKeyEnv: "GEMINI_API_KEY",
-        fallbackApiKeyEnv: "GOOGLE_API_KEY",
-        defaultModel: "gemini-3.1-pro-preview",
-    },
-    kimi: {
-        kind: "openai-compatible",
-        baseURL: "https://api.moonshot.ai/v1",
-        apiKeyEnv: "MOONSHOT_API_KEY",
-        defaultModel: "kimi-k2.6",
-    },
-    moonshot: {
-        kind: "openai-compatible",
-        baseURL: "https://api.moonshot.ai/v1",
-        apiKeyEnv: "MOONSHOT_API_KEY",
-        defaultModel: "kimi-k2.6",
-    },
-    opencode: {
-        kind: "openai-compatible",
-        baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
-        apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
-        defaultModel: "anthropic/claude-fable-5",
-    },
-    pi: {
-        kind: "openai-compatible",
-        baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
-        apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
-        defaultModel: "gpt-5.5",
-    },
-    amp: {
-        kind: "openai-compatible",
-        baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
-        apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
-    },
-    forge: {
-        kind: "openai-compatible",
-        baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
-        apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
-    },
-    "openai-compatible": {
-        kind: "openai-compatible",
-        baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
-        apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
-    },
+    "openai-api": OPENAI_CONFIG,
+    openai: OPENAI_CONFIG,
+    "openai-sdk": OPENAI_CONFIG,
+    codex: OPENAI_CONFIG,
+    "anthropic-api": ANTHROPIC_CONFIG,
+    anthropic: ANTHROPIC_CONFIG,
+    "anthropic-sdk": ANTHROPIC_CONFIG,
+    "claude-code": ANTHROPIC_CONFIG,
+    claude: ANTHROPIC_CONFIG,
+    "gemini-api": GEMINI_CONFIG,
+    gemini: GEMINI_CONFIG,
+    antigravity: GEMINI_CONFIG,
+    kimi: MOONSHOT_CONFIG,
+    moonshot: MOONSHOT_CONFIG,
+    opencode: { ...CUSTOM_ENDPOINT_CONFIG, defaultModel: "anthropic/claude-fable-5" },
+    pi: { ...CUSTOM_ENDPOINT_CONFIG, defaultModel: "gpt-5.5" },
+    amp: CUSTOM_ENDPOINT_CONFIG,
+    forge: CUSTOM_ENDPOINT_CONFIG,
+    "openai-compatible": CUSTOM_ENDPOINT_CONFIG,
 };
 
 /**

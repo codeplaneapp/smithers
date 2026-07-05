@@ -6,13 +6,8 @@
 
 import pc from "picocolors";
 import { getNodeDiffRoute } from "@smithers-orchestrator/server/gatewayRoutes/getNodeDiff";
-import { EXIT_OK, EXIT_SERVER_ERROR } from "./util/exitCodes.js";
+import { EXIT_OK } from "./util/exitCodes.js";
 import { formatCliErrorForStderr, getCliErrorMapping } from "./util/errorMessage.js";
-
-/** @param {boolean} color */
-function colors(color) {
-    return color ? pc.createColors(true) : pc.createColors(false);
-}
 
 // ANSI CSI sequences: `ESC [ ... letter`. Strip covers colors (m), cursor
 // moves, etc. Only used when the caller disables color so that existing
@@ -38,7 +33,7 @@ function colorizePatch(diffText, useColor) {
     // in patch text. Without this, piping to `less` or capturing to a file
     // leaks raw CSI codes. Color is only added here when useColor is true.
     if (!useColor) return stripAnsi(diffText);
-    const c = colors(true);
+    const c = pc.createColors(true);
     const lines = diffText.split("\n");
     const out = [];
     for (const line of lines) {
@@ -216,6 +211,3 @@ export async function runDiffOnce(input) {
     input.stdout.write(`${renderUnifiedDiff(payload, { color: input.color })}\n`);
     return { exitCode: EXIT_OK };
 }
-
-// ensure EXIT_SERVER_ERROR is considered used by linters / tree-shakers.
-void EXIT_SERVER_ERROR;

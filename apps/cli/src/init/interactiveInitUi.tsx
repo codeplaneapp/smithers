@@ -156,7 +156,7 @@ function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, agentIte
 
     // Agent info screen (no usable agents detected)
     if (step === "agent") {
-        const selected = agentItems.find((item, idx) => idx === cursor) ?? agentItems[0];
+        const selected = agentItems[cursor] ?? agentItems[0];
         return (
             <box width="100%" height="100%" flexDirection="column" padding={2}>
                 <text content="smithers init — agent setup" fg="#ffcc00" />

@@ -34,13 +34,6 @@ function decorate(effect) {
     return program;
 }
 /**
- * @param {unknown} cause
- * @returns {SmithersError}
- */
-function normalizeRejection(cause) {
-    return toSmithersError(cause);
-}
-/**
  * @template A, E, R
  * @param {Effect.Effect<A, E, R>} effect
  * @param {{ signal?: AbortSignal }} [options]
@@ -52,9 +45,9 @@ export async function runPromise(effect, options) {
     }
     const failure = Cause.failureOption(exit.cause);
     if (failure._tag === "Some") {
-        throw normalizeRejection(failure.value);
+        throw toSmithersError(failure.value);
     }
-    throw normalizeRejection(Cause.squash(exit.cause));
+    throw toSmithersError(Cause.squash(exit.cause));
 }
 /**
  * @template A, E, R

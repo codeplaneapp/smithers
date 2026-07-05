@@ -897,13 +897,6 @@ export async function streamRun(adapter, runId, name, promptText, opts = {}) {
 }
 
 /**
- * Load a workflow module and return its declared input fields. Returns [] when
- * the workflow has no input schema or cannot be loaded (so we just run with no
- * input rather than blocking the user).
- * @param {string} entryFile
- * @returns {Promise<{ name: string; type: string; required: boolean; default?: unknown; enum?: unknown[]; description?: string }[]>}
- */
-/**
  * Close a loaded workflow's storage backend, mirroring `up`'s
  * `closeWorkflowBackend()` (apps/cli/src/index.js): an async
  * `openSmithersBackend` workflow exposes `close`, a sync `createSmithers`
@@ -919,6 +912,13 @@ async function closeWorkflowBackend(workflow) {
     }
 }
 
+/**
+ * Load a workflow module and return its declared input fields. Returns [] when
+ * the workflow has no input schema or cannot be loaded (so we just run with no
+ * input rather than blocking the user).
+ * @param {string} entryFile
+ * @returns {Promise<{ name: string; type: string; required: boolean; default?: unknown; enum?: unknown[]; description?: string }[]>}
+ */
 async function loadWorkflowInputFields(entryFile) {
     // Loading a workflow constructs its agents, which can log init warnings;
     // silence both streams so discovery cannot corrupt the interactive prompt.

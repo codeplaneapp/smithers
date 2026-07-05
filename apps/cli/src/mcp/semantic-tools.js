@@ -26,12 +26,9 @@ import { runPromise } from "../smithersRuntime.js";
 import { pickTargetCheckpoint, runRestoreOnce } from "../restore.js";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-/**
- * @typedef {{ content: Array<{ type: "text"; text: string; }>; structuredContent: { ok: boolean; data?: unknown; error?: z.infer<typeof toolErrorSchema>; }; isError?: boolean; }} SemanticToolCallResult
- */
-/**
- * @typedef {{ cwd: () => string; openDb: typeof findAndOpenDb; }} SemanticToolContext
- */
+/** @typedef {import("./SemanticToolCallResult.ts").SemanticToolCallResult} SemanticToolCallResult */
+/** @typedef {import("./SemanticToolContext.ts").SemanticToolContext} SemanticToolContext */
+/** @typedef {import("@smithers-orchestrator/db/adapter").RunRow} RunRow */
 /**
  * @template T
  * @typedef {(adapter: SmithersDb, dbPath: string) => Promise<T>} WithDbCallback

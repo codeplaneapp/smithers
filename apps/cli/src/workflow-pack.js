@@ -1916,8 +1916,8 @@ createGatewayReactRoot(<App />);
 
 /**
  * Emit a .smithers/ui/<key>.tsx file for every workflow whose UI source lives in
- * WORKFLOW_UI_SOURCES (the swarm-generated bespoke UIs). kanban and plan keep
- * their own dedicated render functions, so they're not in the map.
+ * WORKFLOW_UI_SOURCES (the swarm-generated bespoke UIs). kanban, plan, and vcs
+ * keep their own dedicated render functions, so they're not in the map.
  * @param {Set<string>} [workflowIds] - when provided, only emit UI files for selected workflows.
  * @returns {TemplateFile[]}
  */
@@ -4663,6 +4663,7 @@ function renderWorkflows(workflowIds) {
  * @param {NodeJS.ProcessEnv} env
  * @param {string} projectRoot
  * @param {{ workflowIds: Set<string>; componentNames: Set<string>; promptIds: Set<string> }} closure
+ * @param {{ scaffoldCustomAgent?: boolean }} [options] - forwarded to renderAgentScaffoldFiles.
  * @returns {TemplateFile[]}
  */
 function renderTemplateFiles(versions, env, projectRoot, closure, options = {}) {
@@ -5025,7 +5026,6 @@ export function initWorkflowPack(options = {}) {
     // direct callers and tests default to off so they don't write to ~/.
     let skill;
     if (options.installSkill && !options.agentsOnly) {
-        const env = options.env ?? process.env;
         const homeDir = options.skillOptions?.homeDir ?? env.HOME ?? homedir();
         // Non-interactive callers (selectedSkillTargets === undefined, e.g.
         // `init --yes` / CI) install to all detected agents, but must still HONOR
@@ -5122,6 +5122,20 @@ export function applyWorkflowPackUpdates(entries) {
     return written;
 }
 /**
+ * Symlink the monorepo's packages/smithers into the pack's node_modules so a
+ * local source checkout dogfoods the in-repo runtime instead of the
+ * npm-installed one.
+ * @param {string} rootDir
+ */
+function linkLocalSourceRuntime(rootDir) {
+    if (!isLocalSourceCheckout()) return;
+    const nodeModules = resolve(rootDir, "node_modules");
+    if (!existsSync(nodeModules)) return;
+    const runtimeLink = resolve(nodeModules, "smithers-orchestrator");
+    rmSync(runtimeLink, { recursive: true, force: true });
+    symlinkSync(SOURCE_SMITHERS_PACKAGE, runtimeLink, "dir");
+}
+/**
  * Install `.smithers/` workspace deps so the first workflow run isn't blocked
  * on a cold install. Failures here don't fail init: the scaffold is on disk,
  * the user can always re-run `bun install` by hand.
@@ -5136,14 +5150,6 @@ export function applyWorkflowPackUpdates(entries) {
  * @param {InitReporter} [reporter]
  * @returns {InitInstallResult}
  */
-function linkLocalSourceRuntime(rootDir) {
-    if (!isLocalSourceCheckout()) return;
-    const nodeModules = resolve(rootDir, "node_modules");
-    if (!existsSync(nodeModules)) return;
-    const runtimeLink = resolve(nodeModules, "smithers-orchestrator");
-    rmSync(runtimeLink, { recursive: true, force: true });
-    symlinkSync(SOURCE_SMITHERS_PACKAGE, runtimeLink, "dir");
-}
 function runBunInstall(rootDir, skip, reporter) {
     if (skip) return { status: "skipped", reason: "skip-install" };
     reporter?.installStart?.();

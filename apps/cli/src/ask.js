@@ -19,6 +19,13 @@ import { describeUnavailableAgent, detectAvailableAgents, formatNoUsableAgentsMe
  * @typedef {{ agent?: AskAgentId; listAgents?: boolean; dumpPrompt?: boolean; toolSurface?: SmithersToolSurface; noMcp?: boolean; printBootstrap?: boolean; }} AskOptions
  */
 /** @typedef {import("@smithers-orchestrator/agents/agent-contract").SmithersToolSurface} SmithersToolSurface */
+/** @typedef {import("@smithers-orchestrator/agents/agent-contract").SmithersAgentContract} SmithersAgentContract */
+/** @typedef {import("@smithers-orchestrator/agents/BaseCliAgent").BaseCliAgent} BaseCliAgent */
+/** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
+/** @typedef {"mcp-config-file" | "mcp-config-inline" | "mcp-allow-list" | "prompt-only"} AskBootstrapMode */
+/** @typedef {AgentAvailability & { id: AskAgentId }} AskSupportedAvailability */
+/** @typedef {{ availability: AskSupportedAvailability; bootstrapMode: AskBootstrapMode; selectionReason: string }} AskSelection */
+/** @typedef {{ mode: "mcp-config-file"; serverName: string; toolSurface: SmithersToolSurface; config: ReturnType<typeof buildJsonMcpConfig> } | { mode: "mcp-config-inline"; serverName: string; toolSurface: SmithersToolSurface; configOverrides: string[] } | { mode: "mcp-allow-list"; serverName: string; toolSurface: SmithersToolSurface; allowedMcpServerNames: string[]; note: string } | { mode: "prompt-only"; serverName: string; toolSurface: SmithersToolSurface; note: string }} AskBootstrap */
 
 const ASK_AGENT_IDS = ["claude", "codex", "kimi", "antigravity", "pi"];
 const DEFAULT_SERVER_NAME = "smithers";

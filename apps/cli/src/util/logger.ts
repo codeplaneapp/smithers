@@ -5,14 +5,6 @@ import pc from "picocolors";
 type JsonModeState = {
   jsonMode: boolean;
   consoleRoutingInstalled: boolean;
-  originalConsole?: {
-    debug: typeof console.debug;
-    error: typeof console.error;
-    info: typeof console.info;
-    log: typeof console.log;
-    trace: typeof console.trace;
-    warn: typeof console.warn;
-  };
 };
 
 const STATE_KEY = Symbol.for("smithers.cli.jsonMode");
@@ -215,7 +207,6 @@ export function installJsonModeConsoleRouting(): void {
     return routeConsoleArgs(args, originalConsole.warn);
   };
 
-  state.originalConsole = originalConsole;
   state.consoleRoutingInstalled = true;
 }
 

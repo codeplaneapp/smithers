@@ -1,6 +1,14 @@
 
 /** @typedef {import("./EventCategory.ts").EventCategory} EventCategory */
 /** @typedef {import("./SmithersEventType.ts").SmithersEventType} SmithersEventType */
+// FORMAT IS LOAD-BEARING: apps/cli/tests/docs-public-surface-coverage.test.js
+// parses this file textually — it slices from the first `const` declaration
+// below to the aliases map that follows it (matching on the declaration text,
+// so do not repeat those `const ...` strings earlier in this file) and
+// extracts entries with /^\s{4}([A-Za-z0-9]+): /gm, then requires the set to
+// equal the SmithersEvent union. Keep one event per line at exactly 4-space
+// indent, and add every new engine event type here AND to
+// docs/reference/event-types.mdx.
 const EVENT_CATEGORY_BY_TYPE = {
     SupervisorStarted: "supervisor",
     SupervisorPollCompleted: "supervisor",

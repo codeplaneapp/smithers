@@ -14,6 +14,13 @@ import { formatAge } from "./format.js";
 const RECENT_EVENTS_LIMIT = 50;
 const MAX_CTA_COMMANDS = 5;
 const WAITING_APPROVAL_STATES = new Set(["waiting-approval", "waiting_approval"]);
+// Frame-XML descriptor tags the diagnosis understands; any other tag is ignored.
+const DESCRIPTOR_TAG_KINDS = {
+    "smithers:task": "task",
+    "smithers:wait-for-event": "wait-for-event",
+    "smithers:timer": "timer",
+    "smithers:subflow": "subflow",
+};
 /**
  * @param {string} nodeId
  * @param {number} iteration
@@ -119,6 +126,25 @@ function parseStringArray(raw) {
     return [trimmed];
 }
 /**
+ * @param {unknown} record
+ * @returns {RetryPolicy | undefined}
+ */
+function retryPolicyFromRecord(record) {
+    if (!isRecord(record))
+        return undefined;
+    const initialDelayMs = parseNumber(record.initialDelayMs);
+    const backoffRaw = parseString(record.backoff);
+    const backoff = backoffRaw === "fixed" || backoffRaw === "linear" || backoffRaw === "exponential"
+        ? backoffRaw
+        : undefined;
+    if (initialDelayMs == null && !backoff)
+        return undefined;
+    return {
+        ...(initialDelayMs != null ? { initialDelayMs: Math.max(0, Math.floor(initialDelayMs)) } : {}),
+        ...(backoff ? { backoff } : {}),
+    };
+}
+/**
  * @param {unknown} raw
  * @returns {RetryPolicy | undefined}
  */
@@ -126,20 +152,7 @@ function parseRetryPolicy(raw) {
     if (typeof raw !== "string" || raw.trim().length === 0)
         return undefined;
     try {
-        const parsed = JSON.parse(raw);
-        if (!isRecord(parsed))
-            return undefined;
-        const initialDelayMs = parseNumber(parsed.initialDelayMs);
-        const backoffRaw = parseString(parsed.backoff);
-        const backoff = backoffRaw === "fixed" || backoffRaw === "linear" || backoffRaw === "exponential"
-            ? backoffRaw
-            : undefined;
-        if (initialDelayMs == null && !backoff)
-            return undefined;
-        return {
-            ...(initialDelayMs != null ? { initialDelayMs: Math.max(0, Math.floor(initialDelayMs)) } : {}),
-            ...(backoff ? { backoff } : {}),
-        };
+        return retryPolicyFromRecord(JSON.parse(raw));
     }
     catch {
         return undefined;
@@ -192,7 +205,7 @@ function formatDuration(ms) {
 }
 /**
  * @param {number} now
- * @param {Array<number | null | undefined>} ...candidates
+ * @param {...(number | null | undefined)} candidates
  * @returns {number}
  */
 function waitingSinceFallback(now, ...candidates) {
@@ -262,15 +275,8 @@ function parseFrameDescriptorMetadata(xmlJson) {
             return;
         const tag = parseString(node.tag) ?? "";
         const props = isRecord(node.props) ? node.props : {};
-        const kind = tag === "smithers:task"
-            ? "task"
-            : tag === "smithers:wait-for-event"
-                ? "wait-for-event"
-                : tag === "smithers:timer"
-                    ? "timer"
-                    : tag === "smithers:subflow"
-                        ? "subflow"
-                        : "unknown";
+        // Object.hasOwn: a tag that collides with an Object.prototype key (e.g. "constructor") must stay "unknown".
+        const kind = Object.hasOwn(DESCRIPTOR_TAG_KINDS, tag) ? DESCRIPTOR_TAG_KINDS[tag] : "unknown";
         if (kind !== "unknown") {
             const id = parseString(props.id);
             if (id) {
@@ -379,22 +385,7 @@ function buildRetryInsight(node, attempts, descriptor) {
             node.state === "waiting-event" ||
             node.state === "waiting-timer");
     const retryPolicy = descriptor?.retryPolicy ??
-        (() => {
-            const candidate = newestMeta.retryPolicy ?? latestFailedMeta.retryPolicy;
-            if (!isRecord(candidate))
-                return undefined;
-            const initialDelayMs = parseNumber(candidate.initialDelayMs);
-            const backoffRaw = parseString(candidate.backoff);
-            const backoff = backoffRaw === "fixed" || backoffRaw === "linear" || backoffRaw === "exponential"
-                ? backoffRaw
-                : undefined;
-            if (initialDelayMs == null && !backoff)
-                return undefined;
-            return {
-                ...(initialDelayMs != null ? { initialDelayMs: Math.max(0, Math.floor(initialDelayMs)) } : {}),
-                ...(backoff ? { backoff } : {}),
-            };
-        })();
+        retryPolicyFromRecord(newestMeta.retryPolicy ?? latestFailedMeta.retryPolicy);
     let nextRetryAtMs = null;
     const lastFinishedAtMs = typeof latestFailed.finishedAtMs === "number"
         ? latestFailed.finishedAtMs
@@ -948,16 +939,7 @@ function buildDiagnosis(params) {
     }
     const dedupedBlockers = dedupeBlockers(blockers);
     let summary;
-    if (status === "finished") {
-        summary = "Run is finished, nothing is blocked.";
-    }
-    else if (status === "cancelled") {
-        summary =
-            typeof run.finishedAtMs === "number"
-                ? `Run was cancelled at ${new Date(run.finishedAtMs).toISOString()}.`
-                : "Run was cancelled.";
-    }
-    else if (status === "running" &&
+    if (status === "running" &&
         isRunHeartbeatFresh(run, nowMs) &&
         dedupedBlockers.length === 0) {
         const currentNode = firstCurrentNode(nodes);

@@ -48,15 +48,6 @@ const SUBSCRIPTION_DIR_ENV_VAR = {
 };
 
 /**
- * @param {string} provider
- * @param {string} configDir
- */
-function subscriptionLoginArgs(provider, configDir) {
-    const args = SUBSCRIPTION_LOGIN_ARGS[provider] ?? [];
-    return typeof args === "function" ? args(configDir) : args;
-}
-
-/**
  * @param {string} dir
  * @returns {boolean}
  */
@@ -103,7 +94,9 @@ export function runAgentAdd(input) {
         if (!populated && !input.skipLogin && !input.force) {
             const bin = SUBSCRIPTION_LOGIN_BIN[input.provider];
             const envVar = SUBSCRIPTION_DIR_ENV_VAR[input.provider];
-            const subArgs = subscriptionLoginArgs(input.provider, configDir);
+            // antigravity's args depend on the chosen config dir.
+            const rawArgs = SUBSCRIPTION_LOGIN_ARGS[input.provider] ?? [];
+            const subArgs = typeof rawArgs === "function" ? rawArgs(configDir) : rawArgs;
             const cmd = `${envVar}=${configDir} ${bin}${subArgs.length ? " " + subArgs.join(" ") : ""}`;
             const detail = `Config dir ${configDir} is empty. Run the following in another terminal to log in, then re-run \`smithers agents add\`:\n\n  ${cmd}\n\n(or pass --skip-login to register the empty dir, --force to register without verification)`;
             return { ok: false, reason: "login-required", detail, configDir };

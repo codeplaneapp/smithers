@@ -4,11 +4,10 @@
 
 import pc from "picocolors";
 import { eventCategoryForType } from "./event-categories.js";
-function cliColors() {
-    return pc.createColors(true);
-}
 /**
  * Format a timestamp as relative age: "2m ago", "1h ago", "3d ago"
+ *
+ * @param {number} ms
  */
 export function formatAge(ms) {
     const now = Date.now();
@@ -29,6 +28,9 @@ export function formatAge(ms) {
 }
 /**
  * Format elapsed time compactly: "5m 23s", "1h 2m", "45s"
+ *
+ * @param {number} startMs
+ * @param {number} [endMs]
  */
 export function formatElapsedCompact(startMs, endMs) {
     const elapsed = (endMs ?? Date.now()) - startMs;
@@ -43,6 +45,9 @@ export function formatElapsedCompact(startMs, endMs) {
 }
 /**
  * Format an elapsed time as HH:MM:SS from a base timestamp.
+ *
+ * @param {number} baseMs
+ * @param {number} eventMs
  */
 export function formatTimestamp(baseMs, eventMs) {
     const elapsed = eventMs - baseMs;
@@ -58,6 +63,9 @@ export function formatTimestamp(baseMs, eventMs) {
 /**
  * Format an elapsed time as a signed relative offset:
  * +MM:SS.mmm (or +HH:MM:SS.mmm when hours > 0).
+ *
+ * @param {number} baseMs
+ * @param {number} eventMs
  */
 export function formatRelativeOffset(baseMs, eventMs) {
     const elapsed = Math.max(0, eventMs - baseMs);
@@ -86,7 +94,7 @@ export function formatRelativeOffset(baseMs, eventMs) {
  * @returns {string}
  */
 export function colorizeEventText(type, text) {
-    const color = cliColors();
+    const color = pc.createColors(true);
     if (type.endsWith("Failed") ||
         type.endsWith("Denied") ||
         type.endsWith("Error") ||
@@ -158,6 +166,11 @@ function summarizePayload(payload, rawPayloadJson, maxLength) {
 }
 /**
  * Format a single event from _smithers_events into a log line.
+ *
+ * @param {{ type: string; payloadJson: string; timestampMs: number }} event
+ * @param {number} baseMs
+ * @param {FormatEventLineOptions} [options]
+ * @returns {string}
  */
 export function formatEventLine(event, baseMs, options) {
     const ts = formatTimestamp(baseMs, event.timestampMs);

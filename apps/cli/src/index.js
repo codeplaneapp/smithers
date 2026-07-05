@@ -21,13 +21,12 @@ import { buildStateKey } from "@smithers-orchestrator/scheduler/buildStateKey";
 import { parseStateKey } from "@smithers-orchestrator/scheduler/parseStateKey";
 import { SmithersCtx } from "@smithers-orchestrator/driver";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { runFork, runPromise } from "./smithersRuntime.js";
+import { runFork, runPromise, runSync } from "./smithersRuntime.js";
 import { trackEvent } from "@smithers-orchestrator/observability/metrics";
 import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
 import { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";
 import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
 import { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
-import { runSync } from "./smithersRuntime.js";
 import { spawn } from "node:child_process";
 import { buildAgentAskRequestRow, isHumanRequestPastTimeout, validateHumanRequestValue, waitForHumanAnswer, } from "@smithers-orchestrator/engine/human-requests";
 import { SmithersError } from "@smithers-orchestrator/errors";
@@ -117,15 +116,15 @@ async function loadWorkflowAsync(path) {
         throw new SmithersError("WORKFLOW_MISSING_DEFAULT", "Workflow must export default");
     return mod.default;
 }
-/**
- * @param {string} path
- */
 // Advertise this CLI's module directory to workflows launched by it. System
 // workflows (the seeded `init`) import CLI internals through this so they
 // always run the exact code that launched them, instead of depending on
 // `@smithers-orchestrator/cli` being resolvable from the pack's node_modules.
 process.env.SMITHERS_CLI_SRC_DIR ??= dirname(fileURLToPath(import.meta.url));
 
+/**
+ * @param {string} path
+ */
 function loadWorkflowEffect(path) {
     return Effect.tryPromise({
         try: () => loadWorkflowAsync(path),
@@ -205,22 +204,22 @@ function readBackendMarkerForCwd(cwd) {
 const CLI_ARGUMENT_MAX_LENGTH = 4096;
 const CLI_IDENTIFIER_MAX_LENGTH = 256;
 const CLI_TEXT_ARGUMENT_MAX_LENGTH = 64 * 1024;
+// DB poll cadence for --follow loops (logs, chat): fast enough to feel live,
+// slow enough not to hammer sqlite.
+const FOLLOW_POLL_INTERVAL_MS = 500;
+// Hard-exit deadline once a graceful shutdown starts, so a hung shutdown never
+// requires `kill -9`.
+const FORCE_EXIT_BACKSTOP_MS = 5000;
 const CLI_HANDLER_BOUNDS_WRAPPED = Symbol("smithers.cliHandlerBoundsWrapped");
-/**
- * @param {string} path
- * @returns {string}
- */
-function cliFieldNameFromPath(path) {
-    const trimmed = path.replace(/\[\d+\]/g, "");
-    const lastDot = trimmed.lastIndexOf(".");
-    return lastDot >= 0 ? trimmed.slice(lastDot + 1) : trimmed;
-}
 /**
  * @param {string} path
  * @param {string} value
  */
 function validateCliStringArgument(path, value) {
-    const field = cliFieldNameFromPath(path);
+    // Strip array indices, keep the last dotted segment as the field name.
+    const trimmed = path.replace(/\[\d+\]/g, "");
+    const lastDot = trimmed.lastIndexOf(".");
+    const field = lastDot >= 0 ? trimmed.slice(lastDot + 1) : trimmed;
     switch (field) {
         case "runId":
         case "requestId":
@@ -629,7 +628,7 @@ function setupAbortSignal() {
         const deadline = setTimeout(() => {
             process.stderr.write(`\n[smithers] graceful shutdown timed out, exiting.\n`);
             process.exit(exitCode);
-        }, 5000);
+        }, FORCE_EXIT_BACKSTOP_MS);
         if (typeof deadline.unref === "function")
             deadline.unref();
     };
@@ -971,7 +970,7 @@ async function* streamRunEventsCommand(c) {
             ? run.status
             : undefined;
         while (true) {
-            await new Promise((resolve) => setTimeout(resolve, 500));
+            await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_INTERVAL_MS));
             const newEvents = await adapter.listEvents(c.args.runId, lastSeq, 200);
             for (const event of newEvents) {
                 yield formatLine(event);
@@ -1291,7 +1290,11 @@ async function buildPsRows(adapter, limit, status) {
             workflowId: run.workflowPath
                 ? workflowIdFromPath(run.workflowPath)
                 : (run.workflowName ?? undefined),
-            status: derivedStateToStatus(view.state),
+            // Legacy `ps` consumers key off `status` and expect "finished", so
+            // only the derived "succeeded" is renamed; every other derived
+            // state passes through unchanged, including stale/orphaned so
+            // dead-owner runs never read as "running".
+            status: view.state === "succeeded" ? "finished" : view.state,
             dbStatus: run.status,
             state: view.state,
             ...(view.unhealthy ? { unhealthy: view.unhealthy } : {}),
@@ -1322,33 +1325,6 @@ async function buildPsRows(adapter, limit, status) {
         });
     }
     return rows;
-}
-/**
- * Map a derived RunState to the legacy `status` string surfaced by `smithers ps`.
- * Older consumers (and the dashboard CTA logic) still key off `status`, so a row
- * whose owner is dead must surface as something other than "running".
- *
- * @param {import("@smithers-orchestrator/db/runState").RunStateView["state"]} state
- * @returns {string}
- */
-function derivedStateToStatus(state) {
-    switch (state) {
-        case "succeeded":
-            return "finished";
-        case "stale":
-        case "orphaned":
-        case "running":
-        case "recovering":
-        case "waiting-approval":
-        case "waiting-event":
-        case "waiting-timer":
-        case "failed":
-        case "cancelled":
-        case "unknown":
-            return state;
-        default:
-            return state;
-    }
 }
 /**
  * @param {PsRow[]} rows
@@ -1393,7 +1369,9 @@ const WAITING_APPROVAL_NODE_STATES = new Set(["waiting-approval", "waiting_appro
  * @returns {string}
  */
 function approvalTargetKey(nodeId, iteration) {
-    return `${nodeId} ${iteration ?? 0}`;
+    // NUL separator so a nodeId that itself contains spaces or digits can never
+    // collide with another (nodeId, iteration) pair.
+    return `${nodeId}\u0000${iteration ?? 0}`;
 }
 
 /**
@@ -2552,8 +2530,8 @@ async function executeUpCommand(c, workflowPath, options, fail) {
     }
 }
 /**
- * @param {{ host: string; port: number; backend?: "sqlite" | "pglite" | "postgres" }} options
- * @returns {Promise<{ url: string; workspace: string; dbPath: string; workflows: string[] }>}
+ * @param {string} id
+ * @returns {string}
  */
 function titleizeWorkflowId(id) {
     return id
@@ -2586,21 +2564,19 @@ function formatHttpHost(host) {
     return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }
 
-function readGatewayAutostartLogTail(workspace, maxLines = 20) {
+function formatGatewayAutostartDiagnostics(workspace, failure) {
     const { logFile } = gatewayRuntimePaths(workspace);
+    // Last 20 log lines: enough stderr context to diagnose a failed spawn
+    // without dumping the whole daemon log into the error message.
+    let tail = null;
     try {
         const text = readFileSync(logFile, "utf8").trimEnd();
-        if (!text)
-            return { logFile, tail: null };
-        return { logFile, tail: text.split(/\r?\n/).slice(-maxLines).join("\n") };
+        if (text)
+            tail = text.split(/\r?\n/).slice(-20).join("\n");
     }
     catch {
-        return { logFile, tail: null };
+        // Missing/unreadable log file: report the headline without a tail.
     }
-}
-
-function formatGatewayAutostartDiagnostics(workspace, failure) {
-    const { logFile, tail } = readGatewayAutostartLogTail(workspace);
     const headline = failure?.kind === "error"
         ? `Autostarted gateway failed to spawn: ${failure.error?.message ?? String(failure.error)}.`
         : failure?.kind === "exit"
@@ -2831,13 +2807,6 @@ async function runUiCommand(c) {
         }
         return frame.payload;
     };
-    const openInBrowser = (url) => {
-        const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-        const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-        const proc = spawn(cmd, args, { stdio: "ignore", detached: true });
-        proc.unref();
-        proc.on("error", () => { });
-    };
     try {
         const workflows = await rpc("listWorkflows", {});
         const byKey = new Map((Array.isArray(workflows) ? workflows : []).map((w) => [w.key, w]));
@@ -2889,13 +2858,6 @@ async function runUiCommand(c) {
  */
 async function runFullUiCommand(c, base, fail) {
     const { serveLocalUi } = await import("./localUiServer.js");
-    const openInBrowser = (url) => {
-        const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-        const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-        const proc = spawn(cmd, args, { stdio: "ignore", detached: true });
-        proc.unref();
-        proc.on("error", () => { });
-    };
     try {
         const { server, url } = await serveLocalUi({
             gatewayBase: base,
@@ -2919,10 +2881,6 @@ async function runFullUiCommand(c, base, fail) {
     }
 }
 const GATEWAY_LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"]);
-
-function isGatewayStateTrustError(error) {
-    return error?.code === "GATEWAY_STATE_UNTRUSTED";
-}
 
 function gatewayAlreadyRunningError(workspace, state) {
     return new SmithersError("GATEWAY_ALREADY_RUNNING", `A gateway for this workspace is already running: pid ${state.pid} at ${state.url}. Use it, or stop it first with \`smithers gateway stop\`.`, { workspace, pid: state.pid, url: state.url });
@@ -2982,7 +2940,7 @@ async function runGatewayStopCommand(c) {
         state = readGatewayRuntimeState(workspace);
     }
     catch (error) {
-        if (isGatewayStateTrustError(error)) {
+        if (error?.code === "GATEWAY_STATE_UNTRUSTED") {
             return c.error({ code: "GATEWAY_STATE_UNTRUSTED", message: error?.message ?? String(error), exitCode: 1 });
         }
         throw error;
@@ -3023,6 +2981,10 @@ async function runGatewayStopCommand(c) {
     clearGatewayRuntimeState(workspace, state.pid);
     return c.ok({ stopped: true, workspace, pid: state.pid });
 }
+/**
+ * @param {{ host: string; port: number; backend?: "sqlite" | "pglite" | "postgres"; authToken?: string; mintToken?: boolean; insecure?: boolean; idleTimeout?: number }} options
+ * @returns {Promise<{ url: string; workspace: string; dbPath: string; workflows: string[] }>}
+ */
 async function runGatewayCommand(options) {
     // The Gateway control plane can launch/cancel/inspect EVERY run in the
     // workspace. Without an auth config it authenticates every request as
@@ -3258,7 +3220,7 @@ async function runGatewayCommand(options) {
             const deadline = setTimeout(() => {
                 process.stderr.write(`[smithers] Gateway shutdown timed out, exiting.\n`);
                 process.exit(143);
-            }, 5000);
+            }, FORCE_EXIT_BACKSTOP_MS);
             if (typeof deadline.unref === "function")
                 deadline.unref();
             try {
@@ -3305,10 +3267,7 @@ const workflowCli = Cli.create({
     options: workflowRunOptions,
     alias: { detach: "d", runId: "r", input: "i", maxConcurrency: "c", prompt: "p" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const mode = interactiveLaunchMode(c.options, Boolean(c.args.name), c.format);
             if (mode === "needs-tty") {
@@ -3369,10 +3328,7 @@ const workflowCli = Cli.create({
     args: workflowPathArgs,
     options: workflowCreateOptions,
     run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const created = createWorkflowFile(c.args.name, process.cwd(), { global: c.options.global });
             return c.ok(created, {
@@ -3422,10 +3378,7 @@ const workflowCli = Cli.create({
     args: workflowSkillArgs,
     options: workflowSkillOptions,
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const workflowId = c.args.name ?? "all";
             const workflows = workflowId === "all"
@@ -3553,6 +3506,21 @@ async function resolveMemoryWorkflowAsync(workflowPath) {
         throw new SmithersError("CLI_DB_NOT_FOUND", "No workflow found to resolve this workspace's store. Run `smithers init`, or pass --workflow <file>.");
     return loadWorkflowAsync(entry.entryFile);
 }
+/**
+ * Shared setup for every `smithers memory` subcommand: resolve the workspace
+ * workflow, open its store, and register sqlite cleanup. The imports stay
+ * dynamic so the memory package is only loaded when a memory command runs.
+ *
+ * @param {string | undefined} workflowPath
+ */
+async function openMemoryStore(workflowPath) {
+    const { createMemoryStore } = await import("@smithers-orchestrator/memory/store");
+    const { parseNamespace } = await import("@smithers-orchestrator/memory/types");
+    const workflow = await resolveMemoryWorkflowAsync(workflowPath);
+    ensureSmithersTables(workflow.db);
+    setupSqliteCleanup(workflow);
+    return { store: createMemoryStore(workflow.db), parseNamespace };
+}
 const memoryCli = Cli.create({
     name: "memory",
     description: "View and query cross-run memory facts.",
@@ -3564,12 +3532,7 @@ const memoryCli = Cli.create({
     alias: { workflow: "w" },
     async run(c) {
         try {
-            const { createMemoryStore } = await import("@smithers-orchestrator/memory/store");
-            const { parseNamespace } = await import("@smithers-orchestrator/memory/types");
-            const workflow = await resolveMemoryWorkflowAsync(c.options.workflow);
-            ensureSmithersTables(workflow.db);
-            setupSqliteCleanup(workflow);
-            const store = createMemoryStore(workflow.db);
+            const { store, parseNamespace } = await openMemoryStore(c.options.workflow);
             const printFact = (f) => {
                 const value = f.valueJson.length > 100 ? f.valueJson.slice(0, 100) + "..." : f.valueJson;
                 const age = formatAge(f.updatedAtMs);
@@ -3619,12 +3582,7 @@ const memoryCli = Cli.create({
     alias: { workflow: "w" },
     async run(c) {
         try {
-            const { createMemoryStore } = await import("@smithers-orchestrator/memory/store");
-            const { parseNamespace } = await import("@smithers-orchestrator/memory/types");
-            const workflow = await resolveMemoryWorkflowAsync(c.options.workflow);
-            ensureSmithersTables(workflow.db);
-            setupSqliteCleanup(workflow);
-            const store = createMemoryStore(workflow.db);
+            const { store, parseNamespace } = await openMemoryStore(c.options.workflow);
             const fact = await store.getFact(parseNamespace(c.args.namespace), c.args.key);
             if (!fact) {
                 console.log(`No fact "${c.args.key}" in namespace "${c.args.namespace}".`);
@@ -3652,12 +3610,7 @@ const memoryCli = Cli.create({
     alias: { workflow: "w" },
     async run(c) {
         try {
-            const { createMemoryStore } = await import("@smithers-orchestrator/memory/store");
-            const { parseNamespace } = await import("@smithers-orchestrator/memory/types");
-            const workflow = await resolveMemoryWorkflowAsync(c.options.workflow);
-            ensureSmithersTables(workflow.db);
-            setupSqliteCleanup(workflow);
-            const store = createMemoryStore(workflow.db);
+            const { store, parseNamespace } = await openMemoryStore(c.options.workflow);
             const trimmedValue = c.args.value.trim();
             let factValue = c.args.value;
             if (trimmedValue.startsWith("{") || trimmedValue.startsWith("[")) {
@@ -3691,12 +3644,7 @@ const memoryCli = Cli.create({
     alias: { workflow: "w" },
     async run(c) {
         try {
-            const { createMemoryStore } = await import("@smithers-orchestrator/memory/store");
-            const { parseNamespace } = await import("@smithers-orchestrator/memory/types");
-            const workflow = await resolveMemoryWorkflowAsync(c.options.workflow);
-            ensureSmithersTables(workflow.db);
-            setupSqliteCleanup(workflow);
-            const store = createMemoryStore(workflow.db);
+            const { store, parseNamespace } = await openMemoryStore(c.options.workflow);
             await store.deleteFact(parseNamespace(c.args.namespace), c.args.key);
             console.log(`Deleted ${pc.bold(c.args.key)} from "${c.args.namespace}".`);
             return c.ok({ namespace: c.args.namespace, key: c.args.key });
@@ -3754,10 +3702,7 @@ const claudeCli = Cli.create({
         collapsePhases: "collapse-phases",
     },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             // With --wait, the store and the run are allowed to not exist YET:
             // a mirror launched right after `workflow run --detach` races the
@@ -3822,10 +3767,7 @@ const claudeCli = Cli.create({
         maxOutputChars: "max-output-chars",
     },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -4105,15 +4047,6 @@ const openapiGenerateArgs = z.object({
     specPath: z.string().describe("Path to an OpenAPI spec"),
     outputPath: z.string().describe("Output JavaScript file for generated tools"),
 });
-/**
- * @param {string} fromDir
- * @param {string} targetPath
- * @returns {string}
- */
-function relativeImportPath(fromDir, targetPath) {
-    const rel = relative(fromDir, targetPath).split("\\").join("/");
-    return rel.startsWith(".") ? rel : `./${rel}`;
-}
 const openapiCli = Cli.create({
     name: "openapi",
     description: "Generate AI SDK tools from OpenAPI specs.",
@@ -4150,7 +4083,10 @@ const openapiCli = Cli.create({
             const specPath = resolve(process.cwd(), c.args.specPath);
             const outputPath = resolve(process.cwd(), c.args.outputPath);
             const outputDir = dirname(outputPath);
-            const importPath = relativeImportPath(outputDir, specPath);
+            // Backslash normalization keeps the generated import specifier
+            // portable when the CLI runs on Windows paths.
+            const rel = relative(outputDir, specPath).split("\\").join("/");
+            const importPath = rel.startsWith(".") ? rel : `./${rel}`;
             const tools = createOpenApiToolsSync(specPath);
             const toolCount = Object.keys(tools).length;
             mkdirSync(outputDir, { recursive: true });
@@ -4189,10 +4125,7 @@ const tokenCli = Cli.create({
         revealToken: z.boolean().default(false).describe("Include the raw bearer token in CLI output"),
     }),
     run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const ttlMs = parseDurationMs(c.options.ttl, "ttl");
             const issued = issueSmithersBrokerToken({
@@ -4230,10 +4163,7 @@ const tokenCli = Cli.create({
         command: z.string().describe("Shell command to run with the injected token"),
     }),
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const resolved = resolveSmithersActionTokenFromStore(c.options.handle, {
                 actionId: c.options.actionId,
@@ -4501,9 +4431,7 @@ function validateDevtoolsArgv(argv) {
         ? ["--frame", "--depth"]
         : (cmd === "diff" || cmd === "output"
             ? ["--iteration"]
-            : cmd === "rewind"
-                ? []
-                : []);
+            : []);
     for (const flag of intFlags) {
         if (!flags.has(flag)) continue;
         const raw = flags.get(flag);
@@ -4627,6 +4555,19 @@ async function resolveHijackRequestEngine(adapter, runId, target) {
 }
 // ---------------------------------------------------------------------------
 let commandExitOverride;
+/**
+ * Per-command failure helper: records the handler's requested exit code for
+ * main() to apply (instead of incur's generic 1 → 4 mapping), then returns the
+ * command's error envelope.
+ *
+ * @param {{ error: (opts: any) => any }} c
+ */
+function makeFail(c) {
+    return (opts) => {
+        commandExitOverride = opts.exitCode ?? 1;
+        return c.error(opts);
+    };
+}
 // Shared with the init-time incur skill re-sync (SyncSkills.sync uses it as the
 // top-level group description, mirroring what `smithers skills add` passes).
 const CLI_DESCRIPTION = "Durable AI workflow orchestrator. Run, monitor, and manage workflow executions. " +
@@ -4651,10 +4592,7 @@ const cli = Cli.create({
     // raw result dump in a human TTY while keeping full JSON for piped/agent use.
     outputPolicy: "agent-only",
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         if (c.args.prompt) {
             // Install the pack first (idempotent when already present), then
             // launch the create-workflow builder with the prompt pre-filled.
@@ -4699,10 +4637,7 @@ const cli = Cli.create({
     options: workflowRunOptions,
     alias: { detach: "d", runId: "r", input: "i", maxConcurrency: "c", prompt: "p" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const workflow = resolveWorkflow("create-workflow", process.cwd());
             if (c.options.interactive) {
@@ -4744,10 +4679,7 @@ const cli = Cli.create({
     args: startersArgs,
     options: startersOptions,
     run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         return runStartersCommand(c, fail);
     },
 })
@@ -4784,10 +4716,7 @@ const cli = Cli.create({
     options: upRunOptions,
     alias: { detach: "d", runId: "r", input: "i", maxConcurrency: "c" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         const mode = interactiveLaunchMode(c.options, Boolean(c.args.workflow), c.format);
         if (mode === "needs-tty") {
             return fail({ code: "INTERACTIVE_REQUIRES_TTY", message: "--interactive needs an interactive terminal (TTY) and human output; it cannot be combined with --format json/jsonl.", exitCode: 4 });
@@ -4817,10 +4746,7 @@ const cli = Cli.create({
     description: "Copy the legacy bun:sqlite smithers.db into PGlite or Postgres and write the migrated.json marker.",
     options: migrateOptions,
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { migrateSmithersStore } = await import("smithers-orchestrator/migrateSmithersStore");
             if (!c.options.to) {
@@ -4886,10 +4812,7 @@ const cli = Cli.create({
     // piped/agent use.
     outputPolicy: "agent-only",
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         return runBugCommand(c, fail);
     },
 })
@@ -4902,10 +4825,7 @@ const cli = Cli.create({
     options: gatewayOptions,
     alias: { host: "H", port: "p" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             if (c.args.action === "status") {
                 return await runGatewayStatusCommand(c);
@@ -4938,10 +4858,7 @@ const cli = Cli.create({
     options: evalOptions,
     alias: { cases: "c", suite: "s", dryRun: "n", concurrency: "j", report: "r" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const workflowPath = resolveWorkflowPathForEval(c.args.workflow);
             const loadedCases = loadEvalCases(process.cwd(), c.options.cases, {
@@ -5094,10 +5011,7 @@ const cli = Cli.create({
     options: superviseOptions,
     alias: { dryRun: "n", interval: "i", staleThreshold: "t", maxConcurrent: "c" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         let parsed;
         try {
             parsed = resolveSupervisorOptions(c.options.interval, c.options.staleThreshold, c.options.maxConcurrent, c.options.dryRun);
@@ -5147,10 +5061,7 @@ const cli = Cli.create({
     options: psOptions,
     alias: { status: "s", limit: "l", all: "a", watch: "w", interval: "i" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -5226,10 +5137,7 @@ const cli = Cli.create({
     options: eventsOptions,
     alias: { node: "n", type: "t", since: "s", limit: "l", json: "j", watch: "w", interval: "i" },
     async *run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         let query;
         try {
             query = normalizeEventsQuery(c.options);
@@ -5613,7 +5521,7 @@ const cli = Cli.create({
                 });
             }
             while (true) {
-                await new Promise((resolve) => setTimeout(resolve, 500));
+                await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_INTERVAL_MS));
                 const attempts = await adapter.listAttemptsForRun(runId);
                 syncAttempts(attempts);
                 const newRows = await adapter.listEvents(runId, lastSeq, 200);
@@ -5689,10 +5597,7 @@ const cli = Cli.create({
     description: "Create and start a one-task auto-hijacked chat run.",
     options: chatCreateOptions,
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         const chatCwd = resolve(process.cwd(), c.options.cwd ?? ".");
         if (!existsSync(chatCwd)) {
             return fail({
@@ -5761,10 +5666,7 @@ const cli = Cli.create({
     args: hijackArgs,
     options: hijackOptions,
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         const { adapter, cleanup } = await findAndOpenDb();
         try {
             const run = await adapter.getRun(c.args.runId);
@@ -5922,10 +5824,7 @@ const cli = Cli.create({
     options: inspectOptions,
     alias: { watch: "w", interval: "i" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -5984,10 +5883,7 @@ const cli = Cli.create({
     options: nodeOptions,
     alias: { runId: "r", iteration: "i", watch: "w" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6092,10 +5988,7 @@ const cli = Cli.create({
     args: whyArgs,
     options: whyOptions,
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6134,10 +6027,7 @@ const cli = Cli.create({
     args: humanArgs,
     options: humanOptions,
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         const action = c.args.action.trim().toLowerCase();
         if (action !== "inbox" && action !== "answer" && action !== "cancel") {
             return fail({
@@ -6275,10 +6165,7 @@ const cli = Cli.create({
     options: askHumanOptions,
     alias: { runId: "r", node: "n" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         const prompt = c.args.prompt?.trim();
         if (!prompt) {
             return fail({
@@ -6411,10 +6298,7 @@ const cli = Cli.create({
     args: alertsArgs,
     options: alertsOptions,
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         const action = c.args.action.trim().toLowerCase();
         if (action !== "list" &&
             action !== "ack" &&
@@ -6531,10 +6415,7 @@ const cli = Cli.create({
     options: approveOptions,
     alias: { node: "n" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6595,10 +6476,7 @@ const cli = Cli.create({
     args: signalArgs,
     options: signalOptions,
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6664,10 +6542,7 @@ const cli = Cli.create({
     options: approveOptions,
     alias: { node: "n" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6702,10 +6577,7 @@ const cli = Cli.create({
     description: "Safely halt agents and terminate a run.",
     args: cancelArgs,
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6852,10 +6724,7 @@ const cli = Cli.create({
         force: z.boolean().default(false).describe("Cancel runs even if they still appear live (default only cancels stale runs)"),
     }),
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6933,10 +6802,7 @@ const cli = Cli.create({
     options: graphOptions,
     alias: { runId: "r" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const resolvedWorkflowPath = resolve(process.cwd(), c.args.workflow);
             const workflow = await loadWorkflow(c.args.workflow);
@@ -7079,10 +6945,7 @@ const cli = Cli.create({
     options: revertOptions,
     alias: { runId: "r", nodeId: "n" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
             try {
@@ -7120,10 +6983,7 @@ const cli = Cli.create({
     }),
     alias: { runId: "r", nodeId: "n" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
             try {
@@ -7185,10 +7045,7 @@ const cli = Cli.create({
     }),
     alias: { runId: "r", nodeId: "n", attempt: "a" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
             try {
@@ -7257,10 +7114,7 @@ const cli = Cli.create({
     }),
     alias: { detach: "d" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         const moduleDir = dirname(fileURLToPath(import.meta.url));
         const composeDirCandidates = [
             resolve(moduleDir, "../../observability"),
@@ -7342,10 +7196,7 @@ const cli = Cli.create({
         node: z.string().optional().describe("Filter scores to a specific node ID"),
     }),
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -7389,10 +7240,7 @@ const cli = Cli.create({
     }),
     alias: { runId: "r", frame: "f", node: "n", input: "i", label: "l" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { replayFromCheckpoint } = await import("@smithers-orchestrator/time-travel/replay");
             const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
@@ -7456,7 +7304,6 @@ const cli = Cli.create({
 })
     // =========================================================================
     // smithers tree <runId>
-    // Findings #1, #2, #3, #7, #11 addressed here.
     // =========================================================================
     .command("tree", {
     description: "Print DevTools snapshot as XML tree.",
@@ -7660,10 +7507,7 @@ const cli = Cli.create({
     }),
     alias: { runId: "r", frame: "f", resetNode: "n", input: "i", label: "l" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { forkRun } = await import("@smithers-orchestrator/time-travel/fork");
             const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
@@ -7752,36 +7596,19 @@ const cli = Cli.create({
     }),
     alias: { json: "j" },
     async run(c) {
-        const fail = (opts) => {
-            commandExitOverride = opts.exitCode ?? 1;
-            return c.error(opts);
-        };
+        const fail = makeFail(c);
         try {
             const { buildTimeline, buildTimelineTree, formatTimelineForTui, formatTimelineAsJson } = await import("@smithers-orchestrator/time-travel/timeline");
             const { adapter, cleanup } = await findAndOpenDb();
             try {
-                if (c.options.tree) {
-                    const tree = await buildTimelineTree(adapter, c.args.runId);
-                    if (c.options.json) {
-                        writeStdoutSync(`${JSON.stringify({ timeline: formatTimelineAsJson(tree) }, null, 2)}\n`);
-                        return undefined;
-                    }
-                    else {
-                        console.log(formatTimelineForTui(tree));
-                    }
-                    return c.ok({ timeline: formatTimelineAsJson(tree) }, {
-                        cta: buildAgentNextSteps({ runId: c.args.runId }),
-                    });
-                }
-                const timeline = await buildTimeline(adapter, c.args.runId);
-                const tree = { timeline, children: [] };
+                const tree = c.options.tree
+                    ? await buildTimelineTree(adapter, c.args.runId)
+                    : { timeline: await buildTimeline(adapter, c.args.runId), children: [] };
                 if (c.options.json) {
                     writeStdoutSync(`${JSON.stringify({ timeline: formatTimelineAsJson(tree) }, null, 2)}\n`);
                     return undefined;
                 }
-                else {
-                    console.log(formatTimelineForTui(tree));
-                }
+                console.log(formatTimelineForTui(tree));
                 return c.ok({ timeline: formatTimelineAsJson(tree) }, {
                     cta: buildAgentNextSteps({ runId: c.args.runId }),
                 });

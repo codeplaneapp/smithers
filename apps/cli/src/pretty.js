@@ -45,7 +45,7 @@ function pad(indent) {
 /**
  * A picocolors-shaped styler: each role is `(s: string) => string`. Production
  * passes `pc`; tests pass an identity object so assertions see pure structure
- * with zero ANSI. Only the roles below are used.
+ * with zero ANSI.
  *
  * @typedef {{
  *   bold: (s: string) => string,
@@ -53,6 +53,8 @@ function pad(indent) {
  *   cyan: (s: string) => string,
  *   green: (s: string) => string,
  *   yellow: (s: string) => string,
+ *   blue: (s: string) => string,
+ *   magenta: (s: string) => string,
  * }} ColorStyler
  */
 

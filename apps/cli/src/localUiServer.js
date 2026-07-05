@@ -1209,27 +1209,10 @@ export function startLocalUiServer({
       }
       // Reverse-proxy to the gateway, rewriting Host/Origin so the gateway sees
       // a same-origin loopback request (it may reject cross-origin upgrades).
-      const headers = { ...req.headers, host: `${gatewayHost}:${gatewayPort}` };
-      if (headers.origin)
-        headers.origin = `http://${gatewayHost}:${gatewayPort}`;
-      const proxyReq = httpRequest(
-        {
-          host: gatewayHost,
-          port: gatewayPort,
-          method: req.method,
-          path: req.url,
-          headers,
-        },
-        (proxyRes) => {
-          res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
-          proxyRes.pipe(res);
-        },
-      );
-      proxyReq.on("error", () => {
+      proxyTo(req, res, gatewayHost, gatewayPort, () => {
         res.writeHead(502, { "content-type": "text/plain" });
         res.end("Gateway unreachable");
       });
-      req.pipe(proxyReq);
       return;
     }
 

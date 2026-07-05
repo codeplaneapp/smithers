@@ -42,14 +42,6 @@ const SUBSCRIPTION_LOGIN_RECIPE = {
     "kimi": { args: ["login"] },
 };
 
-/**
- * @param {string[] | ((configDir: string) => string[])} args
- * @param {string} configDir
- */
-function resolveLoginArgs(args, configDir) {
-    return typeof args === "function" ? args(configDir) : args;
-}
-
 function bail() {
     outro("Cancelled.");
     process.exit(130);
@@ -110,7 +102,8 @@ export async function agentAddWizard(opts = {}) {
             const bin = SUBSCRIPTION_LOGIN_BIN[provider];
             const envVar = SUBSCRIPTION_DIR_ENV_VAR[provider];
             const recipe = SUBSCRIPTION_LOGIN_RECIPE[provider] ?? { args: [] };
-            const loginArgs = resolveLoginArgs(recipe.args, configDir);
+            // antigravity's args depend on the chosen config dir.
+            const loginArgs = typeof recipe.args === "function" ? recipe.args(configDir) : recipe.args;
             const loginCmd = `${envVar}=${configDir} ${bin}${loginArgs.length ? " " + loginArgs.join(" ") : ""}`;
             const lines = [
                 "Open another terminal and run:",

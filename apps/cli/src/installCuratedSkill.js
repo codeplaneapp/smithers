@@ -7,7 +7,6 @@ import { detectAvailableAgents } from "./agent-detection.js";
 
 /** Skill folder name written under each agent's skills directory. */
 export const CURATED_SKILL_NAME = "smithers";
-const SKILL_NAME = CURATED_SKILL_NAME;
 
 /**
  * Retired skill identities that must never keep shadowing the current curated
@@ -104,7 +103,7 @@ export function installCuratedSkill(opts = {}) {
   const detections = opts.detections ?? detectAvailableAgents(env);
   const source = resolveSkillSource(opts.sourceDir);
   /** @type {CuratedSkillResult} */
-  const result = { installed: [], skipped: [], skill: SKILL_NAME, source: source ? source.skillMd : null };
+  const result = { installed: [], skipped: [], skill: CURATED_SKILL_NAME, source: source ? source.skillMd : null };
   if (!source) {
     result.skipped.push({ agent: "all", reason: "bundled skill source not found" });
     return result;
@@ -120,7 +119,7 @@ export function installCuratedSkill(opts = {}) {
       continue;
     }
     try {
-      const dest = join(target.skillsDir, SKILL_NAME);
+      const dest = join(target.skillsDir, CURATED_SKILL_NAME);
       mkdirSync(dest, { recursive: true });
       copyFileSync(source.skillMd, join(dest, "SKILL.md"));
       copyFileSync(source.llmsFull, join(dest, "llms-full.txt"));

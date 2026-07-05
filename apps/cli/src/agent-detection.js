@@ -923,83 +923,6 @@ function pathLiteral(absPath, homeDir) {
 }
 
 /**
- * Generates an agents.ts file driven by ~/.smithers/accounts.json. One
- * `providers.<labelCamel>` entry is emitted per registered account; pools
- * group accounts by engine family.
- *
- * @param {import("@smithers-orchestrator/accounts").Account[]} accounts
- * @param {NodeJS.ProcessEnv} env
- * @returns {string}
- */
-function generateAccountsAgentsTs(accounts, env) {
-    const homeDir = env.HOME ?? homedir();
-    /** @type {Set<string>} */
-    const importNames = new Set();
-    for (const account of accounts) {
-        const cls = ACCOUNT_PROVIDER_CLASSES[account.provider];
-        if (cls) importNames.add(cls);
-    }
-    const smithersImportSpecifiers = [
-        "type AgentLike",
-        ...[...importNames].map((n) => `${n} as Smithers${n}`),
-    ];
-    const providerLines = accounts.map((account) => renderAccountProviderLine(account, homeDir));
-    /** @type {Map<string, string[]>} */
-    const poolMembers = new Map();
-    for (const account of accounts) {
-        const family = ACCOUNT_PROVIDER_POOL[account.provider];
-        if (!family) continue;
-        const arr = poolMembers.get(family) ?? [];
-        arr.push(labelToCamel(account.label));
-        poolMembers.set(family, arr);
-    }
-    const poolLines = [...poolMembers.entries()].map(([family, members]) =>
-        `  ${family}: [${members.map((m) => `providers.${m}`).join(", ")}],`,
-    );
-    const allLabels = accounts.map((a) => labelToCamel(a.label));
-    const membersForFamilies = (...families) => {
-        const seen = new Set();
-        const members = [];
-        for (const family of families) {
-            for (const member of poolMembers.get(family) ?? []) {
-                if (seen.has(member)) continue;
-                seen.add(member);
-                members.push(member);
-            }
-        }
-        for (const member of allLabels) {
-            if (seen.has(member)) continue;
-            seen.add(member);
-            members.push(member);
-        }
-        return members;
-    };
-    poolLines.push(`  smart: [${membersForFamilies("claude", "codex").map((m) => `providers.${m}`).join(", ")}],`);
-    poolLines.push(`  smartTool: [${membersForFamilies("claude", "codex").map((m) => `providers.${m}`).join(", ")}],`);
-    poolLines.push(`  cheapFast: [${membersForFamilies("kimi", "antigravity", "codex", "claude").slice(0, 2).map((m) => `providers.${m}`).join(", ")}],`);
-    poolLines.push(`  review: [${membersForFamilies("claude", "codex").slice(0, 3).map((m) => `providers.${m}`).join(", ")}],`);
-    // Fable sandwich (see TIER_PREFERENCES): planning is claude-led, implement is codex-led.
-    poolLines.push(`  planning: [${membersForFamilies("claude", "codex").slice(0, 3).map((m) => `providers.${m}`).join(", ")}],`);
-    poolLines.push(`  implement: [${membersForFamilies("codex", "claude").slice(0, 3).map((m) => `providers.${m}`).join(", ")}],`);
-    return [
-        "// smithers-source: generated",
-        "// Source of truth: ~/.smithers/accounts.json (managed via `smithers agent add|list|remove`)",
-        'import { homedir } from "node:os";',
-        'import path from "node:path";',
-        `import { ${smithersImportSpecifiers.join(", ")} } from "smithers-orchestrator";`,
-        "",
-        "export const providers = {",
-        ...providerLines,
-        "} as const;",
-        "",
-        "export const agents = {",
-        ...poolLines,
-        "} as const satisfies Record<string, AgentLike[]>;",
-        "",
-    ].join("\n");
-}
-
-/**
  * Renders an account as `<labelCamel>: new SmithersFooAgent({ ... })` for
  * inclusion in the providers map.
  *
@@ -1190,7 +1113,6 @@ export function generateAgentsTs(env = process.env, options = {}) {
         .map((detector) => ({
             id: detector.id,
             active: availableById.has(detector.id),
-            detection: availableById.get(detector.id) ?? detections.find((entry) => entry.id === detector.id),
         }));
     const activeProviderStates = providerStates.filter((entry) => entry.active);
     const activeBaseIds = new Set(activeProviderStates.map((entry) => entry.id));
@@ -1261,7 +1183,7 @@ export function generateAgentsTs(env = process.env, options = {}) {
     ).flat();
     // Tier lines: detection-resolved members, then accounts whose engine
     // family is in the tier's preference order get appended.
-    const resolvedTiers = Object.entries(TIER_PREFERENCES).map(([tier, { order, maxSize }]) => {
+    const resolvedTierLines = Object.entries(TIER_PREFERENCES).map(([tier, { order, maxSize }]) => {
         let resolved = order
             .filter((id) => allProviderIds.has(id))
             .slice(0, maxSize);
@@ -1287,20 +1209,16 @@ export function generateAgentsTs(env = process.env, options = {}) {
             merged = [...merged.filter((id) => id !== DEFAULT_PROVIDER_ID), DEFAULT_PROVIDER_ID];
         }
         const commented = order.filter((id) => !allProviderIds.has(id));
-        return {
+        return renderTierLine(
             tier,
-            members: merged,
-            lines: renderTierLine(
-                tier,
-                merged,
-                commented,
-                renderUnavailablePreferenceComments(tier, order, allProviderIds, detectionsById),
-            ),
-        };
+            merged,
+            commented,
+            renderUnavailablePreferenceComments(tier, order, allProviderIds, detectionsById),
+        );
     });
     const tierLines = [
         ...accountPoolLines,
-        ...resolvedTiers.flatMap((entry) => entry.lines),
+        ...resolvedTierLines.flat(),
     ];
     return [
         "// smithers-source: generated",

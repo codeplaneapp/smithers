@@ -45,7 +45,7 @@ function parseAttemptMeta(metaJson) {
 }
 /**
  * @param {string} workflowPath
- * @returns {Promise<SmithersWorkflow<any>>}
+ * @returns {Promise<import("@smithers-orchestrator/components").SmithersWorkflow<any>>}
  */
 async function loadWorkflow(workflowPath) {
     const abs = resolve(process.cwd(), workflowPath);
