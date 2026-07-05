@@ -2,6 +2,9 @@ import type { GatewayScope } from "../auth/scopes.ts";
 import { GATEWAY_SCOPE_VALUES } from "../auth/scopes.ts";
 
 export const SMITHERS_API_VERSION = "v1" as const;
+// Default `eventWindowSize` for the server: how many per-run events are retained
+// for streamRunEvents bounded replay. A subscriber reconnecting from further back
+// than this window gets GapResync semantics instead of a replay.
 export const GATEWAY_EVENT_WINDOW_DEFAULT = 10_000;
 
 export type SmithersApiVersion = typeof SMITHERS_API_VERSION;
@@ -334,6 +337,10 @@ export type CronRunRequest = {
   input?: Record<string, unknown>;
 };
 
+// The fixed `smithers agents` provider catalog. The GatewayAccount["provider"]
+// union and the listAccounts schema enum both derive from this so they cannot drift.
+const ACCOUNT_PROVIDERS = ["claude-code", "antigravity", "codex", "gemini", "kimi", "anthropic-api", "openai-api", "gemini-api"] as const;
+
 /**
  * One registered Smithers agent account — a row in the user-level
  * `~/.smithers/accounts.json` registry that the `smithers agents` CLI manages,
@@ -352,15 +359,7 @@ export type GatewayAccount = {
   /** Unique account label (the registry key, `--label`). */
   label: string;
   /** Provider id, one of the fixed `smithers agents` catalog. */
-  provider:
-    | "claude-code"
-    | "antigravity"
-    | "codex"
-    | "gemini"
-    | "kimi"
-    | "anthropic-api"
-    | "openai-api"
-    | "gemini-api";
+  provider: (typeof ACCOUNT_PROVIDERS)[number];
   /** Per-account CLI config dir for subscription providers (absent for api-key accounts). */
   configDir?: string | null;
   /** True when a subscription account has a non-empty config dir. */
@@ -443,8 +442,12 @@ export type ListScoresRequest = {
 
 export type ListScoresResponse = GatewayScoreRow[];
 
+// The closed set of work-doc kinds in `_smithers_docs`. The GatewayDocKind
+// union and every ticket-RPC schema enum derive from this so they cannot drift.
+const DOC_KINDS = ["ticket", "plan", "spec", "proposal"] as const;
+
 /** A doc kind stored in `_smithers_docs`; the tickets surface uses `ticket`. */
-export type GatewayDocKind = "ticket" | "plan" | "spec" | "proposal";
+export type GatewayDocKind = (typeof DOC_KINDS)[number];
 
 /**
  * One LIVE doc row (the `_smithers_docs` table, snake→camel cased) returned by
@@ -614,6 +617,22 @@ export const GATEWAY_RPC_LEGACY_METHOD_ALIASES: Record<string, GatewayRpcMethod>
   "cron.add": "cronCreate",
   "cron.remove": "cronDelete",
   "cron.trigger": "cronRun",
+};
+
+// packages/server HTTP/legacy routes with no GATEWAY_RPC_DEFINITIONS entry, kept
+// here so scope enforcement (auth/scopes.ts methodGrantSatisfiesRequiredScope)
+// and the OpenAPI generator share one source of truth for required scopes.
+const HTTP_ROUTE_SCOPES: Record<string, GatewayScope> = {
+  health: "run:read",
+  "approvals.list": "run:read",
+  "workflows.list": "run:read",
+  "runs.diff": "run:read",
+  "frames.list": "run:read",
+  "frames.get": "run:read",
+  "attempts.list": "run:read",
+  "attempts.get": "run:read",
+  "runs.rerun": "run:write",
+  approve: "approval:submit",
 };
 
 export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
@@ -1026,7 +1045,7 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
       label: stringSchema("Unique account label (the registry key)."),
       provider: {
         type: "string",
-        enum: ["claude-code", "antigravity", "codex", "gemini", "kimi", "anthropic-api", "openai-api", "gemini-api"],
+        enum: ACCOUNT_PROVIDERS,
         description: "Provider id, one of the fixed `smithers agents` catalog.",
       },
       configDir: { type: ["string", "null"], description: "Per-account CLI config dir for subscription providers (null for api-key accounts)." },
@@ -1120,11 +1139,11 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
     transport: "http+websocket",
     requiredScope: "ticket:read",
     requestSchema: objectSchema({
-      kind: { type: "string", enum: ["ticket", "plan", "spec", "proposal"], description: "Optional doc-kind filter; omit to list every kind." },
+      kind: { type: "string", enum: DOC_KINDS, description: "Optional doc-kind filter; omit to list every kind." },
     }),
     responseSchema: arraySchema(objectSchema({
       path: stringSchema("Doc identity (primary key); e.g. a ticket id."),
-      kind: { type: "string", enum: ["ticket", "plan", "spec", "proposal"], description: "Doc kind." },
+      kind: { type: "string", enum: DOC_KINDS, description: "Doc kind." },
       content: stringSchema("Full markdown body."),
       contentHash: stringSchema("sha256(content), lowercase hex."),
       status: { type: ["string", "null"], description: "Free-form status (e.g. todo/in-progress/done); rides the row so it survives reload." },
@@ -1145,12 +1164,12 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
     requestSchema: objectSchema({
       path: stringSchema("Doc identity (primary key); e.g. `feat-issues-card`."),
       content: stringSchema("Full markdown body."),
-      kind: { type: "string", enum: ["ticket", "plan", "spec", "proposal"], description: "Doc kind (default `ticket`)." },
+      kind: { type: "string", enum: DOC_KINDS, description: "Doc kind (default `ticket`)." },
       status: stringSchema("Optional initial status."),
     }, ["path", "content"]),
     responseSchema: objectSchema({
       path: stringSchema("Doc identity (primary key)."),
-      kind: { type: "string", enum: ["ticket", "plan", "spec", "proposal"], description: "Doc kind." },
+      kind: { type: "string", enum: DOC_KINDS, description: "Doc kind." },
       content: stringSchema("Full markdown body."),
       contentHash: stringSchema("sha256(content), lowercase hex."),
       status: { type: ["string", "null"], description: "Free-form status." },
@@ -1175,7 +1194,7 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
     }, ["path"]),
     responseSchema: objectSchema({
       path: stringSchema("Doc identity (primary key)."),
-      kind: { type: "string", enum: ["ticket", "plan", "spec", "proposal"], description: "Doc kind." },
+      kind: { type: "string", enum: DOC_KINDS, description: "Doc kind." },
       content: stringSchema("Full markdown body."),
       contentHash: stringSchema("sha256(content), lowercase hex."),
       status: { type: ["string", "null"], description: "Free-form status." },
@@ -1221,26 +1240,12 @@ export function getGatewayRpcDefinition(method: string): GatewayRpcDefinition | 
 }
 
 export function getRequiredScopeForGatewayMethod(method: string): GatewayScope | undefined {
-  if (method === "health") {
-    return "run:read";
+  // hasOwn (not plain indexing) so inherited Object.prototype keys such as
+  // "toString" fall through to the catalog lookup instead of matching.
+  if (Object.hasOwn(HTTP_ROUTE_SCOPES, method)) {
+    return HTTP_ROUTE_SCOPES[method];
   }
-  if (method === "approvals.list") {
-    return "run:read";
-  }
-  if (method === "workflows.list") {
-    return "run:read";
-  }
-  if (method === "runs.diff" || method === "frames.list" || method === "frames.get" || method === "attempts.list" || method === "attempts.get") {
-    return "run:read";
-  }
-  if (method === "runs.rerun") {
-    return "run:write";
-  }
-  if (method === "approve") {
-    return "approval:submit";
-  }
-  const definition = getGatewayRpcDefinition(method);
-  return definition?.requiredScope;
+  return getGatewayRpcDefinition(method)?.requiredScope;
 }
 
 export function listGatewayRpcMethods(): readonly GatewayRpcMethod[] {

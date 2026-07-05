@@ -40,10 +40,6 @@ const RUN_SCOPE_ORDER: GatewayScope[] = ["run:read", "run:write", "run:admin"];
 const CRON_SCOPE_ORDER: GatewayScope[] = ["cron:read", "cron:write"];
 const TICKET_SCOPE_ORDER: GatewayScope[] = ["ticket:read", "ticket:write"];
 
-function normalizeScope(scope: string): string {
-  return scope.trim();
-}
-
 export function isGatewayScope(scope: string): scope is GatewayScope {
   return (GATEWAY_SCOPE_VALUES as readonly string[]).includes(scope);
 }
@@ -100,7 +96,7 @@ export function hasGatewayScope(
   requiredScope: GatewayScope,
   methodName?: string,
 ): boolean {
-  const normalized = grantedScopes.map(normalizeScope).filter(Boolean);
+  const normalized = grantedScopes.map((scope) => scope.trim()).filter(Boolean);
   if (normalized.includes("*")) {
     return true;
   }
