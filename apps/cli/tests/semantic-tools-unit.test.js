@@ -476,6 +476,26 @@ describe("semantic tool definitions", () => {
         });
         expect(typeof background.structuredContent.ok).toBe("boolean");
         expectWorkflowSummaryMatchesSchema(background.structuredContent.data.workflow);
+
+        // Durability contract: a caller abort during waitForTerminal must NOT
+        // cancel the durable run — the wait detaches and reports the run as
+        // launched-in-background. A pre-aborted signal makes this deterministic:
+        // the old code forwarded the signal into runWorkflow and came back
+        // "waited"/"cancelled"; the fix launches without the signal and detaches.
+        const preAborted = new AbortController();
+        preAborted.abort();
+        const detached = await harness.call(
+            "run_workflow",
+            {
+                workflowId: "quick",
+                runId: "semantic-quick-detached",
+                waitForTerminal: true,
+            },
+            { signal: preAborted.signal },
+        );
+        expect(detached.structuredContent.ok).toBe(true);
+        expect(detached.structuredContent.data.launchMode).toBe("background");
+        expect(detached.structuredContent.data.status).not.toBe("cancelled");
     });
 
     test("list_workflows payload carries only keys declared in the output schema (#223)", async () => {

@@ -126,6 +126,13 @@ describe("ask_human semantic tool", () => {
             expect(result.structuredContent.data.requestId).toBe(requestId);
             expect(result.structuredContent.data.status).toBe("aborted");
             expect(result.structuredContent.data.decision).toBe("blocked");
+
+            // The orphaned request must be cancelled, not left pending for a
+            // human to answer after the caller has gone.
+            const stillPending = await adapter.listPendingHumanRequests();
+            expect(stillPending).toHaveLength(0);
+            const cancelled = await adapter.getHumanRequest(requestId);
+            expect(cancelled?.status).toBe("cancelled");
         } finally {
             sqlite.close();
         }

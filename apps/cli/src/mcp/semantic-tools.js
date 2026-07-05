@@ -540,31 +540,71 @@ const getRunEventsDataSchema = z.object({
     events: z.array(eventSchema),
 });
 /**
+ * The single abort error every MCP wait path raises/settles with, so callers
+ * can pattern-match one code.
+ * @returns {SmithersError}
+ */
+function mcpAbortError() {
+    return new SmithersError("TASK_ABORTED", "MCP tool call was aborted.");
+}
+/**
  * @param {AbortSignal | undefined} signal
  */
 function throwIfAborted(signal) {
     if (signal?.aborted) {
-        throw new SmithersError("TASK_ABORTED", "MCP tool call was aborted.");
+        throw mcpAbortError();
     }
 }
 /**
  * @param {number} ms
  * @param {AbortSignal} [signal]
+ * @returns {Promise<void>} rejects with {@link mcpAbortError} if aborted
  */
 function sleep(ms, signal) {
-    throwIfAborted(signal);
     return new Promise((resolvePromise, rejectPromise) => {
+        // The executor runs synchronously, so this early check and the
+        // addEventListener below cannot race an abort between them.
+        if (signal?.aborted) {
+            rejectPromise(mcpAbortError());
+            return;
+        }
         const timer = setTimeout(() => {
             signal?.removeEventListener("abort", onAbort);
             resolvePromise();
         }, ms);
         const onAbort = () => {
             clearTimeout(timer);
-            signal?.removeEventListener("abort", onAbort);
-            rejectPromise(new SmithersError("TASK_ABORTED", "MCP tool call was aborted."));
+            rejectPromise(mcpAbortError());
         };
         signal?.addEventListener("abort", onAbort, { once: true });
-        if (signal?.aborted) onAbort();
+    });
+}
+/**
+ * Await `promise`, but resolve early to `{ aborted: true }` if `signal` fires
+ * first. Used by durable waits (e.g. run_workflow's waitForTerminal) that must
+ * NOT cancel the underlying run when the MCP caller goes away — they detach and
+ * report the run as still-running instead. Rejections from `promise` propagate.
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<{ aborted: true } | { aborted: false, value: T }>}
+ */
+function settleOrAbort(promise, signal) {
+    if (!signal) return promise.then((value) => ({ aborted: false, value }));
+    if (signal.aborted) return Promise.resolve({ aborted: true });
+    return new Promise((resolvePromise, rejectPromise) => {
+        const onAbort = () => {
+            promise.then(undefined, () => {}); // keep a handler so the detached run's rejection isn't unhandled
+            resolvePromise({ aborted: true });
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        promise.then((value) => {
+            signal.removeEventListener("abort", onAbort);
+            resolvePromise({ aborted: false, value });
+        }, (error) => {
+            signal.removeEventListener("abort", onAbort);
+            rejectPromise(error);
+        });
     });
 }
 /**
@@ -815,6 +855,10 @@ async function loadWorkflowById(workflowId, cwd) {
     };
 }
 /**
+ * Poll briefly for the just-launched run row to appear. This is a
+ * best-effort observe on the background path — an abort (the caller went away)
+ * returns `null` like a deadline miss, so the handler still reports the run as
+ * launched-in-background rather than throwing. It never cancels the run.
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {number} waitForStartMs
@@ -823,7 +867,9 @@ async function loadWorkflowById(workflowId, cwd) {
 async function waitForObservedRun(adapter, runId, waitForStartMs, signal) {
     const deadline = Date.now() + Math.max(0, waitForStartMs);
     while (true) {
-        throwIfAborted(signal);
+        if (signal?.aborted) {
+            return null;
+        }
         const run = await adapter.getRun(runId);
         if (run) {
             return buildRunSummary(adapter, run);
@@ -831,7 +877,12 @@ async function waitForObservedRun(adapter, runId, waitForStartMs, signal) {
         if (Date.now() >= deadline) {
             return null;
         }
-        await sleep(25, signal);
+        try {
+            await sleep(25, signal);
+        }
+        catch {
+            return null;
+        }
     }
 }
 /**
@@ -1039,7 +1090,10 @@ export function createSemanticToolDefinitions(options = {}) {
                     maxOutputBytes: input.maxOutputBytes,
                     toolTimeoutMs: input.toolTimeoutMs,
                     hot: input.hot,
-                    signal: input.waitForTerminal ? extra?.signal : undefined,
+                    // Deliberately NOT forwarding extra?.signal: the MCP caller's
+                    // abort (client crash, timeout, disconnect) must never cancel
+                    // a durable run. waitForTerminal races the wait against the
+                    // abort below and detaches instead of tearing the run down.
                 })).then((result) => {
                     launchState.settled = true;
                     launchState.result = result;
@@ -1050,7 +1104,30 @@ export function createSemanticToolDefinitions(options = {}) {
                     throw error;
                 });
                 if (input.waitForTerminal) {
-                    const result = await launchPromise;
+                    // Race the terminal wait against the caller's abort. If the
+                    // caller aborts first the durable run keeps executing; we
+                    // detach and report it as still-running in the background.
+                    const terminal = await settleOrAbort(launchPromise, extra?.signal);
+                    if (terminal.aborted) {
+                        void launchPromise.catch((error) => {
+                            const rendered = toToolError(error);
+                            console.error(`[smithers:mcp] run_workflow detached after abort ${runId}: ${rendered.code} ${rendered.message}`);
+                        });
+                        const detachedRun = adapter != null ? await adapter.getRun(runId) : null;
+                        return {
+                            workflow: summary,
+                            runId,
+                            launchMode: "background",
+                            requestedResume: input.resume,
+                            status: detachedRun?.status ?? "running",
+                            observedRun: detachedRun != null
+                                ? await buildRunSummary(adapter, detachedRun)
+                                : null,
+                            result: null,
+                            monitoring,
+                        };
+                    }
+                    const result = terminal.value;
                     const observedRun = adapter != null ? await adapter.getRun(result.runId) : null;
                     return {
                         workflow: summary,
@@ -1308,6 +1385,14 @@ export function createSemanticToolDefinitions(options = {}) {
                         : undefined,
                     signal: extra?.signal,
                 });
+                if (outcome.status === "aborted") {
+                    // The caller went away; cancel the still-pending request so a
+                    // human doesn't later answer an orphaned prompt. Only flips
+                    // rows still `pending`, so a concurrent answer is preserved.
+                    // Still return a structured blocked outcome (not a throw) so
+                    // the caller keeps the requestId it can reference later.
+                    await adapter.cancelHumanRequest(row.requestId);
+                }
                 let response = null;
                 if (outcome.status === "answered" && outcome.responseJson != null) {
                     try {
