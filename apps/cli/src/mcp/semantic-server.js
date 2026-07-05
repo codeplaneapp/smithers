@@ -63,7 +63,7 @@ export function registerSemanticTools(server, toolDefinitions = createSemanticTo
             inputSchema: tool.inputSchema,
             outputSchema: tool.outputSchema,
             annotations: tool.annotations,
-        }, async (input) => tool.handler(input));
+        }, async (input, extra) => tool.handler(input, extra));
     }
     return server;
 }

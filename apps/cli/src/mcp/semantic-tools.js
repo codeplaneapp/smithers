@@ -34,6 +34,7 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
  * @typedef {(adapter: SmithersDb, dbPath: string) => Promise<T>} WithDbCallback
  */
 /** @typedef {import("./SemanticToolDefinition.ts").SemanticToolDefinition} SemanticToolDefinition */
+/** @typedef {import("./SemanticToolDefinition.ts").SemanticToolCallExtra} SemanticToolCallExtra */
 
 export const SEMANTIC_TOOL_NAMES = [
     "list_workflows",
@@ -536,11 +537,71 @@ const getRunEventsDataSchema = z.object({
     events: z.array(eventSchema),
 });
 /**
- * @param {number} ms
+ * The single abort error every MCP wait path raises/settles with, so callers
+ * can pattern-match one code.
+ * @returns {SmithersError}
  */
-function sleep(ms) {
-    return new Promise((resolvePromise) => {
-        setTimeout(resolvePromise, ms);
+function mcpAbortError() {
+    return new SmithersError("TASK_ABORTED", "MCP tool call was aborted.");
+}
+/**
+ * @param {AbortSignal | undefined} signal
+ */
+function throwIfAborted(signal) {
+    if (signal?.aborted) {
+        throw mcpAbortError();
+    }
+}
+/**
+ * @param {number} ms
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<void>} rejects with {@link mcpAbortError} if aborted
+ */
+function sleep(ms, signal) {
+    return new Promise((resolvePromise, rejectPromise) => {
+        // The executor runs synchronously, so this early check and the
+        // addEventListener below cannot race an abort between them.
+        if (signal?.aborted) {
+            rejectPromise(mcpAbortError());
+            return;
+        }
+        const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolvePromise();
+        }, ms);
+        const onAbort = () => {
+            clearTimeout(timer);
+            rejectPromise(mcpAbortError());
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+    });
+}
+/**
+ * Await `promise`, but resolve early to `{ aborted: true }` if `signal` fires
+ * first. Used by durable waits (e.g. run_workflow's waitForTerminal) that must
+ * NOT cancel the underlying run when the MCP caller goes away — they detach and
+ * report the run as still-running instead. Rejections from `promise` propagate.
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<{ aborted: true } | { aborted: false, value: T }>}
+ */
+function settleOrAbort(promise, signal) {
+    if (!signal) return promise.then((value) => ({ aborted: false, value }));
+    if (signal.aborted) return Promise.resolve({ aborted: true });
+    return new Promise((resolvePromise, rejectPromise) => {
+        const onAbort = () => {
+            promise.then(undefined, () => {}); // keep a handler so the detached run's rejection isn't unhandled
+            resolvePromise({ aborted: true });
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        promise.then((value) => {
+            signal.removeEventListener("abort", onAbort);
+            resolvePromise({ aborted: false, value });
+        }, (error) => {
+            signal.removeEventListener("abort", onAbort);
+            rejectPromise(error);
+        });
     });
 }
 /**
@@ -791,13 +852,21 @@ async function loadWorkflowById(workflowId, cwd) {
     };
 }
 /**
+ * Poll briefly for the just-launched run row to appear. This is a
+ * best-effort observe on the background path — an abort (the caller went away)
+ * returns `null` like a deadline miss, so the handler still reports the run as
+ * launched-in-background rather than throwing. It never cancels the run.
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {number} waitForStartMs
+ * @param {AbortSignal} [signal]
  */
-async function waitForObservedRun(adapter, runId, waitForStartMs) {
+async function waitForObservedRun(adapter, runId, waitForStartMs, signal) {
     const deadline = Date.now() + Math.max(0, waitForStartMs);
     while (true) {
+        if (signal?.aborted) {
+            return null;
+        }
         const run = await adapter.getRun(runId);
         if (run) {
             return buildRunSummary(adapter, run);
@@ -805,7 +874,12 @@ async function waitForObservedRun(adapter, runId, waitForStartMs) {
         if (Date.now() >= deadline) {
             return null;
         }
-        await sleep(25);
+        try {
+            await sleep(25, signal);
+        }
+        catch {
+            return null;
+        }
     }
 }
 /**
@@ -979,7 +1053,7 @@ export function createSemanticToolDefinitions(options = {}) {
             inputSchema: runWorkflowInputSchema,
             outputSchema: resultSchema(runWorkflowDataSchema),
             annotations: { readOnlyHint: false, openWorldHint: true },
-            handler: (input) => executeSemanticTool("run_workflow", async () => {
+            handler: (input, extra) => executeSemanticTool("run_workflow", async () => {
                 const runId = input.runId ?? crypto.randomUUID();
                 const { workflow, summary } = await loadWorkflowById(input.workflowId, context.cwd());
                 const adapter = workflow.db
@@ -1013,6 +1087,10 @@ export function createSemanticToolDefinitions(options = {}) {
                     maxOutputBytes: input.maxOutputBytes,
                     toolTimeoutMs: input.toolTimeoutMs,
                     hot: input.hot,
+                    // Deliberately NOT forwarding extra?.signal: the MCP caller's
+                    // abort (client crash, timeout, disconnect) must never cancel
+                    // a durable run. waitForTerminal races the wait against the
+                    // abort below and detaches instead of tearing the run down.
                 })).then((result) => {
                     launchState.settled = true;
                     launchState.result = result;
@@ -1023,7 +1101,30 @@ export function createSemanticToolDefinitions(options = {}) {
                     throw error;
                 });
                 if (input.waitForTerminal) {
-                    const result = await launchPromise;
+                    // Race the terminal wait against the caller's abort. If the
+                    // caller aborts first the durable run keeps executing; we
+                    // detach and report it as still-running in the background.
+                    const terminal = await settleOrAbort(launchPromise, extra?.signal);
+                    if (terminal.aborted) {
+                        void launchPromise.catch((error) => {
+                            const rendered = toToolError(error);
+                            console.error(`[smithers:mcp] run_workflow detached after abort ${runId}: ${rendered.code} ${rendered.message}`);
+                        });
+                        const detachedRun = adapter != null ? await adapter.getRun(runId) : null;
+                        return {
+                            workflow: summary,
+                            runId,
+                            launchMode: "background",
+                            requestedResume: input.resume,
+                            status: detachedRun?.status ?? "running",
+                            observedRun: detachedRun != null
+                                ? await buildRunSummary(adapter, detachedRun)
+                                : null,
+                            result: null,
+                            monitoring,
+                        };
+                    }
+                    const result = terminal.value;
                     const observedRun = adapter != null ? await adapter.getRun(result.runId) : null;
                     return {
                         workflow: summary,
@@ -1043,7 +1144,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     console.error(`[smithers:mcp] run_workflow background failure ${runId}: ${rendered.code} ${rendered.message}`);
                 });
                 const observedRun = adapter != null
-                    ? await waitForObservedRun(adapter, runId, input.waitForStartMs)
+                    ? await waitForObservedRun(adapter, runId, input.waitForStartMs, extra?.signal)
                     : null;
                 if (observedRun == null && launchState.settled) {
                     if (launchState.error) {
@@ -1107,12 +1208,13 @@ export function createSemanticToolDefinitions(options = {}) {
             inputSchema: watchRunInputSchema,
             outputSchema: resultSchema(watchRunDataSchema),
             annotations: { readOnlyHint: true },
-            handler: (input) => executeSemanticTool("watch_run", async () => withDb(context, async (adapter, dbPath) => {
+            handler: (input, extra) => executeSemanticTool("watch_run", async () => withDb(context, async (adapter, dbPath) => {
                 const intervalMs = Math.max(WATCH_MIN_INTERVAL_MS, input.intervalMs);
                 const deadline = Date.now() + input.timeoutMs;
                 const snapshots = [];
                 let pollCount = 0;
                 while (true) {
+                    throwIfAborted(extra?.signal);
                     const run = await adapter.getRun(input.runId);
                     if (!run) {
                         const dbHint = dbPath ? ` (db: ${dbPath})` : "";
@@ -1153,7 +1255,7 @@ export function createSemanticToolDefinitions(options = {}) {
                         };
                     }
                     pollCount += 1;
-                    await sleep(intervalMs);
+                    await sleep(intervalMs, extra?.signal);
                 }
             })),
         },
@@ -1246,7 +1348,8 @@ export function createSemanticToolDefinitions(options = {}) {
                 openWorldHint: true,
                 idempotentHint: false,
             },
-            handler: (input) => executeSemanticTool("ask_human", async () => withDb(context, async (adapter) => {
+            handler: (input, extra) => executeSemanticTool("ask_human", async () => withDb(context, async (adapter) => {
+                throwIfAborted(extra?.signal);
                 const ctx = await resolveAskHumanContext(adapter, {
                     runId: input.runId,
                     nodeId: input.nodeId,
@@ -1277,7 +1380,16 @@ export function createSemanticToolDefinitions(options = {}) {
                     pollIntervalMs: typeof input.pollSeconds === "number" && input.pollSeconds > 0
                         ? Math.floor(input.pollSeconds * 1_000)
                         : undefined,
+                    signal: extra?.signal,
                 });
+                if (outcome.status === "aborted") {
+                    // The caller went away; cancel the still-pending request so a
+                    // human doesn't later answer an orphaned prompt. Only flips
+                    // rows still `pending`, so a concurrent answer is preserved.
+                    // Still return a structured blocked outcome (not a throw) so
+                    // the caller keeps the requestId it can reference later.
+                    await adapter.cancelHumanRequest(row.requestId);
+                }
                 let response = null;
                 if (outcome.status === "answered" && outcome.responseJson != null) {
                     try {

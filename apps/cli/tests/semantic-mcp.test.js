@@ -124,6 +124,47 @@ describe("semantic MCP surface", () => {
         expect(names).toContain("raw-ping");
     });
 
+    test("forwards MCP request context to semantic tool handlers", async () => {
+        let seenExtra = null;
+        const server = createSemanticMcpServer({
+            name: "smithers-test",
+            version: "test",
+            allowedTools: [],
+        });
+        registerSemanticTools(server, [
+            {
+                name: "list_workflows",
+                description: "Test context forwarding",
+                inputSchema: z.object({}),
+                outputSchema: z.object({ ok: z.boolean() }),
+                annotations: { readOnlyHint: true },
+                handler: async (_input, extra) => {
+                    seenExtra = extra;
+                    return {
+                        content: [{ type: "text", text: '{"ok":true}' }],
+                        structuredContent: { ok: true },
+                    };
+                },
+            },
+        ]);
+        servers.push(server);
+        const client = new Client({
+            name: "smithers-semantic-test-client",
+            version: "test",
+        });
+        clients.push(client);
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        await Promise.all([
+            server.connect(serverTransport),
+            client.connect(clientTransport),
+        ]);
+
+        await client.callTool({ name: "list_workflows", arguments: {} });
+        expect(seenExtra).toBeTruthy();
+        expect(seenExtra.signal).toBeInstanceOf(AbortSignal);
+        expect(seenExtra.requestId).toBeDefined();
+    });
+
     test("rejects invalid semantic tool discovery definitions before serving", () => {
         const baseTool = {
             name: "list_workflows",
