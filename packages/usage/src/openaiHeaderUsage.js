@@ -11,6 +11,9 @@ const CHAT_URL = "https://api.openai.com/v1/chat/completions";
  */
 const PROBE_MODEL = process.env.SMITHERS_OPENAI_PROBE_MODEL ?? "gpt-4o-mini";
 
+/** Probes must fail fast: `smithers usage` fans out over every account and a hung probe stalls the whole table. */
+const PROBE_TIMEOUT_MS = 6_000;
+
 /**
  * Reads live OpenAI rate-limit headers for an API-key account.
  *
@@ -34,7 +37,7 @@ export async function openaiHeaderUsage(account) {
                 max_tokens: 1,
                 messages: [{ role: "user", content: "hi" }],
             }),
-            signal: AbortSignal.timeout(6_000),
+            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         });
         if (res.status === 401) {
             return { source: "none", error: "OPENAI_API_KEY rejected (401)" };

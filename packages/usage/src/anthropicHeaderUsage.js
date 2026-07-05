@@ -7,6 +7,9 @@ const COUNT_TOKENS_URL = "https://api.anthropic.com/v1/messages/count_tokens";
 /** The count_tokens probe needs a valid model id but generates no output tokens. */
 const PROBE_MODEL = process.env.SMITHERS_ANTHROPIC_PROBE_MODEL ?? "claude-fable-5";
 
+/** Probes must fail fast: `smithers usage` fans out over every account and a hung probe stalls the whole table. */
+const PROBE_TIMEOUT_MS = 6_000;
+
 /**
  * Reads live Anthropic rate-limit headers for an API-key account. Uses the
  * `count_tokens` endpoint, which returns the rate-limit header family without
@@ -29,7 +32,7 @@ export async function anthropicHeaderUsage(account) {
                 "content-type": "application/json",
             },
             body: JSON.stringify({ model: PROBE_MODEL, messages: [{ role: "user", content: "hi" }] }),
-            signal: AbortSignal.timeout(6_000),
+            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         });
         if (res.status === 401) {
             return { source: "none", error: "ANTHROPIC_API_KEY rejected (401)" };

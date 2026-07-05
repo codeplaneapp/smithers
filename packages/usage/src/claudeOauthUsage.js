@@ -12,6 +12,9 @@ const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
  */
 const USER_AGENT = process.env.SMITHERS_CLAUDE_CODE_UA ?? "claude-code/2.0.0";
 
+/** Probes must fail fast: `smithers usage` fans out over every account and a hung probe stalls the whole table. */
+const PROBE_TIMEOUT_MS = 6_000;
+
 /**
  * Probes the Claude Code subscription usage endpoint for an account's 5-hour and
  * weekly utilization. Undocumented and best-effort: any failure degrades to a
@@ -36,7 +39,7 @@ export async function claudeOauthUsage(account) {
                 "User-Agent": USER_AGENT,
                 "Content-Type": "application/json",
             },
-            signal: AbortSignal.timeout(6_000),
+            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         });
         if (res.status === 401) {
             return { source: "none", error: "Claude OAuth token rejected (401); run `claude` to refresh" };

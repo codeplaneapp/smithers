@@ -5,6 +5,9 @@ import { readCodexCredentials } from "./readCodexCredentials.js";
 
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
+/** Probes must fail fast: `smithers usage` fans out over every account and a hung probe stalls the whole table. */
+const PROBE_TIMEOUT_MS = 6_000;
+
 /**
  * Probes the Codex ChatGPT-subscription usage endpoint for an account's 5-hour
  * and weekly windows. This is the same data the Codex `/status` view shows and
@@ -28,7 +31,7 @@ export async function codexWhamUsage(account) {
         if (creds.accountId) headers["ChatGPT-Account-Id"] = creds.accountId;
         const res = await fetch(USAGE_URL, {
             headers,
-            signal: AbortSignal.timeout(6_000),
+            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         });
         if (res.status === 401) {
             return { source: "none", error: "Codex token rejected (401); run `codex` to refresh" };

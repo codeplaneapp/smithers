@@ -45,11 +45,10 @@ export async function getUsageForAccounts(accounts, options = {}) {
     const decisions = accounts.map((account) => {
         const entry = cache.entries[account.label];
         const fetchedAt = entry?.report?.fetchedAt;
-        const parsed = typeof fetchedAt === "string" ? nowMs - Date.parse(fetchedAt) : Number.NaN;
-        const age = Number.isFinite(parsed) ? parsed : Infinity;
-        const useCache = Number.isFinite(parsed) && (
-            age < hardFloorMs(account.provider) ||
-            (!fresh && age < refreshIntervalMs(account.provider))
+        const ageMs = typeof fetchedAt === "string" ? nowMs - Date.parse(fetchedAt) : Number.NaN;
+        const useCache = Number.isFinite(ageMs) && (
+            ageMs < hardFloorMs(account.provider) ||
+            (!fresh && ageMs < refreshIntervalMs(account.provider))
         );
         return { account, entry, useCache };
     });

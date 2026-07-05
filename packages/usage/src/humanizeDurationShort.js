@@ -1,7 +1,7 @@
 /**
  * Formats a number of seconds as a short human duration, e.g. `"2h 41m"`,
- * `"5d 3h"`, `"42s"`. Used for "resets in" columns. Negative input renders as
- * `"now"`.
+ * `"5d 3h"`, `"42s"`. Used for "resets in" columns. Non-positive or non-finite
+ * input renders as `"now"`.
  *
  * @param {number} seconds
  * @returns {string}

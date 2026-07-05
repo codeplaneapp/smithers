@@ -12,8 +12,8 @@
 function labelForMinutes(minutes, fallbackId) {
     if (minutes === undefined) return { id: fallbackId, label: fallbackId };
     if (minutes <= 60) return { id: "hourly", label: `${minutes}-minute` };
-    if (minutes < 1440) return { id: "5h", label: `${Math.round(minutes / 60)}-hour` };
-    if (minutes < 20160) return { id: "weekly", label: "weekly" };
+    if (minutes < 1440) return { id: "5h", label: `${Math.round(minutes / 60)}-hour` }; // < 1 day: hours-scale window (Codex 5h is ~300)
+    if (minutes < 20160) return { id: "weekly", label: "weekly" }; // < 2 weeks: anything day-scale is the weekly window
     return { id: "monthly", label: "monthly" };
 }
 
