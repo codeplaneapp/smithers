@@ -1,4 +1,3 @@
-/** @jsxImportSource react */
 import { useEffect, useRef, type CSSProperties } from "react";
 import { useGatewayRunEvents } from "@smithers-orchestrator/gateway-react";
 import { theme } from "./theme";

@@ -10,6 +10,7 @@ import {
   runSmithers,
   writeFakeAntigravityBinary,
   writeFakeClaudeBinary,
+  writeFakeCodexBinary,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 /**
@@ -124,6 +125,7 @@ async function checkUi(page, base, descriptor, runId) {
 workflowUiTest("every init-pack workflow UI builds + boots; the output-verified set renders real runs", async () => {
   const binDir = createExecutableDir();
   writeFakeClaudeBinary(binDir);
+  writeFakeCodexBinary(binDir);
   writeFakeAntigravityBinary(binDir);
   const repo = createTempRepo();
   const env = {

@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// Recursively delete every `.d.ts` under a root (default `src`) so a subsequent
+// `tsup` declaration build starts clean. Without this, a renamed/removed source
+// module leaves its stale `.d.ts` behind (tsup only writes, never prunes), which
+// the check-dts freshness gate would then miss. Usage: `node clean-dts.mjs [dir]`.
 import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 

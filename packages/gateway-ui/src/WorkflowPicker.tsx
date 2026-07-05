@@ -1,4 +1,3 @@
-/** @jsxImportSource react */
 import type { CSSProperties } from "react";
 import { useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
 import { theme } from "./theme";

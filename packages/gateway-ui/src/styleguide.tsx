@@ -1,4 +1,3 @@
-/** @jsxImportSource react */
 import type { ReactNode } from "react";
 import { workflowUiStyles, workflowUiThemeCss } from "./styleguide-css";
 

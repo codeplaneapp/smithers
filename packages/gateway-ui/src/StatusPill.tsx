@@ -1,4 +1,3 @@
-/** @jsxImportSource react */
 import type { CSSProperties } from "react";
 import { formatStatus, statusClass, statusColor } from "./theme";
 

@@ -1,35 +1,17 @@
 import { defineConfig } from "tsup";
-import { readdirSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+// @ts-expect-error — plain .mjs helper shared across package tsup configs; no d.ts.
+import { declarationEntries } from "../../scripts/declaration-entries.mjs";
 
-function declarationEntries() {
-  const sourceRoot = "src";
-  const entries: Record<string, string> = {};
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir).sort()) {
-      const path = join(dir, entry);
-      const stat = statSync(path);
-      if (stat.isDirectory()) {
-        walk(path);
-        continue;
-      }
-      if (path.endsWith(".d.ts") || (!path.endsWith(".js") && !path.endsWith(".ts"))) {
-        continue;
-      }
-      const relativePath = relative(sourceRoot, path).split(sep).join("/");
-      const key = relativePath.replace(/\.(js|ts)$/, "");
-      entries[key] = `${sourceRoot}/${relativePath}`;
-    }
-  };
-  walk(sourceRoot);
-  return entries;
-}
-
+// One declaration file per source module so `@smithers-orchestrator/integrations/<subpath>`
+// ships real types (the package.json `"./*"` exports point each subpath at its own
+// .d.ts). Type twins are named `<name>Types.ts` so they never collide with the
+// same-basename runtime `.js` in declaration output — declarationEntries() throws
+// if that invariant is ever violated.
 export default defineConfig({
   entry: declarationEntries(),
+  // Pin ESM so declaration output is deterministic `.d.ts` (not `.d.cts`).
+  format: ["esm"],
   dts: { only: true, resolve: false },
   outDir: "src",
   clean: false,
-  format: ["esm"],
-  silent: true,
 });

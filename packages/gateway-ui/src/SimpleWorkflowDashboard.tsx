@@ -1,4 +1,3 @@
-/** @jsxImportSource react */
 import { useEffect, useMemo, useState } from "react";
 import { useGatewayActions, useGatewayRuns } from "@smithers-orchestrator/gateway-react";
 import { formatStatus, statusClass } from "./theme";

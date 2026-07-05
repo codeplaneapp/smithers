@@ -1,35 +1,13 @@
 import { defineConfig } from "tsup";
-import { readdirSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
-
-function declarationEntries() {
-  const sourceRoot = "src";
-  const entries: Record<string, string> = {};
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir).sort()) {
-      const path = join(dir, entry);
-      const stat = statSync(path);
-      if (stat.isDirectory()) {
-        walk(path);
-        continue;
-      }
-      if (path.endsWith(".d.ts") || (!path.endsWith(".js") && !path.endsWith(".ts"))) {
-        continue;
-      }
-      const relativePath = relative(sourceRoot, path).split(sep).join("/");
-      const key = relativePath.replace(/\.(js|ts)$/, "");
-      entries[key] = `${sourceRoot}/${relativePath}`;
-    }
-  };
-  walk(sourceRoot);
-  return entries;
-}
+// @ts-expect-error — plain .mjs helper shared across package tsup configs; no d.ts.
+import { declarationEntries } from "../../scripts/declaration-entries.mjs";
 
 export default defineConfig({
   entry: declarationEntries(),
+  // Pin ESM so declaration output is deterministic `.d.ts` (not `.d.cts`), which
+  // the committed per-file declarations and the freshness gate both depend on.
+  format: ["esm"],
   dts: { only: true, resolve: false },
   outDir: "src",
   clean: false,
-  format: ["esm"],
-  silent: true,
 });
