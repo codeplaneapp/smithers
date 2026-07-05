@@ -13,11 +13,6 @@ export type SmithersElectricProxyServer = {
   close(): Promise<void>;
 };
 
-function requestUrl(req: IncomingMessage): string {
-  const host = req.headers.host ?? "electric-proxy.local";
-  return `http://${host}${req.url ?? "/"}`;
-}
-
 function toFetchRequest(req: IncomingMessage): Request {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
@@ -25,8 +20,9 @@ function toFetchRequest(req: IncomingMessage): Request {
     if (Array.isArray(value)) for (const item of value) headers.append(key, item);
     else headers.set(key, value);
   }
+  const host = req.headers.host ?? "electric-proxy.local";
   // Shape reads are GET/OPTIONS only; no body is forwarded.
-  return new Request(requestUrl(req), { method: req.method ?? "GET", headers });
+  return new Request(`http://${host}${req.url ?? "/"}`, { method: req.method ?? "GET", headers });
 }
 
 async function writeFetchResponse(res: ServerResponse, response: Response): Promise<void> {

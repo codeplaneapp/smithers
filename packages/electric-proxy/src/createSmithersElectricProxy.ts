@@ -83,6 +83,8 @@ type OpenBucket = {
   count: number;
 };
 
+// Per-principal abuse bounds (overridable via options): 60 shape opens/min,
+// 50 concurrent streams, 4 MiB per SSE frame, 5 min idle-slot reclaim.
 const DEFAULT_OPEN_PER_MINUTE = 60;
 const DEFAULT_ACTIVE_MAX = 50;
 const DEFAULT_MAX_FRAME_BYTES = 4 * 1024 * 1024;
@@ -96,10 +98,6 @@ function json(status: number, payload: unknown, headers?: HeadersInit): Response
   });
 }
 
-function principalId(auth: SmithersElectricAuthContext): string {
-  return auth.principalId ?? auth.userId ?? auth.tokenId ?? "anonymous";
-}
-
 function q(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
@@ -108,20 +106,11 @@ function listLiteral(values: readonly string[]): string {
   return values.map(q).join(",");
 }
 
-function parseCsvList(value: string | null): string[] {
-  if (!value) return [];
-  return value.split(",").map((item) => item.trim()).filter(Boolean);
-}
-
 function hasDuplicateSecurityParam(params: URLSearchParams): string | null {
   for (const name of ["table", "shape", "where", "key"]) {
     if (params.getAll(name).length > 1) return name;
   }
   return null;
-}
-
-function normalizeIdentifier(identifier: string): string {
-  return identifier.toLowerCase();
 }
 
 function tokenizeWhere(where: string): string[] {
@@ -162,7 +151,8 @@ function tokenizeWhere(where: string): string[] {
       const start = i;
       i += 1;
       while (i < where.length && /[A-Za-z0-9_]/.test(where[i])) i += 1;
-      tokens.push(normalizeIdentifier(where.slice(start, i)));
+      // identifiers/keywords compare case-insensitively downstream
+      tokens.push(where.slice(start, i).toLowerCase());
       continue;
     }
     if (/[0-9]/.test(ch)) {
@@ -175,11 +165,6 @@ function tokenizeWhere(where: string): string[] {
     throw new Error(`unexpected character ${JSON.stringify(ch)} in shape where clause`);
   }
   return tokens;
-}
-
-function tokenValue(token: string): string {
-  if (token.startsWith("\"")) return JSON.parse(token) as string;
-  return token;
 }
 
 function parseWhere(where: string): ParsedWhere {
@@ -200,7 +185,9 @@ function parseWhere(where: string): ParsedWhere {
     if (["and", "or", "union", "select", "not", "in", "is", "null", "=", "(", ")", ","].includes(token)) {
       throw new Error(`expected literal value, got ${token}`);
     }
-    return tokenValue(token);
+    // The tokenizer re-encodes string literals as JSON strings; everything
+    // else is a bare token.
+    return token.startsWith("\"") ? (JSON.parse(token) as string) : token;
   };
 
   while (i < tokens.length) {
@@ -631,7 +618,7 @@ export function createSmithersElectricProxy(options: SmithersElectricProxyOption
       return json(404, { error: "shape not found" });
     }
     const effectiveTable = table || shape.table;
-    const principal = principalId(auth);
+    const principal = auth.principalId ?? auth.userId ?? auth.tokenId ?? "anonymous";
     const allowedByScope = hasGatewayScope(auth.scopes, shape.requiredScope, "listRuns");
     const decisionBase = {
       event: "smithers-electric.scope" as const,
