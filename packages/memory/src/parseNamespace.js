@@ -1,15 +1,8 @@
 
 /** @typedef {import("./MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */
 
+// Must stay in sync with the MemoryNamespaceKind union in MemoryNamespaceKind.ts.
 const MEMORY_NAMESPACE_KINDS = ["workflow", "agent", "user", "global"];
-
-/**
- * @param {string} id
- * @returns {string}
- */
-function decodeNamespaceId(id) {
-    return id.replace(/%3A/g, ":").replace(/%25/g, "%");
-}
 
 /**
  * @param {string} str
@@ -25,5 +18,7 @@ export function parseNamespace(str) {
     if (!MEMORY_NAMESPACE_KINDS.includes(kind)) {
         return { kind: "global", id: str };
     }
-    return { kind, id: decodeNamespaceId(id) };
+    // Undo namespaceToString's escaping: decode %3A before %25 (reverse of the
+    // encode order) so a literal "%25" in the id round-trips.
+    return { kind, id: id.replace(/%3A/g, ":").replace(/%25/g, "%") };
 }

@@ -1,13 +1,17 @@
 import { Effect } from "effect";
 /** @typedef {import("./MemoryProcessor.ts").MemoryProcessor} MemoryProcessor */
+/** @typedef {import("./store/MemoryStore.ts").MemoryStore} MemoryStore */
+/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+
+// Rough approximation: 1 token ~= 4 characters of message JSON.
+const CHARS_PER_TOKEN = 4;
 
 /**
  * @param {number} maxTokens
  * @returns {MemoryProcessor}
  */
 export function TokenLimiter(maxTokens) {
-    // Rough approximation: 1 token ~= 4 characters
-    const charBudget = maxTokens * 4;
+    const charBudget = maxTokens * CHARS_PER_TOKEN;
     /**
    * @param {MemoryStore} store
    * @returns {Effect.Effect<void, SmithersError>}

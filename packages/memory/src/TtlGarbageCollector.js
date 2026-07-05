@@ -1,5 +1,7 @@
 import { Effect } from "effect";
 /** @typedef {import("./MemoryProcessor.ts").MemoryProcessor} MemoryProcessor */
+/** @typedef {import("./store/MemoryStore.ts").MemoryStore} MemoryStore */
+/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
 
 /**
  * @returns {MemoryProcessor}

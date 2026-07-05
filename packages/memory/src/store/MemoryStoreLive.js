@@ -23,18 +23,19 @@ import { MemoryStoreService } from "./MemoryStoreService.js";
 // Helpers
 // ---------------------------------------------------------------------------
 /**
- * @template A
- * @param {string} label
- * @param {() => PromiseLike<A>} operation
- * @returns {Effect.Effect<A, SmithersError>}
+ * Wrap a raw drizzle promise in the standard instrumentation every store
+ * operation shares: typed SmithersError on failure (with the given code),
+ * dbQueryDuration sample on success, log annotation, and a log span.
+ * @param {"DB_QUERY_FAILED" | "DB_WRITE_FAILED"} code
+ * @returns {<A>(label: string, operation: () => PromiseLike<A>) => Effect.Effect<A, SmithersError>}
  */
-function readEffect(label, operation) {
-    return Effect.gen(function* () {
+function instrumentedDbEffect(code) {
+    return (label, operation) => Effect.gen(function* () {
         const start = performance.now();
         const result = yield* Effect.tryPromise({
             try: () => operation(),
             catch: (cause) => toSmithersError(cause, label, {
-                code: "DB_QUERY_FAILED",
+                code,
                 details: { operation: label },
             }),
         });
@@ -42,25 +43,24 @@ function readEffect(label, operation) {
         return result;
     }).pipe(Effect.annotateLogs({ dbOperation: label }), Effect.withLogSpan(`memory:${label}`));
 }
+const readEffect = instrumentedDbEffect("DB_QUERY_FAILED");
+const writeEffect = instrumentedDbEffect("DB_WRITE_FAILED");
 /**
- * @template A
- * @param {string} label
- * @param {() => PromiseLike<A>} operation
- * @returns {Effect.Effect<A, SmithersError>}
+ * Project a fact row onto the declared MemoryFact shape so extra drizzle
+ * columns can never leak through the public type.
+ * @param {typeof smithersMemoryFacts.$inferSelect} row
+ * @returns {MemoryFact}
  */
-function writeEffect(label, operation) {
-    return Effect.gen(function* () {
-        const start = performance.now();
-        const result = yield* Effect.tryPromise({
-            try: () => operation(),
-            catch: (cause) => toSmithersError(cause, label, {
-                code: "DB_WRITE_FAILED",
-                details: { operation: label },
-            }),
-        });
-        yield* Metric.update(dbQueryDuration, performance.now() - start);
-        return result;
-    }).pipe(Effect.annotateLogs({ dbOperation: label }), Effect.withLogSpan(`memory:${label}`));
+function toFact(row) {
+    return {
+        namespace: row.namespace,
+        key: row.key,
+        valueJson: row.valueJson,
+        schemaSig: row.schemaSig,
+        createdAtMs: row.createdAtMs,
+        updatedAtMs: row.updatedAtMs,
+        ttlMs: row.ttlMs,
+    };
 }
 // ---------------------------------------------------------------------------
 // Factory
@@ -88,15 +88,7 @@ function makeMemoryStore(db) {
             const row = rows[0];
             if (!row)
                 return undefined;
-            return {
-                namespace: row.namespace,
-                key: row.key,
-                valueJson: row.valueJson,
-                schemaSig: row.schemaSig,
-                createdAtMs: row.createdAtMs,
-                updatedAtMs: row.updatedAtMs,
-                ttlMs: row.ttlMs,
-            };
+            return toFact(row);
         });
     }
     /**
@@ -152,15 +144,7 @@ function makeMemoryStore(db) {
             .select()
             .from(smithersMemoryFacts)
             .where(eq(smithersMemoryFacts.namespace, nsStr))
-            .orderBy(smithersMemoryFacts.key)).pipe(Effect.map((rows) => rows.map((row) => ({
-            namespace: row.namespace,
-            key: row.key,
-            valueJson: row.valueJson,
-            schemaSig: row.schemaSig,
-            createdAtMs: row.createdAtMs,
-            updatedAtMs: row.updatedAtMs,
-            ttlMs: row.ttlMs,
-        }))));
+            .orderBy(smithersMemoryFacts.key)).pipe(Effect.map((rows) => rows.map(toFact)));
     }
     /**
    * List every fact across all namespaces, ordered by namespace then key.
@@ -170,15 +154,7 @@ function makeMemoryStore(db) {
         return readEffect("memory listAllFacts", () => db
             .select()
             .from(smithersMemoryFacts)
-            .orderBy(smithersMemoryFacts.namespace, smithersMemoryFacts.key)).pipe(Effect.map((rows) => rows.map((row) => ({
-            namespace: row.namespace,
-            key: row.key,
-            valueJson: row.valueJson,
-            schemaSig: row.schemaSig,
-            createdAtMs: row.createdAtMs,
-            updatedAtMs: row.updatedAtMs,
-            ttlMs: row.ttlMs,
-        }))));
+            .orderBy(smithersMemoryFacts.namespace, smithersMemoryFacts.key)).pipe(Effect.map((rows) => rows.map(toFact)));
     }
     // --- Thread Effects ---
     /**
