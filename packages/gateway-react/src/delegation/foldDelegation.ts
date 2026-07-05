@@ -98,9 +98,23 @@ const PHASE_SUFFIX_TO_TABLE: Record<string, string> = {
 };
 
 /**
+ * Phases that pause on a HumanTask/Approval but whose durable rows the fold
+ * never reads: `dc:<goal>:approve` (GoalRefinement's refined-prompt approval)
+ * and `dc:<leaf>:approval-<i>` (DelegationExecution's approvalPolicy gates).
+ * They must parse as delegation node ids so pending `_approval` markers land
+ * on the right logical node (awaiting-human + attention), while
+ * `delegationTableForNodeId` stays null — there is no output row for the
+ * record-assembly pipeline to fetch (their result tables, `dcGoalApproval` /
+ * `dcApproval`, are workflow-internal).
+ */
+const APPROVAL_ONLY_PHASES = new Set(["approve", "approval"]);
+
+/**
  * Parse a physical delegation node id (`dc:<logicalId>:<phase>`) into its
  * logical id and phase. Returns null for anything that is not a delegation
- * node id.
+ * node id. Accepts every output-table phase plus the approval-only phases
+ * (`approve`, `approval-<i>`); unknown phases stay excluded so arbitrary
+ * `dc:*` ids from other workflows never leak into the fold.
  */
 export function parseDelegationNodeId(nodeId: string): { logicalId: string; phase: string } | null {
   const parts = nodeId.split(":");
@@ -111,7 +125,8 @@ export function parseDelegationNodeId(nodeId: string): { logicalId: string; phas
   // somehow carry a literal `/` inside one segment decode identically.
   const logicalId = parts.slice(1, -1).join("/");
   if (!logicalId || !phase) return null;
-  if (PHASE_SUFFIX_TO_TABLE[phase.replace(/-\d+$/, "")] === undefined) return null;
+  const base = phase.replace(/-\d+$/, "");
+  if (PHASE_SUFFIX_TO_TABLE[base] === undefined && !APPROVAL_ONLY_PHASES.has(base)) return null;
   return { logicalId, phase };
 }
 
@@ -119,7 +134,9 @@ export function parseDelegationNodeId(nodeId: string): { logicalId: string; phas
  * The output table a physical delegation node writes to, derived from the
  * `dc:<logicalId>:<phase>` naming contract (plus the signal/poll listener
  * node ids `dc-edit` / `dc-skip-preview` / `dc-poll`). Null when the node is
- * not part of a delegation chain.
+ * not part of a delegation chain — and also for the approval-only phases
+ * (`approve` / `approval-<i>`), which parse as delegation nodes but carry no
+ * output row the fold consumes.
  */
 export function delegationTableForNodeId(nodeId: string): string | null {
   if (nodeId === "dc-edit") return "dcEdit";

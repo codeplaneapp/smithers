@@ -472,6 +472,58 @@ describe("foldDelegation — awaiting-human & attention rollup", () => {
     ]);
     expect(graph).toEqual(base);
   });
+
+  test("approval-only phases parse as delegation ids but map to no output table", () => {
+    expect(parseDelegationNodeId("dc:goal:approve")).toEqual({ logicalId: "goal", phase: "approve" });
+    expect(parseDelegationNodeId("dc:root:core:x:approval-2")).toEqual({ logicalId: "root/core/x", phase: "approval-2" });
+    expect(delegationTableForNodeId("dc:goal:approve")).toBeNull();
+    expect(delegationTableForNodeId("dc:root:core:x:approval-2")).toBeNull();
+    // Unknown phases stay excluded from the delegation namespace.
+    expect(parseDelegationNodeId("dc:root:party")).toBeNull();
+  });
+
+  test("pending goal approve gate (dc:<goal>:approve) marks the goal node awaiting-human", () => {
+    const graph = foldDelegation([
+      ...frame2Records(),
+      { table: "_approval", nodeId: "dc:goal:approve", iteration: 0, pending: true },
+    ]);
+    const goal = graph.nodes.goal!;
+    expect(goal.status).toBe("awaiting-human");
+    expect(goal.attention).toEqual({ self: true, descendants: 0 });
+  });
+
+  /** Minimal nested tree: root → root/core → root/core/x (a leaf under approvalPolicy). */
+  function nestedLeafRecords(): DelegationRecord[] {
+    return [
+      GOAL,
+      rec("dcPlan", "dc:root:plan", 0, plan("root", "fable", [child("root/core", "chunk", "opus", est(20, 2, 10))], est(30, 3, 15))),
+      rec("dcPlan", "dc:root:core:plan", 0, plan("root/core", "opus", [child("root/core/x", "leaf", "sonnet", est(10, 1, 5))], est(20, 2, 10))),
+    ];
+  }
+
+  test("pending approvalPolicy gate (encoded dc:root:core:x:approval-2) marks the leaf awaiting-human with ancestor attention", () => {
+    const graph = foldDelegation([
+      ...nestedLeafRecords(),
+      { table: "_approval", nodeId: "dc:root:core:x:approval-2", iteration: 0, pending: true },
+    ]);
+    const leaf = graph.nodes["root/core/x"]!;
+    expect(leaf.status).toBe("awaiting-human");
+    expect(leaf.attention).toEqual({ self: true, descendants: 0 });
+    expect(graph.nodes["root/core"]!.attention).toEqual({ self: false, descendants: 1 });
+    expect(graph.nodes.root!.attention).toEqual({ self: false, descendants: 1 });
+  });
+
+  test("resolved approval clears awaiting-human (latest pending flag wins)", () => {
+    const graph = foldDelegation([
+      ...nestedLeafRecords(),
+      { table: "_approval", nodeId: "dc:root:core:x:approval-2", iteration: 0, pending: true, seq: 1 },
+      { table: "_approval", nodeId: "dc:root:core:x:approval-2", iteration: 0, pending: false, seq: 2 },
+    ]);
+    const leaf = graph.nodes["root/core/x"]!;
+    expect(leaf.status).not.toBe("awaiting-human");
+    expect(leaf.attention).toEqual({ self: false, descendants: 0 });
+    expect(graph.nodes.root!.attention).toEqual({ self: false, descendants: 0 });
+  });
 });
 
 describe("foldDelegation — goal phase, questions, skip, poll, scores", () => {

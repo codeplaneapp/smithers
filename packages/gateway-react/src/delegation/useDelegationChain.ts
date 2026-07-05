@@ -6,6 +6,11 @@ import { useGatewayRunEvents } from "../useGatewayRunEvents.ts";
 import { useGatewayRunTree } from "../sync/useGatewayRunTree.ts";
 import { useSmithersCollections } from "../useSmithersCollections.ts";
 import {
+  delegationTargetKey,
+  delegationTargetsFromEvents,
+  type DelegationFetchTarget,
+} from "./delegationEventTargets.ts";
+import {
   delegationTableForNodeId,
   foldDelegation,
   parseDelegationNodeId,
@@ -53,16 +58,37 @@ type OutputCacheEntry =
   | { state: "missing"; finishCount: number }
   | { state: "error"; finishCount: number; error: Error };
 
+/** Merge new fetch targets into an existing map; returns the same map when nothing is new. */
+function mergeTargets(
+  previous: Map<string, DelegationFetchTarget>,
+  found: Map<string, DelegationFetchTarget>,
+): Map<string, DelegationFetchTarget> {
+  let next: Map<string, DelegationFetchTarget> | null = null;
+  for (const [key, target] of found) {
+    if (previous.has(key)) continue;
+    (next ??= new Map(previous)).set(key, target);
+  }
+  return next ?? previous;
+}
+
+/** Page size for the one-shot run-event history backfill. */
+const EVENT_HISTORY_PAGE_SIZE = 500;
+
 /**
  * Folded delegation-chain state for one run, per the frozen contract.
  *
- * Record assembly: the live run tree (`useGatewayRunTree`) enumerates every
- * physical `dc:*` node (with loop/retry iterations), `getNodeOutput` fetches
- * each node's durable row exactly once (re-checked when a `node.finished` /
- * `node.failed` event for that node arrives — `useGatewayRunEvents` provides
- * the liveness tick), and `useGatewayApprovals` supplies the `_approval`
- * pending markers. The pure `foldDelegation` reducer turns those records into
- * the graph; malformed/unknown rows surface in `errors` instead of throwing.
+ * Record assembly: fetch targets are the union of (a) the live run tree
+ * (`useGatewayRunTree`), which only reflects the CURRENT frame, and (b) the
+ * durable run-event history — on mount the hook pages `listRunEvents`
+ * (`afterSeq` cursor over the append-only event table) and keeps
+ * accumulating node-lifecycle events from the live stream, so loop iterations
+ * the tree has already replaced (exec attempt history, unmounted `dc-edit` /
+ * `dc-skip-preview` listeners, budget actuals) survive reloads and late
+ * joins. `getNodeOutput` fetches each (nodeId, iteration) durable row exactly
+ * once (re-checked when a finish event for that node arrives), and
+ * `useGatewayApprovals` supplies the `_approval` pending markers. The pure
+ * `foldDelegation` reducer turns those records into the graph;
+ * malformed/unknown rows surface in `errors` instead of throwing.
  */
 export function useDelegationChain(params: { runId: string | undefined }): UseDelegationChainResult {
   const runId = params.runId;
@@ -72,23 +98,38 @@ export function useDelegationChain(params: { runId: string | undefined }): UseDe
   const events = useGatewayRunEvents(runId, { maxEvents: 1000 });
   const approvals = useGatewayApprovals(runId ? { filter: { runId } } : {});
 
-  // Targets: every delegation-relevant (nodeId, iteration) pair in the tree.
+  // Durable (nodeId, iteration) targets reconstructed from run events. Grows
+  // monotonically per run: the live event ring is bounded, so pairs are made
+  // sticky here instead of being re-derived (and lost) from the ring.
+  const [eventTargets, setEventTargets] = useState<Map<string, DelegationFetchTarget>>(() => new Map());
+  const [historyError, setHistoryError] = useState<Error | undefined>(undefined);
+
+  // Targets: every delegation-relevant (nodeId, iteration) pair — current
+  // tree positions unioned with the durable event-derived history.
   const targets = useMemo(() => {
-    const seen = new Map<string, { nodeId: string; iteration: number }>();
+    const seen = new Map<string, DelegationFetchTarget>();
     for (const node of tree.nodes) {
       if (delegationTableForNodeId(node.id) === null) continue;
       const iteration = node.iteration ?? 0;
       seen.set(`${node.id}\u0000${iteration}`, { nodeId: node.id, iteration });
     }
+    for (const [key, target] of eventTargets) {
+      if (!seen.has(key)) seen.set(key, target);
+    }
     return seen;
-  }, [tree.nodes]);
+  }, [tree.nodes, eventTargets]);
 
   // Completion ticks per node id, so missing outputs are only refetched when
-  // something actually finished (not on every event frame).
+  // something actually finished (not on every event frame). Durable history
+  // rows carry the persisted engine type (`NodeFinished`); live wire frames
+  // use `node.finished` — accept both spellings.
   const finishCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const frame of events.events) {
-      if (frame.event !== "node.finished" && frame.event !== "node.failed") continue;
+      if (
+        frame.event !== "node.finished" && frame.event !== "NodeFinished" &&
+        frame.event !== "node.failed" && frame.event !== "NodeFailed"
+      ) continue;
       const payload = isRecord(frame.payload) ? frame.payload : {};
       const nodeId = typeof payload.nodeId === "string" ? payload.nodeId : undefined;
       if (!nodeId) continue;
@@ -108,7 +149,59 @@ export function useDelegationChain(params: { runId: string | undefined }): UseDe
     inFlight.current.clear();
     setCache(new Map());
     setHydrated(false);
+    setEventTargets(new Map());
+    setHistoryError(undefined);
   }, [runId]);
+
+  // Fresh-mount backfill. Mechanism choice: the gateway exposes no listNodes
+  // RPC over durable node rows, but `listRunEvents` replays the full
+  // append-only run-event history with `afterSeq` pagination (the same
+  // surface `smithers events` uses), and every persisted node lifecycle
+  // event carries `nodeId` + `iteration`. Paging it once per run
+  // reconstructs ALL iterations without new RPCs and without the live event
+  // ring's row bound, so it is the most robust source available.
+  useEffect(() => {
+    if (!runId) return;
+    const current = generation.current;
+    let cancelled = false;
+    void (async () => {
+      const found = new Map<string, DelegationFetchTarget>();
+      let afterSeq: number | undefined;
+      try {
+        for (;;) {
+          const rows = await client.api.listRunEvents({
+            runId,
+            limit: EVENT_HISTORY_PAGE_SIZE,
+            ...(afterSeq === undefined ? {} : { afterSeq }),
+          });
+          if (cancelled || generation.current !== current) return;
+          for (const [key, target] of delegationTargetsFromEvents(rows)) found.set(key, target);
+          if (rows.length < EVENT_HISTORY_PAGE_SIZE) break;
+          const lastSeq = rows[rows.length - 1]?.seq;
+          // Defensive: stop rather than loop forever on a non-advancing cursor.
+          if (typeof lastSeq !== "number" || (afterSeq !== undefined && lastSeq <= afterSeq)) break;
+          afterSeq = lastSeq;
+        }
+      } catch (cause) {
+        if (cancelled || generation.current !== current) return;
+        setHistoryError(cause instanceof Error ? cause : new Error(String(cause)));
+        // Keep whatever was collected — the tree still covers current nodes.
+      }
+      if (cancelled || generation.current !== current) return;
+      if (found.size > 0) setEventTargets((previous) => mergeTargets(previous, found));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, client]);
+
+  // Live accumulation: new lifecycle events (loop advances, listener
+  // deliveries) add their (nodeId, iteration) pairs as they stream in.
+  useEffect(() => {
+    const found = delegationTargetsFromEvents(events.events);
+    if (found.size === 0) return;
+    setEventTargets((previous) => mergeTargets(previous, found));
+  }, [events.events]);
 
   useEffect(() => {
     if (!runId) {
@@ -179,7 +272,12 @@ export function useDelegationChain(params: { runId: string | undefined }): UseDe
     }
     for (const approval of runId ? approvals.data ?? [] : []) {
       if (approval.runId !== runId) continue;
-      if (delegationTableForNodeId(approval.nodeId) === null) continue;
+      // Accept any delegation node that can carry a HumanTask/Approval: nodes
+      // with an output table (question-<seq>, poll, exec, …), the listener ids
+      // (dc-poll), AND the approval-only phases (`dc:<goal>:approve`,
+      // `dc:<leaf>:approval-<i>`) which have no output table but must still
+      // surface as awaiting-human. Non-delegation node ids stay excluded.
+      if (delegationTableForNodeId(approval.nodeId) === null && parseDelegationNodeId(approval.nodeId) === null) continue;
       const record: DelegationApprovalRecord = {
         table: "_approval",
         nodeId: approval.nodeId,
@@ -196,8 +294,9 @@ export function useDelegationChain(params: { runId: string | undefined }): UseDe
     }
     if (tree.error) collected.push(tree.error);
     if (events.error) collected.push(events.error);
+    if (historyError) collected.push(historyError);
     return { graph: folded, errors: collected };
-  }, [cache, approvals.data, runId, tree.error, events.error]);
+  }, [cache, approvals.data, runId, tree.error, events.error, historyError]);
 
   const requireRunId = useCallback((): string => {
     if (!runId) throw new Error("useDelegationChain: no runId.");
