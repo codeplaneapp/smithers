@@ -143,7 +143,7 @@ test("default selectedWorkflows (undefined) emits the same set as all-workflow s
         "hello", "create-workflow", "context-engineer", "route-task", "create-skill",
         "extract-skill", "triage-run", "context-doctor",
         "backpressure-plan", "eval-author", "report-slideshow", "smithering",
-        "make-workflow-tutorial", "init", "post-failure",
+        "delegation-chain", "make-workflow-tutorial", "init", "post-failure",
     ];
 
     const resultAll = initWorkflowPack({ rootDir: tmpAll, installSkill: false, skipInstall: true, env, selectedWorkflows: allIds });

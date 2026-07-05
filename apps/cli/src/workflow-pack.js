@@ -120,6 +120,12 @@ const BUNDLED_VERSION_PINS = {
     reactDomTypes: "19.2.3",
     mdxTypes: "2.0.13",
     nodeTypes: "25.6.0",
+    // Seeded multi-file UIs (delegation-chain) import these at runtime; the
+    // gateway bundles workspace UIs from .smithers/ui, so the workspace must
+    // resolve them.
+    xyflowReact: "12.11.1",
+    dagre: "0.8.5",
+    milkdownCrepe: "7.21.2",
 };
 /**
  * @returns {DependencyVersions}
@@ -135,6 +141,9 @@ function readDependencyVersions() {
         reactDomTypesVersion: resolveInstalledPackageVersion("@types/react-dom", BUNDLED_VERSION_PINS.reactDomTypes),
         mdxTypesVersion: resolveInstalledPackageVersion("@types/mdx", BUNDLED_VERSION_PINS.mdxTypes),
         nodeTypesVersion: resolveInstalledPackageVersion("@types/node", BUNDLED_VERSION_PINS.nodeTypes),
+        xyflowReactVersion: resolveInstalledPackageVersion("@xyflow/react", BUNDLED_VERSION_PINS.xyflowReact),
+        dagreVersion: resolveInstalledPackageVersion("dagre", BUNDLED_VERSION_PINS.dagre),
+        milkdownCrepeVersion: resolveInstalledPackageVersion("@milkdown/crepe", BUNDLED_VERSION_PINS.milkdownCrepe),
     };
 }
 /**
@@ -165,6 +174,11 @@ function renderPackageJson(versions) {
             // scaffolding functions to make re-init a durable run.
             "@smithers-orchestrator/cli": smithersSpec,
             zod: versions.zodVersion,
+            // Runtime deps of the seeded multi-file UIs (delegation-chain):
+            // the gateway bundles .smithers/ui/*.tsx from this workspace.
+            "@xyflow/react": versions.xyflowReactVersion,
+            dagre: versions.dagreVersion,
+            "@milkdown/crepe": versions.milkdownCrepeVersion,
         },
         devDependencies: {
             typescript: versions.typescriptVersion,
@@ -255,6 +269,9 @@ const WORKFLOW_MANIFEST = [
     { id: "eval-author", ui: "eval-author", components: [], prompts: [], seeded: true },
     { id: "report-slideshow", ui: "report-slideshow", components: [], prompts: [], seeded: true },
     { id: "smithering", ui: "smithering", components: [], prompts: [], seeded: true },
+    // Recursive multi-tier delegation; its composites ship in packages/components,
+    // so no .smithers/components entries are needed.
+    { id: "delegation-chain", ui: "delegation-chain", components: [], prompts: [], seeded: true },
     { id: "make-workflow-tutorial", ui: "make-workflow-tutorial", components: [], prompts: [], seeded: true },
     // System workflow: durable `smithers init` (hidden from default listings).
     { id: "init", ui: "init", components: [], prompts: [], seeded: true, system: true },
@@ -1832,10 +1849,15 @@ const UI_WORKFLOWS = [
     { key: "eval-author", title: "Eval Author" },
     { key: "report-slideshow", title: "Report Slideshow" },
     { key: "smithering", title: "Smithering" },
+    { key: "delegation-chain", title: "Delegation Chain" },
     { key: "make-workflow-tutorial", title: "Make Workflow Tutorial" },
 ];
 
 const DEDICATED_UI_KEYS = new Set(["kanban", "plan", "vcs"]);
+// Multi-file UIs shipped via GENERATED_SEEDED_FILES (see SEEDED_UI_IDS in
+// scripts/generate-workflow-pack.ts): renderUiFiles must not also emit a
+// generic `.smithers/ui/<key>.tsx` for them, or init would write the path twice.
+const SEEDED_UI_KEYS = new Set(["delegation-chain"]);
 
 function renderGenericWorkflowUiSource(key) {
     // Theme-correct by construction: the gateway host page inlines the
@@ -1903,6 +1925,7 @@ function renderUiFiles(workflowIds) {
     return UI_WORKFLOWS
         .map((w) => w.key)
         .filter((key) => !workflowIds || workflowIds.has(key))
+        .filter((key) => !SEEDED_UI_KEYS.has(key))
         .filter((key) => WORKFLOW_UI_SOURCES[key] || !DEDICATED_UI_KEYS.has(key))
         .map((key) => ({
             path: `.smithers/ui/${key}.tsx`,

@@ -51,6 +51,10 @@ const SEEDED_WORKFLOW_IDS = [
   "report-slideshow",
   // Fable-as-operator meta-workflow (authored in fable-smithers, moved here).
   "smithering",
+  // Recursive multi-tier delegation (goal refinement → tiered decomposition →
+  // derisk probes → gated execution), built on the packages/components
+  // delegation composites.
+  "delegation-chain",
   // First-run tutorial that recommends and builds a project-specific workflow.
   "make-workflow-tutorial",
   // Durable `smithers init` (system workflow — hidden from default listings).
@@ -60,6 +64,16 @@ const SEEDED_WORKFLOW_IDS = [
 ];
 
 type TemplateFile = { path: string; contents: string; owners?: string[] };
+
+/**
+ * Seeded ids whose canonical multi-file UI (`.smithers/ui/<id>.tsx` plus its
+ * relative sibling modules) ships with the pack. These UIs are authored as
+ * multi-file apps, so they ride GENERATED_SEEDED_FILES (owners = the workflow
+ * id) instead of the single-file WORKFLOW_UI_SOURCES map; renderUiFiles() in
+ * workflow-pack.js must skip them (SEEDED_UI_KEYS) so the two paths never
+ * both emit `.smithers/ui/<id>.tsx`.
+ */
+const SEEDED_UI_IDS = new Set(["delegation-chain"]);
 
 /** Prompts a workflow imports from `../prompts/<name>.mdx`. */
 function promptImportsOf(source: string): string[] {
@@ -107,6 +121,46 @@ function libRelativeImportsOf(source: string, fromLibPath: string): string[] {
     names.add(joined);
   }
   return [...names];
+}
+
+/**
+ * Relative imports inside a `.smithers/ui/*` module (`./x`), resolved against
+ * the module's own path (relative to `.smithers/ui/`). Anything that escapes
+ * `.smithers/ui/` is rejected — seeded UI modules must stay self-contained.
+ * Test modules are never part of the shipped closure.
+ */
+function uiRelativeImportsOf(source: string, fromUiPath: string): string[] {
+  const names = new Set<string>();
+  // Static `from "./x"` AND dynamic `import("./x")` forms — seeded UIs lazy-load
+  // heavy editors via dynamic import, and missing those breaks a fresh init.
+  const re = /(?:from\s+|import\s*\(\s*)["'](\.\.?\/[^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    const joined = posix.normalize(posix.join(posix.dirname(fromUiPath), m[1]));
+    if (joined.startsWith("..")) {
+      throw new Error(
+        `Seeded ui module .smithers/ui/${fromUiPath} imports ${m[1]}, which escapes .smithers/ui/. ` +
+          "Seeded UIs must be self-contained under .smithers/ui/.",
+      );
+    }
+    if (/\.test\.(t|j)sx?$/.test(joined) || joined.includes(".test.")) continue;
+    names.add(joined);
+  }
+  return [...names];
+}
+
+/** Resolve a ui import specifier to an on-disk file under `.smithers/ui/`. */
+function resolveUiFile(specifier: string): { relPath: string; absPath: string } {
+  const candidates = /\.(tsx?|ts|js|json)$/.test(specifier)
+    ? [specifier]
+    : [`${specifier}.tsx`, `${specifier}.ts`];
+  for (const candidate of candidates) {
+    const absPath = resolve(SMITHERS_DIR, "ui", candidate);
+    if (existsSync(absPath)) return { relPath: candidate, absPath };
+  }
+  throw new Error(
+    `Seeded ui import "${specifier}" does not resolve to a file under .smithers/ui/ (tried: ${candidates.join(", ")}).`,
+  );
 }
 
 /** Resolve a lib import specifier to an on-disk file under `.smithers/lib/`. */
@@ -186,6 +240,24 @@ function build(): TemplateFile[] {
       push(`.smithers/lib/${relPath}`, libSource, id);
       for (const nested of libRelativeImportsOf(libSource, relPath)) {
         libQueue.push(resolveLibFile(nested));
+      }
+    }
+
+    // Bundle the canonical multi-file UI (entry + its relative imports,
+    // transitively; tests excluded) for ids in SEEDED_UI_IDS, so init writes
+    // the real UI instead of the generic template.
+    if (SEEDED_UI_IDS.has(id)) {
+      const uiQueue = [resolveUiFile(`${id}.tsx`)];
+      const visitedUi = new Set<string>();
+      while (uiQueue.length > 0) {
+        const { relPath, absPath } = uiQueue.shift()!;
+        if (visitedUi.has(relPath)) continue;
+        visitedUi.add(relPath);
+        const uiSource = readOrThrow(absPath, `ui module ${relPath} for workflow ${id}`);
+        push(`.smithers/ui/${relPath}`, uiSource, id);
+        for (const nested of uiRelativeImportsOf(uiSource, relPath)) {
+          uiQueue.push(resolveUiFile(nested));
+        }
       }
     }
   }

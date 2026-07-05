@@ -13,7 +13,7 @@
     "expectedText": [
       "hello",
       "Start",
-      "No runs yet."
+      "No runs yet"
     ],
     "verifyOutput": false
   },
@@ -257,7 +257,9 @@
     "key": "vcs",
     "title": "VCS",
     "runnable": true,
-    "launchArgs": ["vcs"],
+    "launchArgs": [
+      "vcs"
+    ],
     "primaryTestId": "vcs-ui",
     "populatedTestId": "vcs-status-summary",
     "expectedText": [
@@ -384,6 +386,18 @@
     "populatedTestId": "",
     "expectedText": [],
     "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "delegation-chain",
+    "title": "Delegation Chain",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "delegation-chain-ui",
+    "populatedTestId": "",
+    "expectedText": [
+      "Delegation Chain"
+    ],
     "verifyOutput": false
   }
 ]

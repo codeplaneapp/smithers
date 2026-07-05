@@ -80,10 +80,26 @@ test("UI_WORKFLOWS gateway-mounts / ui-files / e2e-descriptors are in sync", () 
     const gatewayKeys = new Set(gatewayWorkflows.map((w) => w.key));
     expect(gatewayKeys.size).toBeGreaterThan(0);
 
-    // 2. Keys with a corresponding .smithers/ui/<key>.tsx file
+    // 2. Keys with a corresponding .smithers/ui/<key>.tsx ENTRY file. Seeded
+    // multi-file UIs (delegation-chain) also emit helper modules into ui/;
+    // any file imported by another emitted ui file is a module, not an entry,
+    // so it neither needs a gateway mount nor an e2e descriptor.
     const uiFiles = readdirSync(join(smithersDir, "ui"));
+    const uiSourceFiles = uiFiles.filter((f) => f.endsWith(".tsx") || f.endsWith(".ts"));
+    const importedModules = new Set();
+    for (const file of uiSourceFiles) {
+        const source = readFileSync(join(smithersDir, "ui", file), "utf8");
+        const re = /(?:from\s+|import\s*\(\s*)["']\.\/([^"']+)["']/g;
+        let m;
+        while ((m = re.exec(source)) !== null) {
+            importedModules.add(m[1].replace(/\.(tsx|ts)$/, ""));
+        }
+    }
     const uiKeys = new Set(
-        uiFiles.filter((f) => f.endsWith(".tsx")).map((f) => f.replace(/\.tsx$/, "")),
+        uiFiles
+            .filter((f) => f.endsWith(".tsx"))
+            .map((f) => f.replace(/\.tsx$/, ""))
+            .filter((key) => !importedModules.has(key)),
     );
 
     // 3. Keys in the e2e descriptor manifest (next to this test file)

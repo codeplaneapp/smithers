@@ -47,6 +47,8 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "  export const Approval: any;",
         "  export const HumanTask: any;",
         "  export const ScanFixVerify: any;",
+        "  export const DelegationChain: any;",
+        "  export const delegationSchemas: any;",
         "  export const ContinueAsNew: any;",
         "  export const Sandbox: any;",
         "  export const Signal: any;",
@@ -89,6 +91,16 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "  export function useGatewayRun(...args: any[]): any;",
         "  export function useGatewayRunEvents(...args: any[]): any;",
         "  export function useGatewayRuns(...args: any[]): any;",
+        "  export type DelegationNodeState = any;",
+        "  // Structural, not `any`: Object.values() on an any-typed record",
+        "  // yields unknown[] under TS 6, breaking property access in dc-graph.",
+        "  export type DelegationGraph = {",
+        "    nodes: Record<string, DelegationNodeState>;",
+        "    edges: any[];",
+        "    [key: string]: any;",
+        "  };",
+        "  export function useDelegationChain(...args: any[]): any;",
+        "  export function foldDelegation(...args: any[]): any;",
         "}",
         "",
     ].join("\n"));
@@ -96,8 +108,36 @@ function writeWorkflowPackTypecheckHarness(repo) {
         'declare module "smithers-orchestrator/gateway-ui" {',
         "  export const WorkflowUiShell: any;",
         "  export const WorkflowUiStyles: any;",
+        "  export const workflowUiStyles: any;",
         "  export const SimpleWorkflowDashboard: any;",
         "  export const StatusPill: any;",
+        "}",
+        "",
+    ].join("\n"));
+    // Seeded multi-file UIs (delegation-chain) import browser-only npm deps that
+    // the pack smoke typecheck doesn't install; declare their imported surface
+    // as `any`, mirroring how the smithers-orchestrator stubs work above.
+    // (Shorthand ambient modules are not enough: generic TYPE usage like
+    // `Node<T>` needs explicit type declarations.)
+    repo.write(".smithers/types/seeded-ui-deps.d.ts", [
+        'declare module "@xyflow/react" {',
+        "  export type Node<T = any, K = any> = any;",
+        "  export type Edge<T = any> = any;",
+        "  export type NodeProps<T = any> = any;",
+        "  export const Background: any;",
+        "  export const Controls: any;",
+        "  export const Handle: any;",
+        "  export const Position: any;",
+        "  export const ReactFlow: any;",
+        "  export const ReactFlowProvider: any;",
+        "  export function useReactFlow(): any;",
+        "}",
+        'declare module "@milkdown/crepe" {',
+        "  export const Crepe: any;",
+        "}",
+        'declare module "dagre" {',
+        "  const dagre: any;",
+        "  export default dagre;",
         "}",
         "",
     ].join("\n"));

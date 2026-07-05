@@ -201,7 +201,7 @@ test("workflow overview, catalog, and sidebar cover every documented workflow", 
         .map((file) => file.replace(/\.mdx$/, ""))
         .filter((id) => id !== "overview" && id !== "catalog")
         .sort();
-    expect(workflowDocIds).toHaveLength(32);
+    expect(workflowDocIds).toHaveLength(33);
 
     const overview = readRepoFile("docs/workflows/overview.mdx");
     const catalog = readRepoFile("docs/workflows/catalog.mdx");

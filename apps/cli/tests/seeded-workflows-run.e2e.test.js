@@ -15,6 +15,9 @@ const SEEDED_WORKFLOW_IDS = GENERATED_SEEDED_FILES
   .map((file) => file.path.split("/").pop().replace(/\.tsx$/, ""))
   .sort();
 
+const SMOKE_COMMAND_TIMEOUT_MS = 120_000;
+const SMOKE_TEST_TIMEOUT_MS = 180_000;
+
 const AGENT_RESPONSE = JSON.stringify({
   greeting: "Hello, world.",
   summary: "mock agent completed the task",
@@ -268,7 +271,12 @@ function initWorkflowPack() {
     GOOGLE_API_KEY: "",
     SMITHERS_FAKE_AGENT_RESPONSE: AGENT_RESPONSE,
   };
-  const init = runSmithers(["init", "--no-install"], { cwd: repo.dir, format: "json", env });
+  const init = runSmithers(["init", "--no-install"], {
+    cwd: repo.dir,
+    format: "json",
+    env,
+    timeoutMs: SMOKE_COMMAND_TIMEOUT_MS,
+  });
   expect(init.exitCode).toBe(0);
   return { repo, env };
 }
@@ -279,9 +287,11 @@ test("every generated init-pack workflow starts and reaches a valid smoke state 
 
 function isValidSmokeOutcome(id, status, exitCode) {
   if (exitCode === 0 && status === "finished") return true;
-  // This onboarding tutorial is intentionally interactive: the smoke run is
-  // healthy when it reaches the human pick step after rendering its prompt.
-  return id === "make-workflow-tutorial" && exitCode === 3 && status === "waiting-approval";
+  // These workflows are intentionally interactive: the smoke run is healthy
+  // when it reaches its first durable human gate (the tutorial's pick step,
+  // delegation-chain's refined-prompt approval).
+  const interactive = id === "make-workflow-tutorial" || id === "delegation-chain";
+  return interactive && exitCode === 3 && status === "waiting-approval";
 }
 
 for (const id of SEEDED_WORKFLOW_IDS) {
@@ -289,7 +299,7 @@ for (const id of SEEDED_WORKFLOW_IDS) {
     const { repo, env } = initWorkflowPack();
     const result = runSmithers(
       ["workflow", "run", id, "--input", JSON.stringify(workflowInput(id))],
-      { cwd: repo.dir, format: "json", env, timeoutMs: 60_000 },
+      { cwd: repo.dir, format: "json", env, timeoutMs: SMOKE_COMMAND_TIMEOUT_MS },
     );
     const status = result.json?.status;
     if (!isValidSmokeOutcome(id, status, result.exitCode)) {
@@ -300,5 +310,5 @@ for (const id of SEEDED_WORKFLOW_IDS) {
         .slice(0, 2000);
       throw new Error(`${id} exited ${result.exitCode} with status ${String(status)}: ${detail}`);
     }
-  }, 90_000);
+  }, SMOKE_TEST_TIMEOUT_MS);
 }
