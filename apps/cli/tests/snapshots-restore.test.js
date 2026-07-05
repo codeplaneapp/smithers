@@ -115,7 +115,53 @@ describe("smithers restore", () => {
 
         expect(r.exitCode).toBe(1);
         expect(reverted).toEqual([]);
-        expect(err.get()).toContain("No matching durability checkpoint");
+        // A mis-reported preselected target gets a distinct, actionable message
+        // rather than the generic listing-miss text.
+        expect(err.get()).toContain("Preselected checkpoint");
+        expect(err.get()).toContain("does not match requested run r1 node n2");
+    });
+
+    test("rejects a preselected target whose seq differs from the requested --seq", async () => {
+        const reverted = [];
+        const err = capture();
+        const r = await runRestoreOnce({
+            runId: "r1",
+            nodeId: "n1",
+            seq: 1,
+            target: cps[0], // n1 seq 0 — right node, wrong seq
+            stdout: capture(),
+            stderr: err,
+            revert: async (commitId, cwd) => {
+                reverted.push([commitId, cwd]);
+                return { success: true };
+            },
+        });
+
+        expect(r.exitCode).toBe(1);
+        expect(reverted).toEqual([]);
+        expect(err.get()).toContain("Preselected checkpoint");
+        expect(err.get()).toContain("seq 1");
+    });
+
+    test("honors a preselected target that matches the requested --seq", async () => {
+        const reverted = [];
+        const out = capture();
+        const r = await runRestoreOnce({
+            runId: "r1",
+            nodeId: "n1",
+            seq: 0,
+            target: cps[0], // n1 seq 0 — matches
+            stdout: out,
+            stderr: capture(),
+            revert: async (commitId, cwd) => {
+                reverted.push([commitId, cwd]);
+                return { success: true };
+            },
+        });
+
+        expect(r.exitCode).toBe(0);
+        expect(reverted).toEqual([["c0", "/wt"]]);
+        expect(out.get()).toContain("checkpoint #0");
     });
 
     test("missing checkpoint exits non-zero with a message", async () => {
