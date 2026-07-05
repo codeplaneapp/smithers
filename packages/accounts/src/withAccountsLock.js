@@ -2,6 +2,11 @@ import { closeSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from 
 import { dirname } from "node:path";
 import { accountsFilePath } from "./accountsFilePath.js";
 
+// Max time an acquirer spins waiting for the lock before erroring.
+const LOCK_TIMEOUT_MS = 10_000;
+// Lock-file age past which the holder is presumed crashed and the lock is broken.
+const STALE_LOCK_MS = 30_000;
+
 /**
  * Cross-process advisory lock around accounts.json read-modify-write. Smithers
  * runs many agents/CLIs concurrently and both the wizard and the programmatic
@@ -38,8 +43,25 @@ export function withAccountsLock(env, critical) {
                     `Timed out acquiring accounts lock at ${lockPath} after ${LOCK_TIMEOUT_MS}ms; another process may be stuck holding it.`,
                 );
             }
-            if (breakStaleLock(lockPath)) continue;
-            spin();
+            // A lock older than STALE_LOCK_MS is orphaned (the holder almost
+            // certainly crashed): break it and retry immediately.
+            try {
+                const lockStat = statSync(lockPath);
+                if (Date.now() - lockStat.mtimeMs > STALE_LOCK_MS) {
+                    rmSync(lockPath, { force: true });
+                    continue;
+                }
+            } catch {
+                // Lock vanished between EEXIST and stat: the holder released it. Retry.
+                continue;
+            }
+            // Busy-wait a few milliseconds before retrying. This API is fully
+            // synchronous, so the critical section never yields the event loop —
+            // a short spin is simpler and safer than introducing async.
+            const spinUntil = Date.now() + 5;
+            while (Date.now() < spinUntil) {
+                // intentional busy-wait
+            }
         }
     }
     try {
@@ -48,42 +70,5 @@ export function withAccountsLock(env, critical) {
     } finally {
         try { closeSync(fd); } catch {}
         try { rmSync(lockPath, { force: true }); } catch {}
-    }
-}
-
-const LOCK_TIMEOUT_MS = 10_000;
-const STALE_LOCK_MS = 30_000;
-
-/**
- * Removes the lock file if it is older than STALE_LOCK_MS (the holder almost
- * certainly crashed). Returns true if the caller should retry acquiring.
- *
- * @param {string} lockPath
- * @returns {boolean}
- */
-function breakStaleLock(lockPath) {
-    try {
-        const stat = statSync(lockPath);
-        if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
-            rmSync(lockPath, { force: true });
-            return true;
-        }
-    } catch {
-        // Lock vanished between EEXIST and stat: the holder released it. Retry.
-        return true;
-    }
-    return false;
-}
-
-/**
- * Busy-wait a few milliseconds before retrying. addAccount/removeAccount are
- * fully synchronous, so the critical section never yields the event loop — a
- * short spin is simpler and safer than introducing async, and the lock is held
- * only for a single read-modify-write.
- */
-function spin() {
-    const until = Date.now() + 5;
-    while (Date.now() < until) {
-        // intentional busy-wait
     }
 }

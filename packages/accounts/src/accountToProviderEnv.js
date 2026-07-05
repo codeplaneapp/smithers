@@ -1,9 +1,10 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 /**
- * Maps an account to the environment variables that the spawned CLI honors.
- * Used by the agent classes' `buildCommand` and by `smithers agent test` to
- * exercise an account without involving an agent.
+ * Maps an account to the environment variables the matching provider CLI
+ * honors. This is the canonical account→env mapping; packages/usage's
+ * `getAccountUsage` and the CLI's `runAgentAdd` (SUBSCRIPTION_DIR_ENV_VAR)
+ * mirror it rather than importing it, and must stay aligned.
  *
  * @param {import("./Account.ts").Account} account
  * @returns {Record<string, string>}
