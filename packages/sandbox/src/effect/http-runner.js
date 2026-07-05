@@ -1,37 +1,15 @@
 import { HttpRunner } from "@effect/cluster";
 import { mkdir, cp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { SandboxEntityExecutor } from "./sandbox-entity.js";
-import { dockerArgs, normalizeSandboxHandleControls, sandboxRunnerEnv, spawnSandboxCommand } from "./process-runner.js";
-/** @typedef {import("../SandboxTransportConfig.ts").SandboxTransportConfig} SandboxTransportConfig */
-/** @typedef {import("../SandboxHandle.ts").SandboxHandle} SandboxHandle */
-/**
- * @param {SandboxTransportConfig} config
- * @returns {SandboxHandle}
- */
-function baseHandle(config) {
-    const sandboxRoot = join(config.rootDir, ".smithers", "sandboxes", config.runId, config.sandboxId);
-    const controls = normalizeSandboxHandleControls(config);
-    return {
-        runtime: config.runtime,
-        runId: config.runId,
-        sandboxId: config.sandboxId,
-        sandboxRoot,
-        requestPath: join(sandboxRoot, "request"),
-        resultPath: join(sandboxRoot, "result"),
-        image: config.image,
-        allowNetwork: Boolean(config.allowNetwork),
-        ...controls,
-    };
-}
+import { dockerArgs, makeBaseSandboxHandle, sandboxRunnerEnv, spawnSandboxCommand } from "./process-runner.js";
 /** @type {Layer.Layer<SandboxEntityExecutor, never, never>} */
 export const DockerSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor, SandboxEntityExecutor.of({
     create: (config) => Effect.gen(function* () {
-        const handle = baseHandle(config);
+        const handle = makeBaseSandboxHandle(config);
         yield* spawnCaptureEffect("docker", ["info"], {
             cwd: config.rootDir,
             env: sandboxRunnerEnv(),
@@ -78,7 +56,7 @@ export const CodeplaneSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor,
         if (!apiUrl || !apiKey) {
             yield* Effect.fail(new SmithersError("INVALID_INPUT", "Codeplane runtime requires CODEPLANE_API_URL and CODEPLANE_API_KEY."));
         }
-        const handle = baseHandle(config);
+        const handle = makeBaseSandboxHandle(config);
         yield* Effect.tryPromise({
             try: async () => {
                 await mkdir(handle.requestPath, { recursive: true });

@@ -9,6 +9,9 @@ const DEFAULT_SANDBOX_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_SANDBOX_OUTPUT_BYTES = 5 * 1024 * 1024;
 const DEFAULT_DOCKER_IMAGE = "oven/bun:1";
 const SANDBOX_DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin";
+// Only these host env vars reach sandbox runner processes (the docker/bwrap/
+// sandbox-exec CLIs), so host secrets never leak into spawned sandboxes;
+// PATH falls back to SANDBOX_DEFAULT_PATH when absent.
 const RUNNER_ENV_ALLOWLIST = [
     "PATH",
     "TMPDIR",
@@ -226,6 +229,29 @@ export function normalizeSandboxHandleControls(input) {
         memoryLimit: normalizeResourceLimit(source.memoryLimit, "memoryLimit", MEMORY_LIMIT_RE),
         cpuLimit: normalizeResourceLimit(source.cpuLimit, "cpuLimit", CPU_LIMIT_RE),
         workspace: normalizeSandboxWorkspace(source.workspace),
+    };
+}
+
+/**
+ * Base handle shared by every local runtime: the
+ * `.smithers/sandboxes/<runId>/<sandboxId>/{request,result}` layout plus the
+ * normalized env/egress/port/volume/limit controls.
+ * @param {import("../SandboxTransportConfig.ts").SandboxTransportConfig} config
+ * @returns {import("../SandboxHandle.ts").SandboxHandle}
+ */
+export function makeBaseSandboxHandle(config) {
+    const sandboxRoot = join(config.rootDir, ".smithers", "sandboxes", config.runId, config.sandboxId);
+    const controls = normalizeSandboxHandleControls(config);
+    return {
+        runtime: config.runtime,
+        runId: config.runId,
+        sandboxId: config.sandboxId,
+        sandboxRoot,
+        requestPath: join(sandboxRoot, "request"),
+        resultPath: join(sandboxRoot, "result"),
+        image: config.image,
+        allowNetwork: Boolean(config.allowNetwork),
+        ...controls,
     };
 }
 

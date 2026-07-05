@@ -32,6 +32,10 @@ function assertPathWithinRootEffect(rootDir, resolvedPath) {
             catch: (cause) => toSmithersError(cause, "realpath root"),
         });
         let current = resolvedPath;
+        // Walk up to the nearest EXISTING ancestor and realpath it, so a
+        // symlinked parent directory of a not-yet-created path cannot smuggle
+        // the target outside the root. ENOENT/ENOTDIR mean "keep walking up";
+        // any other realpath error is fatal.
         while (true) {
             const result = yield* Effect.either(Effect.tryPromise({
                 try: () => realpath(current),

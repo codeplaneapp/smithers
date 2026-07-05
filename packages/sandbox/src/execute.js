@@ -22,6 +22,8 @@ import { SandboxTransport, layerForSandboxRuntime, resolveSandboxRuntime, } from
 /** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
 
 const DEFAULT_MAX_CONCURRENT_SANDBOXES = 10;
+// What a shipped bundle runs when config.command is absent or blank.
+const DEFAULT_SANDBOX_COMMAND = "smithers up bundle.tsx";
 const sandboxProviderRegistry = new Map();
 const sandboxExecutionContext = new AsyncLocalStorage();
 
@@ -102,8 +104,8 @@ async function emitSandboxEvent(db, event) {
 }
 /**
  * Size in bytes of a single file path (0 if missing or not a regular file).
- *  {string} path
- *  {Promise<number>}
+ * @param {string} path
+ * @returns {Promise<number>}
  */
 async function fileSize(path) {
     const info = await stat(path).catch(() => null);
@@ -117,20 +119,11 @@ async function fileSize(path) {
  * @template A
  * @param {SandboxRuntime} runtime
  * @param {Effect.Effect<A, SmithersError, SandboxTransport>} effect
- * @returns {Effect.Effect<A, SmithersError, never>}
- */
-function runtimeServiceEffect(runtime, effect) {
-    return effect.pipe(Effect.provide(layerForSandboxRuntime(runtime)));
-}
-/**
- * @template A
- * @param {SandboxRuntime} runtime
- * @param {Effect.Effect<A, SmithersError, SandboxTransport>} effect
  * @returns {Promise<A>}
  */
 async function transportCall(runtime, effect) {
     const started = performance.now();
-    const value = await Effect.runPromise(runtimeServiceEffect(runtime, effect));
+    const value = await Effect.runPromise(effect.pipe(Effect.provide(layerForSandboxRuntime(runtime))));
     await Effect.runPromise(Metric.update(sandboxTransportDurationMs, performance.now() - started));
     return value;
 }
@@ -159,7 +152,7 @@ function requireSandboxHandle(handle, sandboxId) {
 function resolveSandboxCommand(command) {
     return typeof command === "string" && command.trim().length > 0
         ? command
-        : "smithers up bundle.tsx";
+        : DEFAULT_SANDBOX_COMMAND;
 }
 /**
  * @param {unknown} value
@@ -327,6 +320,113 @@ function isSandboxActive(status) {
     return status !== "finished" && status !== "failed" && status !== "cancelled";
 }
 /**
+ * Shared completion tail for both execution paths (provider and transport):
+ * record the collected bundle, run the diff-review gate, apply accepted
+ * changes, and mark the sandbox row, events, and heartbeat as completed.
+ * @param {{
+ *   adapter: SmithersDb;
+ *   runtimeDb: ConstructorParameters<typeof SmithersDb>[0];
+ *   runtime: ReturnType<typeof requireTaskRuntime>;
+ *   options: ExecuteSandboxOptions;
+ *   selectedRuntime: string;
+ *   configJson: string;
+ *   createdAtMs: number;
+ *   childStartedMs: number;
+ *   validated: import("./ValidatedSandboxBundle.ts").ValidatedSandboxBundle;
+ *   remoteRunId: string | undefined;
+ *   workspaceId: string | null;
+ *   containerId: string | null;
+ *   requireApprovalMessage: string;
+ * }} params
+ * @returns {Promise<unknown>}
+ */
+async function finalizeSandboxBundle(params) {
+    const { adapter, runtimeDb, runtime, options, selectedRuntime, configJson, validated } = params;
+    const totalPatchCount = validated.patchFiles.length + diffBundlePatchCount(validated.manifest.diffBundle);
+    runtime.heartbeat({
+        sandboxId: options.sandboxId,
+        stage: "bundle-collected",
+        progress: 85,
+        bundlePath: validated.bundlePath,
+        patchCount: totalPatchCount,
+    });
+    await emitSandboxEvent(runtimeDb, {
+        type: "SandboxBundleReceived",
+        runId: runtime.runId,
+        sandboxId: options.sandboxId,
+        bundleSizeBytes: validated.bundleSizeBytes,
+        patchCount: totalPatchCount,
+        hasOutputs: validated.manifest.outputs !== undefined,
+        timestampMs: nowMs(),
+    });
+    const reviewDiffs = options.reviewDiffs ?? true;
+    if (reviewDiffs && totalPatchCount > 0) {
+        await emitSandboxEvent(runtimeDb, {
+            type: "SandboxDiffReviewRequested",
+            runId: runtime.runId,
+            sandboxId: options.sandboxId,
+            patchCount: totalPatchCount,
+            totalDiffLines: 0,
+            timestampMs: nowMs(),
+        });
+        if (!options.autoAcceptDiffs) {
+            await emitSandboxEvent(runtimeDb, {
+                type: "SandboxDiffRejected",
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                reason: "Diff review approval is required before applying sandbox patches.",
+                timestampMs: nowMs(),
+            });
+            throw new SmithersError("INVALID_INPUT", params.requireApprovalMessage, {
+                sandboxId: options.sandboxId,
+                patchCount: totalPatchCount,
+            });
+        }
+        await emitSandboxEvent(runtimeDb, {
+            type: "SandboxDiffAccepted",
+            runId: runtime.runId,
+            sandboxId: options.sandboxId,
+            patchCount: totalPatchCount,
+            timestampMs: nowMs(),
+        });
+    }
+    if (!reviewDiffs || totalPatchCount === 0 || options.autoAcceptDiffs) {
+        await applyAcceptedSandboxChanges(validated, options);
+    }
+    await adapter.upsertSandbox({
+        runId: runtime.runId,
+        sandboxId: options.sandboxId,
+        runtime: selectedRuntime,
+        remoteRunId: params.remoteRunId ?? null,
+        workspaceId: params.workspaceId,
+        containerId: params.containerId,
+        configJson,
+        status: validated.manifest.status,
+        shippedAtMs: params.createdAtMs,
+        completedAtMs: nowMs(),
+        bundlePath: validated.bundlePath,
+    });
+    await emitSandboxEvent(runtimeDb, {
+        type: "SandboxCompleted",
+        runId: runtime.runId,
+        sandboxId: options.sandboxId,
+        // Deliberately not `?? null`: an undefined remoteRunId is dropped by
+        // JSON.stringify, preserving the historical event payload shape.
+        remoteRunId: params.remoteRunId,
+        runtime: selectedRuntime,
+        status: validated.manifest.status,
+        durationMs: performance.now() - params.childStartedMs,
+        timestampMs: nowMs(),
+    });
+    runtime.heartbeat({
+        sandboxId: options.sandboxId,
+        stage: "completed",
+        progress: 100,
+        status: validated.manifest.status,
+    });
+    return validated.manifest.outputs;
+}
+/**
  * @param {ExecuteSandboxOptions} options
  * @returns {Promise<unknown>}
  */
@@ -372,10 +472,6 @@ export async function executeSandbox(options) {
     });
     const sandboxRoot = join(options.rootDir, ".smithers", "sandboxes", runtime.runId, options.sandboxId);
     const requestBundlePath = join(sandboxRoot, "request-bundle");
-    /**
-   * @param {string} childRunId
-   */
-    const childLogPath = (childRunId) => join(options.rootDir, ".smithers", "executions", childRunId, "logs", "stream.ndjson");
     let handle = null;
     let providerRequest = null;
     try {
@@ -479,87 +575,21 @@ export async function executeSandbox(options) {
             const providerResult = await runSandboxProvider(provider, providerRequest);
             const materialized = await materializeProviderResult(providerResult, providerRequest.resultBundlePath);
             const validated = await validateSandboxBundle(materialized.bundlePath);
-            const totalPatchCount = validated.patchFiles.length + diffBundlePatchCount(validated.manifest.diffBundle);
-            runtime.heartbeat({
-                sandboxId: options.sandboxId,
-                stage: "bundle-collected",
-                progress: 85,
-                bundlePath: validated.bundlePath,
-                patchCount: totalPatchCount,
-            });
-            await emitSandboxEvent(runtimeDb, {
-                type: "SandboxBundleReceived",
-                runId: runtime.runId,
-                sandboxId: options.sandboxId,
-                bundleSizeBytes: validated.bundleSizeBytes,
-                patchCount: totalPatchCount,
-                hasOutputs: validated.manifest.outputs !== undefined,
-                timestampMs: nowMs(),
-            });
-            const reviewDiffs = options.reviewDiffs ?? true;
-            if (reviewDiffs && totalPatchCount > 0) {
-                await emitSandboxEvent(runtimeDb, {
-                    type: "SandboxDiffReviewRequested",
-                    runId: runtime.runId,
-                    sandboxId: options.sandboxId,
-                    patchCount: totalPatchCount,
-                    totalDiffLines: 0,
-                    timestampMs: nowMs(),
-                });
-                if (!options.autoAcceptDiffs) {
-                    await emitSandboxEvent(runtimeDb, {
-                        type: "SandboxDiffRejected",
-                        runId: runtime.runId,
-                        sandboxId: options.sandboxId,
-                        reason: "Diff review approval is required before applying sandbox patches.",
-                        timestampMs: nowMs(),
-                    });
-                    throw new SmithersError("INVALID_INPUT", "Sandbox produced changes that require review approval.", {
-                        sandboxId: options.sandboxId,
-                        patchCount: totalPatchCount,
-                    });
-                }
-                await emitSandboxEvent(runtimeDb, {
-                    type: "SandboxDiffAccepted",
-                    runId: runtime.runId,
-                    sandboxId: options.sandboxId,
-                    patchCount: totalPatchCount,
-                    timestampMs: nowMs(),
-                });
-            }
-            if (!reviewDiffs || totalPatchCount === 0 || options.autoAcceptDiffs) {
-                await applyAcceptedSandboxChanges(validated, options);
-            }
-            await adapter.upsertSandbox({
-                runId: runtime.runId,
-                sandboxId: options.sandboxId,
-                runtime: selectedRuntime,
-                remoteRunId: materialized.remoteRunId ?? validated.manifest.runId ?? null,
+            return await finalizeSandboxBundle({
+                adapter,
+                runtimeDb,
+                runtime,
+                options,
+                selectedRuntime,
+                configJson,
+                createdAtMs,
+                childStartedMs,
+                validated,
+                remoteRunId: materialized.remoteRunId ?? validated.manifest.runId,
                 workspaceId: materialized.workspaceId,
                 containerId: materialized.containerId,
-                configJson,
-                status: validated.manifest.status,
-                shippedAtMs: createdAtMs,
-                completedAtMs: nowMs(),
-                bundlePath: validated.bundlePath,
+                requireApprovalMessage: "Sandbox produced changes that require review approval.",
             });
-            await emitSandboxEvent(runtimeDb, {
-                type: "SandboxCompleted",
-                runId: runtime.runId,
-                sandboxId: options.sandboxId,
-                remoteRunId: materialized.remoteRunId ?? validated.manifest.runId,
-                runtime: selectedRuntime,
-                status: validated.manifest.status,
-                durationMs: performance.now() - childStartedMs,
-                timestampMs: nowMs(),
-            });
-            runtime.heartbeat({
-                sandboxId: options.sandboxId,
-                stage: "completed",
-                progress: 100,
-                status: validated.manifest.status,
-            });
-            return validated.manifest.outputs;
         }
         const transportConfig = {
             runId: runtime.runId,
@@ -653,91 +683,26 @@ export async function executeSandbox(options) {
             output: child.output,
             status: child.status === "finished" ? "finished" : "failed",
             runId: child.runId,
-            streamLogPath: childLogPath(child.runId),
+            // The child run's live stream log, copied into the result bundle.
+            streamLogPath: join(options.rootDir, ".smithers", "executions", child.runId, "logs", "stream.ndjson"),
         });
         const collected = await transportCall(selectedRuntime, sandboxTransport((svc) => svc.collect(sandboxHandle)));
         const validated = await validateSandboxBundle(collected.bundlePath);
-        const totalPatchCount = validated.patchFiles.length + diffBundlePatchCount(validated.manifest.diffBundle);
-        runtime.heartbeat({
-            sandboxId: options.sandboxId,
-            stage: "bundle-collected",
-            progress: 85,
-            bundlePath: validated.bundlePath,
-            patchCount: totalPatchCount,
-        });
-        await emitSandboxEvent(runtimeDb, {
-            type: "SandboxBundleReceived",
-            runId: runtime.runId,
-            sandboxId: options.sandboxId,
-            bundleSizeBytes: validated.bundleSizeBytes,
-            patchCount: totalPatchCount,
-            hasOutputs: validated.manifest.outputs !== undefined,
-            timestampMs: nowMs(),
-        });
-        const reviewDiffs = options.reviewDiffs ?? true;
-        if (reviewDiffs && totalPatchCount > 0) {
-            await emitSandboxEvent(runtimeDb, {
-                type: "SandboxDiffReviewRequested",
-                runId: runtime.runId,
-                sandboxId: options.sandboxId,
-                patchCount: totalPatchCount,
-                totalDiffLines: 0,
-                timestampMs: nowMs(),
-            });
-            if (!options.autoAcceptDiffs) {
-                await emitSandboxEvent(runtimeDb, {
-                    type: "SandboxDiffRejected",
-                    runId: runtime.runId,
-                    sandboxId: options.sandboxId,
-                    reason: "Diff review approval is required before applying sandbox patches.",
-                    timestampMs: nowMs(),
-                });
-                throw new SmithersError("INVALID_INPUT", "Sandbox produced patches that require review approval.", {
-                    sandboxId: options.sandboxId,
-                    patchCount: totalPatchCount,
-                });
-            }
-            await emitSandboxEvent(runtimeDb, {
-                type: "SandboxDiffAccepted",
-                runId: runtime.runId,
-                sandboxId: options.sandboxId,
-                patchCount: totalPatchCount,
-                timestampMs: nowMs(),
-            });
-        }
-        if (!reviewDiffs || totalPatchCount === 0 || options.autoAcceptDiffs) {
-            await applyAcceptedSandboxChanges(validated, options);
-        }
-        await adapter.upsertSandbox({
-            runId: runtime.runId,
-            sandboxId: options.sandboxId,
-            runtime: selectedRuntime,
+        return await finalizeSandboxBundle({
+            adapter,
+            runtimeDb,
+            runtime,
+            options,
+            selectedRuntime,
+            configJson,
+            createdAtMs,
+            childStartedMs,
+            validated,
             remoteRunId: child.runId,
             workspaceId: sandboxHandle.workspaceId ?? null,
             containerId: sandboxHandle.containerId ?? null,
-            configJson,
-            status: validated.manifest.status,
-            shippedAtMs: createdAtMs,
-            completedAtMs: nowMs(),
-            bundlePath: validated.bundlePath,
+            requireApprovalMessage: "Sandbox produced patches that require review approval.",
         });
-        await emitSandboxEvent(runtimeDb, {
-            type: "SandboxCompleted",
-            runId: runtime.runId,
-            sandboxId: options.sandboxId,
-            remoteRunId: child.runId,
-            runtime: selectedRuntime,
-            status: validated.manifest.status,
-            durationMs: performance.now() - childStartedMs,
-            timestampMs: nowMs(),
-        });
-        runtime.heartbeat({
-            sandboxId: options.sandboxId,
-            stage: "completed",
-            progress: 100,
-            status: validated.manifest.status,
-        });
-        return validated.manifest.outputs;
     }
     catch (error) {
         await adapter.upsertSandbox({

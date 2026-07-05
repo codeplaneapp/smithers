@@ -170,28 +170,6 @@ export async function writeSandboxEgressFiles(value, requestBundlePath) {
 }
 
 /**
- * @param {Record<string, string> | undefined} record
- * @returns {Record<string, string> | undefined}
- */
-function redactRecord(record) {
-    if (!record) {
-        return undefined;
-    }
-    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, "[redacted]"]));
-}
-
-/**
- * @param {Record<string, string> | undefined} record
- * @returns {Record<string, string> | undefined}
- */
-function redactSecretBindings(record) {
-    if (!record) {
-        return undefined;
-    }
-    return Object.fromEntries(Object.keys(record).sort().map((_, index) => [`binding_${index + 1}`, "[redacted]"]));
-}
-
-/**
  * @param {unknown} value
  * @returns {unknown}
  */
@@ -202,8 +180,9 @@ export function redactSandboxEgressConfig(value) {
     }
     /** @type {Record<string, unknown>} */
     const redacted = {};
+    // Env redaction keeps the key names and hides only the values.
     if (egress.env)
-        redacted.env = redactRecord(egress.env);
+        redacted.env = Object.fromEntries(Object.keys(egress.env).sort().map((key) => [key, "[redacted]"]));
     if (egress.httpProxy)
         redacted.httpProxy = "[redacted]";
     if (egress.httpsProxy)
@@ -214,7 +193,8 @@ export function redactSandboxEgressConfig(value) {
         redacted.caCertPem = "[redacted]";
     if (egress.caCertPath)
         redacted.caCertPath = "[redacted]";
+    // Secret binding NAMES are sensitive too, so only the count may leak.
     if (egress.secretBindings)
-        redacted.secretBindings = redactSecretBindings(egress.secretBindings);
+        redacted.secretBindings = Object.fromEntries(Object.keys(egress.secretBindings).sort().map((_, index) => [`binding_${index + 1}`, "[redacted]"]));
     return redacted;
 }

@@ -9,6 +9,7 @@ import { resolveSandboxPath } from "./sandboxPath.js";
 export const SANDBOX_MAX_BUNDLE_BYTES = 100 * 1024 * 1024; // 100MB
 export const SANDBOX_MAX_README_BYTES = 5 * 1024 * 1024; // 5MB
 export const SANDBOX_MAX_PATCH_FILES = 1000;
+// Input bounds enforced on bundle write via @smithers-orchestrator/db input-bounds assertions.
 export const SANDBOX_BUNDLE_RUN_ID_MAX_LENGTH = 256;
 export const SANDBOX_BUNDLE_PATH_MAX_LENGTH = 1024;
 export const SANDBOX_BUNDLE_OUTPUT_MAX_DEPTH = 16;
@@ -92,14 +93,6 @@ function assertPatchPathSafe(bundlePath, patchPath) {
         throw new SmithersError("TOOL_PATH_ESCAPE", `Sandbox patch path escapes bundle root: ${patchPath}`, { patchPath });
     }
 }
-
-/**
- * @param {string} root
- * @param {string} file
- */
-function bundleRelativePath(root, file) {
-    return relative(root, file).split(sep).join("/");
-}
 /**
  * @param {{ output: unknown; patches?: Array<{ path: string; content: string }>; artifacts?: Array<{ path: string; content: string }>; runId?: string; status: "finished" | "failed" | "cancelled"; streamLogPath?: string | null; diffBundle?: unknown; }} params
  */
@@ -167,7 +160,7 @@ export async function validateSandboxBundle(bundlePath) {
         throw new SmithersError("INVALID_INPUT", `Sandbox bundle exceeds ${SANDBOX_MAX_BUNDLE_BYTES} bytes`, { bundlePath, maxBytes: SANDBOX_MAX_BUNDLE_BYTES });
     }
     const patchFiles = walked.files
-        .map((file) => bundleRelativePath(bundlePath, file))
+        .map((file) => relative(bundlePath, file).split(sep).join("/")) // bundle-relative, posix separators
         .filter((file) => file.startsWith("patches/"))
         .filter((file) => file.endsWith(".patch"));
     if (patchFiles.length > SANDBOX_MAX_PATCH_FILES) {

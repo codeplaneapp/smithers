@@ -155,13 +155,14 @@ function sandboxEntityError(error, operation, details) {
  */
 export const makeSandboxTransportServiceEffect = (executorLayer) => Effect.gen(function* () {
     const makeClient = yield* Entity.makeTestClient(SandboxEntity, SandboxEntityLayer.pipe(Layer.provide(executorLayer))).pipe(Effect.provide(ShardingConfig.layer()));
+    /** @typedef {Effect.Effect.Success<ReturnType<typeof makeClient>>} SandboxEntityClient */
     /**
- * @template A
- * @param {{ runId: string; sandboxId: string }} input
- * @param {string} operation
- * @param {Record<string, unknown>} details
- * @param {(client: SandboxEntityClient) => Effect.Effect<A, unknown>} f
- */
+     * @template A
+     * @param {{ runId: string; sandboxId: string }} input
+     * @param {string} operation
+     * @param {Record<string, unknown>} details
+     * @param {(client: SandboxEntityClient) => Effect.Effect<A, unknown>} f
+     */
     const withClient = (input, operation, details, f) => makeClient(makeSandboxEntityId(input)).pipe(Effect.flatMap((client) => f(client)), Effect.mapError((error) => sandboxEntityError(error, operation, {
         runId: input.runId,
         sandboxId: input.sandboxId,
