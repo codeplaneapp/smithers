@@ -2947,11 +2947,11 @@ a { color: var(--brand); }</style>
                 mutation: true,
             };
         }
-        const runAction = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(cancel|resume|rewind|hijack)$/);
+        const runAction = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(cancel|pause|resume|rewind|hijack)$/);
         if (httpMethod === "POST" && runAction) {
             const action = runAction[2];
             return {
-                method: action === "cancel" ? "cancelRun" : action === "resume" ? "resumeRun" : action === "hijack" ? "hijackRun" : "rewindRun",
+                method: action === "cancel" ? "cancelRun" : action === "pause" ? "pauseRun" : action === "resume" ? "resumeRun" : action === "hijack" ? "hijackRun" : "rewindRun",
                 params: { ...body, runId: decodeURIComponent(runAction[1]) },
                 mutation: true,
             };
@@ -6740,6 +6740,26 @@ a { color: var(--brand); }</style>
                 }
                 active.abort.abort();
                 return responseOk(frame.id, { runId, status: "cancelling" });
+            }
+            case "runs.pause":
+            case "pauseRun": {
+                const runId = asString(params.runId);
+                if (!runId) {
+                    return responseError(frame.id, "INVALID_REQUEST", "runId is required");
+                }
+                const resolved = await this.resolveRun(runId).catch(() => null);
+                const run = resolved ? await resolved.adapter.getRun(runId) : null;
+                if (!resolved || !run) {
+                    return responseError(frame.id, "RunNotFound", "Run not found");
+                }
+                if (run.status !== "running") {
+                    return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently executing");
+                }
+                // Durable pause request: the engine's pause-watcher stops scheduling,
+                // drains in-flight tasks, then writes the resumable `paused` status.
+                // Unlike cancel, this never aborts the run's tasks.
+                await runPromise(resolved.adapter.requestRunPause(runId, nowMs()));
+                return responseOk(frame.id, { runId, status: "pausing" });
             }
             case "runs.rerun": {
                 const runId = asString(params.runId);

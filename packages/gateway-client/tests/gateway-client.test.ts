@@ -79,6 +79,7 @@ const typedRpcRequestMethods = {
   launchRun: "launchRun",
   resumeRun: "resumeRun",
   cancelRun: "cancelRun",
+  pauseRun: "pauseRun",
   hijackRun: "hijackRun",
   rewindRun: "rewindRun",
   submitApproval: "submitApproval",

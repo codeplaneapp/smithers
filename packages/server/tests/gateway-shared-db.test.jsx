@@ -121,6 +121,52 @@ describe("gateway — many workflows sharing one DB", () => {
     expect(resolved?.workflowKey).toBe("beta");
   });
 
+  test("pauseRun writes a durable pause request for a running run", async () => {
+    dbPath = makeDbPath("pause");
+    const wf = createSharedDbWorkflows(dbPath);
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway.register("alpha", wf.alpha);
+    const adapter = gateway.adapterForWorkflow(wf.alpha);
+    await adapter.insertRun({
+      runId: "pause-me",
+      workflowName: "alpha",
+      status: "running",
+      createdAtMs: Date.now(),
+    });
+
+    const response = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:write"], userId: "test" },
+      { id: "p", method: "pauseRun", params: { runId: "pause-me" } },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(response.payload.status).toBe("pausing");
+    const run = await adapter.getRun("pause-me");
+    expect(typeof run.pauseRequestedAtMs).toBe("number");
+  });
+
+  test("pauseRun rejects a run that is not currently executing", async () => {
+    dbPath = makeDbPath("pause-inactive");
+    const wf = createSharedDbWorkflows(dbPath);
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway.register("alpha", wf.alpha);
+    const adapter = gateway.adapterForWorkflow(wf.alpha);
+    await adapter.insertRun({
+      runId: "finished-run",
+      workflowName: "alpha",
+      status: "finished",
+      createdAtMs: Date.now(),
+    });
+
+    const response = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:write"], userId: "test" },
+      { id: "p", method: "pauseRun", params: { runId: "finished-run" } },
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error?.code ?? response.error).toBe("RUN_NOT_ACTIVE");
+  });
+
   test("getSchemaSignature exposes the migration head over RPC", async () => {
     dbPath = makeDbPath("schema-signature");
     const wf = createSharedDbWorkflows(dbPath);

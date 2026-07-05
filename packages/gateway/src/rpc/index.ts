@@ -74,6 +74,7 @@ export type GatewayRpcMethod =
   | "launchRun"
   | "resumeRun"
   | "cancelRun"
+  | "pauseRun"
   | "hijackRun"
   | "rewindRun"
   | "submitApproval"
@@ -139,6 +140,15 @@ export type CancelRunRequest = {
 export type CancelRunResponse = {
   runId: string;
   status: "cancelling";
+};
+
+export type PauseRunRequest = {
+  runId: string;
+};
+
+export type PauseRunResponse = {
+  runId: string;
+  status: "pausing";
 };
 
 export type HijackRunRequest = {
@@ -593,6 +603,7 @@ export const GATEWAY_RPC_LEGACY_METHOD_ALIASES: Record<string, GatewayRpcMethod>
   "runs.get": "getRun",
   "runs.list": "listRuns",
   "runs.cancel": "cancelRun",
+  "runs.pause": "pauseRun",
   "approvals.decide": "submitApproval",
   "signals.send": "submitSignal",
   jumpToFrame: "rewindRun",
@@ -658,6 +669,20 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RUN_NOT_ACTIVE", "Internal"],
     exampleRequest: { runId: "run_01" },
     exampleResponse: { runId: "run_01", status: "cancelling" },
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "pauseRun",
+    title: "Pause Run",
+    description: "Gracefully pause an active run: stop scheduling new tasks, let in-flight tasks finish, then park it resumably.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "run:write",
+    requestSchema: objectSchema({ runId }, ["runId"]),
+    responseSchema: objectSchema({ runId, status: { type: "string", enum: ["pausing"] } }, ["runId", "status"]),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "RUN_NOT_ACTIVE", "Internal"],
+    exampleRequest: { runId: "run_01" },
+    exampleResponse: { runId: "run_01", status: "pausing" },
   },
   {
     version: SMITHERS_API_VERSION,

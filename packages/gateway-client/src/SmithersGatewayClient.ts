@@ -456,6 +456,10 @@ export class SmithersGatewayClient {
     return this.rpc("resumeRun", params);
   }
 
+  pauseRun(params: GatewayRpcParams<"pauseRun">) {
+    return this.rpc("pauseRun", params);
+  }
+
   cancelRun(params: GatewayRpcParams<"cancelRun">) {
     return this.rpc("cancelRun", params);
   }

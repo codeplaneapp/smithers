@@ -1,6 +1,8 @@
 import type {
   CancelRunRequest,
   CancelRunResponse,
+  PauseRunRequest,
+  PauseRunResponse,
   CronCreateRequest,
   CronDeleteRequest,
   CronListRequest,
@@ -52,6 +54,7 @@ export type GatewayRpcRequestMap = {
   launchRun: LaunchRunRequest;
   resumeRun: ResumeRunRequest;
   cancelRun: CancelRunRequest;
+  pauseRun: PauseRunRequest;
   hijackRun: HijackRunRequest;
   rewindRun: RewindRunRequest;
   submitApproval: SubmitApprovalRequest;
@@ -85,6 +88,7 @@ export type GatewayRpcResponseMap = {
   launchRun: LaunchRunResponse;
   resumeRun: ResumeRunResponse;
   cancelRun: CancelRunResponse;
+  pauseRun: PauseRunResponse;
   hijackRun: HijackRunResponse;
   rewindRun: Record<string, unknown>;
   submitApproval: SubmitApprovalResponse;
