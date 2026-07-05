@@ -752,6 +752,9 @@ function buildMirrorOnProgress(adapter, runId, workflowName, workflowPath, confi
         });
     };
 }
+// Exposed for tests: the detached-run mirror projector, so the
+// ApprovalRequested/Granted/Denied projection can be exercised directly.
+export const __serverTestInternals = { buildMirrorOnProgress };
 /**
  * @param {ServerOptions} [opts]
  */
