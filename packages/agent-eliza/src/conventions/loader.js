@@ -105,66 +105,41 @@ function nameFromFile(filePath) {
  * @returns {WorkflowDefinition | null}
  */
 function buildDefinition(filePath, baseDir, exported, source, frontmatter) {
-  if (
-    exported !== null &&
-    typeof exported === "object" &&
-    "workflow" in /** @type {object} */ (exported)
-  ) {
-    const raw = /** @type {Partial<WorkflowDefinition>} */ (exported);
-    return {
-      name:
-        raw.name ??
-        (typeof frontmatter.name === "string" ? frontmatter.name : undefined) ??
-        nameFromFile(filePath),
-      description:
-        raw.description ??
-        (typeof frontmatter.description === "string" ? frontmatter.description : undefined) ??
-        "",
-      tags: raw.tags ?? /** @type {string[] | undefined} */ (frontmatter.tags),
-      aliases: raw.aliases ?? /** @type {string[] | undefined} */ (frontmatter.aliases),
-      disableModelInvocation:
-        raw.disableModelInvocation ??
-        (typeof frontmatter["disable-model-invocation"] === "boolean"
-          ? frontmatter["disable-model-invocation"]
-          : undefined),
-      system:
-        raw.system ??
-        (typeof frontmatter.system === "boolean" ? frontmatter.system : undefined),
-      version:
-        raw.version ??
-        (typeof frontmatter.version === "string" ? frontmatter.version : undefined),
-      filePath,
-      baseDir,
-      source,
-      workflow: /** @type {any} */ (raw.workflow),
-    };
-  }
+  if (exported === null || typeof exported !== "object") return null;
 
-  if (exported !== null && typeof exported === "object") {
-    return {
-      name:
-        (typeof frontmatter.name === "string" ? frontmatter.name : undefined) ??
-        nameFromFile(filePath),
-      description:
-        (typeof frontmatter.description === "string" ? frontmatter.description : undefined) ?? "",
-      tags: /** @type {string[] | undefined} */ (frontmatter.tags),
-      aliases: /** @type {string[] | undefined} */ (frontmatter.aliases),
-      disableModelInvocation:
-        typeof frontmatter["disable-model-invocation"] === "boolean"
-          ? frontmatter["disable-model-invocation"]
-          : undefined,
-      system:
-        typeof frontmatter.system === "boolean" ? frontmatter.system : undefined,
-      version:
-        typeof frontmatter.version === "string" ? frontmatter.version : undefined,
-      filePath,
-      baseDir,
-      source,
-      workflow: /** @type {any} */ (exported),
-    };
-  }
+  // Two accepted module shapes: a WorkflowDefinition-like object carrying a
+  // `workflow` field (its own fields win over frontmatter), or a bare workflow
+  // object (all metadata then comes from frontmatter).
+  const hasWorkflowExport = "workflow" in exported;
+  const raw = /** @type {Partial<WorkflowDefinition>} */ (hasWorkflowExport ? exported : {});
 
-  return null;
+  return {
+    name:
+      raw.name ??
+      (typeof frontmatter.name === "string" ? frontmatter.name : undefined) ??
+      nameFromFile(filePath),
+    description:
+      raw.description ??
+      (typeof frontmatter.description === "string" ? frontmatter.description : undefined) ??
+      "",
+    tags: raw.tags ?? /** @type {string[] | undefined} */ (frontmatter.tags),
+    aliases: raw.aliases ?? /** @type {string[] | undefined} */ (frontmatter.aliases),
+    disableModelInvocation:
+      raw.disableModelInvocation ??
+      (typeof frontmatter["disable-model-invocation"] === "boolean"
+        ? frontmatter["disable-model-invocation"]
+        : undefined),
+    system:
+      raw.system ??
+      (typeof frontmatter.system === "boolean" ? frontmatter.system : undefined),
+    version:
+      raw.version ??
+      (typeof frontmatter.version === "string" ? frontmatter.version : undefined),
+    filePath,
+    baseDir,
+    source,
+    workflow: /** @type {any} */ (hasWorkflowExport ? raw.workflow : exported),
+  };
 }
 
 /**

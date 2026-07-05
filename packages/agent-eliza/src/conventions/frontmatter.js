@@ -39,25 +39,10 @@ const COMMENT_FRONTMATTER_RE = /^\/\*\s*---\r?\n([\s\S]*?)\r?\n---\s*\*\/([\s\S]
  * @returns {{ frontmatter: WorkflowFrontmatter; body: string }}
  */
 export function parseWorkflowFrontmatter(source) {
-  // Try block-comment format first (executable JS/TS files).
-  const commentMatch = source.match(COMMENT_FRONTMATTER_RE);
-  if (commentMatch) {
-    const yamlBlock = commentMatch[1] ?? "";
-    const body = commentMatch[2] ?? "";
-    let frontmatter = /** @type {WorkflowFrontmatter} */ ({});
-    try {
-      const parsed = parseYaml(yamlBlock);
-      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-        frontmatter = /** @type {WorkflowFrontmatter} */ (parsed);
-      }
-    } catch {
-      // Malformed YAML — return empty frontmatter with the body intact.
-    }
-    return { frontmatter, body };
-  }
-
-  // Try --- YAML block (companion .md files or plain text).
-  const match = source.match(FRONTMATTER_RE);
+  // Block-comment format is tried first (executable JS/TS files), then the
+  // ---fenced YAML block (companion .md files or plain text). Both regexes
+  // capture [1]=yaml and [2]=body.
+  const match = source.match(COMMENT_FRONTMATTER_RE) ?? source.match(FRONTMATTER_RE);
   if (!match) {
     return { frontmatter: {}, body: source };
   }

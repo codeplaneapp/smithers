@@ -1,6 +1,4 @@
-import { buildGenerateResult } from "@smithers-orchestrator/agents/BaseCliAgent";
-import { extractPrompt } from "@smithers-orchestrator/agents/BaseCliAgent";
-import { truncate } from "@smithers-orchestrator/agents/BaseCliAgent";
+import { buildGenerateResult, extractPrompt, truncate } from "@smithers-orchestrator/agents/BaseCliAgent";
 
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaAgentOptions} ElizaAgentOptions */
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaPlugin} ElizaPlugin */
@@ -114,25 +112,6 @@ function raceAbort(promise, abortSignal) {
             abortSignal.removeEventListener("abort", onAbort);
         });
     });
-}
-
-/**
- * Returns true when the error indicates the model type name is not recognised
- * by the runtime (as opposed to transient errors like network or auth failures).
- *
- * @param {unknown} err
- * @returns {boolean}
- */
-function isUnsupportedModelError(err) {
-    if (!(err instanceof Error)) return false;
-    const msg = err.message.toLowerCase();
-    return (
-        msg.includes("unsupported model") ||
-        msg.includes("unknown model") ||
-        msg.includes("not supported") ||
-        msg.includes("invalid model type") ||
-        msg.includes("model type not found")
-    );
 }
 
 /**
@@ -259,29 +238,33 @@ export class ElizaAgent {
 
         const runtime = await raceAbort(this.#ensureRuntime(), abortSignal);
 
-        /** @type {string} */
-        let text;
-        try {
-            text = await raceAbort(
-                runtime.useModel("TEXT_LARGE", {
+        /** @param {string} modelType */
+        const callModel = (modelType) =>
+            raceAbort(
+                runtime.useModel(modelType, {
                     prompt: promptText,
                     stopSequences: [],
                     abortSignal,
                 }),
                 abortSignal
             );
+
+        /** @type {string} */
+        let text;
+        try {
+            text = await callModel("TEXT_LARGE");
         } catch (err) {
             // Only fall back on unrecognised model-type errors, not transient
             // failures (network, rate-limit, auth) which should surface directly.
-            if (isUnsupportedModelError(err)) {
-                text = await raceAbort(
-                    runtime.useModel("TEXT_SMALL", {
-                        prompt: promptText,
-                        stopSequences: [],
-                        abortSignal,
-                    }),
-                    abortSignal
-                );
+            const msg = err instanceof Error ? err.message.toLowerCase() : "";
+            const unsupportedModelType =
+                msg.includes("unsupported model") ||
+                msg.includes("unknown model") ||
+                msg.includes("not supported") ||
+                msg.includes("invalid model type") ||
+                msg.includes("model type not found");
+            if (unsupportedModelType) {
+                text = await callModel("TEXT_SMALL");
             } else {
                 throw err;
             }
