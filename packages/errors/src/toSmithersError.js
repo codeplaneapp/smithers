@@ -12,20 +12,13 @@ function causeSummary(cause) {
     if (cause instanceof EngineError) {
         return cause.message;
     }
-    if (isSmithersErrorLike(cause)) {
+    if (isSmithersError(cause)) {
         return typeof cause.summary === "string" ? cause.summary : cause.message;
     }
     if (cause instanceof Error) {
         return cause.message;
     }
     return String(cause);
-}
-/**
- * @param {unknown} cause
- * @returns {cause is SmithersError}
- */
-function isSmithersErrorLike(cause) {
-    return cause instanceof SmithersError || isSmithersError(cause);
 }
 /**
  * @param {unknown} cause
@@ -36,7 +29,7 @@ function isSmithersErrorLike(cause) {
 export function toSmithersError(cause, label, options = {}) {
     const taggedError = fromTaggedError(cause);
     const normalizedCause = taggedError ?? cause;
-    const smithersCause = isSmithersErrorLike(normalizedCause);
+    const smithersCause = isSmithersError(normalizedCause);
     if (smithersCause &&
         !label &&
         !options.code &&

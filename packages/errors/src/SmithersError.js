@@ -2,16 +2,6 @@ import { getSmithersErrorDocsUrl } from "./getSmithersErrorDocsUrl.js";
 /** @typedef {import("./SmithersErrorCode.ts").SmithersErrorCode} SmithersErrorCode */
 /** @typedef {import("./SmithersErrorOptions.ts").SmithersErrorOptions} SmithersErrorOptions */
 
-/**
- * @param {string} message
- * @param {string} docsUrl
- * @returns {string}
- */
-function formatSmithersErrorMessage(message, docsUrl) {
-    if (message.includes(docsUrl))
-        return message;
-    return `${message} See ${docsUrl}`;
-}
 export class SmithersError extends Error {
     /** @type {SmithersErrorCode} */
     code;
@@ -33,6 +23,10 @@ export class SmithersError extends Error {
    */
     constructor(code, summary, details, causeOrOptions) {
         const docsUrl = getSmithersErrorDocsUrl(code);
+        // The 4th arg historically took a bare `cause`. An object counts as an
+        // options bag only when it owns at least one known option key
+        // (cause/includeDocsUrl/name), so most plain-object causes still
+        // round-trip as the cause.
         const isOptionsObject = causeOrOptions &&
             typeof causeOrOptions === "object" &&
             !(causeOrOptions instanceof Error) &&
@@ -42,9 +36,11 @@ export class SmithersError extends Error {
         const options = /** @type {SmithersErrorOptions} */ (isOptionsObject
             ? causeOrOptions
             : { cause: causeOrOptions });
-        super(options.includeDocsUrl === false
+        // Append the docs pointer unless suppressed or the summary already contains it.
+        const message = options.includeDocsUrl === false || summary.includes(docsUrl)
             ? summary
-            : formatSmithersErrorMessage(summary, docsUrl), { cause: options.cause });
+            : `${summary} See ${docsUrl}`;
+        super(message, { cause: options.cause });
         Object.setPrototypeOf(this, new.target.prototype);
         this.name = options.name ?? "SmithersError";
         this.code = code;

@@ -1,19 +1,12 @@
 import { SmithersError } from "./SmithersError.js";
 /**
- * @param {unknown} value
- * @returns {TaggedErrorPayload | undefined}
- */
-function objectPayload(value) {
-    return value && typeof value === "object"
-        ? value
-        : undefined;
-}
-/**
  * @param {unknown} error
  * @returns {SmithersError | undefined}
  */
 export function fromTaggedError(error) {
-    const payload = objectPayload(error);
+    const payload = error && typeof error === "object"
+        ? /** @type {Record<string, unknown>} */ (error)
+        : undefined;
     if (!payload || typeof payload._tag !== "string")
         return undefined;
     const message = typeof payload.message === "string" ? payload.message : String(payload._tag);

@@ -1,3 +1,8 @@
+// Runtime source of truth for KnownSmithersErrorCode. Keys must stay in sync
+// with the declare-namespace entries in the generated src/index.d.ts
+// (tests/error-declarations.test.js gates this). `when` is the human-facing
+// trigger description surfaced in docs; `details` describes the expected
+// SmithersError.details shape for the code and is not runtime-enforced.
 export const smithersErrorDefinitions = {
     INVALID_INPUT: {
         category: "engine",
