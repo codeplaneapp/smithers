@@ -98,6 +98,14 @@ function normalizeResult<T>(schema: SafeSchema<T>, result: FakeAgentResult<T> | 
   if (isAuto(result)) {
     return { output: schemaExample(schema) };
   }
+  // Prefer interpreting the value as the bare task output: if it validates
+  // against the output schema directly, it IS the output — even when the domain
+  // output happens to have its own `output`/`text`/`files` keys, which would
+  // otherwise be misread as the {output,text,files} wrapper shape.
+  const asOutput = schema.safeParse(result);
+  if (asOutput.success) {
+    return { output: asOutput.data };
+  }
   if (hasResponseKeys(result)) {
     const response: FakeAgentResult<T> = {};
     if ("output" in result) response.output = assertSchema(schema, result.output);

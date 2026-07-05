@@ -59,4 +59,5 @@
 export * from "./components/index.js";
 export { markdownComponents } from "./markdownComponents.js";
 export { renderMdx } from "./renderMdx.js";
+export { renderPromptToText } from "./components/Task.js";
 export { zodSchemaToJsonExample } from "./zod-to-example.js";
