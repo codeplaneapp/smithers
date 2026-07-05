@@ -9,10 +9,6 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
-    // Required by the `tsup --dts-only` build: tsup injects a `baseUrl` into the
-    // dts compiler options, which TypeScript 6.0.3 flags as deprecated (TS5101).
-    // This silences that tooling-injected deprecation; the project itself sets no
-    // baseUrl. Remove once tsup stops injecting it.
     "ignoreDeprecations": "6.0",
     "strict": true,
     "skipLibCheck": true,
