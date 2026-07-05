@@ -57,6 +57,19 @@ export const EXTENSION_BACKPRESSURE_DISCONNECT_CODE = "BackpressureDisconnect";
 
 /** @typedef {"run:read" | "run:write" | "run:admin" | "approval:submit" | "signal:submit" | "cron:read" | "cron:write" | "observability:read"} GatewayScope */
 
+// Runtime check backing the GatewayScope typedef above (the typedef is the
+// wire contract); the two must stay in lockstep.
+const KNOWN_GATEWAY_SCOPES = [
+  "run:read",
+  "run:write",
+  "run:admin",
+  "approval:submit",
+  "signal:submit",
+  "cron:read",
+  "cron:write",
+  "observability:read",
+];
+
 /**
  * @typedef {object} GatewayExtensionContext
  * @property {string} namespace
@@ -335,17 +348,7 @@ export class GatewayExtensions {
  * @param {string} field
  */
 function assertScope(scope, field) {
-  const valid = [
-    "run:read",
-    "run:write",
-    "run:admin",
-    "approval:submit",
-    "signal:submit",
-    "cron:read",
-    "cron:write",
-    "observability:read",
-  ];
-  if (typeof scope !== "string" || !valid.includes(scope)) {
+  if (typeof scope !== "string" || !KNOWN_GATEWAY_SCOPES.includes(scope)) {
     throw new SmithersError("INVALID_INPUT", `Gateway extension ${field} must be a known GatewayScope.`, { field, scope });
   }
 }

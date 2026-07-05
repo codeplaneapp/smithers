@@ -4,12 +4,11 @@ import { createHash } from "node:crypto";
 import { isIntegrationError, makeIntegrationRuntime, readJsonPath, verifySignature, } from "@smithers-orchestrator/integrations";
 import { pathToFileURL } from "node:url";
 import { resolve, dirname, sep, basename } from "node:path";
-import { Effect } from "effect";
+import { Effect, Metric } from "effect";
 import { isRunHeartbeatFresh, runWorkflow } from "@smithers-orchestrator/engine";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { logError, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
 import { runPromise, runSync } from "./smithersRuntime.js";
@@ -51,6 +50,10 @@ const DEFAULT_SSE_HEARTBEAT_MS = 10_000;
 const COMPLETED_RUN_RETENTION_MS = 60_000;
 const DEFAULT_HEADERS_TIMEOUT = 30_000;
 const DEFAULT_REQUEST_TIMEOUT = 60_000;
+// Event-poll cadence for the SSE stream; also bounds shutdown latency.
+const SSE_POLL_INTERVAL_MS = 500;
+// Statuses after which the event stream can close once drained.
+const TERMINAL_RUN_STATUSES = ["finished", "failed", "cancelled", "continued"];
 class HttpError extends Error {
     status;
     code;
@@ -230,26 +233,6 @@ function buildIntegrationWebhookSources(integrations) {
     });
 }
 /**
- * Map an integration-runtime failure to the webhook route's HTTP status.
- * @param {unknown} error
- * @returns {HttpError}
- */
-function webhookHttpError(error) {
-    if (isIntegrationError(error)) {
-        const reason = /** @type {{ details?: { reason?: unknown } }} */ (error).details?.reason;
-        if (reason === "unknown-source") {
-            return new HttpError(404, "NOT_FOUND", "Unknown webhook source");
-        }
-        if (reason === "invalid-signature") {
-            return new HttpError(401, "UNAUTHORIZED", "Webhook signature verification failed");
-        }
-        if (reason === "decode-failed") {
-            return new HttpError(400, "INVALID_REQUEST", "Webhook payload decode failed");
-        }
-    }
-    return new HttpError(500, "SERVER_ERROR", error instanceof Error ? error.message : "Webhook handling failed");
-}
-/**
  * @param {string} absPath
  * @returns {Promise<SmithersWorkflow<unknown>>}
  */
@@ -327,17 +310,6 @@ function sendJson(res, status, payload) {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.end(JSON.stringify(payload));
-}
-/** @typedef {import("@smithers-orchestrator/db/adapter/RunRow").RunRow} RunRow */
-
-/**
- * @param {SmithersDb} adapter
- * @param {RunRow} run
- * @returns {Promise<RunRow | (RunRow & { runState: import("@smithers-orchestrator/db/runState/RunStateView").RunStateView })>}
- */
-async function withRunState(adapter, run) {
-    const runState = await computeRunStateFromRow(adapter, run).catch(() => undefined);
-    return runState ? { ...run, runState } : run;
 }
 /**
  * @param {ServerResponse} res
@@ -534,7 +506,7 @@ function buildMirrorOnProgress(adapter, runId, workflowName, workflowPath, confi
             createdAtMs: nowMs(),
             startedAtMs: nowMs(),
             finishedAtMs: null,
-            heartbeatAtMs: eventLoopNow(),
+            heartbeatAtMs: nowMs(),
             runtimeOwnerId: null,
             cancelRequestedAtMs: null,
             vcsType: null,
@@ -734,9 +706,6 @@ function buildMirrorOnProgress(adapter, runId, workflowName, workflowPath, confi
         });
     };
 }
-function eventLoopNow() {
-    return nowMs();
-}
 /**
  * @param {ServerOptions} [opts]
  */
@@ -807,7 +776,20 @@ function startServerInternal(opts = {}) {
                     });
                 }
                 catch (error) {
-                    throw webhookHttpError(error);
+                    // Map integration-runtime failures to the webhook route's HTTP status.
+                    if (isIntegrationError(error)) {
+                        const reason = /** @type {{ details?: { reason?: unknown } }} */ (error).details?.reason;
+                        if (reason === "unknown-source") {
+                            throw new HttpError(404, "NOT_FOUND", "Unknown webhook source");
+                        }
+                        if (reason === "invalid-signature") {
+                            throw new HttpError(401, "UNAUTHORIZED", "Webhook signature verification failed");
+                        }
+                        if (reason === "decode-failed") {
+                            throw new HttpError(400, "INVALID_REQUEST", "Webhook payload decode failed");
+                        }
+                    }
+                    throw new HttpError(500, "SERVER_ERROR", error instanceof Error ? error.message : "Webhook handling failed");
                 }
                 return sendJson(res, 202, { accepted: true });
             }
@@ -1140,7 +1122,7 @@ function startServerInternal(opts = {}) {
                     }
                     const runRow = await adapter.getRun(runId);
                     if (runRow &&
-                        ["finished", "failed", "cancelled", "continued"].includes(runRow.status) &&
+                        TERMINAL_RUN_STATUSES.includes(runRow.status) &&
                         events.length === 0) {
                         closed = true;
                         res.end();
@@ -1153,7 +1135,7 @@ function startServerInternal(opts = {}) {
                     try {
                         while (!closed && !res.writableEnded) {
                             await poll();
-                            await runPromise(Effect.sleep(500));
+                            await runPromise(Effect.sleep(SSE_POLL_INTERVAL_MS));
                         }
                     }
                     catch {
@@ -1330,8 +1312,12 @@ function startServerInternal(opts = {}) {
                 const limit = parsePositiveInt(url.searchParams.get("limit"), 50);
                 const status = url.searchParams.get("status") ?? undefined;
                 const workflow = url.searchParams.get("workflow") ?? undefined;
-                const runs = await serverAdapter.listRuns(limit, status, workflow);
-                return sendJson(res, 200, await Promise.all(runs.map((run) => withRunState(serverAdapter, run))));
+                const runRows = await serverAdapter.listRuns(limit, status, workflow);
+                // Annotate each row with its derived run state; derivation is best-effort.
+                return sendJson(res, 200, await Promise.all(runRows.map(async (run) => {
+                    const runState = await computeRunStateFromRow(serverAdapter, run).catch(() => undefined);
+                    return runState ? { ...run, runState } : run;
+                })));
             }
             sendJson(res, 404, {
                 error: { code: "NOT_FOUND", message: "Route not found" },

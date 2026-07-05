@@ -1,5 +1,5 @@
 import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
-import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Option } from "effect";
 import { SchedulerLive, WorkflowSessionLive } from "@smithers-orchestrator/scheduler";
 import { CorrelationContextLive, MetricsServiceLive, TracingServiceLive, createSmithersRuntimeLayer, getCurrentSmithersTraceAnnotations, getCurrentSmithersTraceSpan, } from "@smithers-orchestrator/observability";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
@@ -25,13 +25,6 @@ function decorate(effect) {
     return program;
 }
 /**
- * @param {unknown} cause
- * @returns {SmithersError}
- */
-function normalizeRejection(cause) {
-    return toSmithersError(cause);
-}
-/**
  * @template A, E, R
  * @param {Effect.Effect<A, E, R>} effect
  * @param {{ signal?: AbortSignal }} [options]
@@ -42,10 +35,10 @@ export async function runPromise(effect, options) {
         return exit.value;
     }
     const failure = Cause.failureOption(exit.cause);
-    if (failure._tag === "Some") {
-        throw normalizeRejection(failure.value);
+    if (Option.isSome(failure)) {
+        throw toSmithersError(failure.value);
     }
-    throw normalizeRejection(Cause.squash(exit.cause));
+    throw toSmithersError(Cause.squash(exit.cause));
 }
 /**
  * @template A, E, R

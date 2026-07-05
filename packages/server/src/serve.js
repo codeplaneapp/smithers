@@ -11,6 +11,10 @@ import { runPromise } from "./smithersRuntime.js";
 import { httpRequests, httpRequestDuration, trackEvent } from "@smithers-orchestrator/observability/metrics";
 /** @typedef {import("./ServeOptions.js").ServeOptions} ServeOptions */
 
+// Event-poll cadence for the SSE stream.
+const SSE_POLL_INTERVAL_MS = 500;
+// Statuses after which the stream can close once drained.
+const TERMINAL_RUN_STATUSES = ["finished", "failed", "cancelled", "continued"];
 class HttpError extends Error {
     status;
     code;
@@ -267,11 +271,11 @@ export function createServeApp(opts) {
                 // Check if run is terminal
                 const runRow = await adapter.getRun(runId);
                 if (runRow &&
-                    ["finished", "failed", "cancelled", "continued"].includes(runRow.status) &&
+                    TERMINAL_RUN_STATUSES.includes(runRow.status) &&
                     events.length === 0) {
                     break;
                 }
-                await new Promise((r) => setTimeout(r, 500));
+                await new Promise((r) => setTimeout(r, SSE_POLL_INTERVAL_MS));
             }
         });
     });

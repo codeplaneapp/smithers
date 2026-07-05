@@ -103,12 +103,12 @@ import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
 /**
  * @typedef {{
  *   workflow: SmithersWorkflow;
- *   adapter: SmithersDb;
  *   key: string;
  *   schedule?: string;
  *   webhook?: GatewayWebhookConfig;
  *   ui?: ResolvedGatewayUiConfig | null;
  *   system?: boolean;
+ *   entryFile?: string;
  * }} RegisteredWorkflow
  */
 /**
@@ -153,6 +153,12 @@ const RUN_EVENT_HEARTBEAT_MS = 1_000;
 const RUN_EVENT_STREAM_OUTBOUND_QUEUE_LIMIT = 1_000;
 const RUN_EVENT_STREAM_WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
 const RUN_EVENT_STREAM_DRAIN_RETRY_MS = 10;
+// Same slow-consumer guard for streamDevTools subscriptions; mirrors the
+// run-event-stream limits above and the extension-stream limits in
+// GatewayExtensions.js (EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT /
+// EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES).
+const DEVTOOLS_STREAM_OUTBOUND_QUEUE_LIMIT = 1_000;
+const DEVTOOLS_STREAM_WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
 const RUN_EVENT_WINDOW_RETAINED_RUN_LIMIT = 1_000;
 const RUN_EVENT_TERMINAL_WINDOW_GRACE_MS = 1_000;
 const API_STREAM_COALESCE_MS = 50;
@@ -708,13 +714,6 @@ function bearerTokenFromHeaders(req) {
     return authHeader.slice(0, 7).toLowerCase() === "bearer " ? authHeader.slice(7) : authHeader;
 }
 /**
- * @param {unknown} value
- * @returns {Record<string, unknown> | null}
- */
-function asStringRecord(value) {
-    return asObject(value);
-}
-/**
  * @param {string} id
  * @param {unknown} [payload]
  * @returns {ResponseFrame}
@@ -961,13 +960,6 @@ function eventRunId(payload) {
     return runId ?? null;
 }
 /**
- * @param {string} scope
- * @returns {string}
- */
-function normalizeGrantedScope(scope) {
-    return scope.trim();
-}
-/**
  * @param {string} method
  * @param {{ requiredScopeForMethod?: (method: string) => import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope | undefined }} [registry]
  * @returns {import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope}
@@ -1001,7 +993,7 @@ function requiredScopeForMethod(method, registry) {
  * @returns {boolean}
  */
 function hasScope(scopes, method, registry) {
-    return hasGatewayScope(scopes.map(normalizeGrantedScope), requiredScopeForMethod(method, registry), method);
+    return hasGatewayScope(scopes.map((scope) => scope.trim()), requiredScopeForMethod(method, registry), method);
 }
 /**
  * @param {unknown} value
@@ -1022,7 +1014,7 @@ function decodeBase64UrlJson(value) {
         const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
         const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
         const decoded = Buffer.from(padded, "base64").toString("utf8");
-        return asStringRecord(JSON.parse(decoded));
+        return asObject(JSON.parse(decoded));
     }
     catch {
         return null;
@@ -1101,6 +1093,18 @@ function parseJwtScopes(value) {
     }
     return parseStringArray(value);
 }
+/**
+ * Normalized approval request stored in an approval row's requestJson.
+ * @typedef {{
+ *   mode: "gate" | "select" | "rank" | "decision";
+ *   title: string | null;
+ *   summary: string | null;
+ *   options: Array<{ key: string; label: string; summary?: string }>;
+ *   allowedScopes: string[];
+ *   allowedUsers: string[];
+ *   autoApprove: Record<string, unknown> | null;
+ * }} ApprovalRequestRecord
+ */
 /**
  * @param {unknown} value
  * @param {string | null} fallbackTitle
@@ -1515,40 +1519,45 @@ function serializeGatewayApiPayload(method, payload) {
     }
 }
 /**
+ * Fails fast at dispatch time if a route names a collection the API layer
+ * does not export (API_COLLECTION_NAME_SET is the source of truth).
+ * @param {string[]} names
+ * @returns {string[]}
+ */
+function apiCollections(...names) {
+    for (const name of names) {
+        if (!API_COLLECTION_NAME_SET.has(name)) {
+            throw new Error(`Unknown Gateway API collection name: ${name}`);
+        }
+    }
+    return names;
+}
+/**
  * @param {string} method
  * @returns {string[]}
  */
 function apiMutationCollections(method) {
-    /** @param {string[]} names */
-    const collections = (...names) => {
-        for (const name of names) {
-            if (!API_COLLECTION_NAME_SET.has(name)) {
-                throw new Error(`Unknown Gateway API collection name: ${name}`);
-            }
-        }
-        return names;
-    };
     switch (method) {
         case "launchRun":
-            return collections("runs", "run_events");
+            return apiCollections("runs", "run_events");
         case "resumeRun":
         case "cancelRun":
         case "rewindRun":
-            return collections("runs", "run_events", "nodes", "node_outputs");
+            return apiCollections("runs", "run_events", "nodes", "node_outputs");
         case "submitApproval":
-            return collections("approvals", "runs", "run_events", "nodes");
+            return apiCollections("approvals", "runs", "run_events", "nodes");
         case "submitSignal":
-            return collections("runs", "run_events", "nodes");
+            return apiCollections("runs", "run_events", "nodes");
         case "cronCreate":
         case "cronDelete":
         case "cronRun":
-            return collections("crons", "runs", "run_events");
+            return apiCollections("crons", "runs", "run_events");
         case "createTicket":
         case "updateTicket":
         case "deleteTicket":
-            return collections("tickets", "docs");
+            return apiCollections("tickets", "docs");
         default:
-            return collections("runs");
+            return apiCollections("runs");
     }
 }
 /**
@@ -1556,30 +1565,21 @@ function apiMutationCollections(method) {
  * @returns {string[]}
  */
 function apiCollectionsForGatewayEvent(event) {
-    /** @param {string[]} names */
-    const collections = (...names) => {
-        for (const name of names) {
-            if (!API_COLLECTION_NAME_SET.has(name)) {
-                throw new Error(`Unknown Gateway API collection name: ${name}`);
-            }
-        }
-        return names;
-    };
     if (event.startsWith("approval.")) {
-        return collections("approvals", "runs", "run_events", "nodes");
+        return apiCollections("approvals", "runs", "run_events", "nodes");
     }
     if (event.startsWith("node.") || event.startsWith("task.") || event.startsWith("agent.")) {
         return event === "task.output"
-            ? collections("run_events", "nodes", "node_outputs")
-            : collections("run_events", "nodes");
+            ? apiCollections("run_events", "nodes", "node_outputs")
+            : apiCollections("run_events", "nodes");
     }
     if (event.startsWith("run.")) {
-        return collections("runs", "run_events", "nodes");
+        return apiCollections("runs", "run_events", "nodes");
     }
     if (event.startsWith("cron.")) {
-        return collections("crons", "runs");
+        return apiCollections("crons", "runs");
     }
-    return collections("runs", "run_events");
+    return apiCollections("runs", "run_events");
 }
 /**
  * @param {string} event
@@ -5709,14 +5709,11 @@ a { color: var(--brand); }</style>
             this.invalidateDevToolsSubscribersForRun(event.runId);
         }
         const mapped = this.mapEvent(event);
-        if (!mapped) {
-            const terminalRunId = this.terminalRunIdFromSmithersEvent(event);
-            if (terminalRunId) {
-                this.markRunEventWindowTerminal(terminalRunId);
-            }
-            return;
+        if (mapped) {
+            this.broadcastEvent(mapped.event, mapped.payload);
         }
-        this.broadcastEvent(mapped.event, mapped.payload);
+        // Broadcast before marking terminal so subscribers see the final event
+        // inside the run's live window.
         const terminalRunId = this.terminalRunIdFromSmithersEvent(event);
         if (terminalRunId) {
             this.markRunEventWindowTerminal(terminalRunId);
@@ -5994,7 +5991,7 @@ a { color: var(--brand); }</style>
                         components: {},
                     });
                 }
-                const adapter = firstEntry.adapter ?? this.adapterForWorkflow(firstEntry.workflow);
+                const adapter = this.adapterForWorkflow(firstEntry.workflow);
                 return responseOk(frame.id, await getSmithersSchemaSignature(adapter));
             }
             case "workflows.list":
@@ -6342,8 +6339,6 @@ a { color: var(--brand); }</style>
                     // we queue locally up to 1000 events; exceeding that is a
                     // BackpressureDisconnect that tears down only this stream.
                     const outboundQueue = [];
-                    const OUTBOUND_QUEUE_LIMIT = 1_000;
-                    const WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
                     let flushPending = false;
                     const drainOutboundQueue = () => {
                         if (flushPending) return;
@@ -6352,7 +6347,7 @@ a { color: var(--brand); }</style>
                             try {
                                 while (outboundQueue.length > 0 && connection.ws.readyState === connection.ws.OPEN) {
                                     const ws = connection.ws;
-                                    if (typeof ws.bufferedAmount === "number" && ws.bufferedAmount > WS_BUFFERED_HIGH_WATER_BYTES) {
+                                    if (typeof ws.bufferedAmount === "number" && ws.bufferedAmount > DEVTOOLS_STREAM_WS_BUFFERED_HIGH_WATER_BYTES) {
                                         setTimeout(() => {
                                             flushPending = false;
                                             drainOutboundQueue();
@@ -6375,10 +6370,10 @@ a { color: var(--brand); }</style>
                      * BackpressureDisconnect if the queue overflows.
                      */
                     const enqueueDevToolsEvent = (payload) => {
-                        if (outboundQueue.length >= OUTBOUND_QUEUE_LIMIT) {
+                        if (outboundQueue.length >= DEVTOOLS_STREAM_OUTBOUND_QUEUE_LIMIT) {
                             throw new DevToolsRouteError(
                                 "BackpressureDisconnect",
-                                `Subscriber outbound queue exceeded ${OUTBOUND_QUEUE_LIMIT} events.`,
+                                `Subscriber outbound queue exceeded ${DEVTOOLS_STREAM_OUTBOUND_QUEUE_LIMIT} events.`,
                             );
                         }
                         outboundQueue.push(payload);

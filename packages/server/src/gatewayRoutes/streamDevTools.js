@@ -317,6 +317,64 @@ export async function* streamDevToolsRoute(input) {
             throw routeError ?? error;
         }
     };
+    /**
+   * Replay frames (lastSeenSeq, targetSeq] as delta-or-snapshot events. On a
+   * FrameOutOfRange gap (the DB no longer has the requested intermediate
+   * frame — possibly pruned or rewound) log `gapLogMessage`, re-baseline to
+   * the latest available frame, and stop early. Callers must have published a
+   * baseline snapshot (lastSnapshot) before replaying.
+   *
+   * @param {number} targetSeq
+   * @param {string} gapLogMessage
+   * @returns {Promise<void>}
+   */
+    const emitFramesThrough = async (targetSeq, gapLogMessage) => {
+        for (let seq = lastSeenSeq + 1; seq <= targetSeq; seq += 1) {
+            if (shouldStop()) {
+                break;
+            }
+            const started = Date.now();
+            let nextSnapshot = null;
+            try {
+                nextSnapshot = await captureSnapshot(seq);
+            }
+            catch (error) {
+                if (error instanceof DevToolsRouteError && error.code === "FrameOutOfRange") {
+                    input.onLog?.("warn", gapLogMessage, {
+                        runId,
+                        missingSeq: seq,
+                        latestSeq: targetSeq,
+                    });
+                    const latestAvailable = await getLastFrameSpan(input.adapter, runId);
+                    const rebaselineSeq = latestAvailable?.frameNo ?? lastSeenSeq;
+                    const rebaseline = await captureSnapshot(rebaselineSeq);
+                    publish(await makeEvent({ kind: "snapshot", snapshot: rebaseline }), started);
+                    lastSnapshot = rebaseline;
+                    lastSeenSeq = rebaseline.seq;
+                    break;
+                }
+                throw error;
+            }
+            const deltaEvent = await makeEvent({
+                kind: "delta",
+                snapshot: nextSnapshot,
+                previous: lastSnapshot,
+            });
+            const snapshotEvent = /** @type {DevToolsEvent} */ ({
+                version: 1,
+                kind: "snapshot",
+                snapshot: nextSnapshot,
+            });
+            const invalidated = input.invalidateSnapshot?.() ?? false;
+            const shouldSnapshot =
+                invalidated ||
+                eventsSinceSnapshot + 1 >= DEVTOOLS_REBASELINE_INTERVAL ||
+                estimateEventSize(deltaEvent) >= estimateEventSize(snapshotEvent);
+            publish(shouldSnapshot ? snapshotEvent : deltaEvent, started);
+            lastSnapshot = nextSnapshot;
+            lastSeenSeq = seq;
+        }
+    };
     const producer = withSpan(
         "devtools.streamDevTools",
         {
@@ -378,61 +436,10 @@ export async function* streamDevToolsRoute(input) {
                     publish(await makeEvent({ kind: "snapshot", snapshot: initialSnapshot }), Date.now());
                     lastSnapshot = initialSnapshot;
                     lastSeenSeq = initialSnapshot.seq;
-                    for (let seq = lastSeenSeq + 1; seq <= latestSeq; seq += 1) {
-                        if (shouldStop()) {
-                            break;
-                        }
-                        const started = Date.now();
-                        let nextSnapshot = null;
-                        try {
-                            nextSnapshot = await captureSnapshot(seq);
-                        }
-                        catch (error) {
-                            if (error instanceof DevToolsRouteError && error.code === "FrameOutOfRange") {
-                                // Mid-replay gap: the DB no longer has the
-                                // requested intermediate frame (possibly pruned
-                                // or rewound). Log, emit the latest available
-                                // snapshot, reset the replay state, and break.
-                                input.onLog?.("warn", "devtools replay gap forced re-baseline", {
-                                    runId,
-                                    missingSeq: seq,
-                                    latestSeq,
-                                });
-                                const latestAvailable = await getLastFrameSpan(input.adapter, runId);
-                                const rebaselineSeq = latestAvailable?.frameNo ?? lastSeenSeq;
-                                const rebaseline = await captureSnapshot(rebaselineSeq);
-                                publish(await makeEvent({ kind: "snapshot", snapshot: rebaseline }), started);
-                                lastSnapshot = rebaseline;
-                                lastSeenSeq = rebaseline.seq;
-                                break;
-                            }
-                            throw error;
-                        }
-                        const deltaEvent = await makeEvent({
-                            kind: "delta",
-                            snapshot: nextSnapshot,
-                            previous: lastSnapshot,
-                        });
-                        const snapshotEvent = /** @type {DevToolsEvent} */ ({
-                            version: 1,
-                            kind: "snapshot",
-                            snapshot: nextSnapshot,
-                        });
-                        const invalidated = input.invalidateSnapshot?.() ?? false;
-                        const shouldSnapshot =
-                            invalidated ||
-                            eventsSinceSnapshot + 1 >= DEVTOOLS_REBASELINE_INTERVAL ||
-                            estimateEventSize(deltaEvent) >= estimateEventSize(snapshotEvent);
-                        publish(shouldSnapshot ? snapshotEvent : deltaEvent, started);
-                        lastSnapshot = nextSnapshot;
-                        lastSeenSeq = seq;
-                    }
+                    await emitFramesThrough(latestSeq, "devtools replay gap forced re-baseline");
                 }
             }
             while (!shouldStop()) {
-                if (shouldStop()) {
-                    break;
-                }
                 const latest = await getLastFrameSpan(input.adapter, runId);
                 if (latest && latest.frameNo < lastSeenSeq) {
                     const started = Date.now();
@@ -451,55 +458,7 @@ export async function* streamDevToolsRoute(input) {
                     lastSeenSeq = rewindSnapshot.seq;
                 }
                 if (latest && latest.frameNo > lastSeenSeq && lastSnapshot) {
-                    for (let seq = lastSeenSeq + 1; seq <= latest.frameNo; seq += 1) {
-                        if (shouldStop()) {
-                            break;
-                        }
-                        const started = Date.now();
-                        let nextSnapshot = null;
-                        try {
-                            nextSnapshot = await captureSnapshot(seq);
-                        }
-                        catch (error) {
-                            if (error instanceof DevToolsRouteError && error.code === "FrameOutOfRange") {
-                                input.onLog?.("warn", "devtools live gap forced re-baseline", {
-                                    runId,
-                                    missingSeq: seq,
-                                    latestSeq: latest.frameNo,
-                                });
-                                const rebaselineTarget = await getLastFrameSpan(input.adapter, runId);
-                                const rebaselineSeq = rebaselineTarget?.frameNo ?? lastSeenSeq;
-                                const rebaseline = await captureSnapshot(rebaselineSeq);
-                                publish(/** @type {DevToolsEvent} */ ({
-                                    version: 1,
-                                    kind: "snapshot",
-                                    snapshot: rebaseline,
-                                }), started);
-                                lastSnapshot = rebaseline;
-                                lastSeenSeq = rebaseline.seq;
-                                break;
-                            }
-                            throw error;
-                        }
-                        const deltaEvent = await makeEvent({
-                            kind: "delta",
-                            snapshot: nextSnapshot,
-                            previous: lastSnapshot,
-                        });
-                        const snapshotEvent = /** @type {DevToolsEvent} */ ({
-                            version: 1,
-                            kind: "snapshot",
-                            snapshot: nextSnapshot,
-                        });
-                        const invalidated = input.invalidateSnapshot?.() ?? false;
-                        const shouldSnapshot =
-                            invalidated ||
-                            eventsSinceSnapshot + 1 >= DEVTOOLS_REBASELINE_INTERVAL ||
-                            estimateEventSize(deltaEvent) >= estimateEventSize(snapshotEvent);
-                        publish(shouldSnapshot ? snapshotEvent : deltaEvent, started);
-                        lastSnapshot = nextSnapshot;
-                        lastSeenSeq = seq;
-                    }
+                    await emitFramesThrough(latest.frameNo, "devtools live gap forced re-baseline");
                 }
                 if (shouldStop()) {
                     break;
@@ -516,7 +475,9 @@ export async function* streamDevToolsRoute(input) {
         }
     },
     );
-    // Keep a reference so the finally block can await it.
+    // Failures reach the consumer via queue.fail; this catch only prevents an
+    // unhandled-rejection crash if the producer fails before the finally block
+    // below awaits it.
     void producer.catch(() => { });
     try {
         while (true) {

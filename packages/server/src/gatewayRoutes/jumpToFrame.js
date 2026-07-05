@@ -18,6 +18,7 @@ import { jumpToFrame, JumpToFrameError } from "@smithers-orchestrator/time-trave
  *   runId: unknown;
  *   frameNo: unknown;
  *   confirm?: unknown;
+ *   force?: unknown;
  *   caller?: string;
  *   pauseRunLoop?: () => Promise<void> | void;
  *   resumeRunLoop?: () => Promise<void> | void;
