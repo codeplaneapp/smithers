@@ -107,6 +107,10 @@ jobs:
           node scripts/check-llms.mjs
           node scripts/check-smithers-test-script.mjs
 
+      - name: Run d.ts freshness gate (Linux)
+        if: runner.os == 'Linux'
+        run: node scripts/check-dts.mjs
+
       - name: Run workspace package tests
         if: runner.os != 'Windows'
         run: pnpm -r --no-bail test
