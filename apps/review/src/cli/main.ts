@@ -129,7 +129,10 @@ Examples
   ${command} --no-review --no-narrate     walkthrough only, no agents`;
 }
 
-export async function runReviewCli(argv: string[] = process.argv.slice(2), options: { command?: string } = {}) {
+export async function runReviewCli(
+  argv: string[] = process.argv.slice(2),
+  options: { command?: string; usageExitCode?: number } = {},
+) {
   const command = options.command ?? "smithers-review";
   const helpText = usage(command);
   let args: ReviewArgs;
@@ -138,7 +141,7 @@ export async function runReviewCli(argv: string[] = process.argv.slice(2), optio
   } catch (error) {
     console.error(`${command}: ${(error as Error).message}\n`);
     console.error(helpText);
-    process.exit(1);
+    process.exit(options.usageExitCode ?? 1);
     return;
   }
   if (args.help) {

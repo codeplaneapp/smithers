@@ -1321,6 +1321,12 @@ async function buildPsRows(adapter, limit, status) {
             // time-since-start, to judge a failure fresh enough to escalate —
             // `started` above only carries start age.
             ...(run.finishedAtMs ? { finishedAtMs: run.finishedAtMs } : {}),
+            // Surface the quota reset time on quota-parked runs so fleet tooling
+            // polling `ps --json` can decide when to auto-resume. deriveRunState
+            // puts resetAtMs on the blocked view for quota parks.
+            ...(view.blocked?.kind === "quota" && typeof view.blocked.resetAtMs === "number"
+                ? { resetAtMs: view.blocked.resetAtMs }
+                : {}),
             ...(pendingApprovals.length ? { pendingApprovals } : {}),
         });
     }
@@ -4835,19 +4841,17 @@ const cli = Cli.create({
     // =========================================================================
     .command("review", {
     description: "Run code review plus story-form HTML walkthrough generation for a repo or PR.",
-    async run() {
-        // Real execution is handled by the raw-argv intercept in main() so the
-        // review CLI sees the actual flags; this registration exists so the
-        // command shows up in `smithers --help`. If it is ever reached directly,
-        // forward the real args (minus the `review` token) rather than starting a
-        // review with none.
-        const { runReviewCli } = await import("@smithers-orchestrator/review/cli");
-        const args = process.argv.slice(2);
-        const reviewIndex = args.indexOf("review");
-        const forwarded = reviewIndex >= 0
-            ? [...args.slice(0, reviewIndex), ...args.slice(reviewIndex + 1)]
-            : args;
-        await runReviewCli(forwarded, { command: "smithers review" });
+    async run(c) {
+        // Real CLI execution is handled by the raw-argv intercept in main() so
+        // the review CLI sees the actual flags; this registration exists so the
+        // command shows up in `smithers --help`. It is only ever reached through
+        // a non-CLI transport (the raw/both MCP tool surface, or HTTP), where
+        // reading process.argv and process.exit()-ing the long-lived review CLI
+        // would crash the host. Return a graceful error instead.
+        return c.error({
+            code: "MCP_UNSUPPORTED",
+            message: "`smithers review` runs a long-lived review workflow and is only available from a shell, not as an MCP/HTTP tool. Run `smithers review [repo] [options]` in a terminal.",
+        });
     },
 })
     // =========================================================================
@@ -6622,7 +6626,8 @@ const cli = Cli.create({
                 if (run.status !== "running" &&
                     run.status !== "waiting-approval" &&
                     run.status !== "waiting-event" &&
-                    run.status !== "waiting-timer") {
+                    run.status !== "waiting-timer" &&
+                    run.status !== "paused") {
                     return fail({ code: "RUN_NOT_ACTIVE", message: `Run is not active (status: ${run.status})`, exitCode: 4 });
                 }
                 // A live engine in another process is driving this run. A bare
@@ -6766,11 +6771,17 @@ const cli = Cli.create({
                 const waitingApprovalRuns = await adapter.listRuns(100, "waiting-approval");
                 const waitingEventRuns = await adapter.listRuns(100, "waiting-event");
                 const waitingTimerRuns = await adapter.listRuns(100, "waiting-timer");
+                // A paused run is a durable, resumable state with no live engine;
+                // include it so `down` can terminate it. Its heartbeat is nulled
+                // (stale), so the fresh-heartbeat guard flips it to cancelled
+                // without --force via the direct-flip path below.
+                const pausedRuns = await adapter.listRuns(100, "paused");
                 const allActive = [
                     ...activeRuns,
                     ...waitingApprovalRuns,
                     ...waitingEventRuns,
                     ...waitingTimerRuns,
+                    ...pausedRuns,
                 ];
                 if (allActive.length === 0) {
                     return c.ok({ cancelled: 0, message: "No active runs to cancel." });
@@ -8425,7 +8436,7 @@ async function main() {
         // Forward every arg except the `review` token itself — including any flags
         // that preceded it (e.g. `smithers --help review`), so the review CLI can
         // render its own help instead of eagerly starting a review.
-        await runReviewCli([...argv.slice(0, commandIndex), ...argv.slice(commandIndex + 1)], { command: "smithers review" });
+        await runReviewCli([...argv.slice(0, commandIndex), ...argv.slice(commandIndex + 1)], { command: "smithers review", usageExitCode: 4 });
         return;
     }
     // Self-heal the curated agent skill on a normal human-facing invocation:

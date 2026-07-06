@@ -369,3 +369,15 @@ describe("missing required inputs surface friendly messages, not raw zod prose (
         expect(result.json.message).not.toContain("Missing required");
     });
 });
+
+describe("review honors the exit-4 usage-error contract", () => {
+    // `review` bypasses incur (a raw-argv intercept in main()), so its usage
+    // errors must map to exit 4 explicitly. parseReviewArgs throws on the
+    // unknown flag before any Bun.which/agent check, so this exits during
+    // parsing — no agent CLI or browser needed, safe on CI.
+    test("review rejects unknown flags with exit 4", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["review", "--bogus"], { cwd: repo.dir, format: null });
+        expect(result.exitCode).toBe(4);
+    });
+});

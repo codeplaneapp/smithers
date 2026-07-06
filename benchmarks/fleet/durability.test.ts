@@ -61,15 +61,26 @@ describe("parseFleetRuns", () => {
     expect(parseFleetRuns([{ id: "x", status: "queued" }])).toEqual([{ runId: "x", status: "queued", quotaResetAtMs: undefined }]);
   });
 
-  it("recovers the quota reset from errorJson (string or object)", () => {
-    const asString = parseFleetRuns([
-      { runId: "a", status: "waiting-quota", errorJson: JSON.stringify({ quotaResetAtMs: 42 }) },
+  it("recovers the quota reset from the top-level resetAtMs and nested blocked", () => {
+    const topLevel = parseFleetRuns([
+      { runId: "a", status: "waiting-quota", resetAtMs: 42 },
     ]);
-    expect(asString[0].quotaResetAtMs).toBe(42);
+    expect(topLevel[0].quotaResetAtMs).toBe(42);
     const nested = parseFleetRuns([
-      { runId: "b", status: "waiting-quota", errorJson: { details: { quotaResetAtMs: 99 } } },
+      { runId: "b", status: "waiting-quota", blocked: { kind: "quota", resetAtMs: 99 } },
     ]);
     expect(nested[0].quotaResetAtMs).toBe(99);
+  });
+
+  it("recovers the quota reset from a parsed errorJson string and its details", () => {
+    const fromString = parseFleetRuns([
+      { runId: "c", status: "waiting-quota", errorJson: JSON.stringify({ resetAtMs: 7 }) },
+    ]);
+    expect(fromString[0].quotaResetAtMs).toBe(7);
+    const fromDetails = parseFleetRuns([
+      { runId: "d", status: "waiting-quota", errorJson: JSON.stringify({ details: { resetAtMs: 11 } }) },
+    ]);
+    expect(fromDetails[0].quotaResetAtMs).toBe(11);
   });
 
   it("skips malformed rows", () => {
