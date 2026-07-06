@@ -96,7 +96,7 @@ export function createMockGcpSandboxEnvironment(handler, config = {}) {
 			runRequests.push(request);
 			const executionName = `${request.name}/executions/exec-${++executionCounter}`;
 
-			return lro(async () => {
+			const resolveExecution = async () => {
 				// A configured failed execution simulates an infra failure: the
 				// container never wrote a result, so the kit throws on the empty read.
 				const failedCount = Number(config.execution?.failedCount ?? 0);
@@ -133,7 +133,8 @@ export function createMockGcpSandboxEnvironment(handler, config = {}) {
 					failedCount: 0,
 					conditions: config.execution?.conditions ?? [{ type: "Completed", state: "CONDITION_SUCCEEDED" }],
 				}];
-			});
+				};
+				return [{ promise: resolveExecution, metadata: { name: executionName } }];
 		},
 	};
 

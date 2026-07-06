@@ -100,12 +100,14 @@ describe("createGcpCloudRunJobsSandboxRunner", () => {
 		let lroCancelled = false;
 		const client = {
 			jobPath: (p, l, j) => `projects/${p}/locations/${l}/jobs/${j}`,
-			async runJob() {
+			async runJob(request) {
 				// A never-resolving execution LRO: without racing the abort, run()
-				// would hang until Cloud Run finished.
+				// would hang until Cloud Run finished. The LRO metadata carries the
+				// Execution resource being created, which the runner must target.
 				return [{
 					promise: () => new Promise(() => {}),
 					cancel: async () => { lroCancelled = true; },
+					metadata: { name: `${request.name}/executions/exec-abort` },
 				}];
 			},
 			async cancelExecution(request) {
@@ -121,6 +123,8 @@ describe("createGcpCloudRunJobsSandboxRunner", () => {
 		controller.abort();
 		await expect(pending).rejects.toThrow(/cancel/i);
 		expect(cancelled.length).toBe(1);
+		// Must target the Execution resource (from LRO metadata), not the job.
+		expect(String(cancelled[0].name)).toContain("/executions/");
 		expect(lroCancelled).toBe(true);
 	});
 });
