@@ -1,8 +1,5 @@
-import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
 import { POSTGRES, quoteIdentifier, translateDdl } from "./dialect.js";
-import { smithersSchemaMigrations } from "./internal-schema/smithersSchemaMigrations.js";
 
 const MIGRATION_TABLE_SQL = `CREATE TABLE IF NOT EXISTS _smithers_schema_migrations (
     id TEXT PRIMARY KEY,
@@ -376,25 +373,19 @@ function checksumForStatements(statements) {
  * @param {string} id
  */
 function hasMigrationRecord(sqlite, id) {
-    const db = drizzle(sqlite, { schema: { smithersSchemaMigrations } });
-    return Boolean(db
-        .select({ id: smithersSchemaMigrations.id })
-        .from(smithersSchemaMigrations)
-        .where(eq(smithersSchemaMigrations.id, id))
-        .limit(1)
-        .all()[0]);
+    return Boolean(sqlite
+        .query("SELECT id FROM _smithers_schema_migrations WHERE id = ? LIMIT 1")
+        .all(id)[0]);
 }
 
 /**
  * @param {import("bun:sqlite").Database} sqlite
  */
 function loadAppliedMigrationIds(sqlite) {
-    const db = drizzle(sqlite, { schema: { smithersSchemaMigrations } });
-    return new Set(db
-        .select({ id: smithersSchemaMigrations.id })
-        .from(smithersSchemaMigrations)
+    return new Set(sqlite
+        .query("SELECT id FROM _smithers_schema_migrations")
         .all()
-        .map((row) => row.id));
+        .map((/** @type {{ id: string }} */ row) => row.id));
 }
 
 /**
@@ -413,18 +404,20 @@ async function loadAppliedMigrationIdsPostgres(pgConn) {
  * @param {unknown} details
  */
 function recordMigration(sqlite, migration, details) {
-    const db = drizzle(sqlite, { schema: { smithersSchemaMigrations } });
-    db.insert(smithersSchemaMigrations)
-        .values({
-        id: migration.id,
-        name: migration.name,
-        appliedAtMs: Date.now(),
-        checksum: migration.checksum ?? null,
-        destructive: Boolean(migration.destructive),
-        detailsJson: details === undefined ? null : JSON.stringify(details),
-    })
-        .onConflictDoNothing({ target: smithersSchemaMigrations.id })
-        .run();
+    sqlite
+        .query(
+            `INSERT INTO _smithers_schema_migrations (id, name, applied_at_ms, checksum, destructive, details_json)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT (id) DO NOTHING`,
+        )
+        .run(
+            migration.id,
+            migration.name,
+            Date.now(),
+            migration.checksum ?? null,
+            migration.destructive ? 1 : 0,
+            details === undefined ? null : JSON.stringify(details),
+        );
 }
 
 /**
