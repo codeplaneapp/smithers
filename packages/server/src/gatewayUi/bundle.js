@@ -1,6 +1,7 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -28,9 +29,21 @@ function resolveReactPeer(specifier) {
  * @returns {string | null}
  */
 function resolveWorkspaceDependency(specifier, resolveDir) {
+    const packageRoots = [
+        resolve(process.cwd(), "packages/gateway-react/src"),
+        resolve(process.cwd(), "packages/gateway-react"),
+        resolve(process.cwd(), "packages/gateway-client/src"),
+        resolve(process.cwd(), "packages/gateway-client"),
+    ];
+    const searchPaths = [
+        resolveDir,
+        resolveDir ? dirname(resolveDir) : null,
+        ...packageRoots,
+        process.cwd(),
+    ].filter(Boolean);
     try {
         return require.resolve(specifier, {
-            paths: [resolveDir, process.cwd()].filter(Boolean),
+            paths: searchPaths,
         });
     }
     catch {
