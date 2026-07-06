@@ -90,9 +90,11 @@ import {
     detectInstallMethod,
     ensureUpdateCheck,
     fetchLatestVersion,
+    fetchRemoteSotaVersion,
     formatUpdateNotice,
     isUpdateAvailable,
 } from "./update-check.js";
+import { SOTA_REGISTRY_VERSION } from "./sota-models.generated.js";
 import { reportReplayResult } from "./reportReplayResult.js";
 import { buildClaudeMirrorTick } from "./claude-mirror/buildClaudeMirrorTick.js";
 import { buildClaudeNodeWait } from "./claude-mirror/buildClaudeNodeWait.js";
@@ -7781,16 +7783,27 @@ const cli = Cli.create({
     }),
     async run(c) {
         const current = readPackageVersion();
-        const latest = await fetchLatestVersion({});
+        const [latest, remoteSota] = await Promise.all([fetchLatestVersion({}), fetchRemoteSotaVersion({})]);
         const install = detectInstallMethod();
         if (!latest) {
             process.stderr.write("Could not reach the npm registry to check for updates.\n");
             return c.error({ message: "Could not reach the npm registry to check for updates.", code: "UPDATE_CHECK_FAILED" });
         }
+        // The SOTA model registry ships inside each release; a newer remote
+        // registry means new best-in-class models are (or are about to be) in.
+        const sotaBehind = remoteSota != null && remoteSota > SOTA_REGISTRY_VERSION;
+        if (remoteSota != null) {
+            process.stderr.write(sotaBehind
+                ? `Model registry: v${SOTA_REGISTRY_VERSION} installed, v${remoteSota} published — new SOTA models are out.\n`
+                : `Model registry: v${SOTA_REGISTRY_VERSION} (up to date).\n`);
+        }
         const available = isUpdateAvailable(latest, current);
         if (!available) {
             process.stderr.write(`Smithers is up to date (${current}).\n`);
-            return c.ok({ current, latest, updateAvailable: false, action: "none" });
+            if (sotaBehind) {
+                process.stderr.write("The next release carries the new model registry; this notice will nudge again when it ships.\n");
+            }
+            return c.ok({ current, latest, updateAvailable: false, action: "none", sotaVersion: SOTA_REGISTRY_VERSION, sotaLatest: remoteSota });
         }
         const plan = buildUpdatePlan(install, SMITHERS_PACKAGE);
         process.stderr.write(`Smithers ${latest} is available (you have ${current}).\n`);
@@ -7819,7 +7832,10 @@ const cli = Cli.create({
             return c.error({ message: `Upgrade command exited with code ${result.exitCode}.`, code: "UPDATE_FAILED" });
         }
         process.stderr.write(`✓ Upgraded to ${latest}.\n`);
-        return c.ok({ current, latest, updateAvailable: true, action: "upgraded", command: plan.command });
+        if (sotaBehind) {
+            process.stderr.write("New SOTA models are in. Run `smithers init` to refresh installed workflows to the latest agents.\n");
+        }
+        return c.ok({ current, latest, updateAvailable: true, action: "upgraded", command: plan.command, sotaVersion: SOTA_REGISTRY_VERSION, sotaLatest: remoteSota });
     },
 })
     .command("usage", {
