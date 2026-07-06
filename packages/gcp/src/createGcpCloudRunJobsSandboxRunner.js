@@ -156,7 +156,11 @@ export function createGcpCloudRunJobsSandboxRunner(options) {
 				} catch {
 					// operation may already be settled; ignore.
 				}
-				const target = lastExecutionName ?? name;
+				// Only cancel/delete when we know the execution resource. `name` is
+				// the job resource, which cancelExecution/deleteExecution would
+				// reject, so skip the execution call and rely on the LRO cancel.
+				const target = lastExecutionName ?? pendingExecutionName;
+				if (typeof target !== "string") return;
 				try {
 					if (typeof jobsClient.cancelExecution === "function") {
 						const [op] = await jobsClient.cancelExecution({ name: target });
