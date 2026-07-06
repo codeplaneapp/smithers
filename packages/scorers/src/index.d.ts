@@ -506,6 +506,52 @@ declare function humanPollScorer(): Scorer$1;
 type Scorer$1 = Scorer$d;
 
 /**
+ * USD price for one model, per MILLION tokens. The invoice of record is the
+ * provider's; this table drives spend estimates, dashboards, and the
+ * per-session runaway brake.
+ */
+type ModelPrice$1 = {
+    input: number;
+    output: number;
+    cacheWrite: number;
+    cacheRead: number;
+};
+
+/**
+ * Look up the per-million-token price for a model id. Matches the base id plus
+ * any `-`/`_` date-stamp suffix or a bracketed context-window alias like
+ * `claude-opus-4-8[1m]`, so a real model is never metered as free. Unknown ids
+ * return the all-zero price.
+ *
+ * @param {string} model
+ * @returns {ModelPrice}
+ */
+declare function modelTokenPrices(model: string): ModelPrice;
+type ModelPrice = ModelPrice$1;
+
+/**
+ * Price a token forecast into dollars. The `<Estimate>` component authors token
+ * counts per task; this turns them into `costUsd` deterministically so the
+ * model never has to reason about prices. Prices are per MILLION tokens.
+ *
+ * When only a single `tokens` total is known (no input/output split), it is
+ * priced at the blended midpoint of input and output rates — a token forecast
+ * this coarse cannot know its own read/write mix, and the midpoint keeps a
+ * cheap model's estimate from swinging 5x on that unknown.
+ *
+ * @param {{ model: string, tokens?: number, inputTokens?: number, outputTokens?: number, cacheReadTokens?: number, cacheWriteTokens?: number }} usage
+ * @returns {number} dollars
+ */
+declare function estimateCostUsd(usage: {
+    model: string;
+    tokens?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+}): number;
+
+/**
  * Extracts a delegation event log from a scorer input.
  *
  * Accepts either a bare `DelegationEvent[]` or a `{ events, nodes? }` object
@@ -646,4 +692,4 @@ type ScorerInput = ScorerInput$2;
 type ScoreRow = ScoreRow$1;
 type ScorersMap = ScorersMap$2;
 
-export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, type LlmJudgeConfig, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, extractDelegationEvents, faithfulnessScorer, humanPollScorer, latencyScorer, llmJudge, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, tierFitScorer, toxicityScorer, weightedScore };
+export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, type LlmJudgeConfig, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, extractDelegationEvents, faithfulnessScorer, humanPollScorer, latencyScorer, llmJudge, modelTokenPrices, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, tierFitScorer, toxicityScorer, weightedScore };

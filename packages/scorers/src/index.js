@@ -46,6 +46,9 @@ export { extractDelegationEvents, resolvePlanningNodes, } from "./delegationEven
 export { runScorersAsync, runScorersBatch } from "./run-scorers.js";
 // Aggregation
 export { aggregateScores, weightedScore, delegationRunScore, } from "./aggregate.js";
+// Token pricing (shared cost table)
+export { modelTokenPrices } from "./modelTokenPrices.js";
+export { estimateCostUsd } from "./estimateCostUsd.js";
 // Schema
 export { smithersScorers } from "./schema.js";
 // Metrics

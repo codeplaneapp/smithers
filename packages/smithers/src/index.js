@@ -239,7 +239,7 @@ export { createExternalSmithers } from "./external/index.js";
 export { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";
 export { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
 // Scorers
-export { createScorer, llmJudge, relevancyScorer, toxicityScorer, faithfulnessScorer, schemaAdherenceScorer, latencyScorer, runScorersAsync, runScorersBatch, aggregateScores, smithersScorers, } from "@smithers-orchestrator/scorers";
+export { createScorer, llmJudge, relevancyScorer, toxicityScorer, faithfulnessScorer, schemaAdherenceScorer, latencyScorer, runScorersAsync, runScorersBatch, aggregateScores, smithersScorers, modelTokenPrices, estimateCostUsd, } from "@smithers-orchestrator/scorers";
 // Memory
 export { createMemoryStore, createMemoryLayer, MemoryService, TtlGarbageCollector, TokenLimiter, Summarizer, namespaceToString, parseNamespace, memoryFactReads, memoryFactWrites, memoryRecallQueries, memoryMessageSaves, memoryRecallDuration, } from "@smithers-orchestrator/memory";
 // OpenAPI Tools

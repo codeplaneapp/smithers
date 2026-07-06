@@ -61,7 +61,7 @@ export { Gateway } from '@smithers-orchestrator/server/gateway';
 import * as _smithers_agents from '@smithers-orchestrator/agents';
 export { AmpAgent, AnthropicAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, ForgeAgent, GeminiAgent, HermesAgent, HermesCliAgent, KimiAgent, OpenAIAgent, OpenClawAgent, OpenCodeAgent, PiAgent, VibeAgent, createHttpTool } from '@smithers-orchestrator/agents';
 import * as _smithers_scorers from '@smithers-orchestrator/scorers';
-export { aggregateScores, createScorer, faithfulnessScorer, latencyScorer, llmJudge, relevancyScorer, runScorersAsync, runScorersBatch, schemaAdherenceScorer, smithersScorers, toxicityScorer } from '@smithers-orchestrator/scorers';
+export { aggregateScores, createScorer, estimateCostUsd, faithfulnessScorer, latencyScorer, llmJudge, modelTokenPrices, relevancyScorer, runScorersAsync, runScorersBatch, schemaAdherenceScorer, smithersScorers, toxicityScorer } from '@smithers-orchestrator/scorers';
 import * as _smithers_agents_capability_registry from '@smithers-orchestrator/agents/capability-registry';
 export { hashCapabilityRegistry } from '@smithers-orchestrator/agents/capability-registry';
 export { ERROR_REFERENCE_URL } from '@smithers-orchestrator/errors/ERROR_REFERENCE_URL';
