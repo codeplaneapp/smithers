@@ -8054,6 +8054,17 @@ cli.use(async (c, next) => {
             const rewritten = friendlyMissingInputMessage(c.command, fieldErrors);
             if (rewritten) error.message = rewritten;
         }
+        // `up` has no --dry-run flag, but agents reach for it (the CLI
+        // convention, and sibling verbs `update`/`supervise`, put dry-run there)
+        // to validate a workflow before spending tokens. Redirect the bare
+        // "Unknown flag: --dry-run" to `smithers graph`, which IS the dry-run
+        // path: it renders the graph without executing or persisting anything.
+        if (error instanceof Error &&
+            c.command === "up" &&
+            /Unknown flag:\s*--?dry-run\b/.test(error.message)) {
+            error.message =
+                "`up` has no --dry-run flag. To validate a workflow's graph without executing it or spending any agent tokens (a dry run), run `smithers graph <workflow>`.";
+        }
         throw error;
     }
 });

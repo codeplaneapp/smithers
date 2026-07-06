@@ -38,6 +38,21 @@ describe("conflicting / invalid flag combinations", () => {
         expect(all).toContain("--resume-claim-heartbeat");
     });
 
+    test("up --dry-run redirects to `smithers graph` instead of a bare Unknown flag", () => {
+        const repo = createTempRepo();
+        // `up` has no --dry-run flag; an agent that reaches for it (matching the
+        // CLI convention and sibling verbs `update`/`supervise`) should be
+        // pointed at `smithers graph`, the actual dry-run path.
+        const result = runSmithers(["up", "fake-workflow.tsx", "--dry-run"], {
+            cwd: repo.dir,
+            format: null,
+        });
+        expect(result.exitCode).not.toBe(0);
+        const all = `${result.stdout}\n${result.stderr}`;
+        expect(all).toContain("smithers graph");
+        expect(all).not.toContain("Unknown flag: --dry-run");
+    });
+
     test("gateway --port rejects values above 65535 during flag validation", () => {
         const repo = createTempRepo();
         const result = runSmithers(["gateway", "--port", "99999"], {
