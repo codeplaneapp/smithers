@@ -29,19 +29,19 @@ const { Workflow, smithers, outputs } = createSmithers({
 });
 
 const securityReviewer = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions:
     "You are a security-focused code reviewer. Look for vulnerabilities, injection risks, and auth issues. Return your verdict and detailed feedback.",
 });
 
 const qualityReviewer = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions:
     "You are a code quality reviewer. Evaluate readability, test coverage, error handling, and adherence to best practices. Return your verdict and detailed feedback.",
 });
 
 const aggregator = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions:
     "You receive two code reviews. Synthesize them into a single verdict. Approve only if both reviewers approve.",
 });

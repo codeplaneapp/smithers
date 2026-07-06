@@ -25,14 +25,14 @@ const cwd = process.cwd();
 export const models = {
   // ── weak tier ──────────────────────────────────────────────────────────
   haiku: new ClaudeCodeAgent({ model: "claude-haiku-4-5-20251001", cwd }),
-  sonnet: new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd }),
+  sonnet: new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd }),
   gemini: new GeminiAgent({
-    model: "gemini-3.1-pro-preview",
+    model: "gemini-3.5-flash",
     configDir: path.join(homedir(), ".gemini"),
     cwd,
   }),
   kimi: new KimiAgent({
-    model: "kimi-latest",
+    model: "kimi-k2.7-code",
     configDir: path.join(homedir(), ".smithers/accounts/kimi-1"),
     cwd,
   }),

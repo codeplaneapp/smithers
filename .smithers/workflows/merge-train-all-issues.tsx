@@ -189,7 +189,7 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, smithers, outputs } 
 // at their item's already-on-disk worktree via cwd (see makeMergeAgent below).
 // Codex on ChatGPT auth rejects "-codex" model ids — use a plain id (issue #236 / memory).
 const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-4-6" });
+const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
 const codex = new CodexAgent({
   model: "gpt-5.5",
   sandbox: "danger-full-access",

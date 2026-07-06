@@ -209,7 +209,7 @@ export function createSweEvoPanel(opts: { dbPath?: string } = {}) {
 
   const claudeModel = process.env.SWEEVO_CLAUDE_MODEL ?? "opus";
   const codexModel = process.env.SWEEVO_CODEX_MODEL ?? "gpt-5.5";
-  const geminiModel = process.env.SWEEVO_GEMINI_MODEL ?? "gemini-3.1-pro-preview";
+  const geminiModel = process.env.SWEEVO_GEMINI_MODEL ?? "gemini-3.5-flash";
 
   const workflow = smithers((ctx: any) => {
     const instance = ctx.input as Instance;

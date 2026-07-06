@@ -33,13 +33,13 @@ const { Workflow, smithers, outputs } = createSmithers({
 });
 
 const coder = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions:
     "You are an expert programmer. Write or revise code based on the given requirements and feedback.",
 });
 
 const reviewer = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions:
     "You are a strict code reviewer. Evaluate the code for correctness, style, and edge cases. Set approved to true only if the code is production-ready.",
 });

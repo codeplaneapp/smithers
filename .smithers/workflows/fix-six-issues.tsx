@@ -120,7 +120,7 @@ const { Workflow, Task, Sequence, Parallel, Loop, Approval, Worktree, MergeQueue
 // auth (it unsets ANTHROPIC_API_KEY). Codex on ChatGPT auth rejects "-codex" model
 // ids, so use a plain id (see issue #236 / repo memory).
 const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-4-6" });
+const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
 const codex = new CodexAgent({
   model: "gpt-5.5",
   sandbox: "danger-full-access",

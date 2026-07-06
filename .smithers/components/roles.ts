@@ -32,8 +32,10 @@ export const IMPLEMENTER_MODEL =
 
 // Gemini is reached through Antigravity's `agy` CLI (the legacy `gemini` CLI is
 // sunset in Smithers and only throws), so we probe for `agy`, not `gemini`.
+// Gemini 3.5 Flash (2026-05-19) beats 3.1 Pro on coding/agentic work at Flash
+// speed and cost, so it is the default (see docs/reference/sota-models.mdx).
 export const GEMINI_MODEL =
-  process.env.SMITHERS_GEMINI_MODEL?.trim() || "gemini-3.1-pro-preview";
+  process.env.SMITHERS_GEMINI_MODEL?.trim() || "gemini-3.5-flash";
 
 function commandExists(command: string): boolean {
   const probe =

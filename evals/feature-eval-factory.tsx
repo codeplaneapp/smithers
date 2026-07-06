@@ -56,7 +56,7 @@ const CLI = join(ROOT, "apps/cli/src/index.js");
 const claude = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
 const codex = new CodexAgent({ model: "gpt-5.5", skipGitRepoCheck: true });
 const codex1 = new CodexAgent({ model: "gpt-5.5", configDir: join(homedir(), ".codex"), skipGitRepoCheck: true });
-const antigravity = new AntigravityAgent({ model: "gemini-3.1-pro-preview", configDir: join(homedir(), ".gemini") });
+const antigravity = new AntigravityAgent({ model: "gemini-3.5-flash", configDir: join(homedir(), ".gemini") });
 
 const AGY_AVAILABLE = typeof Bun !== "undefined" && typeof Bun.which === "function" ? Bun.which("agy") != null : false;
 

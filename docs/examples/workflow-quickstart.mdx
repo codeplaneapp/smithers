@@ -35,14 +35,14 @@ const { Workflow, Sequence, Task, smithers, outputs } = createSmithers({
 });
 
 const planAgent = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   output: Output.object({ schema: planSchema }),
   instructions:
     "You are a planning assistant. Return a concise summary and 3-8 actionable steps.",
 });
 
 const briefAgent = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   output: Output.object({ schema: briefSchema }),
   instructions:
     "You are a concise technical writer. Produce a 5-8 sentence brief.",

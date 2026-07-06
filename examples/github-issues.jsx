@@ -54,7 +54,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 
 const triager = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   tools: { bash },
   instructions: `You triage GitHub issues. Fetch the OPEN issues for the given
 repo with: gh issue list --repo <repo> --state open --limit 100 --json number,title,labels

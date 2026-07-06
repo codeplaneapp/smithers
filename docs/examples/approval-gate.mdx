@@ -38,13 +38,13 @@ const { Workflow, smithers, outputs } = createSmithers({
 });
 
 const writer = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions:
     "You are a technical writer. Draft a blog post with a title and full content based on the given topic.",
 });
 
 const publisher = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions:
     "You are a publishing agent. Take the approved draft and return a URL and timestamp for the published post.",
 });

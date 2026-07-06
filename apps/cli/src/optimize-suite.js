@@ -49,14 +49,14 @@ const GEMINI_CONFIG = {
     baseURL: "https://generativelanguage.googleapis.com/v1beta",
     apiKeyEnv: "GEMINI_API_KEY",
     fallbackApiKeyEnv: "GOOGLE_API_KEY",
-    defaultModel: "gemini-3.1-pro-preview",
+    defaultModel: "gemini-3.5-flash",
 };
 // Aliases: kimi, moonshot.
 const MOONSHOT_CONFIG = {
     kind: "openai-compatible",
     baseURL: "https://api.moonshot.ai/v1",
     apiKeyEnv: "MOONSHOT_API_KEY",
-    defaultModel: "kimi-k2.6",
+    defaultModel: "kimi-k2.7-code",
 };
 // Endpoint supplied via env: amp, forge, openai-compatible (opencode and pi
 // extend it with a default model).

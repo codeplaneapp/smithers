@@ -112,7 +112,7 @@ process.stdout.write(lines.join("\\n") + "\\n");
                 continue: true,
                 resume: true,
                 provider: "openai",
-                model: "gpt-4o-mini",
+                model: "gpt-5.4-mini",
                 apiKey: "pi-test-key",
                 systemPrompt: "Base system",
                 appendSystemPrompt: "Extra system",
@@ -329,7 +329,7 @@ process.stdout.write(lines.join("\\n") + "\\n");
             process.env.PI_RESPONSE_FILE = responseFile;
             const agent = new PiAgent({
                 mode: "rpc",
-                model: "gpt-4o-mini",
+                model: "gpt-5.4-mini",
                 env: { PATH: process.env.PATH },
             });
             const result = await agent.generate({
@@ -379,7 +379,7 @@ process.stdout.write(lines.join("\\n") + "\\n");
             let requestSeen = null;
             const agent = new PiAgent({
                 mode: "rpc",
-                model: "gpt-4o-mini",
+                model: "gpt-5.4-mini",
                 env: { PATH: process.env.PATH },
                 onExtensionUiRequest: (request) => {
                     requestSeen = { id: request.id, method: request.method };

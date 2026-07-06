@@ -18,13 +18,13 @@ export const providers = {
   codex: new SmithersCodexAgent({ model: "gpt-5.5", skipGitRepoCheck: true, env: testAgentEnv }),
   opencode: new SmithersOpenCodeAgent({ model: "anthropic/claude-fable-5" }),
   pi: new SmithersPiAgent({ provider: "openai", model: "gpt-5.5" }),
-  kimi: new SmithersKimiAgent({ model: "kimi-latest" }),
+  kimi: new SmithersKimiAgent({ model: "kimi-k2.7-code" }),
   amp: new SmithersAmpAgent(),
   claudeOpus: new SmithersClaudeCodeAgent({ model: "claude-opus-4-8" }),
   claudeSonnet: new SmithersClaudeCodeAgent({ model: "claude-sonnet-5", env: testAgentEnv }),
-  kimi1: new SmithersKimiAgent({ model: "kimi-latest", configDir: path.join(homedir(), ".smithers/accounts/kimi-1") }),
+  kimi1: new SmithersKimiAgent({ model: "kimi-k2.7-code", configDir: path.join(homedir(), ".smithers/accounts/kimi-1") }),
   codex1: new SmithersCodexAgent({ model: "gpt-5.5", configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true }),
-  antigravity1: new SmithersAntigravityAgent({ model: "gemini-3.1-pro-preview", configDir: path.join(homedir(), ".gemini") }),
+  antigravity1: new SmithersAntigravityAgent({ model: "gemini-3.5-flash", configDir: path.join(homedir(), ".gemini") }),
 } as const;
 
 // kimi providers stay out of the default pools: a kimi auth-setup error is

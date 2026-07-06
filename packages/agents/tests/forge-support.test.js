@@ -30,7 +30,7 @@ process.stdout.write("done\\n");
             process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.FORGE_ARGS_FILE = argsFile;
             const agent = new ForgeAgent({
-                model: "anthropic/claude-sonnet-4-20250514",
+                model: "anthropic/claude-sonnet-5",
                 provider: "anthropic",
                 agent: "code",
                 conversationId: "conv-123",
@@ -48,7 +48,7 @@ process.stdout.write("done\\n");
             });
             const capturedArgs = JSON.parse(await readFile(argsFile, "utf8"));
             expect(capturedArgs).toContain("--model");
-            expect(capturedArgs).toContain("anthropic/claude-sonnet-4-20250514");
+            expect(capturedArgs).toContain("anthropic/claude-sonnet-5");
             expect(capturedArgs).toContain("--provider");
             expect(capturedArgs).toContain("anthropic");
             expect(capturedArgs).toContain("--agent");

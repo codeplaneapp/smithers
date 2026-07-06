@@ -21,12 +21,12 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 // Create Kimi agent
 const kimiAnalyzer = new KimiAgent({
-    model: "kimi-latest",
+    model: "kimi-k2.7-code",
     thinking: true,
     timeoutMs: 5 * 60 * 1000, // 5 minutes
 });
 const kimiReporter = new KimiAgent({
-    model: "kimi-latest",
+    model: "kimi-k2.7-code",
     timeoutMs: 3 * 60 * 1000, // 3 minutes
 });
 // Export workflow

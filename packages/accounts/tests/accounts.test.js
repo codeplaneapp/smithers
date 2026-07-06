@@ -299,10 +299,10 @@ describe("readAccounts / writeAccounts / addAccount / removeAccount", () => {
     });
     test("write+read round-trips via raw file", () => {
         const env = newSmithersHome();
-        addAccount({ label: "x", provider: "kimi", configDir: "/p", model: "kimi-latest" }, { env });
+        addAccount({ label: "x", provider: "kimi", configDir: "/p", model: "kimi-k2.7-code" }, { env });
         const raw = readFileSync(accountsFilePath(env), "utf8");
         const reparsed = parseAccountsFile(raw);
-        expect(reparsed.accounts[0].model).toBe("kimi-latest");
+        expect(reparsed.accounts[0].model).toBe("kimi-k2.7-code");
     });
     test("survives a manually-corrupt file by surfacing a clear error", () => {
         const env = newSmithersHome();

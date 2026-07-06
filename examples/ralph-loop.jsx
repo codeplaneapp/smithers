@@ -6,7 +6,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     check: z.object({ status: z.string() }),
 });
 const agent = new ClaudeCodeAgent({
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     dangerouslySkipPermissions: true,
 });
 export default smithers((ctx) => (<Workflow name="ralph-loop">

@@ -132,11 +132,11 @@ describe("classifyQuotaError — error metadata", () => {
         const err = classifyQuotaError(msg, "codex", {
             ...ctx,
             agentId: "my-agent",
-            agentModel: "gpt-4o",
+            agentModel: "gpt-5.4-mini",
             agentEngine: "codex",
         });
         expect(err?.details?.agentId).toBe("my-agent");
-        expect(err?.details?.agentModel).toBe("gpt-4o");
+        expect(err?.details?.agentModel).toBe("gpt-5.4-mini");
         expect(err?.details?.agentEngine).toBe("codex");
     });
 

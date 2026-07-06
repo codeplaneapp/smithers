@@ -89,8 +89,8 @@ but X still fails is a smoke-test **failure**.
    than dying silently.
 9. **`features.docs-bundles`** (LOW) — `docs` prints a non-empty `llms.txt`
    index; `docs-full` prints thousands of lines (not truncated) and exits 0. No
-   stale model ids: expect `claude-sonnet-4-6` / `gpt-5.5`, never
-   `claude-sonnet-4-5` / `gpt-5.2-codex`.
+   stale model ids: expect `claude-sonnet-5` / `gpt-5.5`, never
+   `claude-sonnet-4-6` / `gpt-5.2-codex`.
 10. **`features.paused-exit3`** (0.25.0, MEDIUM) — a seeded workflow with an
     approval gate (e.g. `review`) parks the run; `up`/`workflow run` exits 3 and
     prints a "Run is paused (exit 3 = awaiting a decision, not a failure)" header

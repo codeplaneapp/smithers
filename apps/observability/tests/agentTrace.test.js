@@ -307,7 +307,7 @@ describe("canonicalTraceEventToOtelLogRecord", () => {
         annotations: { "custom.demo": true, "custom.ticket": "OBS-123" },
     };
     test("emits stable Loki query attributes", () => {
-        const record = canonicalTraceEventToOtelLogRecord(event, { agentId: "claude-1", model: "claude-sonnet-4-7" });
+        const record = canonicalTraceEventToOtelLogRecord(event, { agentId: "claude-1", model: "claude-sonnet-5" });
         expect(record.severity).toBe("INFO");
         expect(record.attributes["run.id"]).toBe("run-123");
         expect(record.attributes["node.id"]).toBe("task-1");
@@ -318,7 +318,7 @@ describe("canonicalTraceEventToOtelLogRecord", () => {
         expect(record.attributes["event.kind"]).toBe("assistant.text.delta");
         expect(record.attributes["event.phase"]).toBe("message");
         expect(record.attributes["agent.id"]).toBe("claude-1");
-        expect(record.attributes["agent.model"]).toBe("claude-sonnet-4-7");
+        expect(record.attributes["agent.model"]).toBe("claude-sonnet-5");
         // Annotation keys that already start with "custom." are left as-is;
         // bare keys get a "custom." prefix added.
         expect(record.attributes["custom.demo"]).toBe(true);

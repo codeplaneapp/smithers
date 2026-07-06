@@ -4,7 +4,7 @@ import { extractUsageFromOutput } from "@smithers-orchestrator/agents/BaseCliAge
 describe("extractUsageFromOutput", () => {
   test("extracts tokens from Claude Code stream-json NDJSON", () => {
     const lines = [
-      JSON.stringify({ type: "message_start", message: { id: "msg_01", type: "message", role: "assistant", content: [], model: "claude-sonnet-4-20250514", usage: { input_tokens: 1523, cache_creation_input_tokens: 200, cache_read_input_tokens: 50, output_tokens: 1 } } }),
+      JSON.stringify({ type: "message_start", message: { id: "msg_01", type: "message", role: "assistant", content: [], model: "claude-sonnet-5", usage: { input_tokens: 1523, cache_creation_input_tokens: 200, cache_read_input_tokens: 50, output_tokens: 1 } } }),
       JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
       JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } }),
       JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: " world" } }),

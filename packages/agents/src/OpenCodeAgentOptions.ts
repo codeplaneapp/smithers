@@ -4,7 +4,7 @@ import type { BaseCliAgentOptions } from "./BaseCliAgent";
  * Configuration options for the OpenCodeAgent.
  */
 export type OpenCodeAgentOptions = BaseCliAgentOptions & {
-  /** Model identifier (e.g., "anthropic/claude-opus-4-8", "openai/gpt-5.4") */
+  /** Model identifier (e.g., "anthropic/claude-opus-4-8", "openai/gpt-5.5") */
   model?: string;
   /** OpenCode agent name (maps to --agent flag, selects predefined agent config) */
   agentName?: string;
