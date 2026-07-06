@@ -219,6 +219,23 @@ describe("getNodeOutputRoute status", () => {
       }),
     ).rejects.toMatchObject({ code: "MalformedOutputRow" });
   });
+
+  test("SyntaxError buried in the cause chain returns MalformedOutputRow", async () => {
+    // Production wraps the JSON.parse SyntaxError (toSmithersError, then
+    // runPromise), so the error reaching classification is not itself a
+    // SyntaxError and its outer message never mentions json/parse/malformed.
+    // Only walking the cause chain classifies it correctly.
+    await expect(
+      invokeRoute({
+        selectOutputRowImpl: async () => {
+          const wrapped = new Error("DB_QUERY_FAILED: select failed", {
+            cause: new SyntaxError("Unexpected token i in JSON"),
+          });
+          throw wrapped;
+        },
+      }),
+    ).rejects.toMatchObject({ code: "MalformedOutputRow" });
+  });
 });
 
 describe("getNodeOutputRoute input boundaries", () => {

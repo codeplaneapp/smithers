@@ -478,14 +478,28 @@ function byteLengthOfJson(value) {
 }
 
 /**
+ * A malformed output row surfaces as a JSON.parse SyntaxError, but by the time
+ * it reaches here it is buried in the `cause` chain: selectOutputRowEffect wraps
+ * every DB rejection via toSmithersError (code DB_QUERY_FAILED) and runPromise
+ * wraps it again. Walk the chain (as streamDevTools's findDevToolsRouteError
+ * does) so the SyntaxError check actually fires instead of resting entirely on
+ * the wrapped message happening to still mention "json".
+ *
  * @param {unknown} error
  */
 function looksLikeMalformedOutputRow(error) {
-    if (error instanceof SyntaxError) {
-        return true;
+    let current = error;
+    for (let depth = 0; current != null && depth < 8; depth += 1) {
+        if (current instanceof SyntaxError) {
+            return true;
+        }
+        const message = asString(/** @type {{ message?: unknown }} */ (current).message)?.toLowerCase() ?? "";
+        if (message.includes("json") || message.includes("parse") || message.includes("malformed")) {
+            return true;
+        }
+        current = /** @type {{ cause?: unknown }} */ (current).cause;
     }
-    const message = asString(error?.message)?.toLowerCase() ?? "";
-    return message.includes("json") || message.includes("parse") || message.includes("malformed");
+    return false;
 }
 
 /**
