@@ -985,7 +985,7 @@ Five built-ins: `schemaAdherenceScorer`, `latencyScorer`, `relevancyScorer`, `to
 
 Five delegation scorers back the delegation-chain workflow: `pocJudgmentScorer` (probe judgment; false negatives punished hardest), `planSolidityScorer` (post-execution replan churn), `estimateAccuracyScorer` (forecast vs. actual cost/time/tokens), `tierFitScorer` (was the intelligence tier right), and `humanPollScorer` (end-of-run user poll), combined by `delegationRunScore` / `weightedScore`, with `extractDelegationEvents` and `resolvePlanningNodes` as the shared event readers.
 
-The public scorer surface also exports `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smithersScorers` table, and scorer metrics (`scorersStarted`, `scorersFinished`, `scorersFailed`, `scorerDuration`).
+The public scorer surface also exports `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smithersScorers` table, token-cost helpers (`modelTokenPrices`, `estimateCostUsd`), and scorer metrics (`scorersStarted`, `scorersFinished`, `scorersFailed`, `scorerDuration`).
 
 ```bash
 bunx smithers-orchestrator scores RUN_ID
@@ -9784,6 +9784,55 @@ The high-throughput K2.7-Code variant, around 180 tokens per second. The open-we
 **Best open source** · current · released 2026-04-20 · engines: `kimi` · roles: research
 
 Moonshot's open-source (modified MIT) trillion-parameter MoE flagship: native multimodal, agent swarms up to 300 sub-agents, up to 13 hours of continuous coding. Ties GPT-5.5 on SWE-Bench Pro at roughly 80% lower cost. The strongest model you can self-host.
+
+## Benchmarks
+
+Independent of the roster above: how these models actually score. smithers ships two benchmark harnesses in-repo: [`benchmarks/roadmapbench`](https://github.com/smithersai/smithers/tree/main/benchmarks/roadmapbench) (RoadmapBench, a real audited run) and [`benchmarks/site`](https://github.com/smithersai/smithers/tree/main/benchmarks/site) (the benchmarks.smithers.sh leaderboard, sourced from `benchmarks/results.json`). Only results for models that still appear in the registry above are shown; rows for older models (e.g. Claude Opus 4.6, GPT-5.2) are dropped automatically. `pending` rows are honest placeholders: the smithers fleet run has not completed at full scale yet.
+
+{/* Generated from docs/data/sota-benchmarks.json. Rows naming a deprecated or unlisted model are filtered out. */}
+
+### RoadmapBench
+
+[UniPat-AI/RoadmapBench (115 tasks)](https://github.com/UniPat-AI/RoadmapBench) · metric: Resolved Rate (RR) · Completion Score (CS) · harness: `benchmarks/roadmapbench`
+
+Long-horizon, multi-target version upgrades: start from a repo pinned to an old release and implement every independent feature a real upstream bump introduced (median oracle change ~3,700 LOC across ~51 files; median 5 scored targets). The best single agent on the official leaderboard resolves under 40% of tasks.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| Claude Opus 4.8 + GPT-5.5 | smithers (fable-sandwich) | **RR 0.50 · CS 0.857** | curated subset (Python + TypeScript) · n=2 | every grader fair-validated (oracle=1.0, no-op<1.0); every run audited untainted. Not a full-115 claim. |
+| public SOTA (best single agent) | official | RR ~0.39 · CS ~0.69 | full-115 · n=115 | approximate published best on the official leaderboard |
+
+### SWE-Bench Pro
+
+[ScaleAI/SWE-bench_Pro (test, 731 tasks)](https://github.com/scaleapi/SWE-bench_Pro-os) · metric: Pass@1 (%) · harness: `benchmarks/site`
+
+731 multi-file tasks across 11 professional repos (Go/Python/JS/TS) graded by hidden tests in canonical per-instance Docker. Moonshot reports Kimi K2.6 tying GPT-5.5 here at roughly 80% lower cost.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| Claude Opus 4.8 + Claude Sonnet 5 | smithers (delegation-chain) | pending | full-731 | Claude-only fleet run pending |
+
+### Claw-Eval-Live
+
+[Claw-Eval-Live (105 tasks / 17 families)](https://arxiv.org/abs/2604.28139) · metric: Score (pass bar 75) · harness: `benchmarks/site`
+
+Agentic enterprise workflows scored on observable execution evidence. No public model clears the 70% pass bar; frontier flagships cluster in the low 80s.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| GPT-5.4 | official | 81.7 | full-105 · n=105 | public leaderboard |
+| smithers (mixture) | mixture-gateway | pending | pending | cannot run faithfully Claude-only (native OpenAI gather leg + neutral Gemini judge); asterisked variant only |
+
+### SWE-EVO
+
+[SWE-EVO (48 release-sized tasks / 7 repos)](https://arxiv.org/abs/2512.18470) · metric: Resolved Rate (%) · harness: `benchmarks/site`
+
+Carry a Python project across a whole release transition. Frontier agents resolve only ~21-25% of the full-48 set.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| GPT-5.4 | official (OpenHands) | 25.0 | full-48 · n=48 | Wilson 95% CI [14.9, 38.8] |
+| Claude Opus 4.8 + Claude Sonnet 5 | smithers (delegation-chain) | pending | dvc subset | Claude-only fleet run pending; dvc subset is easier than full-48, not directly comparable |
 
 ## Deprecated ids
 
