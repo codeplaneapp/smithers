@@ -368,6 +368,7 @@
               "reference/authoring",
               "reference/components",
               "reference/agents",
+              "reference/sota-models",
               "reference/tools",
               "reference/scorers",
               "reference/memory",

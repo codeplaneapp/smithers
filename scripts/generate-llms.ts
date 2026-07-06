@@ -118,6 +118,9 @@ const CORE_PAGES = [
   "guides/monitor.mdx",
   "guides/tui.mdx",
   "guides/workflow-optimization.mdx",
+  // The SOTA model registry: which model ids to configure today, with badges.
+  // Generated from docs/data/sota-models.json (see scripts/generate-sota.ts).
+  "reference/sota-models.mdx",
 ];
 
 const MEMORY_PAGES = [
