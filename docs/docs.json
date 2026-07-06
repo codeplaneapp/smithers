@@ -88,6 +88,7 @@
         "group": "Learn",
         "pages": [
           "how-it-works",
+          "concepts/execution-model",
           "concepts/memory",
           "guides/context-engineering",
           "recipes",
@@ -500,6 +501,10 @@
   },
   "redirects": [
     { "source": "/docs", "destination": "/" },
+    { "source": "/serverless", "destination": "/concepts/execution-model" },
+    { "source": "/cost", "destination": "/concepts/execution-model" },
+    { "source": "/concepts/sandboxes", "destination": "/concepts/execution-model" },
+    { "source": "/concepts/cost", "destination": "/concepts/execution-model" },
     { "source": "/docs/introduction", "destination": "/introduction" },
     { "source": "/docs/installation", "destination": "/installation" },
     { "source": "/docs/quickstart", "destination": "/quickstart" },

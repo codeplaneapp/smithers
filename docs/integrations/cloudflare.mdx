@@ -104,6 +104,50 @@ for the Sandbox SDK. Other options cover the sandbox id, workdir (default
 `/workspace`), command, env, setup files, execution mode (`exec` or `process`),
 and cleanup (`destroy` or `keep`).
 
+## Serverless & cost
+
+On Cloudflare, Smithers splits along the two execution modes described in
+[Where agents run](/concepts/execution-model):
+
+- **The control plane + in-process agents** run inside the Worker / Durable
+  Object. `createSmithersCloudflare` builds the Smithers API against Durable
+  Object SQLite (`createCloudflareDurableObjectSqliteDescriptor`), and SDK agents
+  (`AnthropicAgent`, `OpenAIAgent`, …) are plain HTTPS calls with no subprocess --
+  so a workflow built entirely from SDK agents runs Worker-native.
+- **CLI / full-OS agents** cannot run in the Worker's JS runtime (they spawn a
+  vendor binary via `node:child_process`). They are offloaded to a
+  `@cloudflare/sandbox` container through `createCloudflareSandboxProvider`, which
+  the Worker delegates to at each `<Sandbox>` boundary.
+
+<Warning>
+  **Not turnkey-serverless for CLI-agent workflows today.** The package ships
+  storage descriptors and a sandbox provider, but **no Worker entry / Durable
+  Object class and no Workers-native run driver**. The core engine that advances
+  every run uses `node:fs` and `node:child_process` (git/jj worktrees on a real
+  filesystem), so a Node/Bun host is still required to *drive* runs. The
+  Cloudflare provider also creates **one container per `<Sandbox>` `run()`**
+  (keyed `${runId}-${sandboxId}`) -- not per agent turn -- and its
+  `execution: "process"` mode is fire-and-forget (returns a pid, no result
+  reconciliation). Treat Workers-native execution as the storage +
+  in-process-agent path today, not turnkey serverless for CLI harnesses.
+</Warning>
+
+What's billed on Cloudflare:
+
+| Component | Billing driver |
+|---|---|
+| In-process SDK agents | Model API tokens (billed by the model provider, not Cloudflare) |
+| Worker / Durable Object control plane | Worker invocations + Durable Object requests and duration; DO-SQLite storage (rows read/written). Use **DO-SQLite** for durable run-of-record -- **D1 has no interactive transactions** and can leave partial state (see the D1 warning above) |
+| `@cloudflare/sandbox` container (per `<Sandbox>`) | Container wall-clock from create → teardown. Idle hibernation stays at the Sandbox SDK default unless you set it; `cleanup: "keep"` and `execution: "process"` leave the container billing until it hibernates, while `cleanup: "destroy"` (the default) stops it at the end of the boundary |
+
+<Note>
+  Cloudflare's own pricing for Workers, Durable Objects, and the Sandbox SDK
+  changes independently of Smithers -- check Cloudflare's current pricing pages for
+  exact per-unit figures. Smithers only determines the **shape** of what's
+  consumed: token calls, DO storage/requests, and container wall-clock per
+  `<Sandbox>` boundary.
+</Note>
+
 ## Notes
 
 - The package exports no Durable Object class and no Worker entry helper. You write the Worker and Durable Object; the package supplies the storage descriptors and sandbox provider.

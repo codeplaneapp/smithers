@@ -301,7 +301,7 @@ Memory is **state that survives across runs** -- namespaced facts and message hi
 
 Three layers, four namespaces (`workflow`, `agent`, `user`, `global`). Three processors (`TtlGarbageCollector`, `TokenLimiter`, `Summarizer`). See [the full docs bundle](/llms-full.txt) for the full surface.
 
-## Tools & sandboxing
+## Tools, execution environment & sandboxing
 
 Five built-in tools (`read`, `write`, `edit`, `grep`, `bash`) sandboxed to `rootDir`. Symlinks, network, and timeouts are denied by default; `--allow-network` opens bash to the network.
 
@@ -314,13 +314,24 @@ const reviewer    = new AnthropicAgent({ model, instructions: "...", tools: { re
 const implementer = new AnthropicAgent({ model, instructions: "...", tools: { read, write, edit, bash } });
 ```
 
+`defineTool` builds custom tools. Mark side-effecting ones with `sideEffect: true` and use `ctx.idempotencyKey` so retries don't double-fire.
+
+### Where agents run & what's billed
+
+There are **two execution modes**, decided by the agent class, not by a per-turn setting:
+
+- **SDK agents run in-process.** `AnthropicAgent` and `OpenAIAgent` (and `HermesAgent`, and the opt-in `ElizaAgent`) extend the AI SDK's `ToolLoopAgent` and make plain HTTPS calls to a provider. **No subprocess, no container** -- the agent's "environment" is your process. These are the only agents that run unchanged inside a JS-only serverless runtime (a Cloudflare Worker, a Vercel function).
+- **CLI / full-OS agents run as a child process.** `ClaudeCodeAgent`, `CodexAgent`, `OpenCodeAgent`, and every other CLI agent extend `BaseCliAgent`, which spawns the vendor binary via `node:child_process`. **By default that child process runs on the host, in `rootDir`** -- the same machine driving the run. There is no automatic per-turn container.
+
+<Note>
+  **The default is: no container.** SDK agents are API calls in your process; CLI agents are local child processes in `rootDir`. Neither spins up an isolated OS per turn -- a full OS environment is **opt-in** via [`<Sandbox>`](/components/sandbox). Model tokens/subscription, host compute (when local), and sandbox provider compute (when you opt in) are the three cost axes. The full model -- including which harnesses are serverless, warm vs cold containers, and the three meanings of "sandbox" -- is on [Where agents run, sandboxes & cost](/concepts/execution-model).
+</Note>
+
 Use `AnthropicAgent`/`OpenAIAgent` when you want API-billed SDK agents with
 native structured output. Use `ClaudeCodeAgent`, `CodexAgent`, and the other CLI
 agents when you want the vendor CLI/subscription surface; they can still produce
 typed task outputs, but the engine uses the prompt-and-parse fallback unless the
 agent documents a native structured-output opt-in.
-
-`defineTool` builds custom tools. Mark side-effecting ones with `sideEffect: true` and use `ctx.idempotencyKey` so retries don't double-fire.
 
 ## Common gotchas
 
