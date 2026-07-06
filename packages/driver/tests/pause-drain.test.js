@@ -86,4 +86,28 @@ describe("WorkflowDriver graceful pause", () => {
         expect(result).toEqual({ runId: "r1", status: "cancelled" });
         expect(cancelled).toBe(true);
     });
+
+    test("a cancel that lands during the pause drain wins over park", async () => {
+        const { driver } = makeDriver({ onExecute: () => { } });
+        const cancel = new AbortController();
+        // The drain window is where a cancel can arrive: the engine's
+        // pause-watcher aborts the run signal mid-drain. Simulate that by
+        // aborting the cancel controller from inside drainInflight.
+        driver.drainInflight = async () => {
+            cancel.abort();
+        };
+        // cancelRequested returns undefined so cancelRun falls through to its
+        // {status:'cancelled'} fallback.
+        driver.session = { ...driver.session, cancelRequested: () => undefined };
+        driver.runEffect = async () => undefined;
+        const pause = new AbortController();
+        pause.abort();
+        const result = await driver.run({
+            runId: "r1",
+            input: {},
+            signal: cancel.signal,
+            pauseSignal: pause.signal,
+        });
+        expect(result).toEqual({ runId: "r1", status: "cancelled" });
+    });
 });

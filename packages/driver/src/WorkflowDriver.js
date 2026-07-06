@@ -334,6 +334,13 @@ export class WorkflowDriver {
             // completes instead of being killed.
             if (this.activeOptions?.pauseSignal?.aborted) {
                 await this.drainInflight();
+                // A cancel can land during the drain window: the engine's
+                // pause-watcher keeps polling and aborts the run signal when
+                // cancel is requested. Re-check after draining so the durable
+                // cancel wins over parking; otherwise finalizeDriverResult's
+                // paused branch clears cancelRequestedAtMs and erases it.
+                if (this.activeOptions?.signal?.aborted)
+                    return this.cancelRun();
                 return { runId, status: "paused" };
             }
             switch (decision._tag) {
