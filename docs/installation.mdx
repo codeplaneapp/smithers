@@ -56,7 +56,7 @@ Verify the installed version any time with:
 smithers --version
 ```
 
-Smithers also checks npm at most once a day and prints a one-line notice on an interactive run when a newer release is available. The same daily check compares your install's [SOTA model registry](/reference/sota-models) against the published one: when a release ships with new best-in-class models, the notice tells you to run `smithers update` and then `smithers init` so installed workflows move to the latest agents. Disable the passive check with `SMITHERS_NO_UPDATE_CHECK=1` (it is already skipped in CI, in JSON/agent output, and for non-interactive shells).
+Smithers also checks npm at most once a day and prints a one-line notice on an interactive run when a newer release is available. The same daily check compares your install's [SOTA model registry](/reference/sota-models) against the published one: when a release ships with new best-in-class models, the notice tells you to run `smithers update` and then `bunx smithers-orchestrator init` so installed workflows move to the latest agents. Disable the passive check with `SMITHERS_NO_UPDATE_CHECK=1` (it is already skipped in CI, in JSON/agent output, and for non-interactive shells).
 
 ### Clean reinstall
 
