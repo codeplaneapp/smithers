@@ -221,6 +221,9 @@ test("initWorkflowPack succeeds when run from a published install layout", () =>
     // And installed dep versions should be picked up via createRequire.
     expect(generated.dependencies.zod).toBe("4.99.0");
     expect(generated.devDependencies.typescript).toBe("5.99.0");
+    // dagre ships no types, so the pack must seed @types/dagre or its own
+    // `tsc --noEmit` typecheck fails TS7016 on dc-graph.tsx's `import dagre`.
+    expect(generated.devDependencies["@types/dagre"]).toBeDefined();
 
     // init also installed the curated skill into the detected agent (Claude Code,
     // present via the faked ~/.claude credentials) straight from the packaged

@@ -34,7 +34,7 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
  * @typedef {(adapter: SmithersDb, dbPath: string) => Promise<T>} WithDbCallback
  */
 /** @typedef {import("./SemanticToolDefinition.ts").SemanticToolDefinition} SemanticToolDefinition */
-/** @typedef {import("./SemanticToolDefinition.ts").SemanticToolCallExtra} SemanticToolCallExtra */
+/** @typedef {import("./SemanticToolCallExtra.ts").SemanticToolCallExtra} SemanticToolCallExtra */
 
 export const SEMANTIC_TOOL_NAMES = [
     "list_workflows",

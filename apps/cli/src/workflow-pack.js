@@ -125,6 +125,7 @@ const BUNDLED_VERSION_PINS = {
     // resolve them.
     xyflowReact: "12.11.1",
     dagre: "0.8.5",
+    dagreTypes: "0.7.54",
     milkdownCrepe: "7.21.2",
 };
 /**
@@ -143,6 +144,7 @@ function readDependencyVersions() {
         nodeTypesVersion: resolveInstalledPackageVersion("@types/node", BUNDLED_VERSION_PINS.nodeTypes),
         xyflowReactVersion: resolveInstalledPackageVersion("@xyflow/react", BUNDLED_VERSION_PINS.xyflowReact),
         dagreVersion: resolveInstalledPackageVersion("dagre", BUNDLED_VERSION_PINS.dagre),
+        dagreTypesVersion: resolveInstalledPackageVersion("@types/dagre", BUNDLED_VERSION_PINS.dagreTypes),
         milkdownCrepeVersion: resolveInstalledPackageVersion("@milkdown/crepe", BUNDLED_VERSION_PINS.milkdownCrepe),
     };
 }
@@ -186,6 +188,7 @@ function renderPackageJson(versions) {
             "@types/react-dom": versions.reactDomTypesVersion,
             "@types/mdx": versions.mdxTypesVersion,
             "@types/node": versions.nodeTypesVersion,
+            "@types/dagre": versions.dagreTypesVersion,
         },
     }, null, 2) + "\n";
 }

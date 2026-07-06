@@ -1,11 +1,8 @@
 import type { z } from "zod";
 
+import type { SemanticToolCallExtra } from "./SemanticToolCallExtra.ts";
 import type { SemanticToolCallResult } from "./SemanticToolCallResult.ts";
 import type { SemanticToolName } from "./SemanticToolName.ts";
-
-export type SemanticToolCallExtra = {
-    signal?: AbortSignal;
-};
 
 export type SemanticToolDefinition = {
     name: SemanticToolName;
