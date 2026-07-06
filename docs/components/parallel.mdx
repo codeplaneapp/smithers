@@ -34,4 +34,4 @@ type ParallelProps = {
 
 - Group completes when all children finish. To let the group proceed past a failing child, set `continueOnFail` on that individual child `<Task>`. It is not a `<Parallel>` prop.
 - Children receive `parallelGroupId` and `parallelMaxConcurrency` in their descriptor.
-- A run-level cap (`smithers up --max-concurrency, -c`, default `4`) bounds the total in-flight tasks across the whole run, applied on top of every group. So a group can never exceed it: `<Parallel>` with no cap runs at most 4 children at once, and even `<Parallel maxConcurrency={5}>` is silently truncated to 4. To fan out wider, raise `-c` (or set the run's `maxConcurrency`) as well.
+- A run-level cap (`bunx smithers-orchestrator up --max-concurrency, -c`, default `4`) bounds the total in-flight tasks across the whole run, applied on top of every group. So a group can never exceed it: `<Parallel>` with no cap runs at most 4 children at once, and even `<Parallel maxConcurrency={5}>` is silently truncated to 4. To fan out wider, raise `-c` (or set the run's `maxConcurrency`) as well.

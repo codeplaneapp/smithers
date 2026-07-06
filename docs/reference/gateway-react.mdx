@@ -349,11 +349,29 @@ function useGatewayApprovals(
 ```
 
 <ParamField path="params" type="ListApprovalsRequest">
-  Optional filters (e.g. by run).
+  Optional filters, e.g. `{ filter: { runId } }` to scope to one run.
 </ParamField>
 <ResponseField name="GatewayAsyncState<ListApprovalsResponse>" type="object">
-  See [`GatewayAsyncState`](#gatewayasyncstate).
+  See [`GatewayAsyncState`](#gatewayasyncstate). **`data` IS the array of pending
+  gates** (`ListApprovalsResponse = GatewayApprovalSummary[]`); there is no
+  `data.approvals` wrapper. Each gate is
+  `{ runId, nodeId, iteration, requestTitle?, requestSummary?, workflowKey?, requestedAtMs }`
+  (the title is `requestTitle`, not `title`). Pass `nodeId` + `iteration` straight
+  into `submitApproval`.
 </ResponseField>
+
+```tsx
+const approvals = useGatewayApprovals({ filter: { runId } });
+const { submitApproval } = useGatewayActions();
+return (approvals.data ?? []).map((gate) => (
+  <button
+    key={gate.nodeId}
+    onClick={() => submitApproval({ runId, nodeId: gate.nodeId, iteration: gate.iteration, decision: { approved: true } })}
+  >
+    Approve {gate.requestTitle ?? gate.nodeId}
+  </button>
+));
+```
 
 **Source** [`useGatewayApprovals.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayApprovals.ts) · **See also** [`useGatewayActions`](#usegatewayactions)
 
@@ -412,10 +430,21 @@ function useGatewayNodeOutput(params: {
 <ParamField path="params.runId" type="string | undefined" required />
 <ParamField path="params.nodeId" type="string | undefined" required />
 <ParamField path="params.iteration" type="number" default="0">
-  Loop iteration to read.
+  Loop iteration to read. Pass `0` for a normal (non-looping) task.
 </ParamField>
 <ResponseField name="GatewayAsyncState<GetNodeOutput>" type="object">
-  See [`GatewayAsyncState`](#gatewayasyncstate).
+  See [`GatewayAsyncState`](#gatewayasyncstate). `data` is a
+  `{ status: "produced" | "pending" | "failed", row, schema, partial? }` envelope;
+  **the task's output object is under `data.row`**, not `data` itself. Destructure
+  defensively (some code paths hand you the row directly), the way `.smithers/ui/vcs.tsx`
+  does:
+
+  ```tsx
+  const output = useGatewayNodeOutput({ runId, nodeId: "report", iteration: 0 });
+  const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+  const row = isRecord(output.data?.row) ? output.data.row : isRecord(output.data) ? output.data : {};
+  // row now holds your Zod-typed task output, e.g. row.headline / row.summary
+  ```
 </ResponseField>
 
 **Source** [`useGatewayNodeOutput.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayNodeOutput.ts)
@@ -631,7 +660,11 @@ function useGatewayActions(): {
 ```tsx
 const { launchRun, submitApproval } = useGatewayActions();
 await launchRun({ workflow: "research", input: { topic: "smithers" } });
-await submitApproval({ runId: RUN_ID, nodeId: NODE_ID, approved: true });
+// `decision` is REQUIRED; that object carries the verdict. Pass `iteration`
+// from the approval gate (default 0). Approve:
+await submitApproval({ runId: RUN_ID, nodeId: NODE_ID, iteration: 0, decision: { approved: true } });
+// Deny:
+await submitApproval({ runId: RUN_ID, nodeId: NODE_ID, iteration: 0, decision: { approved: false, note: "not yet" } });
 ```
 
 **Source** [`useGatewayActions.ts`](https://github.com/smithersai/smithers/blob/main/packages/gateway-react/src/useGatewayActions.ts) · **See also** [Gateway Client](/reference/gateway-client)

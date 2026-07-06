@@ -1332,7 +1332,7 @@ So never read large material into the orchestrator's own context. Spawn a
 throwaway sub-agent to read the diff, the log, or the file and hand back one
 paragraph. Judging is a read too: to pick the best of N candidates, spawn a
 fresh verifier that ranks them and returns a verdict, rather than pulling N
-diffs into your window — the agent that has to stay clean should not also be the
+diffs into your window; the agent that has to stay clean should not also be the
 one holding every artifact. `<ReviewLoop>`, `<Panel>`, and `<ScanFixVerify>`
 exist so the verification lives in a separate context from the thing being
 verified. Keep the orchestrator lean and it can run all day; pollute it and the
@@ -1346,8 +1346,8 @@ amendments, and the operating rules you started with have quietly stopped being
 followed: you reach for the expensive model on cheap work, call a diagnosis
 "done," let scope creep in. The residue does not announce itself.
 
-The cheap fix is to re-read. Every few steps of a long job — and always after a
-`<ContinueAsNew>` handoff — re-read the spec or goal you are working to and this
+The cheap fix is to re-read. Every few steps of a long job, and always after a
+`<ContinueAsNew>` handoff, re-read the spec or goal you are working to and this
 doctrine, then check your recent behavior against them: right model tier,
 evidence bar actually enforced, still solving the stated problem. Drift you
 catch yourself costs a re-read; drift the human catches costs a day. This is why
@@ -3355,7 +3355,7 @@ type ParallelProps = {
 
 - Group completes when all children finish. To let the group proceed past a failing child, set `continueOnFail` on that individual child `<Task>`. It is not a `<Parallel>` prop.
 - Children receive `parallelGroupId` and `parallelMaxConcurrency` in their descriptor.
-- A run-level cap (`smithers up --max-concurrency, -c`, default `4`) bounds the total in-flight tasks across the whole run, applied on top of every group. So a group can never exceed it: `<Parallel>` with no cap runs at most 4 children at once, and even `<Parallel maxConcurrency={5}>` is silently truncated to 4. To fan out wider, raise `-c` (or set the run's `maxConcurrency`) as well.
+- A run-level cap (`bunx smithers-orchestrator up --max-concurrency, -c`, default `4`) bounds the total in-flight tasks across the whole run, applied on top of every group. So a group can never exceed it: `<Parallel>` with no cap runs at most 4 children at once, and even `<Parallel maxConcurrency={5}>` is silently truncated to 4. To fan out wider, raise `-c` (or set the run's `maxConcurrency`) as well.
 
 ---
 
@@ -8544,6 +8544,10 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/sandbox` | `./src/sandbox.js` | Sandbox provider contracts, bundles, and execution helpers |
 | `smithers-orchestrator/telegram` | `./src/telegram.js` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes |
 | `smithers-orchestrator/cloudflare` | `./src/cloudflare.js` | Cloudflare Workers helpers: Sandbox provider, Durable Object SQLite descriptor, and D1 descriptor |
+| `smithers-orchestrator/daytona` | `./src/daytona.js` | Daytona sandbox provider: run child workflows in Daytona workspaces |
+| `smithers-orchestrator/vercel` | `./src/vercel.js` | Vercel Sandbox provider: run child workflows in Vercel sandboxes |
+| `smithers-orchestrator/aws` | `./src/aws.js` | AWS sandbox provider: run child workflows on ECS Fargate or CodeBuild with S3 bundle transport |
+| `smithers-orchestrator/gcp` | `./src/gcp.js` | GCP sandbox provider: run child workflows on Cloud Run Jobs with GCS bundle transport |
 | `smithers-orchestrator/jsx-runtime` | `./src/jsx-runtime.js` | JSX runtime (auto-resolved by `jsxImportSource`) |
 | `smithers-orchestrator/jsx-dev-runtime` | `./src/jsx-runtime.js` | JSX dev runtime (auto-resolved in dev mode) |
 | `smithers-orchestrator/tools` | `./src/tools.js` | Tool sandbox: `defineTool`, `read`, `grep`, `bash`, `edit`, `write` |
@@ -8570,6 +8574,10 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `smithers-orchestrator` | Public facade for workflow authoring, components, agents, tools, server helpers, memory, OpenAPI tools, scorers, and JSX runtime setup | This page, Types |
 | `@smithers-orchestrator/cli` | CLI entrypoint, MCP server, local workflow pack, account registry commands, DevTools commands, cron, alerts, and server commands | CLI Overview, MCP Server |
 | `@smithers-orchestrator/cloudflare` | Cloudflare Workers integration: Sandbox SDK provider, Durable Object SQLite descriptor, and D1 descriptor | Sandbox, Server |
+| `@smithers-orchestrator/aws` | AWS sandbox provider: ECS Fargate and CodeBuild execution with S3 bundle transport | Sandbox, AWS |
+| `@smithers-orchestrator/daytona` | Daytona sandbox provider: run child workflows in Daytona workspaces | Sandbox, Daytona |
+| `@smithers-orchestrator/gcp` | GCP sandbox provider: Cloud Run Jobs execution with GCS bundle transport | Sandbox, GCP |
+| `@smithers-orchestrator/vercel` | Vercel Sandbox provider: run child workflows in Vercel sandboxes | Sandbox, Vercel |
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | CLI Agents |
 | `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | SDK Agents |
 | `@smithers-orchestrator/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | CLI Agents, SDK Agents |
@@ -9520,7 +9528,7 @@ The hooks read no auth state of their own. They call `client.rpc(...)`, and the 
 Each entry in `events` is a `GatewayEventFrame`: **`{ event, payload, seq }`**. The
 event NAME is `frame.event` (`"NodeStarted"`, `"NodeFinished"`, `"NodeFailed"`,
 `"RunStatusChanged"`, …) and everything else is under `frame.payload`. To build a
-live per-task view — including surfacing a task that FAILED — key off
+live per-task view, including surfacing a task that FAILED, key off
 `frame.payload.nodeId` and read `frame.payload.error` on `NodeFailed`:
 
 ```tsx
@@ -9535,7 +9543,7 @@ for (const frame of events) {
   } else if (frame.event === "NodeFinished") byNode.set(nodeId, { state: "done" });
   else if (frame.event === "NodeStarted") byNode.set(nodeId, { state: "running" });
 }
-// render every node in byNode, showing its state + error — a failed task must be visible, not swallowed.
+// render every node in byNode, showing its state + error; a failed task must be visible, not swallowed.
 ```
 
 The vanilla equivalent (`for await (const frame of client.streamRunEventsResilient(...))`) gives you the same loop without React state. Either way the Gateway picks up where the last `seq` left off after a reconnect, replaying anything you missed as a `run.gap_resync` frame before resuming live `run.event`s.
@@ -9584,7 +9592,7 @@ The `correlationKey` passed to `submitSignal` must match the workflow wait's `co
 pair it with `useGatewayActions().submitApproval` to drive a "pending approvals"
 surface. Its **`data` IS the array** of gates (no `data.approvals` wrapper); each
 gate is `{ runId, nodeId, iteration, requestTitle?, requestSummary?, workflowKey? }`
-— the title is `requestTitle`, not `title`. Feed `nodeId` + `iteration` straight
+the title is `requestTitle`, not `title`. Feed `nodeId` + `iteration` straight
 into `submitApproval`, and remember `decision` is required:
 
 ```tsx
@@ -15644,7 +15652,7 @@ for (const frame of events) {
 
 Use `frame.event === "NodeStarted" | "NodeFinished" | "NodeFailed"` to build a
 per-node status view, and `frame.payload.nodeId` to key it. The table below lists
-each variant's fields — in a UI those fields are on `frame.payload`.
+each variant's fields; in a UI those fields are on `frame.payload`.
 </Warning>
 
 | Event | Top-level fields |

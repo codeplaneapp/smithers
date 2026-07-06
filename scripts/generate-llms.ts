@@ -75,6 +75,7 @@ const CORE_PAGES = [
   "components/saga.mdx",
   "components/try-catch-finally.mdx",
   "components/sandbox.mdx",
+  "components/sandbox-providers.mdx",
   "components/subflow.mdx",
   "components/continue-as-new.mdx",
   "components/super-smithers.mdx",
@@ -107,6 +108,10 @@ const CORE_PAGES = [
   // Building a workflow UI: prebuilt React components agents drop into
   // .smithers/ui/<workflow>.tsx (built on the gateway-react hooks).
   "reference/gateway-ui.mdx",
+  // Building a workflow UI from the raw gateway-react hooks: live events
+  // (frame.event/frame.payload), node output rows, and the submitApproval
+  // `decision` shape — the details agents get wrong when hand-rolling a UI.
+  "guides/custom-workflow-ui.mdx",
   // Runtime API (small, useful in core). Events moved to its own opt-in
   // fragment because the SmithersEvent union is too detailed for everyday
   // schema noise for everyday use.
@@ -160,6 +165,12 @@ const INTEGRATIONS_PAGES = [
   "integrations/ecosystem.mdx",
   "integrations/pi-integration.mdx",
   "integrations/hermes.mdx",
+  // First-class cloud sandbox providers (each maps the SandboxProvider
+  // contract onto a vendor SDK; see components/sandbox-providers.mdx).
+  "integrations/daytona-sandbox-provider.mdx",
+  "integrations/vercel-sandbox-provider.mdx",
+  "integrations/aws-sandbox-provider.mdx",
+  "integrations/gcp-sandbox-provider.mdx",
   "examples/run-on-plue.mdx",
 ];
 

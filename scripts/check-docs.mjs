@@ -821,6 +821,54 @@ function checkFreestyleDocsMatchProviderSeam() {
   }
 }
 
+function checkSandboxProviderDocsMatchPackages() {
+  const overview = join(root, "docs/components/sandbox-providers.mdx");
+  if (!existsSync(overview)) {
+    failed = true;
+    console.error("\n✗ docs/components/sandbox-providers.mdx is missing (shared sandbox-provider overview).");
+    return;
+  }
+  // Each first-class provider doc must name its provider id and its create
+  // factory so the page stays wired to the shipped package.
+  const providers = [
+    { file: "docs/integrations/daytona-sandbox-provider.mdx", id: "daytona-sandbox", factory: "createDaytonaSandboxProvider" },
+    { file: "docs/integrations/vercel-sandbox-provider.mdx", id: "vercel-sandbox", factory: "createVercelSandboxProvider" },
+    { file: "docs/integrations/aws-sandbox-provider.mdx", id: "aws-sandbox", factory: "createAwsSandboxProvider" },
+    { file: "docs/integrations/gcp-sandbox-provider.mdx", id: "gcp-sandbox", factory: "createGcpSandboxProvider" },
+  ];
+  const required = [
+    [overview, "createCommandSandboxProvider"],
+    [overview, "SandboxSession"],
+    [overview, "SMITHERS_SANDBOX_REQUEST_PATH"],
+    [overview, "SMITHERS_SANDBOX_RESULT_PATH"],
+    [overview, "SMITHERS_SANDBOX_PROVIDER"],
+    [overview, "cloudflare-sandbox"],
+  ];
+  const files = new Map([[overview, readFileSync(overview, "utf8")]]);
+  for (const provider of providers) {
+    const path = join(root, provider.file);
+    if (!existsSync(path)) {
+      failed = true;
+      console.error(`\n✗ ${provider.file} is missing (first-class sandbox provider doc).`);
+      continue;
+    }
+    files.set(path, readFileSync(path, "utf8"));
+    required.push([path, provider.id], [path, provider.factory], [path, "SMITHERS_SANDBOX_REQUEST_PATH"]);
+    // Provider ids must never become SandboxRuntime enum values.
+    required.push([overview, provider.id]);
+  }
+  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
+  if (missing.length) {
+    failed = true;
+    console.error("\n✗ Sandbox provider docs do not match the shipped provider packages:");
+    console.error(
+      `    missing: ${missing.map(([file, needle]) => `${displayPath(file)}:${needle}`).join(", ")}`,
+    );
+  } else {
+    console.log("✓ Sandbox provider docs name each provider id and create factory");
+  }
+}
+
 function checkRunStateDocsMatchCurrentEmission() {
   const files = new Map([
     [join(root, "docs/runtime/run-state.mdx"), readFileSync(join(root, "docs/runtime/run-state.mdx"), "utf8")],
@@ -3933,6 +3981,7 @@ checkImplementedApisNotMarkedComingSoon();
 checkTimerDocsMatchWakeRuntime();
 checkIronProxySpecMatchesSandboxSeam();
 checkFreestyleDocsMatchProviderSeam();
+checkSandboxProviderDocsMatchPackages();
 checkRunStateDocsMatchCurrentEmission();
 checkRunStateDocsMatchDerivationContract();
 checkGatewayRpcReferenceDocsMatchRegistry();

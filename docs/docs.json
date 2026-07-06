@@ -238,6 +238,7 @@
               "components/timer",
               "components/human-task",
               "components/sandbox",
+              "components/sandbox-providers",
               "components/continue-as-new",
               "components/saga",
               "components/try-catch-finally"
@@ -274,6 +275,10 @@
           "integrations/telegram",
           "integrations/gateway",
           "integrations/cloudflare",
+          "integrations/daytona-sandbox-provider",
+          "integrations/vercel-sandbox-provider",
+          "integrations/aws-sandbox-provider",
+          "integrations/gcp-sandbox-provider",
           "integrations/custom-ui",
           "integrations/mcp-server",
           "integrations/claude-code-plugin",

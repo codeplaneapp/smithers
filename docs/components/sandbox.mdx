@@ -338,6 +338,21 @@ When `provider` is omitted, Smithers uses the legacy local transport path. `runt
 
 Unknown runtimes now fail closed. Docker is not silently replaced by bubblewrap when Docker is unavailable.
 
+## First-class cloud providers
+
+Smithers ships first-class sandbox providers for five cloud backends. Each is a
+separate optional package that maps the provider contract onto a vendor SDK, so
+`<Sandbox provider={createDaytonaSandboxProvider({...})}>` runs the child
+workflow on that backend with no runtime change. See
+[Sandbox Providers](/components/sandbox-providers) for the shared contract, the
+provider-kit, selection precedence, and a comparison table.
+
+- [Daytona Sandbox Provider](/integrations/daytona-sandbox-provider): id `daytona-sandbox`
+- [Vercel Sandbox Provider](/integrations/vercel-sandbox-provider): id `vercel-sandbox`
+- [AWS Sandbox Provider](/integrations/aws-sandbox-provider): id `aws-sandbox` (Fargate or CodeBuild, S3 transport)
+- [GCP Sandbox Provider](/integrations/gcp-sandbox-provider): id `gcp-sandbox` (Cloud Run Jobs, GCS transport)
+- [Cloudflare](/integrations/cloudflare): id `cloudflare-sandbox`
+
 ## Freestyle provider example
 
 [Freestyle VMs](https://www.freestyle.sh/docs/vms) are full sandboxes with nested virtualization, full networking, and the ability to scale to more resources than alternatives. Use Freestyle VMs when you want to give your agents a real computer rather than a code runner.

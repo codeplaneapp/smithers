@@ -33,15 +33,16 @@ given `entryFile`. This is the default for `smithers gateway` and generated
 | Field | Type | Description |
 | --- | --- | --- |
 | `entry` | `string` | Client entry module to bundle. Use this for full `gateway-react` apps. |
-| `source` | `string` | Client-safe module exporting a React component. The Gateway wraps it with `createGatewayReactRoot`. |
+| `source` | `string` | Client-safe module exporting a React component. The Gateway mounts it with React and passes boot props. |
 | `exportName` | `string` | Named export to read from `source`; defaults to `default`. |
 | `title` | `string` | Browser page title. |
 | `props` | `Record<string, unknown>` | Serializable props passed to a `source` component. |
 | `children` | `ReactNode` | Literal intrinsic React DOM tree for small inline views. |
 
-Inline literal children must be serializable DOM elements and text. Use
-`entry` or `source` when the UI needs hooks, event handlers, Gateway actions, or
-TanStack collection state.
+Inline literal children must be serializable DOM elements and text. Use `entry`
+when the UI needs gateway-react hooks, Gateway actions, or TanStack collection
+state. Use `source` for a small component export that receives serialized props
+and boot metadata from the Gateway.
 
 ## Existing UIs
 

@@ -40,6 +40,27 @@ type RunState =
 
 Discriminate on the `type` field, e.g. `event.type === "NodeFailed"`, to handle specific lifecycle moments.
 
+<Warning>
+**In a browser UI the shape is different.** `useGatewayRunEvents` (and the vanilla
+`streamRunEventsResilient`) yield **`GatewayEventFrame`** objects, not raw
+`SmithersEvent`s. On a frame the event NAME is `frame.event` and every other field
+lives under `frame.payload`. So the client-side equivalents are:
+
+```tsx
+const { events } = useGatewayRunEvents(runId, { afterSeq: 0 });
+for (const frame of events) {
+  if (frame.event === "NodeFailed") {
+    const { nodeId, error } = frame.payload;   // NOT frame.type / frame.nodeId
+    // error is the errorToJson value: read error.message
+  }
+}
+```
+
+Use `frame.event === "NodeStarted" | "NodeFinished" | "NodeFailed"` to build a
+per-node status view, and `frame.payload.nodeId` to key it. The table below lists
+each variant's fields; in a UI those fields are on `frame.payload`.
+</Warning>
+
 | Event | Top-level fields |
 |---|---|
 | `SupervisorStarted` | `runId`, `pollIntervalMs`, `staleThresholdMs`, `timestampMs` |

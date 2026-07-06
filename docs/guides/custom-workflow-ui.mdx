@@ -246,6 +246,27 @@ The hooks read no auth state of their own. They call `client.rpc(...)`, and the 
 
 `useGatewayRunEvents(runId)` opens one `streamRunEventsResilient` socket per `runId` and surfaces every non-heartbeat frame in the `events` array. A heartbeat updates `lastHeartbeat` instead. Heartbeats are how you detect a still-alive but quiet run, so they belong on their own pin to avoid bloating the events array. When `runId` changes the prior connection is aborted and the buffer resets, so the UI never shows the wrong run's events.
 
+Each entry in `events` is a `GatewayEventFrame`: **`{ event, payload, seq }`**. The
+event NAME is `frame.event` (`"NodeStarted"`, `"NodeFinished"`, `"NodeFailed"`,
+`"RunStatusChanged"`, …) and everything else is under `frame.payload`. To build a
+live per-task view, including surfacing a task that FAILED, key off
+`frame.payload.nodeId` and read `frame.payload.error` on `NodeFailed`:
+
+```tsx
+const { events } = useGatewayRunEvents(runId, { afterSeq: 0 });
+const byNode = new Map<string, { state: string; error?: string }>();
+for (const frame of events) {
+  const nodeId = (frame.payload as { nodeId?: string })?.nodeId;
+  if (!nodeId) continue;
+  if (frame.event === "NodeFailed") {
+    const err = (frame.payload as { error?: { message?: string } }).error;
+    byNode.set(nodeId, { state: "failed", error: err?.message });
+  } else if (frame.event === "NodeFinished") byNode.set(nodeId, { state: "done" });
+  else if (frame.event === "NodeStarted") byNode.set(nodeId, { state: "running" });
+}
+// render every node in byNode, showing its state + error; a failed task must be visible, not swallowed.
+```
+
 The vanilla equivalent (`for await (const frame of client.streamRunEventsResilient(...))`) gives you the same loop without React state. Either way the Gateway picks up where the last `seq` left off after a reconnect, replaying anything you missed as a `run.gap_resync` frame before resuming live `run.event`s.
 
 When the run finishes, the server emits one `run.completed` frame and closes the stream cleanly; both layers stop reconnecting on that signal.
@@ -288,7 +309,28 @@ const { submitApproval, submitSignal, cancelRun } = useGatewayActions();
 
 The `correlationKey` passed to `submitSignal` must match the workflow wait's `correlationId`, for example `<WaitForEvent event="utterance" correlationId="utterance">`. The Gateway enforces approval scopes (`allowedScopes`, `allowedUsers`) per the workflow's `<Approval>` declaration, so a UI that surfaces "Approve" for an unauthorized user will still fail at the RPC boundary. Render the gate optimistically and let the error surface through `useGatewayActions`'s return value.
 
-`useGatewayApprovals({ filter: { runId } })` lists every pending gate for the run; pair it with `useGatewayActions().submitApproval` to drive a "pending approvals" surface. The reference UIs in `.smithers/ui/grill-me.tsx` and `.smithers/ui/ultragrill.tsx` show this pattern at scale.
+`useGatewayApprovals({ filter: { runId } })` lists every pending gate for the run;
+pair it with `useGatewayActions().submitApproval` to drive a "pending approvals"
+surface. Its **`data` IS the array** of gates (no `data.approvals` wrapper); each
+gate is `{ runId, nodeId, iteration, requestTitle?, requestSummary?, workflowKey? }`
+the title is `requestTitle`, not `title`. Feed `nodeId` + `iteration` straight
+into `submitApproval`, and remember `decision` is required:
+
+```tsx
+const approvals = useGatewayApprovals({ filter: { runId } });
+const { submitApproval } = useGatewayActions();
+return (approvals.data ?? []).map((gate) => (
+  <div key={gate.nodeId}>
+    <span>{gate.requestTitle ?? gate.nodeId}</span>
+    <button onClick={() => submitApproval({ runId, nodeId: gate.nodeId, iteration: gate.iteration, decision: { approved: true } })}>
+      Approve
+    </button>
+  </div>
+));
+```
+
+The reference UIs in `.smithers/ui/grill-me.tsx` and `.smithers/ui/ultragrill.tsx`
+show this pattern at scale.
 
 ## Stale-data-free update model
 

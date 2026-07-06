@@ -68,8 +68,7 @@ Use `entry` for existing Gateway UI files:
 ```
 
 Use `source` for a browser-safe module that exports a React component. The
-Gateway wraps it with `createGatewayReactRoot` and passes `props` plus boot
-metadata:
+Gateway mounts it with React and passes `props` plus boot metadata:
 
 ```tsx
 <UI
@@ -93,7 +92,7 @@ browser.
 4. Leave the browser UI file in `.smithers/ui/<workflow>.tsx` unless you want to
    convert it to the `source` component-export shape.
 5. Verify with `bunx smithers-orchestrator gateway` and open
-   `/workflows/<workflow>` or run `bunx smithers-orchestrator ui <runId>`.
+   `/workflows/<workflow>` or run `bunx smithers-orchestrator ui RUN_ID`.
 
 The Gateway discovers `<UI>` during `register()`. The component renders nothing
 into the workflow graph and does not execute client code on the backend.

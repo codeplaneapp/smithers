@@ -2047,6 +2047,512 @@ workflows (even small one-task ones), and optimize them like skills with
 
 ---
 
+## Daytona Sandbox Provider
+
+> Run a Smithers <Sandbox> child workflow inside a Daytona sandbox with createDaytonaSandboxProvider.
+
+# Daytona Sandbox Provider
+
+`@smithers-orchestrator/daytona` is a first-class Smithers `SandboxProvider`
+backed by the [Daytona](https://www.daytona.io/) SDK. It runs a `<Sandbox>`
+child workflow's request inside a Daytona sandbox: it uploads the request JSON,
+runs the entry command, and reads the result JSON back. The shared provider-kit
+owns the request/result protocol, egress, secret scrubbing, and cleanup, so this
+package only maps the small `SandboxSession` seam onto Daytona.
+
+The provider id is `daytona-sandbox` (exported as `DAYTONA_SANDBOX_PROVIDER_ID`).
+
+```ts
+import {
+  createDaytonaSandboxProvider,
+  registerDaytonaSandboxProvider,
+  DAYTONA_SANDBOX_PROVIDER_ID,
+} from "smithers-orchestrator/daytona";
+```
+
+## Credentials
+
+`@daytonaio/sdk` is an optional dependency, imported lazily inside the session
+(the package also tries the renamed `@daytona/sdk`). Install it to use the real
+provider:
+
+```
+npm install @daytonaio/sdk
+```
+
+Credentials come from factory options first, then the Daytona env chain. They
+are used only to build the local SDK client. They are never written into the
+request JSON and never forwarded into the remote sandbox env.
+
+- `DAYTONA_API_KEY`: API key (required for a real client).
+- `DAYTONA_API_URL`: API base url (optional).
+- `DAYTONA_TARGET`: target region (optional).
+
+The same values may be passed as `apiKey`, `apiUrl`, and `target` factory
+options, or through `clientOptions`.
+
+## Usage
+
+Pass the provider straight to `<Sandbox>`:
+
+```tsx
+import { createSmithers, Sandbox } from "smithers-orchestrator";
+import { createDaytonaSandboxProvider } from "smithers-orchestrator/daytona";
+
+const provider = createDaytonaSandboxProvider({
+  image: "ubuntu:22.04",
+  autoStopInterval: 15, // minutes idle before Daytona auto-stops
+  ephemeral: true,      // delete the sandbox on disconnect
+});
+
+export default parent.smithers((ctx) => (
+  <parent.Workflow name="daytona-sandbox-run">
+    <Sandbox
+      id="remote-edit"
+      provider={provider}
+      workflow={childWorkflow}
+      input={{ prompt: ctx.input.prompt }}
+      output={parent.outputs.result}
+    />
+  </parent.Workflow>
+));
+```
+
+Or register it once and reference it by id:
+
+```ts
+import { registerDaytonaSandboxProvider } from "smithers-orchestrator/daytona";
+
+const unregister = registerDaytonaSandboxProvider({ image: "ubuntu:22.04" });
+
+// <Sandbox provider="daytona-sandbox" workflow={child} output={outputs.result} />
+```
+
+## Request/result contract
+
+The kit writes the request JSON to `.smithers/sandbox-request.json` in the
+workdir and hands the entry command two env vars:
+
+- `SMITHERS_SANDBOX_REQUEST_PATH`: where to read the request JSON.
+- `SMITHERS_SANDBOX_RESULT_PATH`: where to write the result JSON.
+
+The entry command either prints the result JSON to stdout or writes it to
+`SMITHERS_SANDBOX_RESULT_PATH`. The result is `{ bundlePath }` or a structured
+`{ status, output|outputs, patches?, diffBundle?, runId? }`. The kit fills
+`remoteRunId`/`workspaceId` from the Daytona sandbox id when the entry omits
+them.
+
+## Factory options
+
+- `image` or `snapshot`: the base for `daytona.create` (pass one, not both).
+- `autoStopInterval`: minutes idle before Daytona auto-stops (default `15`).
+- `ephemeral`: delete the sandbox on disconnect (default `true`).
+- `resources`, `labels`, `env`: forwarded to `daytona.create`.
+- `command`: entry command (default `node /workspace/run-smithers-sandbox.js`).
+- `workdir`: default `/workspace`.
+- `cleanup`: `"destroy"` (default) or `"keep"`.
+- `client` / `clientOptions`: inject an SDK client or its constructor options.
+
+Per-run `request.config` may carry `image`, `snapshot`, `resources`, `labels`,
+or a `workspace` block (`snapshotId`, `idleTimeoutSecs`,
+`persistence: "ephemeral"`) which maps onto the create options.
+
+## SDK subset used
+
+`daytona.create({ image?|snapshot?, envVars, labels, ephemeral, autoStopInterval,
+resources })`, `sandbox.fs.uploadFile(Buffer, path)`,
+`sandbox.fs.downloadFile(path)`, `sandbox.process.executeCommand(command, cwd,
+env, timeoutSecs)` (Daytona merges stderr into `result`), and
+`daytona.delete(sandbox)`.
+
+## Cleanup and cost
+
+`cleanup: "destroy"` (default) deletes the sandbox after the run. `cleanup:
+"keep"` leaves it running. `ephemeral` plus `autoStopInterval` bound idle cost
+even when cleanup is skipped, so a crashed orchestrator does not leave a sandbox
+billing forever. You pay for Daytona sandbox time from create to teardown.
+
+`createMockDaytonaSandboxEnvironment(handler, faults?)` is an in-memory SDK
+double for tests. It needs zero credentials, so unit tests run in CI without
+touching Daytona.
+
+---
+
+## Vercel Sandbox Provider
+
+> Run a Smithers <Sandbox> child workflow on Vercel Sandbox compute with createVercelSandboxProvider.
+
+# Vercel Sandbox Provider
+
+`@smithers-orchestrator/vercel` is a first-class Smithers `SandboxProvider`
+backed by the [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) SDK. It
+runs a `<Sandbox>` child workflow's request on Vercel Sandbox compute: it ships
+the request JSON into the sandbox workdir, runs the entry command, and reads the
+result JSON back. The shared provider-kit owns request shipping, egress, result
+parsing, secret scrubbing, and cleanup, so this package only supplies the Vercel
+`createSession` seam.
+
+The provider id is `vercel-sandbox` (exported as `VERCEL_SANDBOX_PROVIDER_ID`).
+The default workdir is `/vercel/sandbox`.
+
+```ts
+import {
+  createVercelSandboxProvider,
+  registerVercelSandboxProvider,
+  VERCEL_SANDBOX_PROVIDER_ID,
+} from "smithers-orchestrator/vercel";
+```
+
+## Credentials
+
+`@vercel/sandbox` is an optional dependency, imported lazily inside the session.
+OIDC is preferred; the access-token trio is the fallback. Auth is resolved and
+validated before the SDK is touched, so a misconfigured provider fails fast with
+`INVALID_INPUT`. These values are used only to create the sandbox. They are
+never written into the request JSON and never forwarded into the remote command
+env.
+
+- `VERCEL_OIDC_TOKEN` (preferred), or
+- `VERCEL_TOKEN` + `VERCEL_TEAM_ID` + `VERCEL_PROJECT_ID`.
+
+Each can also be passed as a factory option (`oidcToken`, `token`, `teamId`,
+`projectId`).
+
+## Usage
+
+```tsx
+import { createSmithers, Sandbox } from "smithers-orchestrator";
+import { createVercelSandboxProvider } from "smithers-orchestrator/vercel";
+
+const provider = createVercelSandboxProvider({
+  runtime: "node24",
+  vcpus: 2,
+  ports: [3000],
+  maxDurationMs: 45 * 60_000,
+});
+
+export default parent.smithers((ctx) => (
+  <parent.Workflow name="vercel-sandbox-run">
+    <Sandbox
+      id="remote-build"
+      provider={provider}
+      workflow={childWorkflow}
+      input={{ prompt: ctx.input.prompt }}
+      output={parent.outputs.result}
+    />
+  </parent.Workflow>
+));
+```
+
+Or register it once and reference it by id:
+
+```ts
+import { registerVercelSandboxProvider } from "smithers-orchestrator/vercel";
+
+const unregister = registerVercelSandboxProvider({ runtime: "node24" });
+
+// <Sandbox provider="vercel-sandbox" workflow={child} output={outputs.result} />
+```
+
+## Request/result contract
+
+The kit writes the request JSON to `.smithers/sandbox-request.json` in the
+workdir and hands the entry command two env vars:
+
+- `SMITHERS_SANDBOX_REQUEST_PATH`: where to read the request JSON.
+- `SMITHERS_SANDBOX_RESULT_PATH`: where to write the result JSON.
+
+The entry command either prints the result JSON to stdout or writes it to
+`SMITHERS_SANDBOX_RESULT_PATH`. The result is `{ bundlePath }` or a structured
+`{ status, output|outputs, patches?, diffBundle?, runId? }`. When ports are
+declared, the reachable `sandbox.domain(port)` is surfaced through a heartbeat.
+
+## Factory options
+
+- `runtime`: Vercel Sandbox runtime (default `node24`).
+- `vcpus`: vCPU count passed to `resources`.
+- `ports`: ports whose domains are surfaced.
+- `timeoutMs` / `maxDurationMs`: see duration cap below.
+- `persist`: `stop()` (pause) instead of `delete()` on teardown.
+- `command`: entry command.
+- `workdir`: default `/vercel/sandbox`.
+- `cleanup`: `"destroy"` (default) or `"keep"`.
+- `env`: merged into the command env.
+- `client` / `createOptions`: inject the SDK class or extra `Sandbox.create`
+  options.
+
+## Duration and plan cap
+
+The default session timeout is 5 minutes, which is also Vercel's create-time
+ceiling. `options.timeoutMs` (or `request.toolTimeoutMs`) maps to the create
+`timeout`. Durations above the 5-minute ceiling are reached by warning through a
+heartbeat and calling `sandbox.extendTimeout()`, up to `options.maxDurationMs`
+(default 45 minutes). A request above the cap throws `INVALID_INPUT` rather than
+provisioning a sandbox that would overrun the plan. Raise `maxDurationMs` for
+Pro (up to 5 hours).
+
+## Cleanup and cost
+
+Ephemeral sandboxes are deleted permanently on teardown (`cleanup: "destroy"`,
+the default). Set `persist: true` to `stop()` (pause) the sandbox instead so it
+can be resumed. `cleanup: "keep"` skips teardown entirely. You pay for Vercel
+Sandbox wall-clock from create to teardown.
+
+`createMockVercelSandboxEnvironment(handler, config?)` is an in-memory SDK
+double for tests. Pass it as `options.client`; it needs zero credentials, so
+unit tests run in CI without touching Vercel.
+
+---
+
+## AWS Sandbox Provider
+
+> Run a Smithers <Sandbox> child workflow on AWS Fargate or CodeBuild with createAwsSandboxProvider, transporting the bundle through S3.
+
+# AWS Sandbox Provider
+
+`@smithers-orchestrator/aws` is a first-class Smithers `SandboxProvider` that
+runs a `<Sandbox>` child workflow's request on AWS. It has two modes: Fargate
+(ECS `RunTask`, the default) and CodeBuild. AWS gives the orchestrator no shared
+filesystem with the remote task, so the request/result bundle is transported
+through an S3 bucket you already own. The shared provider-kit owns the
+request/result protocol, egress, secret scrubbing, and cleanup; this package
+supplies the S3 transport plus the ECS/CodeBuild runners.
+
+The provider id is `aws-sandbox` (exported as `AWS_SANDBOX_PROVIDER_ID`).
+
+```ts
+import {
+  createAwsSandboxProvider,
+  registerAwsSandboxProvider,
+  AWS_SANDBOX_PROVIDER_ID,
+} from "smithers-orchestrator/aws";
+```
+
+## Credentials
+
+Authentication uses the standard AWS SDK v3 credential chain: env vars, shared
+config, SSO, or an instance/task role. No explicit credentials are passed to the
+factory and none are ever forwarded into the remote task env. The remote task
+authenticates with its own task or build IAM role.
+
+The `@aws-sdk/*` clients are optional dependencies, imported lazily. Install the
+ones your mode needs:
+
+- `@aws-sdk/client-s3` (always).
+- `@aws-sdk/client-ecs` (Fargate).
+- `@aws-sdk/client-codebuild` (CodeBuild).
+- `@aws-sdk/client-cloudwatch-logs` (only with `captureLogs`).
+
+## Prerequisites
+
+The provider does not provision infrastructure. Set these up first:
+
+- An S3 `bucket` that already exists. The provider only manages the key prefix
+  `smithers/sandbox/<runId>/<sandboxId>/` under it.
+- For Fargate: an ECS `cluster`, a registered `taskDefinition`, at least one VPC
+  `subnet`, optional `securityGroups`, and the `containerName` inside the task
+  definition. The task role needs S3 read/write on the prefix.
+- For CodeBuild: a CodeBuild `projectName`. The build role needs S3 read/write
+  on the prefix.
+
+## Usage
+
+```tsx
+import { createAwsSandboxProvider } from "smithers-orchestrator/aws";
+
+// Fargate (default)
+const provider = createAwsSandboxProvider({
+  region: "us-east-1",
+  bucket: "my-smithers-sandbox-bucket", // must already exist
+  cluster: "smithers",
+  taskDefinition: "smithers-sandbox:7",
+  subnets: ["subnet-abc123"],
+  securityGroups: ["sg-def456"],
+  assignPublicIp: "ENABLED",
+  containerName: "runner",
+});
+
+// <Sandbox provider={provider} workflow={child} output={outputs.result} />
+```
+
+```ts
+// CodeBuild
+const codebuild = createAwsSandboxProvider({
+  mode: "codebuild",
+  region: "us-east-1",
+  bucket: "my-smithers-sandbox-bucket",
+  projectName: "smithers-sandbox",
+});
+```
+
+Or register either provider once and reference it by id with
+`registerAwsSandboxProvider(...)` then `<Sandbox provider="aws-sandbox" />`.
+
+## Request/result contract
+
+The kit hands the entry command `SMITHERS_SANDBOX_REQUEST_PATH` and
+`SMITHERS_SANDBOX_RESULT_PATH`. Because there is no shared filesystem, the
+container round-trips those files through S3. The provider injects four more
+vars so the entry can find them:
+
+- `SMITHERS_SANDBOX_S3_BUCKET`: the transport bucket.
+- `SMITHERS_SANDBOX_S3_PREFIX`: `smithers/sandbox/<runId>/<sandboxId>`.
+- `SMITHERS_SANDBOX_REQUEST_S3_KEY`: S3 key of the request JSON.
+- `SMITHERS_SANDBOX_RESULT_S3_KEY`: S3 key the entry must write the result to.
+
+Every workdir path maps to `s3://<bucket>/<prefix>/<basename(path)>`. The entry
+either prints the result JSON to stdout or writes it to the result key. An infra
+failure (task or build fails with no result written) throws. A result file with
+`status: "failed"` is a normal failed bundle. Fargate reports a real numeric
+container exit code; CodeBuild reports a status (`SUCCEEDED` maps to 0, else 1).
+
+## Factory options
+
+- `mode`: `"fargate"` (default) or `"codebuild"`.
+- `region`, `bucket`: required in both modes.
+- Fargate: `cluster`, `taskDefinition`, `subnets`, `containerName` (required),
+  `securityGroups`, `assignPublicIp`, `logGroupName`.
+- CodeBuild: `projectName` (required).
+- `captureLogs`: pull CloudWatch logs, truncated to `maxOutputBytes`.
+- `command`, `workdir` (default `/workspace`), `env`.
+- `cleanup`: `"destroy"` (default) or `"keep"`.
+- `clients` / `client` / `clientOptions`: inject SDK doubles or client options.
+
+## Cleanup and cost
+
+`cleanup: "destroy"` (default) stops the task or build if it is still running
+and deletes the transient S3 objects. `cleanup: "keep"` leaves them. You pay for
+Fargate task time or CodeBuild build minutes, plus S3 storage of the small
+transient bundle objects. Set a short lifecycle TTL on the `smithers/sandbox/`
+prefix to reap anything a crash leaves behind. EC2 mode is documented future
+work.
+
+`createMockAwsSandboxEnvironment(handler, mockOptions?)` provides in-memory S3,
+ECS, CodeBuild, and CloudWatch Logs doubles for tests. It needs zero AWS
+credentials, so unit tests run in CI without touching AWS.
+
+---
+
+## GCP Sandbox Provider
+
+> Run a Smithers <Sandbox> child workflow on Cloud Run Jobs with createGcpSandboxProvider, transporting the bundle through Cloud Storage.
+
+# GCP Sandbox Provider
+
+`@smithers-orchestrator/gcp` is a first-class Smithers `SandboxProvider` for
+Google Cloud. It executes a `<Sandbox>` child workflow's request on Cloud Run
+Jobs and ships the request/result bundle through a Cloud Storage bucket, because
+Cloud Run Jobs give no shared filesystem back to the caller. The shared
+provider-kit owns the request/result protocol, egress, secret scrubbing, and
+cleanup; this package supplies the GCS transport plus the Cloud Run runner.
+
+The provider id is `gcp-sandbox` (exported as `GCP_SANDBOX_PROVIDER_ID`).
+
+```ts
+import {
+  createGcpSandboxProvider,
+  registerGcpSandboxProvider,
+  GCP_SANDBOX_PROVIDER_ID,
+} from "smithers-orchestrator/gcp";
+```
+
+## Credentials
+
+Authentication is Application Default Credentials:
+`GOOGLE_APPLICATION_CREDENTIALS` (a service-account key file) or workload
+identity, plus `GOOGLE_CLOUD_PROJECT`. Local credentials are never forwarded
+into the container. The container env is `options.env` plus the Smithers, egress,
+and GCS-transport variables.
+
+`@google-cloud/run` and `@google-cloud/storage` are optional dependencies,
+imported lazily inside the session, so the package loads without them. Install
+both to use the real provider:
+
+```
+npm install @google-cloud/run @google-cloud/storage
+```
+
+## Prerequisites
+
+The provider does not create the bucket. Set these up first:
+
+- A Cloud Storage `bucket` that already exists (the transport). Set a short
+  lifecycle TTL on the `smithers/sandbox/` prefix to reap crash leftovers.
+- A Cloud Run `jobName` to run, or set `createJob` to have a per-run Job created
+  and torn down. The job's service account needs read/write on the bucket
+  prefix.
+
+## Required options
+
+`createGcpSandboxProvider({ projectId, location, bucket, jobName })`: all four
+are required and missing ones throw `INVALID_INPUT`. `projectId` falls back to
+`GOOGLE_CLOUD_PROJECT`.
+
+| option      | meaning                                                     |
+| ----------- | ---------------------------------------------------------- |
+| `projectId` | GCP project id                                             |
+| `location`  | Cloud Run region, e.g. `us-central1`                       |
+| `bucket`    | a pre-existing Cloud Storage bucket (transport)            |
+| `jobName`   | Cloud Run Job to run (or created per-run when `createJob`) |
+
+Other knobs: `prefix` (default `smithers/sandbox`), `command`, `workdir`
+(default `/workspace`), `env`, `cleanup` (`"destroy"` or `"keep"`),
+`timeoutSec`, `createJob`, `sandboxId(request)`, and
+`client`/`clients`/`clientOptions` for SDK injection.
+
+## Usage
+
+```tsx
+import { Sandbox } from "smithers-orchestrator";
+import { createGcpSandboxProvider } from "smithers-orchestrator/gcp";
+
+const provider = createGcpSandboxProvider({
+  projectId: "my-project",
+  location: "us-central1",
+  bucket: "my-smithers-sandbox",
+  jobName: "smithers-sandbox-runner",
+});
+
+// <Sandbox provider={provider} workflow={child} output={outputs.result} />
+```
+
+Or register it once and reference it by id with
+`registerGcpSandboxProvider(...)` then `<Sandbox provider="gcp-sandbox" />`.
+
+## Request/result contract
+
+The kit writes `.smithers/sandbox-request.json` and expects
+`.smithers/sandbox-result.json` back, handing the container
+`SMITHERS_SANDBOX_REQUEST_PATH` and `SMITHERS_SANDBOX_RESULT_PATH`. Because there
+is no shared filesystem, the container round-trips those files through GCS. The
+runner injects four extra vars:
+
+- `SMITHERS_SANDBOX_GCS_BUCKET`: the transport bucket.
+- `SMITHERS_SANDBOX_GCS_PREFIX`: object-name prefix.
+- `SMITHERS_SANDBOX_REQUEST_GCS_OBJECT`: object holding the request JSON.
+- `SMITHERS_SANDBOX_RESULT_GCS_OBJECT`: object the entry must write result JSON to.
+
+Every workdir-relative path maps to
+`<prefix>/<runId>/<sandboxId>/<basename(path)>`. Cloud Run reports task counts
+and conditions, not a numeric exit code: a succeeded task is exit 0 and a failed
+task is exit 1. An infra failure (execution failed, no result written) throws. A
+run that writes `status: "failed"` result JSON is a normal failed bundle the kit
+materializes.
+
+## Cleanup and cost
+
+`cleanup: "destroy"` (default) deletes the transient GCS objects and, when
+`createJob` made a per-run job, deletes that job. `cleanup: "keep"` leaves
+everything. The bucket itself is never created or deleted. You pay for Cloud Run
+Job execution time plus GCS storage of the small transient objects. Compute
+Engine execution is documented future work.
+
+`createMockGcpSandboxEnvironment(handler, config?)` provides in-memory Cloud
+Storage and Cloud Run doubles for tests. It needs zero real GCP credentials or
+bucket, so unit tests run in CI without touching GCP.
+
+---
+
 ## Run on Plue
 
 > Execute a Smithers workflow on Plue workspaces through the Plue sandbox provider.

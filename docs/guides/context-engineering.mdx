@@ -281,7 +281,7 @@ So never read large material into the orchestrator's own context. Spawn a
 throwaway sub-agent to read the diff, the log, or the file and hand back one
 paragraph. Judging is a read too: to pick the best of N candidates, spawn a
 fresh verifier that ranks them and returns a verdict, rather than pulling N
-diffs into your window — the agent that has to stay clean should not also be the
+diffs into your window; the agent that has to stay clean should not also be the
 one holding every artifact. `<ReviewLoop>`, `<Panel>`, and `<ScanFixVerify>`
 exist so the verification lives in a separate context from the thing being
 verified. Keep the orchestrator lean and it can run all day; pollute it and the
@@ -295,8 +295,8 @@ amendments, and the operating rules you started with have quietly stopped being
 followed: you reach for the expensive model on cheap work, call a diagnosis
 "done," let scope creep in. The residue does not announce itself.
 
-The cheap fix is to re-read. Every few steps of a long job — and always after a
-`<ContinueAsNew>` handoff — re-read the spec or goal you are working to and this
+The cheap fix is to re-read. Every few steps of a long job, and always after a
+`<ContinueAsNew>` handoff, re-read the spec or goal you are working to and this
 doctrine, then check your recent behavior against them: right model tier,
 evidence bar actually enforced, still solving the stated problem. Drift you
 catch yourself costs a re-read; drift the human catches costs a day. This is why
