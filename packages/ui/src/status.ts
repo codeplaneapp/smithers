@@ -15,7 +15,7 @@ export type StatusClass = "ok" | "warn" | "bad" | "muted";
 /** Bucket a status string into the four badge tints. */
 export function statusClass(status: string | undefined): StatusClass {
   const normalized = normalizeStatus(status);
-  if (["fixed", "ready", "done", "finished", "success", "ok", "complete", "completed", "closed"].includes(normalized)) return "ok";
+  if (["fixed", "ready", "done", "finished", "continued", "success", "ok", "complete", "completed", "closed"].includes(normalized)) return "ok";
   if (["broken", "blocked", "failed", "failure", "error"].includes(normalized)) return "bad";
   if (
     ["partial", "missing-tests", "missing", "running", "pending", "queued", "waiting", "paused", "todo", "open"].includes(normalized) ||
@@ -37,6 +37,7 @@ export function formatStatus(status: string | undefined): string {
     ready: "Ready",
     done: "Done",
     finished: "Finished",
+    continued: "Continued",
     running: "Running",
     pending: "Pending",
     queued: "Queued",
@@ -44,6 +45,7 @@ export function formatStatus(status: string | undefined): string {
     "waiting-approval": "Waiting for approval",
     "waiting-event": "Waiting for event",
     "waiting-timer": "Waiting on timer",
+    "waiting-quota": "Waiting on quota",
     paused: "Paused",
     partial: "Partial",
     "missing-tests": "Missing e2e",
@@ -68,6 +70,7 @@ const TERMINAL_STATUSES = new Set([
   "success",
   "done",
   "finished",
+  "continued",
   "complete",
   "completed",
   "closed",
