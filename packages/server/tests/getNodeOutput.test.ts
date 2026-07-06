@@ -221,10 +221,10 @@ describe("getNodeOutputRoute status", () => {
   });
 
   test("SyntaxError buried in the cause chain returns MalformedOutputRow", async () => {
-    // Production wraps the JSON.parse SyntaxError (toSmithersError, then
-    // runPromise), so the error reaching classification is not itself a
-    // SyntaxError and its outer message never mentions json/parse/malformed.
-    // Only walking the cause chain classifies it correctly.
+    // selectOutputRow wraps the JSON.parse SyntaxError in a SmithersError
+    // (DB_QUERY_FAILED) with the SyntaxError on `cause`. The wrapper's outer
+    // message deliberately lacks the json/parse/malformed keywords so this
+    // pins the cause-chain walk rather than the message heuristic.
     await expect(
       invokeRoute({
         selectOutputRowImpl: async () => {

@@ -479,11 +479,11 @@ function byteLengthOfJson(value) {
 
 /**
  * A malformed output row surfaces as a JSON.parse SyntaxError, but by the time
- * it reaches here it is buried in the `cause` chain: selectOutputRowEffect wraps
- * every DB rejection via toSmithersError (code DB_QUERY_FAILED) and runPromise
- * wraps it again. Walk the chain (as streamDevTools's findDevToolsRouteError
- * does) so the SyntaxError check actually fires instead of resting entirely on
- * the wrapped message happening to still mention "json".
+ * it reaches here selectOutputRow has wrapped it in a SmithersError (code
+ * DB_QUERY_FAILED) with the SyntaxError on its `cause` chain. Walk the chain
+ * (as streamDevTools's findDevToolsRouteError does) so the SyntaxError check
+ * fires for any wrapping depth, with the message keywords kept as a fallback
+ * for drivers that report malformed JSON without throwing a SyntaxError.
  *
  * @param {unknown} error
  */
