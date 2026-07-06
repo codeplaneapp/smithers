@@ -2,7 +2,6 @@ import * as Reactivity from "@effect/experimental/Reactivity";
 import * as SqlClient from "@effect/sql/SqlClient";
 import { SqlError } from "@effect/sql/SqlError";
 import * as Statement from "@effect/sql/Statement";
-import { Database } from "bun:sqlite";
 import { Context, Effect, Layer, ManagedRuntime, Scope, Stream } from "effect";
 import {
     POSTGRES,
@@ -17,6 +16,7 @@ import {
 } from "./schema-migrations.js";
 import { camelToSnake } from "./utils/camelToSnake.js";
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
+/** @typedef {import("bun:sqlite").Database} Database */
 /** @typedef {import("./SqlMessageStorageEventHistoryQuery.ts").SqlMessageStorageEventHistoryQuery} SqlMessageStorageEventHistoryQuery */
 /**
  * @typedef {string | number | bigint | boolean | Uint8Array | null | undefined} SqliteParam
@@ -553,14 +553,23 @@ function buildUpdateSql(table, patch, whereSql, params = []) {
  * @returns {Database}
  */
 function resolveSqliteDatabase(db) {
-    if (db instanceof Database) {
+    const isRawClient = (/** @type {any} */ v) =>
+        Boolean(v) && typeof v.query === "function" && typeof v.run === "function";
+    // A Drizzle BunSQLiteDatabase wraps the raw client; a bun:sqlite Database *is*
+    // the raw client. Duck-type instead of `instanceof Database` so this module
+    // loads on runtimes without bun:sqlite (Cloudflare Workers / other isolates),
+    // where the bun-sqlite path is never taken.
+    const wrapped = db?.session?.client ?? db?.$client;
+    if (wrapped !== undefined) {
+        if (!isRawClient(wrapped)) {
+            throw new TypeError("SqlMessageStorage requires a Bun SQLite client.");
+        }
+        return wrapped;
+    }
+    if (isRawClient(db)) {
         return db;
     }
-    const candidate = db.session?.client ?? db.$client;
-    if (!candidate || typeof candidate.query !== "function" || typeof candidate.run !== "function") {
-        throw new TypeError("SqlMessageStorage requires a Bun SQLite client.");
-    }
-    return candidate;
+    throw new TypeError("SqlMessageStorage requires a Bun SQLite client.");
 }
 /**
  * @param {unknown} db
