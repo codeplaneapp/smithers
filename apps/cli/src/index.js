@@ -4981,7 +4981,9 @@ const cli = Cli.create({
             });
             const wantsStructured = c.format === "json" || c.format === "jsonl" || formatRequestedJsonOutput();
             if (c.options.dryRun) {
-                if (wantsStructured) {
+                const humanTty = Boolean(process.stdin.isTTY && process.stdout.isTTY) &&
+                    (c.format === undefined || c.format === "toon");
+                if (wantsStructured || !humanTty) {
                     return c.ok({ suite: plan });
                 }
                 process.stdout.write(`${renderEvalPlan(plan)}\n`);
@@ -5075,7 +5077,14 @@ const cli = Cli.create({
             });
             report = { ...report, reportPath };
             process.exitCode = report.summary.failed > 0 ? 1 : 0;
-            if (wantsStructured) {
+            // Only a human on a TTY gets the formatted `renderEvalReport` text.
+            // A piped/agent consumer (non-TTY, default TOON) must get a single
+            // coherent TOON envelope, NOT the human report followed by a stray
+            // `c.ok(undefined)` tail (which renders as `data: null` plus the
+            // auto-injected skills CTA — two output formats under one command).
+            const humanTty = Boolean(process.stdin.isTTY && process.stdout.isTTY) &&
+                (c.format === undefined || c.format === "toon");
+            if (wantsStructured || !humanTty) {
                 return c.ok({ eval: report });
             }
             process.stdout.write(`${renderEvalReport(report)}\n`);

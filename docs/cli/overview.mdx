@@ -28,6 +28,18 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 143 SIGTERM
 ```
 
+## Output envelope and next-step CTAs
+
+On a TTY the CLI prints human-formatted text. When output is piped or captured (any non-TTY consumer, such as an AI agent), each command instead emits a single TOON envelope: the command's `data`, plus a "Next steps" `cta` block that suggests follow-up commands. The `cta` renders as a TOON table:
+
+```toon
+commands[2]{command,description}:
+  bunx smithers-orchestrator logs run-abc123,Tail active run
+  bunx smithers-orchestrator inspect run-abc123,Inspect most recent run
+```
+
+Read each row as two comma-separated fields declared by the `{command,description}` header. **The runnable shell command is the first field, up to the comma; the text after the comma is a human description, not part of the command.** So the first row's command is `bunx smithers-orchestrator logs run-abc123`, and `Tail active run` is prose. Never copy-paste a whole row into a shell. Field values are unquoted unless they themselves contain a comma or a quote, in which case TOON quotes and escapes them (a `--prompt "..."` value comes out as `"... --prompt \"<describe>\""`); strip that TOON quoting before running. On a TTY the same CTA renders as aligned `command  # description` lines, so this parsing only matters for piped or agent output. Pass `--format json` to get the same `cta` as a nested object with explicit `command` and `description` keys and skip parsing the table.
+
 ## Pauses, resume, and detached runs
 
 `bunx smithers-orchestrator up` exits when a run reaches a durable wait state (`waiting-approval`, `waiting-event`, or `waiting-timer`), even in foreground mode. `bunx smithers-orchestrator up --detach` starts a background owner and returns its `runId`, but that owner also exits when the run pauses. This is expected: the persisted run is waiting for an external decision, signal, or timer rather than burning a process.
