@@ -580,6 +580,324 @@ function emitGatewayLog(level, message, annotations, span) {
     }
     emitGatewayEffect(effect);
 }
+
+/**
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isProtocolSpecifier(value) {
+    return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value);
+}
+
+/**
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isAbsoluteFilePath(value) {
+    return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+/**
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isRelativeFilePath(value) {
+    return value.startsWith("./") || value.startsWith("../") || value.startsWith(".\\") || value.startsWith("..\\");
+}
+
+/**
+ * @param {string} value
+ * @param {string | undefined} entryFile
+ * @returns {string}
+ */
+function resolveWorkflowEntryRef(value, entryFile) {
+    if (isProtocolSpecifier(value) || isAbsoluteFilePath(value)) {
+        return value;
+    }
+    const base = entryFile ? dirname(entryFile) : process.cwd();
+    return resolve(base, value);
+}
+
+/**
+ * @param {string} value
+ * @param {string | undefined} entryFile
+ * @returns {string}
+ */
+function resolveWorkflowSourceRef(value, entryFile) {
+    if (isProtocolSpecifier(value) || isAbsoluteFilePath(value)) {
+        return value;
+    }
+    if (isRelativeFilePath(value)) {
+        return resolve(entryFile ? dirname(entryFile) : process.cwd(), value);
+    }
+    return value;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Record<string, unknown>}
+ */
+function plainRecord(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? /** @type {Record<string, unknown>} */ (value)
+        : {};
+}
+
+/**
+ * @param {unknown} value
+ * @param {number} depth
+ * @returns {unknown}
+ */
+function serializeLiteralPropValue(value, depth = 0) {
+    if (value == null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        return value;
+    }
+    if (depth > 16) {
+        throw new SmithersError("INVALID_INPUT", "Inline <UI> props are nested too deeply.");
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => serializeLiteralPropValue(entry, depth + 1));
+    }
+    if (typeof value === "object") {
+        const out = {};
+        for (const [key, entry] of Object.entries(/** @type {Record<string, unknown>} */ (value))) {
+            const serialized = serializeLiteralPropValue(entry, depth + 1);
+            if (serialized !== undefined) {
+                out[key] = serialized;
+            }
+        }
+        return out;
+    }
+    return undefined;
+}
+
+/**
+ * @param {Record<string, unknown>} props
+ * @returns {Record<string, unknown>}
+ */
+function serializeLiteralElementProps(props) {
+    const out = {};
+    for (const [key, value] of Object.entries(props)) {
+        if (key === "children" || key === "ref" || key === "key" || key === "dangerouslySetInnerHTML") {
+            continue;
+        }
+        const serialized = serializeLiteralPropValue(value);
+        if (serialized !== undefined) {
+            out[key] = serialized;
+        }
+    }
+    return out;
+}
+
+/**
+ * @param {unknown} node
+ * @param {number} depth
+ * @returns {unknown}
+ */
+function serializeLiteralReactNode(node, depth = 0) {
+    if (node == null || typeof node === "boolean") {
+        return null;
+    }
+    if (typeof node === "string" || typeof node === "number") {
+        return node;
+    }
+    if (depth > 64) {
+        throw new SmithersError("INVALID_INPUT", "Inline <UI> children are nested too deeply.");
+    }
+    if (Array.isArray(node)) {
+        return node.map((entry) => serializeLiteralReactNode(entry, depth + 1)).filter((entry) => entry !== null);
+    }
+    if (typeof node !== "object") {
+        return null;
+    }
+    const element = /** @type {{ type?: unknown; props?: Record<string, unknown> }} */ (node);
+    if (!("type" in element) || !("props" in element)) {
+        return null;
+    }
+    if (typeof element.type === "symbol") {
+        return serializeLiteralReactNode(element.props?.children, depth + 1);
+    }
+    if (typeof element.type !== "string") {
+        throw new SmithersError("INVALID_INPUT", "Inline <UI> children can only contain intrinsic DOM elements. Use <UI entry=...> for component-based apps.");
+    }
+    const children = serializeLiteralReactNode(element.props?.children, depth + 1);
+    const childArray = Array.isArray(children) ? children : children == null ? [] : [children];
+    return {
+        type: element.type,
+        props: serializeLiteralElementProps(element.props ?? {}),
+        children: childArray,
+    };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {"ui" | "tui" | undefined}
+ */
+function workflowViewKind(value) {
+    if (!value || (typeof value !== "function" && typeof value !== "object")) {
+        return undefined;
+    }
+    const kind = /** @type {Record<PropertyKey, unknown>} */ (value)[SMITHERS_WORKFLOW_VIEW_KIND];
+    return kind === "ui" || kind === "tui" ? kind : undefined;
+}
+
+/**
+ * @param {unknown} node
+ * @param {(kind: "ui" | "tui", props: Record<string, unknown>) => void} visit
+ */
+function visitWorkflowViewElements(node, visit) {
+    if (node == null || typeof node === "boolean" || typeof node === "string" || typeof node === "number") {
+        return;
+    }
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            visitWorkflowViewElements(child, visit);
+        }
+        return;
+    }
+    if (typeof node !== "object") {
+        return;
+    }
+    const element = /** @type {{ type?: unknown; props?: Record<string, unknown> }} */ (node);
+    const props = element.props ?? {};
+    const kind = workflowViewKind(element.type);
+    if (kind) {
+        visit(kind, props);
+    }
+    if ("children" in props) {
+        visitWorkflowViewElements(props.children, visit);
+    }
+}
+
+/**
+ * @param {"ui" | "tui"} kind
+ * @param {Record<string, unknown>} props
+ * @param {string} workflowKey
+ * @param {string | undefined} entryFile
+ * @returns {import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition | null}
+ */
+function normalizeWorkflowViewDeclaration(kind, props, workflowKey, entryFile) {
+    const title = asString(props.title);
+    const bootProps = plainRecord(props.props);
+    if (typeof props.entry === "string" && props.entry.trim()) {
+        return {
+            kind,
+            entry: resolveWorkflowEntryRef(props.entry.trim(), entryFile),
+            ...(kind === "ui" && typeof props.path === "string" ? { path: props.path } : {}),
+            ...(title ? { title } : {}),
+            props: bootProps,
+        };
+    }
+    if (typeof props.source === "string" && props.source.trim()) {
+        const source = resolveWorkflowSourceRef(props.source.trim(), entryFile);
+        const exportName = typeof props.exportName === "string" && props.exportName.trim()
+            ? props.exportName.trim()
+            : "default";
+        return {
+            kind,
+            source,
+            exportName,
+            ...(kind === "ui" && typeof props.path === "string" ? { path: props.path } : {}),
+            ...(title ? { title } : {}),
+            props: bootProps,
+        };
+    }
+    if ("children" in props && props.children != null) {
+        return {
+            kind,
+            literal: serializeLiteralReactNode(props.children),
+            ...(kind === "ui" && typeof props.path === "string" ? { path: props.path } : {}),
+            ...(title ? { title } : {}),
+            props: bootProps,
+        };
+    }
+    throw new SmithersError("INVALID_INPUT", `<${kind === "ui" ? "UI" : "TUI"}> in workflow ${workflowKey} requires entry, source, or literal children.`);
+}
+
+/**
+ * @param {import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition} view
+ * @param {string} workflowKey
+ * @param {string} fallbackPath
+ * @returns {ResolvedGatewayUiConfig}
+ */
+function workflowViewToGatewayUiConfig(view, workflowKey, fallbackPath) {
+    const path = normalizeUiMountPath(view.path, fallbackPath);
+    const title = view.title ?? workflowKey;
+    if (view.entry) {
+        return { entry: view.entry, path, title, props: view.props ?? {} };
+    }
+    if (view.source) {
+        return {
+            entry: `smithers-inline-component:${workflowKey}`,
+            path,
+            title,
+            props: view.props ?? {},
+            inline: { kind: "component", source: view.source, exportName: view.exportName ?? "default" },
+        };
+    }
+    return {
+        entry: `smithers-inline-literal:${workflowKey}`,
+        path,
+        title,
+        props: view.props ?? {},
+        inline: { kind: "literal", tree: view.literal ?? null },
+    };
+}
+
+/**
+ * @param {import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition} view
+ * @returns {ResolvedWorkflowTuiConfig}
+ */
+function workflowViewToTuiConfig(view) {
+    return {
+        kind: "tui",
+        ...(view.title ? { title: view.title } : {}),
+        props: view.props ?? {},
+        ...(view.entry ? { entry: view.entry } : {}),
+        ...(view.source ? { source: view.source, exportName: view.exportName ?? "default" } : {}),
+        ...(view.literal !== undefined ? { inline: { kind: "literal", tree: view.literal } } : {}),
+    };
+}
+
+/**
+ * @param {string} workflowKey
+ * @param {SmithersWorkflow} workflow
+ * @param {string | undefined} entryFile
+ * @returns {{ ui?: import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition; tui?: import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition }}
+ */
+function discoverWorkflowViews(workflowKey, workflow, entryFile) {
+    const views = {};
+    let root;
+    try {
+        const ctx = new SmithersCtx({
+            runId: `__smithers_ui_discovery__:${workflowKey}`,
+            iteration: 0,
+            iterations: {},
+            input: {},
+            auth: null,
+            outputs: {},
+            zodToKeyName: workflow.zodToKeyName,
+            runtimeConfig: {
+                ...(entryFile ? { workflowPath: entryFile, baseRootDir: dirname(entryFile) } : {}),
+            },
+        });
+        root = workflow.build(ctx);
+    }
+    catch (error) {
+        emitGatewayLog("warning", "workflow UI discovery render failed", {
+            workflow: workflowKey,
+            ...gatewayErrorAnnotations(error),
+        }, "gateway:workflow-ui-discovery");
+        return views;
+    }
+    visitWorkflowViewElements(root, (kind, props) => {
+        if (views[kind]) {
+            throw new SmithersError("INVALID_INPUT", `Workflow ${workflowKey} declares more than one <${kind === "ui" ? "UI" : "TUI"}>.`);
+        }
+        views[kind] = normalizeWorkflowViewDeclaration(kind, props, workflowKey, entryFile);
+    });
+    return views;
+}
 /**
  * @param {GatewayRequestContext} context
  * @returns {Record<string, unknown>}
@@ -3472,13 +3790,19 @@ a { color: var(--brand); }</style>
      */
     register(key, workflow, options) {
         ensureSmithersTables(workflow.db);
-        const ui = resolveGatewayUiConfig(options?.ui, `/workflows/${encodeURIComponent(key)}`);
+        const embeddedViews = discoverWorkflowViews(key, workflow, options?.entryFile);
+        const ui = resolveGatewayUiConfig(options?.ui, `/workflows/${encodeURIComponent(key)}`)
+            ?? (embeddedViews.ui
+                ? workflowViewToGatewayUiConfig(embeddedViews.ui, key, `/workflows/${encodeURIComponent(key)}`)
+                : null);
+        const tui = embeddedViews.tui ? workflowViewToTuiConfig(embeddedViews.tui) : null;
         this.workflows.set(key, {
             key,
             workflow,
             schedule: options?.schedule,
             webhook: options?.webhook,
             ui,
+            tui,
             system: Boolean(options?.system),
             entryFile: options?.entryFile,
         });

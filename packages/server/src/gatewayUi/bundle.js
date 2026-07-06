@@ -10,11 +10,28 @@ const require = createRequire(import.meta.url);
 // crashed with mixed React copies as soon as a UI imported react-dom directly
 // (portals, flushSync, createRoot in shared components).
 const reactSpecifierRe = /^react(?:-dom)?(?:\/.*)?$/;
+const tanstackSpecifierRe = /^@tanstack\//;
 const INLINE_UI_NAMESPACE = "smithers-inline-ui";
 
 function resolveReactPeer(specifier) {
     try {
         return require.resolve(specifier);
+    }
+    catch {
+        return null;
+    }
+}
+
+/**
+ * @param {string} specifier
+ * @param {string | undefined} resolveDir
+ * @returns {string | null}
+ */
+function resolveWorkspaceDependency(specifier, resolveDir) {
+    try {
+        return require.resolve(specifier, {
+            paths: [resolveDir, process.cwd()].filter(Boolean),
+        });
     }
     catch {
         return null;
@@ -88,7 +105,7 @@ function inlineUiPlugin(config) {
 function renderLiteralInlineUiEntry(tree) {
     return [
         'import { createElement } from "react";',
-        'import { createGatewayReactRoot } from "@smithers-orchestrator/gateway-react";',
+        'import { createRoot } from "react-dom/client";',
         `const tree = ${JSON.stringify(tree)};`,
         "function inflate(node) {",
         "  if (node == null || typeof node === 'string' || typeof node === 'number') return node;",
@@ -97,7 +114,7 @@ function renderLiteralInlineUiEntry(tree) {
         "  return createElement(node.type, node.props || null, ...children);",
         "}",
         "function App() { return inflate(tree); }",
-        "createGatewayReactRoot(createElement(App), { baseUrl: globalThis.location?.origin });",
+        "createRoot(document.getElementById('root')).render(createElement(App));",
     ].join("\n");
 }
 
@@ -165,6 +182,10 @@ export async function bundleGatewayUiEntry(config, cache) {
                 setup(build) {
                     build.onResolve({ filter: reactSpecifierRe }, (args) => {
                         const path = resolveReactPeer(args.path);
+                        return path ? { path } : undefined;
+                    });
+                    build.onResolve({ filter: tanstackSpecifierRe }, (args) => {
+                        const path = resolveWorkspaceDependency(args.path, args.resolveDir);
                         return path ? { path } : undefined;
                     });
                 },
