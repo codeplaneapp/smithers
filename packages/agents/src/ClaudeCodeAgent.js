@@ -1,6 +1,6 @@
 import { BaseCliAgent, pushFlag, pushList, isRecord, asString, truncate, toolKindFromName, shouldSurfaceUnparsedStdout, isLikelyRuntimeMetadata, createSyntheticIdGenerator, } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList, } from "./capability-registry/index.js";
-import { classifyQuotaError } from "./BaseCliAgent/BaseCliAgent.js";
+import { isClaudeLimitBanner } from "./BaseCliAgent/isClaudeLimitBanner.js";
 import { logWarning } from "@smithers-orchestrator/observability/logging";
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
@@ -176,7 +176,7 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                 // below. Classify them here too, or the run treats the banner as a
                 // normal (empty) answer and fails on output-schema validation
                 // instead of parking as a resumable quota wait.
-                if (!limitBannerText && classifyQuotaError(trimmedLine, this.cliEngine)) {
+                if (!limitBannerText && isClaudeLimitBanner(trimmedLine)) {
                     limitBannerText = trimmedLine;
                 }
                 if (!shouldSurfaceUnparsedStdout(trimmedLine)) {
@@ -224,7 +224,7 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                         const text = asString(block.text)?.trim();
                         if (payloadType === "assistant" && text) {
                             lastAssistantText = text;
-                            if (!limitBannerText && classifyQuotaError(text, this.cliEngine)) {
+                            if (!limitBannerText && isClaudeLimitBanner(text)) {
                                 limitBannerText = text;
                             }
                             events.push({
@@ -322,7 +322,7 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                 const subtype = asString(payload.subtype) ?? "success";
                 const resultText = asString(payload.result);
                 const resultError = asString(payload.error);
-                if (!limitBannerText && resultText && classifyQuotaError(resultText, this.cliEngine)) {
+                if (!limitBannerText && resultText && isClaudeLimitBanner(resultText)) {
                     limitBannerText = resultText;
                 }
                 const isError = payload.is_error === true || subtype === "error" || Boolean(limitBannerText);

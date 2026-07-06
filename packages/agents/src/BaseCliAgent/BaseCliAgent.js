@@ -50,9 +50,11 @@ export function classifyQuotaError(message, command, context = {}) {
     let resetHint;
     // Format: "try again at Jun 18th, 2026 9:54 AM" — strip ordinal suffix before parsing
     const dateMatch = /try again at\s+([A-Z][a-z]+ \d+(?:st|nd|rd|th)?,?\s+\d{4}\s+\d+:\d+\s+(?:AM|PM))/i.exec(message);
-    // Format: "resets 1:30am (America/New_York)" — next occurrence of that
-    // wall-clock time in the named zone (Claude/Fable session-limit banner).
-    const clockMatch = /\bresets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(([^)]+)\)/i.exec(message);
+    // Format: "resets 1:30am (America/New_York)" or "reset at 4pm
+    // (Asia/Kolkata)" — next occurrence of that wall-clock time in the named
+    // zone (Claude/Fable session-limit banner). Accepts singular "reset",
+    // optional "at", and an optional ":mm".
+    const clockMatch = /\breset(?:s)?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(([^)]+)\)/i.exec(message);
     if (dateMatch) {
         const normalized = dateMatch[1].replace(/(\d+)(st|nd|rd|th)\b/gi, "$1");
         const parsed = Date.parse(normalized);

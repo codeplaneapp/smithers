@@ -98,6 +98,15 @@ describe("classifyQuotaError — reset time parsing", () => {
         expect(resetAt).toBe(Date.parse("2025-06-16T05:30:00Z"));
     });
 
+    test("parses 'Your limit will reset at 4pm (Asia/Kolkata)' banner", () => {
+        const noonUtc = Date.parse("2025-06-15T04:00:00Z");
+        const msg = "Claude usage limit reached. Your limit will reset at 4pm (Asia/Kolkata).";
+        const err = classifyQuotaError(msg, "claude-code", { nowMs: () => noonUtc });
+        expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+        expect(typeof err?.details?.quotaResetAtMs).toBe("number");
+        expect(err?.details?.quotaResetAtMs).toBeGreaterThan(noonUtc);
+    });
+
     test("parses 'retry after N seconds' format", () => {
         const msg = "Rate limit exceeded. Retry after 60 seconds.";
         const err = classifyQuotaError(msg, "codex", ctx);
