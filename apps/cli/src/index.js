@@ -8030,6 +8030,75 @@ const KNOWN_COMMANDS = new Set([
     "skills",
 ]);
 /**
+ * Common wrong guesses map straight to the right command(s) so an agent or
+ * human who types the natural-but-wrong verb gets pointed at the real one
+ * instead of a bare "Unknown command".
+ *
+ * @type {Record<string, string>}
+ */
+const COMMAND_ALIASES = {
+    list: "ps (list runs) or workflow list (list workflows)",
+    ls: "ps (list runs)",
+    "list-runs": "ps",
+    runs: "ps",
+    workflows: "workflow list",
+    status: "ps",
+    stop: "cancel",
+    kill: "cancel",
+    start: "up",
+    exec: "up",
+    show: "inspect",
+    log: "logs",
+    tail: "logs",
+    help: "--help",
+};
+/**
+ * Levenshtein edit distance between two strings.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function editDistance(a, b) {
+    const rows = a.length + 1;
+    const cols = b.length + 1;
+    let prev = Array.from({ length: cols }, (_, index) => index);
+    for (let i = 1; i < rows; i++) {
+        const curr = [i];
+        for (let j = 1; j < cols; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+        }
+        prev = curr;
+    }
+    return prev[cols - 1];
+}
+/**
+ * Build a "did you mean" hint for an unknown command: prefer an explicit alias,
+ * otherwise the closest known command by edit distance (within a small
+ * threshold so we never suggest something unrelated).
+ *
+ * @param {string} command
+ * @returns {string | undefined}
+ */
+function suggestKnownCommand(command) {
+    const alias = COMMAND_ALIASES[command];
+    if (alias)
+        return alias;
+    let best;
+    let bestDistance = Infinity;
+    for (const known of KNOWN_COMMANDS) {
+        const distance = editDistance(command, known);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = known;
+        }
+    }
+    // Only suggest when it's a plausible typo, not a wild miss.
+    const threshold = command.length <= 4 ? 2 : 3;
+    return best && bestDistance <= threshold ? best : undefined;
+}
+/**
  * Rewrite `smithers .` or `smithers <path>` (when path looks like a directory) to `smithers gui <path>`.
  * Matches the convention of VS Code / Cursor's `code .` shortcut for opening the current directory.
  *
@@ -8516,7 +8585,9 @@ async function main() {
     const commandIndex = findFirstPositionalIndex(argv);
     const command = commandIndex >= 0 ? argv[commandIndex] : undefined;
     if (command && !KNOWN_COMMANDS.has(command)) {
-        console.error(`Unknown command: ${command}`);
+        const suggestion = suggestKnownCommand(command);
+        const didYouMean = suggestion ? ` Did you mean '${suggestion}'?` : "";
+        console.error(`Unknown command: ${command}.${didYouMean} Run 'smithers --help' to list commands.`);
         process.exit(4);
     }
     if (command === "review") {
