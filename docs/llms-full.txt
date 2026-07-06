@@ -14298,6 +14298,22 @@ under a real `<Sandbox>` provider with egress controls
 instead.
 </Warning>
 
+<Warning>
+**Enforcement vs. bypassable denylist.** True OS-level network isolation is
+enforced **only on macOS**, where a blocked `bash` runs under `sandbox-exec`
+with a network-deny profile (when `sandbox-exec` is available). On Linux and
+every other platform, including the environments Smithers runs in for CI,
+cloud, and production, `allowNetwork:false` cannot enforce a kernel sandbox and
+degrades to the token/basename denylist in the table above. That denylist is
+best-effort defense-in-depth, **not** a security boundary: it is trivially
+bypassable by a shell, an interpreter (`python -c` assembling a URL from parts,
+bash `/dev/tcp`), or a renamed binary. When isolation is unenforced, Smithers
+logs a `TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely
+on `allowNetwork:false` to sandbox untrusted code**. Run untrusted workloads
+under a real `<Sandbox>` provider with egress controls
+instead.
+</Warning>
+
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
