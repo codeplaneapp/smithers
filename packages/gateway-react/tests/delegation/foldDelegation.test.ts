@@ -513,6 +513,18 @@ describe("foldDelegation — awaiting-human & attention rollup", () => {
     expect(graph.nodes.root!.attention).toEqual({ self: false, descendants: 1 });
   });
 
+  test("awaiting-human marker survives a logicalId containing a space", () => {
+    // Leaf logical ids are agent-authored with no charset validation, so a
+    // space can appear in the physical node id. The approvalByKey separator
+    // must be NUL (not a space) or split() would truncate the node id and drop
+    // the awaiting-human marker.
+    const graph = foldDelegation([
+      { table: "_approval", nodeId: "dc:root:api client:approval-1", iteration: 1, pending: true },
+    ]);
+    expect(graph.nodes["root/api client"]!.status).toBe("awaiting-human");
+    expect(graph.nodes["root/api client"]!.attention.self).toBe(true);
+  });
+
   test("resolved approval clears awaiting-human (latest pending flag wins)", () => {
     const graph = foldDelegation([
       ...nestedLeafRecords(),

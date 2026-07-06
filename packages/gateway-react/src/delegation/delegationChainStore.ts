@@ -335,7 +335,10 @@ export function createDelegationChainStore(options: {
               return next;
             });
             yield* Effect.forkIn(fetchOutputs(due, finishCounts), scope);
-          } else if (!(yield* Ref.get(hydrated)) && !inputsNow.treeLoading) {
+          } else if (inFlightNow.size === 0 && !(yield* Ref.get(hydrated)) && !inputsNow.treeLoading) {
+            // Only hydrate when nothing is outstanding: in-flight keys are
+            // excluded from `due`, so an empty `due` with a forked fetch still
+            // pending must NOT flip hydrated — OutputsSettled does that.
             yield* Ref.set(hydrated, true);
           }
         }
