@@ -59,4 +59,58 @@ describe("renderWorkflow", () => {
     await expect(runTask(frame.tasks[0], { runId: "task-test" })).resolves.toEqual({ message: "hello Ada" });
     expect(greeter.calls[0].taskContext).toMatchObject({ runId: "task-test", nodeId: "greet", iteration: 0 });
   });
+
+  test("resolves a string output key onto outputTable/outputSchema like the engine", async () => {
+    const { Workflow, Task, smithers } = createSmithers(schemas);
+    const greeter = fakeAgent(schemas.greeting, {
+      output: { message: "hello Ada" },
+    });
+    const workflow = smithers(() => (
+      <Workflow name="hello">
+        <Task id="greet" output="greeting" agent={greeter}>
+          Hello Ada
+        </Task>
+      </Workflow>
+    ));
+    const frame = await renderWorkflow(workflow);
+
+    // The engine's resolveTaskOutputs pass runs, so a string output key is
+    // resolved to a concrete table + schema instead of a bare string.
+    expect(frame.tasks[0].outputTable).toBeDefined();
+    expect(frame.tasks[0].outputSchema).toBeDefined();
+    // Validation is now enforced by runTask against the resolved schema.
+    await expect(runTask(frame.tasks[0], { runId: "task-test" })).resolves.toEqual({
+      message: "hello Ada",
+    });
+  });
+
+  test("throws UNKNOWN_OUTPUT_SCHEMA for an unregistered raw Zod object, matching the engine", async () => {
+    const { Workflow, Task, smithers } = createSmithers(schemas);
+    const rogue = z.object({ nope: z.string() });
+    const greeter = fakeAgent(rogue, { output: { nope: "x" } });
+    const workflow = smithers(() => (
+      <Workflow name="hello">
+        <Task id="greet" output={rogue} agent={greeter}>
+          Hello Ada
+        </Task>
+      </Workflow>
+    ));
+
+    await expect(renderWorkflow(workflow)).rejects.toThrow(/not registered/);
+  });
+
+  test("validates a text-only agent result against the task output schema", async () => {
+    const { Workflow, Task, smithers, outputs } = createSmithers(schemas);
+    const textOnly = fakeAgent(schemas.greeting, { text: "no output" });
+    const workflow = smithers(() => (
+      <Workflow name="hello">
+        <Task id="greet" output={outputs.greeting} agent={textOnly}>
+          {`Hello`}
+        </Task>
+      </Workflow>
+    ));
+    const frame = await renderWorkflow(workflow);
+
+    await expect(runTask(frame.tasks[0])).rejects.toThrow("failed validation");
+  });
 });

@@ -93,4 +93,40 @@ describe("fakeAgent", () => {
     const agent = fakeAgent(nestedSchema, { output: "payload", text: "note" });
     await expect(agent.generate()).resolves.toEqual({ output: { output: "payload", text: "note" } });
   });
+
+  test("rejects absolute file paths", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "smithers-testing-"));
+    try {
+      const agent = fakeAgent(resultSchema, {
+        output: { summary: "ok", passed: true },
+        files: { "/etc/x": "y" },
+      });
+      await expect(agent.generate({ rootDir: dir })).rejects.toThrow("must stay inside rootDir");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects .. traversal", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "smithers-testing-"));
+    try {
+      const agent = fakeAgent(resultSchema, {
+        output: { summary: "ok", passed: true },
+        files: { "../x": "y" },
+      });
+      await expect(agent.generate({ rootDir: dir })).rejects.toThrow("must stay inside rootDir");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("function script receives args and reset clears calls", async () => {
+    const agent = fakeAgent(resultSchema, () => ({ output: { summary: "done", passed: true } }));
+
+    await agent.generate({ prompt: "p" });
+    expect(agent.calls[0].args.prompt).toBe("p");
+
+    agent.reset();
+    expect(agent.calls).toHaveLength(0);
+  });
 });

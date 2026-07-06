@@ -34,6 +34,7 @@ export async function runTask(task: TaskDescriptor, options: RunTaskOptions = {}
   if (result && typeof result === "object" && "output" in result) {
     return validateOutput(task, (result as { output?: unknown }).output);
   }
+  if (task.outputSchema) return validateOutput(task, result);
   return result;
 }
 
