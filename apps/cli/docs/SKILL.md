@@ -328,6 +328,17 @@ the full treatment in [Context engineering](/guides/context-engineering):
 - **Sandwich delegation.** Smart, expensive models plan and review at the ends;
   cheaper models implement the middle. Recurse as the work grows. Do not spend your
   most expensive model on work a cheaper one can do.
+- **You are the lifeline; keep your own window lean.** As the long-lived orchestrator
+  driving these runs, your context is the scarce resource, not the sub-agents'. Never
+  read a large diff, log, or file into your own window; spawn a throwaway sub-agent
+  (or a `<Task>`) to read it and return one paragraph. Judge the same way: a fresh
+  verifier ranks best-of-N and hands back a verdict, so you never pull N diffs into
+  your context. A polluted orchestrator degrades every decision downstream.
+- **Re-read your instructions to fight drift.** Long sessions drift from their
+  instructions. Every few steps, re-read the spec/goal you are working to (and this
+  doctrine) and check recent behavior against it: right model tier, evidence bar
+  actually enforced, still on the stated goal. Self-caught drift is free; drift the
+  human catches costs a day. `<ContinueAsNew>` re-injects the goal for this reason.
 
 ## Reading outputs, and fanning out over worktrees
 
