@@ -120,12 +120,19 @@ export type ReviewGate = {
  * Read a ReviewPanel's synthesized verdict from the workflow context. The
  * workflow must register `reviewSynthesis: reviewSynthesisSchema` in
  * createSmithers. `nodeId` is the moderator node (`${idPrefix}-moderator`).
+ *
+ * Uses `ctx.latest` (highest-iteration row), NOT `ctx.outputMaybe` (which
+ * resolves the render iteration = 0 for a non-nested `<Loop>`). Inside a
+ * per-item loop that means the gate stays stable across frames: it reads the
+ * newest verdict every render instead of the stale iteration-0 row, so a
+ * `done` built on it advances and the feedback threaded into the next
+ * implement attempt reflects the latest review.
  */
 export function reviewGate(
-  ctx: { outputMaybe: (channel: string, opts: { nodeId: string }) => unknown },
+  ctx: { latest: (channel: string, nodeId: string) => unknown },
   nodeId: string,
 ): ReviewGate {
-  const verdict = ctx.outputMaybe("reviewSynthesis", { nodeId }) as
+  const verdict = ctx.latest("reviewSynthesis", nodeId) as
     | z.infer<typeof reviewSynthesisSchema>
     | undefined;
   const approved = verdict?.approved === true;
