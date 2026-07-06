@@ -43,10 +43,30 @@
       "import": "./packages/telegram/src/index.js",
       "default": "./packages/telegram/src/index.js"
     },
+    "./aws": {
+      "types": "./packages/smithers/src/aws.d.ts",
+      "import": "./packages/smithers/src/aws.js",
+      "default": "./packages/smithers/src/aws.js"
+    },
     "./cloudflare": {
       "types": "./packages/smithers/src/cloudflare.d.ts",
       "import": "./packages/smithers/src/cloudflare.js",
       "default": "./packages/smithers/src/cloudflare.js"
+    },
+    "./daytona": {
+      "types": "./packages/smithers/src/daytona.d.ts",
+      "import": "./packages/smithers/src/daytona.js",
+      "default": "./packages/smithers/src/daytona.js"
+    },
+    "./gcp": {
+      "types": "./packages/smithers/src/gcp.d.ts",
+      "import": "./packages/smithers/src/gcp.js",
+      "default": "./packages/smithers/src/gcp.js"
+    },
+    "./vercel": {
+      "types": "./packages/smithers/src/vercel.d.ts",
+      "import": "./packages/smithers/src/vercel.js",
+      "default": "./packages/smithers/src/vercel.js"
     },
     "./control-plane": "./packages/smithers/src/control-plane.js"
   },
@@ -131,10 +151,12 @@
     "@smithers-orchestrator/accounts": "workspace:*",
     "@smithers-orchestrator/agent-eliza": "workspace:*",
     "@smithers-orchestrator/agents": "workspace:*",
+    "@smithers-orchestrator/aws": "workspace:*",
     "@smithers-orchestrator/cli": "workspace:*",
     "@smithers-orchestrator/cloudflare": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/control-plane": "workspace:*",
+    "@smithers-orchestrator/daytona": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/devtools": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",
@@ -145,6 +167,7 @@
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/gateway-react": "workspace:*",
     "@smithers-orchestrator/gateway-ui": "workspace:*",
+    "@smithers-orchestrator/gcp": "workspace:*",
     "@smithers-orchestrator/graph": "workspace:*",
     "@smithers-orchestrator/integrations": "workspace:*",
     "@smithers-orchestrator/memory": "workspace:*",
@@ -167,6 +190,7 @@
     "@smithers-orchestrator/ui-styleguide": "workspace:*",
     "@smithers-orchestrator/usage": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
+    "@smithers-orchestrator/vercel": "workspace:*",
     "@tanstack/react-query": "^5.101.2",
     "@types/bun": "latest",
     "@types/dagre": "^0.7.54",

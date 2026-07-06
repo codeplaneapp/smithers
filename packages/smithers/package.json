@@ -94,6 +94,26 @@
       "import": "./src/cloudflare.js",
       "default": "./src/cloudflare.js"
     },
+    "./daytona": {
+      "types": "./src/daytona.d.ts",
+      "import": "./src/daytona.js",
+      "default": "./src/daytona.js"
+    },
+    "./vercel": {
+      "types": "./src/vercel.d.ts",
+      "import": "./src/vercel.js",
+      "default": "./src/vercel.js"
+    },
+    "./aws": {
+      "types": "./src/aws.d.ts",
+      "import": "./src/aws.js",
+      "default": "./src/aws.js"
+    },
+    "./gcp": {
+      "types": "./src/gcp.d.ts",
+      "import": "./src/gcp.js",
+      "default": "./src/gcp.js"
+    },
     "./jsx-runtime": {
       "types": "./src/jsx-runtime.d.ts",
       "import": "./src/jsx-runtime.js",
@@ -127,10 +147,12 @@
   "dependencies": {
     "@mdx-js/esbuild": "^3.1.1",
     "@smithers-orchestrator/agents": "workspace:*",
+    "@smithers-orchestrator/aws": "workspace:*",
     "@smithers-orchestrator/cli": "workspace:*",
     "@smithers-orchestrator/cloudflare": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/control-plane": "workspace:*",
+    "@smithers-orchestrator/daytona": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
@@ -138,6 +160,7 @@
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/gateway-react": "workspace:*",
     "@smithers-orchestrator/gateway-ui": "workspace:*",
+    "@smithers-orchestrator/gcp": "workspace:*",
     "@smithers-orchestrator/graph": "workspace:*",
     "@smithers-orchestrator/memory": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
@@ -153,6 +176,7 @@
     "@smithers-orchestrator/tool-context": "workspace:*",
     "@smithers-orchestrator/ui": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
+    "@smithers-orchestrator/vercel": "workspace:*",
     "ai": "^7.0.10",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",

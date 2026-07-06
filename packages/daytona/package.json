@@ -29,6 +29,7 @@
     "@smithers-orchestrator/sandbox": "workspace:*"
   },
   "optionalDependencies": {
+    "@daytona/sdk": "^0.28.0",
     "@daytonaio/sdk": "^0.28.0"
   },
   "devDependencies": {
