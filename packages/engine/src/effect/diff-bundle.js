@@ -1,7 +1,7 @@
 import { applyPatch as applyUnifiedPatch } from "diff";
 import { spawn } from "node:child_process";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 /** @typedef {import("./DiffBundle.ts").DiffBundle} DiffBundle */
 /** @typedef {import("./FilePatch.ts").FilePatch} FilePatch */
@@ -337,12 +337,35 @@ export async function computeDiffBundle(baseRef, currentDir, seq = 1) {
     };
 }
 /**
+ * Resolve a bundle patch path against targetDir, guaranteeing the result
+ * stays inside targetDir. Rejects absolute paths and any path that escapes
+ * via "..". Security boundary against malicious sandbox diff bundles.
+ * @param {string} targetDir
+ * @param {string} patchPath
+ * @returns {string}
+ */
+function resolveContainedPath(targetDir, patchPath) {
+    if (typeof patchPath !== "string" || patchPath.length === 0) {
+        throw new SmithersError("INVALID_INPUT", "Diff bundle patch path is empty.", { path: patchPath });
+    }
+    if (isAbsolute(patchPath)) {
+        throw new SmithersError("INVALID_INPUT", `Diff bundle patch path must be relative: ${patchPath}`, { path: patchPath });
+    }
+    const base = resolve(targetDir);
+    const resolved = resolve(base, patchPath);
+    const rel = relative(base, resolved);
+    if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+        throw new SmithersError("INVALID_INPUT", `Diff bundle patch path escapes the target directory: ${patchPath}`, { path: patchPath, targetDir });
+    }
+    return resolved;
+}
+/**
  * @param {FilePatch} patch
  * @param {string} targetDir
  * @returns {Promise<void>}
  */
 async function applyPatchFallback(patch, targetDir) {
-    const targetPath = join(targetDir, patch.path);
+    const targetPath = resolveContainedPath(targetDir, patch.path);
     const targetExists = await fileExists(targetPath);
     if (patch.binaryContent) {
         if (patch.operation === "delete") {
@@ -379,10 +402,20 @@ export async function applyDiffBundle(bundle, targetDir) {
     if (bundle.patches.length === 0) {
         return;
     }
+    // Security boundary: reject any patch whose path escapes targetDir (via
+    // ".." or an absolute path) BEFORE writing anything, so a malicious
+    // sandbox diff bundle cannot write to arbitrary host paths. Runs before
+    // both the git-apply attempt and the fallback, which write under targetDir.
+    for (const patch of bundle.patches) {
+        resolveContainedPath(targetDir, patch.path);
+    }
     await mkdir(targetDir, { recursive: true });
     const fullPatch = bundle.patches.map((patch) => patch.diff).join("");
     try {
-        await runGit(targetDir, ["apply", "--binary", "--whitespace=nowarn", "--unsafe-paths", "-"], { input: fullPatch });
+        // NB: no --unsafe-paths. git apply keeps its default refusal to touch
+        // files outside the working tree, blocking traversal embedded in the
+        // raw diff content (independent of the patch.path validation above).
+        await runGit(targetDir, ["apply", "--binary", "--whitespace=nowarn", "-"], { input: fullPatch });
         return;
     }
     catch  {

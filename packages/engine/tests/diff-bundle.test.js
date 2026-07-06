@@ -213,6 +213,49 @@ describe("diff bundle", () => {
         }
     });
 
+    test("rejects diff bundle patches that escape the target directory", async () => {
+        const target = makeTempDir("smithers-diff-escape-");
+        const outside = join(target, "..", "smithers-diff-escape-marker.txt");
+        const absTarget = join(tmpdir(), "smithers-diff-abs-marker.txt");
+        try {
+            await expect(applyDiffBundle({
+                seq: 1,
+                baseRef: "base",
+                patches: [{
+                    path: "../smithers-diff-escape-marker.txt",
+                    operation: "add",
+                    diff: [
+                        "diff --git a/../smithers-diff-escape-marker.txt b/../smithers-diff-escape-marker.txt",
+                        "new file mode 100644",
+                        "--- /dev/null",
+                        "+++ b/../smithers-diff-escape-marker.txt",
+                        "@@ -0,0 +1 @@",
+                        "+pwned",
+                        "",
+                    ].join("\n"),
+                }],
+            }, target)).rejects.toThrow(/escapes the target directory/);
+            expect(existsSync(outside)).toBe(false);
+
+            await expect(applyDiffBundle({
+                seq: 2,
+                baseRef: "base",
+                patches: [{
+                    path: absTarget,
+                    operation: "add",
+                    diff: "irrelevant\n",
+                    binaryContent: Buffer.from("pwned").toString("base64"),
+                }],
+            }, target)).rejects.toThrow(/must be relative/);
+            expect(existsSync(absTarget)).toBe(false);
+        }
+        finally {
+            cleanup(target);
+            rmSync(outside, { force: true });
+            rmSync(absTarget, { force: true });
+        }
+    });
+
     test("falls back to binary writes, missing deletes and patch errors", async () => {
         const target = makeTempDir("smithers-diff-fallback-");
         try {
