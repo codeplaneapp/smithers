@@ -57,6 +57,10 @@ structured-output agents, validates the returned row, and persists it to the
 matching output table. You only need `outputSchema={...}` when `output` is a
 custom Drizzle table or string key and Smithers cannot infer the Zod schema.
 
+<Warning>
+**Do not name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every node output alongside those internal columns, so an output schema that declares one collides and the workflow fails to load (`bunx smithers-orchestrator graph` errors before it runs). This bites loop counters especially; name the field `round`, `pass`, or `attempt` instead of `iteration`.
+</Warning>
+
 ```tsx
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";

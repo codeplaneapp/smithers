@@ -4538,6 +4538,14 @@ through `sandboxEgressEnv()`, and when `caCertPem` is set it uploads the CA to
 the workspace so `NODE_EXTRA_CA_CERTS` resolves inside the sandbox. See
 [`<Sandbox>` egress controls](/components/sandbox#egress-controls).
 
+Providers with a real remote filesystem (Daytona, Vercel, Cloudflare) resolve
+that CA path directly. The object-store providers (AWS, GCP) have no shared
+filesystem, so they upload the CA to their bundle store and pass its location to
+the container: AWS injects `SMITHERS_SANDBOX_CA_S3_KEY` and GCP injects
+`SMITHERS_SANDBOX_CA_GCS_OBJECT`. The container entry command must download that
+object and write it to the path named by `NODE_EXTRA_CA_CERTS` before it makes
+outbound calls.
+
 Credentials are used only to build the local SDK client. They are never placed
 in the request JSON and never forwarded into the remote env unless you list them
 explicitly in `options.env`. `redactSandboxProviderValue()` redacts keys

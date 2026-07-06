@@ -14,7 +14,10 @@ There are two SDKs:
 
 Pick the client for plumbing, the React layer for views.
 
-For local workflow UIs, `bunx smithers-orchestrator ui RUN_ID` is the one-command launch path. If no Gateway is reachable on the local port, it starts `smithers gateway` for the workspace and waits before opening the browser. The workflow owns the UI route: put the browser source in `.smithers/ui/<workflow>.tsx`, declare it from the workflow with `<UI entry="../ui/<workflow>.tsx" />`, and the Gateway serves it at `/workflows/<workflow>`.
+For local workflow UIs, `bunx smithers-orchestrator ui RUN_ID` is the one-command launch path. If no Gateway is reachable on the local port, it starts `smithers gateway` for the workspace and waits before opening the browser. The workflow owns the UI route: put the browser source in `.smithers/ui/<workflow>.tsx`, declare it from the workflow with `<UI entry="../ui/<workflow>.tsx" />`, and the Gateway serves it at `/workflows/<workflow>`. Creating the `.smithers/ui/<workflow>.tsx` file alone is **not** enough; without the `<UI>` declaration the Gateway reports `NO_UI`.
+
+<Warning>
+**Adding `<UI>` to an already-running detached workflow means starting a fresh run.** Resume hashes the **workflow file's content** (not git), so any edit to `.smithers/workflows/<workflow>.tsx` (including adding the `<UI entry>` line) makes that run fail to resume with `RESUME_METADATA_MISMATCH`. Declare `<UI>` before you launch, or `bunx smithers-orchestrator fork` from a checkpoint or start a fresh `bunx smithers-orchestrator up` after editing. Editing the `.smithers/ui/<workflow>.tsx` bundle itself is always safe: it is not hashed, and the Gateway rebuilds it (restart the Gateway if a change is not picked up).</Warning>
 
 ## Install
 
@@ -260,6 +263,20 @@ useGatewayNodeOutput({ runId, nodeId, iteration: 3 });         // getNodeOutput
 ```
 
 Pass `undefined` for the key (e.g. `useGatewayRun(undefined)`) and the hook reports `loading: false` and clears `data`, perfect for routes where the runId is not yet selected.
+
+<Warning>
+**`useGatewayNodeOutput` returns `{ status, row }`, not the task output directly.** The `data` is the `getNodeOutput` payload: `status` (e.g. `"produced"`) plus `row`, the validated `<Task>` output object. Read your task's fields from **`data.row`**, not `data`:
+
+```tsx
+const out = useGatewayNodeOutput({ runId, nodeId: "break", iteration: round });
+const title = out.data?.row?.title;   // ✅  the task's output field
+// out.data?.title  →  always undefined (title lives under .row)
+```
+</Warning>
+
+<Note>
+**Scope to the run the URL names.** `bunx smithers-orchestrator ui RUN_ID` opens `/workflows/<key>?runId=RUN_ID`. Read it with `new URLSearchParams(location.search).get("runId")` and pin your views to that id, rather than always picking the newest run from `useGatewayRuns`; otherwise the UI drifts to a different run than the one the user opened.
+</Note>
 
 ### Pushed updates (with ring-buffer)
 
