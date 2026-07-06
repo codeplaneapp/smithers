@@ -14,6 +14,7 @@ import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
 const REGISTRY_PATH = resolve(ROOT, "docs/data/sota-models.json");
+const BENCHMARKS_PATH = resolve(ROOT, "docs/data/sota-benchmarks.json");
 const MDX_PATH = resolve(ROOT, "docs/reference/sota-models.mdx");
 const CLI_MODULE_PATH = resolve(ROOT, "apps/cli/src/sota-models.generated.js");
 
@@ -66,6 +67,35 @@ type SotaRegistry = {
   updatedAt: string;
   policy: string[];
   models: SotaModel[];
+};
+
+type BenchmarkRow = {
+  models?: string[];
+  label?: string;
+  harness: string;
+  score: string;
+  n?: number;
+  subset: string;
+  status: "result" | "reference" | "pending";
+  note?: string;
+};
+
+type Benchmark = {
+  id: string;
+  name: string;
+  url: string;
+  dataset: string;
+  metric: string;
+  inRepo: string;
+  headline: string;
+  rows: BenchmarkRow[];
+};
+
+type BenchmarkRegistry = {
+  version: number;
+  updatedAt: string;
+  note?: string;
+  benchmarks: Benchmark[];
 };
 
 export function validateRegistry(registry: SotaRegistry): void {
@@ -134,7 +164,65 @@ export function roleDefaults(registry: SotaRegistry): Record<string, string> {
   return defaults;
 }
 
-function renderMdx(registry: SotaRegistry): string {
+/**
+ * A benchmark row renders only if every model it names is a current (non-deprecated)
+ * entry in the registry. Rows that name a deprecated or absent model (e.g. an older
+ * Claude Opus 4.6 or GPT-5.2 leaderboard line) are dropped, so the page never quotes
+ * a result for a model the roster no longer lists. Reference baselines that name no
+ * specific model (they carry a `label`) always render.
+ */
+export function visibleRows(registry: SotaRegistry, benchmark: Benchmark): BenchmarkRow[] {
+  const currentIds = new Set(active(registry).map((m) => m.id));
+  return benchmark.rows.filter((row) => !row.models || row.models.every((id) => currentIds.has(id)));
+}
+
+function renderBenchmarks(registry: SotaRegistry, benchmarks: Benchmark[]): string[] {
+  const nameOf = new Map(registry.models.map((m) => [m.id, m.name]));
+  const lines: string[] = [];
+  lines.push("## Benchmarks");
+  lines.push("");
+  lines.push(
+    "Independent of the roster above: how these models actually score. smithers ships two benchmark harnesses in-repo: " +
+      "[`benchmarks/roadmapbench`](https://github.com/smithersai/smithers/tree/main/benchmarks/roadmapbench) " +
+      "(RoadmapBench, a real audited run) and " +
+      "[`benchmarks/site`](https://github.com/smithersai/smithers/tree/main/benchmarks/site) " +
+      "(the benchmarks.smithers.sh leaderboard, sourced from `benchmarks/results.json`). Only results for models that " +
+      "still appear in the registry above are shown; rows for older models (e.g. Claude Opus 4.6, GPT-5.2) are dropped " +
+      "automatically. `pending` rows are honest placeholders: the smithers fleet run has not completed at full scale yet.",
+  );
+  lines.push("");
+  lines.push(
+    "{/* Generated from docs/data/sota-benchmarks.json. Rows naming a deprecated or unlisted model are filtered out. */}",
+  );
+  for (const benchmark of benchmarks) {
+    const rows = visibleRows(registry, benchmark);
+    if (!rows.length) continue;
+    lines.push("");
+    lines.push(`### ${benchmark.name}`);
+    lines.push("");
+    const facts = [
+      `[${benchmark.dataset}](${benchmark.url})`,
+      `metric: ${benchmark.metric}`,
+      `harness: \`${benchmark.inRepo}\``,
+    ];
+    lines.push(facts.join(" · "));
+    lines.push("");
+    lines.push(benchmark.headline);
+    lines.push("");
+    lines.push("| Models | Harness | Score | Sample | Notes |");
+    lines.push("| --- | --- | --- | --- | --- |");
+    for (const row of rows) {
+      const who = row.models ? row.models.map((id) => nameOf.get(id) ?? id).join(" + ") : (row.label ?? "-");
+      const sample = row.n ? `${row.subset} · n=${row.n}` : row.subset;
+      const score = row.status === "result" ? `**${row.score}**` : row.score;
+      lines.push(`| ${who} | ${row.harness} | ${score} | ${sample} | ${row.note ?? ""} |`);
+    }
+  }
+  lines.push("");
+  return lines;
+}
+
+function renderMdx(registry: SotaRegistry, benchmarks: Benchmark[]): string {
   const lines: string[] = [];
   lines.push("---");
   lines.push('title: "SOTA models"');
@@ -198,6 +286,7 @@ function renderMdx(registry: SotaRegistry): string {
     }
   }
   lines.push("");
+  lines.push(...renderBenchmarks(registry, benchmarks));
   lines.push("## Deprecated ids");
   lines.push("");
   lines.push("Rewrite these on sight; the daily research job does the same sweep mechanically.");
@@ -255,7 +344,8 @@ function renderCliModule(registry: SotaRegistry): string {
 export function generateSota(): { mdx: string; cliModule: string } {
   const registry: SotaRegistry = JSON.parse(readFileSync(REGISTRY_PATH, "utf8"));
   validateRegistry(registry);
-  return { mdx: renderMdx(registry), cliModule: renderCliModule(registry) };
+  const benchmarks: BenchmarkRegistry = JSON.parse(readFileSync(BENCHMARKS_PATH, "utf8"));
+  return { mdx: renderMdx(registry, benchmarks.benchmarks), cliModule: renderCliModule(registry) };
 }
 
 if (import.meta.main) {

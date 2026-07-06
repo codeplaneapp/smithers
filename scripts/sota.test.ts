@@ -39,6 +39,19 @@ describe("the checked-in registry", () => {
     expect(defaults.ui).toBe("gemini-3.5-flash");
     expect(defaults.realtime).toBe("gpt-5.3-codex-spark");
   });
+
+  test("renders a benchmarks section for current models only", () => {
+    const { mdx } = generateSota();
+    expect(mdx).toContain("## Benchmarks");
+    expect(mdx).toContain("### RoadmapBench");
+    // The real in-repo result on current registry models is shown.
+    expect(mdx).toContain("Claude Opus 4.8 + GPT-5.5");
+    expect(mdx).toContain("RR 0.50 · CS 0.857");
+    // Older-model leaderboard rows are dropped by the id filter, so their
+    // scores never appear (the prose may still name the model as an example).
+    expect(mdx).not.toContain("83.6");
+    expect(mdx).not.toContain("18.75");
+  });
 });
 
 describe("validateRegistry", () => {
