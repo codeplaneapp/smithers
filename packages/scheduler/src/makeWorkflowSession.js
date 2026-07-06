@@ -656,8 +656,9 @@ export function makeWorkflowSession(options = {}) {
      * @returns {Record<string, number> | undefined}
      */
     function timerStartsField() {
+        const mounted = new Set(state.graph?.mountedTaskIds ?? []);
         const timerStarts = [...state.timerStarts.entries()]
-            .filter(([, startMs]) => Number.isFinite(startMs))
+            .filter(([key, startMs]) => Number.isFinite(startMs) && mounted.has(key))
             .sort(([left], [right]) => left.localeCompare(right));
         return timerStarts.length > 0
             ? Object.fromEntries(timerStarts)

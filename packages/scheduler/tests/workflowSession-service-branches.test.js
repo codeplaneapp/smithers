@@ -196,6 +196,40 @@ describe("WorkflowSessionService direct methods", () => {
     ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
   });
 
+  test("a carried timer anchor whose key never re-mounts is dropped from the next continuation", () => {
+    // Regression: timerStartsField() dumped the entire timerStarts map, so a
+    // stale anchor carried across a continue-as-new boundary whose state key
+    // never re-mounts in the child (an iteration-shifted or conditionally
+    // unmounted timer) re-carried forever. Only currently-mounted timer keys
+    // may be emitted.
+    const now = 1_000;
+    const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });
+    const session = makeWorkflowSession({
+      nowMs: () => now,
+      // "gone::0" is a dead anchor from a prior generation that will not mount
+      // in the graph below; only "timer::0" is live.
+      initialTimerStarts: new Map([["gone::0", 500]]),
+    });
+
+    expect(run(session.submitGraph(graph([task], workflow([
+      el("smithers:timer", { id: "timer" }),
+    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+
+    const decision = run(session.submitGraph(graph([task], workflow([
+      el("smithers:parallel", {}, [
+        el("smithers:timer", { id: "timer" }),
+        el("smithers:continue-as-new", {}),
+      ]),
+    ]))));
+
+    expect(decision).toMatchObject({
+      _tag: "ContinueAsNew",
+      transition: { timerStarts: { "timer::0": 1_000 } },
+    });
+    // The stale "gone::0" anchor must NOT be re-carried into the continuation.
+    expect(decision.transition.timerStarts).not.toHaveProperty("gone::0");
+  });
+
   test("hotReloaded cancels unmounted in-progress work and runs newly mounted tasks", () => {
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
