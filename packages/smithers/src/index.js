@@ -159,7 +159,11 @@
 /** @typedef {import("@smithers-orchestrator/time-travel/timetravel").TimeTravelOptions} TimeTravelOptions */
 /** @typedef {import("@smithers-orchestrator/time-travel/timetravel").TimeTravelResult} TimeTravelResult */
 /** @typedef {import("@smithers-orchestrator/components").TryCatchFinallyProps} TryCatchFinallyProps */
+/** @typedef {import("@smithers-orchestrator/components").TUIProps} TUIProps */
+/** @typedef {import("@smithers-orchestrator/components").UIProps} UIProps */
 /** @typedef {import("@smithers-orchestrator/components").WaitForEventProps} WaitForEventProps */
+/** @typedef {import("@smithers-orchestrator/components").WorkflowViewBootProps} WorkflowViewBootProps */
+/** @typedef {import("@smithers-orchestrator/components").WorkflowViewProps} WorkflowViewProps */
 /**
  * @template T
  * @typedef {import("@smithers-orchestrator/memory").WorkingMemoryConfig<T>} WorkingMemoryConfig
