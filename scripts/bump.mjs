@@ -59,6 +59,26 @@ if (syncedProvider !== provider) {
   console.log(`  synced DEFAULT_ORCHESTRATOR_VERSION in ${providerPath}`);
 }
 
+// gateway-client reports DEFAULT_CLIENT_VERSION in its connect handshake when
+// the caller supplies none; a test asserts it matches package.json, so sync it
+// here too or a release bump would leave every default client stale.
+const clientPath = join(root, "packages", "gateway-client", "src", "SmithersGatewayClient.ts");
+const clientSource = readFileSync(clientPath, "utf8");
+const syncedClient = clientSource.replace(
+  /(const DEFAULT_CLIENT_VERSION = ")[^"]+(")/,
+  `$1${version}$2`,
+);
+if (!syncedClient.includes(`DEFAULT_CLIENT_VERSION = "${version}"`)) {
+  throw new Error(
+    `bump.mjs could not sync DEFAULT_CLIENT_VERSION in ${clientPath} — the pin pattern no longer matches; update the regex in scripts/bump.mjs`,
+  );
+}
+if (syncedClient !== clientSource) {
+  writeFileSync(clientPath, syncedClient);
+  changed.push(clientPath);
+  console.log(`  synced DEFAULT_CLIENT_VERSION in ${clientPath}`);
+}
+
 execSync("pnpm install --prefer-offline", { cwd: root, stdio: "inherit" });
 
 // publish.mjs refuses to release without the committed versioned llms bundles

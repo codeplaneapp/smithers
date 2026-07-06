@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { SmithersGatewayClient } from "../src/index.ts";
 
 class FakeWebSocket extends EventTarget {
@@ -97,5 +99,15 @@ describe("SmithersGatewayClient", () => {
     } finally {
       globalThis.__SMITHERS_GATEWAY_UI__ = undefined;
     }
+  });
+});
+
+describe("default client version", () => {
+  test("tracks package.json so the connect handshake can't report a stale release", () => {
+    const pkg = JSON.parse(
+      readFileSync(join(import.meta.dir, "../package.json"), "utf8"),
+    ) as { version: string };
+    const client = new SmithersGatewayClient();
+    expect(client.client.version).toBe(pkg.version);
   });
 });
