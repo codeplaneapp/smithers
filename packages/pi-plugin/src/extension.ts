@@ -675,7 +675,8 @@ export function extension(pi: ExtensionAPI) {
         );
         return;
       }
-      ctx.ui.notify(`${action}d ${target.node.nodeId}`, action === "Approve" ? "info" : "warning");
+      const pastTense = action === "Approve" ? "Approved" : "Denied";
+      ctx.ui.notify(`${pastTense} ${target.node.nodeId}`, action === "Approve" ? "info" : "warning");
     },
   });
 
