@@ -2284,7 +2284,7 @@ commands[87]:
     purpose: Run code review plus story-form HTML walkthrough generation for a repo or PR
     args[1]{name,type,required,desc}:
       repo,string,false,Repository path; defaults to the current directory
-    flags[14]{name,short,type,default,desc}:
+    flags[17]{name,short,type,default,desc}:
       from,,string,,Base ref for a merge-base diff
       to,,string,,Head ref for a merge-base diff
       commit,,string,,Review one commit
@@ -2297,6 +2297,9 @@ commands[87]:
       concurrency,,number,8,Parallel file reviews
       timeout,,number,10,Per-agent-task timeout in minutes
       out,,string,,Output HTML path
+      title,,string,,Walkthrough title (default: narrator headline)
+      db,,string,,Smithers db path
+      split,,boolean,false,Side-by-side diffs instead of unified
       publish,,boolean,false,Upload to the share service and print the share URL
       open,,boolean,false,Open the walkthrough in the default browser
   - name: ps
@@ -5733,9 +5736,8 @@ attention rollups, budget rollup, phase) and returns the `submitEdit`,
   `INVALID_INPUT` if the policy produced approval gates without it.
 - `dcPlan.orchestration` (`"tasks" | "workflow"`) is reserved for planned
   higher-order orchestration (a node authoring its own workflow as its
-  execution strategy); it is accepted and ignored today, and the store behind
-  `useDelegationChain` is planned to move to Effect.ts behind the same hook
-  signature.
+  execution strategy); it is accepted and ignored today. The fold store behind
+  `useDelegationChain` runs on Effect.ts behind the frozen hook signature.
 - Scoring wiring: `scorers.exec` / `scorers.review` ride the exec and review
   tasks; `scorers.run` rides the digest task. The delegation scorers live in
   `smithers-orchestrator/scorers` (see the scorer reference).
@@ -8330,7 +8332,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/jsx-runtime` | `./src/jsx-runtime.js` | JSX runtime (auto-resolved by `jsxImportSource`) |
 | `smithers-orchestrator/jsx-dev-runtime` | `./src/jsx-runtime.js` | JSX dev runtime (auto-resolved in dev mode) |
 | `smithers-orchestrator/tools` | `./src/tools.js` | Tool sandbox: `defineTool`, `read`, `grep`, `bash`, `edit`, `write` |
-| `smithers-orchestrator/testing` | `./src/testing.ts` | Workflow test helpers: `fakeAgent`, `renderWorkflow`, `renderPrompt`, and `runTask` |
+| `smithers-orchestrator/testing` | `./src/testing.js` | Workflow test helpers: `fakeAgent`, `renderWorkflow`, `renderPrompt`, and `runTask` |
 | `smithers-orchestrator/server` | `./src/server.js` | HTTP server for run management and event streaming |
 | `smithers-orchestrator/observability` | `./src/observability.js` | OpenTelemetry traces, metrics, and Prometheus integration |
 | `smithers-orchestrator/mdx-plugin` | `./src/mdx-plugin.js` | Bun preload plugin for `.mdx` imports |

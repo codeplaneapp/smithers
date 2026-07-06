@@ -162,12 +162,12 @@ configurable through the scorer factory options.
 
 ## Roadmap
 
-Two follow-ups are planned and deliberately deferred: higher-order
-orchestration (a planning node authoring its own smithers workflow as its
-execution strategy) is reserved via the optional
-`dcPlan.orchestration: "tasks" | "workflow"` field, which is accepted and
-ignored today; and the UI-side fold store behind `useDelegationChain` is
-planned to be rebuilt on Effect.ts behind the same frozen hook signature.
+One follow-up is deliberately deferred: higher-order orchestration (a
+planning node authoring its own smithers workflow as its execution strategy)
+is reserved via the optional `dcPlan.orchestration: "tasks" | "workflow"`
+field, which is accepted and ignored today. The UI-side fold store behind
+`useDelegationChain` already runs on Effect.ts behind the frozen hook
+signature.
 
 ## Use it when
 
