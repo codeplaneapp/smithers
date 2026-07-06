@@ -129,6 +129,17 @@ export function edgesForConnector(
 }
 
 /**
+ * The connector arrow drawn between two graph columns. Compact terminals
+ * (< COMPACT_WIDTH cols) use a narrower glyph. Callers size the connector
+ * `<box>`/`<text>` cells from this string's length so the arrow can never
+ * overflow its column (see #582): every glyph here is a single-column BMP
+ * character, so `.length` equals the rendered width.
+ */
+export function connectorArrow(compact: boolean): string {
+  return compact ? " → " : " ──▶ ";
+}
+
+/**
  * For a given connector slot (= row in the right column),
  * does any edge arrive at this slot from the left column?
  */
