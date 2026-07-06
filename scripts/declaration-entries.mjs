@@ -3,11 +3,13 @@
 // wildcard). Walks `sourceRoot` and maps each `.js`/`.ts` module to its own
 // declaration entry.
 //
-// Non-source files under the tree (READMEs, JSON, assets) are skipped — only
-// `.js`/`.ts` modules become declaration entries. Throws on the one thing that
-// genuinely breaks the emit: a `.js`/`.ts` twin sharing a basename (both map to
-// the same key, so one's emitted `.d.ts` would clobber the other's — the classic
-// runtime/type-twin collision).
+// Only `.js`/`.ts` modules become declaration entries. Non-source files are
+// limited to a known allow-list (`.md`, `.json`) that is skipped; any other,
+// unrecognized module-like extension (`.tsx`/`.jsx`/`.mts`/`.cts`, …) throws so
+// it can't silently ship with no per-file `.d.ts`. Also throws on the one thing
+// that genuinely breaks the emit: a `.js`/`.ts` twin sharing a basename (both map
+// to the same key, so one's emitted `.d.ts` would clobber the other's — the
+// classic runtime/type-twin collision).
 import { readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
@@ -28,10 +30,17 @@ export function declarationEntries(sourceRoot = "src") {
         walk(path);
         continue;
       }
-      // Only .js/.ts modules produce declarations; skip .d.ts and any
-      // non-source file that legitimately lives under src/ (READMEs, JSON, …).
-      if (path.endsWith(".d.ts") || (!path.endsWith(".js") && !path.endsWith(".ts"))) {
-        continue;
+      // Only .js/.ts modules produce declarations. Skip .d.ts and the known
+      // non-source files that legitimately live under src/ (READMEs, JSON); any
+      // other module-like extension (.tsx/.jsx/.mts/.cts, …) would emit no
+      // per-file .d.ts and silently ship untyped, so fail loudly instead.
+      if (path.endsWith(".d.ts")) continue;
+      if (path.endsWith(".md") || path.endsWith(".json")) continue;
+      if (!path.endsWith(".js") && !path.endsWith(".ts")) {
+        const rel = relative(sourceRoot, path).split(sep).join("/");
+        throw new Error(
+          `declarationEntries: unexpected source file "${rel}" — only .js/.ts modules produce per-file declarations; author components as .js, or extend the walker to handle this extension.`,
+        );
       }
       const relativePath = relative(sourceRoot, path).split(sep).join("/");
       const key = relativePath.replace(/\.(js|ts)$/, "");

@@ -48,6 +48,11 @@ const syncedProvider = provider.replace(
   /(export const DEFAULT_ORCHESTRATOR_VERSION = ")[^"]+(")/,
   `$1${version}$2`,
 );
+if (!syncedProvider.includes(`DEFAULT_ORCHESTRATOR_VERSION = "${version}"`)) {
+  throw new Error(
+    `bump.mjs could not sync DEFAULT_ORCHESTRATOR_VERSION in ${providerPath} — the pin pattern no longer matches; update the regex in scripts/bump.mjs`,
+  );
+}
 if (syncedProvider !== provider) {
   writeFileSync(providerPath, syncedProvider);
   changed.push(providerPath);
