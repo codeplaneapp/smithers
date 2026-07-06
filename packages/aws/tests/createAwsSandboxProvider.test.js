@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AWS_SANDBOX_PROVIDER_ID, createAwsSandboxProvider, createMockAwsSandboxEnvironment } from "../src/index.js";
+import { AWS_SANDBOX_PROVIDER_ID, createAwsSandboxProvider, createAwsSandboxS3Transport, createMockAwsSandboxEnvironment } from "../src/index.js";
 
 const FARGATE_OPTS = {
 	region: "us-east-1",
@@ -161,16 +161,18 @@ describe("createAwsSandboxProvider — fargate happy path", () => {
 		await expect(provider.run(makeRequest({ signal: controller.signal }).request)).rejects.toThrow(/cancel/i);
 	});
 
-	test("cleanup destroy stops the task and deletes transient S3 objects", async () => {
+	test("cleanup destroy skips StopTask for an already-stopped task and deletes transient S3 objects", async () => {
 		const env = createMockAwsSandboxEnvironment(() => ({ status: "finished" }));
 		const provider = createAwsSandboxProvider({ clients: env, ...FARGATE_OPTS });
 		const { request } = makeRequest();
 		await provider.run(request);
 		const prefix = `smithers/sandbox/${request.runId}/${request.sandboxId}`;
-		expect(env.store.has(`${prefix}/sandbox-request.json`)).toBe(true);
+		const requestKey = `${prefix}/${encodeURIComponent(".smithers/sandbox-request.json")}`;
+		expect(env.store.has(requestKey)).toBe(true);
 		await provider.cleanup?.(request);
-		expect(env.stoppedTasks.length).toBe(1);
-		expect(env.store.has(`${prefix}/sandbox-request.json`)).toBe(false);
+		// N8: the poll already observed STOPPED, so no redundant StopTask is issued.
+		expect(env.stoppedTasks.length).toBe(0);
+		expect(env.store.has(requestKey)).toBe(false);
 	});
 
 	test("cleanup keep leaves the task and objects", async () => {
@@ -180,7 +182,8 @@ describe("createAwsSandboxProvider — fargate happy path", () => {
 		await provider.run(request);
 		await provider.cleanup?.(request);
 		expect(env.stoppedTasks.length).toBe(0);
-		expect(env.store.has(`smithers/sandbox/${request.runId}/${request.sandboxId}/sandbox-request.json`)).toBe(true);
+		const requestKey = `smithers/sandbox/${request.runId}/${request.sandboxId}/${encodeURIComponent(".smithers/sandbox-request.json")}`;
+		expect(env.store.has(requestKey)).toBe(true);
 	});
 
 	test("captureLogs surfaces CloudWatch output in the failure detail, redacted", async () => {
@@ -279,5 +282,146 @@ describe("createAwsSandboxProvider — codebuild mode", () => {
 		await provider.run(request);
 		await provider.cleanup?.(request);
 		expect(env.stoppedBuilds.length).toBe(1);
+	});
+});
+
+/**
+ * Minimal in-memory S3 double for the transport unit test.
+ */
+function memoryS3() {
+	/** @type {Map<string, string>} */
+	const store = new Map();
+	return {
+		store,
+		/** @param {Record<string, any>} input */
+		async putObject(input) {
+			store.set(String(input.Key), String(input.Body));
+			return {};
+		},
+		/** @param {Record<string, any>} input */
+		async getObject(input) {
+			const key = String(input.Key);
+			if (!store.has(key)) throw new Error(`NoSuchKey: ${key}`);
+			return { Body: store.get(key) };
+		},
+		/** @param {Record<string, any>} input */
+		async deleteObjects(input) {
+			for (const obj of input?.Delete?.Objects ?? []) store.delete(String(obj.Key));
+			return {};
+		},
+	};
+}
+
+describe("createAwsSandboxS3Transport — collision-free keying (C3)", () => {
+	test("two distinct paths sharing a basename map to distinct keys and round-trip independently", async () => {
+		const s3 = memoryS3();
+		const transport = createAwsSandboxS3Transport({ s3, bucket: "b", prefix: "smithers/sandbox/run/sbx", workdir: "/workspace" });
+
+		const keyA = transport.keyForPath("/workspace/a/config.json");
+		const keyB = transport.keyForPath("/workspace/b/config.json");
+		expect(keyA).not.toBe(keyB);
+		// Both still live under the session prefix.
+		expect(keyA.startsWith("smithers/sandbox/run/sbx/")).toBe(true);
+		expect(keyB.startsWith("smithers/sandbox/run/sbx/")).toBe(true);
+
+		await transport.writeFile("/workspace/a/config.json", "AAA");
+		await transport.writeFile("/workspace/b/config.json", "BBB");
+		// No collision in the underlying store: two objects, not one.
+		expect(s3.store.size).toBe(2);
+		expect(await transport.readFile("/workspace/a/config.json")).toBe("AAA");
+		expect(await transport.readFile("/workspace/b/config.json")).toBe("BBB");
+	});
+
+	test("keying strips the workdir prefix and encodes the relative path", () => {
+		const s3 = memoryS3();
+		const transport = createAwsSandboxS3Transport({ s3, bucket: "b", prefix: "p", workdir: "/workspace" });
+		expect(transport.keyForPath("/workspace/.smithers/sandbox-request.json")).toBe(`p/${encodeURIComponent(".smithers/sandbox-request.json")}`);
+	});
+});
+
+describe("createAwsSandboxProvider — egress CA S3 key injection (N3-aws)", () => {
+	const CA_PEM = "-----BEGIN CERTIFICATE-----\nMIIBfakecert\n-----END CERTIFICATE-----";
+
+	test("injects SMITHERS_SANDBOX_CA_S3_KEY (keyed like request/result) when egress.caCertPem is set, and the CA object exists at that key", async () => {
+		/** @type {any} */
+		let seen;
+		const env = createMockAwsSandboxEnvironment((args) => {
+			seen = args;
+			return { status: "finished" };
+		});
+		const provider = createAwsSandboxProvider({ clients: env, ...FARGATE_OPTS });
+		const { request } = makeRequest({ egress: { caCertPem: CA_PEM } });
+		await provider.run(request);
+
+		const prefix = `smithers/sandbox/${request.runId}/${request.sandboxId}`;
+		const expectedKey = `${prefix}/${encodeURIComponent(".smithers/egress/ca.crt")}`;
+		expect(seen.env.SMITHERS_SANDBOX_CA_S3_KEY).toBe(expectedKey);
+		// The CA object was actually uploaded to that key by the kit.
+		expect(env.store.get(expectedKey)).toBe(CA_PEM);
+	});
+
+	test("omits SMITHERS_SANDBOX_CA_S3_KEY when egress carries no caCertPem", async () => {
+		/** @type {any} */
+		let seen;
+		const env = createMockAwsSandboxEnvironment((args) => {
+			seen = args;
+			return { status: "finished" };
+		});
+		const provider = createAwsSandboxProvider({ clients: env, ...FARGATE_OPTS });
+		await provider.run(makeRequest().request);
+		expect(seen.env.SMITHERS_SANDBOX_CA_S3_KEY).toBeUndefined();
+	});
+});
+
+describe("createAwsSandboxProvider — awslogs stream prefix (N6)", () => {
+	test("captureLogs reads a custom awslogs stream prefix", async () => {
+		/** @type {string | undefined} */
+		let streamName;
+		const env = createMockAwsSandboxEnvironment(() => ({ status: "finished" }), { logEvents: ["hello log"] });
+		const getLogEvents = env.logs.getLogEvents;
+		env.logs.getLogEvents = async (input) => {
+			streamName = /** @type {any} */ (input).logStreamName;
+			return getLogEvents(input);
+		};
+		const provider = createAwsSandboxProvider({
+			clients: env,
+			...FARGATE_OPTS,
+			captureLogs: true,
+			logGroupName: "/aws/ecs/smithers",
+			awslogsStreamPrefix: "my-prefix",
+		});
+		await provider.run(makeRequest().request);
+		expect(streamName).toMatch(/^my-prefix\/runner\/\d+$/);
+	});
+
+	test("captureLogs defaults the stream prefix to the container name", async () => {
+		/** @type {string | undefined} */
+		let streamName;
+		const env = createMockAwsSandboxEnvironment(() => ({ status: "finished" }), { logEvents: ["hello log"] });
+		const getLogEvents = env.logs.getLogEvents;
+		env.logs.getLogEvents = async (input) => {
+			streamName = /** @type {any} */ (input).logStreamName;
+			return getLogEvents(input);
+		};
+		const provider = createAwsSandboxProvider({
+			clients: env,
+			...FARGATE_OPTS,
+			captureLogs: true,
+			logGroupName: "/aws/ecs/smithers",
+		});
+		await provider.run(makeRequest().request);
+		expect(streamName).toMatch(/^runner\/runner\/\d+$/);
+	});
+});
+
+describe("createAwsSandboxProvider — no redundant StopTask after STOPPED (N8)", () => {
+	test("cleanup does not call StopTask once the task has already reached STOPPED", async () => {
+		const env = createMockAwsSandboxEnvironment(() => ({ status: "finished" }));
+		const provider = createAwsSandboxProvider({ clients: env, ...FARGATE_OPTS });
+		const { request } = makeRequest();
+		await provider.run(request);
+		// The task stopped on its own during the run, so cleanup must not re-stop it.
+		await provider.cleanup?.(request);
+		expect(env.stoppedTasks.length).toBe(0);
 	});
 });

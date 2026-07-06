@@ -63,7 +63,12 @@ export function createVercelSandboxProvider(options = {}) {
 			try {
 				sandbox = await Sandbox.create({
 					runtime,
-					resources: { vcpus: options.vcpus },
+					// Only send `resources` when a vcpu count is set; otherwise the SDK
+					// receives `{ vcpus: undefined }`, which some versions reject.
+					...(options.vcpus !== undefined ? { resources: { vcpus: options.vcpus } } : {}),
+					// Provision the sandbox with any declared ports so their domains are
+					// reachable (sandbox.domain(port) alone does not open them).
+					...(Array.isArray(options.ports) && options.ports.length > 0 ? { ports: options.ports } : {}),
 					timeout: createTimeoutMs,
 					...(options.createOptions ?? {}),
 					...auth,
@@ -119,12 +124,23 @@ export function createVercelSandboxProvider(options = {}) {
 					return decodeVercelFile(await sandbox.readFile({ path }));
 				},
 				async exec(command, opts) {
-					const done = await sandbox.runCommand({
+					if (opts.signal?.aborted) {
+						throw new Error("Vercel sandbox command aborted before it started.");
+					}
+					/** @type {Record<string, unknown>} */
+					const runInput = {
 						cmd: "sh",
 						args: ["-c", command],
 						cwd: opts.cwd,
 						env: opts.env,
-					});
+					};
+					// Forward a per-command timeout to the SDK when one is set. The SDK
+					// ignores fields it does not recognize; we also race a local timeout
+					// below so the deadline is enforced regardless.
+					if (Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0) {
+						runInput.timeout = opts.timeoutMs;
+					}
+					const done = await raceCommand(sandbox.runCommand(runInput), opts.signal, opts.timeoutMs);
 					return {
 						exitCode: done.exitCode ?? 0,
 						stdout: String(await done.stdout()),
@@ -144,6 +160,47 @@ export function createVercelSandboxProvider(options = {}) {
 				},
 			};
 		},
+	});
+}
+
+/**
+ * Race a running command against its abort signal and an optional per-command
+ * timeout so `exec` rejects promptly instead of waiting for the command to
+ * finish. The abort listener and timer are always torn down on settle so
+ * neither leaks when the command wins the race.
+ *
+ * @template T
+ * @param {Promise<T>} commandPromise
+ * @param {AbortSignal | undefined} signal
+ * @param {number | undefined} timeoutMs
+ * @returns {Promise<T>}
+ */
+function raceCommand(commandPromise, signal, timeoutMs) {
+	const hasTimeout = Number.isFinite(timeoutMs) && /** @type {number} */ (timeoutMs) > 0;
+	if (!signal && !hasTimeout) {
+		return commandPromise;
+	}
+	/** @type {(() => void) | undefined} */
+	let onAbort;
+	/** @type {ReturnType<typeof setTimeout> | undefined} */
+	let timer;
+	const guard = /** @type {Promise<never>} */ (
+		new Promise((_resolve, reject) => {
+			if (signal) {
+				onAbort = () => reject(new Error("Vercel sandbox command aborted."));
+				signal.addEventListener("abort", onAbort, { once: true });
+			}
+			if (hasTimeout) {
+				timer = setTimeout(
+					() => reject(new Error(`Vercel sandbox command timed out after ${timeoutMs}ms.`)),
+					/** @type {number} */ (timeoutMs),
+				);
+			}
+		})
+	);
+	return Promise.race([commandPromise, guard]).finally(() => {
+		if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+		if (timer) clearTimeout(timer);
 	});
 }
 

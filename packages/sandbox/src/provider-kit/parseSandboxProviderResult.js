@@ -37,6 +37,13 @@ export function parseSandboxProviderResult(raw, remoteId, context = {}) {
 			{ provider: context.provider, remoteId },
 		);
 	}
+	if ("bundlePath" in parsed && "status" in parsed) {
+		throw new SmithersError(
+			"SANDBOX_EXECUTION_FAILED",
+			"Sandbox result JSON contains both bundlePath and status, which are mutually exclusive: bundlePath is a diff-bundle passthrough result and status is an inline result. The runner must return exactly one shape.",
+			{ provider: context.provider, remoteId },
+		);
+	}
 	return {
 		...parsed,
 		remoteRunId: parsed.remoteRunId ?? parsed.runId ?? remoteId,

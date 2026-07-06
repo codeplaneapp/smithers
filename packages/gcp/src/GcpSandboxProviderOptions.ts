@@ -1,4 +1,4 @@
-import type { SandboxProviderRequest } from "@smithers-orchestrator/sandbox/SandboxProvider";
+import type { SandboxProviderRequest } from "@smithers-orchestrator/sandbox";
 
 /**
  * A Cloud Storage client double: the subset of `@google-cloud/storage`'s
@@ -23,9 +23,12 @@ export type GcpStorageClient = {
 export type GcpRunJobsClient = {
 	jobPath?: (project: string, location: string, job: string) => string;
 	locationPath?: (project: string, location: string) => string;
-	runJob: (request: unknown) => Promise<[{ promise: () => Promise<[GcpCloudRunExecution]> }]>;
+	runJob: (request: unknown) => Promise<[{ promise: () => Promise<[GcpCloudRunExecution]>; cancel?: () => Promise<unknown> }]>;
 	createJob?: (request: unknown) => Promise<[{ promise: () => Promise<[unknown]> }]>;
 	deleteJob?: (request: unknown) => Promise<[{ promise: () => Promise<[unknown]> }]>;
+	/** Best-effort abort path invoked when a run is cancelled mid-execution. */
+	cancelExecution?: (request: unknown) => Promise<[{ promise?: () => Promise<[unknown]> }]>;
+	deleteExecution?: (request: unknown) => Promise<[{ promise?: () => Promise<[unknown]> }]>;
 };
 
 /**

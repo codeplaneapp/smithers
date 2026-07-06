@@ -1,7 +1,10 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { createCommandSandboxProvider } from "@smithers-orchestrator/sandbox/provider-kit/createCommandSandboxProvider";
-import { SANDBOX_PROVIDER_REQUEST_ENV } from "@smithers-orchestrator/sandbox/provider-kit/SANDBOX_PROVIDER_REQUEST_ENV";
-import { SANDBOX_PROVIDER_RESULT_ENV } from "@smithers-orchestrator/sandbox/provider-kit/SANDBOX_PROVIDER_RESULT_ENV";
+import {
+	createCommandSandboxProvider,
+	SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH,
+	SANDBOX_PROVIDER_REQUEST_ENV,
+	SANDBOX_PROVIDER_RESULT_ENV,
+} from "@smithers-orchestrator/sandbox";
 import { GCP_SANDBOX_PROVIDER_ID } from "./GCP_SANDBOX_PROVIDER_ID.js";
 import { createGcpCloudRunJobsSandboxRunner } from "./createGcpCloudRunJobsSandboxRunner.js";
 import { createGcpSandboxGcsTransport } from "./createGcpSandboxGcsTransport.js";
@@ -16,6 +19,26 @@ const GCS_BUCKET_ENV = "SMITHERS_SANDBOX_GCS_BUCKET";
 const GCS_PREFIX_ENV = "SMITHERS_SANDBOX_GCS_PREFIX";
 const GCS_REQUEST_OBJECT_ENV = "SMITHERS_SANDBOX_REQUEST_GCS_OBJECT";
 const GCS_RESULT_OBJECT_ENV = "SMITHERS_SANDBOX_RESULT_GCS_OBJECT";
+// The GCS object holding the egress CA bundle the kit uploaded via
+// uploadEgressCaToSession. Container-entry contract: when this is present the
+// entry MUST download it from Cloud Storage and materialize it at the local
+// path in NODE_EXTRA_CA_CERTS before running — that env points at a container
+// path that does not exist until the object is fetched. Injected only when the
+// request carries an inline egress CA (`egress.caCertPem`), mirroring the
+// request/result object injection.
+const GCS_CA_OBJECT_ENV = "SMITHERS_SANDBOX_CA_GCS_OBJECT";
+
+/**
+ * The workdir-absolute path the kit writes the inline egress CA to (via
+ * uploadEgressCaToSession). Kept in sync with that helper so the transport keys
+ * the CA object under the same path the container will read.
+ *
+ * @param {string} workdir
+ * @returns {string}
+ */
+function caWorkspacePath(workdir) {
+	return `${workdir.replace(/\/+$/g, "")}/${SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH.replace(/^\/+/g, "")}`;
+}
 
 /**
  * @param {string} provider
@@ -104,7 +127,7 @@ async function resolveRunClient(provider, options) {
  * filesystem). Auth is Application Default Credentials.
  *
  * @param {import("./GcpSandboxProviderOptions.ts").GcpSandboxProviderOptions} [options]
- * @returns {import("@smithers-orchestrator/sandbox/SandboxProvider").SandboxProvider}
+ * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
  */
 export function createGcpSandboxProvider(options = {}) {
 	const id = (options.id ?? GCP_SANDBOX_PROVIDER_ID).trim() || GCP_SANDBOX_PROVIDER_ID;
@@ -142,6 +165,15 @@ export function createGcpSandboxProvider(options = {}) {
 				provider: id,
 			});
 
+			// When the request ships an inline egress CA, the kit uploads it to a
+			// GCS object keyed by its workdir path. Compute that object name so exec
+			// can hand it to the container (NODE_EXTRA_CA_CERTS alone points at a
+			// nonexistent local path). Only set when a CA was actually uploaded.
+			const caCertPem = request.egress?.caCertPem;
+			const caObjectName = typeof caCertPem === "string" && caCertPem.length > 0
+				? transport.objectNameFor(caWorkspacePath(workdir))
+				: undefined;
+
 			let destroyed = false;
 
 			return {
@@ -165,6 +197,7 @@ export function createGcpSandboxProvider(options = {}) {
 						[GCS_PREFIX_ENV]: transport.prefix,
 						...(requestPath ? { [GCS_REQUEST_OBJECT_ENV]: transport.objectNameFor(requestPath) } : {}),
 						...(resultPath ? { [GCS_RESULT_OBJECT_ENV]: transport.objectNameFor(resultPath) } : {}),
+						...(caObjectName ? { [GCS_CA_OBJECT_ENV]: caObjectName } : {}),
 					};
 					return await runner.run({
 						command,

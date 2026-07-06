@@ -55,6 +55,7 @@ function sleep(ms, signal) {
  *   captureLogs?: boolean;
  *   logs?: unknown;
  *   logGroupName?: string;
+ *   awslogsStreamPrefix?: string;
  *   maxOutputBytes?: number;
  *   secrets?: string[];
  * }} options
@@ -97,7 +98,12 @@ export async function createAwsEcsSandboxRunner(options) {
 			}
 			const res = await ecs.describeTasks({ cluster, tasks: [taskArnToPoll] });
 			const task = /** @type {{ tasks?: Array<Record<string, any>> }} */ (res)?.tasks?.[0];
-			if (task && String(task.lastStatus) === "STOPPED") return task;
+			if (task && String(task.lastStatus) === "STOPPED") {
+				// The task has already terminated on its own, so a later cleanup must
+				// not issue a redundant StopTask against an already-stopped task.
+				stopped = true;
+				return task;
+			}
 			if (Date.now() >= deadline) {
 				await stop();
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", `AWS fargate sandbox task did not stop within ${timeoutMs}ms.`, { provider: AWS_SANDBOX_PROVIDER_ID, remoteId: taskArnToPoll });
@@ -183,10 +189,15 @@ export async function createAwsEcsSandboxRunner(options) {
 			let stdout = "";
 			if (options.captureLogs) {
 				const taskId = String(taskArn).split("/").pop() ?? "";
+				// awslogs stream name is `<streamPrefix>/<containerName>/<taskId>`. The
+				// prefix defaults to the container name (matching a common awslogs
+				// `awslogs-stream-prefix` convention) but is configurable for task
+				// definitions that use a different prefix.
+				const streamPrefix = typeof options.awslogsStreamPrefix === "string" && options.awslogsStreamPrefix.length > 0 ? options.awslogsStreamPrefix : containerName;
 				stdout = await readCloudWatchLogs({
 					logs: /** @type {any} */ (options.logs),
 					logGroupName: options.logGroupName,
-					logStreamName: options.logGroupName ? `${containerName}/${containerName}/${taskId}` : undefined,
+					logStreamName: options.logGroupName ? `${streamPrefix}/${containerName}/${taskId}` : undefined,
 					maxOutputBytes: options.maxOutputBytes,
 				});
 			}

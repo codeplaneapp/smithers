@@ -1,13 +1,20 @@
 import { GCP_SANDBOX_PROVIDER_ID } from "./GCP_SANDBOX_PROVIDER_ID.js";
 
 /**
+ * Key a workdir path to a stable, collision-free object suffix. The full path
+ * (not just its basename) is preserved so two distinct paths that share a
+ * basename map to distinct GCS objects. Each segment is sanitized to the safe
+ * object-name charset; empty and `.`/`..` segments are dropped.
+ *
  * @param {string} path
  * @returns {string}
  */
-function basename(path) {
-	const trimmed = String(path).replace(/\/+$/g, "");
-	const index = trimmed.lastIndexOf("/");
-	return index === -1 ? trimmed : trimmed.slice(index + 1);
+function objectKeyFor(path) {
+	const segments = String(path)
+		.split("/")
+		.filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
+		.map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, "_"));
+	return segments.length > 0 ? segments.join("/") : "object";
 }
 
 /**
@@ -25,8 +32,8 @@ function decodeDownloaded(value) {
 /**
  * Build the Cloud Storage bundle transport a GCP sandbox session uses instead of
  * a shared filesystem. Every workdir-relative path maps to a deterministic
- * object under `<prefix>/<runId>/<sandboxId>/<basename(path)>`; writes upload,
- * reads download, and destroy removes the transient objects.
+ * object under `<prefix>/<runId>/<sandboxId>/<sanitized-workdir-path>`; writes
+ * upload, reads download, and destroy removes the transient objects.
  *
  * @param {{
  *   storage: import("./GcpSandboxProviderOptions.ts").GcpStorageClient;
@@ -52,7 +59,7 @@ export function createGcpSandboxGcsTransport(options) {
 	function objectNameFor(path) {
 		const existing = pathToObject.get(path);
 		if (existing) return existing;
-		const objectName = `${keyPrefix}/${basename(path)}`;
+		const objectName = `${keyPrefix}/${objectKeyFor(path)}`;
 		pathToObject.set(path, objectName);
 		return objectName;
 	}

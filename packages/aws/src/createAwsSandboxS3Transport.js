@@ -3,13 +3,23 @@ import { AWS_SANDBOX_PROVIDER_ID } from "./AWS_SANDBOX_PROVIDER_ID.js";
 import { scrubAwsSandboxSecrets } from "./scrubAwsSandboxSecrets.js";
 
 /**
+ * Reduce a workdir path to a workdir-relative path. Strips a leading `workdir`
+ * prefix (and any leading slashes) so `/workspace/a/config.json` becomes
+ * `a/config.json`. Paths outside the workdir keep their absolute tail with the
+ * leading slash removed. This preserves the *full* relative path so distinct
+ * files never collapse to a shared basename.
+ *
  * @param {string} path
+ * @param {string} workdir
  * @returns {string}
  */
-function basename(path) {
-	const clean = String(path).replace(/\/+$/g, "");
-	const index = clean.lastIndexOf("/");
-	return index < 0 ? clean : clean.slice(index + 1);
+function workdirRelative(path, workdir) {
+	const p = String(path);
+	const wd = String(workdir).replace(/\/+$/g, "");
+	if (wd && (p === wd || p.startsWith(`${wd}/`))) {
+		return p.slice(wd.length).replace(/^\/+/g, "");
+	}
+	return p.replace(/^\/+/g, "");
 }
 
 /**
@@ -31,28 +41,37 @@ async function readBody(body) {
 /**
  * Build the S3-backed file transport for one sandbox session. Every workdir
  * path maps to a single flat object key
- * `s3://<bucket>/smithers/sandbox/<runId>/<sandboxId>/<basename(path)>`. The
- * container round-trips the request/result JSON through the same keys.
+ * `s3://<bucket>/smithers/sandbox/<runId>/<sandboxId>/<encoded-relative-path>`,
+ * where `<encoded-relative-path>` is the `encodeURIComponent` of the
+ * workdir-relative path. Encoding the whole relative path (rather than just its
+ * basename) keeps the mapping collision-free and reversible: two files that
+ * share a basename in different directories — e.g. `/workspace/a/config.json`
+ * and `/workspace/b/config.json` — map to distinct keys (`a%2Fconfig.json` vs
+ * `b%2Fconfig.json`). The container round-trips the request/result JSON through
+ * the same keys.
  *
  * @param {{
  *   s3: { putObject: (input: Record<string, unknown>) => Promise<any>; getObject: (input: Record<string, unknown>) => Promise<any>; deleteObjects: (input: Record<string, unknown>) => Promise<any> };
  *   bucket: string;
  *   prefix: string;
+ *   workdir?: string;
  *   secrets?: string[];
  * }} config
  */
 export function createAwsSandboxS3Transport(config) {
 	const { s3, bucket, prefix } = config;
+	const workdir = config.workdir ?? "/workspace";
 	const secrets = config.secrets ?? [];
 	/** @type {Set<string>} */
 	const writtenKeys = new Set();
 
 	/**
+	 * Map a workdir path to its collision-free S3 object key.
 	 * @param {string} path
 	 * @returns {string}
 	 */
 	function keyForPath(path) {
-		return `${prefix}/${basename(path)}`;
+		return `${prefix}/${encodeURIComponent(workdirRelative(path, workdir))}`;
 	}
 
 	/**

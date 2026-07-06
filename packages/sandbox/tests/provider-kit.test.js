@@ -347,6 +347,66 @@ describe("createCommandSandboxProvider", () => {
 		expect(s.destroyedCount()).toBe(1);
 	});
 
+	test("run result is returned before a cleanup whose destroy throws, and cleanup rejects", async () => {
+		const s = makeSession({
+			exec: () => ({ exitCode: 0, stdout: JSON.stringify({ status: "finished", output: "ok" }), stderr: "" }),
+		});
+		s.session.destroy = async () => {
+			throw new Error("destroy boom");
+		};
+		const provider = createCommandSandboxProvider({ id: "kit", cleanup: "destroy", createSession: () => s.session });
+		const { request } = makeRequest();
+		// The successful run result must come back intact BEFORE cleanup runs.
+		const result = await provider.run(request);
+		expect(result.status).toBe("finished");
+		expect(result.output).toBe("ok");
+		// cleanup must let the destroy rejection propagate so execute.js can downgrade it.
+		await expect(provider.cleanup(request)).rejects.toThrow("destroy boom");
+	});
+
+	test("a destroy failure does not corrupt the active-session map; a second cleanup is a no-op", async () => {
+		const s = makeSession({
+			exec: () => ({ exitCode: 0, stdout: JSON.stringify({ status: "finished" }), stderr: "" }),
+		});
+		let destroyCalls = 0;
+		s.session.destroy = async () => {
+			destroyCalls += 1;
+			throw new Error("destroy boom");
+		};
+		const provider = createCommandSandboxProvider({ id: "kit", cleanup: "destroy", createSession: () => s.session });
+		const { request } = makeRequest();
+		await provider.run(request);
+		await expect(provider.cleanup(request)).rejects.toThrow("destroy boom");
+		// The session was removed from the map before destroy ran, so a repeat cleanup finds nothing.
+		await provider.cleanup(request);
+		expect(destroyCalls).toBe(1);
+	});
+
+	test("egress secret and proxy credentials are scrubbed from a thrown exec error", async () => {
+		const egressSecret = "egress-secret-value-xyz";
+		const proxyUrl = "https://proxyuser:proxypass123@proxy.internal:8080";
+		const s = makeSession({
+			exec: () => {
+				throw new Error(`failed talking to ${proxyUrl} using ${egressSecret}`);
+			},
+		});
+		const provider = createCommandSandboxProvider({ id: "kit", createSession: () => s.session });
+		const { request } = makeRequest({
+			egress: { env: { SERVICE_SECRET: egressSecret }, httpsProxy: proxyUrl },
+		});
+		let error;
+		try {
+			await provider.run(request);
+		} catch (e) {
+			error = e;
+		}
+		expect(error).toBeInstanceOf(SmithersError);
+		expect(error.message).not.toContain(egressSecret);
+		expect(error.message).not.toContain(proxyUrl);
+		expect(error.message).not.toContain("proxypass123");
+		expect(error.message).toContain("[redacted]");
+	});
+
 	test("throws on empty id", () => {
 		expect(() => createCommandSandboxProvider({ id: "  ", createSession: () => makeSession().session })).toThrow(SmithersError);
 	});
@@ -429,5 +489,33 @@ describe("parseSandboxProviderResult", () => {
 		expect(out.remoteRunId).toBe("rr");
 		expect(out.workspaceId).toBe("ws");
 		expect(out.containerId).toBe("remote-9");
+	});
+
+	test("rejects a result carrying both bundlePath and status (mutually exclusive)", () => {
+		let error;
+		try {
+			parseSandboxProviderResult(JSON.stringify({ bundlePath: "/b", status: "finished" }), "r1");
+		} catch (e) {
+			error = e;
+		}
+		expect(error).toBeInstanceOf(SmithersError);
+		expect(error.code).toBe("SANDBOX_EXECUTION_FAILED");
+		expect(error.message).toContain("mutually exclusive");
+	});
+
+	test("accepts a bundlePath-only result", () => {
+		const out = parseSandboxProviderResult(JSON.stringify({ bundlePath: "/b" }), "remote-9");
+		expect(out.bundlePath).toBe("/b");
+		expect(out.remoteRunId).toBe("remote-9");
+	});
+
+	test("accepts a status-only result", () => {
+		const out = parseSandboxProviderResult(JSON.stringify({ status: "finished" }), "remote-9");
+		expect(out.status).toBe("finished");
+	});
+
+	test("returns an unknown status value unchanged (execute.js is the authority that rejects it)", () => {
+		const out = parseSandboxProviderResult(JSON.stringify({ status: "garbage-status" }), "remote-9");
+		expect(out.status).toBe("garbage-status");
 	});
 });

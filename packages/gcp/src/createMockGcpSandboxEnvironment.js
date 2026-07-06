@@ -11,7 +11,7 @@ const RESULT_OBJECT_ENV = "SMITHERS_SANDBOX_RESULT_GCS_OBJECT";
  *
  * This is what makes tests run with ZERO GCP credentials and NO real bucket.
  *
- * @param {(args: { command: string; request: Record<string, unknown>; files: Map<string, string>; env: Record<string, string> }) => import("@smithers-orchestrator/sandbox/SandboxProvider").SandboxProviderResult | Promise<import("@smithers-orchestrator/sandbox/SandboxProvider").SandboxProviderResult>} handler
+ * @param {(args: { command: string; request: Record<string, unknown>; files: Map<string, string>; env: Record<string, string> }) => import("@smithers-orchestrator/sandbox").SandboxProviderResult | Promise<import("@smithers-orchestrator/sandbox").SandboxProviderResult>} handler
  * @param {{
  *   faults?: { save?: boolean; download?: boolean; run?: boolean; createJob?: boolean; deleteJob?: boolean };
  *   execution?: { succeededCount?: number; failedCount?: number; conditions?: Array<{ type?: string; state?: string; message?: string }>; name?: string };

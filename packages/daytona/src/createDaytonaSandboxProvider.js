@@ -77,7 +77,7 @@ export function createDaytonaSandboxProvider(options = {}) {
 					}
 					const timeoutSecs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.ceil(timeoutMs / 1000) : 0;
 					const execPromise = Promise.resolve(sandbox.process.executeCommand(command, cwd, env, timeoutSecs));
-					const res = signal ? await Promise.race([execPromise, rejectOnAbort(signal)]) : await execPromise;
+					const res = signal ? await raceWithAbort(execPromise, signal) : await execPromise;
 					// Daytona merges stderr into result; there is no separate stream.
 					return { exitCode: res?.exitCode ?? 0, stdout: String(res?.result ?? ""), stderr: "" };
 				},
@@ -230,16 +230,27 @@ function decodeToString(data) {
 }
 
 /**
+ * Race an exec promise against an AbortSignal, guaranteeing the abort listener
+ * is removed once the exec settles (resolve or reject). Without the explicit
+ * removeEventListener, a long-lived shared signal would leak one listener per
+ * exec, since `{ once: true }` only detaches when the abort event actually fires.
+ *
+ * @template T
+ * @param {Promise<T>} execPromise
  * @param {AbortSignal} signal
- * @returns {Promise<never>}
+ * @returns {Promise<T>}
  */
-function rejectOnAbort(signal) {
-	return new Promise((_resolve, reject) => {
-		signal.addEventListener(
-			"abort",
-			() => reject(new Error("Daytona sandbox command aborted.")),
-			{ once: true },
-		);
+function raceWithAbort(execPromise, signal) {
+	/** @type {() => void} */
+	let onAbort = () => {};
+	const abortPromise = /** @type {Promise<never>} */ (
+		new Promise((_resolve, reject) => {
+			onAbort = () => reject(new Error("Daytona sandbox command aborted."));
+			signal.addEventListener("abort", onAbort, { once: true });
+		})
+	);
+	return Promise.race([execPromise, abortPromise]).finally(() => {
+		signal.removeEventListener("abort", onAbort);
 	});
 }
 

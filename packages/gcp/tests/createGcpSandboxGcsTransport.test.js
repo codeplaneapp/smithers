@@ -16,9 +16,20 @@ function makeTransport(overrides = {}) {
 }
 
 describe("createGcpSandboxGcsTransport", () => {
-	test("maps a workdir path to <prefix>/<runId>/<sandboxId>/<basename>", () => {
+	test("maps a workdir path to <prefix>/<runId>/<sandboxId>/<sanitized-path>", () => {
 		const { transport } = makeTransport();
-		expect(transport.objectNameFor("/workspace/.smithers/sandbox-request.json")).toBe("smithers/sandbox/R/R-S/sandbox-request.json");
+		expect(transport.objectNameFor("/workspace/.smithers/sandbox-request.json")).toBe("smithers/sandbox/R/R-S/workspace/.smithers/sandbox-request.json");
+	});
+
+	test("same-basename paths in different dirs map to distinct objects and round-trip independently", async () => {
+		const { transport } = makeTransport();
+		const a = transport.objectNameFor("/workspace/a/config.json");
+		const b = transport.objectNameFor("/workspace/b/config.json");
+		expect(a).not.toBe(b);
+		await transport.writeFile("/workspace/a/config.json", "AAA");
+		await transport.writeFile("/workspace/b/config.json", "BBB");
+		expect(await transport.readFile("/workspace/a/config.json")).toBe("AAA");
+		expect(await transport.readFile("/workspace/b/config.json")).toBe("BBB");
 	});
 
 	test("path mapping is stable across calls", () => {
@@ -31,12 +42,12 @@ describe("createGcpSandboxGcsTransport", () => {
 	test("writeFile uploads to the mapped object", async () => {
 		const { env, transport } = makeTransport();
 		await transport.writeFile("/workspace/.smithers/sandbox-request.json", "{\"ok\":1}");
-		expect(env.objects.get("smithers/sandbox/R/R-S/sandbox-request.json")).toBe("{\"ok\":1}");
+		expect(env.objects.get("smithers/sandbox/R/R-S/workspace/.smithers/sandbox-request.json")).toBe("{\"ok\":1}");
 	});
 
 	test("readFile downloads and decodes the mapped object", async () => {
 		const { env, transport } = makeTransport();
-		env.objects.set("smithers/sandbox/R/R-S/result.json", "{\"done\":true}");
+		env.objects.set("smithers/sandbox/R/R-S/workspace/result.json", "{\"done\":true}");
 		const content = await transport.readFile("/workspace/result.json");
 		expect(content).toBe("{\"done\":true}");
 	});
@@ -53,6 +64,6 @@ describe("createGcpSandboxGcsTransport", () => {
 	test("trailing-slash prefix is normalized", () => {
 		const { transport } = makeTransport({ prefix: "custom/prefix/" });
 		expect(transport.prefix).toBe("custom/prefix");
-		expect(transport.objectNameFor("/x/y.txt")).toBe("custom/prefix/R/R-S/y.txt");
+		expect(transport.objectNameFor("/x/y.txt")).toBe("custom/prefix/R/R-S/x/y.txt");
 	});
 });

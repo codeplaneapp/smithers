@@ -29,15 +29,14 @@ function makeCreateProvider(requiredOpts) {
 		const { onDestroy, ...rest } = providerOptions;
 		const env = createMockAwsSandboxEnvironment(handler);
 		if (typeof onDestroy === "function") {
-			const stopTask = env.ecs.stopTask;
-			env.ecs.stopTask = async (input) => {
+			// A destroy always tears down transient S3 objects (both modes), so hook
+			// deleteObjects as the reliable "destroy happened" signal. StopTask can be
+			// legitimately skipped when a fargate task already reached STOPPED on its
+			// own, so it is not a dependable destroy marker.
+			const deleteObjects = env.s3.deleteObjects;
+			env.s3.deleteObjects = async (input) => {
 				onDestroy();
-				return stopTask(input);
-			};
-			const stopBuild = env.codebuild.stopBuild;
-			env.codebuild.stopBuild = async (input) => {
-				onDestroy();
-				return stopBuild(input);
+				return deleteObjects(input);
 			};
 		}
 		return createAwsSandboxProvider({ clients: env, ...requiredOpts, ...rest });

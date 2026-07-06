@@ -67,11 +67,20 @@ export type AwsSandboxProviderOptions = {
 	captureLogs?: boolean;
 	/** CloudWatch log group to read when `captureLogs` is set. */
 	logGroupName?: string;
+	/**
+	 * awslogs stream prefix for the fargate log stream name
+	 * (`<prefix>/<containerName>/<taskId>`). Defaults to the container name.
+	 */
+	awslogsStreamPrefix?: string;
 	/** Options forwarded to every constructed AWS SDK client (e.g. credentials, endpoint). */
 	clientOptions?: Record<string, unknown>;
 	/** Inject SDK doubles (tests) or real clients to reuse configuration. */
 	clients?: AwsSandboxClients;
-	/** Alias for `clients` (the single-injection form from the base brief). */
+	/**
+	 * Alias for `clients`: the exact same `{ s3, ecs, codebuild, logs }` bag, not a
+	 * single SDK client. Provided for the singular spelling from the base brief and
+	 * treated identically to `clients` (which wins if both are set).
+	 */
 	client?: AwsSandboxClients;
 
 	// --- Fargate (ECS) options ---

@@ -235,6 +235,31 @@ describe("createDaytonaSandboxProvider", () => {
 		await expect(provider.run(makeRequest({ signal: controller.signal }).request)).rejects.toThrow();
 	});
 
+	test("normal exec removes its abort listener (no leak on a shared signal)", async () => {
+		const env = createMockDaytonaSandboxEnvironment(() => ({ status: "finished" }));
+		const provider = createDaytonaSandboxProvider({ client: env });
+		const controller = new AbortController();
+		const { signal } = controller;
+		let added = 0;
+		let removed = 0;
+		const realAdd = signal.addEventListener.bind(signal);
+		const realRemove = signal.removeEventListener.bind(signal);
+		signal.addEventListener = (type, ...rest) => {
+			if (type === "abort") added++;
+			return realAdd(type, ...rest);
+		};
+		signal.removeEventListener = (type, ...rest) => {
+			if (type === "abort") removed++;
+			return realRemove(type, ...rest);
+		};
+		// Reuse the same non-aborted signal across several execs (as a long-lived shared signal would be).
+		for (let i = 0; i < 3; i++) {
+			await provider.run(makeRequest({ signal }).request);
+		}
+		expect(added).toBeGreaterThan(0);
+		expect(removed).toBe(added);
+	});
+
 	test("egress secrets are redacted in the shipped request JSON", async () => {
 		let seen;
 		const env = createMockDaytonaSandboxEnvironment(({ request }) => {

@@ -94,4 +94,33 @@ describe("createGcpCloudRunJobsSandboxRunner", () => {
 		await expect(runner.run({ command: "x", env: {}, signal: controller.signal })).rejects.toThrow(/cancel/i);
 		expect(client.calls.run.length).toBe(0);
 	});
+
+	test("abort after runJob starts rejects promptly and attempts cancellation", async () => {
+		const cancelled = [];
+		let lroCancelled = false;
+		const client = {
+			jobPath: (p, l, j) => `projects/${p}/locations/${l}/jobs/${j}`,
+			async runJob() {
+				// A never-resolving execution LRO: without racing the abort, run()
+				// would hang until Cloud Run finished.
+				return [{
+					promise: () => new Promise(() => {}),
+					cancel: async () => { lroCancelled = true; },
+				}];
+			},
+			async cancelExecution(request) {
+				cancelled.push(request);
+				return [{ promise: async () => [{}] }];
+			},
+		};
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		const controller = new AbortController();
+		const pending = runner.run({ command: "x", env: {}, signal: controller.signal });
+		// Let ensureJob + runJob settle and the abort listener attach.
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		controller.abort();
+		await expect(pending).rejects.toThrow(/cancel/i);
+		expect(cancelled.length).toBe(1);
+		expect(lroCancelled).toBe(true);
+	});
 });

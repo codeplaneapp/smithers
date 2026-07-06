@@ -1,5 +1,5 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { createCommandSandboxProvider, SANDBOX_PROVIDER_REQUEST_ENV, SANDBOX_PROVIDER_RESULT_ENV } from "@smithers-orchestrator/sandbox";
+import { createCommandSandboxProvider, SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH, SANDBOX_PROVIDER_REQUEST_ENV, SANDBOX_PROVIDER_RESULT_ENV } from "@smithers-orchestrator/sandbox";
 import { AWS_SANDBOX_PROVIDER_ID } from "./AWS_SANDBOX_PROVIDER_ID.js";
 import { createAwsCodeBuildSandboxRunner } from "./createAwsCodeBuildSandboxRunner.js";
 import { createAwsEcsSandboxRunner } from "./createAwsEcsSandboxRunner.js";
@@ -8,6 +8,19 @@ import { resolveAwsSdkClient } from "./resolveAwsSdkClient.js";
 
 const DEFAULT_WORKDIR = "/workspace";
 const SECRET_KEY_RE = /token|secret|key|password|credential|authorization|passwd|apikey/i;
+
+/**
+ * Join a workdir with a relative path the way the provider kit does, so the
+ * S3 key we compute for the egress CA matches the key the kit's
+ * `uploadEgressCaToSession` actually wrote it to.
+ *
+ * @param {string} workdir
+ * @param {string} path
+ * @returns {string}
+ */
+function absoluteWorkdirPath(workdir, path) {
+	return path.startsWith("/") ? path : `${workdir.replace(/\/+$/g, "")}/${path.replace(/^\/+/g, "")}`;
+}
 
 /**
  * @param {Record<string, string> | undefined} env
@@ -26,9 +39,10 @@ function secretValuesFrom(env) {
  * Build a Smithers SandboxProvider backed by AWS. Because AWS has no shared
  * filesystem between the orchestrator and the remote task, the request/result
  * bundle is transported through S3: `writeFile`/`readFile` map a workdir path to
- * `s3://<bucket>/smithers/sandbox/<runId>/<sandboxId>/<basename(path)>`, and the
- * remote container round-trips the same keys via the injected
- * `SMITHERS_SANDBOX_S3_*` env vars.
+ * `s3://<bucket>/smithers/sandbox/<runId>/<sandboxId>/<encoded-relative-path>`
+ * (the workdir-relative path, `encodeURIComponent`-encoded so distinct paths
+ * never collide), and the remote container round-trips the same keys via the
+ * injected `SMITHERS_SANDBOX_S3_*` env vars.
  *
  * @param {import("./AwsSandboxProviderOptions.ts").AwsSandboxProviderOptions} [options]
  * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
@@ -61,6 +75,8 @@ export function createAwsSandboxProvider(options = {}) {
 		if (!options.projectName) throw new SmithersError("INVALID_INPUT", "AWS codebuild sandbox requires a `projectName`.", { provider: id });
 	}
 
+	// `client` is a singular-spelling alias for the `{ s3, ecs, codebuild, logs }`
+	// clients bag, not a single SDK client; `clients` wins when both are present.
 	const clients = options.clients ?? options.client ?? {};
 	const clientOptions = { region, ...(options.clientOptions ?? {}) };
 	const secrets = secretValuesFrom(options.env);
@@ -85,7 +101,7 @@ export function createAwsSandboxProvider(options = {}) {
 				methods: ["putObject", "getObject", "deleteObjects"],
 				clientOptions,
 			}));
-			const transport = createAwsSandboxS3Transport({ s3, bucket, prefix, secrets });
+			const transport = createAwsSandboxS3Transport({ s3, bucket, prefix, workdir, secrets });
 
 			const logs = options.captureLogs
 				? await resolveAwsSdkClient({
@@ -122,6 +138,7 @@ export function createAwsSandboxProvider(options = {}) {
 						captureLogs: options.captureLogs,
 						logs,
 						logGroupName: options.logGroupName,
+						awslogsStreamPrefix: options.awslogsStreamPrefix,
 						maxOutputBytes: request.maxOutputBytes,
 						secrets,
 					});
@@ -148,6 +165,14 @@ export function createAwsSandboxProvider(options = {}) {
 						SMITHERS_SANDBOX_S3_PREFIX: prefix,
 						SMITHERS_SANDBOX_REQUEST_S3_KEY: requestPath ? transport.keyForPath(requestPath) : "",
 						SMITHERS_SANDBOX_RESULT_S3_KEY: resultPath ? transport.keyForPath(resultPath) : "",
+						// Container-entry contract: when egress carries an inline CA, the kit
+						// uploaded it to a workdir path that ONLY exists as an S3 object.
+						// NODE_EXTRA_CA_CERTS points at a *local* file the container must first
+						// materialize by fetching this key to that path; without it the CA is
+						// unreachable and egress silently no-ops. Keyed like request/result.
+						...(request.egress?.caCertPem
+							? { SMITHERS_SANDBOX_CA_S3_KEY: transport.keyForPath(absoluteWorkdirPath(workdir, SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH)) }
+							: {}),
 					};
 					return runner.run(command, { env, timeoutMs: execOpts.timeoutMs, signal: execOpts.signal });
 				},

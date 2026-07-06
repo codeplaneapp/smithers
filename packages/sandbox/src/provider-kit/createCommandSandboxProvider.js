@@ -1,5 +1,5 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { sandboxEgressEnv } from "../egress.js";
+import { normalizeSandboxEgressConfig, sandboxEgressEnv } from "../egress.js";
 import { SANDBOX_PROVIDER_REQUEST_ENV } from "./SANDBOX_PROVIDER_REQUEST_ENV.js";
 import { SANDBOX_PROVIDER_RESULT_ENV } from "./SANDBOX_PROVIDER_RESULT_ENV.js";
 import { parseSandboxProviderResult } from "./parseSandboxProviderResult.js";
@@ -46,7 +46,8 @@ export function createCommandSandboxProvider(options) {
 	return {
 		id,
 		async run(request) {
-			const secrets = secretValuesFrom(options.env);
+			const egressEnv = sandboxEgressEnv(request.egress);
+			const secrets = collectSecretValues(options.env, request.egress, egressEnv);
 			const session = await options.createSession(request);
 			const key = `${request.runId}:${request.sandboxId}`;
 			active.set(key, session);
@@ -60,7 +61,7 @@ export function createCommandSandboxProvider(options) {
 
 			const env = {
 				...(options.env ?? {}),
-				...sandboxEgressEnv(request.egress),
+				...egressEnv,
 				[SANDBOX_PROVIDER_REQUEST_ENV]: requestPath,
 				[SANDBOX_PROVIDER_RESULT_ENV]: resultPath,
 			};
@@ -128,6 +129,33 @@ function truncateOutput(text, maxBytes) {
 	}
 	const kept = text.slice(0, maxBytes);
 	return `${kept}… [truncated ${text.length - maxBytes} chars]`;
+}
+
+/**
+ * Collect every value that must be scrubbed from thrown exec-error messages:
+ * secret-keyed values from the provider's static env, every egress-injected env
+ * value, and the HTTP(S)_PROXY URLs (which may embed user:pass@ credentials).
+ *
+ * @param {Record<string, string> | undefined} optionsEnv
+ * @param {unknown} egress
+ * @param {Record<string, string>} egressEnv
+ * @returns {string[]}
+ */
+function collectSecretValues(optionsEnv, egress, egressEnv) {
+	const out = secretValuesFrom(optionsEnv);
+	const normalized = normalizeSandboxEgressConfig(egress);
+	for (const value of Object.values(normalized?.env ?? {})) {
+		if (typeof value === "string" && value.length > 0) {
+			out.push(value);
+		}
+	}
+	for (const key of ["HTTP_PROXY", "HTTPS_PROXY"]) {
+		const value = egressEnv[key];
+		if (typeof value === "string" && value.length > 0) {
+			out.push(value);
+		}
+	}
+	return out;
 }
 
 /**

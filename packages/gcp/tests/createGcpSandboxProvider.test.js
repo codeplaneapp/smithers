@@ -228,6 +228,27 @@ describe("createGcpSandboxProvider", () => {
 		expect(JSON.stringify(seenRequest.egress)).not.toContain("leaky-secret-value");
 	});
 
+	test("CA GCS object env is injected only when egress carries an inline caCertPem", async () => {
+		let seenEnv;
+		const env = createMockGcpSandboxEnvironment(({ env: e }) => {
+			seenEnv = e;
+			return { status: "finished" };
+		});
+		const provider = createGcpSandboxProvider({ ...REQUIRED, client: env });
+
+		// No egress CA -> no CA object env injected.
+		await provider.run(makeRequest().request);
+		expect(seenEnv.SMITHERS_SANDBOX_CA_GCS_OBJECT).toBeUndefined();
+
+		// Inline egress CA -> the GCS object the CA was uploaded to is injected,
+		// and that object actually holds the uploaded PEM.
+		const caCertPem = "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n";
+		await provider.run(makeRequest({ egress: { caCertPem } }).request);
+		expect(seenEnv.SMITHERS_SANDBOX_CA_GCS_OBJECT).toBeString();
+		expect(seenEnv.SMITHERS_SANDBOX_CA_GCS_OBJECT).toContain("/.smithers/egress/ca.crt");
+		expect(env.objects.get(seenEnv.SMITHERS_SANDBOX_CA_GCS_OBJECT)).toContain("BEGIN CERTIFICATE");
+	});
+
 	test("remoteId reflects the Cloud Run execution name after exec", async () => {
 		const env = createMockGcpSandboxEnvironment(() => ({ status: "finished" }));
 		const provider = createGcpSandboxProvider({ ...REQUIRED, client: env });

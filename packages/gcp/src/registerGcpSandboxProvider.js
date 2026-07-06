@@ -1,4 +1,4 @@
-import { registerSandboxProvider } from "@smithers-orchestrator/sandbox/execute";
+import { registerSandboxProvider } from "@smithers-orchestrator/sandbox";
 import { createGcpSandboxProvider } from "./createGcpSandboxProvider.js";
 
 /**

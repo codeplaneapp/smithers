@@ -138,6 +138,66 @@ describe("createVercelSandboxProvider", () => {
 		expect(env.createCalls[0]).toMatchObject({ runtime: "node22", resources: { vcpus: 4 }, timeout: 120_000 });
 	});
 
+	test("create omits resources entirely when no vcpus is set", async () => {
+		const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+		const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
+		await provider.run(makeRequest().request);
+		expect("resources" in env.createCalls[0]).toBe(false);
+	});
+
+	test("create is provisioned with the declared ports", async () => {
+		const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+		const provider = createVercelSandboxProvider({ client: env, oidcToken: "t", ports: [3000, 8080] });
+		await provider.run(makeRequest().request);
+		expect(env.createCalls[0].ports).toEqual([3000, 8080]);
+	});
+
+	test("create omits ports when none are declared", async () => {
+		const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+		const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
+		await provider.run(makeRequest().request);
+		expect("ports" in env.createCalls[0]).toBe(false);
+	});
+
+	describe("exec abort / timeout", () => {
+		test("exec with an already-aborted signal rejects without running the command", async () => {
+			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+			const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
+			let error;
+			try {
+				await provider.run(makeRequest({ signal: AbortSignal.abort() }).request);
+			} catch (e) {
+				error = e;
+			}
+			expect(error).toBeInstanceOf(SmithersError);
+			expect(error.code).toBe("SANDBOX_EXECUTION_FAILED");
+			expect(error.message).toContain("aborted");
+			// The command never runs once the signal is already aborted.
+			expect(env.sandboxes[0]?.runCommandCalls ?? 0).toBe(0);
+		});
+
+		test("aborting mid-exec rejects promptly rather than waiting for the command", async () => {
+			const controller = new AbortController();
+			// A handler that never settles: only the abort race can end the exec.
+			const env = createMockVercelSandboxEnvironment(() => new Promise(() => {}));
+			const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
+			const started = Date.now();
+			const runPromise = provider.run(makeRequest({ signal: controller.signal, toolTimeoutMs: 60_000 }).request);
+			setTimeout(() => controller.abort(), 10);
+			let error;
+			try {
+				await runPromise;
+			} catch (e) {
+				error = e;
+			}
+			expect(error).toBeInstanceOf(SmithersError);
+			expect(error.code).toBe("SANDBOX_EXECUTION_FAILED");
+			expect(error.message).toContain("aborted");
+			// Rejects on abort, not after the 60s command timeout.
+			expect(Date.now() - started).toBeLessThan(5_000);
+		});
+	});
+
 	test("ships the request JSON (input + config) into the sandbox and injects path env vars", async () => {
 		let seenRequest;
 		let seenEnv;

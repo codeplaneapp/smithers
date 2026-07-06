@@ -43,6 +43,7 @@ export function createMockVercelSandboxEnvironment(handler, config = {}) {
 		const domainCalls = [];
 		let stopped = false;
 		let deleted = false;
+		let runCommandCalls = 0;
 
 		const sandbox = {
 			sandboxId,
@@ -50,6 +51,9 @@ export function createMockVercelSandboxEnvironment(handler, config = {}) {
 			createOptions,
 			extendTimeoutCalls,
 			domainCalls,
+			get runCommandCalls() {
+				return runCommandCalls;
+			},
 			get stopped() {
 				return stopped;
 			},
@@ -71,6 +75,7 @@ export function createMockVercelSandboxEnvironment(handler, config = {}) {
 				return Buffer.from(files.get(path) ?? "");
 			},
 			async runCommand({ cmd, args, cwd, env }) {
+				runCommandCalls += 1;
 				if (stopped || deleted) throw new Error(`mock vercel sandbox "${sandboxId}" is torn down`);
 				if (failures.has("exec") || failures.has("runCommand")) {
 					throw new Error("mock vercel runCommand failure");

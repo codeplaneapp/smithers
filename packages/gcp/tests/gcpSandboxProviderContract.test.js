@@ -1,4 +1,4 @@
-import { createSandboxProviderContractSuite } from "@smithers-orchestrator/sandbox/provider-kit/createSandboxProviderContractSuite";
+import { createSandboxProviderContractSuite } from "@smithers-orchestrator/sandbox";
 import { GCP_SANDBOX_PROVIDER_ID } from "../src/GCP_SANDBOX_PROVIDER_ID.js";
 import { createGcpSandboxProvider } from "../src/createGcpSandboxProvider.js";
 import { createMockGcpSandboxEnvironment } from "../src/createMockGcpSandboxEnvironment.js";

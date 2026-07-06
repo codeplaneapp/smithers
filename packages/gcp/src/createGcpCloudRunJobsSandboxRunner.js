@@ -137,7 +137,62 @@ export function createGcpCloudRunJobsSandboxRunner(options) {
 					...(timeoutSec ? { timeout: { seconds: timeoutSec } } : {}),
 				},
 			});
-			const [execution] = await operation.promise();
+
+			// Cloud Run's runJob LRO carries the Execution being created in its
+			// metadata. Capture it now so a mid-flight abort cancels the actual
+			// execution resource rather than the job resource (`name`).
+			const metadataName = operation && typeof operation === "object"
+				? /** @type {{ metadata?: { name?: unknown } }} */ (operation).metadata?.name
+				: undefined;
+			const pendingExecutionName = typeof metadataName === "string" ? metadataName : undefined;
+
+			// Best-effort cancellation of an in-flight execution. Cancel the LRO
+			// first (if the operation supports it), then ask the client to
+			// cancel/delete the Cloud Run execution if it exposes that path.
+			// Errors are swallowed: the run is already being torn down.
+			const cancelExecution = async () => {
+				try {
+					if (typeof operation.cancel === "function") await operation.cancel();
+				} catch {
+					// operation may already be settled; ignore.
+				}
+				const target = lastExecutionName ?? name;
+				try {
+					if (typeof jobsClient.cancelExecution === "function") {
+						const [op] = await jobsClient.cancelExecution({ name: target });
+						await op?.promise?.();
+					} else if (typeof jobsClient.deleteExecution === "function") {
+						const [op] = await jobsClient.deleteExecution({ name: target });
+						await op?.promise?.();
+					}
+				} catch {
+					// execution may already be gone; cancellation is best-effort.
+				}
+			};
+
+			// Race the execution LRO against the abort signal. Without this the
+			// run would block on operation.promise() until Cloud Run finished
+			// even after an abort, never cancelling the execution.
+			const signal = exec.signal;
+			/** @type {(() => void) | undefined} */
+			let removeAbortListener;
+			const execution = await new Promise((resolve, reject) => {
+				operation.promise().then(
+					([value]) => resolve(value),
+					(error) => reject(error),
+				);
+				if (signal) {
+					const onAbort = () => {
+						void cancelExecution();
+						reject(new SmithersError("SANDBOX_EXECUTION_FAILED", "GCP sandbox execution was cancelled.", { provider }));
+					};
+					signal.addEventListener("abort", onAbort, { once: true });
+					removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+				}
+			}).finally(() => {
+				removeAbortListener?.();
+			});
+
 			lastExecutionName = execution?.name ?? lastExecutionName ?? name;
 			const outcome = executionOutcome(execution);
 			return { exitCode: outcome.exitCode, stdout: "", stderr: outcome.stderr };

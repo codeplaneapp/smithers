@@ -134,6 +134,30 @@ export function createSandboxProviderContractSuite(config) {
 			expect(typeof (/** @type {{ remoteId?: unknown }} */ (created)?.remoteId)).toBe("string");
 		});
 
+		test("non-empty config reaches the request JSON", async () => {
+			/** @type {Record<string, unknown> | undefined} */
+			let seen;
+			const provider = createProvider(({ request }) => {
+				seen = request;
+				return { status: "finished" };
+			});
+			const { request } = buildRequest({ config: { region: "contract-region", replicas: 3 } });
+			await provider.run(request);
+			expect(seen?.config).toEqual({ region: "contract-region", replicas: 3 });
+		});
+
+		test("session-created, request-shipped, and result-read heartbeats all fire", async () => {
+			const provider = createProvider(() => ({ status: "finished" }));
+			const { request, heartbeats } = buildRequest();
+			await provider.run(request);
+			const stages = heartbeats
+				.map((entry) => (typeof entry === "object" && entry !== null ? String(/** @type {{ stage?: unknown }} */ (entry).stage ?? "") : ""))
+				.filter((stage) => stage.length > 0);
+			expect(stages.some((stage) => stage.endsWith("-session-created"))).toBe(true);
+			expect(stages.some((stage) => stage.endsWith("-request-shipped"))).toBe(true);
+			expect(stages.some((stage) => stage.endsWith("-result-read"))).toBe(true);
+		});
+
 		test("result satisfies materializeProviderResult shape", async () => {
 			const provider = createProvider(() => ({ status: "finished", output: null }));
 			const { request } = buildRequest();
@@ -185,8 +209,8 @@ function defaultCreateRequest(overrides = {}) {
 	const request = {
 		runId: "run-contract",
 		sandboxId: "sbx-contract",
-		input: { hello: "world" },
-		config: {},
+		input: overrides.input ?? { hello: "world" },
+		config: /** @type {Record<string, unknown>} */ (overrides.config) ?? {},
 		rootDir: `/tmp/smithers-contract-${seq}/root`,
 		requestBundlePath: `/tmp/smithers-contract-${seq}/request`,
 		resultBundlePath: `/tmp/smithers-contract-${seq}/result`,
