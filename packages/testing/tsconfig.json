@@ -5,6 +5,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
+    "ignoreDeprecations": "6.0",
     "strict": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
