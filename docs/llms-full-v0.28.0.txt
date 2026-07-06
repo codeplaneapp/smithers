@@ -1016,7 +1016,7 @@ const implementer = new AnthropicAgent({ model, instructions: "...", tools: { re
 
 There are **two execution modes**, decided by the agent class, not by a per-turn setting:
 
-- **SDK agents run in-process.** `AnthropicAgent` and `OpenAIAgent` (and `HermesAgent`, and the opt-in `ElizaAgent`) extend the AI SDK's `ToolLoopAgent` and make plain HTTPS calls to a provider. **No subprocess, no container** -- the agent's "environment" is your process. These are the only agents that run unchanged inside a JS-only serverless runtime (a Cloudflare Worker, a Vercel function).
+- **SDK agents run in-process.** `AnthropicAgent` and `OpenAIAgent` (and `HermesAgent`) extend the AI SDK's `ToolLoopAgent`, and the opt-in `ElizaAgent` wraps an elizaOS `AgentRuntime` in-process; all make plain HTTPS calls to a provider. **No subprocess, no container** -- the agent's "environment" is your process. These are the only agents that run unchanged inside a JS-only serverless runtime (a Cloudflare Worker, a Vercel function).
 - **CLI / full-OS agents run as a child process.** `ClaudeCodeAgent`, `CodexAgent`, `OpenCodeAgent`, and every other CLI agent extend `BaseCliAgent`, which spawns the vendor binary via `node:child_process`. **By default that child process runs on the host, in `rootDir`** -- the same machine driving the run. There is no automatic per-turn container.
 
 <Note>

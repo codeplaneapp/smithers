@@ -138,7 +138,7 @@ What's billed on Cloudflare:
 |---|---|
 | In-process SDK agents | Model API tokens (billed by the model provider, not Cloudflare) |
 | Worker / Durable Object control plane | Worker invocations + Durable Object requests and duration; DO-SQLite storage (rows read/written). Use **DO-SQLite** for durable run-of-record -- **D1 has no interactive transactions** and can leave partial state (see the D1 warning above) |
-| `@cloudflare/sandbox` container (per `<Sandbox>`) | Container wall-clock from create → teardown. Idle hibernation stays at the Sandbox SDK default unless you set it; `cleanup: "keep"` and `execution: "process"` leave the container billing until it hibernates, while `cleanup: "destroy"` (the default) stops it at the end of the boundary |
+| `@cloudflare/sandbox` container (per `<Sandbox>`) | Container wall-clock from create → teardown. Idle hibernation stays at the Sandbox SDK default unless you set it. `cleanup: "keep"` leaves the container billing until it hibernates; with the default `cleanup: "destroy"` the container is destroyed at the end of the boundary -- even in `execution: "process"` mode, whose `run()` returns a pid immediately and then hits provider cleanup |
 
 <Note>
   Cloudflare's own pricing for Workers, Durable Objects, and the Sandbox SDK
