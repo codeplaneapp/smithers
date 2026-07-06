@@ -125,6 +125,37 @@ describe("computeRunState", () => {
         });
     });
 
+    test("waiting-timer overdue past grace surfaces timer-overdue unhealthy", async () => {
+        const adapter = makeAdapter({
+            run: makeRun({ status: "waiting-timer" }),
+            nodes: [
+                { nodeId: "t-overdue", iteration: 0, state: "waiting-timer" },
+            ],
+            attemptsByKey: {
+                "run-1|t-overdue|0": [
+                    {
+                        state: "waiting-timer",
+                        metaJson: JSON.stringify({
+                            timer: { firesAtMs: NOW - 31_000, timerId: "to" },
+                        }),
+                    },
+                ],
+            },
+        });
+        const view = await computeRunState(adapter, "run-1", { now: NOW });
+        expect(view.state).toBe("waiting-timer");
+        expect(view.blocked).toEqual({
+            kind: "timer",
+            nodeId: "t-overdue",
+            wakeAt: new Date(NOW - 31_000).toISOString(),
+        });
+        expect(view.unhealthy).toEqual({
+            kind: "timer-overdue",
+            wakeAt: new Date(NOW - 31_000).toISOString(),
+            overdueMs: 31_000,
+        });
+    });
+
     test("waiting-event pulls correlationKey from attempt metaJson", async () => {
         const adapter = makeAdapter({
             run: makeRun({ status: "waiting-event" }),
