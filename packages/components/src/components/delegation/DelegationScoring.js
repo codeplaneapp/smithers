@@ -58,6 +58,7 @@ export function DelegationScoring(props) {
         approvalRows,
         devPreviewRows,
         replanRows,
+        maxDeriskRounds: props.maxDeriskRounds,
     });
     if (!done)
         return null;

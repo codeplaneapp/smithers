@@ -821,12 +821,17 @@ declare const gateSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     brief: z.ZodString;
 }, z.core.$strip>], "method">;
 type Gate$1 = z.infer<typeof gateSchema>;
-/** Final refined goal. Written by the goal-refinement agent, then re-written by the human approval HumanTask. */
+/**
+ * Final refined goal. Written by the goal-refinement agent, then re-written by
+ * the human approval HumanTask. Defaults keep degraded agent output moving
+ * toward the approval gate (where a human sees and can reject it) instead of
+ * burning validation retries — the GrillMe precedent.
+ */
 declare const dcGoalSchema: z.ZodObject<{
-    logicalId: z.ZodString;
-    refinedPrompt: z.ZodString;
-    assumptions: z.ZodArray<z.ZodString>;
-    questionsAsked: z.ZodNumber;
+    logicalId: z.ZodDefault<z.ZodString>;
+    refinedPrompt: z.ZodDefault<z.ZodString>;
+    assumptions: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    questionsAsked: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strip>;
 type DcGoalRow$1 = z.infer<typeof dcGoalSchema>;
 /** Rendered form metadata for one goal-refinement question (haiku prefetch renders these ahead of the user). */
@@ -836,8 +841,8 @@ declare const dcQuestionSchema: z.ZodObject<{
     question: z.ZodString;
     header: z.ZodString;
     kind: z.ZodEnum<{
-        select: "select";
         text: "text";
+        select: "select";
         confirm: "confirm";
     }>;
     options: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -856,14 +861,14 @@ type DcQuestionRow$1 = z.infer<typeof dcQuestionSchema>;
  * dcQuestion rows from it.
  */
 declare const dcForecastSchema: z.ZodObject<{
-    logicalId: z.ZodString;
-    total: z.ZodNumber;
-    questions: z.ZodArray<z.ZodObject<{
+    logicalId: z.ZodDefault<z.ZodString>;
+    total: z.ZodDefault<z.ZodNumber>;
+    questions: z.ZodDefault<z.ZodArray<z.ZodObject<{
         seq: z.ZodNumber;
         question: z.ZodString;
         kind: z.ZodEnum<{
-            select: "select";
             text: "text";
+            select: "select";
             confirm: "confirm";
         }>;
         options: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -872,7 +877,7 @@ declare const dcForecastSchema: z.ZodObject<{
         }, z.core.$strip>>>;
         recommended: z.ZodString;
         reason: z.ZodString;
-    }, z.core.$strip>>;
+    }, z.core.$strip>>>;
 }, z.core.$strip>;
 type DcForecastRow$1 = z.infer<typeof dcForecastSchema>;
 /**
@@ -1015,9 +1020,9 @@ declare const dcProbeSchema: z.ZodObject<{
     answer: z.ZodString;
     report: z.ZodString;
     planImpact: z.ZodEnum<{
+        none: "none";
         changes: "changes";
         confirms: "confirms";
-        none: "none";
     }>;
     proposedChange: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -1140,10 +1145,10 @@ type DcScoreRow$1 = z.infer<typeof dcScoreSchema>;
  */
 declare const delegationSchemas: {
     readonly dcGoal: z.ZodObject<{
-        logicalId: z.ZodString;
-        refinedPrompt: z.ZodString;
-        assumptions: z.ZodArray<z.ZodString>;
-        questionsAsked: z.ZodNumber;
+        logicalId: z.ZodDefault<z.ZodString>;
+        refinedPrompt: z.ZodDefault<z.ZodString>;
+        assumptions: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        questionsAsked: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strip>;
     readonly dcQuestion: z.ZodObject<{
         logicalId: z.ZodString;
@@ -1151,8 +1156,8 @@ declare const delegationSchemas: {
         question: z.ZodString;
         header: z.ZodString;
         kind: z.ZodEnum<{
-            select: "select";
             text: "text";
+            select: "select";
             confirm: "confirm";
         }>;
         options: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -1164,14 +1169,14 @@ declare const delegationSchemas: {
         resolved: z.ZodBoolean;
     }, z.core.$strip>;
     readonly dcForecast: z.ZodObject<{
-        logicalId: z.ZodString;
-        total: z.ZodNumber;
-        questions: z.ZodArray<z.ZodObject<{
+        logicalId: z.ZodDefault<z.ZodString>;
+        total: z.ZodDefault<z.ZodNumber>;
+        questions: z.ZodDefault<z.ZodArray<z.ZodObject<{
             seq: z.ZodNumber;
             question: z.ZodString;
             kind: z.ZodEnum<{
-                select: "select";
                 text: "text";
+                select: "select";
                 confirm: "confirm";
             }>;
             options: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -1180,7 +1185,7 @@ declare const delegationSchemas: {
             }, z.core.$strip>>>;
             recommended: z.ZodString;
             reason: z.ZodString;
-        }, z.core.$strip>>;
+        }, z.core.$strip>>>;
     }, z.core.$strip>;
     readonly dcGoalApproval: z.ZodObject<{
         approved: z.ZodBoolean;
@@ -1303,9 +1308,9 @@ declare const delegationSchemas: {
         answer: z.ZodString;
         report: z.ZodString;
         planImpact: z.ZodEnum<{
+            none: "none";
             changes: "changes";
             confirms: "confirms";
-            none: "none";
         }>;
         proposedChange: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
@@ -1434,7 +1439,16 @@ type DelegationScorers$1 = {
 };
 /** Props shared by every delegation phase composite. */
 type DelegationSharedProps$1 = {
-    /** Physical node-id prefix (`<idPrefix>:<logicalId>:<phase>`). Default "dc". */
+    /**
+     * Physical node-id prefix (`<idPrefix>:<logicalId>:<phase>`). Default "dc".
+     *
+     * WARNING: the delegation fold and the `smithers ui` delegation UI
+     * (`foldDelegation`/`delegationTableForNodeId` in
+     * `@smithers-orchestrator/gateway-react`) only recognize the default
+     * `"dc"` prefix. A custom prefix still executes correctly, but the run
+     * renders NO delegation UI until the fold learns the new prefix — keep the
+     * default unless you also extend the fold.
+     */
     idPrefix?: string;
     /** Agent per tier. Missing tiers fall back to the nearest configured tier. */
     agents: DelegationAgents$1;
@@ -1801,6 +1815,18 @@ type ApprovalGateProps$2 = {
 declare function Workflow(props: WorkflowProps$1): React__default.DOMElement<WorkflowProps$1, Element>;
 type WorkflowProps$1 = WorkflowProps$2;
 
+/**
+ * Render a prompt React node to plain markdown text.
+ *
+ * If the prompt is a React element (e.g. a compiled MDX component), we inject
+ * `markdownComponents` via the standard MDX `components` prop so that
+ * renderToStaticMarkup outputs clean markdown instead of HTML. The static
+ * render entity-escapes all text, so we decode the entities back to literal
+ * characters before handing the prompt to the agent.
+ * @param {unknown} prompt
+ * @returns {string}
+ */
+declare function renderPromptToText(prompt: unknown): string;
 /**
  * @template Row, Output, D
  * @param {TaskProps<Row, Output, D>} props
@@ -2523,18 +2549,35 @@ declare function probesRequested(plans: Map<string, {
     risk: DcPlanRow$1["risks"][number];
 }>;
 /**
- * @typedef {{ type: "probe" | "user-edit"; ref: string; flagged: string; detail: Record<string, any> }} DeriskTrigger
+ * @typedef {{ type: "probe" | "user-edit" | "review-fail"; ref: string; flagged: string; detail: Record<string, any> }} DeriskTrigger
  */
 /**
- * Unaddressed replan triggers: probe findings whose planImpact is "changes"
- * and live user edits, minus anything a dcReplan row already answered
- * (matched by trigger.ref).
+ * Unaddressed replan triggers: probe findings whose planImpact is "changes",
+ * live user edits, and chunk-level gate failures (from `chunkGateFailures`),
+ * minus anything a dcReplan row already answered (matched by trigger.ref).
  * @param {Record<string, any>[]} probeRows
  * @param {Record<string, any>[]} editRows
  * @param {Record<string, any>[]} replanRows
+ * @param {ChunkGateFailure[]} [chunkFailures]
  * @returns {DeriskTrigger[]}
  */
-declare function pendingTriggers(probeRows: Record<string, any>[], editRows: Record<string, any>[], replanRows: Record<string, any>[]): DeriskTrigger$1[];
+declare function pendingTriggers(probeRows: Record<string, any>[], editRows: Record<string, any>[], replanRows: Record<string, any>[], chunkFailures?: ChunkGateFailure[]): DeriskTrigger$1[];
+/**
+ * Map a trigger's flagged id onto the plan tree. Two flagged ids are not plan
+ * nodes and would otherwise be silently swallowed by `planOwnerOf`:
+ * - a probe logical id (`<parent>#<risk>`) — a live edit on a probe's output
+ *   replans the probe's PARENT (the planning node that owns the risk);
+ * - the goal node (`"goal"`) — an edit to the approved goal after planning
+ *   started re-opens ROOT planning (the root plan is the goal's direct
+ *   consumer), unless a caller really planned a node named "goal".
+ * @param {string} flagged
+ * @param {Map<string, { plan: DcPlanRow; versions: number }>} plans
+ * @returns {string}
+ */
+declare function triggerTargetOf(flagged: string, plans: Map<string, {
+    plan: DcPlanRow$1;
+    versions: number;
+}>): string;
 /**
  * How many replan decisions a node has already made (its per-node round counter).
  * @param {Record<string, any>[]} replanRows
@@ -2643,8 +2686,41 @@ declare function leafComplete(opts: {
     devPreviewRows?: Record<string, any>[];
 }): boolean;
 /**
+ * @typedef {{ logicalId: string; gateNodeId: string; ref: string; feedback: string }} ChunkGateFailure
+ */
+/**
+ * Chunk-level review-gate failures: for every planning (non-leaf) node with
+ * declared review gates, the gate nodes whose LATEST dcReview verdict is
+ * "fail" (a subsequent pass supersedes it). Leaf gate failures are handled by
+ * the leaf's own attempt loop (`leafAttemptState`); chunk reviews have no
+ * attempt loop, so a fail must become a derisk/replan trigger instead — each
+ * failure carries a deterministic `ref` (`<gateNodeId>#fail-<rowCount>`) that
+ * a dcReplan row addresses via `trigger.ref`, and a NEW failure after more
+ * rows re-triggers with a fresh ref.
+ * @param {{
+ *   idPrefix: string;
+ *   plans: Map<string, { plan: DcPlanRow; versions: number }>;
+ *   gates: Map<string, DcGatesRow>;
+ *   approvalPolicy: string | undefined;
+ *   reviewRows: Record<string, any>[];
+ * }} opts
+ * @returns {ChunkGateFailure[]}
+ */
+declare function chunkGateFailures(opts: {
+    idPrefix: string;
+    plans: Map<string, {
+        plan: DcPlanRow$1;
+        versions: number;
+    }>;
+    gates: Map<string, DcGatesRow$1>;
+    approvalPolicy: string | undefined;
+    reviewRows: Record<string, any>[];
+}): ChunkGateFailure[];
+/**
  * Whether the whole execution phase is complete: planning done, a non-empty
- * leaf frontier, and every leaf complete.
+ * leaf frontier, every leaf complete, and no chunk-level review gate stuck on
+ * a latest-fail — a chunk fail must be superseded by a later pass or answered
+ * by a dcReplan row (matched on `trigger.ref`) before scoring may start.
  * @param {{
  *   idPrefix: string;
  *   plans: Map<string, { plan: DcPlanRow; versions: number }>;
@@ -2654,6 +2730,8 @@ declare function leafComplete(opts: {
  *   reviewRows: Record<string, any>[];
  *   approvalRows: Record<string, any>[];
  *   devPreviewRows?: Record<string, any>[];
+ *   replanRows?: Record<string, any>[];
+ *   maxDeriskRounds?: number;
  * }} opts
  * @returns {boolean}
  */
@@ -2669,6 +2747,8 @@ declare function executionComplete(opts: {
     reviewRows: Record<string, any>[];
     approvalRows: Record<string, any>[];
     devPreviewRows?: Record<string, any>[];
+    replanRows?: Record<string, any>[];
+    maxDeriskRounds?: number;
 }): boolean;
 /**
  * Resolve a tier label to an agent from the `agents` prop, walking down the
@@ -2679,6 +2759,46 @@ declare function executionComplete(opts: {
  * @returns {AgentLike | AgentLike[] | undefined}
  */
 declare function agentForTier(agents: Partial<Record<Tier$2, AgentLike$1 | AgentLike$1[]>>, tier: Tier$2, tierOrder?: readonly Tier$2[]): AgentLike$1 | AgentLike$1[] | undefined;
+/**
+ * Synthesize the delegation event log the run scorers in
+ * `smithers-orchestrator/scorers` fold (`DelegationEvent[]` — the simulation
+ * contract's vocabulary) from the dc* rows the run actually wrote. Output
+ * rows carry no cross-table timestamps, so events are emitted in phase order
+ * with one documented approximation: probe/user-edit replans are treated as
+ * plan-phase (the derisk loop runs before execution), while review-fail
+ * replans are post-exec by construction (chunk reviews only run after their
+ * subtree executed) and are emitted after the execution events.
+ *
+ * Mapping (dc row → event `t`):
+ * - dcPlan.risks[*]                        → RISK_FLAGGED { node, risk }
+ * - dcPlan.risks[*] with probe poc/research → PROBE_SPAWNED { parent, probe: "<parent>#<risk>", kind }
+ * - dcProbe                                → FINDING_REPORTED { probe, toParent, planImpact }
+ * - dcReplan                               → REPLAN_REQUESTED { from, reason, trigger } then
+ *                                            NODE_INVALIDATED | NODE_REAFFIRMED { node }
+ * - dcExec first row per logicalId         → EXEC_STARTED { node }
+ * - dcExec subsequent rows (retries)       → REDELEGATED { node }
+ * - dcReview                               → GATE_FAILED | GATE_PASSED { node }
+ * - dcDevPreview with builtOk !== true     → GATE_FAILED { node, gate: "preview" }
+ * - every executed node, at the end        → NODE_DONE { node }
+ *
+ * @param {{
+ *   planRows: Record<string, any>[];
+ *   probeRows: Record<string, any>[];
+ *   replanRows: Record<string, any>[];
+ *   execRows: Record<string, any>[];
+ *   reviewRows: Record<string, any>[];
+ *   devPreviewRows?: Record<string, any>[];
+ * }} opts
+ * @returns {Record<string, any>[]}
+ */
+declare function synthesizeDelegationEvents(opts: {
+    planRows: Record<string, any>[];
+    probeRows: Record<string, any>[];
+    replanRows: Record<string, any>[];
+    execRows: Record<string, any>[];
+    reviewRows: Record<string, any>[];
+    devPreviewRows?: Record<string, any>[];
+}): Record<string, any>[];
 type AgentLike$1 = _smithers_orchestrator_agents_AgentLike.AgentLike;
 type DelegationNodeInfo$1 = {
     logicalId: string;
@@ -2690,10 +2810,16 @@ type DelegationNodeInfo$1 = {
     estimate?: Estimate$1;
 };
 type DeriskTrigger$1 = {
-    type: "probe" | "user-edit";
+    type: "probe" | "user-edit" | "review-fail";
     ref: string;
     flagged: string;
     detail: Record<string, any>;
+};
+type ChunkGateFailure = {
+    logicalId: string;
+    gateNodeId: string;
+    ref: string;
+    feedback: string;
 };
 type DcGatesRow$1 = DcGatesRow$2;
 type DcPlanRow$1 = DcPlanRow$2;
@@ -2707,9 +2833,12 @@ type Tier$2 = Tier$3;
  *
  * 1. Every risk with `probe != null` in a CURRENT plan spawns a probe task
  *    (haiku research / sonnet poc) reporting to its nearest parent only.
- * 2. Probe findings with `planImpact: "changes"` and delivered `dc-edit`
- *    signal rows are triggers. Affected = the flagged node + its dependents
- *    (child AND dep edges), each mapped to its plan-owning ancestor.
+ * 2. Probe findings with `planImpact: "changes"`, delivered `dc-edit`
+ *    signal rows, and chunk-level review-gate failures (trigger type
+ *    "review-fail") are triggers. Edits on probe outputs (`<parent>#<risk>`)
+ *    map to the probe's parent; post-approval goal edits map to the root.
+ *    Affected = the flagged node + its dependents (child AND dep edges),
+ *    each mapped to its plan-owning ancestor.
  * 3. Each affected owner gets a replan-decision task
  *    (`<p>:<id>:replan-<k>`, k = its per-node round counter); an
  *    `invalidated` decision mounts a fresh plan task (`<p>:<id>:plan-<k>`)
@@ -2720,8 +2849,6 @@ type Tier$2 = Tier$3;
 declare function DeriskLoop(props: DeriskLoopProps$1): React__default.FunctionComponentElement<SequenceProps$2> | null;
 type DeriskLoopProps$1 = DeriskLoopProps$2;
 
-/** @typedef {import("./delegationSchemas.ts").Gate} Gate */
-/** @typedef {import("./delegationState.js").DelegationNodeInfo} DelegationNodeInfo */
 /**
  * <DelegationExecution> — walk the leaf frontier with max parallelism
  * (frames 8-9).
@@ -2747,12 +2874,20 @@ type DelegationExecutionProps$1 = DelegationExecutionProps$2;
  * <DelegationScoring> — end-of-run scoring + human poll (frame 10).
  *
  * Per-task scorers ride the exec/review tasks inside DelegationExecution
- * (`scorers.exec` / `scorers.review`); this composite adds the run level:
- * a compute task (`<p>:root:score`) that digests the whole run's rows into a
- * dcScore row and carries the caller's `scorers.run` (e.g. built from
- * `delegationRunScore` in `smithers-orchestrator/scorers`), and — when
- * `poll` is enabled — the 3-question satisfaction poll HumanTask
- * (`<p>:root:poll`), the run's final attention badge.
+ * (`scorers.exec` / `scorers.review`); this composite adds the run level.
+ * When `poll` is enabled, the 3-question satisfaction poll HumanTask
+ * (`<p>:root:poll`) mounts FIRST — the run's final attention badge — and the
+ * run-score task (`<p>:root:score`) mounts only after the poll row lands, so
+ * `humanPollScorer` sees the submitted poll instead of always skipping.
+ *
+ * The score task carries the caller's `scorers.run` (e.g. built from
+ * `delegationRunScore` in `smithers-orchestrator/scorers`) and a `context`
+ * synthesized to the exact shapes those scorers parse:
+ * - `events` + `nodes` — a faithful DelegationEvent[] log derived from the
+ *   dc* rows (see `synthesizeDelegationEvents`) for pocJudgment/planSolidity;
+ * - `plan` + `exec` — the raw dcPlan/dcExec rows for estimateAccuracy;
+ * - `poll` — the poll's `{ question, answer }` entries for humanPoll;
+ * - `tier`/`brief`/`stats` — the root node descriptor for tierFit.
  * @param {DelegationScoringProps} props
  */
 declare function DelegationScoring(props: DelegationScoringProps$1): React__default.FunctionComponentElement<SequenceProps$2> | null;
@@ -3113,8 +3248,10 @@ declare function ContinueAsNew(props: ContinueAsNewProps$1): React__default.Reac
 /**
  * Convenience helper for conditional continuation inside workflow JSX:
  * `{shouldContinue ? continueAsNew({ cursor }) : null}`
+ * @param {unknown} [state]
+ * @returns {React.ReactElement}
  */
-declare function continueAsNew(state: any): React__default.FunctionComponentElement<ContinueAsNewProps$2>;
+declare function continueAsNew(state?: unknown): React__default.ReactElement;
 type ContinueAsNewProps$1 = ContinueAsNewProps$2;
 
 /** @typedef {import("./SagaStepProps.ts").SagaStepProps} SagaStepProps */
@@ -3303,7 +3440,6 @@ declare const markdownComponents: Record<string, React__default.FC<any>>;
  * @returns {string}
  */
 declare function renderMdx(Component: MDXContent, props?: Record<string, any>): string;
-declare function renderPromptToText(prompt: unknown): string;
 type MDXContent = React.ComponentType<Record<string, any>>;
 
 /** @typedef {import("zod").ZodObject<import("zod").ZodRawShape>} ZodObject */
@@ -3353,4 +3489,4 @@ type XmlElement = _smithers_orchestrator_graph.XmlElement;
 type XmlNode = _smithers_orchestrator_graph.XmlNode;
 type XmlText = _smithers_orchestrator_graph.XmlText;
 
-export { Approval, type ApprovalAutoApprove, type ApprovalDecision, ApprovalGate, type ApprovalGateProps, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, Aspects, type AspectsProps, BackpressurePlanning, type BackpressurePlanningProps, Branch, type BranchProps, type CachePolicy, type CategoryConfig, type CheckConfig, CheckSuite, type CheckSuiteProps, ClassifyAndRoute, type ClassifyAndRouteProps, type ColumnDef, ContentPipeline, type ContentPipelineProps, type ContentPipelineStage, ContinueAsNew, type ContinueAsNewProps, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_TIER_ORDER, type DcApprovalRow, type DcBudgetRow, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcForecastRow, type DcGatesRow, type DcGoalApprovalRow, type DcGoalRow, type DcPlanRow, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcScoreRow, type DcSkipRow, Debate, type DebateProps, type DecisionRule, DecisionTable, type DecisionTableProps, type DelegationAgents, type DelegationBudget, DelegationChain, type DelegationChainProps, DelegationEditListener, type DelegationEditListenerProps, DelegationExecution, type DelegationExecutionProps, type DelegationOutputs, DelegationPlanning, type DelegationPlanningProps, DelegationPreview, type DelegationPreviewProps, type DelegationScorers, DelegationScoring, type DelegationScoringProps, type DelegationSharedProps, type DepsSpec, DeriskLoop, type DeriskLoopProps, type DevPreviewKind, DriftDetector, type DriftDetectorProps, type EngineDecision, EscalationChain, type EscalationChainProps, type EscalationLevel, type Estimate, type ExtractOptions, type Gate, GatherAndSynthesize, type GatherAndSynthesizeProps, GoalRefinement, type GoalRefinementProps, type HostElement, type HostNode, type HostText, HumanTask, type HumanTaskProps, type InferDeps, type InferOutputEntry, type InferRow, Kanban, type KanbanProps, Loop, type LoopProps, MergeQueue, type MergeQueueProps, Optimizer, type OptimizerProps, type OutputAccessor, type OutputKey, type OutputTarget, Panel, type PanelProps, type PanelistConfig, Parallel, type ParallelProps, Poller, type PollerProps, Ralph, type RalphProps, type RenderContext, type RetryPolicy, ReviewLoop, type ReviewLoopProps, type RunAuthContext, type RunOptions, type RunResult, Runbook, type RunbookProps, type RunbookStep, Saga, type SagaProps, SagaStep, type SagaStepDef, type SagaStepProps, Sandbox, type SandboxEgressConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, ScanFixVerify, type ScanFixVerifyProps, type SchemaRegistryEntry, type ScorersMap, Sequence, type SequenceProps, Sidecar, type SidecarDelta, type SidecarProps, Signal, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersErrorCode, type SmithersWorkflow, type SmithersWorkflowDriverOptions, type SmithersWorkflowOptions, type SourceDef, Subflow, type SubflowProps, SuperSmithers, type SuperSmithersProps, Supervisor, type SupervisorProps, Task, type TaskDescriptor, type TaskProps, type Tier, Timer, type TimerProps, TryCatchFinally, type TryCatchFinallyProps, WaitForEvent, type WaitForEventProps, type WaitReason, Workflow, type WorkflowGraph, type WorkflowProps, type WorkflowRuntime, type WorkflowSession, Worktree, type WorktreeProps, type XmlElement, type XmlNode, type XmlText, actualTotals, agentForTier, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, captureWorkingCopyCommit, computeSidecarDelta, continueAsNew, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, dependentsOf, devPreviewKindSchema, devPreviewNodeId, estimateSchema, executionComplete, foldGates, foldPlans, frontierLeaves, gateSchema, leafAttemptState, leafComplete, leavesUnder, markdownComponents, nodeIndex, pendingTriggers, physicalId, planOwnerOf, planningComplete, probeIdFor, probesRequested, renderMdx, renderPromptToText, replanCountFor, splitGates, tierSchema, unplannedChunks, withCommitRange, zodSchemaToJsonExample };
+export { Approval, type ApprovalAutoApprove, type ApprovalDecision, ApprovalGate, type ApprovalGateProps, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, Aspects, type AspectsProps, BackpressurePlanning, type BackpressurePlanningProps, Branch, type BranchProps, type CachePolicy, type CategoryConfig, type CheckConfig, CheckSuite, type CheckSuiteProps, ClassifyAndRoute, type ClassifyAndRouteProps, type ColumnDef, ContentPipeline, type ContentPipelineProps, type ContentPipelineStage, ContinueAsNew, type ContinueAsNewProps, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_TIER_ORDER, type DcApprovalRow, type DcBudgetRow, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcForecastRow, type DcGatesRow, type DcGoalApprovalRow, type DcGoalRow, type DcPlanRow, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcScoreRow, type DcSkipRow, Debate, type DebateProps, type DecisionRule, DecisionTable, type DecisionTableProps, type DelegationAgents, type DelegationBudget, DelegationChain, type DelegationChainProps, DelegationEditListener, type DelegationEditListenerProps, DelegationExecution, type DelegationExecutionProps, type DelegationOutputs, DelegationPlanning, type DelegationPlanningProps, DelegationPreview, type DelegationPreviewProps, type DelegationScorers, DelegationScoring, type DelegationScoringProps, type DelegationSharedProps, type DepsSpec, DeriskLoop, type DeriskLoopProps, type DevPreviewKind, DriftDetector, type DriftDetectorProps, type EngineDecision, EscalationChain, type EscalationChainProps, type EscalationLevel, type Estimate, type ExtractOptions, type Gate, GatherAndSynthesize, type GatherAndSynthesizeProps, GoalRefinement, type GoalRefinementProps, type HostElement, type HostNode, type HostText, HumanTask, type HumanTaskProps, type InferDeps, type InferOutputEntry, type InferRow, Kanban, type KanbanProps, Loop, type LoopProps, MergeQueue, type MergeQueueProps, Optimizer, type OptimizerProps, type OutputAccessor, type OutputKey, type OutputTarget, Panel, type PanelProps, type PanelistConfig, Parallel, type ParallelProps, Poller, type PollerProps, Ralph, type RalphProps, type RenderContext, type RetryPolicy, ReviewLoop, type ReviewLoopProps, type RunAuthContext, type RunOptions, type RunResult, Runbook, type RunbookProps, type RunbookStep, Saga, type SagaProps, SagaStep, type SagaStepDef, type SagaStepProps, Sandbox, type SandboxEgressConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, ScanFixVerify, type ScanFixVerifyProps, type SchemaRegistryEntry, type ScorersMap, Sequence, type SequenceProps, Sidecar, type SidecarDelta, type SidecarProps, Signal, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersErrorCode, type SmithersWorkflow, type SmithersWorkflowDriverOptions, type SmithersWorkflowOptions, type SourceDef, Subflow, type SubflowProps, SuperSmithers, type SuperSmithersProps, Supervisor, type SupervisorProps, Task, type TaskDescriptor, type TaskProps, type Tier, Timer, type TimerProps, TryCatchFinally, type TryCatchFinallyProps, WaitForEvent, type WaitForEventProps, type WaitReason, Workflow, type WorkflowGraph, type WorkflowProps, type WorkflowRuntime, type WorkflowSession, Worktree, type WorktreeProps, type XmlElement, type XmlNode, type XmlText, actualTotals, agentForTier, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, captureWorkingCopyCommit, chunkGateFailures, computeSidecarDelta, continueAsNew, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, dependentsOf, devPreviewKindSchema, devPreviewNodeId, estimateSchema, executionComplete, foldGates, foldPlans, frontierLeaves, gateSchema, leafAttemptState, leafComplete, leavesUnder, markdownComponents, nodeIndex, pendingTriggers, physicalId, planOwnerOf, planningComplete, probeIdFor, probesRequested, renderMdx, renderPromptToText, replanCountFor, splitGates, synthesizeDelegationEvents, tierSchema, triggerTargetOf, unplannedChunks, withCommitRange, zodSchemaToJsonExample };

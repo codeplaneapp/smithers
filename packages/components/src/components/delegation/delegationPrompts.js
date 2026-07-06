@@ -75,10 +75,12 @@ export function goalQuestionsPrompt(opts) {
         "- Ask ONLY genuine user-preference questions — scope, taste, intent, appetite for risk. NEVER ask anything discoverable from the repository, docs, tools, or memory: answer those yourself and carry them as assumptions.",
         `- Forecast the full count now (total) and number the questions seq 1..N, most plan-changing first. Ask at most ${opts.maxQuestions}. Zero questions is a valid forecast.`,
         "- Every question carries a recommended default and the reason for it, so the user can accept your judgment with one click.",
+        "- Each question requires: seq (int), question, kind (one of \"select\"|\"confirm\"|\"text\"), recommended, reason — and for kind \"select\" an options array of { label, description }.",
         opts.approvalPolicy ? approvalPolicyRules(opts.approvalPolicy) : "",
         "",
         "Return JSON matching (logicalId is always \"goal\"):",
         zodSchemaToJsonExample(dcForecastSchema),
+        `Example question element: ${JSON.stringify({ seq: 1, question: "Which layout?", kind: "select", options: [{ label: "Grid", description: "cards in a grid" }, { label: "List", description: "vertical list" }], recommended: "Grid", reason: "denser overview" })}`,
     ].filter(Boolean).join("\n");
 }
 
@@ -183,7 +185,7 @@ export function planPrompt(opts) {
             ? `THIS IS A REPLAN (round ${opts.replan.round}, trigger ${opts.replan.triggerRef}). Your previous plan was invalidated: ${opts.replan.reason}. Produce the corrected plan; RE-FORECAST every estimate honestly from what you now know — do not anchor on your original numbers.`
             : "",
         "Rules:",
-        `- Children use path-style logical ids under yours: "${opts.logicalId}/<short-name>".`,
+        `- Children use path-style logical ids under yours: "${opts.logicalId}/<short-name>". Ids may contain only letters, digits, hyphen and underscore in each "/"-separated segment (no spaces, dots, or colons).`,
         mustLeaf
             ? `- You are at depth ${opts.depth} of max ${opts.maxDepth}: EVERY child must be kind "leaf".`
             : `- Declare each child "chunk" (needs further decomposition by a "${nextTier}"-tier owner) or "leaf" (directly executable). Split by EXECUTION context windows, not planning vanity — a small graph that fits the ask beats a deep one.`,
@@ -301,7 +303,7 @@ export function replanPrompt(opts) {
         .map((t) => t.type === "probe"
             ? `probe ${t.ref}: planImpact=changes — ${String(t.detail.proposedChange ?? t.detail.answer ?? "")}\nReport:\n${String(t.detail.report ?? "")}`
             : t.type === "review-fail"
-                ? `chunk review FAILED on "${t.flagged}" (ref ${t.ref}):\n${String(t.detail.feedback ?? "")}`
+                ? `chunk review FAILED on "${t.flagged}" (ref ${t.ref}):\n${String(t.detail.feedback ?? t.detail.proposedChange ?? "")}`
                 : `user edit ${t.ref} on ${t.flagged}: ${String(t.detail.note ?? "")}\nEdited output:\n${JSON.stringify(t.detail.editedOutput ?? null)}`)
         .join("\n\n");
     return [
@@ -344,7 +346,9 @@ export function execPrompt(opts) {
                 ? `- check: ${gate.command}`
                 : gate.method === "review"
                     ? `- review (${gate.tier}): ${gate.brief}`
-                    : `- approval: ${gate.policyMatch}`)
+                    : gate.method === "preview"
+                        ? `- preview (${gate.kind}): ${gate.brief}`
+                        : `- approval: ${gate.policyMatch}`)
             .join("\n");
     return [
         `Execute delegation leaf "${opts.leaf.logicalId}" (${opts.leaf.title}). Attempt ${opts.attempt}.`,

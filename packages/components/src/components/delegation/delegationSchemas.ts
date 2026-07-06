@@ -114,15 +114,29 @@ export const dcGoalApprovalSchema = z.object({
 });
 export type DcGoalApprovalRow = z.infer<typeof dcGoalApprovalSchema>;
 
+/**
+ * Path-style logical id: `[a-zA-Z0-9_-]` segments joined by "/". Agent-authored
+ * ids must survive `physicalId`'s `/`→`:` encoding into the gateway node-id
+ * charset (`[a-zA-Z0-9:_-]`, <=128 chars) — a space/dot/colon would produce a
+ * physical id the gateway's getNodeOutput/getNodeDiff reject.
+ */
+const logicalIdSchema = z
+	.string()
+	.regex(
+		/^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/,
+		'logicalId must be path-style with segments of [a-zA-Z0-9_-] joined by "/"',
+	)
+	.max(128);
+
 /** One row per delegating node: its children, risks, and resource estimates. Replans append superseding rows. */
 export const dcPlanSchema = z.object({
-	logicalId: z.string(),
+	logicalId: logicalIdSchema,
 	tier: tierSchema,
 	title: z.string(),
 	brief: z.string(),
 	children: z.array(
 		z.object({
-			logicalId: z.string(),
+			logicalId: logicalIdSchema,
 			tier: tierSchema,
 			kind: z.enum(["chunk", "leaf"]),
 			title: z.string(),
@@ -158,7 +172,7 @@ export type DcPreviewRow = z.infer<typeof dcPreviewSchema>;
 export const dcGatesSchema = z.object({
 	logicalId: z.string(),
 	gates: z.array(gateSchema),
-	depsLogical: z.array(z.string()),
+	depsLogical: z.array(logicalIdSchema),
 });
 export type DcGatesRow = z.infer<typeof dcGatesSchema>;
 

@@ -179,12 +179,19 @@ export function DeriskLoop(props) {
             }),
         }));
     }
-    // 3. Fresh plan versions for invalidated decisions.
+    // 3. Fresh plan versions for invalidated decisions. Key each corrective
+    //    plan by a TRUSTED per-owner index (insertion order of invalidated
+    //    rows), never the agent-reported dcReplan.round — trusting row.round
+    //    would collide two versions whose agent echoed the same round (the
+    //    package invariant: agent-reported fields never gate control flow).
+    /** @type {Map<string, number>} */
+    const invalidatedCount = new Map();
     for (const row of replanRows) {
         if (row.decision !== "invalidated" || typeof row.logicalId !== "string")
             continue;
         const owner = row.logicalId;
-        const round = Number(row.round) || 1;
+        const round = (invalidatedCount.get(owner) ?? 0) + 1;
+        invalidatedCount.set(owner, round);
         const node = nodes.get(owner);
         const tier = delegatingTierFor(node, nodes, tierOrder);
         newPlanTasks.push(React.createElement(Task, {

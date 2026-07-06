@@ -108,8 +108,20 @@ export function DelegationExecution(props) {
     const depsSatisfied = (leaf) => {
         const deps = gates.get(leaf.logicalId)?.depsLogical ?? [];
         return deps.every((dep) => {
-            const depLeaves = leavesUnder(dep, plans);
-            return depLeaves.length > 0 && depLeaves.every((depLeaf) => isComplete(depLeaf));
+            // A leaf can never meaningfully wait on itself or one of its own
+            // ancestors (the container it lives under); skipping avoids the
+            // self-inclusion deadlock AND the sibling mutual-deadlock that
+            // self-exclusion alone would create.
+            if (leaf.logicalId === dep || leaf.logicalId.startsWith(`${dep}/`))
+                return true;
+            const depLeaves = leavesUnder(dep, plans).filter((l) => l.logicalId !== leaf.logicalId);
+            // A dep that resolves to no leaves (typo / unknown id) would silently
+            // wedge the whole run (the leaf never mounts, executionComplete never
+            // turns true). Surface it instead of hanging.
+            if (depLeaves.length === 0) {
+                throw new SmithersError("INVALID_INPUT", `Delegation leaf "${leaf.logicalId}" declares dep "${dep}" that resolves to no leaves — a typo'd or unknown logical id.`);
+            }
+            return depLeaves.every((depLeaf) => isComplete(depLeaf));
         });
     };
     const pipelines = [];
@@ -181,7 +193,10 @@ export function DelegationExecution(props) {
             label: `exec: ${leaf.logicalId}`,
             children: execPrompt({
                 leaf,
-                gates: gatesRow.gates ?? [],
+                // Split gates so approval gates are dropped when no approvalPolicy
+                // applies and preview gates render their own brief line (not the
+                // "- approval: undefined" fallback).
+                gates: [...reviews, ...checks, ...approvals, ...previews],
                 attempt,
                 feedback: state.failedFeedback,
             }),

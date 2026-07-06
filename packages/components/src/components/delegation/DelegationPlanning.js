@@ -4,6 +4,7 @@
 
 import React from "react";
 import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { Sequence } from "../Sequence.js";
 import { Parallel } from "../Parallel.js";
 import { Task } from "../Task.js";
@@ -82,6 +83,12 @@ export function DelegationPlanning(props) {
     // library) instead of a plan-task subtree. Deferred for UI/debuggability
     // complexity; today every child is orchestration "tasks".
     for (const chunk of unplannedChunks(plans)) {
+        // Enforce the depth cap: an agent that disobeys "EVERY child must be
+        // kind leaf" at maxDepth would otherwise fan out delegating-tier plan
+        // tasks unbounded and planningComplete would never turn true.
+        if (logicalDepth(chunk.logicalId) >= maxDepth) {
+            throw new SmithersError("INVALID_INPUT", `Delegation plan for "${chunk.parentId}" declared chunk child "${chunk.logicalId}" at or past maxDepth ${maxDepth}; every child at the depth cap must be kind "leaf".`);
+        }
         const parent = chunk.parentId ? nodes.get(chunk.parentId) : undefined;
         const planId = physicalId(p, chunk.logicalId, "plan");
         tasks.push(React.createElement(Task, {

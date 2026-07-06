@@ -610,6 +610,7 @@ export function chunkGateFailures(opts) {
  *   approvalRows: Record<string, any>[];
  *   devPreviewRows?: Record<string, any>[];
  *   replanRows?: Record<string, any>[];
+ *   maxDeriskRounds?: number;
  * }} opts
  * @returns {boolean}
  */
@@ -622,10 +623,16 @@ export function executionComplete(opts) {
     const failures = chunkGateFailures(opts);
     if (failures.length === 0)
         return true;
-    const addressed = new Set((opts.replanRows ?? [])
+    const maxRounds = opts.maxDeriskRounds ?? 3;
+    const rr = opts.replanRows ?? [];
+    const addressed = new Set(rr
         .map((row) => row?.trigger?.ref)
         .filter((ref) => typeof ref === "string"));
-    return failures.every((failure) => addressed.has(failure.ref));
+    // A chunk failure is terminal once addressed by a replan (matched on
+    // trigger.ref) OR once its owning node has exhausted its per-node derisk
+    // budget — otherwise an exhausted owner + a pinned latest-fail chunk review
+    // would wedge the run forever (executionComplete never turning true).
+    return failures.every((failure) => addressed.has(failure.ref) || replanCountFor(rr, failure.logicalId) >= maxRounds);
 }
 
 /**
