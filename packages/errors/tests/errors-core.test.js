@@ -429,6 +429,26 @@ describe("toSmithersError", () => {
     expect(wrapped.cause).toBe(cause);
   });
 
+  test("expands AggregateError sub-errors with line numbers", () => {
+    // Regression: a Bun build failure surfaces as an AggregateError whose
+    // .message is a bare count ("2 errors building X") while the real esbuild
+    // messages and line numbers live on .errors[]. The summary must expose them
+    // so a failing graph/up render shows WHAT is wrong and WHERE, not just a count.
+    const cause = Object.assign(new Error('2 errors building "broken.tsx"'), {
+      errors: [
+        { message: 'Expected "}" but found "deploy"', position: { line: 14 } },
+        { message: "Unterminated string literal", position: { line: 14 } },
+      ],
+    });
+    const wrapped = toSmithersError(cause, "cli load workflow", {
+      code: "GRAPH_FAILED",
+    });
+    expect(wrapped.code).toBe("GRAPH_FAILED");
+    expect(wrapped.summary).toContain("Unterminated string literal");
+    expect(wrapped.summary).toContain("line 14");
+    expect(wrapped.cause).toBe(cause);
+  });
+
   test("wraps Node-style error objects instead of returning them unwrapped", () => {
     // Regression: a Node system error like { code: "ENOENT", message } must not
     // be mistaken for a SmithersError. It should be wrapped, not returned as-is,

@@ -16,6 +16,22 @@ function causeSummary(cause) {
         return typeof cause.summary === "string" ? cause.summary : cause.message;
     }
     if (cause instanceof Error) {
+        // AggregateError (e.g. a Bun build failure) hides the real messages behind
+        // a bare count like "2 errors building X". Expand the sub-errors so the
+        // summary shows each message and line number instead of just a total.
+        const subErrors = Array.isArray(/** @type {any} */ (cause).errors)
+            ? /** @type {any[]} */ (/** @type {any} */ (cause).errors)
+            : [];
+        if (subErrors.length > 0) {
+            const details = subErrors
+                .map((sub) => {
+                    const message = typeof sub?.message === "string" ? sub.message : String(sub);
+                    const line = sub?.position?.line;
+                    return typeof line === "number" ? `${message} (line ${line})` : message;
+                })
+                .join("; ");
+            return details ? `${cause.message}: ${details}` : cause.message;
+        }
         return cause.message;
     }
     return String(cause);
