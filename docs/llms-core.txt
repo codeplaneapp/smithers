@@ -2073,7 +2073,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[87]:
+commands[88]:
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal a wizard first lets you pick workflows and skill targets; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -2604,6 +2604,17 @@ commands[87]:
     flags[2]{name,short,type,default,desc}:
       check,,boolean,false,Only report current vs latest version; never upgrade
       dry-run,,boolean,false,Print the upgrade command without running it
+  - name: upgrade
+    purpose: "Run the agent-assisted Smithers upgrade workflow: fetch changelogs, upgrade with a cheap agent, and escalate to a smart agent only when needed."
+    flags[8]{name,short,type,default,desc}:
+      interactive,,boolean,false,Force the full-screen interactive TUI monitor (TTY only).
+      detach,d,boolean,false,Launch the upgrade workflow in the background and print the run ID.
+      dry-run,,boolean,false,Fetch changelogs and plan the upgrade without changing the install.
+      run-id,,string,,Explicit run ID for the upgrade workflow.
+      root,,string,,Tool sandbox root directory.
+      log-dir,,string,,NDJSON event logs directory.
+      backend,,enum,,"sqlite|pglite|postgres"
+      auth-token,,string,,Bearer token passed to the interactive monitor gateway client.
   - name: agents.capabilities
     purpose: Print JSON capability registry for built-in CLI agents
   - name: agents.doctor
@@ -6323,12 +6334,25 @@ Major sections at a glance:
 interface SmithersWorkflow<Schema = unknown> {
   readonly readableName?: string;
   readonly description?: string;
+  readonly ui?: WorkflowViewDefinition;
+  readonly tui?: WorkflowViewDefinition;
   readonly db?: unknown;
   readonly build: (ctx: SmithersCtx<Schema>) => JSX.Element;
   readonly opts: SmithersWorkflowOptions;
   readonly schemaRegistry?: Map<string, SchemaRegistryEntry>;
   readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;
 }
+
+type WorkflowViewDefinition = {
+  kind: "ui" | "tui";
+  title?: string;
+  props?: Record<string, unknown>;
+  entry?: string;
+  path?: string;
+  source?: string;
+  exportName?: string;
+  literal?: WorkflowLiteralViewNode;
+};
 
 type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
