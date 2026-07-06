@@ -15,6 +15,7 @@ export * from "./events.js";
 export * from "./createDocWatcher.js";
 export * from "./getDefinedToolMetadata.js";
 export * from "./human-requests.js";
+export * from "./platform-layer.js";
 export * from "./runtime-owner.js";
 export * from "./scheduler.js";
 export * from "./signals.js";

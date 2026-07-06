@@ -28,6 +28,7 @@
     "@effect/cluster": "^0.59.0",
     "@effect/experimental": "^0.60.0",
     "@effect/platform-bun": "^0.90.0",
+    "@effect/platform-node": "^0.107.0",
     "@effect/rpc": "^0.75.1",
     "@effect/sql": "^0.51.1",
     "@effect/sql-sqlite-bun": "^0.52.0",

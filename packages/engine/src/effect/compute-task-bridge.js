@@ -11,9 +11,9 @@ import { fromTaggedError } from "@smithers-orchestrator/errors/fromTaggedError";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { getJjPointer } from "@smithers-orchestrator/vcs/jj";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import { runPromiseWithEnginePlatform, sleepMs } from "../platform-layer.js";
 /**
- * @typedef {{ rootDir: string; }} ComputeTaskBridgeToolConfig
+ * @typedef {{ rootDir: string; platformLayer?: unknown; }} ComputeTaskBridgeToolConfig
  */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
 /** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
@@ -342,7 +342,7 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
     };
     const waitForHeartbeatWriteDrain = async () => {
         while (heartbeatWriteInFlight) {
-            await Bun.sleep(5);
+            await sleepMs(5);
         }
     };
     /**
@@ -536,7 +536,7 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
         payload = validation.data;
         taskExecutionReturned = true;
         await Effect.runPromise(eventBus.flush());
-        const jjPointer = await Effect.runPromise(getJjPointer(toolConfig.rootDir).pipe(Effect.provide(BunContext.layer)));
+        const jjPointer = await runPromiseWithEnginePlatform(getJjPointer(toolConfig.rootDir), toolConfig.platformLayer);
         await waitForHeartbeatWriteDrain();
         await flushHeartbeat(true);
         taskCompleted = true;

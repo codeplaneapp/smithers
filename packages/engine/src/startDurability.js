@@ -6,8 +6,7 @@
 // DI seams (isJjRepoFn / captureSnapshot / createWatcher) default to the real jj +
 // fs watcher and are overridden in tests.
 
-import { Effect } from "effect";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import { runPromiseWithEnginePlatform } from "./platform-layer.js";
 import { captureWorkspaceSnapshot, isJjRepo } from "@smithers-orchestrator/vcs/jj";
 import { createSnapshotService } from "./snapshotService.js";
 import { createWorkspaceWatcher } from "./workspaceWatcher.js";
@@ -27,10 +26,11 @@ function hookLabel(p) {
 
 /**
  * @template A
- * @param {Effect.Effect<A, never, any>} effect
+ * @param {import("effect").Effect.Effect<A, never, any>} effect
+ * @param {unknown} platformLayer
  * @returns {Promise<A>}
  */
-const runVcs = (effect) => Effect.runPromise(effect.pipe(Effect.provide(BunContext.layer)));
+const runVcs = (effect, platformLayer) => runPromiseWithEnginePlatform(effect, platformLayer);
 
 const NOOP_HANDLE = {
     active: false,
@@ -56,6 +56,7 @@ const NOOP_HANDLE = {
  * @property {(deps: { cwd: string, onSettle: () => void }) => { close: () => void, watching?: boolean }} [createWatcher]
  * @property {boolean} [withSocket] When true, open a snapshot socket server so a CLI agent's hook can request strict Tier 1 snapshots.
  * @property {(deps: { runId: string, nodeId: string, snapshot: Function }) => Promise<{ socketPath: string, close: () => void }>} [createSocketServer]
+ * @property {unknown} [platformLayer]
  */
 
 /**
@@ -73,8 +74,9 @@ export async function startDurability(opts) {
         cwd,
         nowMs = () => Date.now(),
         onGap,
-        isJjRepoFn = (c) => runVcs(isJjRepo(c)),
-        captureSnapshot = (c) => runVcs(captureWorkspaceSnapshot(c)),
+        platformLayer,
+        isJjRepoFn = (c) => runVcs(isJjRepo(c), platformLayer),
+        captureSnapshot = (c) => runVcs(captureWorkspaceSnapshot(c), platformLayer),
         createWatcher = createWorkspaceWatcher,
         withSocket = false,
         createSocketServer = createSnapshotServer,

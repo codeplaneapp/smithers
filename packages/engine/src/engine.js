@@ -29,7 +29,7 @@ import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "./re
 import { appendGap, defaultGapSpoolPath } from "./durabilityGapSpool.js";
 import { runWithToolContext } from "@smithers-orchestrator/tool-context";
 import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import { resolveEnginePlatformLayer, runWithEnginePlatform, sleepMs, whichExecutable } from "./platform-layer.js";
 import { getTableName, isTable } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { Cause, Duration, Effect, Exit, Fiber, Metric, Schedule } from "effect";
@@ -61,6 +61,7 @@ import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
 /** @typedef {import("@smithers-orchestrator/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
+/** @typedef {RunOptions & { enginePlatformLayer?: unknown; platformLayer?: unknown }} EngineRunOptions */
 /** @typedef {import("@smithers-orchestrator/driver/RunResult").RunResult} RunResult */
 /** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
 /** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
@@ -77,8 +78,8 @@ import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
  * re-create them for every task sharing the same worktree.
  */
 const createdWorktrees = new Set();
-const gitBinary = typeof Bun !== "undefined" ? Bun.which("git") : null;
-const caffeinateBinary = typeof Bun !== "undefined" ? Bun.which("caffeinate") : null;
+const gitBinary = whichExecutable("git") ?? "git";
+const caffeinateBinary = whichExecutable("caffeinate");
 const RUN_WORKFLOW_RUN_ID_MAX_LENGTH = 256;
 const RUN_WORKFLOW_WORKFLOW_PATH_MAX_LENGTH = 4096;
 const RUN_WORKFLOW_INPUT_MAX_BYTES = 1024 * 1024;
@@ -721,14 +722,14 @@ async function ensureJjWorkspaceGitRoot(gitRoot, worktreePath, branch, baseBranc
  * created/updated in the new worktree. Safe to call multiple times for the
  * same path.
  */
-async function ensureWorktree(rootDir, worktreePath, branch, baseBranch) {
+async function ensureWorktree(rootDir, worktreePath, branch, baseBranch, platformLayer) {
     if (existsSync(worktreePath)) {
         // Worktree exists — rebase onto the configured base branch so work starts from tip.
         const vcs = findVcsRoot(rootDir);
         const base = baseBranch || "main";
         if (vcs?.type === "jj") {
-            await Effect.runPromise(runJj(["git", "fetch"], { cwd: worktreePath }).pipe(Effect.provide(BunContext.layer)));
-            const rebaseRes = await Effect.runPromise(runJj(["rebase", "-d", base], { cwd: worktreePath }).pipe(Effect.provide(BunContext.layer)));
+            await Effect.runPromise(runWithEnginePlatform(runJj(["git", "fetch"], { cwd: worktreePath }), platformLayer));
+            const rebaseRes = await Effect.runPromise(runWithEnginePlatform(runJj(["rebase", "-d", base], { cwd: worktreePath }), platformLayer));
             if (rebaseRes.code !== 0) {
                 console.warn(`[smithers] worktree sync: jj rebase -d ${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`);
             }
@@ -764,15 +765,15 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch) {
     }
     if (vcs.type === "jj") {
         const name = worktreePath.split("/").pop() ?? "worktree";
-        const wsResult = await Effect.runPromise(workspaceAdd(name, worktreePath, { cwd: vcs.root, atRev: baseBranch }).pipe(Effect.provide(BunContext.layer)));
+        const wsResult = await Effect.runPromise(runWithEnginePlatform(workspaceAdd(name, worktreePath, { cwd: vcs.root, atRev: baseBranch }), platformLayer));
         if (!wsResult.success) {
             throw new SmithersError("WORKTREE_CREATE_FAILED", `Failed to create jj workspace at ${worktreePath}: ${wsResult.error}`, { worktreePath, vcsType: "jj" });
         }
         // Create a bookmark pointing at the new workspace's working copy
         if (branch) {
-            const setRes = await Effect.runPromise(runJj(["bookmark", "set", branch, "-r", "@", "--allow-backwards"], {
+            const setRes = await Effect.runPromise(runWithEnginePlatform(runJj(["bookmark", "set", branch, "-r", "@", "--allow-backwards"], {
                 cwd: worktreePath,
-            }).pipe(Effect.provide(BunContext.layer)));
+            }), platformLayer));
             if (setRes.code !== 0) {
                 throw new SmithersError("WORKTREE_CREATE_FAILED", `Failed to set jj bookmark ${branch} in ${worktreePath}: ${setRes.stderr || `exit ${setRes.code}`}`, { worktreePath, branch, vcsType: "jj" });
             }
@@ -1711,9 +1712,10 @@ async function getGitPointer(cwd) {
 /**
  * @param {string | null} workflowPath
  * @param {string} rootDir
+ * @param {unknown} platformLayer
  * @returns {Promise<RunDurabilityMetadata>}
  */
-async function getRunDurabilityMetadata(workflowPath, rootDir) {
+async function getRunDurabilityMetadata(workflowPath, rootDir, platformLayer) {
     const entryWorkflowHash = await readWorkflowEntryHash(workflowPath);
     const workflowHash = await readWorkflowGraphHash(workflowPath);
     const vcs = findVcsRoot(rootDir);
@@ -1727,7 +1729,7 @@ async function getRunDurabilityMetadata(workflowPath, rootDir) {
         };
     }
     const vcsRevision = vcs.type === "jj"
-        ? await Effect.runPromise(getJjPointer(rootDir).pipe(Effect.provide(BunContext.layer)))
+        ? await Effect.runPromise(runWithEnginePlatform(getJjPointer(rootDir), platformLayer))
         : await getGitPointer(rootDir);
     return {
         workflowHash,
@@ -1998,7 +2000,7 @@ function startRunSupervisor(adapter, runId, runtimeOwnerId, controller, hijackSt
                     error: error instanceof Error ? error.message : String(error),
                 }, "engine:cancel-watch");
             }
-            await Bun.sleep(RUN_CANCEL_POLL_MS);
+            await sleepMs(RUN_CANCEL_POLL_MS);
         }
     })();
     return async () => {
@@ -2741,7 +2743,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     };
     const waitForHeartbeatWriteDrain = async () => {
         while (heartbeatWriteInFlight) {
-            await Bun.sleep(5);
+            await sleepMs(5);
         }
     };
     const attemptMeta = {
@@ -2870,7 +2872,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             }), Schedule.spaced(Duration.millis(TASK_HEARTBEAT_TIMEOUT_CHECK_MS))).pipe(Effect.flatMap(() => Effect.never)));
         }
         if (desc.worktreePath) {
-            await ensureWorktree(toolConfig.rootDir, desc.worktreePath, desc.worktreeBranch, desc.worktreeBaseBranch);
+            await ensureWorktree(toolConfig.rootDir, desc.worktreePath, desc.worktreeBranch, desc.worktreeBaseBranch, toolConfig.platformLayer);
             // Safety net for a silent, expensive footgun: a worker's working dir resolves as
             // `agent.cwd ?? worktreePath ?? repoRoot`, so an agent constructed with a pinned
             // `cwd` (e.g. `cwd: process.cwd()`) OVERRIDES this <Worktree>. The worker then
@@ -2902,7 +2904,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             const agentSig = cacheAgent?.id ?? "agent";
             const toolsSig = hashCapabilityRegistry(cacheAgent?.capabilities ?? null);
             // Incorporate JJ state so workspace changes invalidate cache as documented.
-            const jjBase = await Effect.runPromise(getJjPointer(taskRoot).pipe(Effect.provide(BunContext.layer)));
+            const jjBase = await Effect.runPromise(runWithEnginePlatform(getJjPointer(taskRoot), toolConfig.platformLayer));
             cacheJjBase = jjBase ?? null;
             let cacheBase;
             let cacheKeyDisabled = false;
@@ -3511,6 +3513,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         runId,
                         nodeId: desc.nodeId,
                         iteration: desc.iteration,
+                        platformLayer: toolConfig.platformLayer,
                     });
                     // A failed restore means the agent is about to resume against a
                     // stale or half-written tree. Never swallow it: surface a
@@ -3562,6 +3565,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     attempt: attemptNo,
                     cwd: taskRoot,
                     withSocket: true,
+                    platformLayer: toolConfig.platformLayer,
                 });
                 const docFileSync = await startDocFileSync({
                     enabled: process.env.SMITHERS_DOCS_FILE_SYNC === "1",
@@ -4266,7 +4270,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         taskExecutionReturned = true;
         await Effect.runPromise(eventBus.flush());
         // Reuse the resolved taskRoot for JJ pointer capture to avoid recomputing.
-        const jjPointer = await Effect.runPromise(getJjPointer(taskRoot).pipe(Effect.provide(BunContext.layer)));
+        const jjPointer = await Effect.runPromise(runWithEnginePlatform(getJjPointer(taskRoot), toolConfig.platformLayer));
         await waitForHeartbeatWriteDrain();
         await flushHeartbeat(true);
         taskCompleted = true;
@@ -4861,7 +4865,7 @@ function timerStartsFromContinuationEnvelope(envelope) {
 /**
  * @template Schema
  * @param {SmithersWorkflow<Schema>} workflow
- * @param {RunOptions} opts
+ * @param {EngineRunOptions} opts
  * @returns {Promise<RunBodyResult>}
  */
 async function runWorkflowBodyDriver(workflow, opts) {
@@ -4884,6 +4888,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const toolTimeoutMs = coercePositiveInt("toolTimeoutMs", opts.toolTimeoutMs, DEFAULT_TOOL_TIMEOUT_MS);
     const allowNetwork = Boolean(opts.allowNetwork);
     const runtimeOwnerId = buildRuntimeOwnerId();
+    const platformLayer = await resolveEnginePlatformLayer(opts.enginePlatformLayer ?? opts.platformLayer);
     const runAbortController = new AbortController();
     // A graceful pause stops the driver from scheduling new tasks but, unlike
     // cancel, does NOT abort in-flight tasks — so it gets its own signal that is
@@ -4895,7 +4900,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     };
     const detachAbort = wireAbortSignal(runAbortController, opts.signal);
     let stopSupervisor = async () => { };
-    const runMetadata = await getRunDurabilityMetadata(resolvedWorkflowPath, rootDir);
+    const runMetadata = await getRunDurabilityMetadata(resolvedWorkflowPath, rootDir, platformLayer);
     const lastSeq = await Effect.runPromise(adapter.getLastEventSeq(runId));
     const eventBus = new EventBus({
         db: adapter,
@@ -4925,6 +4930,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         allowNetwork,
         maxOutputBytes,
         toolTimeoutMs,
+        platformLayer,
         agentPreflightCache: new WeakMap(),
         traceContext: {
             workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? null,
@@ -4998,7 +5004,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 }, "engine:run");
                 return;
             }
-            await Bun.sleep(RUN_ABORT_SETTLE_POLL_MS);
+            await sleepMs(RUN_ABORT_SETTLE_POLL_MS);
         }
     };
     /**
@@ -5221,7 +5227,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             case "Timer":
                 return reconcileTimerWait(reason.resumeAtMs);
             case "RetryBackoff":
-                await Bun.sleep(Math.max(0, reason.waitMs));
+                await sleepMs(Math.max(0, reason.waitMs));
                 return submitLastGraph();
             case "Quota":
                 return markRunWaiting("waiting-quota", "quota", {

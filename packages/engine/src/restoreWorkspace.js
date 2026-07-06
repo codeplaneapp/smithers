@@ -6,16 +6,16 @@
 // existing revertToJjPointer). DI seam on `revert` keeps it unit-testable; never
 // throws, returns a structured result the caller can log or branch on.
 
-import { Effect } from "effect";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import { runPromiseWithEnginePlatform } from "./platform-layer.js";
 import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
 
 /**
  * @param {string} commitId
  * @param {string} cwd
+ * @param {unknown} platformLayer
  * @returns {Promise<{ success: boolean, error?: string }>}
  */
-const defaultRevert = (commitId, cwd) => Effect.runPromise(revertToJjPointer(commitId, cwd).pipe(Effect.provide(BunContext.layer)));
+const defaultRevert = (commitId, cwd, platformLayer) => runPromiseWithEnginePlatform(revertToJjPointer(commitId, cwd), platformLayer);
 
 /**
  * Pick the chronologically latest checkpoint, breaking ties by attempt then seq.
@@ -43,6 +43,7 @@ function latestCheckpoint(rows) {
  * @property {string} nodeId
  * @property {number} [iteration]
  * @property {(commitId: string, cwd: string) => Promise<{ success: boolean, error?: string }>} [revert]
+ * @property {unknown} [platformLayer]
  */
 
 /**
@@ -50,7 +51,7 @@ function latestCheckpoint(rows) {
  * @returns {Promise<{ restored: boolean, reason?: string, commitId?: string, cwd?: string, seq?: number, error?: string }>}
  */
 export async function restoreWorkspaceToLatestCheckpoint(opts) {
-    const { adapter, runId, nodeId, iteration = 0, revert = defaultRevert } = opts;
+    const { adapter, runId, nodeId, iteration = 0, platformLayer, revert = (commitId, cwd) => defaultRevert(commitId, cwd, platformLayer) } = opts;
 
     let rows;
     try { rows = await adapter.listWorkspaceCheckpoints(runId); }
