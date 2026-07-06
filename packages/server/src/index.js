@@ -426,7 +426,6 @@ function assertAuth(req, authToken) {
     if (!authToken)
         return;
     const header = req.headers["authorization"] ??
-        req.headers["Authorization"] ??
         req.headers["x-smithers-key"];
     const value = Array.isArray(header) ? header[0] : header;
     const token = value?.slice(0, 7).toLowerCase() === "bearer " ? value.slice(7) : value;
