@@ -105,7 +105,9 @@ captureTest("capture workflow UI screenshots", async () => {
     for (const d of DESCRIPTORS) {
       const runId = runIdByKey[d.key];
       const url = `${base}/workflows/${d.key}${runId ? `?runId=${runId}` : ""}`;
-      await page.goto(url, { waitUntil: "networkidle" });
+      // A workflow UI holds a live Gateway WebSocket, so the network never goes
+      // idle — wait for the document, then for the UI's own ready selector.
+      await page.goto(url, { waitUntil: "domcontentloaded" });
       try { await page.waitForSelector(`[data-testid="${d.primaryTestId}"]`, { timeout: 15_000 }); } catch {}
       if (d.verifyOutput && d.populatedTestId) {
         try { await page.waitForSelector(`[data-testid="${d.populatedTestId}"]`, { timeout: 10_000 }); } catch {}
@@ -116,8 +118,8 @@ captureTest("capture workflow UI screenshots", async () => {
       console.log(`  shot ${d.key}${runId ? " (run " + runId.slice(0, 8) + ")" : " (empty state)"} -> ${file}`);
     }
     // Also capture kanban (its own UI, not in descriptors).
-    await page.goto(`${base}/workflows/kanban`, { waitUntil: "networkidle" });
-    await new Promise((r) => setTimeout(r, 400));
+    await page.goto(`${base}/workflows/kanban`, { waitUntil: "domcontentloaded" });
+    await new Promise((r) => setTimeout(r, 1_000));
     await page.screenshot({ path: resolve(OUT_DIR, "kanban.png") });
     console.log("  shot kanban (empty state)");
   } finally {

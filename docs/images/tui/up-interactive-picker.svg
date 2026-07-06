@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="728" height="418" viewBox="0 0 728 418" role="img" aria-label="smithers up --interactive picker">
+  <rect width="728" height="418" rx="14" fill="#080b12"/>
+  <rect x="0" y="0" width="728" height="34" rx="14" fill="#111827"/>
+  <rect x="0" y="20" width="728" height="18" fill="#111827"/>
+  <circle cx="24" cy="18" r="5" fill="#ff5f57"/>
+  <circle cx="42" cy="18" r="5" fill="#ffbd2e"/>
+  <circle cx="60" cy="18" r="5" fill="#28c840"/>
+  <text x="364" y="22" text-anchor="middle" fill="#9ca3af" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="12">smithers up --interactive picker</text>
+  <text xml:space="preserve" fill="#d7dde8" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="14">
+    <tspan x="28" y="54">┌   smithers  interactive</tspan>
+    <tspan x="28" y="74">│</tspan>
+    <tspan x="28" y="94">◆  Select a workflow to run</tspan>
+    <tspan x="28" y="114">│  Type to filter…</tspan>
+    <tspan x="28" y="134">│  ● Audit (Run the audit Smithers workflow from this repository.)</tspan>
+    <tspan x="28" y="154">│  ○ Audit Burndown</tspan>
+    <tspan x="28" y="174">│  ○ Audit Fix Train</tspan>
+    <tspan x="28" y="194">│  ○ Backpressure Plan</tspan>
+    <tspan x="28" y="214">│  ○ Break Smithers (EDD Loop)</tspan>
+    <tspan x="28" y="234">│  ○ Build TUI Monitor</tspan>
+    <tspan x="28" y="254">│  ○ Bulletproof Audit</tspan>
+    <tspan x="28" y="274">│  ○ Close Issues (Codex)</tspan>
+    <tspan x="28" y="294">│  ○ Consolidate 06-07 onto TanStack DB</tspan>
+    <tspan x="28" y="314">│  ○ Context Doctor</tspan>
+    <tspan x="28" y="334">│  ○ Context Engineer</tspan>
+    <tspan x="28" y="354">│  ...</tspan>
+    <tspan x="28" y="374">└</tspan>
+  </text>
+</svg>

@@ -1613,8 +1613,11 @@ Use this loop for broad, ambiguous, risky, long-running, or multi-agent work:
    acceptance criteria, risks, and the evidence the human needs to see.
 4. Design the Smithers run. Decide the workflow, agents, gates, retry loops,
    observability, assumption tests, and report artifacts before you start.
-5. Validate the workflow shape. Render the graph or dry-run evals before
-   launching expensive or destructive work.
+5. Validate the workflow shape. Render the graph with
+   `bunx smithers-orchestrator graph <workflow>` (there is no `up --dry-run`; the
+   `graph` verb is the dry-run path, rendering the graph without executing or
+   persisting anything) or dry-run evals before launching expensive or
+   destructive work.
 6. Run with observability. Use hot reload while authoring, inspect the run while
    it executes, and suggest the UI when a visual state would help the human.
 7. Report with evidence. Produce a concise Markdown or HTML report that links to
@@ -1898,7 +1901,8 @@ Before launching:
 - Outcome, finish line, and evidence are written down.
 - Missing context has been researched or asked for.
 - Third-party assumptions have probes or are explicitly marked as risks.
-- Workflow graph or eval dry-run has been checked.
+- Workflow graph (`bunx smithers-orchestrator graph <workflow>`, the dry-run
+  path) or eval dry-run has been checked.
 - Backpressure checks exist and can fail.
 - Observability path is chosen.
 - Report artifact path is chosen.
@@ -2888,7 +2892,7 @@ commands[88]:
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
 - **Account commands**: `agents add|list|remove|test` manage `~/.smithers/accounts.json`; subscription providers use CLI config directories, API providers use API keys.
 - **Output format**: all commands honour `--format toon|json|yaml|md|jsonl`; `--filter-output <key.path>` extracts a nested field from JSON output.
-- **Removed command**: `bunx smithers-orchestrator tui` was removed in 0.20.2. Use `ps`, `events`, `chat`, `inspect`, `node`, `tree`, `diff`, `output`, or `rewind` instead. See [`/guides/tui`](/guides/tui) for migration details.
+- **Interactive TUI**: use `bunx smithers-orchestrator up --interactive` or `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive` for the current full-screen terminal monitor. `bunx smithers-orchestrator init` also has a human setup wizard. See [Interactive TUI](/guides/tui).
 
 ---
 
@@ -10155,34 +10159,106 @@ The monitor replaced the retired `monitor` *workflow*, which had to launch a dur
 
 ---
 
-## TUI Removed
+## Interactive TUI
 
-> The old smithers tui command is no longer shipped; use the CLI commands instead.
+> Use bunx smithers-orchestrator init, up --interactive, and workflow run --interactive to pick workflows, collect inputs, and watch runs in the full-screen terminal monitor.
 
-`bunx smithers-orchestrator tui` was removed in `0.20.2`. Use the commands in the table below instead.
+Smithers has two terminal UI surfaces:
 
-That removal dropped the old `apps/cli/src/tui/` tree (and, at the time, the CLI's OpenTUI dependency). OpenTUI has since returned in a different place: the full-screen single-run monitor (a separate `@smithers-orchestrator/tui` package, `smithers-mon` bin) is built on OpenTUI and is what `up --interactive` hands off to (see below). The historical note above is about the *old* `tui` command, not the new monitor.
+1. `bunx smithers-orchestrator init` opens an interactive setup wizard unless you pass `--yes` / `--non-interactive`.
+2. `bunx smithers-orchestrator up --interactive` and `bunx smithers-orchestrator workflow run --interactive` open the run launcher and then the full-screen monitor.
 
-If you want the old "pick a workflow, start it, and watch it live" experience, that flow now lives behind a flag on the run commands: [`up --interactive`](/cli/overview) (or [`workflow run --interactive`](/cli/overview)). With no workflow argument it opens an interactive picker, prompts for inputs, starts the run, and then hands off to the full-screen single-run monitor (a separate `smithers-mon` binary) for the lifetime of the run. There is no silent fallback: if `@smithers-orchestrator/tui` cannot be resolved (e.g. a slim install), the command fails with `TUI_MONITOR_UNAVAILABLE` while the detached run keeps running; watch it with [`bunx smithers-orchestrator ps`](/cli/overview) / [`bunx smithers-orchestrator inspect RUN_ID`](/cli/overview) or the run's log file.
+The old standalone `bunx smithers-orchestrator tui` command was removed in `0.20.2`. The current TUI path is the `--interactive` mode on run commands.
 
-## Replacements
+## Interactive setup
 
-| Need | Use |
+Run `init` in a human terminal when you want to choose which workflow-pack files and agent integrations to install:
+
+```bash
+bunx smithers-orchestrator init
+```
+
+For CI, scripts, or agent-driven setup, use the non-interactive form:
+
+```bash
+bunx smithers-orchestrator init --yes
+```
+
+<Frame caption="Captured from tmux: bunx smithers-orchestrator init starts with a workflow-pack picker, so a human can decide which workflows to install.">
+  <img src="/images/tui/init-workflow-selection.svg" alt="Terminal screenshot of bunx smithers-orchestrator init showing the workflow selection checklist" />
+</Frame>
+
+## Interactive run launcher
+
+Use `up --interactive` when you want Smithers to help pick a workflow and collect inputs:
+
+```bash
+bunx smithers-orchestrator up --interactive
+```
+
+From an interactive TTY, omitting the workflow argument also opens the same launcher:
+
+```bash
+bunx smithers-orchestrator up
+```
+
+<Frame caption="Captured from tmux: up --interactive opens a searchable workflow picker before it starts a run.">
+  <img src="/images/tui/up-interactive-picker.svg" alt="Terminal screenshot of bunx smithers-orchestrator up --interactive showing the workflow picker" />
+</Frame>
+
+Use `workflow run --interactive` when you prefer workflow IDs over file paths:
+
+```bash
+bunx smithers-orchestrator workflow run --interactive
+bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive
+```
+
+Passing a workflow ID skips the picker and goes straight to the input prompts for that workflow:
+
+<Frame caption="Captured from tmux: workflow run hello --interactive preselects hello and prompts for its input schema.">
+  <img src="/images/tui/workflow-run-interactive-input.svg" alt="Terminal screenshot of workflow run hello --interactive prompting for the name input" />
+</Frame>
+
+## Full-screen monitor
+
+After the launcher starts the run, Smithers detaches the workflow process and hands your terminal to the full-screen monitor from `@smithers-orchestrator/tui`. The monitor connects to the workspace Gateway, starts one if needed, and streams the run tree, output, logs, diffs, timeline, and hijack state.
+
+```bash
+bunx smithers-orchestrator workflow run hello --interactive
+```
+
+<Frame caption="Captured from tmux: after a real hello run finishes, the monitor still shows the run tree and selected node details.">
+  <img src="/images/tui/interactive-monitor-hello.svg" alt="Terminal screenshot of the full-screen Smithers TUI monitor showing a finished hello run" />
+</Frame>
+
+Useful keys:
+
+| Key | Action |
 | --- | --- |
-| Pick a workflow and watch it run | [`up --interactive`](/cli/overview) or [`workflow run --interactive`](/cli/overview) |
-| Live browser view over every run | [`monitor`](/guides/monitor) |
-| Active run list | [`ps --watch`](/cli/overview) |
-| Lifecycle event stream | [`events --watch`](/cli/overview) or [`logs --follow`](/cli/overview) |
-| Agent transcript | [`chat --follow`](/cli/overview) |
-| Run detail | [`inspect --watch`](/cli/overview) |
-| Node attempts, tools, and output | [`node --watch`](/cli/overview), [`output`](/cli/overview), [`diff`](/cli/overview) |
-| Rendered DevTools tree | [`tree --watch`](/cli/overview) |
-| Local control plane | [`ps --watch`](/cli/overview), [`inspect --watch`](/cli/overview), and the [CLI overview](/cli/overview) |
-| Remote or browser control plane | [`up --serve`](/integrations/serve), [Gateway](/integrations/gateway), and [MCP Server](/integrations/mcp-server) |
+| `1` to `4` | Switch primary tabs |
+| `g` | Graph mode |
+| `l` | Logs mode |
+| `t` | Timeline mode |
+| `h` | Hijack mode |
+| `?` | Help |
+| `q` | Quit the monitor |
 
-For a browser or remote control plane, `up --serve` exposes an HTTP API; the Gateway and MCP Server docs explain multi-user and agent-driven access.
+There is no silent fallback. If the TUI package cannot be resolved, the command fails with `TUI_MONITOR_UNAVAILABLE` while the detached run keeps running. Watch it with `bunx smithers-orchestrator ps`, `bunx smithers-orchestrator inspect RUN_ID`, or the run log file.
 
-Historical TUI product/design material is kept for reference, but it does not describe a shipped command.
+## Command map
+
+| Need | Command |
+| --- | --- |
+| Interactive setup wizard | `bunx smithers-orchestrator init` |
+| Non-interactive setup | `bunx smithers-orchestrator init --yes` |
+| Pick a workflow and run it | `bunx smithers-orchestrator up --interactive` |
+| Pick a workflow ID and run it | `bunx smithers-orchestrator workflow run --interactive` |
+| Run a known workflow ID interactively | `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive` |
+| Run a known workflow file interactively | `bunx smithers-orchestrator up .smithers/workflows/hello.tsx --interactive` |
+| Run the upgrade workflow with the monitor | `bunx smithers-orchestrator upgrade --interactive` |
+| Scripted or CI run | `bunx smithers-orchestrator up WORKFLOW -d` |
+
+Agents should suggest the interactive commands to humans, but should not run them through an automation harness. If an agent is executing a workflow itself, use `-d`, `--format json`, `ps`, `logs`, `inspect`, and `events` instead.
 
 ---
 

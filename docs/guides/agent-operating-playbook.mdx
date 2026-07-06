@@ -63,8 +63,11 @@ Use this loop for broad, ambiguous, risky, long-running, or multi-agent work:
    acceptance criteria, risks, and the evidence the human needs to see.
 4. Design the Smithers run. Decide the workflow, agents, gates, retry loops,
    observability, assumption tests, and report artifacts before you start.
-5. Validate the workflow shape. Render the graph or dry-run evals before
-   launching expensive or destructive work.
+5. Validate the workflow shape. Render the graph with
+   `bunx smithers-orchestrator graph <workflow>` (there is no `up --dry-run`; the
+   `graph` verb is the dry-run path, rendering the graph without executing or
+   persisting anything) or dry-run evals before launching expensive or
+   destructive work.
 6. Run with observability. Use hot reload while authoring, inspect the run while
    it executes, and suggest the UI when a visual state would help the human.
 7. Report with evidence. Produce a concise Markdown or HTML report that links to
@@ -348,7 +351,8 @@ Before launching:
 - Outcome, finish line, and evidence are written down.
 - Missing context has been researched or asked for.
 - Third-party assumptions have probes or are explicitly marked as risks.
-- Workflow graph or eval dry-run has been checked.
+- Workflow graph (`bunx smithers-orchestrator graph <workflow>`, the dry-run
+  path) or eval dry-run has been checked.
 - Backpressure checks exist and can fail.
 - Observability path is chosen.
 - Report artifact path is chosen.
