@@ -9,6 +9,10 @@ description: Implement ticket files from .smithers/tickets in parallel worktree 
 bunx smithers-orchestrator workflow run kanban --input '{"maxConcurrency":3}'
 ```
 
+<Frame caption="The kanban UI shows each ticket implemented on its own worktree branch, merging only the ones that pass.">
+  <img src="/images/workflow-ui/kanban.png" alt="kanban workflow UI showing tickets fanned into worktree branches before a merge step" />
+</Frame>
+
 ## Inputs
 
 | Input | Type | Default |

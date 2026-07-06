@@ -12,6 +12,10 @@ but it runs from the CLI too.
 bunx smithers-orchestrator workflow run vcs --input '{"action":"status","vcs":"jj"}'
 ```
 
+<Frame caption="The vcs UI shows the working tree for the run and dispatches git or jj actions like status, log, commit, and rebase.">
+  <img src="/images/workflow-ui/vcs.png" alt="vcs workflow UI showing a git working tree and action controls" />
+</Frame>
+
 ## Actions
 
 - **status** (default): deterministic working-tree summary, including tool, branch, head, clean flag, and the list of changes.
