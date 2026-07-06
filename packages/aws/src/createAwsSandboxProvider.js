@@ -121,6 +121,7 @@ export function createAwsSandboxProvider(options = {}) {
 						region,
 						captureLogs: options.captureLogs,
 						logs,
+						logGroupName: options.logGroupName,
 						maxOutputBytes: request.maxOutputBytes,
 						secrets,
 					});
