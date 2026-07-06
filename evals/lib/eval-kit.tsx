@@ -151,7 +151,7 @@ function qualityPrompt(
   }
   lines.push(
     "",
-    `UI BUNDLE${functional ? " (may be truncated — see OBSERVED FEATURES for ground truth)" : ""}:\n${(report.artifact ?? "(none)").slice(0, functional ? 14_000 : 6_000)}`,
+    `UI BUNDLE${functional ? " (may be truncated below — OBSERVED FEATURES above are ground truth; if approvalLive is true the UI DID mount and the mount call exists past any cutoff)" : ""}:\n${(report.artifact ?? "(none)").slice(0, functional ? 24_000 : 6_000)}`,
     "",
     "Set `score` (0-1) and a short `reason`.",
   );
@@ -198,8 +198,9 @@ export function createFluencyEval(opts: FluencyEvalOptions) {
     };
     const isUi = verify.kind === "build" || verify.kind === "ui-functional";
     // For ui-functional cases, feed the quality judge what actually rendered in
-    // the browser (from the verify verdict), not just the source.
-    const verdict = ctx.outputMaybe("verify", { nodeId: "verify" }) as
+    // the browser (from the verify verdict), not just the source. The output KEY
+    // is "verdict" (outputs.verdict); the node id is "verify".
+    const verdict = ctx.outputMaybe("verdict", { nodeId: "verify" }) as
       | { renderedText?: string; features?: Record<string, boolean>; passed?: boolean }
       | undefined;
     const functionalObservations =
