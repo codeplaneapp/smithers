@@ -15,7 +15,7 @@ import { computeVerdict, type VerifySpec } from "./verify.ts";
 import type { CandidateReport } from "./report-schema.ts";
 
 function spec(over: Partial<VerifySpec>): VerifySpec {
-  return { kind: "query", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, ...over };
+  return { kind: "query", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], ...over };
 }
 
 function report(sql: string): CandidateReport {

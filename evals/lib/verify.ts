@@ -2,12 +2,12 @@
 // possible. A fluency eval's verify <Task> calls computeVerdict() from an
 // agentless compute child; only `judge` verification spends a model.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoRoot } from "./paths.js";
 import type { CandidateReport, EvalVerdict } from "./report-schema.js";
 
-export type VerifyKind = "contains" | "equals" | "graph" | "sql" | "query" | "build" | "judge";
+export type VerifyKind = "contains" | "equals" | "graph" | "sql" | "query" | "build" | "ui-functional" | "judge";
 
 export type VerifySpec = {
   kind: VerifyKind;
@@ -25,6 +25,8 @@ export type VerifySpec = {
   expect: string | null;
   /** sqlite db path for `sql` (a seeded fixture) */
   db: string | null;
+  /** required functional checks for `ui-functional` (empty = the full set) */
+  required: string[];
 };
 
 /** Input arrives as raw value or null (never the zod default) — coalesce hard. */
@@ -39,6 +41,7 @@ export function normalizeVerify(raw: unknown): VerifySpec {
     sql: v.sql ?? null,
     expect: v.expect ?? null,
     db: v.db ?? null,
+    required: Array.isArray(v.required) ? v.required : [],
   };
 }
 
@@ -276,6 +279,87 @@ function buildVerify(artifact: string, v: VerifySpec): EvalVerdict {
   };
 }
 
+/** The DEFAULT_UI_CHECKS full functional set, in display order. */
+const DEFAULT_UI_CHECKS = ["mounts", "status", "events", "output", "error", "approval", "approvalLive"];
+
+/** Drive the candidate UI in a real browser against the fixture run (the
+ * ui-functional verifier). Shells out to ui-functional-runner.ts, which boots a
+ * Gateway + headless Chromium and asserts observed behavior. Zero model spend;
+ * this is the hard functional gate that pairs with the ui-quality judge. */
+function functionalVerify(artifact: string, v: VerifySpec): EvalVerdict {
+  const root = repoRoot();
+  const tmpBase = join(root, ".smithers", "state");
+  let dir: string | null = null;
+  let raw: string | null = null;
+  let crashDetail = "";
+  try {
+    mkdirSync(tmpBase, { recursive: true });
+    dir = mkdtempSync(join(tmpBase, "eval-uifn-"));
+    const artifactFile = join(dir, "candidate.tsx");
+    const outFile = join(dir, "verdict.json");
+    writeFileSync(artifactFile, artifact, "utf8");
+    const runner = join(root, "evals/lib/ui-functional-runner.ts");
+    const required = v.required.length ? v.required : DEFAULT_UI_CHECKS;
+    const res = spawnSync(
+      "bun",
+      [runner, "--artifact", artifactFile, "--out", outFile, "--required", required.join(",")],
+      { cwd: root, encoding: "utf8", timeout: 300_000, maxBuffer: 32 * 1024 * 1024 },
+    );
+    try {
+      raw = readFileSync(outFile, "utf8");
+    } catch {
+      crashDetail = `${res.stdout ?? ""}\n${res.stderr ?? ""}`.trim().slice(-500);
+    }
+  } catch (err) {
+    crashDetail = err instanceof Error ? err.message : String(err);
+  } finally {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+
+  if (!raw) {
+    return {
+      passed: false,
+      score: 0,
+      reason: `ui-functional runner produced no verdict: ${crashDetail.slice(0, 300)}`,
+      method: "ui-functional",
+      checks: [{ name: "runner", passed: false, detail: crashDetail.slice(0, 300) }],
+      renderedText: "",
+      features: {},
+    };
+  }
+  let parsed: {
+    passed?: boolean;
+    score?: number;
+    reason?: string;
+    checks?: Array<{ name: string; passed: boolean; detail?: string }>;
+    renderedText?: string;
+    features?: Record<string, boolean>;
+    infraError?: string | null;
+  };
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return {
+      passed: false,
+      score: 0,
+      reason: `ui-functional verdict was not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      method: "ui-functional",
+      checks: [],
+      renderedText: "",
+      features: {},
+    };
+  }
+  return {
+    passed: Boolean(parsed.passed),
+    score: typeof parsed.score === "number" ? parsed.score : 0,
+    reason: parsed.reason ?? "ui-functional verified",
+    method: "ui-functional",
+    checks: (parsed.checks ?? []).map((c) => ({ name: c.name, passed: c.passed, detail: c.detail ?? "" })),
+    renderedText: parsed.renderedText ?? "",
+    features: parsed.features ?? {},
+  };
+}
+
 /** Deterministic verdict for every non-judge verify kind. */
 export async function computeVerdict(
   verify: VerifySpec,
@@ -293,6 +377,8 @@ export async function computeVerdict(
       return await queryVerify(artifact, verify);
     case "build":
       return buildVerify(artifact, verify);
+    case "ui-functional":
+      return functionalVerify(artifact, verify);
     case "contains":
     default:
       return containsVerify(artifact, verify);

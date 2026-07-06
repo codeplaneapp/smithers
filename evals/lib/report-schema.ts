@@ -82,9 +82,20 @@ export const evalVerdict = z.object({
   score: z.number().min(0).max(1).describe("Graded correctness 0-1 (1 = fully correct)."),
   reason: z.string().describe("Why it passed or failed."),
   method: z
-    .enum(["contains", "equals", "graph", "sql", "query", "build", "judge"])
+    .enum(["contains", "equals", "graph", "sql", "query", "build", "ui-functional", "judge"])
     .describe("How verification was performed."),
   checks: z.array(verdictCheck).default([]).describe("Per-check breakdown."),
+  // ui-functional only: what actually rendered when the candidate UI was booted
+  // against the fixture run in a real browser, so the quality judge can grade
+  // feature-completeness against observed behavior, not just source.
+  renderedText: z
+    .string()
+    .optional()
+    .describe("Excerpt of the live-rendered DOM text (ui-functional only)."),
+  features: z
+    .record(z.string(), z.boolean())
+    .optional()
+    .describe("Feature -> whether it rendered/worked in the browser (ui-functional only)."),
 });
 
 /** First-class AI quality score for UI-authoring (build) cases. Persisted as a
