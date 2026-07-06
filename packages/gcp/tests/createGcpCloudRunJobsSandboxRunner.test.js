@@ -1,0 +1,97 @@
+import { describe, expect, test } from "bun:test";
+import { createGcpCloudRunJobsSandboxRunner } from "../src/createGcpCloudRunJobsSandboxRunner.js";
+
+/** Minimal JobsClient double that records requests and resolves a scripted execution. */
+function makeJobsClient(execution, { failRun = false } = {}) {
+	const calls = { run: [], create: [], delete: [] };
+	return {
+		calls,
+		jobPath: (p, l, j) => `projects/${p}/locations/${l}/jobs/${j}`,
+		locationPath: (p, l) => `projects/${p}/locations/${l}`,
+		async runJob(request) {
+			if (failRun) throw new Error("runJob boom");
+			calls.run.push(request);
+			return [{ promise: async () => [execution] }];
+		},
+		async createJob(request) {
+			calls.create.push(request);
+			return [{ promise: async () => [{}] }];
+		},
+		async deleteJob(request) {
+			calls.delete.push(request);
+			return [{ promise: async () => [{}] }];
+		},
+	};
+}
+
+const BASE = { projectId: "p", location: "l", jobName: "j" };
+
+describe("createGcpCloudRunJobsSandboxRunner", () => {
+	test("succeededCount === 1 yields exit 0 and empty stdout", async () => {
+		const client = makeJobsClient({ name: "exec-a", succeededCount: 1, failedCount: 0 });
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		const result = await runner.run({ command: "echo hi", env: { A: "1" } });
+		expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+	});
+
+	test("failedCount > 0 yields exit 1 with condition message as stderr", async () => {
+		const client = makeJobsClient({ name: "exec-b", succeededCount: 0, failedCount: 1, conditions: [{ type: "Completed", state: "CONDITION_FAILED", message: "container crashed" }] });
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		const result = await runner.run({ command: "false", env: {} });
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toBe("container crashed");
+	});
+
+	test("passes args=[sh,-c,command], env list, and timeout into runJob overrides", async () => {
+		const client = makeJobsClient({ name: "exec-c", succeededCount: 1 });
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE, timeoutSec: 120 });
+		await runner.run({ command: "node r.js", env: { FOO: "bar" } });
+		const overrides = client.calls.run[0].overrides;
+		expect(overrides.containerOverrides[0].args).toEqual(["sh", "-c", "node r.js"]);
+		expect(overrides.containerOverrides[0].env).toEqual([{ name: "FOO", value: "bar" }]);
+		expect(overrides.timeout).toEqual({ seconds: 120 });
+	});
+
+	test("derives timeout from timeoutMs when timeoutSec is absent", async () => {
+		const client = makeJobsClient({ name: "exec-d", succeededCount: 1 });
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		await runner.run({ command: "x", env: {}, timeoutMs: 5000 });
+		expect(client.calls.run[0].overrides.timeout).toEqual({ seconds: 5 });
+	});
+
+	test("remoteId is the job path before exec and the execution name after", async () => {
+		const client = makeJobsClient({ name: "projects/p/locations/l/jobs/j/executions/exec-e", succeededCount: 1 });
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		expect(runner.remoteId).toBe("projects/p/locations/l/jobs/j");
+		await runner.run({ command: "x", env: {} });
+		expect(runner.remoteId).toContain("/executions/exec-e");
+	});
+
+	test("createJob creates a per-run job before running and deleteJob removes it", async () => {
+		const client = makeJobsClient({ name: "exec-f", succeededCount: 1 });
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE, createJob: true });
+		await runner.run({ command: "x", env: {} });
+		expect(client.calls.create.length).toBe(1);
+		expect(runner.createdJob).toBe(true);
+		await runner.deleteJob();
+		expect(client.calls.delete.length).toBe(1);
+	});
+
+	test("reused job never creates or deletes", async () => {
+		const client = makeJobsClient({ name: "exec-g", succeededCount: 1 });
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		await runner.run({ command: "x", env: {} });
+		await runner.deleteJob();
+		expect(client.calls.create.length).toBe(0);
+		expect(client.calls.delete.length).toBe(0);
+	});
+
+	test("aborted signal throws before running", async () => {
+		const client = makeJobsClient({ name: "exec-h", succeededCount: 1 });
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		const controller = new AbortController();
+		controller.abort();
+		await expect(runner.run({ command: "x", env: {}, signal: controller.signal })).rejects.toThrow(/cancel/i);
+		expect(client.calls.run.length).toBe(0);
+	});
+});
