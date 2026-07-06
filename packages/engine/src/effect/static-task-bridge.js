@@ -7,7 +7,7 @@ import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { getJjPointer } from "@smithers-orchestrator/vcs/jj";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import { getPlatformLayer } from "../platform-layer.js";
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
 /**
  * @typedef {{ rootDir: string; }} StaticTaskBridgeToolConfig
@@ -156,7 +156,7 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
         }
         payload = validation.data;
         const completedAtMs = nowMs();
-        const jjPointer = await Effect.runPromise(getJjPointer(toolConfig.rootDir).pipe(Effect.provide(BunContext.layer)));
+        const jjPointer = await Effect.runPromise(getJjPointer(toolConfig.rootDir).pipe(Effect.provide(getPlatformLayer())));
         await adapter.withTransaction("task-completion", Effect.gen(function* () {
             yield* adapter.upsertOutputRow(desc.outputTable, { runId, nodeId: desc.nodeId, iteration: desc.iteration }, payload);
             yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {

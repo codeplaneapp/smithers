@@ -11,6 +11,7 @@
 /** @typedef {import("./OutputKey.ts").OutputKey} OutputKey */
 /** @typedef {import("./OutputSnapshot.ts").OutputSnapshot} OutputSnapshot */
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
+/** @typedef {import("./RunOptions.ts").EffectPlatformRuntime} EffectPlatformRuntime */
 /** @typedef {import("./RunOptions.ts").RunOptions} RunOptions */
 /** @typedef {import("./RunResult.ts").RunResult} RunResult */
 /** @typedef {import("./RunStatus.ts").RunStatus} RunStatus */

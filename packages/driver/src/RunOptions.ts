@@ -1,6 +1,9 @@
 import type { RunAuthContext } from "./RunAuthContext.ts";
 import type { OutputSnapshot } from "./OutputSnapshot.ts";
 import type { SmithersEvent } from "@smithers-orchestrator/observability/SmithersEvent";
+import type { Layer } from "effect";
+
+export type EffectPlatformRuntime = "bun" | "node" | "worker";
 
 export type HotReloadOptions = {
   /** Root directory to watch for changes (default: auto-detect from workflow entry) */
@@ -41,6 +44,17 @@ export type RunOptions = {
   annotations?: Record<string, string | number | boolean>;
   auth?: RunAuthContext | null;
   config?: Record<string, unknown>;
+  /**
+   * Effect platform runtime label for engines that support a swappable platform
+   * layer. "bun" uses the engine's default Bun layer; "node" and "worker"
+   * require effectPlatformLayer from the embedding runtime.
+   */
+  effectPlatformRuntime?: EffectPlatformRuntime;
+  /**
+   * Custom @effect/platform layer, for example NodeContext.layer supplied by a
+   * Node serverless entrypoint that owns @effect/platform-node.
+   */
+  effectPlatformLayer?: Layer.Layer<any, never, never>;
   cliAgentToolsDefault?: "all" | "explicit-only";
   initialOutputs?: OutputSnapshot;
   initialIteration?: number;

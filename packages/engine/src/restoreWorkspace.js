@@ -7,15 +7,15 @@
 // throws, returns a structured result the caller can log or branch on.
 
 import { Effect } from "effect";
-import * as BunContext from "@effect/platform-bun/BunContext";
 import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
+import { getPlatformLayer } from "./platform-layer.js";
 
 /**
  * @param {string} commitId
  * @param {string} cwd
  * @returns {Promise<{ success: boolean, error?: string }>}
  */
-const defaultRevert = (commitId, cwd) => Effect.runPromise(revertToJjPointer(commitId, cwd).pipe(Effect.provide(BunContext.layer)));
+const defaultRevert = (commitId, cwd) => Effect.runPromise(revertToJjPointer(commitId, cwd).pipe(Effect.provide(getPlatformLayer())));
 
 /**
  * Pick the chronologically latest checkpoint, breaking ties by attempt then seq.

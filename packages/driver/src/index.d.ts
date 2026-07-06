@@ -4,6 +4,7 @@ import { SmithersEvent } from '@smithers-orchestrator/observability/SmithersEven
 import * as _smithers_orchestrator_scheduler from '@smithers-orchestrator/scheduler';
 import { WaitReason as WaitReason$1, EngineDecision as EngineDecision$1 } from '@smithers-orchestrator/scheduler';
 import { z } from 'zod';
+import { Layer } from 'effect';
 import { SmithersWorkflowOptions } from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
 import { SchemaRegistryEntry } from '@smithers-orchestrator/db/SchemaRegistryEntry';
 import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
@@ -56,6 +57,7 @@ type HotReloadOptions$1 = {
     /** Debounce interval in ms for file change events (default: 100) */
     debounceMs?: number;
 };
+type EffectPlatformRuntime$1 = "bun" | "node" | "worker";
 type RunOptions$2 = {
     runId?: string;
     parentRunId?: string | null;
@@ -77,6 +79,17 @@ type RunOptions$2 = {
     annotations?: Record<string, string | number | boolean>;
     auth?: RunAuthContext$2 | null;
     config?: Record<string, unknown>;
+    /**
+     * Effect platform runtime label for engines that support a swappable platform
+     * layer. "bun" uses the engine's default Bun layer; "node" and "worker"
+     * require effectPlatformLayer from the embedding runtime.
+     */
+    effectPlatformRuntime?: EffectPlatformRuntime$1;
+    /**
+     * Custom @effect/platform layer, for example NodeContext.layer supplied by a
+     * Node serverless entrypoint that owns @effect/platform-node.
+     */
+    effectPlatformLayer?: Layer.Layer<any, never, never>;
     cliAgentToolsDefault?: "all" | "explicit-only";
     initialOutputs?: OutputSnapshot$2;
     initialIteration?: number;
@@ -1148,6 +1161,7 @@ type WaitReason = _smithers_orchestrator_scheduler.WaitReason;
 type TaskDescriptor = _smithers_orchestrator_graph_types.TaskDescriptor;
 
 type HotReloadOptions = HotReloadOptions$1;
+type EffectPlatformRuntime = EffectPlatformRuntime$1;
 type OutputAccessor<Schema = any> = OutputAccessor$2<Schema>;
 type InferOutputEntry<T> = InferOutputEntry$1<T>;
 type OutputKey = OutputKey$2;
@@ -1162,4 +1176,4 @@ type WorkflowDriverOptions<Schema = unknown> = WorkflowDriverOptions$1<Schema>;
 type WorkflowRuntime = WorkflowRuntime$2;
 type WorkflowSession = WorkflowSession$2;
 
-export { type HotReloadOptions, type InferOutputEntry, type OutputAccessor, type OutputKey, type OutputSnapshot, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, SmithersCtx, type SmithersCtxOptions, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowRuntime, type WorkflowSession };
+export { type EffectPlatformRuntime, type HotReloadOptions, type InferOutputEntry, type OutputAccessor, type OutputKey, type OutputSnapshot, type RunAuthContext, type RunOptions, type RunResult, type RunStatus, SmithersCtx, type SmithersCtxOptions, type WorkflowDefinition, WorkflowDriver, type WorkflowDriverOptions, type WorkflowRuntime, type WorkflowSession };

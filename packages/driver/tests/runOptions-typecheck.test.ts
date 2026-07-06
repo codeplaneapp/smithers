@@ -27,6 +27,8 @@ describe("RunOptions public type", () => {
 
         const options: RunOptions = {
           input: {},
+          effectPlatformRuntime: "node",
+          effectPlatformLayer: {} as RunOptions["effectPlatformLayer"],
           initialOutputs: {
             rows: [{ value: 1 }],
           },

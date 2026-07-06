@@ -7,8 +7,8 @@
 // fs watcher and are overridden in tests.
 
 import { Effect } from "effect";
-import * as BunContext from "@effect/platform-bun/BunContext";
 import { captureWorkspaceSnapshot, isJjRepo } from "@smithers-orchestrator/vcs/jj";
+import { getPlatformLayer } from "./platform-layer.js";
 import { createSnapshotService } from "./snapshotService.js";
 import { createWorkspaceWatcher } from "./workspaceWatcher.js";
 import { pruneWorkspaceDurability } from "./pruneWorkspaceDurability.js";
@@ -30,7 +30,7 @@ function hookLabel(p) {
  * @param {Effect.Effect<A, never, any>} effect
  * @returns {Promise<A>}
  */
-const runVcs = (effect) => Effect.runPromise(effect.pipe(Effect.provide(BunContext.layer)));
+const runVcs = (effect) => Effect.runPromise(effect.pipe(Effect.provide(getPlatformLayer())));
 
 const NOOP_HANDLE = {
     active: false,
