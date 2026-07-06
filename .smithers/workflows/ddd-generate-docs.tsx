@@ -26,6 +26,15 @@ const surveySchema = z.object({
   topLevelDirs: z.array(z.string()).default([]),
   docsFiles: z.array(z.string()).default([]),
   testDirs: z.array(z.string()).default([]),
+  // Non-JS build manifests (go.mod, Cargo.toml, build.zig, pyproject.toml, …)
+  // so the survey is not blind to a Go/Rust/Zig/Python product core that has no
+  // package.json. Without this, a polyglot repo's real services are invisible.
+  manifests: z.array(z.string()).default([]),
+  // Likely service/command entry-point dirs (cmd/, internal/, services/, crates/…)
+  // to point the drafting agent at the code, not just the JS workspaces.
+  serviceDirs: z.array(z.string()).default([]),
+  // Authoritative design docs to mine instead of re-deriving the feature set.
+  designDocs: z.array(z.string()).default([]),
   summary: z.string().default(""),
 });
 
@@ -110,6 +119,32 @@ export function surveyRepo(root: string = ROOT) {
   }
   const docsFiles = listDir(resolve(root, "docs")).slice(0, 50);
   const testDirs = topLevelDirs.filter((d) => /^(test|tests|e2e|__tests__)$/i.test(d));
+
+  // Non-JS build manifests at the repo root — the signal that the product core
+  // is (partly) Go/Rust/Zig/Python/JVM, which package.json discovery misses.
+  const MANIFEST_FILES = [
+    "go.mod", "Cargo.toml", "build.zig", "pyproject.toml", "requirements.txt",
+    "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "composer.json",
+    "pubspec.yaml", "mix.exs", "Package.swift", "CMakeLists.txt", "Makefile",
+  ];
+  const manifests = MANIFEST_FILES.filter((f) => existsSync(resolve(root, f)));
+
+  // Conventional service/command entry-point dirs across ecosystems. cmd/ +
+  // internal/ (Go), services/, crates/ (Rust), src-tauri/, server/, api/.
+  const SERVICE_DIRS = ["cmd", "internal", "services", "crates", "server", "api", "src-tauri", "gateway"];
+  const serviceDirs = SERVICE_DIRS.filter((d) => {
+    try { return statSync(resolve(root, d)).isDirectory(); } catch { return false; }
+  });
+
+  // Authoritative design docs a drafting agent should mine rather than
+  // re-derive the whole feature set from scratch.
+  const DESIGN_DOC_CANDIDATES = [
+    "PRODUCT_DESIGN.md", "ARCHITECTURE.md", "DESIGN.md", "PLAN.md", "ROADMAP.md",
+    "docs/features.md", "docs/architecture.md", "docs/product.md", "docs/design.md",
+    "docs/specs", "AGENTS.md",
+  ];
+  const designDocs = DESIGN_DOC_CANDIDATES.filter((f) => existsSync(resolve(root, f)));
+
   return {
     hasSpec: existsSync(resolve(root, ".smithers/spec/features.json")),
     readmeExcerpt: readHead(resolve(root, "README.md")),
@@ -117,7 +152,10 @@ export function surveyRepo(root: string = ROOT) {
     topLevelDirs,
     docsFiles,
     testDirs,
-    summary: `Surveyed ${root}: ${topLevelDirs.length} top-level dirs, ${packageNames.length} packages, docs/=${docsFiles.length} entries.`,
+    manifests,
+    serviceDirs,
+    designDocs,
+    summary: `Surveyed ${root}: ${topLevelDirs.length} top-level dirs, ${packageNames.length} JS packages, ${manifests.length} non-JS manifests (${manifests.join(", ") || "none"}), service dirs=[${serviceDirs.join(", ") || "none"}], docs/=${docsFiles.length} entries.`,
   };
 }
 
@@ -282,6 +320,11 @@ export default smithers((ctx) => {
           deps={{ survey: outputs.survey }}
         >
           {(deps: any) => `Generate (or refresh) the living product spec for THIS repo by reading its real code and docs. Start from the survey below, then read targeted files (README, key package entry points, docs) — never recursive dumps. Write .smithers/spec/features.json describing the product's real features with honest statuses, and write .smithers/spec/content/overview.md if it is missing or a stub. If features.json already exists, UPDATE it: refine existing records with what the code proves, add missing features, never blindly replace records or drop their fields. Create the .smithers/spec/content directory if needed. Then run "bun .smithers/lib/ddd/build.ts" and fix validation errors until it passes. Return only JSON matching the draft schema.
+
+Coverage rules:
+- The survey's packageNames only finds JS package.json workspaces. If survey.manifests or survey.serviceDirs is non-empty, the product core is (partly) NON-JS (Go/Rust/Zig/Python/etc.) — you MUST read those service dirs (e.g. cmd/, internal/, crates/) and manifests and give those services their own feature records. Do not describe only the JS surface.
+- If survey.designDocs lists files (PRODUCT_DESIGN.md, docs/features.md, ARCHITECTURE.md, docs/specs, …), read them FIRST and mine them as the authoritative feature taxonomy instead of re-deriving from scratch. When docs conflict, prefer the highest-level design doc.
+- Describe THIS repo's product honestly. If the repo shares a name with another product (e.g. a "smithers" that is not smithers-orchestrator), word every summary so the two are never conflated.
 
 Survey:
 ${JSON.stringify(deps.survey, null, 2)}
