@@ -1,0 +1,203 @@
+---
+title: "SOTA models"
+description: "The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v1, updated 2026-07-06."
+---
+
+{/* GENERATED FILE. Edit docs/data/sota-models.json, then run `pnpm sota:gen`. */}
+
+**Registry v1** · updated **2026-07-06**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smithers-orchestrator update` picks the changes up on your machine, and re-running `bunx smithers-orchestrator init` refreshes installed workflows to the new defaults.
+
+## Badges
+
+Each badge names the single best model for that job right now.
+
+| Badge | Model | ID |
+| --- | --- | --- |
+| Best orchestrator | Claude Fable 5 | `claude-fable-5` |
+| Smartest reviewer | Claude Fable 5 | `claude-fable-5` |
+| Smartest coder | Claude Fable 5 | `claude-fable-5` |
+| Fastest coding | GPT-5.3-Codex-Spark | `gpt-5.3-codex-spark` |
+| Best at UI | Gemini 3.5 Flash | `gemini-3.5-flash` |
+| Fast & cheap | Gemini 3.5 Flash | `gemini-3.5-flash` |
+| Best value coding | Kimi K2.7-Code | `kimi-k2.7-code` |
+| Best open source | Kimi K2.6 | `kimi-k2.6` |
+
+## Role defaults
+
+The fable-sandwich tiers (see the [workflow optimization guide](/guides/workflow-optimization)) resolve to these ids:
+
+| Role | Default model |
+| --- | --- |
+| orchestrator | `claude-fable-5` |
+| planning | `claude-fable-5` |
+| review | `claude-fable-5` |
+| smart | `claude-fable-5` |
+| implement | `gpt-5.5` |
+| cheapFast | `gemini-3.5-flash` |
+| ui | `gemini-3.5-flash` |
+| realtime | `gpt-5.3-codex-spark` |
+| research | `kimi-k2.6` |
+
+## Anthropic
+
+### Claude Fable 5 (`claude-fable-5`)
+
+**Best orchestrator** · **Smartest reviewer** · **Smartest coder** · state of the art · engines: `claude`, `opencode` · roles: orchestrator, planning, review, smart
+
+Anthropic's Mythos-class frontier model, the first of the Claude 5 family. The strongest model available for planning, code review, and orchestrating other agents, which is why it sits at both ends of the fable sandwich: it writes the plan, delegates implementation, then reviews the result.
+
+### Claude Opus 4.8 (`claude-opus-4-8`)
+
+current · engines: `claude`, `opencode` · roles: smart
+
+Anthropic's Opus tier. Still a top-shelf generalist and the always-present fallback behind Fable in the smart, planning, and review pools.
+
+### Claude Sonnet 5 (`claude-sonnet-5`)
+
+current · released 2026-06-29 · engines: `claude`, `opencode` · roles: implement, cheapFast
+
+The newest Sonnet: fast, cheap, 1M context. The guaranteed implementer fallback in the fable sandwich and the default cheapFast Claude.
+
+### Claude Haiku 4.5 (`claude-haiku-4-5`)
+
+current · engines: `claude`, `opencode`
+
+Anthropic's cheapest tier, for high-volume summarization and classification where even Sonnet is overkill.
+
+## OpenAI
+
+### GPT-5.5 (`gpt-5.5`)
+
+state of the art · engines: `codex`, `pi` · roles: implement, smart
+
+OpenAI's GA flagship and the Codex CLI default. The implementation workhorse in the middle of the fable sandwich. With ChatGPT auth use the id gpt-5.5 exactly (gpt-5.5-codex and gpt-5.3-codex are deprecated in Codex).
+
+### GPT-5.4 (`gpt-5.4`)
+
+current · engines: `codex`, `pi`
+
+The previous OpenAI flagship. Still solid for professional work when gpt-5.5 quota is tight.
+
+### GPT-5.4 mini (`gpt-5.4-mini`)
+
+current · engines: `codex`, `pi` · roles: cheapFast
+
+OpenAI's fast, efficient tier. The default cheap OpenAI model, including via OpenRouter (openai/gpt-5.4-mini).
+
+### GPT-5.3-Codex-Spark (`gpt-5.3-codex-spark`)
+
+**Fastest coding** · state of the art · released 2026-02-12 · engines: `codex` · roles: realtime
+
+OpenAI's first real-time coding model: 1000+ tokens per second on dedicated Cerebras hardware while staying genuinely capable. Research preview, ChatGPT Pro only. Reach for it when iteration latency matters more than depth.
+
+## Google
+
+### Gemini 3.5 Flash (`gemini-3.5-flash`)
+
+**Best at UI** · **Fast & cheap** · state of the art · released 2026-05-19 · engines: `antigravity` · roles: ui, implement, cheapFast
+
+Google's best price-to-performance model and the best model for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. The default Gemini in smithers.
+
+### Gemini 3.1 Pro (`gemini-3.1-pro-preview`)
+
+current · engines: `antigravity`
+
+Google's Pro tier (still preview). Superseded for coding and agentic work by Gemini 3.5 Flash; keep it for long-horizon reasoning where Pro depth wins.
+
+### Gemini 3.1 Flash-Lite (`gemini-3.1-flash-lite`)
+
+current · engines: `antigravity`
+
+Frontier-class performance at a fraction of the cost. The floor of the Gemini lineup for bulk, low-stakes calls.
+
+## Moonshot AI
+
+### Kimi K2.7-Code (`kimi-k2.7-code`)
+
+**Best value coding** · state of the art · released 2026-06-12 · engines: `kimi` · roles: implement, cheapFast
+
+Moonshot's most capable coding model and the best coding value on the market: 256k context, roughly 30% fewer reasoning tokens than K2.6, strong instruction-following in long contexts. The default Kimi in smithers; the -highspeed variant trades a little quality for ~180 tok/s.
+
+### Kimi K2.7-Code High-Speed (`kimi-k2.7-code-highspeed`)
+
+current · engines: `kimi` · roles: realtime
+
+The high-throughput K2.7-Code variant, around 180 tokens per second. The open-weights answer to Codex-Spark for latency-sensitive loops.
+
+### Kimi K2.6 (`kimi-k2.6`)
+
+**Best open source** · current · released 2026-04-20 · engines: `kimi` · roles: research
+
+Moonshot's open-source (modified MIT) trillion-parameter MoE flagship: native multimodal, agent swarms up to 300 sub-agents, up to 13 hours of continuous coding. Ties GPT-5.5 on SWE-Bench Pro at roughly 80% lower cost. The strongest model you can self-host.
+
+## Benchmarks
+
+Independent of the roster above: how these models actually score. smithers ships two benchmark harnesses in-repo: [`benchmarks/roadmapbench`](https://github.com/smithersai/smithers/tree/main/benchmarks/roadmapbench) (RoadmapBench, a real audited run) and [`benchmarks/site`](https://github.com/smithersai/smithers/tree/main/benchmarks/site) (the benchmarks.smithers.sh leaderboard, sourced from `benchmarks/results.json`). Only results for models that still appear in the registry above are shown; rows for older models (e.g. Claude Opus 4.6, GPT-5.2) are dropped automatically. `pending` rows are honest placeholders: the smithers fleet run has not completed at full scale yet.
+
+{/* Generated from docs/data/sota-benchmarks.json. Rows naming a deprecated or unlisted model are filtered out. */}
+
+### RoadmapBench
+
+[UniPat-AI/RoadmapBench (115 tasks)](https://github.com/UniPat-AI/RoadmapBench) · metric: Resolved Rate (RR) · Completion Score (CS) · harness: `benchmarks/roadmapbench`
+
+Long-horizon, multi-target version upgrades: start from a repo pinned to an old release and implement every independent feature a real upstream bump introduced (median oracle change ~3,700 LOC across ~51 files; median 5 scored targets). The best single agent on the official leaderboard resolves under 40% of tasks.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| Claude Opus 4.8 + GPT-5.5 | smithers (fable-sandwich) | **RR 0.50 · CS 0.857** | curated subset (Python + TypeScript) · n=2 | every grader fair-validated (oracle=1.0, no-op<1.0); every run audited untainted. Not a full-115 claim. |
+| public SOTA (best single agent) | official | RR ~0.39 · CS ~0.69 | full-115 · n=115 | approximate published best on the official leaderboard |
+
+### SWE-Bench Pro
+
+[ScaleAI/SWE-bench_Pro (test, 731 tasks)](https://github.com/scaleapi/SWE-bench_Pro-os) · metric: Pass@1 (%) · harness: `benchmarks/site`
+
+731 multi-file tasks across 11 professional repos (Go/Python/JS/TS) graded by hidden tests in canonical per-instance Docker. Moonshot reports Kimi K2.6 tying GPT-5.5 here at roughly 80% lower cost.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| Claude Opus 4.8 + Claude Sonnet 5 | smithers (delegation-chain) | pending | full-731 | Claude-only fleet run pending |
+
+### Claw-Eval-Live
+
+[Claw-Eval-Live (105 tasks / 17 families)](https://arxiv.org/abs/2604.28139) · metric: Score (pass bar 75) · harness: `benchmarks/site`
+
+Agentic enterprise workflows scored on observable execution evidence. No public model clears the 70% pass bar; frontier flagships cluster in the low 80s.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| GPT-5.4 | official | 81.7 | full-105 · n=105 | public leaderboard |
+| smithers (mixture) | mixture-gateway | pending | pending | cannot run faithfully Claude-only (native OpenAI gather leg + neutral Gemini judge); asterisked variant only |
+
+### SWE-EVO
+
+[SWE-EVO (48 release-sized tasks / 7 repos)](https://arxiv.org/abs/2512.18470) · metric: Resolved Rate (%) · harness: `benchmarks/site`
+
+Carry a Python project across a whole release transition. Frontier agents resolve only ~21-25% of the full-48 set.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| GPT-5.4 | official (OpenHands) | 25.0 | full-48 · n=48 | Wilson 95% CI [14.9, 38.8] |
+| Claude Opus 4.8 + Claude Sonnet 5 | smithers (delegation-chain) | pending | dvc subset | Claude-only fleet run pending; dvc subset is easier than full-48, not directly comparable |
+
+## Deprecated ids
+
+Rewrite these on sight; the daily research job does the same sweep mechanically.
+
+| Deprecated | Use instead |
+| --- | --- |
+| `claude-sonnet-4-6` | `claude-sonnet-5` |
+| `claude-sonnet-4-7` | `claude-sonnet-5` |
+| `claude-sonnet-4-20250514` | `claude-sonnet-5` |
+| `gpt-5.3-codex` | `gpt-5.5` |
+| `gpt-5.2` | `gpt-5.5` |
+| `gpt-4o` | `gpt-5.4-mini` |
+| `kimi-latest` | `kimi-k2.7-code` |
+
+## Update policy
+
+- Only GA (generally available) models enter the registry. Limited previews (e.g. GPT-5.6 Sol/Terra/Luna) wait until they ship for real.
+- Research previews with real availability (e.g. gpt-5.3-codex-spark on ChatGPT Pro) may enter with status sota for their niche, noted in the description.
+- No floating aliases (kimi-latest, *-latest). Pin concrete ids so a provider-side model swap cannot bypass this registry.
+- Every badge names exactly one model. A new badge holder demotes the old one in the same change.
+- Any change to models bumps version by exactly 1 and refreshes updatedAt.
+- Deprecated entries keep their replacedBy id for one release so sweeps know what to rewrite, then get deleted.

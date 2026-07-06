@@ -965,7 +965,7 @@ export function Optimizer({
     relevancy({ question: ctx.input.question }),       // answers the question
     schemaAdherence(),                                 // matches the Zod schema
     llmJudge({                                         // custom L L M judge
-      model: anthropic("claude-sonnet-4-20250514"),
+      model: anthropic("claude-sonnet-5"),
       rubric: "Score 0-100 on clarity and concision.",
     }),
   ]}

@@ -2,6 +2,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
 
+import { SOTA_REGISTRY_VERSION } from "./sota-models.generated.js";
+
 /**
  * Update detection + a once-a-day "new version available" notice.
  *
@@ -11,6 +13,11 @@ import { dirname, join, sep } from "node:path";
  *  2. The passive notice wired into the CLI's main loop, which checks npm at
  *     most once per day and tells the user when a newer version is published
  *     (see {@link ensureUpdateCheck} + {@link formatUpdateNotice}).
+ *
+ * The same daily budget also fetches the SOTA model registry version from the
+ * repo (docs/data/sota-models.json). When a newer release ships with a newer
+ * registry, the notice additionally tells the user that new SOTA models are in
+ * and to re-run `smithers init` so installed workflows pick up the new agents.
  *
  * Everything is best-effort: a missing network, a malformed marker, or an
  * unparseable version must never break a real command, so the public entry
@@ -23,9 +30,42 @@ export const SMITHERS_PACKAGE = "smithers-orchestrator";
 /** Throttle window for the passive npm check. */
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+/** Where the current SOTA model registry lives. `main` is ahead of releases,
+ * which is fine: the notice only fires once a release carrying the newer
+ * registry exists (see {@link formatUpdateNotice}). */
+export const SOTA_REGISTRY_URL =
+  "https://raw.githubusercontent.com/smithersai/smithers/main/docs/data/sota-models.json";
+
+/** The docs sidebar is the authoritative published changelog index. */
+export const CHANGELOG_INDEX_URL =
+  "https://raw.githubusercontent.com/smithersai/smithers/main/docs/docs.json";
+
+/** Raw GitHub URL prefix for published changelog MDX files. */
+export const CHANGELOG_RAW_BASE_URL =
+  "https://raw.githubusercontent.com/smithersai/smithers/main/docs/changelogs";
+
 /** Default network timeout for the registry probe. Kept short so the one
  * throttled check a day never noticeably stalls a command. */
 const DEFAULT_FETCH_TIMEOUT_MS = 1500;
+
+const DEFAULT_CHANGELOG_MAX_ENTRIES = 20;
+const DEFAULT_CHANGELOG_MAX_CHARS = 12_000;
+
+/**
+ * Read this installed CLI package's version.
+ *
+ * @returns {string}
+ */
+export function readCurrentPackageVersion() {
+  try {
+    const pkgUrl = new URL("../package.json", import.meta.url);
+    const raw = readFileSync(pkgUrl, "utf8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed.version === "string" ? parsed.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 /**
  * Parse a version string into comparable numeric release components, dropping
@@ -238,8 +278,179 @@ export async function fetchLatestVersion(opts = {}) {
 }
 
 /**
+ * Fetch the published SOTA model registry version. Returns null on any error —
+ * same "no information, no notice" contract as {@link fetchLatestVersion}.
+ *
+ * @param {{ url?: string; fetchImpl?: typeof fetch; timeoutMs?: number }} [opts]
+ * @returns {Promise<number | null>}
+ */
+export async function fetchRemoteSotaVersion(opts = {}) {
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  if (typeof fetchImpl !== "function") return null;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(opts.url ?? SOTA_REGISTRY_URL, { signal: controller.signal });
+    if (!res?.ok) return null;
+    const body = await res.json();
+    const version = body?.version;
+    return Number.isInteger(version) && version > 0 ? version : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * @param {unknown} value
+ * @param {Set<string>} out
+ */
+function collectChangelogVersionStrings(value, out) {
+  if (typeof value === "string") {
+    const match = value.match(/^changelogs\/(\d+\.\d+\.\d+)$/);
+    if (match?.[1]) out.add(match[1]);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) collectChangelogVersionStrings(entry, out);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const entry of Object.values(value)) collectChangelogVersionStrings(entry, out);
+  }
+}
+
+/**
+ * Extract version ids from the docs sidebar and sort them oldest to newest.
+ *
+ * @param {unknown} docsJson
+ * @returns {string[]}
+ */
+export function extractChangelogVersions(docsJson) {
+  const versions = new Set();
+  collectChangelogVersionStrings(docsJson, versions);
+  return [...versions].sort((a, b) => compareVersions(a, b));
+}
+
+/**
+ * @param {string[]} versions
+ * @param {string} currentVersion
+ * @param {string | null | undefined} latestVersion
+ * @returns {string[]}
+ */
+export function filterChangelogVersionsSince(versions, currentVersion, latestVersion) {
+  return versions.filter((version) => {
+    if (compareVersions(version, currentVersion) <= 0) return false;
+    if (latestVersion && compareVersions(version, latestVersion) > 0) return false;
+    return true;
+  });
+}
+
+/**
+ * @param {typeof fetch} fetchImpl
+ * @param {string} url
+ * @param {number} timeoutMs
+ * @returns {Promise<Response | null>}
+ */
+async function fetchWithTimeout(fetchImpl, url, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(url, { signal: controller.signal });
+    return res ?? null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fetch changelog MDX files newer than the installed version. Missing individual
+ * changelog pages are reported in-place so the caller can still proceed with
+ * the versions that were reachable.
+ *
+ * @param {{
+ *   currentVersion: string;
+ *   latestVersion?: string | null;
+ *   fetchImpl?: typeof fetch;
+ *   timeoutMs?: number;
+ *   indexUrl?: string;
+ *   rawBaseUrl?: string;
+ *   maxEntries?: number;
+ *   maxCharsPerEntry?: number;
+ * }} opts
+ * @returns {Promise<{ versions: string[]; truncated: boolean; entries: Array<{ version: string; url: string; ok: boolean; content: string; error?: string }> }>}
+ */
+export async function fetchChangelogsSince(opts) {
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const currentVersion = opts.currentVersion;
+  if (typeof fetchImpl !== "function" || !currentVersion || currentVersion === "unknown") {
+    return { versions: [], truncated: false, entries: [] };
+  }
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+  const indexUrl = opts.indexUrl ?? CHANGELOG_INDEX_URL;
+  const rawBaseUrl = (opts.rawBaseUrl ?? CHANGELOG_RAW_BASE_URL).replace(/\/+$/, "");
+  const maxEntries = Math.max(1, opts.maxEntries ?? DEFAULT_CHANGELOG_MAX_ENTRIES);
+  const maxCharsPerEntry = Math.max(256, opts.maxCharsPerEntry ?? DEFAULT_CHANGELOG_MAX_CHARS);
+
+  const indexRes = await fetchWithTimeout(fetchImpl, indexUrl, timeoutMs);
+  if (!indexRes?.ok) {
+    return { versions: [], truncated: false, entries: [] };
+  }
+  let docsJson;
+  try {
+    docsJson = await indexRes.json();
+  } catch {
+    return { versions: [], truncated: false, entries: [] };
+  }
+
+  const allVersions = filterChangelogVersionsSince(
+    extractChangelogVersions(docsJson),
+    currentVersion,
+    opts.latestVersion,
+  );
+  const versions = allVersions.slice(0, maxEntries);
+  const entries = [];
+  for (const version of versions) {
+    const url = `${rawBaseUrl}/${version}.mdx`;
+    const res = await fetchWithTimeout(fetchImpl, url, timeoutMs);
+    if (!res?.ok) {
+      entries.push({
+        version,
+        url,
+        ok: false,
+        content: "",
+        error: res ? `HTTP ${res.status}` : "fetch failed",
+      });
+      continue;
+    }
+    try {
+      const text = await res.text();
+      entries.push({
+        version,
+        url,
+        ok: true,
+        content: text.length > maxCharsPerEntry ? text.slice(0, maxCharsPerEntry) : text,
+        ...(text.length > maxCharsPerEntry ? { error: `truncated to ${maxCharsPerEntry} chars` } : {}),
+      });
+    } catch {
+      entries.push({ version, url, ok: false, content: "", error: "read failed" });
+    }
+  }
+
+  return {
+    versions,
+    truncated: allVersions.length > versions.length,
+    entries,
+  };
+}
+
+/**
  * @param {string} markerPath
- * @returns {{ lastCheckMs?: number; latest?: string }}
+ * @returns {{ lastCheckMs?: number; latest?: string; sotaVersion?: number }}
  */
 function readMarker(markerPath) {
   try {
@@ -252,7 +463,7 @@ function readMarker(markerPath) {
 
 /**
  * @param {string} markerPath
- * @param {{ lastCheckMs: number; latest: string | null }} data
+ * @param {{ lastCheckMs: number; latest: string | null; sotaVersion: number | null }} data
  */
 function writeMarker(markerPath, data) {
   try {
@@ -282,8 +493,9 @@ function writeMarker(markerPath, data) {
  *   timeoutMs?: number;
  *   intervalMs?: number;
  *   force?: boolean;
+ *   currentSotaVersion?: number;
  * }} opts
- * @returns {Promise<{ current: string; latest: string; updateAvailable: boolean; checkedNow: boolean } | null>}
+ * @returns {Promise<{ current: string; latest: string; updateAvailable: boolean; checkedNow: boolean; sotaVersion: number | null; sotaUpdateAvailable: boolean } | null>}
  */
 export async function ensureUpdateCheck(opts) {
   try {
@@ -291,6 +503,7 @@ export async function ensureUpdateCheck(opts) {
     if (env.SMITHERS_NO_UPDATE_CHECK === "1") return null;
     const current = opts.currentVersion;
     if (!current || current === "unknown") return null;
+    const currentSotaVersion = opts.currentSotaVersion ?? SOTA_REGISTRY_VERSION;
 
     const homeDir = opts.homeDir ?? env.HOME ?? homedir();
     const markerPath = join(homeDir, ".smithers", "update-check.json");
@@ -303,17 +516,19 @@ export async function ensureUpdateCheck(opts) {
     const lastCheckMs = neverChecked ? 0 : marker.lastCheckMs;
 
     let latest = typeof marker.latest === "string" ? marker.latest : null;
+    let sotaVersion = Number.isInteger(marker.sotaVersion) ? marker.sotaVersion : null;
     let checkedNow = false;
     if (opts.force || neverChecked || nowMs - lastCheckMs >= intervalMs) {
-      const fetched = await fetchLatestVersion({
-        fetchImpl: opts.fetchImpl,
-        timeoutMs: opts.timeoutMs,
-      });
+      const [fetched, fetchedSota] = await Promise.all([
+        fetchLatestVersion({ fetchImpl: opts.fetchImpl, timeoutMs: opts.timeoutMs }),
+        fetchRemoteSotaVersion({ fetchImpl: opts.fetchImpl, timeoutMs: opts.timeoutMs }),
+      ]);
       checkedNow = true;
       // Persist the check time even on a failed fetch so a flaky network does
-      // not turn into a per-command retry storm. Keep the last known latest.
+      // not turn into a per-command retry storm. Keep the last known values.
       if (fetched) latest = fetched;
-      writeMarker(markerPath, { lastCheckMs: nowMs, latest });
+      if (fetchedSota) sotaVersion = fetchedSota;
+      writeMarker(markerPath, { lastCheckMs: nowMs, latest, sotaVersion });
     }
 
     if (!latest) return null;
@@ -322,6 +537,8 @@ export async function ensureUpdateCheck(opts) {
       latest,
       updateAvailable: isUpdateAvailable(latest, current),
       checkedNow,
+      sotaVersion,
+      sotaUpdateAvailable: sotaVersion != null && sotaVersion > currentSotaVersion,
     };
   } catch {
     return null;
@@ -333,16 +550,24 @@ export async function ensureUpdateCheck(opts) {
  * install method decides whether we point at `smithers update` (it can act) or
  * at the next `@latest` run (transient runners).
  *
- * @param {{ current: string; latest: string; updateAvailable: boolean } | null} check
+ * A newer SOTA model registry alone (merged to main, no release cut yet) stays
+ * silent: nudging users to update to a version that does not carry the new
+ * registry would be wrong. Once the release exists both facts are true and the
+ * notice covers models too.
+ *
+ * @param {{ current: string; latest: string; updateAvailable: boolean; sotaUpdateAvailable?: boolean } | null} check
  * @param {ReturnType<typeof detectInstallMethod>} [install]
  * @returns {string | null}
  */
 export function formatUpdateNotice(check, install) {
   if (!check?.updateAvailable) return null;
+  const models = check.sotaUpdateAvailable
+    ? " New SOTA models are in — after upgrading, run `smithers init` to refresh your workflows to the latest agents."
+    : "";
   const head = `↑ Smithers ${check.latest} is available (you have ${check.current}).`;
   if (install?.kind === "bunx") {
     const runner = install.manager === "npm" ? "npx" : "bunx";
-    return `${head} You're on ${runner} — the next \`${runner} ${SMITHERS_PACKAGE}@latest\` run picks it up.`;
+    return `${head} You're on ${runner} — the next \`${runner} ${SMITHERS_PACKAGE}@latest\` run picks it up.${models}`;
   }
-  return `${head} Run \`smithers update\` to upgrade.`;
+  return `${head} Run \`smithers update\` to upgrade.${models}`;
 }

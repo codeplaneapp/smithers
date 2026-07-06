@@ -19,6 +19,9 @@
  * @template [Schema=unknown]
  * @typedef {import("./WorkflowDefinition.ts").WorkflowDefinition<Schema>} WorkflowDefinition
  */
+/** @typedef {import("./WorkflowView.ts").WorkflowLiteralViewNode} WorkflowLiteralViewNode */
+/** @typedef {import("./WorkflowView.ts").WorkflowViewDefinition} WorkflowViewDefinition */
+/** @typedef {import("./WorkflowView.ts").WorkflowViewKind} WorkflowViewKind */
 /**
  * @template [Schema=unknown]
  * @typedef {import("./WorkflowDriverOptions.ts").WorkflowDriverOptions<Schema>} WorkflowDriverOptions

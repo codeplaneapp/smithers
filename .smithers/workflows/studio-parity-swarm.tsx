@@ -157,12 +157,12 @@ const codex = new CodexAgent({
   skipGitRepoCheck: true,
 });
 const claude = new ClaudeCodeAgent({
-  model: process.env.SMITHERS_STUDIO_CLAUDE_MODEL ?? "claude-sonnet-4-20250514",
+  model: process.env.SMITHERS_STUDIO_CLAUDE_MODEL ?? "claude-sonnet-5",
   permissionMode: "bypassPermissions",
   dangerouslySkipPermissions: true,
 });
 const antigravity = new AntigravityAgent({
-  model: process.env.SMITHERS_STUDIO_ANTIGRAVITY_MODEL ?? "gemini-3.1-pro-preview",
+  model: process.env.SMITHERS_STUDIO_ANTIGRAVITY_MODEL ?? "gemini-3.5-flash",
   yolo: true,
   dangerouslySkipPermissions: true,
 });

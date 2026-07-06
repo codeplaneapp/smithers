@@ -206,7 +206,7 @@ type VibeAgentOptions$2 = BaseCliAgentOptions$2 & {
  * Configuration options for the OpenCodeAgent.
  */
 type OpenCodeAgentOptions$2 = BaseCliAgentOptions$1 & {
-    /** Model identifier (e.g., "anthropic/claude-opus-4-8", "openai/gpt-5.4") */
+    /** Model identifier (e.g., "anthropic/claude-opus-4-8", "openai/gpt-5.5") */
     model?: string;
     /** OpenCode agent name (maps to --agent flag, selects predefined agent config) */
     agentName?: string;

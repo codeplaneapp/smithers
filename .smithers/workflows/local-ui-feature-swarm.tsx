@@ -114,7 +114,7 @@ const { Workflow, Loop, smithers, outputs } = createSmithers({
 });
 
 const claude = new ClaudeCodeAgent({
-  model: process.env.SMITHERS_LOCAL_UI_CLAUDE_MODEL ?? "claude-sonnet-4-6",
+  model: process.env.SMITHERS_LOCAL_UI_CLAUDE_MODEL ?? "claude-sonnet-5",
   permissionMode: "bypassPermissions",
   dangerouslySkipPermissions: true,
 });

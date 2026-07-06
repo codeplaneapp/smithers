@@ -122,7 +122,7 @@ class FixtureAgent implements AgentLike {
 
 export const providers = {
   claude: new FixtureAgent("claude", "claude-fable-5", "fixture-claude"),
-  claudeSonnet: new FixtureAgent("claude", "claude-sonnet-4-6", "fixture-claude-sonnet"),
+  claudeSonnet: new FixtureAgent("claude", "claude-sonnet-5", "fixture-claude-sonnet"),
   codex: new FixtureAgent("codex", "gpt-5.5", "fixture-codex"),
 } as const;
 

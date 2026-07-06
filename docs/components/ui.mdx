@@ -1,0 +1,35 @@
+---
+title: <UI>
+description: Declare a workflow-owned browser UI that the Gateway serves and the client renders with React.
+---
+
+`<UI>` lets a workflow carry its own Gateway UI declaration in the workflow TSX
+instead of registering a separate UI from the launcher. The component renders
+nothing in the workflow graph; the Gateway discovers it, bundles the client-side
+React entry, and serves it from the workflow UI route.
+
+```tsx
+import { UI, Workflow } from "smithers-orchestrator";
+
+export default smithers(() => (
+  <Workflow name="custom-view">
+    <UI entry="./ui/custom-view.tsx" title="Custom View" />
+    {/* normal workflow nodes */}
+  </Workflow>
+));
+```
+
+## Props
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `entry` | `string` | Client entry module to bundle. Use this for full `gateway-react` apps. |
+| `source` | `string` | Client-safe module exporting a React component. The Gateway wraps it with `createGatewayReactRoot`. |
+| `exportName` | `string` | Named export to read from `source`; defaults to `default`. |
+| `title` | `string` | Browser page title. |
+| `props` | `Record<string, unknown>` | Serializable props passed to a `source` component. |
+| `children` | `ReactNode` | Literal intrinsic React DOM tree for small inline views. |
+
+Inline literal children must be serializable DOM elements and text. Use
+`entry` or `source` when the UI needs hooks, event handlers, Gateway actions, or
+TanStack collection state.

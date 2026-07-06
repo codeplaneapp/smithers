@@ -113,6 +113,10 @@
  */
 /** @typedef {import("./TimerProps.ts").TimerProps} TimerProps */
 /** @typedef {import("./TryCatchFinallyProps.ts").TryCatchFinallyProps} TryCatchFinallyProps */
+/** @typedef {import("./UIProps.ts").TUIProps} TUIProps */
+/** @typedef {import("./UIProps.ts").UIProps} UIProps */
+/** @typedef {import("./UIProps.ts").WorkflowViewBootProps} WorkflowViewBootProps */
+/** @typedef {import("./UIProps.ts").WorkflowViewProps} WorkflowViewProps */
 /** @typedef {import("./WaitForEventProps.ts").WaitForEventProps} WaitForEventProps */
 /** @typedef {import("./WorkflowProps.ts").WorkflowProps} WorkflowProps */
 /** @typedef {import("./WorktreeProps.ts").WorktreeProps} WorktreeProps */
@@ -128,6 +132,7 @@ export { Branch } from "./Branch.js";
 export { Loop, Ralph } from "./Ralph.js";
 export { ContinueAsNew, continueAsNew } from "./ContinueAsNew.js";
 export { Worktree } from "./Worktree.js";
+export { UI, TUI, SMITHERS_WORKFLOW_VIEW_KIND } from "./UI.js";
 // --- Composite Components ---
 export { Kanban } from "./Kanban.js";
 export { ClassifyAndRoute } from "./ClassifyAndRoute.js";

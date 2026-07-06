@@ -25,7 +25,7 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 
 probe_status=0
-output="$(claude -p "Say OK" --model claude-sonnet-4-6 2>/tmp/smithers-e2e-claude-probe.err)" || probe_status=$?
+output="$(claude -p "Say OK" --model claude-sonnet-5 2>/tmp/smithers-e2e-claude-probe.err)" || probe_status=$?
 if [[ -z "${output//[[:space:]]/}" ]]; then
   echo "Claude agent credential probe failed: claude CLI produced no output. Run claude /login or claude setup-token, or set ANTHROPIC_API_KEY in apps/smithers/.env.e2e.local." >&2
   sed -n '1,20p' /tmp/smithers-e2e-claude-probe.err >&2 || true

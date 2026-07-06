@@ -60,7 +60,7 @@ function artifactContract(kind: VerifyKind): string {
       "Requirements that make it verifiable:",
       "  • It MUST start with the pragma: /** @jsxImportSource smithers-orchestrator */",
       "  • Import everything from 'smithers-orchestrator' (and 'zod' for schemas).",
-      "  • Construct any agent INLINE (e.g. new ClaudeCodeAgent({ model: 'claude-sonnet-4-6' })).",
+      "  • Construct any agent INLINE (e.g. new ClaudeCodeAgent({ model: 'claude-sonnet-5' })).",
       "  • Do NOT import project-relative paths like '../agents' or '../prompts/*.mdx' — it must stand alone.",
       "  • It must render with `smithers graph` (a valid <Workflow> tree with typed <Task> outputs).",
     ].join("\n");

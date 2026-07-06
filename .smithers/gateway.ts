@@ -26,9 +26,10 @@ function displayName(key: string, source: string): string {
 // the rest of the gateway and the other workflow UIs still come up.
 async function mountWorkflow(key: string, title: string) {
   try {
+    const workflowEntry = resolve(here, "workflows", key + ".tsx");
     const mod = await import("./workflows/" + key + ".tsx");
     const uiEntry = resolve(here, "ui", key + ".tsx");
-    const options: { ui?: { entry: string; title: string } } = {};
+    const options: { ui?: { entry: string; title: string }; entryFile: string } = { entryFile: workflowEntry };
     if (existsSync(uiEntry)) options.ui = { entry: uiEntry, title };
     gateway.register(key, mod.default, options);
     if (options.ui) {

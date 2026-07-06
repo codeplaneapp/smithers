@@ -33,7 +33,7 @@ const { Workflow, smithers, outputs } = createSmithers({
 });
 
 const codeSearchAgent = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions: `You are a codebase analysis agent. Use the provided tools to search
 through source code and answer questions. Always back up your findings with
 specific file paths and line numbers.`,

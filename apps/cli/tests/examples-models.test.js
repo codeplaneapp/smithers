@@ -8,6 +8,7 @@ const EXAMPLES_DIR = resolve(REPO_ROOT, "examples");
 const STALE_SONNET_MODELS = [
     "claude-sonnet-4-20250514",
     "claude-sonnet-4-5",
+    "claude-sonnet-4-6",
     "claude-sonnet-4-7",
 ];
 

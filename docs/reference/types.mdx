@@ -54,12 +54,25 @@ Major sections at a glance:
 interface SmithersWorkflow<Schema = unknown> {
   readonly readableName?: string;
   readonly description?: string;
+  readonly ui?: WorkflowViewDefinition;
+  readonly tui?: WorkflowViewDefinition;
   readonly db?: unknown;
   readonly build: (ctx: SmithersCtx<Schema>) => JSX.Element;
   readonly opts: SmithersWorkflowOptions;
   readonly schemaRegistry?: Map<string, SchemaRegistryEntry>;
   readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;
 }
+
+type WorkflowViewDefinition = {
+  kind: "ui" | "tui";
+  title?: string;
+  props?: Record<string, unknown>;
+  entry?: string;
+  path?: string;
+  source?: string;
+  exportName?: string;
+  literal?: WorkflowLiteralViewNode;
+};
 
 type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;

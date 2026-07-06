@@ -37,12 +37,12 @@ describe("Pi diagnostics provider mapping", () => {
         expect(result.message).toContain("ANTHROPIC_API_KEY");
     });
     test("infers OpenAI checks from provider/model prefix", async () => {
-        const check = apiKeyCheck(getDiagnosticStrategy("pi", { model: "openai/gpt-4o" }));
+        const check = apiKeyCheck(getDiagnosticStrategy("pi", { model: "openai/gpt-5.4-mini" }));
         const result = await check.run({ env: {}, cwd: "/tmp" });
         expect(result.message).toContain("OPENAI_API_KEY");
     });
     test("infers OpenAI checks from a bare gpt- model id", async () => {
-        const check = apiKeyCheck(getDiagnosticStrategy("pi", { model: "gpt-4o" }));
+        const check = apiKeyCheck(getDiagnosticStrategy("pi", { model: "gpt-5.4-mini" }));
         const result = await check.run({ env: {}, cwd: "/tmp" });
         expect(result.message).toContain("OPENAI_API_KEY");
     });
@@ -63,7 +63,7 @@ describe("Pi diagnostics provider mapping", () => {
             .toEqual({ GOOGLE_API_KEY: "g" });
     });
     test("maps a bare gpt- model id apiKey to OPENAI_API_KEY", () => {
-        expect(diagnosticApiKeyEnv("pi", { model: "gpt-4o", apiKey: "sk-x" }))
+        expect(diagnosticApiKeyEnv("pi", { model: "gpt-5.4-mini", apiKey: "sk-x" }))
             .toEqual({ OPENAI_API_KEY: "sk-x" });
     });
     test("maps the pi --api-key option to the provider's env var", () => {
@@ -71,7 +71,7 @@ describe("Pi diagnostics provider mapping", () => {
             .toEqual({ OPENAI_API_KEY: "sk-openai" });
         expect(diagnosticApiKeyEnv("pi", { provider: "anthropic", apiKey: "sk-anthropic" }))
             .toEqual({ ANTHROPIC_API_KEY: "sk-anthropic" });
-        expect(diagnosticApiKeyEnv("pi", { model: "openai/gpt-4o", apiKey: "sk-x" }))
+        expect(diagnosticApiKeyEnv("pi", { model: "openai/gpt-5.4-mini", apiKey: "sk-x" }))
             .toEqual({ OPENAI_API_KEY: "sk-x" });
         expect(diagnosticApiKeyEnv("pi", { provider: "google", apiKey: "g-key" }))
             .toEqual({ GOOGLE_API_KEY: "g-key" });

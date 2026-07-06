@@ -6,6 +6,7 @@ import { CodexAgent } from "@smithers-orchestrator/agents/CodexAgent";
 import { KimiAgent } from "@smithers-orchestrator/agents/KimiAgent";
 import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
 import { detectAvailableAgents } from "./agent-detection.js";
+import { SOTA_SLOTS } from "./sota-models.generated.js";
 
 // A human watching a run wants a friendly recap, not a scroll of engine logs.
 // A cheap/fast model reads the run transcript and narrates it: a short terminal
@@ -19,11 +20,11 @@ import { detectAvailableAgents } from "./agent-detection.js";
  * builds a tool-less agent (no MCP): it only reads the transcript we hand it.
  */
 const REPORT_AGENTS = [
-    { id: "claude", build: (cwd, systemPrompt) => new ClaudeCodeAgent({ cwd, model: "claude-sonnet-5", systemPrompt, dangerouslySkipPermissions: true }) },
-    { id: "codex", build: (cwd, systemPrompt) => new CodexAgent({ cwd, model: "gpt-5.5", systemPrompt, fullAuto: true, skipGitRepoCheck: true }) },
-    { id: "antigravity", build: (cwd, systemPrompt) => new AntigravityAgent({ cwd, model: "gemini-3.1-pro-preview", systemPrompt, dangerouslySkipPermissions: true }) },
-    { id: "kimi", build: (cwd, systemPrompt) => new KimiAgent({ cwd, model: "kimi-k2.6", systemPrompt }) },
-    { id: "pi", build: (cwd, systemPrompt) => new PiAgent({ cwd, provider: "openai", model: "gpt-5.5", systemPrompt }) },
+    { id: "claude", build: (cwd, systemPrompt) => new ClaudeCodeAgent({ cwd, model: SOTA_SLOTS.sonnet, systemPrompt, dangerouslySkipPermissions: true }) },
+    { id: "codex", build: (cwd, systemPrompt) => new CodexAgent({ cwd, model: SOTA_SLOTS.codex, systemPrompt, fullAuto: true, skipGitRepoCheck: true }) },
+    { id: "antigravity", build: (cwd, systemPrompt) => new AntigravityAgent({ cwd, model: SOTA_SLOTS.gemini, systemPrompt, dangerouslySkipPermissions: true }) },
+    { id: "kimi", build: (cwd, systemPrompt) => new KimiAgent({ cwd, model: SOTA_SLOTS.kimi, systemPrompt }) },
+    { id: "pi", build: (cwd, systemPrompt) => new PiAgent({ cwd, provider: "openai", model: SOTA_SLOTS.codex, systemPrompt }) },
 ];
 
 const TERMINAL_SENTINEL = "===SMITHERS_TERMINAL===";

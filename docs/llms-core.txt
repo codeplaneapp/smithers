@@ -128,7 +128,7 @@ Verify the installed version any time with:
 smithers --version
 ```
 
-Smithers also checks npm at most once a day and prints a one-line notice on an interactive run when a newer release is available. Disable that passive check with `SMITHERS_NO_UPDATE_CHECK=1` (it is already skipped in CI, in JSON/agent output, and for non-interactive shells).
+Smithers also checks npm at most once a day and prints a one-line notice on an interactive run when a newer release is available. The same daily check compares your install's [SOTA model registry](/reference/sota-models) against the published one: when a release ships with new best-in-class models, the notice tells you to run `smithers update` and then `bunx smithers-orchestrator init` so installed workflows move to the latest agents. Disable the passive check with `SMITHERS_NO_UPDATE_CHECK=1` (it is already skipped in CI, in JSON/agent output, and for non-interactive shells).
 
 ### Clean reinstall
 
@@ -964,7 +964,7 @@ Five built-ins: `schemaAdherenceScorer`, `latencyScorer`, `relevancyScorer`, `to
 
 Five delegation scorers back the [delegation-chain workflow](/workflows/delegation-chain): `pocJudgmentScorer` (probe judgment; false negatives punished hardest), `planSolidityScorer` (post-execution replan churn), `estimateAccuracyScorer` (forecast vs. actual cost/time/tokens), `tierFitScorer` (was the intelligence tier right), and `humanPollScorer` (end-of-run user poll), combined by `delegationRunScore` / `weightedScore`, with `extractDelegationEvents` and `resolvePlanningNodes` as the shared event readers.
 
-The public scorer surface also exports `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smithersScorers` table, and scorer metrics (`scorersStarted`, `scorersFinished`, `scorersFailed`, `scorerDuration`).
+The public scorer surface also exports `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smithersScorers` table, token-cost helpers (`modelTokenPrices`, `estimateCostUsd`), and scorer metrics (`scorersStarted`, `scorersFinished`, `scorersFailed`, `scorerDuration`).
 
 ```bash
 bunx smithers-orchestrator scores RUN_ID
@@ -2073,7 +2073,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[87]:
+commands[88]:
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal a wizard first lets you pick workflows and skill targets; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -2607,6 +2607,17 @@ commands[87]:
     flags[2]{name,short,type,default,desc}:
       check,,boolean,false,Only report current vs latest version; never upgrade
       dry-run,,boolean,false,Print the upgrade command without running it
+  - name: upgrade
+    purpose: "Run the agent-assisted Smithers upgrade workflow: fetch changelogs, upgrade with a cheap agent, and escalate to a smart agent only when needed."
+    flags[8]{name,short,type,default,desc}:
+      interactive,,boolean,false,Force the full-screen interactive TUI monitor (TTY only).
+      detach,d,boolean,false,Launch the upgrade workflow in the background and print the run ID.
+      dry-run,,boolean,false,Fetch changelogs and plan the upgrade without changing the install.
+      run-id,,string,,Explicit run ID for the upgrade workflow.
+      root,,string,,Tool sandbox root directory.
+      log-dir,,string,,NDJSON event logs directory.
+      backend,,enum,,"sqlite|pglite|postgres"
+      auth-token,,string,,Bearer token passed to the interactive monitor gateway client.
   - name: agents.capabilities
     purpose: Print JSON capability registry for built-in CLI agents
   - name: agents.doctor
@@ -6325,12 +6336,25 @@ Major sections at a glance:
 interface SmithersWorkflow<Schema = unknown> {
   readonly readableName?: string;
   readonly description?: string;
+  readonly ui?: WorkflowViewDefinition;
+  readonly tui?: WorkflowViewDefinition;
   readonly db?: unknown;
   readonly build: (ctx: SmithersCtx<Schema>) => JSX.Element;
   readonly opts: SmithersWorkflowOptions;
   readonly schemaRegistry?: Map<string, SchemaRegistryEntry>;
   readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;
 }
+
+type WorkflowViewDefinition = {
+  kind: "ui" | "tui";
+  title?: string;
+  props?: Record<string, unknown>;
+  entry?: string;
+  path?: string;
+  source?: string;
+  exportName?: string;
+  literal?: WorkflowLiteralViewNode;
+};
 
 type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
@@ -8524,12 +8548,15 @@ Defined in the root `package.json` for development:
 | `lint:fix` | `node scripts/lint.mjs --fix --fix-suggestions` | Apply supported oxlint fixes |
 | `cli` | `bun run apps/cli/src/index.js` | Run the local development CLI entrypoint |
 | `generate:init-pack` | `bun scripts/generate-workflow-pack.ts` | Regenerate the local workflow pack used by `bunx smithers-orchestrator init` |
-| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && pnpm -r --no-bail test` | Run docs/config guards, dependency guards, llms guards, per-file declaration freshness, and each package test script (no-bail so every failing package is reported) |
+| `sota:gen` | `bun scripts/generate-sota.ts` | Render the SOTA model registry (`docs/data/sota-models.json`) into its docs page and CLI module |
+| `sota:research` | `bun scripts/sota-research.ts` | Research whether new SOTA models shipped and rewrite the registry if so (used by the daily cron) |
+| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && pnpm -r --no-bail test` | Run docs/config guards, dependency guards, llms guards, SOTA registry guard, per-file declaration freshness, and each package test script (no-bail so every failing package is reported) |
 | `coverage` | `node scripts/coverage.mjs` | Generate a test coverage report across the workspace |
 | `check:effect` | `node scripts/check-single-effect-version.mjs` | Verify the workspace resolves a single Effect version |
 | `check:deps` | `node scripts/check-dependency-boundaries.mjs` | Verify package dependency boundaries |
 | `check:docs` | `node scripts/check-docs.mjs` | Verify documentation style and API drift guards |
 | `check:llms` | `node scripts/check-llms.mjs` | Verify generated llms docs are current |
+| `check:sota` | `node scripts/check-sota.mjs` | Verify the SOTA registry's generated docs page and CLI module match `docs/data/sota-models.json` |
 | `check:dts` | `node scripts/check-dts.mjs` | Verify per-file `.d.ts` declarations are freshly regenerated from source |
 | `fetch:jj` | `node scripts/fetch-jj-binaries.mjs` | Fetch vendored jj binaries for supported platforms |
 | `docs:components` | `node scripts/generate-component-source.mjs` | Embed composite component source as tabs in their docs pages |
@@ -9595,13 +9622,13 @@ Observed result:
 | `cerebras` | OpenAI-compatible | `CEREBRAS_API_KEY` | `zai-glm-4.7` |
 | `openai-api`, `openai`, `openai-sdk`, `codex` | OpenAI-compatible | `OPENAI_API_KEY` | `gpt-5.5` |
 | `anthropic-api`, `anthropic`, `anthropic-sdk`, `claude-code`, `claude` | Anthropic Messages API | `ANTHROPIC_API_KEY` | `claude-fable-5` |
-| `gemini-api`, `gemini`, `antigravity` | Gemini generateContent API | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3.1-pro-preview` |
-| `kimi`, `moonshot` | OpenAI-compatible Moonshot API | `MOONSHOT_API_KEY` | `kimi-k2.6` |
+| `gemini-api`, `gemini`, `antigravity` | Gemini generateContent API | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3.5-flash` |
+| `kimi`, `moonshot` | OpenAI-compatible Moonshot API | `MOONSHOT_API_KEY` | `kimi-k2.7-code` |
 | `opencode` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `anthropic/claude-fable-5` |
 | `pi` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `gpt-5.5` |
 | `amp`, `forge`, `openai-compatible` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | pass `--model` when needed |
 
-The CLI provider names (`claude-code`, `codex`, `antigravity`, `gemini`, `kimi`) map to their hosted API equivalents for optimization because GEPA needs a direct model call to propose prompt patches. Providers with no single hosted backend (`opencode`, `pi`, `amp`, `forge`) are still accepted through a generic OpenAI-compatible endpoint.
+The default models track the [SOTA model registry](/reference/sota-models), which lists the current defaults and badges and is refreshed by a daily research job. The CLI provider names (`claude-code`, `codex`, `antigravity`, `gemini`, `kimi`) map to their hosted API equivalents for optimization because GEPA needs a direct model call to propose prompt patches. Providers with no single hosted backend (`opencode`, `pi`, `amp`, `forge`) are still accepted through a generic OpenAI-compatible endpoint.
 
 `--provider heuristic` is deterministic and intended for local tests and fixtures. Use `heuristic` when you want deterministic optimization without an API call: place `optimizationHints` in each case's `metadata` to control the patch. It uses eval-case metadata such as:
 
@@ -9616,3 +9643,208 @@ The CLI provider names (`claude-code`, `codex`, `antigravity`, `gemini`, `kimi`)
 ```
 
 Artifacts are Smithers JSON records with baseline score, optimized score, improvement, prompt patches, and linked eval reports.
+
+---
+
+## SOTA models
+
+> The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v1, updated 2026-07-06.
+
+{/* GENERATED FILE. Edit docs/data/sota-models.json, then run `pnpm sota:gen`. */}
+
+**Registry v1** · updated **2026-07-06**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smithers-orchestrator update` picks the changes up on your machine, and re-running `bunx smithers-orchestrator init` refreshes installed workflows to the new defaults.
+
+## Badges
+
+Each badge names the single best model for that job right now.
+
+| Badge | Model | ID |
+| --- | --- | --- |
+| Best orchestrator | Claude Fable 5 | `claude-fable-5` |
+| Smartest reviewer | Claude Fable 5 | `claude-fable-5` |
+| Smartest coder | Claude Fable 5 | `claude-fable-5` |
+| Fastest coding | GPT-5.3-Codex-Spark | `gpt-5.3-codex-spark` |
+| Best at UI | Gemini 3.5 Flash | `gemini-3.5-flash` |
+| Fast & cheap | Gemini 3.5 Flash | `gemini-3.5-flash` |
+| Best value coding | Kimi K2.7-Code | `kimi-k2.7-code` |
+| Best open source | Kimi K2.6 | `kimi-k2.6` |
+
+## Role defaults
+
+The fable-sandwich tiers (see the [workflow optimization guide](/guides/workflow-optimization)) resolve to these ids:
+
+| Role | Default model |
+| --- | --- |
+| orchestrator | `claude-fable-5` |
+| planning | `claude-fable-5` |
+| review | `claude-fable-5` |
+| smart | `claude-fable-5` |
+| implement | `gpt-5.5` |
+| cheapFast | `gemini-3.5-flash` |
+| ui | `gemini-3.5-flash` |
+| realtime | `gpt-5.3-codex-spark` |
+| research | `kimi-k2.6` |
+
+## Anthropic
+
+### Claude Fable 5 (`claude-fable-5`)
+
+**Best orchestrator** · **Smartest reviewer** · **Smartest coder** · state of the art · engines: `claude`, `opencode` · roles: orchestrator, planning, review, smart
+
+Anthropic's Mythos-class frontier model, the first of the Claude 5 family. The strongest model available for planning, code review, and orchestrating other agents, which is why it sits at both ends of the fable sandwich: it writes the plan, delegates implementation, then reviews the result.
+
+### Claude Opus 4.8 (`claude-opus-4-8`)
+
+current · engines: `claude`, `opencode` · roles: smart
+
+Anthropic's Opus tier. Still a top-shelf generalist and the always-present fallback behind Fable in the smart, planning, and review pools.
+
+### Claude Sonnet 5 (`claude-sonnet-5`)
+
+current · released 2026-06-29 · engines: `claude`, `opencode` · roles: implement, cheapFast
+
+The newest Sonnet: fast, cheap, 1M context. The guaranteed implementer fallback in the fable sandwich and the default cheapFast Claude.
+
+### Claude Haiku 4.5 (`claude-haiku-4-5`)
+
+current · engines: `claude`, `opencode`
+
+Anthropic's cheapest tier, for high-volume summarization and classification where even Sonnet is overkill.
+
+## OpenAI
+
+### GPT-5.5 (`gpt-5.5`)
+
+state of the art · engines: `codex`, `pi` · roles: implement, smart
+
+OpenAI's GA flagship and the Codex CLI default. The implementation workhorse in the middle of the fable sandwich. With ChatGPT auth use the id gpt-5.5 exactly (gpt-5.5-codex and gpt-5.3-codex are deprecated in Codex).
+
+### GPT-5.4 (`gpt-5.4`)
+
+current · engines: `codex`, `pi`
+
+The previous OpenAI flagship. Still solid for professional work when gpt-5.5 quota is tight.
+
+### GPT-5.4 mini (`gpt-5.4-mini`)
+
+current · engines: `codex`, `pi` · roles: cheapFast
+
+OpenAI's fast, efficient tier. The default cheap OpenAI model, including via OpenRouter (openai/gpt-5.4-mini).
+
+### GPT-5.3-Codex-Spark (`gpt-5.3-codex-spark`)
+
+**Fastest coding** · state of the art · released 2026-02-12 · engines: `codex` · roles: realtime
+
+OpenAI's first real-time coding model: 1000+ tokens per second on dedicated Cerebras hardware while staying genuinely capable. Research preview, ChatGPT Pro only. Reach for it when iteration latency matters more than depth.
+
+## Google
+
+### Gemini 3.5 Flash (`gemini-3.5-flash`)
+
+**Best at UI** · **Fast & cheap** · state of the art · released 2026-05-19 · engines: `antigravity` · roles: ui, implement, cheapFast
+
+Google's best price-to-performance model and the best model for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. The default Gemini in smithers.
+
+### Gemini 3.1 Pro (`gemini-3.1-pro-preview`)
+
+current · engines: `antigravity`
+
+Google's Pro tier (still preview). Superseded for coding and agentic work by Gemini 3.5 Flash; keep it for long-horizon reasoning where Pro depth wins.
+
+### Gemini 3.1 Flash-Lite (`gemini-3.1-flash-lite`)
+
+current · engines: `antigravity`
+
+Frontier-class performance at a fraction of the cost. The floor of the Gemini lineup for bulk, low-stakes calls.
+
+## Moonshot AI
+
+### Kimi K2.7-Code (`kimi-k2.7-code`)
+
+**Best value coding** · state of the art · released 2026-06-12 · engines: `kimi` · roles: implement, cheapFast
+
+Moonshot's most capable coding model and the best coding value on the market: 256k context, roughly 30% fewer reasoning tokens than K2.6, strong instruction-following in long contexts. The default Kimi in smithers; the -highspeed variant trades a little quality for ~180 tok/s.
+
+### Kimi K2.7-Code High-Speed (`kimi-k2.7-code-highspeed`)
+
+current · engines: `kimi` · roles: realtime
+
+The high-throughput K2.7-Code variant, around 180 tokens per second. The open-weights answer to Codex-Spark for latency-sensitive loops.
+
+### Kimi K2.6 (`kimi-k2.6`)
+
+**Best open source** · current · released 2026-04-20 · engines: `kimi` · roles: research
+
+Moonshot's open-source (modified MIT) trillion-parameter MoE flagship: native multimodal, agent swarms up to 300 sub-agents, up to 13 hours of continuous coding. Ties GPT-5.5 on SWE-Bench Pro at roughly 80% lower cost. The strongest model you can self-host.
+
+## Benchmarks
+
+Independent of the roster above: how these models actually score. smithers ships two benchmark harnesses in-repo: [`benchmarks/roadmapbench`](https://github.com/smithersai/smithers/tree/main/benchmarks/roadmapbench) (RoadmapBench, a real audited run) and [`benchmarks/site`](https://github.com/smithersai/smithers/tree/main/benchmarks/site) (the benchmarks.smithers.sh leaderboard, sourced from `benchmarks/results.json`). Only results for models that still appear in the registry above are shown; rows for older models (e.g. Claude Opus 4.6, GPT-5.2) are dropped automatically. `pending` rows are honest placeholders: the smithers fleet run has not completed at full scale yet.
+
+{/* Generated from docs/data/sota-benchmarks.json. Rows naming a deprecated or unlisted model are filtered out. */}
+
+### RoadmapBench
+
+[UniPat-AI/RoadmapBench (115 tasks)](https://github.com/UniPat-AI/RoadmapBench) · metric: Resolved Rate (RR) · Completion Score (CS) · harness: `benchmarks/roadmapbench`
+
+Long-horizon, multi-target version upgrades: start from a repo pinned to an old release and implement every independent feature a real upstream bump introduced (median oracle change ~3,700 LOC across ~51 files; median 5 scored targets). The best single agent on the official leaderboard resolves under 40% of tasks.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| Claude Opus 4.8 + GPT-5.5 | smithers (fable-sandwich) | **RR 0.50 · CS 0.857** | curated subset (Python + TypeScript) · n=2 | every grader fair-validated (oracle=1.0, no-op<1.0); every run audited untainted. Not a full-115 claim. |
+| public SOTA (best single agent) | official | RR ~0.39 · CS ~0.69 | full-115 · n=115 | approximate published best on the official leaderboard |
+
+### SWE-Bench Pro
+
+[ScaleAI/SWE-bench_Pro (test, 731 tasks)](https://github.com/scaleapi/SWE-bench_Pro-os) · metric: Pass@1 (%) · harness: `benchmarks/site`
+
+731 multi-file tasks across 11 professional repos (Go/Python/JS/TS) graded by hidden tests in canonical per-instance Docker. Moonshot reports Kimi K2.6 tying GPT-5.5 here at roughly 80% lower cost.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| Claude Opus 4.8 + Claude Sonnet 5 | smithers (delegation-chain) | pending | full-731 | Claude-only fleet run pending |
+
+### Claw-Eval-Live
+
+[Claw-Eval-Live (105 tasks / 17 families)](https://arxiv.org/abs/2604.28139) · metric: Score (pass bar 75) · harness: `benchmarks/site`
+
+Agentic enterprise workflows scored on observable execution evidence. No public model clears the 70% pass bar; frontier flagships cluster in the low 80s.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| GPT-5.4 | official | 81.7 | full-105 · n=105 | public leaderboard |
+| smithers (mixture) | mixture-gateway | pending | pending | cannot run faithfully Claude-only (native OpenAI gather leg + neutral Gemini judge); asterisked variant only |
+
+### SWE-EVO
+
+[SWE-EVO (48 release-sized tasks / 7 repos)](https://arxiv.org/abs/2512.18470) · metric: Resolved Rate (%) · harness: `benchmarks/site`
+
+Carry a Python project across a whole release transition. Frontier agents resolve only ~21-25% of the full-48 set.
+
+| Models | Harness | Score | Sample | Notes |
+| --- | --- | --- | --- | --- |
+| GPT-5.4 | official (OpenHands) | 25.0 | full-48 · n=48 | Wilson 95% CI [14.9, 38.8] |
+| Claude Opus 4.8 + Claude Sonnet 5 | smithers (delegation-chain) | pending | dvc subset | Claude-only fleet run pending; dvc subset is easier than full-48, not directly comparable |
+
+## Deprecated ids
+
+Rewrite these on sight; the daily research job does the same sweep mechanically.
+
+| Deprecated | Use instead |
+| --- | --- |
+| `claude-sonnet-4-6` | `claude-sonnet-5` |
+| `claude-sonnet-4-7` | `claude-sonnet-5` |
+| `claude-sonnet-4-20250514` | `claude-sonnet-5` |
+| `gpt-5.3-codex` | `gpt-5.5` |
+| `gpt-5.2` | `gpt-5.5` |
+| `gpt-4o` | `gpt-5.4-mini` |
+| `kimi-latest` | `kimi-k2.7-code` |
+
+## Update policy
+
+- Only GA (generally available) models enter the registry. Limited previews (e.g. GPT-5.6 Sol/Terra/Luna) wait until they ship for real.
+- Research previews with real availability (e.g. gpt-5.3-codex-spark on ChatGPT Pro) may enter with status sota for their niche, noted in the description.
+- No floating aliases (kimi-latest, *-latest). Pin concrete ids so a provider-side model swap cannot bypass this registry.
+- Every badge names exactly one model. A new badge holder demotes the old one in the same change.
+- Any change to models bumps version by exactly 1 and refreshes updatedAt.
+- Deprecated entries keep their replacedBy id for one release so sweeps know what to rewrite, then get deleted.

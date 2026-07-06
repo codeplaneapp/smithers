@@ -182,7 +182,8 @@
             "group": "System",
             "pages": [
               "workflows/init",
-              "workflows/post-failure"
+              "workflows/post-failure",
+              "workflows/upgrade"
             ]
           }
         ]
@@ -200,6 +201,8 @@
           "components/approval",
           "components/merge-queue",
           "components/worktree",
+          "components/ui",
+          "components/tui",
           "components/extract-prompt",
           {
             "group": "Composite",
@@ -368,6 +371,7 @@
               "reference/authoring",
               "reference/components",
               "reference/agents",
+              "reference/sota-models",
               "reference/tools",
               "reference/scorers",
               "reference/memory",

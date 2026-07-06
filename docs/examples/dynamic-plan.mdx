@@ -31,18 +31,18 @@ const { Workflow, smithers, outputs } = createSmithers({
 });
 
 const analyzer = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions:
     "Analyze the given task. Determine if it is low or high complexity. Return a short summary and a complexity rating.",
 });
 
 const planner = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions: "Break the task into concrete, ordered steps.",
 });
 
 const implementer = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions: "Implement the requested task and return the result.",
 });
 

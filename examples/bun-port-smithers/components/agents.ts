@@ -132,7 +132,7 @@ function writerAgent(repo: string, kind = "phase-a-implement"): any {
   if (!useRealAgents) return makeDryAgent(kind);
   return new ClaudeCodeAgent({
     cwd: repo,
-    model: process.env.BUN_PORT_WRITER_MODEL ?? "claude-sonnet-4-6",
+    model: process.env.BUN_PORT_WRITER_MODEL ?? "claude-sonnet-5",
     permissionMode: "acceptEdits",
     allowedTools: process.env.BUN_PORT_WRITER_ALLOWED_TOOLS?.split(",") ?? [
       "Read",
@@ -163,7 +163,7 @@ function reviewerAgent(repo: string, kind = "phase-a-verify"): any {
   return new PiAgent({
     cwd: repo,
     provider: process.env.BUN_PORT_REVIEW_PROVIDER ?? "openai-codex",
-    model: process.env.BUN_PORT_REVIEW_MODEL ?? "gpt-5.3-codex",
+    model: process.env.BUN_PORT_REVIEW_MODEL ?? "gpt-5.5",
     mode: "rpc",
     thinking: "high",
     tools: ["read", "grep", "bash"],

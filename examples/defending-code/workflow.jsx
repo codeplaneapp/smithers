@@ -32,7 +32,7 @@ import { ClaudeCodeAgent } from "@smithers-orchestrator/agents";
 import { z } from "zod";
 import { createExampleSmithers } from "../_example-kit.js";
 
-const MODEL = process.env.DEFENDING_CODE_MODEL ?? "claude-sonnet-4-6";
+const MODEL = process.env.DEFENDING_CODE_MODEL ?? "claude-sonnet-5";
 const FANOUT = Number(process.env.DEFENDING_CODE_FANOUT ?? "3");
 const TARGET_SRC = "targets/card-parser/src/card_parser.c";
 

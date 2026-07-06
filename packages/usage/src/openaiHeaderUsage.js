@@ -9,7 +9,7 @@ const CHAT_URL = "https://api.openai.com/v1/chat/completions";
  * does. This minimal completion costs one request and a single output token,
  * which is the cheapest documented way to read the headers.
  */
-const PROBE_MODEL = process.env.SMITHERS_OPENAI_PROBE_MODEL ?? "gpt-4o-mini";
+const PROBE_MODEL = process.env.SMITHERS_OPENAI_PROBE_MODEL ?? "gpt-5.4-mini";
 
 /** Probes must fail fast: `smithers usage` fans out over every account and a hung probe stalls the whole table. */
 const PROBE_TIMEOUT_MS = 6_000;

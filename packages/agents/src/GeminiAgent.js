@@ -10,7 +10,7 @@ export const GEMINI_SUNSET_MESSAGE = [
     "Use AntigravityAgent with Google's `agy` CLI instead.",
     "Example:",
     '  import { AntigravityAgent } from "smithers-orchestrator";',
-    '  const agent = new AntigravityAgent({ model: "gemini-3.1-pro-preview", cwd: process.cwd() });',
+    '  const agent = new AntigravityAgent({ model: "gemini-3.5-flash", cwd: process.cwd() });',
 ].join("\n");
 
 /**

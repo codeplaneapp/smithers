@@ -28,6 +28,29 @@ function createValueWorkflow(dbPath) {
   ));
 }
 
+function createWorkflowOwnedLiteralUi(dbPath) {
+  const { smithers, Workflow, Task, UI, TUI, outputs } = createSmithers(
+    { result: z.object({ ok: z.boolean() }) },
+    { dbPath },
+  );
+  return smithers(() => (
+    <Workflow name="workflow-owned-ui">
+      <UI title="Inline Workflow UI" props={{ source: "workflow-jsx" }}>
+        <main data-testid="inline-workflow-ui" style={{ padding: 12 }}>
+          <h1>Inline Workflow UI</h1>
+          <p>Rendered from workflow JSX</p>
+        </main>
+      </UI>
+      <TUI title="Inline Workflow TUI">
+        <box>
+          <text>Terminal workflow UI</text>
+        </box>
+      </TUI>
+      <Task id="task1" output={outputs.result}>{{ ok: true }}</Task>
+    </Workflow>
+  ));
+}
+
 function writeUiEntry(dir, label) {
   const entry = join(dir, "ui.jsx");
   writeFileSync(
@@ -442,6 +465,39 @@ describe("Gateway UI", () => {
       }),
     ]);
   });
+
+  test("serves a workflow-owned inline UI declaration without register ui options", async () => {
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-inline-workflow-ui-"));
+    gateway = new Gateway();
+    gateway.register("inline", createWorkflowOwnedLiteralUi(join(tempDir, "inline.db")));
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const htmlResponse = await fetch(`http://127.0.0.1:${port}/workflows/inline`);
+    expect(htmlResponse.status).toBe(200);
+    const html = await htmlResponse.text();
+    expect(html).toContain("<title>Inline Workflow UI</title>");
+    expect(html).toContain('"workflowKey":"inline"');
+    expect(html).toContain('"source":"workflow-jsx"');
+
+    const bundleResponse = await fetch(`http://127.0.0.1:${port}/workflows/inline/__smithers_ui/client.js`);
+    expect(bundleResponse.status).toBe(200);
+    const bundle = await bundleResponse.text();
+    expect(bundle).toContain("Inline Workflow UI");
+    expect(bundle).toContain("Rendered from workflow JSX");
+    expect(bundle).toContain("createRoot");
+
+    const listedResponse = await postRpc(port, "listWorkflows", { filter: { hasUi: true } });
+    expect(listedResponse.status).toBe(200);
+    const listed = await listedResponse.json();
+    expect(listed.payload).toEqual([
+      expect.objectContaining({
+        key: "inline",
+        hasUi: true,
+        uiPath: "/workflows/inline",
+      }),
+    ]);
+  }, 20000);
 
   test("system workflows are hidden from listWorkflows unless includeSystem is set", async () => {
     tempDir = mkdtempSync(join(process.cwd(), ".smithers-system-wf-"));

@@ -61,6 +61,8 @@ const SEEDED_WORKFLOW_IDS = [
   "init",
   // Auto-launched autopsy for failed runs (system workflow).
   "post-failure",
+  // Agent-assisted CLI/plugin upgrade wrapper (system workflow).
+  "upgrade",
 ];
 
 type TemplateFile = { path: string; contents: string; owners?: string[] };

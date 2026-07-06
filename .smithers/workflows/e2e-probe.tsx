@@ -9,7 +9,7 @@ const probeOutputSchema = z.object({
 });
 
 const claude = new ClaudeCodeAgent({
-  model: "claude-sonnet-4-6",
+  model: "claude-sonnet-5",
   cwd: process.cwd(),
 });
 

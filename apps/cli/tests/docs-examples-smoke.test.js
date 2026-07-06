@@ -66,32 +66,32 @@ const NON_STANDALONE_WORKFLOW_SNIPPETS = [
 ];
 const CURRENT_MODEL_DOCS = {
     "docs/examples/approval-gate.mdx": {
-        banned: ["claude-sonnet-4-5-20250929"],
-        required: ["claude-sonnet-4-6"],
+        banned: ["claude-sonnet-4-5-20250929", "claude-sonnet-4-6"],
+        required: ["claude-sonnet-5"],
     },
     "docs/examples/claude-plugin-orchestrator.mdx": {
-        banned: ["claude-sonnet-4-5-20250929"],
-        required: ["claude-sonnet-4-6"],
+        banned: ["claude-sonnet-4-5-20250929", "claude-sonnet-4-6"],
+        required: ["claude-sonnet-5"],
     },
     "docs/examples/dynamic-plan.mdx": {
-        banned: ["claude-sonnet-4-5-20250929"],
-        required: ["claude-sonnet-4-6"],
+        banned: ["claude-sonnet-4-5-20250929", "claude-sonnet-4-6"],
+        required: ["claude-sonnet-5"],
     },
     "docs/examples/loop.mdx": {
-        banned: ["claude-sonnet-4-5-20250929"],
-        required: ["claude-sonnet-4-6"],
+        banned: ["claude-sonnet-4-5-20250929", "claude-sonnet-4-6"],
+        required: ["claude-sonnet-5"],
     },
     "docs/examples/multi-agent-review.mdx": {
-        banned: ["claude-sonnet-4-5-20250929"],
-        required: ["claude-sonnet-4-6"],
+        banned: ["claude-sonnet-4-5-20250929", "claude-sonnet-4-6"],
+        required: ["claude-sonnet-5"],
     },
     "docs/examples/tools-agent.mdx": {
-        banned: ["claude-sonnet-4-5-20250929"],
-        required: ["claude-sonnet-4-6"],
+        banned: ["claude-sonnet-4-5-20250929", "claude-sonnet-4-6"],
+        required: ["claude-sonnet-5"],
     },
     "docs/examples/workflow-quickstart.mdx": {
-        banned: ["claude-sonnet-4-5-20250929"],
-        required: ["claude-sonnet-4-6"],
+        banned: ["claude-sonnet-4-5-20250929", "claude-sonnet-4-6"],
+        required: ["claude-sonnet-5"],
     },
     "docs/why/background-agents.mdx": {
         banned: ["claude-opus-4-5"],

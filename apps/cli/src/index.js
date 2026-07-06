@@ -90,14 +90,17 @@ import {
     detectInstallMethod,
     ensureUpdateCheck,
     fetchLatestVersion,
+    fetchRemoteSotaVersion,
     formatUpdateNotice,
     isUpdateAvailable,
 } from "./update-check.js";
+import { SOTA_REGISTRY_VERSION } from "./sota-models.generated.js";
 import { reportReplayResult } from "./reportReplayResult.js";
 import { buildClaudeMirrorTick } from "./claude-mirror/buildClaudeMirrorTick.js";
 import { buildClaudeNodeWait } from "./claude-mirror/buildClaudeNodeWait.js";
 import { runClaudeMonitor } from "./claude-mirror/runClaudeMonitor.js";
 import { waitForClaudeMirrorChange } from "./claude-mirror/waitForClaudeMirrorChange.js";
+import { isAgentHarness } from "./util/envDetect.js";
 import pc from "picocolors";
 import crypto from "node:crypto";
 import React from "react";
@@ -1930,6 +1933,16 @@ const workflowRunOptions = upOptions.extend({
     prompt: z.string().optional().describe("Prompt text mapped to input.prompt when --input is omitted"),
     interactive: interactiveRunOption,
 });
+const upgradeOptions = z.object({
+    interactive: z.boolean().default(false).describe("Force the full-screen interactive TUI monitor (TTY only)."),
+    detach: z.boolean().default(false).describe("Launch the upgrade workflow in the background and print the run ID."),
+    dryRun: z.boolean().default(false).describe("Fetch changelogs and plan the upgrade without changing the install."),
+    runId: z.string().optional().describe("Explicit run ID for the upgrade workflow."),
+    root: z.string().optional().describe("Tool sandbox root directory."),
+    logDir: z.string().optional().describe("NDJSON event logs directory."),
+    backend: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Storage backend for the upgrade workflow run."),
+    authToken: z.string().optional().describe("Bearer token passed to the interactive monitor gateway client."),
+});
 /**
  * @param {WorkflowRunCommandOptions} options
  * @returns {UpCommandOptions}
@@ -1972,6 +1985,38 @@ function interactiveLaunchMode(options, hasWorkflowArg, format) {
     if (options.interactive) return tty ? "interactive" : "needs-tty";
     if (!hasWorkflowArg) return tty ? "interactive" : "missing-arg";
     return "direct";
+}
+/**
+ * @param {{ interactive?: boolean; detach?: boolean }} options
+ * @param {string | undefined} format
+ * @returns {"interactive" | "detached" | "needs-tty"}
+ */
+function upgradeLaunchMode(options, format) {
+    const wantsStructured = format !== undefined && format !== "toon";
+    const tty = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !wantsStructured;
+    if (options.interactive) return tty ? "interactive" : "needs-tty";
+    if (options.detach || wantsStructured || !tty || isAgentHarness()) return "detached";
+    return "interactive";
+}
+/**
+ * @param {any} options
+ * @param {boolean} detach
+ * @returns {any}
+ */
+function buildUpgradeUpOptions(options, detach) {
+    return {
+        ...upOptions.parse({}),
+        detach,
+        runId: options.runId,
+        root: options.root,
+        logDir: options.logDir,
+        backend: options.backend,
+        authToken: options.authToken,
+        input: JSON.stringify({ dryRun: options.dryRun }),
+        // The upgrade workflow itself is the status report; avoid launching the
+        // post-run HTML narrator from the detached child.
+        report: false,
+    };
 }
 function formatRequestedJsonOutput() {
     for (let index = 0; index < process.argv.length; index += 1) {
@@ -7781,6 +7826,46 @@ const cli = Cli.create({
     },
 })
     // =========================================================================
+    // smithers upgrade
+    // Agent-assisted upgrade workflow: TUI for humans, detached run for agents.
+    // =========================================================================
+    .command("upgrade", {
+    description: "Run the agent-assisted Smithers upgrade workflow: fetch changelogs, upgrade with a cheap agent, and escalate to a smart agent only when needed.",
+    options: upgradeOptions,
+    alias: { detach: "d", runId: "r" },
+    outputPolicy: "agent-only",
+    async run(c) {
+        const fail = makeFail(c);
+        let workflow;
+        try {
+            workflow = resolveWorkflow("upgrade", process.cwd());
+        }
+        catch (err) {
+            const message = err instanceof SmithersError && err.code === "RUN_NOT_FOUND"
+                ? "The upgrade workflow is not installed in this .smithers pack. Run `smithers init` to refresh the workflow pack, then re-run `smithers upgrade`."
+                : err?.message ?? String(err);
+            return fail({
+                code: err instanceof SmithersError ? err.code : "UPGRADE_WORKFLOW_NOT_FOUND",
+                message,
+                exitCode: 4,
+            });
+        }
+        const mode = upgradeLaunchMode(c.options, c.format);
+        if (mode === "needs-tty") {
+            return fail({
+                code: "INTERACTIVE_REQUIRES_TTY",
+                message: "--interactive needs an interactive terminal (TTY) and human output; it cannot be combined with --format json/jsonl.",
+                exitCode: 4,
+            });
+        }
+        if (mode === "interactive") {
+            const runOptions = buildUpgradeUpOptions(c.options, false);
+            return runTuiCommand({ ...c, options: { ...runOptions, interactive: true } }, fail, { preselect: workflow });
+        }
+        return executeUpCommand(c, workflow.entryFile, buildUpgradeUpOptions(c.options, true), fail);
+    },
+})
+    // =========================================================================
     // smithers update
     // Detect how Smithers was installed and either run the upgrade or print it.
     // =========================================================================
@@ -7792,16 +7877,27 @@ const cli = Cli.create({
     }),
     async run(c) {
         const current = readPackageVersion();
-        const latest = await fetchLatestVersion({});
+        const [latest, remoteSota] = await Promise.all([fetchLatestVersion({}), fetchRemoteSotaVersion({})]);
         const install = detectInstallMethod();
         if (!latest) {
             process.stderr.write("Could not reach the npm registry to check for updates.\n");
             return c.error({ message: "Could not reach the npm registry to check for updates.", code: "UPDATE_CHECK_FAILED" });
         }
+        // The SOTA model registry ships inside each release; a newer remote
+        // registry means new best-in-class models are (or are about to be) in.
+        const sotaBehind = remoteSota != null && remoteSota > SOTA_REGISTRY_VERSION;
+        if (remoteSota != null) {
+            process.stderr.write(sotaBehind
+                ? `Model registry: v${SOTA_REGISTRY_VERSION} installed, v${remoteSota} published — new SOTA models are out.\n`
+                : `Model registry: v${SOTA_REGISTRY_VERSION} (up to date).\n`);
+        }
         const available = isUpdateAvailable(latest, current);
         if (!available) {
             process.stderr.write(`Smithers is up to date (${current}).\n`);
-            return c.ok({ current, latest, updateAvailable: false, action: "none" });
+            if (sotaBehind) {
+                process.stderr.write("The next release carries the new model registry; this notice will nudge again when it ships.\n");
+            }
+            return c.ok({ current, latest, updateAvailable: false, action: "none", sotaVersion: SOTA_REGISTRY_VERSION, sotaLatest: remoteSota });
         }
         const plan = buildUpdatePlan(install, SMITHERS_PACKAGE);
         process.stderr.write(`Smithers ${latest} is available (you have ${current}).\n`);
@@ -7830,7 +7926,10 @@ const cli = Cli.create({
             return c.error({ message: `Upgrade command exited with code ${result.exitCode}.`, code: "UPDATE_FAILED" });
         }
         process.stderr.write(`✓ Upgraded to ${latest}.\n`);
-        return c.ok({ current, latest, updateAvailable: true, action: "upgraded", command: plan.command });
+        if (sotaBehind) {
+            process.stderr.write("New SOTA models are in. Run `smithers init` to refresh installed workflows to the latest agents.\n");
+        }
+        return c.ok({ current, latest, updateAvailable: true, action: "upgraded", command: plan.command, sotaVersion: SOTA_REGISTRY_VERSION, sotaLatest: remoteSota });
     },
 })
     .command("usage", {

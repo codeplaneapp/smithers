@@ -46,12 +46,12 @@ const { smithers, outputs } = createSmithers({
 });
 
 const researcher = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions: "Research the topic thoroughly.",
 });
 
 const writer = new Agent({
-  model: anthropic("claude-sonnet-4-6"),
+  model: anthropic("claude-sonnet-5"),
   instructions: "Write a clear, concise summary.",
 });
 

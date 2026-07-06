@@ -4,11 +4,12 @@ import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 import { listAccounts } from "@smithers-orchestrator/accounts";
+import { SOTA_SLOTS } from "./sota-models.generated.js";
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
 /** @typedef {import("./AgentAvailabilityStatus.ts").AgentAvailabilityStatus} AgentAvailabilityStatus */
 
 const DEFAULT_PROVIDER_ID = "openrouter";
-const OPENROUTER_DEFAULT_MODEL = "openai/gpt-4.1-mini";
+const OPENROUTER_DEFAULT_MODEL = `openai/${SOTA_SLOTS.codexMini}`;
 
 const DETECTORS = [
     {
@@ -257,7 +258,7 @@ const AGENT_VARIANTS = [
         displayName: "Claude Opus",
         constructor: {
             importName: "ClaudeCodeAgent",
-            expr: 'new SmithersClaudeCodeAgent({ model: "claude-opus-4-8", cwd: process.cwd() })',
+            expr: `new SmithersClaudeCodeAgent({ model: "${SOTA_SLOTS.opus}", cwd: process.cwd() })`,
         },
     },
     {
@@ -266,7 +267,7 @@ const AGENT_VARIANTS = [
         displayName: "Claude Sonnet",
         constructor: {
             importName: "ClaudeCodeAgent",
-            expr: 'new SmithersClaudeCodeAgent({ model: "claude-sonnet-5", cwd: process.cwd() })',
+            expr: `new SmithersClaudeCodeAgent({ model: "${SOTA_SLOTS.sonnet}", cwd: process.cwd() })`,
         },
     },
 ];
@@ -312,11 +313,11 @@ const REQUIRED_DEFAULT_TIERS = ["smart", "smartTool"];
 const CONSTRUCTORS = {
     claude: {
         importName: "ClaudeCodeAgent",
-        expr: 'new SmithersClaudeCodeAgent({ model: "claude-fable-5", cwd: process.cwd() })',
+        expr: `new SmithersClaudeCodeAgent({ model: "${SOTA_SLOTS.fable}", cwd: process.cwd() })`,
     },
     codex: {
         importName: "CodexAgent",
-        expr: 'new SmithersCodexAgent({ model: "gpt-5.5", cwd: process.cwd(), skipGitRepoCheck: true })',
+        expr: `new SmithersCodexAgent({ model: "${SOTA_SLOTS.codex}", cwd: process.cwd(), skipGitRepoCheck: true })`,
     },
     openrouter: {
         importName: "OpenAIAgent",
@@ -324,7 +325,7 @@ const CONSTRUCTORS = {
     },
     opencode: {
         importName: "OpenCodeAgent",
-        expr: 'new SmithersOpenCodeAgent({ model: "anthropic/claude-fable-5", cwd: process.cwd() })',
+        expr: `new SmithersOpenCodeAgent({ model: "anthropic/${SOTA_SLOTS.fable}", cwd: process.cwd() })`,
     },
     antigravity: {
         importName: "AntigravityAgent",
@@ -332,11 +333,11 @@ const CONSTRUCTORS = {
     },
     pi: {
         importName: "PiAgent",
-        expr: 'new SmithersPiAgent({ provider: "openai", model: "gpt-5.5" })',
+        expr: `new SmithersPiAgent({ provider: "openai", model: "${SOTA_SLOTS.codex}" })`,
     },
     kimi: {
         importName: "KimiAgent",
-        expr: 'new SmithersKimiAgent({ model: "kimi-k2.6" })',
+        expr: `new SmithersKimiAgent({ model: "${SOTA_SLOTS.kimi}" })`,
     },
     amp: {
         importName: "AmpAgent",
@@ -880,13 +881,13 @@ const ACCOUNT_PROVIDER_POOL = {
  * @type {Record<string, string>}
  */
 const ACCOUNT_PROVIDER_DEFAULT_MODEL = {
-    "claude-code": "claude-fable-5",
-    "anthropic-api": "claude-fable-5",
+    "claude-code": SOTA_SLOTS.fable,
+    "anthropic-api": SOTA_SLOTS.fable,
     "antigravity": undefined,
-    "codex": "gpt-5.5",
-    "openai-api": "gpt-5.5",
-    "gemini-api": "gemini-3.1-pro-preview",
-    "kimi": "kimi-k2.6",
+    "codex": SOTA_SLOTS.codex,
+    "openai-api": SOTA_SLOTS.codex,
+    "gemini-api": SOTA_SLOTS.gemini,
+    "kimi": SOTA_SLOTS.kimi,
 };
 
 /**

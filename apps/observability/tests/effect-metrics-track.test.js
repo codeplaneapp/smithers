@@ -71,7 +71,7 @@ describe("trackEvent", () => {
         expect(metricValueDelta(afterStarted, afterFinished, "smithers.runs.active")).toBe(-1);
     });
     test("emits token metrics with model, agent, and context bucket labels", async () => {
-        const labels = { agent: "claude-code", model: "claude-sonnet-4-20250514" };
+        const labels = { agent: "claude-code", model: "claude-sonnet-5" };
         const before = await snapshotMetrics();
         await runTrack({
             type: "TokenUsageReported",
@@ -388,7 +388,7 @@ describe("trackEvent", () => {
             type: "TokenUsageReported",
             runId: "run-1",
             nodeId: "node-1",
-            model: "claude-sonnet-4-20250514",
+            model: "claude-sonnet-5",
             agent: "claude-code",
             inputTokens: 100,
             outputTokens: 50,

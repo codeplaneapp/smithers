@@ -44,7 +44,7 @@ describe.skipIf(!dockerAvailable)("electric-proxy over a real Electric + Postgre
 
   afterAll(() => {
     fixture?.teardown();
-  });
+  }, 60_000);
 
   test("fronts real Electric: fills the where template from grants and filters out un-granted runs", async () => {
     let forwardedAuth: string | null = "unset";
