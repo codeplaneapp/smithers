@@ -83,7 +83,7 @@ export default smithers((ctx) => {
   const cheap = ctx.outputMaybe("cheapUpgrade", { nodeId: "cheap-upgrade" });
   const smart = ctx.outputMaybe("smartUpgrade", { nodeId: "smart-upgrade" });
   const needsSmart = Boolean(cheap?.needsHelp && String(cheap.needsHelp).trim().length > 0);
-  const finalAttempt = smart ?? cheap;
+  const finalAttempt = needsSmart ? smart : cheap;
 
   return (
     <Workflow name="upgrade">
