@@ -1,0 +1,78 @@
+name: SOTA model research
+
+# Daily check that the model registry (docs/data/sota-models.json) still names
+# the state of the art. A web-searching agent compares the registry against
+# provider docs; when new GA models shipped, scripts/sota-research.ts rewrites
+# the registry and every generated/pinned surface, and this workflow opens a PR
+# for human review. Model swaps never land on main without a merge.
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sota-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: pnpm/action-setup@v6.0.8
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: latest
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
+      # Same dogfood pattern as pr-review.yml: the repo's ChatGPT (Codex)
+      # subscription does the research instead of a metered API key.
+      - name: Authenticate Codex
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          mkdir -p ~/.codex
+          printf '%s' "$CODEX_AUTH_JSON" > ~/.codex/auth.json
+
+      - name: Research the model landscape
+        run: bun scripts/sota-research.ts
+
+      - name: Open a PR when the registry moved
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet; then
+            echo "Registry unchanged; nothing to do."
+            exit 0
+          fi
+          version=$(node -p "JSON.parse(require('fs').readFileSync('docs/data/sota-models.json','utf8')).version")
+          branch="sota/registry-v${version}"
+          git checkout -B "$branch"
+          git add -A
+          git -c user.name="smithers-sota-bot" -c user.email="bot@smithers.sh" \
+            commit -m "🤖 chore(sota): model registry v${version}" -m "$(cat /tmp/sota-research-summary.md)"
+          git push --force origin "$branch"
+          gh pr create \
+            --title "🤖 chore(sota): model registry v${version}" \
+            --body-file /tmp/sota-research-summary.md \
+            --base main --head "$branch" \
+            || gh pr edit "$branch" --body-file /tmp/sota-research-summary.md
