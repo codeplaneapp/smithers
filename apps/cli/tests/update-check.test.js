@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+    CHANGELOG_INDEX_URL,
+    CHANGELOG_RAW_BASE_URL,
     SMITHERS_PACKAGE,
     SOTA_REGISTRY_URL,
     UPDATE_CHECK_INTERVAL_MS,
@@ -11,8 +13,11 @@ import {
     compareVersions,
     detectInstallMethod,
     ensureUpdateCheck,
+    extractChangelogVersions,
     fetchLatestVersion,
+    fetchChangelogsSince,
     fetchRemoteSotaVersion,
+    filterChangelogVersionsSince,
     formatUpdateNotice,
     globalUpdateCommand,
     isUpdateAvailable,
@@ -183,6 +188,64 @@ describe("fetchLatestVersion", () => {
     test("returns null on a non-ok response or a throw", async () => {
         expect(await fetchLatestVersion({ fetchImpl: async () => ({ ok: false }) })).toBeNull();
         expect(await fetchLatestVersion({ fetchImpl: async () => { throw new Error("offline"); } })).toBeNull();
+    });
+});
+
+describe("changelog helpers", () => {
+    test("extracts changelog versions from docs sidebar data oldest-first", () => {
+        const versions = extractChangelogVersions({
+            navigation: [
+                "quickstart",
+                {
+                    group: "Changelog",
+                    pages: ["changelogs/0.27.0", "changelogs/0.26.1", "changelogs/0.26.0"],
+                },
+            ],
+        });
+        expect(versions).toEqual(["0.26.0", "0.26.1", "0.27.0"]);
+    });
+
+    test("filters changelogs newer than current and not newer than latest", () => {
+        expect(
+            filterChangelogVersionsSince(
+                ["0.25.4", "0.26.0", "0.26.1", "0.27.0", "0.28.0"],
+                "0.26.0",
+                "0.27.0",
+            ),
+        ).toEqual(["0.26.1", "0.27.0"]);
+    });
+
+    test("fetchChangelogsSince reads docs index and fetches matching MDX pages", async () => {
+        const seen = [];
+        const fetchImpl = async (url) => {
+            seen.push(String(url));
+            if (String(url) === CHANGELOG_INDEX_URL) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        navigation: [{ pages: ["changelogs/0.26.0", "changelogs/0.26.1", "changelogs/0.27.0"] }],
+                    }),
+                };
+            }
+            return {
+                ok: true,
+                text: async () => `# ${String(url).split("/").pop()?.replace(".mdx", "")}`,
+            };
+        };
+
+        const result = await fetchChangelogsSince({
+            currentVersion: "0.26.0",
+            latestVersion: "0.27.0",
+            fetchImpl,
+        });
+
+        expect(result.versions).toEqual(["0.26.1", "0.27.0"]);
+        expect(result.entries.map((entry) => entry.content)).toEqual(["# 0.26.1", "# 0.27.0"]);
+        expect(seen).toEqual([
+            CHANGELOG_INDEX_URL,
+            `${CHANGELOG_RAW_BASE_URL}/0.26.1.mdx`,
+            `${CHANGELOG_RAW_BASE_URL}/0.27.0.mdx`,
+        ]);
     });
 });
 

@@ -36,9 +36,36 @@ export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const SOTA_REGISTRY_URL =
   "https://raw.githubusercontent.com/smithersai/smithers/main/docs/data/sota-models.json";
 
+/** The docs sidebar is the authoritative published changelog index. */
+export const CHANGELOG_INDEX_URL =
+  "https://raw.githubusercontent.com/smithersai/smithers/main/docs/docs.json";
+
+/** Raw GitHub URL prefix for published changelog MDX files. */
+export const CHANGELOG_RAW_BASE_URL =
+  "https://raw.githubusercontent.com/smithersai/smithers/main/docs/changelogs";
+
 /** Default network timeout for the registry probe. Kept short so the one
  * throttled check a day never noticeably stalls a command. */
 const DEFAULT_FETCH_TIMEOUT_MS = 1500;
+
+const DEFAULT_CHANGELOG_MAX_ENTRIES = 20;
+const DEFAULT_CHANGELOG_MAX_CHARS = 12_000;
+
+/**
+ * Read this installed CLI package's version.
+ *
+ * @returns {string}
+ */
+export function readCurrentPackageVersion() {
+  try {
+    const pkgUrl = new URL("../package.json", import.meta.url);
+    const raw = readFileSync(pkgUrl, "utf8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed.version === "string" ? parsed.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 /**
  * Parse a version string into comparable numeric release components, dropping
@@ -274,6 +301,151 @@ export async function fetchRemoteSotaVersion(opts = {}) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * @param {unknown} value
+ * @param {Set<string>} out
+ */
+function collectChangelogVersionStrings(value, out) {
+  if (typeof value === "string") {
+    const match = value.match(/^changelogs\/(\d+\.\d+\.\d+)$/);
+    if (match?.[1]) out.add(match[1]);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) collectChangelogVersionStrings(entry, out);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const entry of Object.values(value)) collectChangelogVersionStrings(entry, out);
+  }
+}
+
+/**
+ * Extract version ids from the docs sidebar and sort them oldest to newest.
+ *
+ * @param {unknown} docsJson
+ * @returns {string[]}
+ */
+export function extractChangelogVersions(docsJson) {
+  const versions = new Set();
+  collectChangelogVersionStrings(docsJson, versions);
+  return [...versions].sort((a, b) => compareVersions(a, b));
+}
+
+/**
+ * @param {string[]} versions
+ * @param {string} currentVersion
+ * @param {string | null | undefined} latestVersion
+ * @returns {string[]}
+ */
+export function filterChangelogVersionsSince(versions, currentVersion, latestVersion) {
+  return versions.filter((version) => {
+    if (compareVersions(version, currentVersion) <= 0) return false;
+    if (latestVersion && compareVersions(version, latestVersion) > 0) return false;
+    return true;
+  });
+}
+
+/**
+ * @param {typeof fetch} fetchImpl
+ * @param {string} url
+ * @param {number} timeoutMs
+ * @returns {Promise<Response | null>}
+ */
+async function fetchWithTimeout(fetchImpl, url, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(url, { signal: controller.signal });
+    return res ?? null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fetch changelog MDX files newer than the installed version. Missing individual
+ * changelog pages are reported in-place so the caller can still proceed with
+ * the versions that were reachable.
+ *
+ * @param {{
+ *   currentVersion: string;
+ *   latestVersion?: string | null;
+ *   fetchImpl?: typeof fetch;
+ *   timeoutMs?: number;
+ *   indexUrl?: string;
+ *   rawBaseUrl?: string;
+ *   maxEntries?: number;
+ *   maxCharsPerEntry?: number;
+ * }} opts
+ * @returns {Promise<{ versions: string[]; truncated: boolean; entries: Array<{ version: string; url: string; ok: boolean; content: string; error?: string }> }>}
+ */
+export async function fetchChangelogsSince(opts) {
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const currentVersion = opts.currentVersion;
+  if (typeof fetchImpl !== "function" || !currentVersion || currentVersion === "unknown") {
+    return { versions: [], truncated: false, entries: [] };
+  }
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+  const indexUrl = opts.indexUrl ?? CHANGELOG_INDEX_URL;
+  const rawBaseUrl = (opts.rawBaseUrl ?? CHANGELOG_RAW_BASE_URL).replace(/\/+$/, "");
+  const maxEntries = Math.max(1, opts.maxEntries ?? DEFAULT_CHANGELOG_MAX_ENTRIES);
+  const maxCharsPerEntry = Math.max(256, opts.maxCharsPerEntry ?? DEFAULT_CHANGELOG_MAX_CHARS);
+
+  const indexRes = await fetchWithTimeout(fetchImpl, indexUrl, timeoutMs);
+  if (!indexRes?.ok) {
+    return { versions: [], truncated: false, entries: [] };
+  }
+  let docsJson;
+  try {
+    docsJson = await indexRes.json();
+  } catch {
+    return { versions: [], truncated: false, entries: [] };
+  }
+
+  const allVersions = filterChangelogVersionsSince(
+    extractChangelogVersions(docsJson),
+    currentVersion,
+    opts.latestVersion,
+  );
+  const versions = allVersions.slice(0, maxEntries);
+  const entries = [];
+  for (const version of versions) {
+    const url = `${rawBaseUrl}/${version}.mdx`;
+    const res = await fetchWithTimeout(fetchImpl, url, timeoutMs);
+    if (!res?.ok) {
+      entries.push({
+        version,
+        url,
+        ok: false,
+        content: "",
+        error: res ? `HTTP ${res.status}` : "fetch failed",
+      });
+      continue;
+    }
+    try {
+      const text = await res.text();
+      entries.push({
+        version,
+        url,
+        ok: true,
+        content: text.length > maxCharsPerEntry ? text.slice(0, maxCharsPerEntry) : text,
+        ...(text.length > maxCharsPerEntry ? { error: `truncated to ${maxCharsPerEntry} chars` } : {}),
+      });
+    } catch {
+      entries.push({ version, url, ok: false, content: "", error: "read failed" });
+    }
+  }
+
+  return {
+    versions,
+    truncated: allVersions.length > versions.length,
+    entries,
+  };
 }
 
 /**
