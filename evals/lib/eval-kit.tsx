@@ -144,14 +144,14 @@ function qualityPrompt(
   if (functional) {
     lines.push(
       "",
-      "This UI was ALSO booted in a real browser against a real run. Weigh what it ACTUALLY did — a good UI must, for every task, stream live events, render node output, surface the FAILED node, and expose a working approval control. Penalize features that did not render even if the source looks plausible.",
+      "This UI was ALSO booted in a real browser against a real run. The OBSERVED FEATURES below are GROUND TRUTH for what actually rendered/worked — trust them over the source. In particular, if `approvalLive` is true the UI DID mount, DID render approvals, and its Approve button DID work, so do NOT penalize for an apparently-missing createGatewayReactRoot mount or an 'unused' submitApproval — the source shown may simply be truncated past the cutoff. Judge on: did it, for every task, stream live events, render node output, surface the FAILED node, and drive a working approval — plus polish/UX/accessibility. Penalize features that are `false` in OBSERVED FEATURES.",
       `OBSERVED FEATURES (rendered/worked in the browser): ${JSON.stringify(functional.features ?? {})}`,
       `OBSERVED DOM TEXT (excerpt):\n${(functional.renderedText ?? "(none)").slice(0, 2000)}`,
     );
   }
   lines.push(
     "",
-    `UI BUNDLE:\n${(report.artifact ?? "(none)").slice(0, 6000)}`,
+    `UI BUNDLE${functional ? " (may be truncated — see OBSERVED FEATURES for ground truth)" : ""}:\n${(report.artifact ?? "(none)").slice(0, functional ? 14_000 : 6_000)}`,
     "",
     "Set `score` (0-1) and a short `reason`.",
   );
