@@ -1,45 +1,40 @@
 # Smithers - product overview
 
-Smithers is a durable control plane for long-running coding agents. You write
-a workflow as a small TSX file, and Smithers runs it: scheduling agent tasks,
-persisting every decision, retrying failures, pausing for human approval, and
-resuming after crashes, rate limits, or restarts. The status of every product
-surface is tracked in `.smithers/spec/features.json` and rendered as the
-feature matrix; each feature has a derived spec doc under `features/`.
+Smithers is a durable control plane for long-running coding-agent work. You write a workflow as a small TSX/JSX tree, then Smithers renders it into a task graph, executes real agents or compute functions, validates typed outputs, persists every decision, and re-renders from durable state until the run finishes or reaches a human/external wait.
+
+The product in this repository is the runtime and local control plane: published packages under packages/*, the smithers CLI in apps/cli, observability integrations in apps/observability, review support in apps/review, the seeded .smithers workflow pack, docs, skills, and e2e fault suites. The product UI that matters here is the smithers ui surface for workflow-owned dashboards under .smithers/ui/*.tsx, not a separate SaaS app.
 
 ## What it is
 
-A workflow is JSX: `Workflow`, `Sequence`, `Parallel`, `Loop`, `Task`,
-`Approval`, `Worktree`. Tasks carry zod-typed outputs, so downstream steps get
-structured data, not prose. Tasks run real agents (Claude Code, Codex,
-OpenCode, Pi, Kimi, Amp, Antigravity) or plain compute functions. The engine
-writes every event to a local store (SQLite or PGlite, Postgres in the cloud),
-which is what makes runs durable: kill the process and `smithers up` continues
-from the last persisted decision.
+A workflow is React for work: Workflow, Task, Sequence, Parallel, Branch, Loop, Approval, HumanTask, Timer, Signal, Sandbox, Worktree, and higher-level components describe what can happen next. createSmithers binds zod schemas to outputs so downstream steps read structured rows through ctx instead of scraping prose. Tasks can call SDK agents in-process, spawn CLI agents such as Claude Code or Codex, run local compute, or run behind an explicit Sandbox provider.
 
-Around the engine sits the rest of the product. The `smithers` CLI launches
-and inspects runs, and doubles as an MCP server. The gateway exposes runs,
-live events, and approvals over HTTP/WS so UIs and remote clients can watch
-and steer. `smithers ui` serves per-workflow custom dashboards written in
-React against gateway-react hooks. Time travel lets you rewind, fork, and
-replay a persisted run. Worktrees isolate each agent in its own checkout so
-parallel work cannot stomp your tree.
+Durability is the core contract. State lives in SQLite, PGlite, or Postgres tables, not process memory. A completed task is not re-executed on resume; a killed or paused run reloads persisted input, outputs, frames, attempts, waits, approvals, events, and owner state. Time travel, replay, fork, snapshots, run inspection, custom UIs, and the gateway all build on that event and frame history.
+
+Around the engine is the operator surface. The smithers CLI installs workflow packs, launches and resumes runs, watches logs, answers approvals, sends signals, manages agent accounts, runs evals, generates OpenAPI tools, migrates storage, starts gateways, opens monitors, and serves MCP tools for other agents. The gateway exposes versioned RPC and WebSocket APIs for runs, approvals, prompts, docs, tickets, memory, scores, cron, and DevTools. gateway-client and gateway-react let browser or desktop UIs consume that API without inventing a second contract.
+
+## What ships here
+
+- packages/smithers: the public facade and package exports.
+- packages/engine, scheduler, driver, db, graph, components, react-reconciler: the durable workflow runtime.
+- packages/agents, accounts, usage: SDK/CLI agent adapters, capability reports, account and usage helpers.
+- packages/gateway, server, gateway-client, gateway-react, gateway-ui: RPC, HTTP/WebSocket, and workflow UI client layers.
+- packages/time-travel, vcs, sandbox plus cloud provider packages: rewind, replay, worktrees, local and remote execution boundaries.
+- packages/memory, scorers, openapi, integrations, control-plane: optional product modules for memory, evaluation, API tools, webhooks, hosted primitives, and external systems.
+- apps/cli, apps/observability, apps/review: the command-line product, metrics/tracing stack, and open-code-review support.
+- .smithers/: the built-in workflow pack, workflow UIs, DDD spec workflow, and local dogfooding assets.
+- docs/, skills/, e2e/: human/agent docs and no-mocks fault/regression coverage.
 
 ## Principles
 
-1. **Durability is the product.** Nothing important lives only in process
-   memory. A run that dies must resume without repeating finished work.
-2. **No fake success.** A feature's status in this spec is what we can prove
-   with tests or direct evidence. Prefer partial over fixed when unsure.
-3. **Real backends in tests.** No mocked gateways or fabricated data; e2e
-   means a real store, real processes, and where feasible real agents.
-4. **Dogfood.** Internal multi-step processes run as smithers system
-   workflows, not one-off imperative scripts.
+1. **Durability is the product.** Every meaningful decision must be persisted before Smithers claims progress.
+2. **Agents drive it.** Smithers is designed for coding agents to invoke, inspect, and steer through CLI, MCP, and workflow skills.
+3. **Real backends over mocks.** Product code and e2e tests use real stores, processes, gateways, and fault paths; fake agents are acceptable only to make CI deterministic.
+4. **Explicit boundaries.** Tool sandbox, CLI-agent sandbox policies, and Sandbox provider containers are different boundaries and must be named precisely.
+5. **Honest status.** A feature is fixed only when the repo has convincing tests and no known gaps; partial is preferable to pretending.
+6. **Dogfood durable workflows.** Internal multi-step processes should be modeled as Smithers workflows when they need retries, approvals, replay, or long-lived state.
 
 ## How this spec is maintained
 
-The `docs-driven-development` workflow (itself a feature below) audits the
-product, updates `features.json` honestly, derives the per-feature docs with
-`bun .smithers/lib/ddd/build.ts`, and dispatches agents to close the highest
-value gaps each round. Derived docs under `features/` are never hand-edited;
-change `features.json` or this overview instead.
+.smithers/spec/features.json is the structured source of truth for feature status, evidence, missing work, architecture notes, observability, debug paths, endpoints, and links. .smithers/spec/content/overview.md is the editable human overview. .smithers/spec/content/features/<id>.md and .smithers/ui/ddd-*.generated.ts are derived by bun .smithers/lib/ddd/build.ts and should not be hand-edited.
+
+The docs-driven-development workflow audits this spec, generates backlog tickets from open gaps, triages the highest-value work, dispatches implementation agents, and reviews the result. Each refresh should read targeted code and docs, preserve existing feature fields unless the repo proves a correction, update feature records honestly, then run the DDD build gate.

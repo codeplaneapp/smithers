@@ -2,103 +2,363 @@
 // One ticket per open gap (features.json broken/partial/missing* + each missing[] item).
 export const ticketsBacklog: { path: string; kind: string; status: string; priority: string; updatedAtMs: number; featureId: string; featureTitle: string; content: string }[] = [
   {
-    "path": "tickets/cli--01-cli-read-commands-have-historically-been-sqlite-coupled-keep-117bb72e.md",
+    "path": "tickets/init-workflow-pack--01-2026-07-06-review-apps-cli-tests-workflow-pack-subset.test.j-561fe005.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "init-workflow-pack",
+    "featureTitle": "Init workflow pack and starters",
+    "content": "# 2026-07-06 review: apps/cli/tests/workflow-pack-subset.test.js fails because subset install includes unexpected upgrade workflow in addition to selected workflow plus init/post-failure.\n\nFeature: Init workflow pack and starters (init-workflow-pack)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: apps/cli/tests/workflow-pack-subset.test.js fails because subset install includes unexpected upgrade workflow in addition to selected workflow plus init/post-failure.\n"
+  },
+  {
+    "path": "tickets/init-workflow-pack--02-2026-07-06-review-apps-cli-tests-init.e2e.test.js-workflow-p-3ea34dc4.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "init-workflow-pack",
+    "featureTitle": "Init workflow pack and starters",
+    "content": "# 2026-07-06 review: apps/cli/tests/init.e2e.test.js workflow-pack smoke typecheck fails because seeded workflows import UI from smithers-orchestrator, but that facade export is missing.\n\nFeature: Init workflow pack and starters (init-workflow-pack)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: apps/cli/tests/init.e2e.test.js workflow-pack smoke typecheck fails because seeded workflows import UI from smithers-orchestrator, but that facade export is missing.\n"
+  },
+  {
+    "path": "tickets/cli--01-the-cli-surface-is-broad-keep-pglite-postgres-parity-covered-c81f0bd8.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "cli",
+    "featureTitle": "smithers CLI",
+    "content": "# The CLI surface is broad; keep pglite/postgres parity covered for every read and mutation command, not just launch/read round-trips.\n\nFeature: smithers CLI (cli)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nThe CLI surface is broad; keep pglite/postgres parity covered for every read and mutation command, not just launch/read round-trips.\n"
+  },
+  {
+    "path": "tickets/cli--02-some-agent--or-browser-dependent-commands-necessarily-skip-i-ab30623b.md",
     "kind": "e2e",
     "status": "todo",
     "priority": "p0",
     "updatedAtMs": 0,
     "featureId": "cli",
     "featureTitle": "smithers CLI",
-    "content": "# CLI read commands have historically been sqlite-coupled; keep pglite/postgres parity covered by e2e for every read command\n\nFeature: smithers CLI (cli)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\nCLI read commands have historically been sqlite-coupled; keep pglite/postgres parity covered by e2e for every read command\n"
+    "content": "# Some agent- or browser-dependent commands necessarily skip in CI; document and test their fake-agent/no-browser behavior.\n\nFeature: smithers CLI (cli)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\nSome agent- or browser-dependent commands necessarily skip in CI; document and test their fake-agent/no-browser behavior.\n"
   },
   {
-    "path": "tickets/agent-adapters--01-kimi-auth-setup-error-should-fail-over-to-the-next-pool-agen-b3f81de3.md",
-    "kind": "fix",
+    "path": "tickets/mcp-agent-control--01-the-support-matrix-spans-many-external-agents-not-every-agen-0dd1629f.md",
+    "kind": "issue",
     "status": "todo",
     "priority": "p0",
     "updatedAtMs": 0,
-    "featureId": "agent-adapters",
-    "featureTitle": "Agent adapters",
-    "content": "# Kimi auth-setup error should fail over to the next pool agent instead of failing the run\n\nFeature: Agent adapters (agent-adapters)\nStatus: todo · Kind: fix · Priority: P0 · Feature status: partial\n\n## Gap\n\nKimi auth-setup error should fail over to the next pool agent instead of failing the run\n"
+    "featureId": "mcp-agent-control",
+    "featureTitle": "MCP server and agent wiring",
+    "content": "# The support matrix spans many external agents; not every agent-specific config path can be exercised end to end in CI.\n\nFeature: MCP server and agent wiring (mcp-agent-control)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nThe support matrix spans many external agents; not every agent-specific config path can be exercised end to end in CI.\n"
   },
   {
-    "path": "tickets/gateway-server--01-serverless-resume-cron-tick-and-run-lease-claims-are-new-add-314dd71b.md",
+    "path": "tickets/approvals-human-gates--01-2026-07-06-review-the-targeted-approval-proof-failed-e2e-fau-b16665fc.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "approvals-human-gates",
+    "featureTitle": "Approvals, human tasks, and durable waits",
+    "content": "# 2026-07-06 review: the targeted approval proof failed e2e/faults/case03-restart-waiting-approval.test.ts with Timed out waiting for resumed run to finish, so durable waiting-approval restart is not proven.\n\nFeature: Approvals, human tasks, and durable waits (approvals-human-gates)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: the targeted approval proof failed e2e/faults/case03-restart-waiting-approval.test.ts with Timed out waiting for resumed run to finish, so durable waiting-approval restart is not proven.\n"
+  },
+  {
+    "path": "tickets/gateway-server--01-serverless-resume-cron-tick-and-run-lease-claims-need-broade-94117994.md",
     "kind": "e2e",
     "status": "todo",
     "priority": "p0",
     "updatedAtMs": 0,
     "featureId": "gateway-server",
-    "featureTitle": "Gateway and server",
-    "content": "# Serverless resume/cron tick and run-lease claims are new; add end-to-end proof beyond unit tests\n\nFeature: Gateway and server (gateway-server)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\nServerless resume/cron tick and run-lease claims are new; add end-to-end proof beyond unit tests\n"
+    "featureTitle": "Gateway, RPC, and server",
+    "content": "# Serverless resume/cron tick and run-lease claims need broader end-to-end proof beyond unit/RPC contract tests.\n\nFeature: Gateway, RPC, and server (gateway-server)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\nServerless resume/cron tick and run-lease claims need broader end-to-end proof beyond unit/RPC contract tests.\n"
   },
   {
-    "path": "tickets/time-travel-replay--01-durability-snapshots-phase-2-restore-in-test-only-tool-conte-a5fb08ea.md",
+    "path": "tickets/gateway-server--02-hosted-gateway-deployments-still-need-explicit-production-ha-fbd72596.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "gateway-server",
+    "featureTitle": "Gateway, RPC, and server",
+    "content": "# Hosted gateway deployments still need explicit production hardening around TLS, token rotation, and multi-tenant boundaries.\n\nFeature: Gateway, RPC, and server (gateway-server)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nHosted gateway deployments still need explicit production hardening around TLS, token rotation, and multi-tenant boundaries.\n"
+  },
+  {
+    "path": "tickets/workflow-uis--01-2026-07-06-review-bun-test---timeout-120000---max-concurrenc-02e8b76f.md",
     "kind": "e2e",
     "status": "todo",
     "priority": "p1",
     "updatedAtMs": 0,
-    "featureId": "time-travel-replay",
-    "featureTitle": "Time travel and replay",
-    "content": "# Durability snapshots phase 2 (restore in test-only tool context) is not finished\n\nFeature: Time travel and replay (time-travel-replay)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\nDurability snapshots phase 2 (restore in test-only tool context) is not finished\n"
+    "featureId": "workflow-uis",
+    "featureTitle": "Custom workflow UIs and monitor surfaces",
+    "content": "# 2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/ui-command.test.js fails; the smithers ui autostart case times out waiting for the local Gateway.\n\nFeature: Custom workflow UIs and monitor surfaces (workflow-uis)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/ui-command.test.js fails; the smithers ui autostart case times out waiting for the local Gateway.\n"
   },
   {
-    "path": "tickets/crash-recovery-resume--01-crash-recovery-workflow-.smithers-workflows-crash-recovery.t-c6a9a1a9.md",
+    "path": "tickets/workflow-uis--02-2026-07-06-review-bun-test---timeout-120000---max-concurrenc-a515c2f1.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "workflow-uis",
+    "featureTitle": "Custom workflow UIs and monitor surfaces",
+    "content": "# 2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/docs-examples-smoke.test.js fails for docs/examples/workflow-ui-react.mdx#2 with GRAPH_FAILED/Object.entries on undefined input.\n\nFeature: Custom workflow UIs and monitor surfaces (workflow-uis)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/docs-examples-smoke.test.js fails for docs/examples/workflow-ui-react.mdx#2 with GRAPH_FAILED/Object.entries on undefined input.\n"
+  },
+  {
+    "path": "tickets/crash-recovery-resume--01-crash-recovery-workflow-.smithers-workflows-crash-recovery.t-5c9738f2.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "crash-recovery-resume",
+    "featureTitle": "Crash recovery, supervisor, and resume",
+    "content": "# Crash-recovery workflow (.smithers/workflows/crash-recovery.tsx) is not part of the read survey and still needs explicit end-to-end proof if it remains a shipped workflow.\n\nFeature: Crash recovery, supervisor, and resume (crash-recovery-resume)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\nCrash-recovery workflow (.smithers/workflows/crash-recovery.tsx) is not part of the read survey and still needs explicit end-to-end proof if it remains a shipped workflow.\n"
+  },
+  {
+    "path": "tickets/crash-recovery-resume--02-resume-across-edited-workflow-source-intentionally-fails-hot-ecad6396.md",
     "kind": "fix",
     "status": "todo",
     "priority": "p0",
     "updatedAtMs": 0,
     "featureId": "crash-recovery-resume",
-    "featureTitle": "Crash recovery and resume",
-    "content": "# Crash-recovery workflow (.smithers/workflows/crash-recovery.tsx) is new and unverified end to end\n\nFeature: Crash recovery and resume (crash-recovery-resume)\nStatus: todo · Kind: fix · Priority: P0 · Feature status: partial\n\n## Gap\n\nCrash-recovery workflow (.smithers/workflows/crash-recovery.tsx) is new and unverified end to end\n"
+    "featureTitle": "Crash recovery, supervisor, and resume",
+    "content": "# Resume across edited workflow source intentionally fails; hot-reload and stopped-run resume remain separate concepts that need clear docs whenever changed.\n\nFeature: Crash recovery, supervisor, and resume (crash-recovery-resume)\nStatus: todo · Kind: fix · Priority: P0 · Feature status: partial\n\n## Gap\n\nResume across edited workflow source intentionally fails; hot-reload and stopped-run resume remain separate concepts that need clear docs whenever changed.\n"
   },
   {
-    "path": "tickets/sandbox-vcs--01-jj-bookmark-conflicts-from-git-commits-in-chained-worktrees--e4b1808b.md",
+    "path": "tickets/time-travel-replay--01-durability-snapshots-phase-2-for-restore-in-test-only-tool-c-db26e176.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "time-travel-replay",
+    "featureTitle": "Time travel, rewind, replay, and snapshots",
+    "content": "# Durability snapshots phase 2 for restore in test-only tool context is not finished.\n\nFeature: Time travel, rewind, replay, and snapshots (time-travel-replay)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\nDurability snapshots phase 2 for restore in test-only tool context is not finished.\n"
+  },
+  {
+    "path": "tickets/time-travel-replay--02-unsafe-approval-replay-protection-has-e2e-coverage-but-needs-c634fb73.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "time-travel-replay",
+    "featureTitle": "Time travel, rewind, replay, and snapshots",
+    "content": "# Unsafe approval replay protection has e2e coverage but needs continued review whenever approval persistence changes.\n\nFeature: Time travel, rewind, replay, and snapshots (time-travel-replay)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\nUnsafe approval replay protection has e2e coverage but needs continued review whenever approval persistence changes.\n"
+  },
+  {
+    "path": "tickets/sandbox-vcs--01-jj-bookmark-conflicts-from-git-commits-in-chained-worktrees--7685f0d3.md",
     "kind": "issue",
     "status": "todo",
     "priority": "p1",
     "updatedAtMs": 0,
     "featureId": "sandbox-vcs",
-    "featureTitle": "Sandboxes, worktrees, and VCS",
-    "content": "# jj bookmark conflicts from git commits in chained worktrees need an automated repair path\n\nFeature: Sandboxes, worktrees, and VCS (sandbox-vcs)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\njj bookmark conflicts from git commits in chained worktrees need an automated repair path\n"
+    "featureTitle": "Local sandboxes, worktrees, and VCS",
+    "content": "# jj bookmark conflicts from git commits in chained worktrees need an automated repair path.\n\nFeature: Local sandboxes, worktrees, and VCS (sandbox-vcs)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\njj bookmark conflicts from git commits in chained worktrees need an automated repair path.\n"
   },
   {
-    "path": "tickets/open-code-review--01-cloud-deployment-blocked-on-a-funded-anthropic_api_key-91f7f3e4.md",
+    "path": "tickets/sandbox-vcs--02-production-deployments-must-separately-prove-their-selected--496db45a.md",
     "kind": "issue",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "sandbox-vcs",
+    "featureTitle": "Local sandboxes, worktrees, and VCS",
+    "content": "# Production deployments must separately prove their selected container runtime enforces CPU, memory, network, and volume policies.\n\nFeature: Local sandboxes, worktrees, and VCS (sandbox-vcs)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nProduction deployments must separately prove their selected container runtime enforces CPU, memory, network, and volume policies.\n"
+  },
+  {
+    "path": "tickets/remote-sandbox-providers--01-provider-tests-use-injected-clients-and-mock-environments-re-dd94397e.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "remote-sandbox-providers",
+    "featureTitle": "Remote sandbox providers",
+    "content": "# Provider tests use injected clients and mock environments; real cloud-account integration tests are not part of CI.\n\nFeature: Remote sandbox providers (remote-sandbox-providers)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nProvider tests use injected clients and mock environments; real cloud-account integration tests are not part of CI.\n"
+  },
+  {
+    "path": "tickets/remote-sandbox-providers--02-cloudflare-package-does-not-ship-a-turnkey-worker-entry-or-w-3364f016.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "remote-sandbox-providers",
+    "featureTitle": "Remote sandbox providers",
+    "content": "# Cloudflare package does not ship a turnkey Worker entry or Workers-native run driver for CLI-agent workflows.\n\nFeature: Remote sandbox providers (remote-sandbox-providers)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nCloudflare package does not ship a turnkey Worker entry or Workers-native run driver for CLI-agent workflows.\n"
+  },
+  {
+    "path": "tickets/storage-backends--01-electric-cloud-sync-is-documented-for-managed-postgres-but-n-94e27714.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "storage-backends",
+    "featureTitle": "Storage backends and migration",
+    "content": "# Electric Cloud Sync is documented for managed Postgres but needs deployment-level proof in the target hosted environment.\n\nFeature: Storage backends and migration (storage-backends)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\nElectric Cloud Sync is documented for managed Postgres but needs deployment-level proof in the target hosted environment.\n"
+  },
+  {
+    "path": "tickets/storage-backends--02-cloudflare-d1-descriptor-is-read-mostly-non-atomic-by-design-3db60e5e.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "storage-backends",
+    "featureTitle": "Storage backends and migration",
+    "content": "# Cloudflare D1 descriptor is read-mostly/non-atomic by design and should not be presented as durable run-of-record storage.\n\nFeature: Storage backends and migration (storage-backends)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nCloudflare D1 descriptor is read-mostly/non-atomic by design and should not be presented as durable run-of-record storage.\n"
+  },
+  {
+    "path": "tickets/agent-adapters--01-kimi-auth-setup-errors-should-fail-over-to-the-next-pool-age-340cc6fd.md",
+    "kind": "fix",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "agent-adapters",
+    "featureTitle": "Agent adapters and account pools",
+    "content": "# Kimi auth-setup errors should fail over to the next pool agent instead of failing the run.\n\nFeature: Agent adapters and account pools (agent-adapters)\nStatus: todo · Kind: fix · Priority: P0 · Feature status: partial\n\n## Gap\n\nKimi auth-setup errors should fail over to the next pool agent instead of failing the run.\n"
+  },
+  {
+    "path": "tickets/agent-adapters--02-many-vendor-cli-behaviors-depend-on-locally-installed-binari-4233fd95.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p0",
+    "updatedAtMs": 0,
+    "featureId": "agent-adapters",
+    "featureTitle": "Agent adapters and account pools",
+    "content": "# Many vendor CLI behaviors depend on locally installed binaries and subscription/API-key modes that cannot all be covered in clean CI.\n\nFeature: Agent adapters and account pools (agent-adapters)\nStatus: todo · Kind: issue · Priority: P0 · Feature status: partial\n\n## Gap\n\nMany vendor CLI behaviors depend on locally installed binaries and subscription/API-key modes that cannot all be covered in clean CI.\n"
+  },
+  {
+    "path": "tickets/open-code-review--01-hosted-cloud-review-path-is-blocked-on-funded-provider-crede-a81d9638.md",
+    "kind": "review",
     "status": "todo",
     "priority": "p1",
     "updatedAtMs": 0,
     "featureId": "open-code-review",
     "featureTitle": "Open code review",
-    "content": "# Cloud deployment blocked on a funded ANTHROPIC_API_KEY\n\nFeature: Open code review (open-code-review)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nCloud deployment blocked on a funded ANTHROPIC_API_KEY\n"
+    "content": "# Hosted/cloud review path is blocked on funded provider credentials and deployment-specific verification.\n\nFeature: Open code review (open-code-review)\nStatus: todo · Kind: review · Priority: P1 · Feature status: partial\n\n## Gap\n\nHosted/cloud review path is blocked on funded provider credentials and deployment-specific verification.\n"
   },
   {
-    "path": "tickets/memory--01-no-end-to-end-proof-that-seeded-workflows-read-and-write-mem-4ebc23d9.md",
+    "path": "tickets/open-code-review--02-review-quality-still-depends-on-live-agent-behavior-ci-can-p-32598f67.md",
+    "kind": "review",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "open-code-review",
+    "featureTitle": "Open code review",
+    "content": "# Review quality still depends on live agent behavior; CI can prove structure and local paths but not every model-quality regression.\n\nFeature: Open code review (open-code-review)\nStatus: todo · Kind: review · Priority: P1 · Feature status: partial\n\n## Gap\n\nReview quality still depends on live agent behavior; CI can prove structure and local paths but not every model-quality regression.\n"
+  },
+  {
+    "path": "tickets/evals-scorers--01-optimizer-tests-prove-helper-behavior-but-production-provide-4850de76.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "evals-scorers",
+    "featureTitle": "Eval suites, scorers, and optimization",
+    "content": "# Optimizer tests prove helper behavior but production provider quality/cost needs suite-specific monitoring.\n\nFeature: Eval suites, scorers, and optimization (evals-scorers)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nOptimizer tests prove helper behavior but production provider quality/cost needs suite-specific monitoring.\n"
+  },
+  {
+    "path": "tickets/evals-scorers--02-more-seeded-workflows-should-ship-checked-in-eval-suites-for-c6abd961.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "evals-scorers",
+    "featureTitle": "Eval suites, scorers, and optimization",
+    "content": "# More seeded workflows should ship checked-in eval suites for their intended behavior.\n\nFeature: Eval suites, scorers, and optimization (evals-scorers)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nMore seeded workflows should ship checked-in eval suites for their intended behavior.\n"
+  },
+  {
+    "path": "tickets/memory--01-no-end-to-end-proof-that-seeded-workflows-read-and-write-mem-00009d32.md",
     "kind": "e2e",
     "status": "todo",
     "priority": "p2",
     "updatedAtMs": 0,
     "featureId": "memory",
     "featureTitle": "Agent memory",
-    "content": "# No end-to-end proof that seeded workflows read and write memory across separate runs\n\nFeature: Agent memory (memory)\nStatus: todo · Kind: e2e · Priority: P2 · Feature status: partial\n\n## Gap\n\nNo end-to-end proof that seeded workflows read and write memory across separate runs\n"
+    "content": "# No end-to-end proof that seeded workflows read and write memory across separate real runs.\n\nFeature: Agent memory (memory)\nStatus: todo · Kind: e2e · Priority: P2 · Feature status: partial\n\n## Gap\n\nNo end-to-end proof that seeded workflows read and write memory across separate real runs.\n"
   },
   {
-    "path": "tickets/observability--01-otlp-exporter-is-not-installed-in-the-reference-deployments--66b3fd93.md",
+    "path": "tickets/memory--02-semantic-recall-is-intentionally-not-exposed-on-the-current--bba42575.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p2",
+    "updatedAtMs": 0,
+    "featureId": "memory",
+    "featureTitle": "Agent memory",
+    "content": "# Semantic recall is intentionally not exposed on the current public API; keep docs clear to avoid overpromising retrieval behavior.\n\nFeature: Agent memory (memory)\nStatus: todo · Kind: issue · Priority: P2 · Feature status: partial\n\n## Gap\n\nSemantic recall is intentionally not exposed on the current public API; keep docs clear to avoid overpromising retrieval behavior.\n"
+  },
+  {
+    "path": "tickets/observability--01-otlp-exporter-installation-into-real-reference-deployments-i-0b38c7fd.md",
     "kind": "issue",
     "status": "todo",
     "priority": "p2",
     "updatedAtMs": 0,
     "featureId": "observability",
-    "featureTitle": "Observability",
-    "content": "# OTLP exporter is not installed in the reference deployments; prove a real export path\n\nFeature: Observability (observability)\nStatus: todo · Kind: issue · Priority: P2 · Feature status: partial\n\n## Gap\n\nOTLP exporter is not installed in the reference deployments; prove a real export path\n"
+    "featureTitle": "Observability and tracing",
+    "content": "# OTLP exporter installation into real reference deployments is uneven; prove a production export path per deployment target.\n\nFeature: Observability and tracing (observability)\nStatus: todo · Kind: issue · Priority: P2 · Feature status: partial\n\n## Gap\n\nOTLP exporter installation into real reference deployments is uneven; prove a production export path per deployment target.\n"
   },
   {
-    "path": "tickets/docs-driven-development--01-image-upload-target-crepe-imageblock-needs-an-asset-server-v-51e77423.md",
+    "path": "tickets/observability--02-metrics-coverage-exists-but-dashboards-alerts-are-not-a-full-4f2dd6da.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p2",
+    "updatedAtMs": 0,
+    "featureId": "observability",
+    "featureTitle": "Observability and tracing",
+    "content": "# Metrics coverage exists, but dashboards/alerts are not a fully versioned product surface in this repo.\n\nFeature: Observability and tracing (observability)\nStatus: todo · Kind: e2e · Priority: P2 · Feature status: partial\n\n## Gap\n\nMetrics coverage exists, but dashboards/alerts are not a fully versioned product surface in this repo.\n"
+  },
+  {
+    "path": "tickets/control-plane--01-this-is-a-data-contract-package-not-a-complete-hosted-contro-f5d13e39.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "control-plane",
+    "featureTitle": "Hosted control-plane primitives",
+    "content": "# This is a data-contract package, not a complete hosted control plane: SSO enforcement, billing checkout, tenant-isolated gateway deployment, object storage, and compliance operations live outside this repo.\n\nFeature: Hosted control-plane primitives (control-plane)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nThis is a data-contract package, not a complete hosted control plane: SSO enforcement, billing checkout, tenant-isolated gateway deployment, object storage, and compliance operations live outside this repo.\n"
+  },
+  {
+    "path": "tickets/control-plane--02-usage-command-covers-account-provider-usage-not-a-full-multi-9bfc8843.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "control-plane",
+    "featureTitle": "Hosted control-plane primitives",
+    "content": "# Usage command covers account/provider usage, not a full multi-tenant billing UI.\n\nFeature: Hosted control-plane primitives (control-plane)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nUsage command covers account/provider usage, not a full multi-tenant billing UI.\n"
+  },
+  {
+    "path": "tickets/docs-pipeline--01-2026-07-06-review-bun-test---timeout-120000---max-concurrenc-a1c96b06.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "docs-pipeline",
+    "featureTitle": "Docs pipeline and LLM bundles",
+    "content": "# 2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/docs-examples-smoke.test.js fails for docs/examples/workflow-ui-react.mdx#2 with GRAPH_FAILED/Object.entries on undefined input.\n\nFeature: Docs pipeline and LLM bundles (docs-pipeline)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: bun test --timeout=120000 --max-concurrency=1 apps/cli/tests/docs-examples-smoke.test.js fails for docs/examples/workflow-ui-react.mdx#2 with GRAPH_FAILED/Object.entries on undefined input.\n"
+  },
+  {
+    "path": "tickets/docs-pipeline--02-keep-docs-pipeline-partial-until-the-docs-examples-smoke-gat-1e847fc9.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "docs-pipeline",
+    "featureTitle": "Docs pipeline and LLM bundles",
+    "content": "# Keep docs-pipeline partial until the docs examples smoke gate passes together with check-docs/check-llms and CLI overview coverage.\n\nFeature: Docs pipeline and LLM bundles (docs-pipeline)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\nKeep docs-pipeline partial until the docs examples smoke gate passes together with check-docs/check-llms and CLI overview coverage.\n"
+  },
+  {
+    "path": "tickets/docs-driven-development--01-image-upload-target-crepe-imageblock-needs-an-asset-server-v-75fd2614.md",
     "kind": "issue",
     "status": "todo",
     "priority": "p1",
     "updatedAtMs": 0,
     "featureId": "docs-driven-development",
     "featureTitle": "Docs driven development",
-    "content": "# Image upload target: Crepe ImageBlock needs an asset server; v1 wires ?assetBaseUrl passthrough but ships no asset server (uploads disabled when absent)\n\nFeature: Docs driven development (docs-driven-development)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nImage upload target: Crepe ImageBlock needs an asset server; v1 wires ?assetBaseUrl passthrough but ships no asset server (uploads disabled when absent)\n"
+    "content": "# Image upload target: Crepe ImageBlock needs an asset server; v1 wires ?assetBaseUrl passthrough but ships no asset server, so uploads are disabled when absent.\n\nFeature: Docs driven development (docs-driven-development)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nImage upload target: Crepe ImageBlock needs an asset server; v1 wires ?assetBaseUrl passthrough but ships no asset server, so uploads are disabled when absent.\n"
+  },
+  {
+    "path": "tickets/docs-driven-development--02-spec-statuses-can-drift-if-refresh-tasks-do-not-run-the-pack-e850c0ec.md",
+    "kind": "e2e",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "docs-driven-development",
+    "featureTitle": "Docs driven development",
+    "content": "# Spec statuses can drift if refresh tasks do not run the package/e2e tests they cite; keep missing[] explicit when proof is absent.\n\nFeature: Docs driven development (docs-driven-development)\nStatus: todo · Kind: e2e · Priority: P1 · Feature status: partial\n\n## Gap\n\nSpec statuses can drift if refresh tasks do not run the package/e2e tests they cite; keep missing[] explicit when proof is absent.\n"
   }
 ];
