@@ -3118,9 +3118,23 @@ async function runGatewayCommand(options) {
     ensureSmithersTables(workspaceWorkflow.db);
     setupSqliteCleanup(workspaceWorkflow);
     backendCleanups.push(() => workspaceApi.close?.());
-    for (const discovered of discoverWorkflows(workspace)) {
+    // Load every workflow module up front, concurrently. Each `loadWorkflow`
+    // does a dynamic `import()` of the workflow's `.tsx`, and that import is the
+    // single biggest chunk of gateway cold-start once a workspace has dozens of
+    // packs — awaiting them one at a time serializes the transpile+evaluate of
+    // ~90 modules. `Promise.all` overlaps that work (module evaluation is still
+    // single-threaded, but bun's transpile and the filesystem reads pipeline),
+    // shaving a few hundred ms off boot. Registration below stays a sequential
+    // loop so DB writes and gateway state mutate in a stable, discovery order,
+    // and a broken workflow is still skipped instead of failing the whole boot.
+    const discoveredWorkflows = discoverWorkflows(workspace);
+    const loadedWorkflows = await Promise.all(discoveredWorkflows.map((discovered) => loadWorkflow(discovered.entryFile).then((workflow) => ({ discovered, workflow, loadError: /** @type {unknown} */ (null) }), (loadError) => ({ discovered, workflow: /** @type {any} */ (null), loadError }))));
+    for (const { discovered, workflow, loadError } of loadedWorkflows) {
+        if (loadError || !workflow) {
+            process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${(/** @type {any} */ (loadError))?.message ?? String(loadError)}\n`);
+            continue;
+        }
         try {
-            const workflow = await loadWorkflow(discovered.entryFile);
             ensureSmithersTables(workflow.db);
             setupSqliteCleanup(workflow);
             backendCleanups.push(() => closeWorkflowBackend(workflow));
