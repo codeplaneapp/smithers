@@ -299,6 +299,15 @@ describe("pocJudgmentScorer", () => {
         expect(result.meta?.nodes.h1).toBeUndefined();
         expect(result.meta?.nodes.p1).toBeUndefined();
     });
+    it("skips when custom weights zero out every encountered classification", async () => {
+        const custom = pocJudgmentScorer({ weights: { correctNegative: 0 } });
+        const result = await custom.score({
+            input: "task",
+            output: { events: [{ t: "NODE_DONE", node: "c1" }] },
+        });
+        expect(result.score).toBe(1);
+        expect(result.meta?.skipped).toBe(true);
+    });
     it("honors custom values and weights", async () => {
         const custom = pocJudgmentScorer({
             values: { correctNegative: 1, falseNegative: 0.1 },
@@ -742,6 +751,15 @@ describe("humanPollScorer", () => {
         });
         expect(result.score).toBe(0);
     });
+    it("scores a context poll when output is an empty array", async () => {
+        const result = await scorer.score({
+            input: "task",
+            output: [],
+            context: { poll: [{ question: "q", answer: 1 }] },
+        });
+        expect(result.score).toBe(0);
+        expect(result.meta?.skipped).toBeFalsy();
+    });
 });
 
 describe("delegationRunScore", () => {
@@ -805,6 +823,15 @@ describe("delegationRunScore", () => {
         });
         expect(result.score).toBe(1);
     });
+    it("treats an undefined weight as skipped", () => {
+        const result = delegationRunScore({
+            pocJudgment: { score: 0.5 },
+            planSolidity: { score: 1 },
+        }, { weights: { planSolidity: undefined } });
+        expect(Number.isFinite(result.score)).toBe(true);
+        expect(result.score).toBeCloseTo(0.5, 5);
+        expect(result.meta?.components.planSolidity.skipped).toBe(true);
+    });
 });
 
 describe("weightedScore", () => {
@@ -820,5 +847,11 @@ describe("weightedScore", () => {
     it("records renormalized applied weights", () => {
         const result = weightedScore({ a: { score: 1 }, b: null }, { a: 0.3, b: 0.7 });
         expect(result.meta?.components.a.appliedWeight).toBeCloseTo(1, 5);
+    });
+    it("treats a NaN weight as skipped", () => {
+        const result = weightedScore({ a: { score: 1 }, b: { score: 0.5 } }, { a: 1, b: NaN });
+        expect(Number.isFinite(result.score)).toBe(true);
+        expect(result.score).toBeCloseTo(1, 5);
+        expect(result.meta?.components.b.skipped).toBe(true);
     });
 });
