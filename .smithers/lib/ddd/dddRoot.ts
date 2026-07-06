@@ -11,7 +11,9 @@ export function dddRoot(start: string = process.cwd()): string {
   const found = findDddRoot(start);
   if (found) return found;
   throw new Error(
-    `docs-driven-development: could not find .smithers/spec/features.json walking up from ${start}. Run from the smithers repo.`,
+    `docs-driven-development: could not find the DDD pack walking up from ${start}. ` +
+      `Run from a repo whose .smithers/ has the DDD pack installed (lib/ddd/build.ts, ` +
+      `workflows/docs-driven-development.tsx, or spec/features.json).`,
   );
 }
 
