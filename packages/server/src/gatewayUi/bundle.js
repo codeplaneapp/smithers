@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url);
 // (portals, flushSync, createRoot in shared components).
 const reactSpecifierRe = /^react(?:-dom)?(?:\/.*)?$/;
 const tanstackSpecifierRe = /^@tanstack\//;
+const smithersUiSpecifierRe = /^(?:smithers-orchestrator\/gateway-(?:react|client)|@smithers-orchestrator\/(?:gateway-react|gateway-client|gateway)(?:\/.*)?)$/;
 const INLINE_UI_NAMESPACE = "smithers-inline-ui";
 
 function resolveReactPeer(specifier) {
@@ -44,6 +45,22 @@ function resolveWorkspaceDependency(specifier, resolveDir) {
     try {
         return require.resolve(specifier, {
             paths: searchPaths,
+        });
+    }
+    catch {
+        return null;
+    }
+}
+
+/**
+ * @param {string} specifier
+ * @param {string | undefined} resolveDir
+ * @returns {string | null}
+ */
+function resolveSmithersUiDependency(specifier, resolveDir) {
+    try {
+        return require.resolve(specifier, {
+            paths: [resolveDir, process.cwd()].filter(Boolean),
         });
     }
     catch {
@@ -142,7 +159,7 @@ function renderLiteralInlineUiEntry(tree) {
 function renderComponentInlineUiEntry(source, exportName) {
     return [
         'import { createElement } from "react";',
-        'import { createGatewayReactRoot } from "@smithers-orchestrator/gateway-react";',
+        'import { createGatewayReactRoot } from "@smithers-orchestrator/gateway-react/createGatewayReactRoot";',
         `import * as InlineUiModule from ${JSON.stringify(moduleSpecifier(source))};`,
         `const exportName = ${JSON.stringify(exportName)};`,
         "const Component = exportName === 'default' ? InlineUiModule.default : InlineUiModule[exportName];",
@@ -202,6 +219,10 @@ export async function bundleGatewayUiEntry(config, cache) {
                     });
                     build.onResolve({ filter: tanstackSpecifierRe }, (args) => {
                         const path = resolveWorkspaceDependency(args.path, args.resolveDir);
+                        return path ? { path } : undefined;
+                    });
+                    build.onResolve({ filter: smithersUiSpecifierRe }, (args) => {
+                        const path = resolveSmithersUiDependency(args.path, args.resolveDir);
                         return path ? { path } : undefined;
                     });
                 },
