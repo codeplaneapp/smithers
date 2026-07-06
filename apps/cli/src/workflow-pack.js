@@ -277,10 +277,12 @@ const WORKFLOW_MANIFEST = [
     { id: "init", ui: "init", components: [], prompts: [], seeded: true, system: true },
     // System workflow: auto-launched autopsy for failed runs.
     { id: "post-failure", ui: "post-failure", components: [], prompts: [], seeded: true, system: true },
+    // System workflow: agent-assisted Smithers CLI/plugin/package upgrade.
+    { id: "upgrade", ui: "upgrade", components: [], prompts: [], seeded: true, system: true },
 ];
 /**
  * The IDs of every installable workflow, in manifest order. System workflows
- * (durable `init`, `post-failure` autopsy) are internal plumbing the pack
+ * (durable `init`, `post-failure` autopsy, `upgrade`) are internal plumbing the pack
  * closure always installs — they are never offered in the interactive wizard
  * and never subject to à-la-carte deselection — so they are excluded unless
  * `includeSystem: true` is passed. Exported so the init wizard derives its
@@ -324,7 +326,7 @@ const ALWAYS_EMIT_COMPONENTS = new Set(["CommandProbe"]);
  */
 function computeClosure(selectedWorkflows) {
     const allIds = WORKFLOW_MANIFEST.map((w) => w.id);
-    // System workflows (durable `init`, `post-failure`) are always installed
+    // System workflows (durable `init`, `post-failure`, `upgrade`) are always installed
     // regardless of the caller's selection: the wizard never offers them and
     // an à-la-carte selection must not drop them (else durable re-init and the
     // failure autopsy silently stop working). Force-include them here rather

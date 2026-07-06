@@ -1,10 +1,10 @@
-name: SOTA model research
+name: Daily Smithers maintenance
 
-# Daily check that the model registry (docs/data/sota-models.json) still names
-# the state of the art. A web-searching agent compares the registry against
-# provider docs; when new GA models shipped, scripts/sota-research.ts rewrites
-# the registry and every generated/pinned surface, and this workflow opens a PR
-# for human review. Model swaps never land on main without a merge.
+# Daily dogfood run for Smithers' own system workflows. The benchmark
+# maintenance workflow refreshes SOTA research, smokes the current
+# benchmark/eval harnesses, and lets a smart web-searching agent look for new
+# benchmarks. The canary workflow runs once in a fresh repo and once in a
+# persisted filesystem cache so memory/LRU behavior is tested across days.
 
 on:
   schedule:
@@ -16,13 +16,13 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: sota-research
+  group: daily-smithers-maintenance
   cancel-in-progress: false
 
 jobs:
-  research:
+  maintenance:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -53,26 +53,173 @@ jobs:
           mkdir -p ~/.codex
           printf '%s' "$CODEX_AUTH_JSON" > ~/.codex/auth.json
 
-      - name: Research the model landscape
-        run: bun scripts/sota-research.ts
+      - name: Restore persistent canary workspace
+        uses: actions/cache/restore@v4
+        with:
+          path: .smithers-canary-state
+          key: smithers-canary-${{ github.run_id }}
+          restore-keys: |
+            smithers-canary-
 
-      - name: Open a PR when the registry moved
+      - name: Run benchmark maintenance workflow
+        run: |
+          set +e
+          cat > /tmp/daily-benchmark-input.json <<JSON
+          {
+            "runLabel": "github-${GITHUB_RUN_ID}",
+            "summaryPath": "/tmp/smithers-daily-research-summary.md",
+            "sotaSummaryPath": "/tmp/sota-research-summary.md",
+            "evalModel": "codex",
+            "evalMaxCases": 1,
+            "evalConcurrency": 2
+          }
+          JSON
+          bun apps/cli/src/index.js workflow run daily-benchmark-maintenance \
+            --allow-network \
+            --max-output-bytes 200000 \
+            --tool-timeout-ms 1800000 \
+            --input "$(< /tmp/daily-benchmark-input.json)" \
+            --format json \
+            --no-report \
+            --no-post-failure
+          status=$?
+          echo "$status" > /tmp/smithers-daily-benchmark-status
+          exit 0
+
+      - name: Run fresh-repo canary workflow
+        run: |
+          set +e
+          cat > /tmp/fresh-canary-input.json <<JSON
+          {
+            "mode": "fresh",
+            "workspaceDir": "${RUNNER_TEMP}/smithers-fresh-canary",
+            "runLabel": "github-${GITHUB_RUN_ID}-fresh",
+            "runHello": true,
+            "summaryPath": "/tmp/smithers-canary-fresh.md"
+          }
+          JSON
+          bun apps/cli/src/index.js workflow run daily-canary \
+            --allow-network \
+            --max-output-bytes 200000 \
+            --tool-timeout-ms 1800000 \
+            --input "$(< /tmp/fresh-canary-input.json)" \
+            --format json \
+            --no-report \
+            --no-post-failure
+          status=$?
+          echo "$status" > /tmp/smithers-fresh-canary-status
+          exit 0
+
+      - name: Run persistent-workspace canary workflow
+        run: |
+          set +e
+          mkdir -p .smithers-canary-state
+          cat > /tmp/persistent-canary-input.json <<JSON
+          {
+            "mode": "persistent",
+            "workspaceDir": "${GITHUB_WORKSPACE}/.smithers-canary-state/persistent",
+            "runLabel": "github-${GITHUB_RUN_ID}-persistent",
+            "runHello": true,
+            "summaryPath": "/tmp/smithers-canary-persistent.md"
+          }
+          JSON
+          bun apps/cli/src/index.js workflow run daily-canary \
+            --allow-network \
+            --max-output-bytes 200000 \
+            --tool-timeout-ms 1800000 \
+            --input "$(< /tmp/persistent-canary-input.json)" \
+            --format json \
+            --no-report \
+            --no-post-failure
+          status=$?
+          echo "$status" > /tmp/smithers-persistent-canary-status
+          exit 0
+
+      - name: Save persistent canary workspace
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .smithers-canary-state
+          key: smithers-canary-${{ github.run_id }}
+
+      - name: Upload maintenance artifacts
+        if: always()
+        uses: actions/upload-artifact@v5.0.0
+        with:
+          name: smithers-daily-maintenance-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            /tmp/smithers-daily-research-summary.md
+            /tmp/sota-research-summary.md
+            /tmp/smithers-canary-*.md
+            /tmp/smithers-*-status
+            benchmarks/results.json
+            benchmarks/site/index.html
+            .smithers/evals/reports
+            evals/harness/.report
+
+      - name: Open a PR when maintenance changes files
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git diff --quiet; then
-            echo "Registry unchanged; nothing to do."
+          paths=(
+            docs
+            apps/cli/docs
+            apps/cli/src/sota-models.generated.js
+            apps/cli/src/seeded-workflow-pack.generated.js
+            packages/smithers/docs
+            skills/smithers
+            .smithers
+            benchmarks
+            evals
+            scripts
+          )
+          if [ -z "$(git status --porcelain -- "${paths[@]}")" ]; then
+            echo "Maintenance changed no tracked files; nothing to do."
             exit 0
           fi
           version=$(node -p "JSON.parse(require('fs').readFileSync('docs/data/sota-models.json','utf8')).version")
-          branch="sota/registry-v${version}"
+          branch="daily/smithers-maintenance-${GITHUB_RUN_ID}"
+          body=/tmp/smithers-maintenance-pr.md
+          {
+            echo "# Daily Smithers maintenance"
+            echo
+            echo "Run: ${GITHUB_RUN_ID}"
+            echo "SOTA registry version: ${version}"
+            echo
+            for file in \
+              /tmp/smithers-daily-research-summary.md \
+              /tmp/smithers-canary-fresh.md \
+              /tmp/smithers-canary-persistent.md; do
+              if [ -f "$file" ]; then
+                echo
+                cat "$file"
+              fi
+            done
+          } > "$body"
           git checkout -B "$branch"
-          git add -A
+          git add -- "${paths[@]}"
           git -c user.name="smithers-sota-bot" -c user.email="bot@smithers.sh" \
-            commit -m "🤖 chore(sota): model registry v${version}" -m "$(cat /tmp/sota-research-summary.md)"
+            commit -m "🤖 chore(research): daily Smithers maintenance ${GITHUB_RUN_ID}" -m "$(cat "$body")"
           git push --force origin "$branch"
           gh pr create \
-            --title "🤖 chore(sota): model registry v${version}" \
-            --body-file /tmp/sota-research-summary.md \
+            --title "🤖 chore(research): daily Smithers maintenance ${GITHUB_RUN_ID}" \
+            --body-file "$body" \
             --base main --head "$branch" \
-            || gh pr edit "$branch" --body-file /tmp/sota-research-summary.md
+            || gh pr edit "$branch" --body-file "$body"
+
+      - name: Fail when a Smithers maintenance workflow failed
+        if: always()
+        run: |
+          failed=0
+          for file in \
+            /tmp/smithers-daily-benchmark-status \
+            /tmp/smithers-fresh-canary-status \
+            /tmp/smithers-persistent-canary-status; do
+            status="$(cat "$file" 2>/dev/null || echo 1)"
+            echo "$file: $status"
+            if [ "$status" != "0" ]; then
+              failed=1
+            fi
+          done
+          exit "$failed"
