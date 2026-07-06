@@ -11,7 +11,7 @@ by image-pull throughput. They run on different machines.
 
 ```
 Postgres (shared run store)
-  ├── orchestrator: smithers serve --gateway
+  ├── orchestrator: smithers gateway + smithers supervise
   ├── rollout fleet: 6 Fly Machines, 1 subscription each   ← this package
   └── scoring pool: 2 amd64 Docker boxes, warm image cache
 ```
@@ -58,8 +58,8 @@ This is native, and the fleet uses it. When a subscription hits its 5-hour
 window, smithers parks each of that sub's runs as `waiting-quota` with the parsed
 reset time (`engine.markRunWaiting`), and the gateway daemon's `processDueTimers`
 sweep auto-resumes them at the boundary — no human, no restart. The worker runs
-`smithers serve --gateway --supervise` (that sweep plus the stale-run supervisor)
-and keeps the container alive until every task is terminal, so the parked runs
+`smithers gateway` (that sweep) plus `smithers supervise` (the stale-run
+supervisor) and keeps the container alive until every task is terminal, so the parked runs
 have a live daemon to wake into. Fly Machines have no timeout, so a multi-hour
 wait costs only idle CPU.
 
