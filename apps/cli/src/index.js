@@ -117,7 +117,22 @@ async function loadWorkflowAsync(path) {
     const mod = await import(pathToFileURL(abs).href);
     if (!mod.default)
         throw new SmithersError("WORKFLOW_MISSING_DEFAULT", "Workflow must export default");
-    return mod.default;
+    // A built smithers workflow is an object carrying a `build` function and
+    // `opts`. Raw component exports (a bare function returning <Workflow>) or
+    // JSX elements slip past the `mod.default` check and later blow up deep in
+    // the DB adapter as `undefined is not an object (evaluating 'db.session')`,
+    // because nothing wrapped them with `smithers(...)` to attach a `.db`.
+    // Catch that here with an actionable authoring error instead.
+    const wf = mod.default;
+    if (typeof wf !== "object" ||
+        wf === null ||
+        typeof wf.build !== "function" ||
+        typeof wf.opts !== "object") {
+        throw new SmithersError("WORKFLOW_NOT_BUILT", "Workflow default export must be created with `smithers(...)`. You exported a raw component or element. Wrap the body:\n" +
+            "  const { Workflow, smithers, outputs } = createSmithers({ /* schemas */ });\n" +
+            "  export default smithers((ctx) => <Workflow>…</Workflow>);");
+    }
+    return wf;
 }
 // Advertise this CLI's module directory to workflows launched by it. System
 // workflows (the seeded `init`) import CLI internals through this so they

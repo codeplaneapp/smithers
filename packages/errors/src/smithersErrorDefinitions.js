@@ -251,6 +251,10 @@ export const smithersErrorDefinitions = {
         category: "components",
         when: "A workflow module does not export a default Smithers workflow.",
     },
+    WORKFLOW_NOT_BUILT: {
+        category: "components",
+        when: "A workflow's default export is a raw component or JSX element instead of the object returned by `smithers(...)`.",
+    },
     TOOL_PATH_INVALID: {
         category: "tools",
         when: "A filesystem tool receives a non-string path.",

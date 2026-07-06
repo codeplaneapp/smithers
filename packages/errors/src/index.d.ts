@@ -529,6 +529,12 @@ declare namespace smithersErrorDefinitions {
         let when_47: string;
         export { when_47 as when };
     }
+    namespace WORKFLOW_NOT_BUILT {
+        let category_47b: string;
+        export { category_47b as category };
+        let when_47b: string;
+        export { when_47b as when };
+    }
     namespace TOOL_PATH_INVALID {
         let category_48: string;
         export { category_48 as category };
