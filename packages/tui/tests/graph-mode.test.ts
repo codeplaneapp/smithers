@@ -156,14 +156,6 @@ describe("graphUtils – connectorArrow", () => {
     expect(connectorArrow(false)).toBe(" ──▶ ");
     expect(connectorArrow(false).length).toBe(5);
   });
-
-  it("arrow width matches the blank filler it aligns with in both modes", () => {
-    for (const compact of [true, false]) {
-      const arrow = connectorArrow(compact);
-      const blank = " ".repeat(arrow.length);
-      expect(arrow.length).toBe(blank.length);
-    }
-  });
 });
 
 describe("graphUtils – hasIncomingEdge", () => {
