@@ -37,7 +37,7 @@ type Results = { scaffold: string; benchmarks: Benchmark[] };
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-function rowHtml(r: Row, metric: string): string {
+function rowHtml(r: Row): string {
   const value = r.value === null ? "—" : `${r.value}`;
   const cls = `row row--${r.status}${r.model.startsWith("smithers") ? " row--ours" : ""}`;
   const badge =
@@ -65,14 +65,22 @@ function benchHtml(b: Benchmark): string {
   <div class="table-wrap">
     <table>
       <thead><tr><th>Model</th><th>Scaffold</th><th>${esc(b.metric)}</th><th>n</th><th>Subset / caveat</th></tr></thead>
-      <tbody>${b.leaderboard.map((r) => rowHtml(r, b.metric)).join("\n")}</tbody>
+      <tbody>${b.leaderboard.map((r) => rowHtml(r)).join("\n")}</tbody>
     </table>
   </div>
 </section>`;
 }
 
 function page(results: Results): string {
-  return `<main>
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smithers Benchmarks</title>
+</head>
+<body>
+<main>
   <header class="hero">
     <h1>Smithers Benchmarks</h1>
     <p class="sub">Frontier coding benchmarks run through a Claude-only delegation fleet.<br>
@@ -118,7 +126,9 @@ function page(results: Results): string {
   .badge--ours { border-color:var(--ours); color:var(--ours); }
   footer { color:var(--muted); font-size:12px; margin-top:28px; }
   footer code, .disclaimer code { background:var(--panel); border:1px solid var(--line); padding:1px 5px; border-radius:5px; }
-</style>`;
+</style>
+</body>
+</html>`;
 }
 
 const dir = import.meta.dir;

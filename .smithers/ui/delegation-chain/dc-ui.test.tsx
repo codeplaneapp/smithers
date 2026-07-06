@@ -13,6 +13,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { DelegationGraph } from "smithers-orchestrator/gateway-react";
+import { dcGoalApprovalSchema } from "smithers-orchestrator";
 
 // DcMarkdownEditor drops to its textarea fallback under happy-dom (it sniffs
 // navigator.userAgent), which is what makes the edit flows testable.
@@ -34,6 +35,7 @@ const {
   goalApprovalPendingOf,
   goalApprovalTarget,
   pendingQuestionSeqsOf,
+  pollPendingOf,
   questionTarget,
 } = await import("./dc-shared");
 const { DcNodeCardBody, delegationToFlow, findAttentionTarget } = await import("./dc-graph");
@@ -692,8 +694,16 @@ describe("question flow", () => {
     await setInputValue(byTestId("dc-refined-reject-reason") as HTMLTextAreaElement, "wrong direction entirely");
     await click(byTestId("dc-refined-reject-confirm"));
     expect(answers).toEqual([
-      { nodeId: "dc:goal:approve", iteration: 0, value: { approved: false, reason: "wrong direction entirely" } },
+      {
+        nodeId: "dc:goal:approve",
+        iteration: 0,
+        value: { approved: false, refinedPrompt: "Build X.", reason: "wrong direction entirely" },
+      },
     ]);
+    // The reject payload must satisfy dcGoalApprovalSchema so the dc:<goal>:approve
+    // HumanTask parses the decision note instead of throwing HUMAN_TASK_VALIDATION_FAILED
+    // and retrying: the run ends cleanly rather than the approval node failing.
+    expect(dcGoalApprovalSchema.safeParse(answers[0]!.value).success).toBe(true);
     // Post-reject state: form closes, status flips, approve stays locked.
     expect(maybeByTestId("dc-refined-reject")).toBe(null);
     expect(byTestId("dc-refined-rejected").textContent).toContain("run ends here");
@@ -715,6 +725,16 @@ describe("question flow", () => {
     expect(goalApprovalPendingOf(makeGraph([doneGoal], [], { phase: "goal", refinedPrompt: "" }))).toBe(true);
     // Approved and planning: surface goes away.
     expect(goalApprovalPendingOf(makeGraph([doneGoal], [], { phase: "planning", refinedPrompt: "x" }))).toBe(false);
+  });
+});
+
+describe("pollPendingOf", () => {
+  test("true only when a poll HumanTask is actually pending", () => {
+    expect(pollPendingOf(new Set(["dc-poll"]))).toBe(true);
+    expect(pollPendingOf(new Set(["dc:root:poll"]))).toBe(true);
+    expect(pollPendingOf(new Set(["dc:root:poll-2"]))).toBe(true);
+    expect(pollPendingOf(new Set(["dc:root:review"]))).toBe(false);
+    expect(pollPendingOf(new Set())).toBe(false);
   });
 });
 

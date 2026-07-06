@@ -380,7 +380,7 @@ export function DcMarkdownEditor({
   const useTextareaFallback =
     typeof window === "undefined" ||
     typeof document === "undefined" ||
-    (typeof navigator !== "undefined" && /happy-?dom|jsdom|bun/i.test(navigator.userAgent));
+    (typeof navigator !== "undefined" && /happy-?dom|jsdom|\bBun\//i.test(navigator.userAgent));
   if (useTextareaFallback) {
     return (
       <textarea
@@ -559,6 +559,29 @@ export function pendingQuestionSeqsOf(pendingApprovalIds: Iterable<string>): num
     if (match) seqs.push(Number(match[1]));
   }
   return seqs.sort((a, b) => a - b);
+}
+
+/**
+ * Whether the end-of-run poll HumanTask is actually pending (mirrors the exact
+ * predicate in useDelegationChain's submitPoll). The poll form must render only
+ * when a poll approval is live — a completed run whose poll was already answered
+ * (or a run configured with poll:false) has no pending poll, so calling
+ * submitPoll would throw "no pending poll to answer".
+ */
+export function pollPendingOf(pendingApprovalIds: Iterable<string>): boolean {
+  for (const id of pendingApprovalIds) {
+    if (id === "dc-poll") return true;
+    // Physical delegation node ids are `dc:<logicalId>:<phase>` (the naming
+    // contract parseDelegationNodeId decodes in gateway-react/foldDelegation);
+    // the end-of-run poll HumanTask mounts at phase `poll` (or `poll-<i>`).
+    // Detect it inline so the seeded UI stays self-contained and typechecks
+    // standalone rather than importing an internal value from the facade.
+    const parts = id.split(":");
+    if (parts.length < 3 || parts[0] !== "dc") continue;
+    const phase = parts[parts.length - 1]!;
+    if (phase.replace(/-\d+$/, "") === "poll") return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

@@ -168,7 +168,7 @@ export async function bundleGatewayUiEntry(config, cache) {
         // Serve production React: the development build plus inline sourcemaps
         // made every UI bundle 3.7-6.6 MB. Sourcemaps stay inline (operators
         // debug against them); minify stays off so stack traces read cleanly.
-        define: { "process.env.NODE_ENV": '"production"' },
+        define: { "process.env.NODE_ENV": JSON.stringify(noCache ? "development" : "production") },
         sourcemap: "inline",
         minify: false,
         jsx: {

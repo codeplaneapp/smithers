@@ -134,6 +134,80 @@ process.exit(0);
             await rm(fake.dir, { recursive: true, force: true });
         }
     });
+    test("does not misclassify a successful run whose answer mentions rate-limit prose as a quota error", async () => {
+        // A successful run (is_error:false, subtype:success, exit 0) whose model
+        // output merely *mentions* quota/rate-limit prose must NOT be parked as a
+        // quota wait. The banner interpreter is gated by the narrow
+        // isClaudeLimitBanner matcher, not the broad quota classifier.
+        const answer = "The endpoint returns 429 rate limit exceeded when too many requests arrive";
+        const fake = await makeFakeClaude(`
+process.stdout.write(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: ${JSON.stringify(answer)} }] } }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: ${JSON.stringify(answer)} }) + "\\n");
+process.exit(0);
+`);
+        try {
+            process.env.PATH = prependPath(fake.dir, originalPath);
+            const agent = new ClaudeCodeAgent({
+                model: "claude-fable-5",
+                env: { PATH: process.env.PATH },
+            });
+            const result = await agent.generate({ messages: [{ role: "user", content: "audit this" }] });
+            expect(result.text).toContain("rate limit exceeded");
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
+    test("classifies a stream-json assistant-text session-limit banner as a quota error", async () => {
+        const banner = "You've hit your session limit \\u00b7 resets 5:50pm (America/New_York)";
+        const fake = await makeFakeClaude(`
+process.stdout.write(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "${banner}" }] } }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "" }) + "\\n");
+process.exit(0);
+`);
+        try {
+            process.env.PATH = prependPath(fake.dir, originalPath);
+            const agent = new ClaudeCodeAgent({ model: "claude-fable-5", env: { PATH: process.env.PATH } });
+            let error;
+            try {
+                await agent.generate({ messages: [{ role: "user", content: "audit this" }] });
+            }
+            catch (err) {
+                error = err;
+            }
+            expect(error).toBeDefined();
+            expect(error?.code).toBe("AGENT_QUOTA_EXCEEDED");
+            expect(error?.details?.failureQuota).toBe(true);
+            expect(typeof error?.details?.quotaResetAtMs).toBe("number");
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
+    test("classifies a session-limit banner in the stream-json result payload as a quota error", async () => {
+        const banner = "You're out of usage credits. Run /usage-credits to keep using Fable 5";
+        const fake = await makeFakeClaude(`
+process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: ${JSON.stringify(banner)} }) + "\\n");
+process.exit(0);
+`);
+        try {
+            process.env.PATH = prependPath(fake.dir, originalPath);
+            const agent = new ClaudeCodeAgent({ model: "claude-fable-5", env: { PATH: process.env.PATH } });
+            let error;
+            try {
+                await agent.generate({ messages: [{ role: "user", content: "audit this" }] });
+            }
+            catch (err) {
+                error = err;
+            }
+            expect(error).toBeDefined();
+            expect(error?.code).toBe("AGENT_QUOTA_EXCEEDED");
+            expect(error?.details?.failureQuota).toBe(true);
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
     test("does not add --verbose for text output by default", async () => {
         const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-claude-args-"));
         const argsFile = join(argsFileDir, "args.json");

@@ -94,7 +94,7 @@ describe("Gateway UI", () => {
 
   afterEach(async () => {
     if (cleanupDomRuntime) {
-      cleanupDomRuntime();
+      await cleanupDomRuntime();
       cleanupDomRuntime = null;
     }
     if (domRegistered) {
@@ -340,19 +340,31 @@ describe("Gateway UI", () => {
         this.addEventListener("close", () => sockets.delete(this));
       }
     };
-    cleanupDomRuntime = () => {
+    cleanupDomRuntime = async () => {
       for (const interval of intervals) {
         nativeClearInterval(interval);
       }
       intervals.clear();
+      // Close sockets first, while the setTimeout/WebSocket wrappers are still
+      // active, so any retry scheduled from the socket 'close' listener is
+      // tracked.
+      for (const socket of sockets) {
+        socket.close();
+      }
+      // Wait for close handshakes to flush; the TrackedWebSocket 'close'
+      // listener (above) deletes each socket from the set. Bounded so a stuck
+      // socket cannot hang teardown.
+      const drainStart = Date.now();
+      while (sockets.size > 0 && Date.now() - drainStart < 1000) {
+        await sleep(10);
+      }
+      sockets.clear();
+      // Clear timeouts AFTER draining so close-path retries
+      // (retryDevToolsStream) are cancelled before natives are restored.
       for (const timeout of timeouts) {
         nativeClearTimeout(timeout);
       }
       timeouts.clear();
-      for (const socket of sockets) {
-        socket.close();
-      }
-      sockets.clear();
       globalThis.setInterval = nativeSetInterval;
       globalThis.clearInterval = nativeClearInterval;
       globalThis.setTimeout = nativeSetTimeout;

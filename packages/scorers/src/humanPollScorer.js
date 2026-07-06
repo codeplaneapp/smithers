@@ -7,11 +7,11 @@ import { createScorer } from "./createScorer.js";
  */
 function extractPoll(candidate) {
     if (Array.isArray(candidate))
-        return candidate;
+        return candidate.length > 0 ? candidate : null;
     if (typeof candidate === "object" && candidate !== null) {
         const poll = /** @type {{ poll?: unknown }} */ (candidate).poll;
         if (Array.isArray(poll))
-            return poll;
+            return poll.length > 0 ? poll : null;
     }
     return null;
 }

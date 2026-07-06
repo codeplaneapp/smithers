@@ -69,7 +69,7 @@ function resolveOidcPullRequestNumber(
  * Failure mapping:
  *  - 400 unparseable body / missing auth material
  *  - 401 OIDC fails signature/issuer/audience/expiry, or unknown api key
- *  - 403 repo not registered, or api key not authorized for repo
+ *  - 403 repo not registered, api key not authorized for repo, or unscoped api key
  *  - 402 plan quota for this calendar month is spent
  */
 export async function handleSessions(
@@ -109,8 +109,11 @@ export async function handleSessions(
     if (typeof body.pr !== "number" || body.pr <= 0) {
       return jsonError(400, "missing pull request number");
     }
-    if (record.repos.length > 0 && !record.repos.includes(body.repo)) {
-      return jsonError(403, "api key not authorized for repo");
+    if (record.repos.length === 0) {
+      return jsonError(403, "api key is not scoped to any repo; mint a repo-scoped key", { repo: body.repo });
+    }
+    if (!record.repos.includes(body.repo)) {
+      return jsonError(403, "api key not authorized for repo", { repo: body.repo });
     }
     repo = body.repo;
     pr = body.pr;

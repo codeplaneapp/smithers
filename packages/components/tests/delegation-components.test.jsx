@@ -218,6 +218,8 @@ describe("delegation schemas", () => {
         expect(dcPollSchema.safeParse({ answers: [{ question: "q", rating: 6 }] }).success).toBe(false);
         expect(dcReplanSchema.safeParse({ round: 1, logicalId: "x", decision: "maybe", reason: "r", trigger: { type: "probe", ref: "p" } }).success).toBe(false);
         expect(dcProbeSchema.safeParse({ probeId: "p", parentLogicalId: "root", kind: "poc", question: "q", answer: "a", report: "r", planImpact: "definitely" }).success).toBe(false);
+        // A logicalId with a space would encode into a physical node id the gateway rejects.
+        expect(dcPlanSchema.safeParse({ ...rootPlan, children: [{ ...rootPlan.children[0], logicalId: "root/api v2" }] }).success).toBe(false);
     });
 });
 
@@ -291,6 +293,22 @@ describe("DelegationPlanning", () => {
             { dcGoalApproval: [{ nodeId: "dc:goal:approve", iteration: 0, approved: true, refinedPrompt: "refined!" }] });
         expect(ids(approved)).toEqual(["dc:root:plan"]);
         expect(approved.tasks[0].prompt).toContain("refined!");
+    });
+
+    test("a chunk child at or past maxDepth throws instead of fanning out unbounded", async () => {
+        const rootAtCap = {
+            nodeId: "dc:root:plan", iteration: 0, logicalId: "root", tier: "fable", title: "Root", brief: "b",
+            children: [{ logicalId: "root/core", tier: "opus", kind: "chunk", title: "Core", brief: "c", estimate }],
+            subtreeEstimate: estimate, risks: [],
+        };
+        const coreAtCap = {
+            nodeId: "dc:root:core:plan", iteration: 0, logicalId: "root/core", tier: "opus", title: "Core", brief: "c",
+            children: [{ logicalId: "root/core/a", tier: "sonnet", kind: "chunk", title: "A", brief: "a", estimate }],
+            subtreeEstimate: estimate, risks: [],
+        };
+        await expect(renderWithOutputs(
+            <DelegationPlanning prompt="build it" agents={agents} outputs={outputs} maxDepth={2} />,
+            { dcPlan: [rootAtCap, coreAtCap] })).rejects.toThrow(/maxDepth/);
     });
 });
 
@@ -432,6 +450,21 @@ describe("DeriskLoop", () => {
         expect(replanPlan.prompt).toContain("RE-FORECAST");
     });
 
+    test("fresh plan versions key by trusted insertion order, not the agent-echoed round", async () => {
+        // Two invalidations for the same owner across rounds that BOTH echo
+        // round:1 must not collide onto a single plan-1 node.
+        const replans = [
+            { nodeId: "dc:root:core:replan-1", iteration: 0, round: 1, logicalId: "root/core", decision: "invalidated", reason: "r1", trigger: { type: "probe", ref: "root/core#h1" } },
+            { nodeId: "dc:root:core:replan-2", iteration: 0, round: 1, logicalId: "root/core", decision: "invalidated", reason: "r2", trigger: { type: "user-edit", ref: "e2" } },
+        ];
+        const graph = await renderWithOutputs(
+            <DeriskLoop agents={agents} outputs={outputs} />,
+            { ...completePlans, ...deriskGates, dcReplan: replans });
+        const planIds = ids(graph).filter((id) => id.includes(":core:plan-"));
+        expect(planIds).toContain("dc:root:core:plan-1");
+        expect(planIds).toContain("dc:root:core:plan-2");
+    });
+
     test("a dc-edit row triggers a replan round like a probe finding", async () => {
         const graph = await renderWithOutputs(
             <DeriskLoop agents={agents} outputs={outputs} />,
@@ -486,6 +519,11 @@ describe("DeriskLoop", () => {
         expect(direct.prompt).toContain("core misassembled");
         expect(direct.prompt).toContain("chunk review FAILED");
         expect(direct.prompt).toContain('trigger { type: "review-fail", ref: "dc:root:core:review-1#fail-1" }');
+        // The cascade dependent's replan carries the crafted cascade summary
+        // (proposedChange), not a blank feedback line.
+        const cascade = graph.tasks.find((t) => t.nodeId === "dc:root:replan-1");
+        expect(cascade.prompt).toContain("Cascade from");
+        expect(cascade.prompt).toContain("chunk review FAILED");
     });
 
     test("a chunk review fail stops triggering once addressed by a replan or superseded by a pass", async () => {
@@ -727,6 +765,11 @@ describe("DelegationExecution", () => {
         expect(devPreview.dependsOn).toEqual(["dc:root:core:a:exec"]); // runs AFTER execution
         expect(devPreview.prompt).toContain("throwaway-ui");
         expect(devPreview.prompt).toContain("builtOk");
+        // The executor brief lists the preview gate by its own brief, not the
+        // "- approval: undefined" fallback.
+        const execWithPreview = graph.tasks.find((t) => t.nodeId === "dc:root:core:a:exec");
+        expect(execWithPreview.prompt).toContain("preview (throwaway-ui): clickable demo of A");
+        expect(execWithPreview.prompt).not.toContain("approval: undefined");
         // Leaves without preview gates get none.
         expect(ids(graph).some((id) => id.startsWith("dc:root:core:b:dev-preview"))).toBe(false);
         // The root slideshow only mounts once its whole subtree completes.
@@ -807,6 +850,39 @@ describe("DelegationExecution", () => {
         const hardGuard = breached.tasks.find((t) => t.nodeId === "dc:root:core:a:budget");
         expect(() => hardGuard.computeFn()).toThrow(/budget exceeded/i);
     });
+
+    test("a leaf that declares its own container as a dep does not wedge — self/ancestor deps are skipped", async () => {
+        const selfDepGates = {
+            dcGates: [
+                gatesRow("root", []),
+                gatesRow("root/core", []),
+                gatesRow("root/docs", []),
+                gatesRow("root/core/a", [], ["root/core"]), // parent chunk as dep
+                gatesRow("root/core/b", [], ["root/core"]),
+            ],
+        };
+        const graph = await renderWithOutputs(
+            <DelegationExecution agents={agents} outputs={outputs} />, { ...completePlans, ...selfDepGates });
+        const taskIds = ids(graph);
+        // Both leaves mount rather than each waiting on a set that includes itself.
+        expect(taskIds).toContain("dc:root:core:a:exec");
+        expect(taskIds).toContain("dc:root:core:b:exec");
+    });
+
+    test("a dep that resolves to no leaves (typo/unknown id) throws instead of silently wedging", async () => {
+        const badDepGates = {
+            dcGates: [
+                gatesRow("root", []),
+                gatesRow("root/core", []),
+                gatesRow("root/docs", []),
+                gatesRow("root/core/a", [], ["root/nope"]),
+                gatesRow("root/core/b", []),
+            ],
+        };
+        await expect(renderWithOutputs(
+            <DelegationExecution agents={agents} outputs={outputs} />, { ...completePlans, ...badDepGates }))
+            .rejects.toThrow(/root\/nope/);
+    });
 });
 
 describe("withCommitRange", () => {
@@ -882,6 +958,15 @@ describe("GoalRefinement", () => {
         expect(human.needsApproval).toBe(true);
     });
 
+    test("the forecast prompt names the required question shape (kind enum + select options)", async () => {
+        const first = await renderWithOutputs(
+            <GoalRefinement prompt="vague ask" agents={agents} outputs={outputs} />, {});
+        const forecast = first.tasks[0].prompt;
+        expect(forecast).toContain("kind");
+        expect(forecast).toContain("select");
+        expect(forecast).toContain("options");
+    });
+
     test("refine mounts after all answers; approval HumanTask after the refined goal", async () => {
         const questions = [{ seq: 1, question: "q1?", kind: "confirm", recommended: "yes", reason: "r" }];
         const forecast = { nodeId: "dc:goal:forecast", iteration: 0, logicalId: "goal", total: 1, questions };
@@ -952,6 +1037,51 @@ describe("DelegationScoring", () => {
         const digest = score.computeFn();
         expect(digest.logicalId).toBe("root");
         expect(JSON.parse(digest.summary).execAttempts).toBe(3);
+    });
+
+    test("a latest-fail chunk review blocks scoring until a replan addresses it or a pass supersedes it", async () => {
+        const chunkGates = {
+            dcGates: [
+                gatesRow("root", []),
+                gatesRow("root/docs", []),
+                gatesRow("root/core", [{ method: "review", tier: "fable", brief: "judge core" }]),
+                gatesRow("root/core/a", []),
+                gatesRow("root/core/b", []),
+            ],
+        };
+        const fail = { nodeId: "dc:root:core:review-1", iteration: 0, logicalId: "root/core", attempt: 1, verdict: "fail", feedback: "misassembled" };
+        // BLOCKED: every leaf is done, but the unaddressed latest-fail chunk
+        // review keeps executionComplete false so nothing mounts.
+        const blocked = await renderWithOutputs(
+            <DelegationScoring agents={agents} outputs={outputs} />,
+            { ...completePlans, ...chunkGates, ...allDone, dcReview: [fail] });
+        expect(blocked.tasks).toHaveLength(0);
+        // ADDRESSED: a replan whose trigger.ref matches the failure unblocks scoring.
+        const addressed = await renderWithOutputs(
+            <DelegationScoring agents={agents} outputs={outputs} />,
+            {
+                ...completePlans, ...chunkGates, ...allDone, dcReview: [fail],
+                dcReplan: [{ nodeId: "dc:root:core:replan-1", iteration: 0, round: 1, logicalId: "root/core", decision: "reaffirmed", reason: "leaf-local fix", trigger: { type: "review-fail", ref: "dc:root:core:review-1#fail-1" } }],
+            });
+        expect(ids(addressed)).toContain("dc:root:poll");
+        // SUPERSEDED: a later pass clears the failure.
+        const superseded = await renderWithOutputs(
+            <DelegationScoring agents={agents} outputs={outputs} />,
+            { ...completePlans, ...chunkGates, ...allDone, dcReview: [fail, { ...fail, iteration: 1, verdict: "pass", feedback: "fixed" }] });
+        expect(ids(superseded)).toContain("dc:root:poll");
+        // EXHAUSTED: the failure is never addressed by a matching trigger.ref,
+        // but root/core has spent its full derisk budget (maxDeriskRounds), so
+        // scoring must proceed instead of wedging the run forever.
+        const exhausted = await renderWithOutputs(
+            <DelegationScoring agents={agents} outputs={outputs} maxDeriskRounds={2} />,
+            {
+                ...completePlans, ...chunkGates, ...allDone, dcReview: [fail],
+                dcReplan: [
+                    { nodeId: "dc:root:core:replan-1", iteration: 0, round: 1, logicalId: "root/core", decision: "reaffirmed", reason: "r1", trigger: { type: "review-fail", ref: "dc:root:core:review-1#other-1" } },
+                    { nodeId: "dc:root:core:replan-2", iteration: 0, round: 2, logicalId: "root/core", decision: "reaffirmed", reason: "r2", trigger: { type: "review-fail", ref: "dc:root:core:review-1#other-2" } },
+                ],
+            });
+        expect(ids(exhausted)).toContain("dc:root:poll");
     });
 
     test("poll={false} skips the satisfaction poll and scores immediately", async () => {

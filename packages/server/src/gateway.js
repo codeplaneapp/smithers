@@ -4449,7 +4449,11 @@ a { color: var(--brand); }</style>
                 let quotaRuns;
                 try {
                     quotaRuns = await adapter.listRuns(1_000, "waiting-quota");
-                    if (quotaRuns.length > 0) {
+                    // Only finite-reset quota runs will ever be auto-resumed;
+                    // no-reset runs (credit exhaustion) are left for a human, so
+                    // keeping the daemon awake for them pins an autostarted
+                    // daemon alive forever and defeats idle spin-down.
+                    if (quotaRuns.some((run) => parseQuotaResetAtMs(run.errorJson) !== null)) {
                         this.hasPendingTimers = true;
                     }
                 }

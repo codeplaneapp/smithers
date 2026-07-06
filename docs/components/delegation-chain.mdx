@@ -183,9 +183,8 @@ attention rollups, budget rollup, phase) and returns the `submitEdit`,
   `INVALID_INPUT` if the policy produced approval gates without it.
 - `dcPlan.orchestration` (`"tasks" | "workflow"`) is reserved for planned
   higher-order orchestration (a node authoring its own workflow as its
-  execution strategy); it is accepted and ignored today, and the store behind
-  `useDelegationChain` is planned to move to Effect.ts behind the same hook
-  signature.
+  execution strategy); it is accepted and ignored today. The fold store behind
+  `useDelegationChain` runs on Effect.ts behind the frozen hook signature.
 - Scoring wiring: `scorers.exec` / `scorers.review` ride the exec and review
   tasks; `scorers.run` rides the digest task. The delegation scorers live in
   `smithers-orchestrator/scorers` (see the [scorer reference](/reference/scorers)).

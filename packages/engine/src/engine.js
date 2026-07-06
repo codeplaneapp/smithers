@@ -2176,7 +2176,7 @@ export function resolveSchema(db) {
  * Match the ZodObject on outputSchema against zodToKeyName to find the
  * schema registry entry, then set outputTable and outputTableName.
  */
-function resolveTaskOutputs(tasks, workflow) {
+export function resolveTaskOutputs(tasks, workflow) {
     for (const task of tasks) {
         if (isTimerTask(task)) {
             continue;
@@ -4699,6 +4699,7 @@ async function activateRunForResume(adapter, existingRun, opts, runtimeOwnerId, 
                 heartbeatAtMs: activatedAtMs,
                 runtimeOwnerId,
                 cancelRequestedAtMs: null,
+                pauseRequestedAtMs: null,
                 hijackRequestedAtMs: null,
                 hijackTarget: null,
                 workflowPath: workflowPath ??
@@ -4936,6 +4937,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
     let defaultIteration = 0;
     const workflowRef = workflow;
     let lastGraph = null;
+    // Duration-timer start anchors carried across a continue-as-new handoff.
+    // reconcileTimerWait closes over this so a child run's fresh timer attempt
+    // reuses the parent's original deadline instead of restarting from boot.
+    /** @type {Map<string, number> | undefined} */
+    let carriedTimerStarts;
     let descriptorMap = new Map();
     let workflowName = "workflow";
     let cacheEnabled = Boolean(workflow.opts.cache);
@@ -5063,6 +5069,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             heartbeatAtMs: null,
             runtimeOwnerId: null,
             cancelRequestedAtMs: null,
+            pauseRequestedAtMs: null,
             hijackRequestedAtMs: null,
             hijackTarget: null,
         };
@@ -5179,7 +5186,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 state !== "cancelled");
         }) ?? [];
         for (const task of tasks) {
-            const resolved = await resolveDeferredTaskStateBridge(adapter, db, runId, task, eventBus);
+            const resolved = await resolveDeferredTaskStateBridge(adapter, db, runId, task, eventBus, undefined, carriedTimerStarts);
             if (!resolved.handled)
                 continue;
             if (resolved.state === "finished") {
@@ -5729,6 +5736,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 heartbeatAtMs: nowMs(),
                 runtimeOwnerId,
                 cancelRequestedAtMs: null,
+                pauseRequestedAtMs: null,
                 hijackRequestedAtMs: null,
                 hijackTarget: null,
                 workflowPath: resolvedWorkflowPath ??
@@ -5817,6 +5825,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         const activeRun = await Effect.runPromise(adapter.getRun(runId));
         const continuationEnvelope = continuationEnvelopeFromInput(activeInput) ??
             continuationEnvelopeFromConfig(parseRunConfigJson(activeRun?.configJson));
+        carriedTimerStarts = timerStartsFromContinuationEnvelope(continuationEnvelope);
         budgetTracker = await setupBudgetTracker({
             adapter,
             runId,
@@ -5829,7 +5838,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             requireStableFinish: true,
             requireRerenderOnOutputChange: opts.requireRerenderOnOutputChange ?? true,
             initialRalphState: ralphState,
-            initialTimerStarts: timerStartsFromContinuationEnvelope(continuationEnvelope),
+            initialTimerStarts: carriedTimerStarts,
             evaluateAspectBudget: (descriptor) => budgetTracker
                 ? evaluateAspectBudget(descriptor.aspects, budgetTracker.snapshot(nowMs()))
                 : null,

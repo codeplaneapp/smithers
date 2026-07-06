@@ -16,6 +16,8 @@ describe("statusClass", () => {
     expect(statusClass("blocked")).toBe("bad");
     expect(statusClass("running")).toBe("warn");
     expect(statusClass("waiting-approval")).toBe("warn");
+    expect(statusClass("waiting-quota")).toBe("warn");
+    expect(statusClass("continued")).toBe("ok");
     expect(statusClass("cancelled")).toBe("muted");
     expect(statusClass("something-new")).toBe("muted");
   });
@@ -24,6 +26,8 @@ describe("statusClass", () => {
 describe("formatStatus", () => {
   test("maps known statuses and title-cases unknowns", () => {
     expect(formatStatus("waiting-approval")).toBe("Waiting for approval");
+    expect(formatStatus("waiting-quota")).toBe("Waiting on quota");
+    expect(formatStatus("continued")).toBe("Continued");
     expect(formatStatus("ok")).toBe("Complete");
     expect(formatStatus("some-new-state")).toBe("Some New State");
     expect(formatStatus(undefined)).toBe("Unknown");
@@ -38,6 +42,30 @@ describe("isTerminalRunStatus", () => {
     expect(isTerminalRunStatus("cancelled")).toBe(true);
     expect(isTerminalRunStatus("canceled")).toBe(true);
     expect(isTerminalRunStatus("skipped")).toBe(true);
+    expect(isTerminalRunStatus("continued")).toBe(true);
+  });
+
+  test("pins terminality across the DB run vocabulary", () => {
+    // The canonical DB_RUN_ALLOWED_STATUSES (packages/db) — hardcoded here to
+    // avoid a ui->db dependency-boundary violation. Only the finished/failed/
+    // cancelled/continued end-states are terminal; every waiting/paused/running
+    // status is still in-flight.
+    const dbRunStatuses = [
+      "running",
+      "waiting-approval",
+      "waiting-event",
+      "waiting-timer",
+      "waiting-quota",
+      "paused",
+      "finished",
+      "failed",
+      "cancelled",
+      "continued",
+    ];
+    const terminal = new Set(["finished", "failed", "cancelled", "continued"]);
+    for (const status of dbRunStatuses) {
+      expect(isTerminalRunStatus(status)).toBe(terminal.has(status));
+    }
   });
 
   test("in-flight and unknown statuses are not terminal", () => {

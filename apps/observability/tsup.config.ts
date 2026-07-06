@@ -12,7 +12,10 @@ export default defineConfig({
   clean: false,
   format: ["esm"],
   // NOTE: multi-entry dts rollup emits a shared, content-hashed chunk
-  // (src/<name>-<hash>.d.ts). The hash is deterministic for identical content;
-  // the build script rm's src/*-*.d.ts first so stale chunks never linger.
+  // (src/<name>-<hash>.d.ts). rollup-plugin-dts is non-deterministic for large
+  // declaration files, so the hash and index.d.ts import specifier can change
+  // across rebuilds even for identical source (see scripts/publish.mjs drift
+  // guard). The build script rm's src/*-*.d.ts first so a renamed chunk never
+  // leaves an orphan, and index.d.ts + its chunk are always regenerated together.
   silent: true,
 });

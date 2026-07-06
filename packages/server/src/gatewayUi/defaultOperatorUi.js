@@ -64,7 +64,6 @@ const state = {
 const css = `
 /*__SMITHERS_WORKFLOW_UI_THEME_CSS__*/
 :root {
-  color-scheme: light dark;
   --ink: var(--text);
   --muted: var(--text-muted);
   --line: var(--border-solid);

@@ -10,6 +10,7 @@ import { markdownComponents } from "@smithers-orchestrator/components/markdownCo
 import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { buildStateKey } from "@smithers-orchestrator/scheduler/buildStateKey";
 // Reconciles the three bridge-managed deferred task kinds — Timer
 // (meta.__timer), WaitForEvent (meta.__waitForEvent), and approval-gated tasks
 // (desc.needsApproval) — against the durable attempt/node rows so the
@@ -562,9 +563,13 @@ function validateDeferredOutputPayload(desc, runId, payload) {
  * @param {string} runId
  * @param {_TaskDescriptor} desc
  * @param {EventBus} eventBus
+ * @param {Map<string, number>} [initialTimerStarts] Carried duration-timer start
+ *   anchors keyed by `${nodeId}::${iteration}`, propagated across a
+ *   continue-as-new handoff so a child run's fresh attempt reuses the parent's
+ *   original deadline instead of restarting the full duration from child boot.
  * @returns {Promise<DeferredBridgeResolution>}
  */
-async function resolveTimerTaskStateBridge(adapter, runId, desc, eventBus) {
+async function resolveTimerTaskStateBridge(adapter, runId, desc, eventBus, initialTimerStarts) {
     if (!isBridgeManagedTimerTask(desc)) {
         return { handled: false };
     }
@@ -573,7 +578,9 @@ async function resolveTimerTaskStateBridge(adapter, runId, desc, eventBus) {
     const latest = attempts[0];
     const latestTimerSnapshot = parseTimerSnapshot(latest?.metaJson);
     if (!latest) {
-        const snapshot = buildTimerSnapshot(desc, now);
+        const carriedKey = buildStateKey(desc.nodeId, desc.iteration);
+        const carried = initialTimerStarts?.get(carriedKey);
+        const snapshot = buildTimerSnapshot(desc, typeof carried === "number" && Number.isFinite(carried) ? carried : now);
         const attemptNo = 1;
         const immediateFire = snapshot.firesAtMs <= now;
         const initialState = immediateFire ? "finished" : "waiting-timer";
@@ -1288,10 +1295,12 @@ async function resolveApprovalTaskStateBridge(adapter, db, runId, desc, eventBus
  * @param {_TaskDescriptor} desc
  * @param {EventBus} eventBus
  * @param {DeferredBridgeStateEmitter} [emitStateEvent]
+ * @param {Map<string, number>} [initialTimerStarts] Carried duration-timer start
+ *   anchors (see resolveTimerTaskStateBridge).
  * @returns {Promise<DeferredBridgeResolution>}
  */
-export async function resolveDeferredTaskStateBridge(adapter, db, runId, desc, eventBus, emitStateEvent) {
-    const timer = await resolveTimerTaskStateBridge(adapter, runId, desc, eventBus);
+export async function resolveDeferredTaskStateBridge(adapter, db, runId, desc, eventBus, emitStateEvent, initialTimerStarts) {
+    const timer = await resolveTimerTaskStateBridge(adapter, runId, desc, eventBus, initialTimerStarts);
     if (timer.handled) {
         return timer;
     }

@@ -240,6 +240,45 @@ test("gateway starts for an initialized workspace with no existing DB and listRu
     expect(stdout).toBe("");
 }, 15_000);
 
+test("gateway skips a broken workflow and still registers the valid ones", async () => {
+    const repo = createTempRepo();
+    writeTestWorkflow(repo, ".smithers/workflows/aaa.tsx");
+    writeTestWorkflow(repo, ".smithers/workflows/zzz.tsx");
+    // A top-level throw guarantees loadWorkflow's dynamic import rejects,
+    // landing in the concurrent loader's loadError branch. Frontmatter-only
+    // discovery still enumerates it, so boot must skip it without failing.
+    repo.write(".smithers/workflows/mmm.tsx", 'throw new Error("boom");\n');
+
+    const port = await findOpenPort();
+    const child = spawn(process.execPath, ["run", CLI_ENTRY, "gateway", "--host", "127.0.0.1", "--port", String(port)], {
+        cwd: repo.dir,
+        env: {
+            ...process.env,
+            NO_COLOR: "1",
+            FORCE_COLOR: "0",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const closePromise = new Promise((resolvePromise) => child.once("close", resolvePromise));
+    try {
+        await waitFor(() => stderr.includes("Registered workflows:"));
+        expect(stderr).toContain("Skipping workflow mmm");
+        const line = stderr.split("\n").find((l) => l.includes("Registered workflows:"));
+        expect(line).toContain("aaa");
+        expect(line).toContain("zzz");
+        expect(line).not.toContain("mmm");
+    }
+    finally {
+        await stopProcess(child, closePromise);
+    }
+}, 15_000);
+
 // A workspace with NO local .smithers pack must still serve the global
 // (~/.smithers, here $SMITHERS_HOME) pack's workflows WITH their UIs: the
 // ui/<id>.tsx auto-mount resolves against the pack the workflow was discovered

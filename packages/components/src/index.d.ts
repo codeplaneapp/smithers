@@ -2762,6 +2762,7 @@ declare function chunkGateFailures(opts: {
  *   approvalRows: Record<string, any>[];
  *   devPreviewRows?: Record<string, any>[];
  *   replanRows?: Record<string, any>[];
+ *   maxDeriskRounds?: number;
  * }} opts
  * @returns {boolean}
  */
@@ -2778,6 +2779,7 @@ declare function executionComplete(opts: {
     approvalRows: Record<string, any>[];
     devPreviewRows?: Record<string, any>[];
     replanRows?: Record<string, any>[];
+    maxDeriskRounds?: number;
 }): boolean;
 /**
  * Resolve a tier label to an agent from the `agents` prop, walking down the

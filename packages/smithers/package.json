@@ -45,9 +45,9 @@
       "default": "./src/tools.js"
     },
     "./testing": {
-      "types": "./src/testing.ts",
-      "import": "./src/testing.ts",
-      "default": "./src/testing.ts"
+      "types": "./src/testing.d.ts",
+      "import": "./src/testing.js",
+      "default": "./src/testing.js"
     },
     "./gateway-client": {
       "types": "./src/gateway-client.d.ts",

@@ -57,7 +57,7 @@ function capture(cmd: string, args: string[]): Promise<string> {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function pollRuns(runIds: string[]): Promise<FleetRun[]> {
-  const raw = await capture(smithers, ["ps", "--json"]);
+  const raw = await capture(smithers, ["ps", "--json", "--limit", String(Math.max(runIds.length * 4, 200))]);
   try {
     return parseFleetRuns(JSON.parse(raw), runIds);
   } catch {
@@ -71,23 +71,25 @@ async function main() {
   console.log(`worker: ${shard.length} task(s) on this subscription`);
 
   if (dryRun) {
-    console.log(`  [dry-run] smithers serve --gateway --supervise  (durable control plane)`);
+    console.log(`  [dry-run] smithers gateway  +  smithers supervise  (durable control plane)`);
     for (const t of shard) {
       console.log(`  [dry-run] ${smithers} up ${t.workflow} -d --run-id ${t.runId} --input <json>`);
-      console.log(`  [dry-run] ${smithers} approvals resolve --run-id ${t.runId} --all --approve`);
     }
-    console.log(`  [dry-run] supervise until all terminal; waiting-quota auto-resumes at reset`);
+    console.log(`  [dry-run] supervise until all terminal; waiting-quota auto-resumes at reset; waiting-approval auto-approved`);
     return;
   }
 
   // Durable control plane: the gateway daemon runs processDueTimers (quota
-  // auto-resume) + the stale-run supervisor. Kept alive for the whole shard.
-  const gateway = spawn(smithers, ["serve", "--gateway", "--supervise"], { stdio: "inherit" });
+  // auto-resume) and the stale-run supervisor auto-resumes stuck runs. Both
+  // kept alive for the whole shard.
+  const gateway = spawn(smithers, ["gateway"], { stdio: "inherit" });
+  gateway.on("error", () => {});
+  const supervisor = spawn(smithers, ["supervise"], { stdio: "inherit" });
+  supervisor.on("error", () => {});
   await sleep(2000);
 
   for (const task of shard) {
     await run(smithers, ["up", task.workflow, "-d", "--run-id", task.runId, "--input", JSON.stringify(task.input)]);
-    await run(smithers, ["approvals", "resolve", "--run-id", task.runId, "--all", "--approve"]);
   }
 
   // Supervise to completion. The gateway auto-resumes quota parks at their
@@ -108,6 +110,11 @@ async function main() {
           await run(smithers, ["up", task.workflow, "--resume", "--run-id", id, "-d", "--force"]);
         }
       }
+      if (r && r.status === "waiting-approval") {
+        const task = shard.find((t) => t.runId === id)!;
+        await run(smithers, ["approve", id]);
+        await run(smithers, ["up", task.workflow, "--resume", "--run-id", id, "-d", "--force"]);
+      }
     }
     console.log(`worker: ${runIds.length - remaining}/${runIds.length} done` + (parked ? `, ${parked} parked on quota` : ""));
     if (remaining === 0) break;
@@ -115,6 +122,7 @@ async function main() {
   }
 
   gateway.kill();
+  supervisor.kill();
   console.log("worker: shard complete");
 }
 

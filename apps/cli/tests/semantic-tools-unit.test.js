@@ -730,6 +730,32 @@ describe("semantic tool definitions", () => {
         expect(harness.state.cleanupCalls).toBeGreaterThanOrEqual(8);
     });
 
+    test("watch_run stops promptly when the caller aborts during a poll interval", async () => {
+        const harness = makeHarness({
+            runs: [runRow({ runId: "run-mid", status: "running" })],
+            nodes: [],
+            approvals: [],
+            attempts: [],
+        });
+        const abort = new AbortController();
+        // A non-terminal run parks the loop inside `await sleep(intervalMs, signal)`.
+        const pending = harness.call(
+            "watch_run",
+            { runId: "run-mid", intervalMs: 60_000, timeoutMs: 60_000 },
+            { signal: abort.signal },
+        );
+        // Let the first poll iteration run and park inside the 60s sleep.
+        await new Promise((r) => setTimeout(r, 50));
+        // Firing abort here exercises sleep()'s onAbort (clearTimeout + reject)
+        // branch; resolving well under the 60s interval proves the timer was
+        // cancelled rather than waited out.
+        abort.abort();
+        const res = await pending;
+        expect(res.isError).toBe(true);
+        expect(res.structuredContent.error.code).toBe("TASK_ABORTED");
+        expect(harness.state.cleanupCalls).toBe(1);
+    });
+
     test("serves semantic durability snapshot and restore tools", async () => {
         const harness = makeHarness();
 

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import {
     buildMonitoringGuidance,
     buildMonitoringOptions,
@@ -28,6 +29,28 @@ describe("hasCustomUi", () => {
 
     test("is false for an empty workflow id", () => {
         expect(hasCustomUi("", "/work", () => true)).toBe(false);
+    });
+
+    test("detects a global ~/.smithers/ui/<id>.tsx via SMITHERS_HOME", () => {
+        const priorHome = process.env.SMITHERS_HOME;
+        process.env.SMITHERS_HOME = "/global-home";
+        try {
+            const globalUi = resolve("/global-home", "ui", "implement.tsx");
+            const seen = [];
+            const exists = (p) => {
+                seen.push(p);
+                return p === globalUi;
+            };
+            // Workspace candidate is absent, so only the global-pack branch matches.
+            expect(hasCustomUi("implement", "/work", exists)).toBe(true);
+            expect(seen).toContain(globalUi);
+            expect(seen[0]).toContain("/work/.smithers/ui/implement.tsx");
+            // A workflow with no global UI stays false.
+            expect(hasCustomUi("missing", "/work", exists)).toBe(false);
+        } finally {
+            if (priorHome === undefined) delete process.env.SMITHERS_HOME;
+            else process.env.SMITHERS_HOME = priorHome;
+        }
     });
 });
 

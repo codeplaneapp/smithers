@@ -373,7 +373,9 @@ function applyDelegationEvent(state: FoldState): (event: DelegationEvent) => voi
         state.scores[key] = row;
       },
       ApprovalMarked: ({ nodeId, iteration, pending }) => {
-        state.approvalByKey.set(`${nodeId} ${iteration}`, pending);
+        // NUL separator (matches delegationTargetKey) so physical node ids
+        // containing a space are not truncated when the key is re-parsed.
+        state.approvalByKey.set(`${nodeId}\0${iteration}`, pending);
       },
       Ignored: ({ record, reason }) => {
         state.onIgnored(record, reason);
@@ -390,7 +392,7 @@ function bucketStage(state: FoldState): FoldState {
   // physical node ids onto logical nodes.
   for (const [key, pending] of state.approvalByKey) {
     if (!pending) continue;
-    const nodeId = key.split(" ")[0]!;
+    const nodeId = key.split("\0")[0]!;
     const parsed = parseDelegationNodeId(nodeId);
     if (!parsed) continue;
     ensureNode(state.nodes, parsed.logicalId).approvalPending = true;

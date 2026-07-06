@@ -2,7 +2,29 @@ import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
 import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
 import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
 import type { WorkflowDefinition } from "@smithers-orchestrator/driver/WorkflowDefinition";
-import type { ExtractOptions, WorkflowGraph } from "@smithers-orchestrator/graph";
+import type { ExtractOptions, TaskDescriptor, WorkflowGraph } from "@smithers-orchestrator/graph";
+
+// The engine's post-render helpers are authored in `.js`; engine's `./*` exports
+// funnel every subpath's *types* to its `index.d.ts` bundle, which does not
+// re-declare these internals, so we narrow the imported namespace to the runtime
+// shape we call. Runtime resolution hits `engine/src/*.js`, where each function is
+// a real export.
+type ComputeFnOptions = { rootDir?: string; workflowPath?: string | null };
+type EngineOutputHelpers = {
+  resolveTaskOutputs: (tasks: readonly TaskDescriptor[], workflow: unknown) => void;
+};
+type TaskComputeFnHelpers = {
+  attachSubflowComputeFns: (
+    tasks: readonly TaskDescriptor[],
+    workflow: unknown,
+    opts: ComputeFnOptions,
+  ) => void;
+  attachSandboxComputeFns: (
+    tasks: readonly TaskDescriptor[],
+    workflow: unknown,
+    opts: ComputeFnOptions,
+  ) => void;
+};
 
 type OutputSnapshot = Record<string, unknown[]>;
 type RuntimeConfig = {
@@ -70,6 +92,34 @@ export async function renderWorkflow<Schema = unknown>(
     workflow.build(ctx) as Parameters<SmithersRenderer["render"]>[0],
     buildExtractOptions(options),
   );
+  // Mirror the engine's production post-render pass (renderFrameAsync) so
+  // rendered descriptors match what the engine schedules: resolve string/ZodObject
+  // output keys onto outputTable/outputSchema, then attach subflow/sandbox compute
+  // fns. Deliberately skip applyOptimizationArtifactToTasks — it reads an artifact
+  // file from disk and would give tests cwd-dependent behavior.
+  //
+  // The engine is loaded lazily: it transitively pulls Bun-only modules
+  // (`bun:sqlite`), so a top-level import would make this package fail to load
+  // under Node. Deferring the import keeps the module Node-loadable while the
+  // post-render pass still runs when `renderWorkflow` executes under Bun.
+  const baseRootDir = options.baseRootDir ?? options.runtimeConfig?.baseRootDir;
+  const workflowPath =
+    options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null;
+  const engineHelpers = (await import(
+    "@smithers-orchestrator/engine/engine"
+  )) as unknown as EngineOutputHelpers;
+  const computeHelpers = (await import(
+    "@smithers-orchestrator/engine/task-compute-fns"
+  )) as unknown as TaskComputeFnHelpers;
+  engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
+  computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
+    rootDir: baseRootDir,
+    workflowPath,
+  });
+  computeHelpers.attachSandboxComputeFns(graph.tasks, workflow, {
+    rootDir: baseRootDir,
+    workflowPath,
+  });
   return {
     ...graph,
     runId: ctx.runId,

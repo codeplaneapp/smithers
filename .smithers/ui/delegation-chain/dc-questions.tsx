@@ -321,7 +321,7 @@ export function RefinedPromptApproval({
               className="button danger"
               data-testid="dc-refined-reject-confirm"
               disabled={busy}
-              onClick={() => void submit({ approved: false, reason: reason.trim() || "rejected by human" }, "rejected")}
+              onClick={() => void submit({ approved: false, refinedPrompt: draft, reason: reason.trim() || "rejected by human" }, "rejected")}
             >
               {busy ? "Submitting..." : "Reject & end run"}
             </button>

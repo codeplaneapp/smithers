@@ -134,7 +134,7 @@ export function weightedScore(results, weights) {
     let weightSum = 0;
     for (const [key, weight] of Object.entries(weights)) {
         const result = results[key];
-        if (weight <= 0 || result == null || result.meta?.skipped === true) {
+        if (!Number.isFinite(weight) || weight <= 0 || result == null || result.meta?.skipped === true) {
             components[key] = { weight, skipped: true };
             continue;
         }

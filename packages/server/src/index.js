@@ -741,15 +741,22 @@ function buildMirrorOnProgress(adapter, runId, workflowName, workflowPath, confi
         workflowPath,
         eventType: event.type,
     }), Effect.withLogSpan("server:mirror-event"));
+    // Serialize mirror-event application per run so projections apply in
+    // emission order. onProgress is a synchronous EventBus listener; without a
+    // tail chain each event spawned a detached fiber that could complete out of
+    // order, scrambling insertEventWithNextSeq seqs and racing the non-atomic
+    // approval read-modify-write (resurrecting a decided approval as pending).
+    let mirrorTail = Promise.resolve();
     return (event) => {
-        void runPromise(mirrorEventEffect(event)).catch((err) => {
-            logError("mirror event persistence failed", {
-                runId,
-                workflowPath,
-                eventType: event.type,
-                error: err instanceof Error ? err.message : String(err),
-            }, "server:mirror-event");
-        });
+        mirrorTail = mirrorTail.then(() =>
+            runPromise(mirrorEventEffect(event)).catch((err) => {
+                logError("mirror event persistence failed", {
+                    runId,
+                    workflowPath,
+                    eventType: event.type,
+                    error: err instanceof Error ? err.message : String(err),
+                }, "server:mirror-event");
+            }));
     };
 }
 // Exposed for tests: the detached-run mirror projector, so the

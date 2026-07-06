@@ -212,9 +212,14 @@ export function pocJudgmentScorer(opts) {
                     reason,
                 };
             }
-            const score = weightSum > 0
-                ? Math.max(0, Math.min(1, total / weightSum))
-                : 0;
+            if (weightSum === 0) {
+                return {
+                    score: 1,
+                    reason: "All classifications zero-weighted; skipping",
+                    meta: { skipped: true, nodes, counts },
+                };
+            }
+            const score = Math.max(0, Math.min(1, total / weightSum));
             const summary = Object.entries(counts)
                 .filter(([, count]) => count > 0)
                 .map(([classification, count]) => `${count} ${classification}`)

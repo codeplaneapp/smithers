@@ -1,0 +1,41 @@
+// src/runTask.ts
+async function runTask(task, options = {}) {
+  if (task.kind === "static" || task.staticPayload !== void 0) {
+    return validateOutput(task, task.staticPayload);
+  }
+  if (task.kind === "compute" || task.computeFn) {
+    if (!task.computeFn) {
+      throw new TypeError(`Task ${task.nodeId} is marked compute but has no compute function`);
+    }
+    return validateOutput(task, await task.computeFn());
+  }
+  const agent = Array.isArray(task.agent) ? task.agent[0] : task.agent;
+  if (!agent?.generate) {
+    throw new TypeError(`Task ${task.nodeId} has no runnable agent, compute function, or static payload`);
+  }
+  const result = await agent.generate({
+    prompt: task.prompt,
+    outputSchema: task.outputSchema,
+    rootDir: options.rootDir,
+    taskContext: {
+      runId: options.runId,
+      nodeId: task.nodeId,
+      iteration: task.iteration,
+      attempt: options.attempt ?? 1
+    }
+  });
+  if (result && typeof result === "object" && "output" in result) {
+    return validateOutput(task, result.output);
+  }
+  return result;
+}
+function validateOutput(task, value) {
+  if (!task.outputSchema) return value;
+  const parsed = task.outputSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const message = parsed.error.issues.map((issue) => issue.message).join("; ");
+  throw new TypeError(`Task ${task.nodeId} output failed validation: ${message}`);
+}
+export {
+  runTask
+};

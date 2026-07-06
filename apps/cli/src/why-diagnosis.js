@@ -594,6 +594,16 @@ function buildDiagnosis(params) {
             currentNodeId: firstCurrentNode(nodes),
         };
     }
+    if (status === "paused") {
+        return {
+            runId,
+            status,
+            summary: "Run was gracefully paused; resume with `smithers up --resume <runId>`.",
+            generatedAtMs: nowMs,
+            blockers: [],
+            currentNodeId: firstCurrentNode(nodes),
+        };
+    }
     const descriptorMetadata = parseFrameDescriptorMetadata(lastFrame?.xmlJson);
     const parsedEvents = events.map((row) => ({
         row,

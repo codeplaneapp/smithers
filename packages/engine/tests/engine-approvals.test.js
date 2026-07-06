@@ -55,6 +55,58 @@ describe("approveNode", () => {
         expect(node?.label).toBe("Approval Gate");
         expect(run?.status).toBe("waiting-event");
     });
+    test("keeps the run parked while a row-less mounted gate remains, then un-parks after it is decided", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertRun({
+            runId: "run-parked",
+            workflowName: "test-wf",
+            workflowHash: "h",
+            status: "waiting-approval",
+            createdAtMs: Date.now(),
+        });
+        // A real gate that carries a durable approval request row.
+        await adapter.insertNode({
+            runId: "run-parked",
+            nodeId: "gate-real",
+            iteration: 0,
+            state: "waiting-approval",
+            lastAttempt: null,
+            updatedAtMs: Date.now(),
+            outputTable: "",
+            label: null,
+        });
+        await adapter.insertOrUpdateApproval({
+            runId: "run-parked",
+            nodeId: "gate-real",
+            iteration: 0,
+            status: "requested",
+            requestedAtMs: Date.now() - 1000,
+            decidedAtMs: null,
+            note: null,
+            decidedBy: null,
+        });
+        // A row-less mounted gate: waiting-approval node with NO _smithers_approvals
+        // row. It only counts as pending via the fallback UNION in listPendingApprovals,
+        // which requires the hyphen node state and a waiting-approval run status.
+        await adapter.insertNode({
+            runId: "run-parked",
+            nodeId: "gate-mounted",
+            iteration: 0,
+            state: "waiting-approval",
+            lastAttempt: null,
+            updatedAtMs: Date.now(),
+            outputTable: "",
+            label: null,
+        });
+        // Deciding the real gate must NOT un-park the run: the row-less gate-mounted
+        // is still pending via the fallback UNION.
+        await Effect.runPromise(approveNode(adapter, "run-parked", "gate-real", 0));
+        expect((await adapter.getRun("run-parked"))?.status).toBe("waiting-approval");
+        expect(await adapter.listPendingApprovals("run-parked")).toHaveLength(1);
+        // Deciding the last (row-less) gate un-parks the run.
+        await Effect.runPromise(approveNode(adapter, "run-parked", "gate-mounted", 0));
+        expect((await adapter.getRun("run-parked"))?.status).toBe("waiting-event");
+    });
     test("approveNode without note/decidedBy defaults to null", async () => {
         const { adapter } = createTestDb();
         await adapter.insertRun({

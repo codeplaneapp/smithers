@@ -11,7 +11,7 @@
 #   docker run --rm \
 #     -e CLAUDE_CODE_OAUTH_TOKEN="$TOKEN_1" \
 #     -e FLEET_SHARD_FILE=/shard/shard.json \
-#     -e SMITHERS_BACKEND=postgres -e SMITHERS_PG_URL="$PG_URL" \
+#     -e SMITHERS_BACKEND=postgres -e SMITHERS_POSTGRES_URL="$PG_URL" \
 #     -v "$PWD/shard-1.json:/shard/shard.json:ro" \
 #     smithers-fleet-rollout
 FROM oven/bun:1.3
@@ -35,4 +35,7 @@ RUN bun install --frozen-lockfile
 
 # No ANTHROPIC_* here — subscription auth (CLAUDE_CODE_OAUTH_TOKEN) must win.
 ENV SMITHERS_ROLE=fleet-rollout
+# `bun <file>.ts` does not add node_modules/.bin to PATH, so point the worker at
+# the workspace-installed smithers bin explicitly.
+ENV FLEET_SMITHERS=/app/node_modules/.bin/smithers
 CMD ["bun", "benchmarks/fleet/worker.ts"]
