@@ -1,6 +1,7 @@
 // smithers-source: authored
 // smithers-display-name: Ship Pipeline
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers, Sequence } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -43,6 +44,7 @@ const { Workflow, smithers } = createSmithers({
 
 export default smithers((ctx) => (
   <Workflow name="ship-pipeline">
+    <UI entry="../ui/ship-pipeline.tsx" title={"Ship Pipeline"} />
     <Sequence>
       <VerifiableGoals
         ctx={ctx}

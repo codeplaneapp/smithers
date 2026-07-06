@@ -119,6 +119,7 @@
           "guides/monitor",
           "guides/tui",
           "guides/custom-workflow-ui",
+          "guides/workflow-owned-ui-migration",
           "guides/sync",
           "guides/workflow-ui-design",
           "guides/alerting",

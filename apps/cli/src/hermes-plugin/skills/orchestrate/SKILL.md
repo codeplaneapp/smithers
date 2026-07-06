@@ -63,7 +63,8 @@ CLI command and before every workflow you build:
    executing), `smithers tree <run-id>` (live node tree), the `--interactive`
    TUI monitor (`smithers workflow run <id> --interactive`), the custom browser
    UI (author `.smithers/ui/<workflowId>.tsx` with
-   `smithers-orchestrator/gateway-react`, open with `smithers ui <runId>`), and
+   `smithers-orchestrator/gateway-react`, declare it from the workflow with
+   `<UI entry="../ui/<workflowId>.tsx" />`, open with `smithers ui <runId>`), and
    `smithers ui --app` for the full local control-plane UI. If a workflow has
    no UI yet, offer to build one. See "Keep the human in the picture" below.
 

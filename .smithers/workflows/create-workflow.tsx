@@ -4,6 +4,7 @@
 // smithers-description: Build a new Smithers workflow from a plain-English ask — clarify, provision docs & skills, design, scaffold, verify, and document.
 // smithers-tags: authoring, workflow-pack, scaffolding
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { $ } from "bun";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
@@ -258,6 +259,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="create-workflow">
+      <UI entry="../ui/create-workflow.tsx" title={"Create Workflow"} />
       <Sequence>
         {/* 1 — Turn the freeform ask into a structured, buildable spec. */}
         <Task id="clarify" output={outputs.clarify} agent={agents.smart}>

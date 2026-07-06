@@ -1,5 +1,6 @@
 // smithers-display-name: Kanban
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers, Sequence, Parallel, Worktree } from "smithers-orchestrator";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
@@ -118,6 +119,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="kanban">
+      <UI entry="../ui/kanban.tsx" title={"Kanban"} />
       <Sequence>
         {/* Implement each ticket in its own worktree branch, in parallel */}
         <Parallel maxConcurrency={maxConcurrency}>

@@ -1,6 +1,7 @@
 // smithers-source: seeded
 // smithers-display-name: Grill Me
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -18,6 +19,7 @@ const { Workflow, smithers, outputs } = createSmithers({
 
 export default smithers((ctx) => (
   <Workflow name={WORKFLOW_ID}>
+    <UI entry="../ui/grill-me.tsx" title={"Grill Me"} />
     <GrillMe
       idPrefix={WORKFLOW_ID}
       context={ctx.input.prompt}

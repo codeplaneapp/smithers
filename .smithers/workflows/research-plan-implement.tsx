@@ -1,6 +1,7 @@
 // smithers-source: seeded
 // smithers-display-name: Research Plan Implement
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -78,6 +79,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="research-plan-implement">
+      <UI entry="../ui/research-plan-implement.tsx" title={"Research Plan Implement"} />
       <Sequence>
         <Task id="research" output={researchOutputSchema} agent={agents.smartTool}>
           <ResearchPrompt prompt={prompt} />

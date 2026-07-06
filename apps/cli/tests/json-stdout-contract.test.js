@@ -283,10 +283,12 @@ describe("CLI --json stdout contract", () => {
         try {
             // The fixture's display name ("json-contract") deliberately differs
             // from the workflow file basename ("workflow"), which keys the
-            // .smithers/ui entry.
+            // workflow-owned UI declaration.
             await seedJsonContractFixture(repo, adapter, sqlite);
             mkdirSync(join(repo.dir, ".smithers", "ui"), { recursive: true });
+            mkdirSync(join(repo.dir, ".smithers", "workflows"), { recursive: true });
             writeFileSync(join(repo.dir, ".smithers", "ui", "workflow.tsx"), "export default null;\n");
+            writeFileSync(join(repo.dir, ".smithers", "workflows", "workflow.tsx"), '<Workflow name="workflow"><UI entry="../ui/workflow.tsx" /></Workflow>\n');
             const result = runSmithers(["ps"], { cwd: repo.dir, format: "json" });
             expect(result.exitCode).toBe(0);
             const cta = result.json?.cta ?? result.json?.meta?.cta;

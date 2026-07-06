@@ -1,6 +1,7 @@
 // smithers-source: seeded
 // smithers-display-name: Mission
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -384,6 +385,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="mission">
+      <UI entry="../ui/mission.tsx" title={"Mission"} />
       <Sequence>
         <Task
           id="mission:plan"

@@ -1,6 +1,6 @@
 /**
- * Guards UI_WORKFLOWS, gateway mounts, ui-files, and e2e descriptors against
- * drift relative to each other.
+ * Guards UI_WORKFLOWS, gateway mounts, workflow-owned <UI> declarations,
+ * ui-files, and e2e descriptors against drift relative to each other.
  *
  * initWorkflowPack() is called into a real temp directory so the generated
  * gateway.ts and ui/*.tsx files are inspected from actual output — not from
@@ -74,8 +74,10 @@ test("UI_WORKFLOWS gateway-mounts / ui-files / e2e-descriptors are in sync", () 
 
     const smithersDir = join(tmpDir, ".smithers");
 
-    // 1. Keys mounted in the generated gateway.ts
+    // 1. Keys mounted in the generated gateway.ts. The gateway must not pass
+    // `ui` options anymore; workflow source owns the <UI> declaration.
     const gatewaySource = readFileSync(join(smithersDir, "gateway.ts"), "utf8");
+    expect(gatewaySource).not.toContain("ui: { entry:");
     const gatewayWorkflows = parseMountedWorkflows(gatewaySource);
     const gatewayKeys = new Set(gatewayWorkflows.map((w) => w.key));
     expect(gatewayKeys.size).toBeGreaterThan(0);
@@ -102,6 +104,16 @@ test("UI_WORKFLOWS gateway-mounts / ui-files / e2e-descriptors are in sync", () 
             .filter((key) => !importedModules.has(key)),
     );
 
+    // 2b. Keys whose workflow source declares the UI it owns.
+    const workflowUiKeys = new Set();
+    const workflowsDir = join(smithersDir, "workflows");
+    for (const workflow of gatewayWorkflows) {
+        const source = readFileSync(join(workflowsDir, `${workflow.key}.tsx`), "utf8");
+        if (source.includes(`<UI entry="../ui/${workflow.key}.tsx"`)) {
+            workflowUiKeys.add(workflow.key);
+        }
+    }
+
     // 3. Keys in the e2e descriptor manifest (next to this test file)
     const descriptors = JSON.parse(
         readFileSync(resolve(import.meta.dir, "workflow-ui-descriptors.json"), "utf8"),
@@ -116,11 +128,19 @@ test("UI_WORKFLOWS gateway-mounts / ui-files / e2e-descriptors are in sync", () 
         expect(uiKeys.has(key), `gateway mounts "${key}" but no ui/${key}.tsx was emitted`).toBe(
             true,
         );
+        expect(
+            workflowUiKeys.has(key),
+            `gateway mounts "${key}" but workflows/${key}.tsx does not declare <UI entry="../ui/${key}.tsx" />`,
+        ).toBe(true);
     }
     for (const key of uiKeys) {
         expect(
             gatewayKeys.has(key),
             `ui/${key}.tsx exists but "${key}" is not mounted in gateway.ts`,
+        ).toBe(true);
+        expect(
+            workflowUiKeys.has(key),
+            `ui/${key}.tsx exists but workflows/${key}.tsx does not declare the owned UI`,
         ).toBe(true);
     }
 

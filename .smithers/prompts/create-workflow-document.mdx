@@ -37,8 +37,9 @@ The body must tell an agent, in this order:
 4. How to run it detached and watch it: `-d` to detach, then
    `smithers ps`, `smithers logs <runId> -f`, `smithers inspect <runId>`.
 5. How to visualize it: `bunx smithers-orchestrator graph {props.workflowFile}`
-   (add `--interactive` for the TUI), and, if the custom UI exists, open it for
-   a run with `smithers ui <runId>`.
+   (add `--interactive` for the TUI), and, if the workflow declares a custom
+   `<UI>` and the custom UI file exists, open it for a run with
+   `smithers ui <runId>`.
 6. How to handle blocked states: `smithers approve <runId>` for approval gates,
    `smithers why <runId>` for signal waits, `smithers cancel <runId>` to stop.
 7. A final "Suggest next" line for the operator agent to relay to the user:

@@ -93,6 +93,7 @@
 //     a possibly-broken build; the escalation reason survives in monitor:triage output.
 // ─────────────────────────────────────────────────────────────────────────────
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { $ } from "bun";
 import {
   ClaudeCodeAgent,
@@ -944,6 +945,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="smithering">
+      <UI entry="../ui/smithering.tsx" title={"Smithering"} />
       <Sequence>
         {/* ── -1. Setup: interview the human (via the operating agent) when no prompt
                was provided; otherwise resolve config deterministically from inputs ── */}

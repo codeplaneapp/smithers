@@ -51,6 +51,32 @@ function createWorkflowOwnedLiteralUi(dbPath) {
   ));
 }
 
+function createWorkflowOwnedEntryUi(dbPath, entry) {
+  const { smithers, Workflow, Task, UI, outputs } = createSmithers(
+    { result: z.object({ ok: z.boolean() }) },
+    { dbPath },
+  );
+  return smithers(() => (
+    <Workflow name="workflow-owned-entry-ui">
+      <UI entry={entry} title="Entry Workflow UI" props={{ source: "entry-declaration" }} />
+      <Task id="task1" output={outputs.result}>{{ ok: true }}</Task>
+    </Workflow>
+  ));
+}
+
+function createWorkflowOwnedSourceUi(dbPath, source) {
+  const { smithers, Workflow, Task, UI, outputs } = createSmithers(
+    { result: z.object({ ok: z.boolean() }) },
+    { dbPath },
+  );
+  return smithers(() => (
+    <Workflow name="workflow-owned-source-ui">
+      <UI source={source} title="Source Workflow UI" props={{ label: "Source Workflow UI" }} />
+      <Task id="task1" output={outputs.result}>{{ ok: true }}</Task>
+    </Workflow>
+  ));
+}
+
 function writeUiEntry(dir, label) {
   const entry = join(dir, "ui.jsx");
   writeFileSync(
@@ -497,6 +523,68 @@ describe("Gateway UI", () => {
         uiPath: "/workflows/inline",
       }),
     ]);
+  }, 20000);
+
+  test("serves a workflow-owned entry UI declaration without register ui options", async () => {
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-entry-workflow-ui-"));
+    const entry = writeUiEntry(tempDir, "Entry Workflow UI");
+    gateway = new Gateway();
+    gateway.register("entry-owned", createWorkflowOwnedEntryUi(join(tempDir, "entry.db"), entry));
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const htmlResponse = await fetch(`http://127.0.0.1:${port}/workflows/entry-owned`);
+    expect(htmlResponse.status).toBe(200);
+    const html = await htmlResponse.text();
+    expect(html).toContain("<title>Entry Workflow UI</title>");
+    expect(html).toContain('"workflowKey":"entry-owned"');
+    expect(html).toContain('"source":"entry-declaration"');
+
+    const bundleResponse = await fetch(`http://127.0.0.1:${port}/workflows/entry-owned/__smithers_ui/client.js`);
+    expect(bundleResponse.status).toBe(200);
+    expect(await bundleResponse.text()).toContain("Entry Workflow UI");
+
+    const listedResponse = await postRpc(port, "listWorkflows", { filter: { hasUi: true } });
+    expect(listedResponse.status).toBe(200);
+    const listed = await listedResponse.json();
+    expect(listed.payload).toEqual([
+      expect.objectContaining({
+        key: "entry-owned",
+        hasUi: true,
+        uiPath: "/workflows/entry-owned",
+      }),
+    ]);
+  }, 20000);
+
+  test("serves a workflow-owned source UI declaration through the gateway-react wrapper", async () => {
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-source-workflow-ui-"));
+    const source = join(tempDir, "source-ui.jsx");
+    writeFileSync(
+      source,
+      [
+        'import { createElement } from "react";',
+        "export default function SourceUi(props) {",
+        '  return createElement("main", { "data-testid": "source-workflow-ui" }, props.label);',
+        "}",
+      ].join("\n"),
+    );
+    gateway = new Gateway();
+    gateway.register("source-owned", createWorkflowOwnedSourceUi(join(tempDir, "source.db"), source));
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const htmlResponse = await fetch(`http://127.0.0.1:${port}/workflows/source-owned`);
+    expect(htmlResponse.status).toBe(200);
+    const html = await htmlResponse.text();
+    expect(html).toContain("<title>Source Workflow UI</title>");
+    expect(html).toContain('"label":"Source Workflow UI"');
+
+    const bundleResponse = await fetch(`http://127.0.0.1:${port}/workflows/source-owned/__smithers_ui/client.js`);
+    expect(bundleResponse.status).toBe(200);
+    const bundle = await bundleResponse.text();
+    expect(bundle).toContain("source-workflow-ui");
+    expect(bundle).toContain("createGatewayReactRoot");
+    expect(bundle).toContain("Source Workflow UI");
   }, 20000);
 
   test("system workflows are hidden from listWorkflows unless includeSystem is set", async () => {

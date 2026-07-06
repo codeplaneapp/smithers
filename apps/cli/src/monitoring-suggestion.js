@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 
@@ -15,8 +15,8 @@ import { accountsRoot } from "@smithers-orchestrator/accounts";
  */
 
 /**
- * Derive a discovered-workflow id from a workflow file path. `.smithers/ui`
- * entries and seeded workflow ids are keyed by this basename.
+ * Derive a discovered-workflow id from a workflow file path. Workflow-owned UI
+ * declarations and seeded workflow ids are keyed by this basename.
  * @param {string} workflowPath
  * @returns {string}
  */
@@ -25,22 +25,34 @@ export function workflowIdFromPath(workflowPath) {
 }
 
 /**
- * Does a custom `smithers ui` entry already exist for this workflow? Probes
- * the workspace pack (`<cwd>/.smithers/ui/`) and then the global pack
- * (`~/.smithers/ui/`, honoring SMITHERS_HOME), matching how the gateway
- * auto-mounts pack-relative `ui/<id>.tsx` files.
+ * Does a custom `smithers ui` entry already exist for this workflow? Probes the
+ * workspace pack (`<cwd>/.smithers`) and then the global pack (`~/.smithers`,
+ * honoring SMITHERS_HOME). A UI source file alone is not runnable: the owning
+ * workflow must declare `<UI ...>` so the Gateway advertises `/workflows/<id>`.
  * @param {string} workflowId
  * @param {string} cwd
  * @param {(p: string) => boolean} [exists]
+ * @param {(p: string, encoding: "utf8") => string} [read]
  * @returns {boolean}
  */
-export function hasCustomUi(workflowId, cwd, exists = existsSync) {
+export function hasCustomUi(workflowId, cwd, exists = existsSync, read = readFileSync) {
     if (!workflowId) return false;
     const candidates = [
-        resolve(cwd, ".smithers", "ui", `${workflowId}.tsx`),
-        resolve(accountsRoot(), "ui", `${workflowId}.tsx`),
+        resolve(cwd, ".smithers"),
+        accountsRoot(),
     ];
-    return candidates.some((path) => exists(path));
+    return candidates.some((packDir) => {
+        const uiPath = resolve(packDir, "ui", `${workflowId}.tsx`);
+        const workflowPath = resolve(packDir, "workflows", `${workflowId}.tsx`);
+        if (!exists(uiPath) || !exists(workflowPath)) return false;
+        try {
+            const source = read(workflowPath, "utf8");
+            return source.includes("<UI") && source.includes(`../ui/${workflowId}.tsx`);
+        }
+        catch {
+            return false;
+        }
+    });
 }
 
 /**
@@ -53,7 +65,7 @@ export function hasCustomUi(workflowId, cwd, exists = existsSync) {
 export function buildMonitoringOptions({ runId, workflowId, hasUi }) {
     const uiStep = hasUi
         ? `run \`smithers ui ${runId}\` (a custom UI already exists for "${workflowId}")`
-        : `author \`.smithers/ui/${workflowId}.tsx\` with the gateway-react hooks, then run \`smithers ui ${runId}\``;
+        : `author \`.smithers/ui/${workflowId}.tsx\` with the gateway-react hooks, add \`<UI entry="../ui/${workflowId}.tsx" />\` to the workflow, then run \`smithers ui ${runId}\``;
     return [
         {
             id: "monitor-ui",

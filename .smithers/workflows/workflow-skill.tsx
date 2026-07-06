@@ -1,6 +1,7 @@
 // smithers-source: seeded
 // smithers-display-name: Workflow Skill
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createSmithers } from "smithers-orchestrator";
@@ -134,6 +135,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name={WORKFLOW_ID}>
+      <UI entry="../ui/workflow-skill.tsx" title={"Workflow Skill"} />
       <Task id="collect" output={outputs.collect}>
         {async () => {
           const root = process.cwd();

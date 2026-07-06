@@ -29,6 +29,7 @@
 // BOTH backends; reviews must reject mocked "e2e".
 // ─────────────────────────────────────────────────────────────────────────────
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
@@ -756,6 +757,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="tanstack-db-sync-engine">
+      <UI entry="../ui/tanstack-db-sync-engine.tsx" title={"TanStack DB sync engine (per-mode collection providers)"} />
       <Sequence>
         {/* Design freeze — Fable, read-only at the repo root. */}
         <Task id="design" output={outputs.design} agent={planAgent} retries={RETRIES} timeoutMs={DESIGN_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>

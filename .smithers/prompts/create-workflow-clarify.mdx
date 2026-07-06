@@ -62,8 +62,9 @@ Extract:
 7. **humanGates**: anywhere a human should approve or answer before continuing.
 8. **successCriteria**: how we know a run succeeded. Concrete and checkable.
 9. **ui**: what the custom run UI should visualize, from the user's answer (or
-   your stated assumption). Every new workflow gets a custom UI at
-   `.smithers/ui/<name>.tsx` unless the user explicitly declines one.
+   your stated assumption). Every new workflow gets a custom UI source at
+   `.smithers/ui/<name>.tsx` and a workflow-owned `<UI entry="../ui/<name>.tsx" />`
+   declaration unless the user explicitly declines one.
 10. **clarifyingQuestions**: the numbered questions above with their assumptions.
 11. **openQuestions**: anything still ambiguous that the design step must resolve.
 

@@ -1,6 +1,7 @@
 // smithers-source: e2e
 // smithers-display-name: E2E Approval Probe
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { Approval, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 
@@ -23,6 +24,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="e2e-approval-probe">
+      <UI entry="../ui/e2e-approval-probe.tsx" title={"E2E Approval Probe"} />
       <Approval
         id="approve-probe"
         output={outputs.approval}

@@ -2035,7 +2035,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 - Boolean flags accept either bare form (`--watch`) or explicit `--watch true|false`.
 - Global options: `--format toon|json|yaml|md|jsonl`, `--filter-output <key.path>`, `--full-output`, `--token-count`, `--token-limit N`, `--token-offset N`, `--schema`, `--llms`, `--llms-full`, `--mcp`, `--help`, `--version`.
 - MCP stdio mode: pass `--mcp` to start Smithers as an MCP server. Add `--surface semantic|raw|both` to choose the exposed tool surface. Add `--allowed-tools name,name` and/or `--read-only` to scope the semantic toolset exposed to outbound MCP clients.
-- Workflow resolution: `up`, `graph`, `revert`, `replay`, `fork`, `retry-task`, and `timetravel` take a workflow file path. `eval` accepts either a workflow path or a discovered workflow ID. `workflow run <name>` resolves IDs from the nearest local `.smithers/workflows/<name>.tsx` (walking up from the working directory) and from the global `~/.smithers/workflows/` pack. Local workflows take precedence: on an id collision the local file wins. The global pack honors `SMITHERS_HOME`. So global workflows run from any directory, while a repo's own pack can override them by name.
+- Workflow resolution: `revert`, `replay`, `fork`, `retry-task`, and `timetravel` take a workflow file path. `up`, `graph`, `eval`, and `optimize` accept either a workflow path or a discovered workflow ID (an existing file is used as-is; otherwise the argument is resolved as an ID, the same way `workflow run` does). `workflow run <name>` resolves IDs from the nearest local `.smithers/workflows/<name>.tsx` (walking up from the working directory) and from the global `~/.smithers/workflows/` pack. Local workflows take precedence: on an id collision the local file wins. The global pack honors `SMITHERS_HOME`. So global workflows run from any directory, while a repo's own pack can override them by name.
 - Rewrites: `bunx smithers-orchestrator workflow WORKFLOW_ID` runs a discovered workflow when `<id>` resolves; `bunx smithers-orchestrator workflow.tsx` behaves like `bunx smithers-orchestrator up workflow.tsx`; `bunx smithers-orchestrator chat create` behaves like `bunx smithers-orchestrator chat-create`.
 - JSON arguments are preflighted before workflow modules load. `--input` and `--annotations` accept an inline JSON value or `-` to read JSON from stdin, capped at 1 MiB.
 
@@ -2094,7 +2094,7 @@ A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` backgr
 
 1. **Smithers Monitor (live, zero setup):** run `bunx smithers-orchestrator monitor RUN_ID` to open the gateway's live web UI over every run in the workspace, focused on this one (status, execution tree, events, approvals), no code required. See [the Smithers Monitor](/guides/monitor).
 2. **Status-report cron (hands-off):** a job that every 5 minutes reads `bunx smithers-orchestrator inspect RUN_ID --format json` and reports the status.
-3. **Live custom UI (richest, most work):** run `bunx smithers-orchestrator ui RUN_ID` when a `.smithers/ui/<workflow>.tsx` already exists, otherwise author one with the gateway-react hooks first. See [custom workflow UIs](/guides/custom-workflow-ui).
+3. **Live custom UI (richest, most work):** run `bunx smithers-orchestrator ui RUN_ID` when the workflow declares a `.smithers/ui/<workflow>.tsx` UI with `<UI entry="../ui/<workflow>.tsx" />`, otherwise author the UI source and declaration first. See [custom workflow UIs](/guides/custom-workflow-ui).
 4. **Quick HTML page (fastest):** write a static status page from `bunx smithers-orchestrator inspect RUN_ID`, open it, and refresh it about every 5 minutes.
 
 The same `monitoring` object (its `text` plus structured `options`) is in the `run_workflow` MCP result for background launches, and is `null` when `waitForTerminal` is set (the run already finished).
@@ -2107,7 +2107,7 @@ Open a run's custom browser UI with:
 bunx smithers-orchestrator ui RUN_ID
 ```
 
-`bunx smithers-orchestrator ui` finds the workspace's gateway through its runtime state file (written under the OS temp dir when `smithers gateway` starts) and verifies the answering process serves this workspace before using it. State-file discovery refuses gateways that advertise another workspace; the legacy `127.0.0.1:7331` fallback still trusts pre-identity gateways that advertise no workspace, so use `--gateway <url>` or `--no-autostart` when you need to be explicit. When none is running it starts `smithers gateway` automatically (one per workspace: concurrent autostarts race on a lock and share the winner) and then opens the UI. `smithers gateway` serves the workspace DB and auto-mounts `ui/<workflow>.tsx` files for matching discovered workflow ids, resolved from the pack each workflow was discovered in: a repo's `.smithers/ui/` or the global `~/.smithers/ui/` for global-pack workflows. A workspace with no local `.smithers` pack and no existing `smithers.db` still boots: the gateway creates the DB at the working directory and serves the global pack alone. That is the headless sandbox shape: provision a VM with `bunx smithers-orchestrator init --global --yes --no-skill` (the default `bun install` inside `~/.smithers` is required for pack workflows to import) and `smithers gateway` serves the full pack, UIs included, from any bare cloned repo. Manage the daemon with `smithers gateway status` and `smithers gateway stop`. Use `bunx smithers-orchestrator ui RUN_ID --no-autostart` to fail fast when no Gateway is already running, or `--gateway <url>` for a remote Gateway.
+`bunx smithers-orchestrator ui` finds the workspace's gateway through its runtime state file (written under the OS temp dir when `smithers gateway` starts) and verifies the answering process serves this workspace before using it. State-file discovery refuses gateways that advertise another workspace; the legacy `127.0.0.1:7331` fallback still trusts pre-identity gateways that advertise no workspace, so use `--gateway <url>` or `--no-autostart` when you need to be explicit. When none is running it starts `smithers gateway` automatically (one per workspace: concurrent autostarts race on a lock and share the winner) and then opens the UI. `smithers gateway` serves the workspace DB and workflow-owned `<UI>` declarations, with entry files resolved relative to the workflow that declared them. A workspace with no local `.smithers` pack and no existing `smithers.db` still boots: the gateway creates the DB at the working directory and serves the global pack alone. That is the headless sandbox shape: provision a VM with `bunx smithers-orchestrator init --global --yes --no-skill` (the default `bun install` inside `~/.smithers` is required for pack workflows to import) and `smithers gateway` serves the full pack, UIs included, from any bare cloned repo. Manage the daemon with `smithers gateway status` and `smithers gateway stop`. Use `bunx smithers-orchestrator ui RUN_ID --no-autostart` to fail fast when no Gateway is already running, or `--gateway <url>` for a remote Gateway.
 
 ## Troubleshooting
 
@@ -2185,9 +2185,9 @@ commands[88]:
   - name: hermes
     purpose: Add Smithers to a local Hermes agent (register the MCP server and install the native Hermes plugin); alias for mcp add --agent hermes
   - name: up
-    purpose: Start or resume a workflow execution from a .tsx workflow file path (use `workflow run` to start from a discovered workflow id instead)
+    purpose: Start or resume a workflow execution from a discovered workflow ID or a .tsx workflow file path
     args[1]{name,type,required,desc}:
-      workflow,string,false,Workflow file path (omit with --interactive to pick one)
+      workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
     flags[32]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
@@ -2471,7 +2471,7 @@ commands[88]:
   - name: graph
     purpose: Render the workflow graph without executing it
     args[1]{name,type,required,desc}:
-      workflow,string,true,Workflow file path
+      workflow,string,true,Workflow ID or file path
     flags[3]{name,short,type,default,desc}:
       run-id,r,string,graph,Run ID for context
       input,,string,,Input JSON; overrides persisted input
@@ -8982,8 +8982,8 @@ building your own rows that match the components.
 
 This is a full `.smithers/ui/<workflow>.tsx` bundle: a run picker, the node tree,
 a live event log, a node-output pane, and the approval queue, wired together with
-local state. Save it next to a workflow, register the workflow with
-`ui: { entry: ".smithers/ui/<workflow>.tsx" }`, and open it with
+local state. Save it next to a workflow, declare it from that workflow with
+`<UI entry="../ui/<workflow>.tsx" />`, and open it with
 `bunx smithers-orchestrator ui RUN_ID` (or `bunx smithers-orchestrator ui --workflow <workflow>`).
 To open the full local control surface instead of a single workflow UI, see
 [`bunx smithers-orchestrator ui --app`](#the-full-local-smithers-ui) below.

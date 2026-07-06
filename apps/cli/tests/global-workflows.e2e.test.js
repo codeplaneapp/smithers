@@ -38,7 +38,7 @@ test("workflow list merges the global ~/.smithers pack, local taking precedence"
     expect(globalWorkflows.find((w) => w.id === "ping")?.scope).toBe("global");
     expect(globalWorkflows.find((w) => w.id === "ping")?.entryFile).toBe(join(smithersHome, "workflows", "ping.tsx"));
     // The discovery record names its owning pack, so pack-relative assets
-    // (e.g. the gateway's ui/<id>.tsx auto-mount) resolve from the right pack.
+    // declared by workflow-owned UI entries resolve from the right pack.
     expect(globalWorkflows.find((w) => w.id === "ping")?.packDir).toBe(smithersHome);
 
     // A local workflow with the same id shadows the global one; global-only stays.

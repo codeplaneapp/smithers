@@ -4,6 +4,7 @@
 // smithers-description: Author a new agent skill (SKILL.md + supporting files) from a plain-English ask.
 // smithers-tags: authoring, skills
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -142,6 +143,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="create-skill">
+      <UI entry="../ui/create-skill.tsx" title={"Create Skill"} />
       <Sequence>
         {/* 1 — Turn the freeform ask into a structured skill spec. */}
         <Task id="clarify" output={outputs.clarify} agent={agents.smart}>

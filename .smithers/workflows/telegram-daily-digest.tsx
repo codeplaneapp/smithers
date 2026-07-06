@@ -4,6 +4,7 @@
 // smithers-description: Summarize a Telegram group transcript or bot update queue, write a daily digest, and optionally post it back to Telegram.
 // smithers-tags: telegram, digest, cron, community
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createSmithers } from "smithers-orchestrator";
@@ -1091,6 +1092,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="telegram-daily-digest">
+      <UI entry="../ui/telegram-daily-digest.tsx" title={"Telegram Daily Digest"} />
       <Sequence>
         <Task id="collect-messages" output={outputs.collect}>
           {() => collectMessages(input)}

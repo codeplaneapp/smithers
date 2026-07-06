@@ -1,6 +1,7 @@
 // smithers-source: seeded
 // smithers-display-name: Implement
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -48,6 +49,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="implement">
+      <UI entry="../ui/implement.tsx" title={"Implement"} />
       <Sequence>
         <ValidationLoop
           idPrefix="impl"

@@ -4,6 +4,7 @@
 // smithers-description: Run deterministic checks over a context contract and report missing goals, inputs, verification, approvals, and report specs.
 // smithers-tags: quality, context-engineering
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -249,6 +250,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="context-doctor">
+      <UI entry="../ui/context-doctor.tsx" title={"Context Doctor"} />
       <Sequence>
         {/* 1 — Deterministic diagnosis of the contract (pure JS, no agent).
             Input fields arrive null when unsupplied — coalesce to the

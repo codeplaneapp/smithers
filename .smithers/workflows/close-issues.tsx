@@ -1,6 +1,7 @@
 // smithers-display-name: Close Issues (Codex)
 // smithers-source: one-off — fix + review + land every open GitHub issue not opened by roninjin10.
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { CodexAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
@@ -330,6 +331,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="close-issues">
+      <UI entry="../ui/close-issues.tsx" title={"Close Issues (Codex)"} />
       <Sequence>
         <Task id="discover" output={outputs.discovery} timeoutMs={5 * 60_000}>
           {() => discoverIssues()}

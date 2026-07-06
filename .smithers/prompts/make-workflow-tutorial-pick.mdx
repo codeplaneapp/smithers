@@ -19,7 +19,8 @@ Tell the agent:
 
 Once you reply, Smithers will run `create-workflow` to:
 - Design the workflow's JSX task graph
-- Scaffold `.smithers/workflows/{name}.tsx` + `.smithers/ui/{name}.tsx`
+- Scaffold `.smithers/workflows/{name}.tsx` + `.smithers/ui/{name}.tsx`, with
+  the workflow declaring `<UI entry="../ui/{name}.tsx" />`
 - Verify the graph renders
 - Launch it, monitor it, and self-improve until it works
 

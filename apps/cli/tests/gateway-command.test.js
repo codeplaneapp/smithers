@@ -280,20 +280,39 @@ test("gateway skips a broken workflow and still registers the valid ones", async
 }, 15_000);
 
 // A workspace with NO local .smithers pack must still serve the global
-// (~/.smithers, here $SMITHERS_HOME) pack's workflows WITH their UIs: the
-// ui/<id>.tsx auto-mount resolves against the pack the workflow was discovered
-// in, not only the workspace. This is the sandbox-VM shape — a bare cloned repo
-// served entirely from a `smithers init --global` pack.
-test("gateway mounts a global-pack workflow's ui/<id>.tsx when the workspace has no local pack", async () => {
+// (~/.smithers, here $SMITHERS_HOME) pack's workflow-owned UIs. The workflow's
+// <UI entry="../ui/<id>.tsx" /> resolves against the pack the workflow was
+// discovered in, not only the workspace. This is the sandbox-VM shape — a bare
+// cloned repo served entirely from a `smithers init --global` pack.
+test("gateway discovers a global-pack workflow-owned UI when the workspace has no local pack", async () => {
     const globalHome = createTempRepo();
     const smithersHome = join(globalHome.dir, ".smithers");
-    writeTestWorkflow(globalHome, ".smithers/workflows/globping.tsx");
+    globalHome.write(".smithers/workflows/globping.tsx", [
+        "/** @jsxImportSource smithers-orchestrator */",
+        "import { createSmithers, UI } from \"smithers-orchestrator\";",
+        "import { z } from \"zod/v4\";",
+        "",
+        "const { Workflow, Task, smithers, outputs } = createSmithers({",
+        "  output: z.object({ ok: z.boolean() }),",
+        "});",
+        "",
+        "export default smithers(() => (",
+        "  <Workflow name=\"globping\">",
+        "    <UI entry=\"../ui/globping.tsx\" title=\"Global Ping\" />",
+        "    <Task id=\"output\" output={outputs.output}>{{ ok: true }}</Task>",
+        "  </Workflow>",
+        "));",
+        "",
+    ].join("\n"));
     globalHome.write(".smithers/ui/globping.tsx", [
         "import React from \"react\";",
+        "import { createGatewayReactRoot } from \"smithers-orchestrator/gateway-react\";",
         "",
-        "export default function GlobPingUi() {",
+        "function GlobPingUi() {",
         "  return <main>Global Ping UI</main>;",
         "}",
+        "",
+        "createGatewayReactRoot(<GlobPingUi />);",
         "",
     ].join("\n"));
 

@@ -4,6 +4,7 @@
 // smithers-description: Turn a vague user script into a context contract, route it to skills/workflows, add backpressure, execute, and report — the concierge proxy.
 // smithers-tags: concierge, context-engineering, planning
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -219,6 +220,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="context-engineer">
+      <UI entry="../ui/context-engineer.tsx" title={"Context Engineer"} />
       <Sequence>
         {/* 1 — Classify the vague script into modes + a durability call. */}
         <Task id="classify-script" output={outputs.classify} agent={agents.cheapFast}>

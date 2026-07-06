@@ -14,10 +14,10 @@ import {
 } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 /**
- * Real-browser e2e for EVERY init-pack workflow UI. No route mocking, no faked
+ * Real-browser e2e for EVERY init-pack workflow-owned UI. No route mocking, no faked
  * assertions: a real `smithers init`, the generated gateway.ts booted as a real
- * server bundling each UI on demand via Bun, and a headless Chromium loading
- * every UI from the live gateway.
+ * server discovering <UI> declarations from workflow source, bundling each UI
+ * on demand via Bun, and a headless Chromium loading every UI from the live gateway.
  *
  * Two real, layered checks:
  *   - ALL 16 UIs: build + boot + mount in the browser (catches bundle errors,
@@ -82,6 +82,18 @@ async function waitForHealth(base, timeoutMs = 60_000) {
   return false;
 }
 
+async function listWorkflowUis(base) {
+  const response = await fetch(`${base}/v1/rpc/listWorkflows`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ filter: { hasUi: true } }),
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.ok).toBe(true);
+  return body.payload;
+}
+
 async function checkUi(page, base, descriptor, runId) {
   const url = `${base}/workflows/${descriptor.key}${runId ? `?runId=${runId}` : ""}`;
   await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -141,6 +153,12 @@ workflowUiTest("every init-pack workflow UI builds + boots; the output-verified 
   repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
 
   expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
+  expect(repo.read(".smithers/gateway.ts")).not.toContain("ui: { entry:");
+  for (const descriptor of DESCRIPTORS) {
+    expect(repo.read(`.smithers/workflows/${descriptor.key}.tsx`)).toContain(
+      `<UI entry="../ui/${descriptor.key}.tsx"`,
+    );
+  }
 
   // Execute the output-verified workflows for real and capture their run ids.
   const runIdByKey = {};
@@ -170,6 +188,16 @@ workflowUiTest("every init-pack workflow UI builds + boots; the output-verified 
   const uiFailures = [];
   try {
     expect(await waitForHealth(base)).toBe(true);
+    const workflowsWithUi = await listWorkflowUis(base);
+    for (const descriptor of DESCRIPTORS) {
+      expect(workflowsWithUi).toContainEqual(
+        expect.objectContaining({
+          key: descriptor.key,
+          hasUi: true,
+          uiPath: `/workflows/${descriptor.key}`,
+        }),
+      );
+    }
     browser = await (await loadChromium()).launch({ headless: true });
     const page = await browser.newPage();
     for (const d of DESCRIPTORS) {

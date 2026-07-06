@@ -4,6 +4,7 @@
 // smithers-description: After a run, harvest a reusable skill or workflow and durable memory from the pattern.
 // smithers-tags: reuse, skills, memory
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -113,6 +114,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="extract-skill">
+      <UI entry="../ui/extract-skill.tsx" title={"Extract Skill"} />
       <Sequence>
         {/* 1 — Read the run (if given) and decide what is worth harvesting. */}
         <Task

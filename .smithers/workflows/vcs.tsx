@@ -2,6 +2,7 @@
 // smithers-display-name: VCS
 // smithers-description: Inspect and act on a git or jj working tree. Status and log are deterministic; commit messages and rebase plans are written by an agent.
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers, Task, Sequence } from 'smithers-orchestrator';
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod/v4';
@@ -156,6 +157,7 @@ export default smithers((ctx) => {
   if (action === 'log') {
     return (
       <Workflow name="vcs">
+        <UI entry="../ui/vcs.tsx" title={"VCS"} />
         <Task id="vcs:log" output={logSchema}>{() => readLog(tool)}</Task>
       </Workflow>
     );

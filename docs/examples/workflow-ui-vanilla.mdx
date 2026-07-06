@@ -164,15 +164,23 @@ The React layer's stale-data-free model is built into the hooks. In vanilla code
 
 The React `useGatewayRpc` source in [`packages/gateway-react/src/useGatewayRpc.ts`](/reference/package-configuration) is a 60-line reference if you want a minimal recipe.
 
-## Registering the UI
+## Declaring the UI
 
-```ts
-gateway.register("demo-vanilla-ui", workflow, {
-  ui: { entry: ".smithers/ui/demo-vanilla-ui.ts", title: "Demo Vanilla Workflow" },
-});
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, UI } from "smithers-orchestrator";
+
+const { Workflow, Task, smithers } = createSmithers();
+
+export default smithers(() => (
+  <Workflow name="demo-vanilla-ui">
+    <UI entry="../ui/demo-vanilla-ui.ts" title="Demo Vanilla Workflow" />
+    <Task id="ship">{{ ok: true }}</Task>
+  </Workflow>
+));
 ```
 
-The Gateway bundles the entry with esbuild (no React injected, no framework assumed) and serves it at `/workflows/demo-vanilla-ui`.
+The Gateway discovers the `<UI>` declaration when it registers the workflow with its `entryFile`, bundles the entry with esbuild (no React injected, no framework assumed), and serves it at `/workflows/demo-vanilla-ui`.
 
 ## Test pattern (no UI library coupling)
 

@@ -4,6 +4,7 @@
 // smithers-description: Classify a plain-English script and either run it as a single task or recommend the right durable workflow.
 // smithers-tags: concierge, routing
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -138,6 +139,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="route-task">
+      <UI entry="../ui/route-task.tsx" title={"Route Task"} />
       <Sequence>
         {/* 1 — Classify the script into a mode and decide whether it needs a durable workflow. */}
         <Task id="classify" output={outputs.classify} agent={agents.cheapFast}>

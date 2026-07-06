@@ -1,7 +1,8 @@
 // Guard: every canonical init workflow must ship with a custom UI.
 //
 // `initWorkflowPack` writes .smithers/workflows/<key>.tsx for each seeded
-// workflow and .smithers/ui/<key>.tsx for each workflow that has a custom UI.
+// workflow, a workflow-owned <UI> declaration, and .smithers/ui/<key>.tsx for
+// each workflow that has a custom UI.
 // This test asserts the two sets are identical so future workflow additions
 // that forget a UI fail here instead of silently shipping without one.
 
@@ -60,6 +61,15 @@ test("every canonical init workflow ships with a custom UI", () => {
             missing,
             `Seeded workflows shipped without a custom UI: ${missing.join(", ")}. ` +
             `Add UI source to workflowUiSources.js and register in UI_WORKFLOWS.`,
+        ).toEqual([]);
+
+        const missingDeclarations = workflowKeys.filter((key) => {
+            const source = readFileSync(join(workflowsDir, `${key}.tsx`), "utf8");
+            return !source.includes(`<UI entry="../ui/${key}.tsx"`);
+        });
+        expect(
+            missingDeclarations,
+            `Seeded workflows shipped a UI file without owning it from workflow JSX: ${missingDeclarations.join(", ")}.`,
         ).toEqual([]);
     } finally {
         rmSync(root, { recursive: true, force: true });

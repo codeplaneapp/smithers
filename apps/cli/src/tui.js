@@ -367,10 +367,10 @@ export function buildNextStepsLines({ runId, workflowId, entryFile, uiExists }) 
         lines.push(`smithers ui ${runId}  (open this run in its custom UI)`);
     } else if (workflowId) {
         // There is no generic run inspector behind `smithers ui <runId>`: the
-        // command fails NO_UI until a custom UI file exists. Lead with AUTHORING
-        // it, mirroring buildAgentNextSteps (agentNextSteps.js) so the two
-        // guidance surfaces cannot drift apart on this case again.
-        lines.push(`author .smithers/ui/${workflowId}.tsx with the smithers-orchestrator/gateway-react hooks, then open it with \`smithers ui ${runId}\``);
+        // command fails NO_UI until the workflow declares a custom UI. Lead with
+        // AUTHORING it, mirroring buildAgentNextSteps (agentNextSteps.js) so the
+        // two guidance surfaces cannot drift apart on this case again.
+        lines.push(`author .smithers/ui/${workflowId}.tsx with the smithers-orchestrator/gateway-react hooks, add \`<UI entry="../ui/${workflowId}.tsx" />\` to the workflow, then open it with \`smithers ui ${runId}\``);
     } else {
         // Without a workflow id we cannot name the UI file to author, and
         // `smithers ui <runId>` would fail NO_UI — point at the full
@@ -384,17 +384,26 @@ export function buildNextStepsLines({ runId, workflowId, entryFile, uiExists }) 
 }
 
 /**
- * Whether a custom `smithers ui` surface exists for this workflow id at the
- * pack-relative `ui/<workflowId>.tsx` convention (mirrors index.js resolution:
- * the workspace's `.smithers/ui/`, then the global `~/.smithers/ui/`).
+ * Whether a custom `smithers ui` surface exists for this workflow id. A
+ * pack-relative `ui/<workflowId>.tsx` file is not enough: the same pack's
+ * workflow must also declare `<UI entry="../ui/<workflowId>.tsx" />`.
  * @param {string | undefined} workflowId
  * @param {string} [cwd]
  */
 export function customUiExists(workflowId, cwd = process.cwd()) {
     if (!workflowId) return false;
     try {
-        return resolvePackDirs(cwd).some(({ packDir }) => existsSync(resolve(packDir, "ui", `${workflowId}.tsx`)))
-            || existsSync(resolve(cwd, ".smithers", "ui", `${workflowId}.tsx`));
+        const packDirs = [
+            ...resolvePackDirs(cwd).map(({ packDir }) => packDir),
+            resolve(cwd, ".smithers"),
+        ];
+        return packDirs.some((packDir) => {
+            const uiPath = resolve(packDir, "ui", `${workflowId}.tsx`);
+            const workflowPath = resolve(packDir, "workflows", `${workflowId}.tsx`);
+            if (!existsSync(uiPath) || !existsSync(workflowPath)) return false;
+            const source = readFileSync(workflowPath, "utf8");
+            return source.includes("<UI") && source.includes(`../ui/${workflowId}.tsx`);
+        });
     } catch {
         return false;
     }

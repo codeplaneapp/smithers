@@ -16,13 +16,14 @@ describe("workflowIdFromPath", () => {
 });
 
 describe("hasCustomUi", () => {
-    test("looks for .smithers/ui/<id>.tsx under cwd via the injected probe", () => {
+    test("looks for a .smithers/ui/<id>.tsx file declared by the workflow via the injected probe", () => {
         const seen = [];
         const exists = (p) => {
             seen.push(p);
-            return p.endsWith("/.smithers/ui/implement.tsx");
+            return p.endsWith("/.smithers/ui/implement.tsx") || p.endsWith("/.smithers/workflows/implement.tsx");
         };
-        expect(hasCustomUi("implement", "/work", exists)).toBe(true);
+        const read = () => '<Workflow name="implement"><UI entry="../ui/implement.tsx" /></Workflow>';
+        expect(hasCustomUi("implement", "/work", exists, read)).toBe(true);
         expect(hasCustomUi("missing", "/work", exists)).toBe(false);
         expect(seen[0]).toContain("/work/.smithers/ui/implement.tsx");
     });
@@ -72,6 +73,7 @@ describe("buildMonitoringOptions", () => {
     test("the live-ui option tells the agent to author a UI when none exists", () => {
         const noUi = buildMonitoringOptions({ runId: "run-1", workflowId: "implement", hasUi: false });
         expect(noUi[2].how).toContain(".smithers/ui/implement.tsx");
+        expect(noUi[2].how).toContain('<UI entry="../ui/implement.tsx"');
         expect(noUi[2].how).toContain("author");
     });
 });

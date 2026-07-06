@@ -1,6 +1,7 @@
 // smithers-source: authored
 // smithers-display-name: Open Code Review
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers, Parallel, Sequence, type AgentLike } from "smithers-orchestrator";
 import { agents } from "../agents";
 import {
@@ -36,6 +37,7 @@ export function createOpenCodeReviewWorkflow(reviewAgents: AgentLike[] = agents.
     const reviewFileIds = reviewFiles.map((file) => file.id);
     return (
       <Workflow name="open-code-review">
+        <UI entry="../ui/open-code-review.tsx" title={"Open Code Review"} />
         <Sequence>
           <Task id="resolve-target" output={outputs.target} noRetry>
             {async () => resolveReviewTarget(input)}

@@ -1,7 +1,7 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 // Pin BOTH react and react-dom to the copy this server package resolves.
@@ -43,11 +43,14 @@ function resolveWorkspaceDependency(specifier, resolveDir) {
  * @returns {string}
  */
 function moduleSpecifier(source) {
-    if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(source)) {
-        return source;
+    if (source.startsWith("file://")) {
+        return fileURLToPath(source);
     }
     if (source.startsWith("/") || /^[A-Za-z]:[\\/]/.test(source)) {
-        return pathToFileURL(source).href;
+        return source;
+    }
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(source)) {
+        return source;
     }
     return source;
 }

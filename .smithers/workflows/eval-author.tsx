@@ -4,6 +4,7 @@
 // smithers-description: Turn acceptance criteria into eval fixtures (JSONL cases + rubric) wired to smithers eval.
 // smithers-tags: quality, evals
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -69,6 +70,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="eval-author">
+      <UI entry="../ui/eval-author.tsx" title={"Eval Author"} />
       <Sequence>
         {/* 1 — Turn the acceptance criteria into a structured eval suite. */}
         <Task id="derive" output={outputs.derive} agent={agents.smart}>

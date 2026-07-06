@@ -1,6 +1,7 @@
 // smithers-display-name: Docs Driven Development
 // smithers-description: Maintain a living product spec (features.json + WYSIWYG docs) and run an audit→triage→implement→review improvement loop over it.
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { Approval, createSmithers, Loop, Sequence, Task } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -462,6 +463,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="docs-driven-development">
+      <UI entry="../ui/docs-driven-development.tsx" title={"Docs Driven Development"} />
       <Loop id="improvement-loop" until={productComplete(ctx)} maxIterations={maxRounds} onMaxReached="return-last">
         <Sequence>
           <Task id="bootstrap" output={outputs.bootstrap}>

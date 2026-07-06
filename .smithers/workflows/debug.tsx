@@ -1,6 +1,7 @@
 // smithers-source: seeded
 // smithers-display-name: Debug
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -20,6 +21,7 @@ const { Workflow, smithers } = createSmithers({
 
 export default smithers((ctx) => (
   <Workflow name="debug">
+    <UI entry="../ui/debug.tsx" title={"Debug"} />
     <ValidationLoop
       idPrefix="debug"
       prompt={ctx.input.prompt}

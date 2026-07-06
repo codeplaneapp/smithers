@@ -1,6 +1,7 @@
 // smithers-source: seeded
 // smithers-display-name: Audit
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -27,6 +28,7 @@ export default smithers((ctx) => {
   const tier = ctx.input.agentTier ?? "smart";
   return (
     <Workflow name="audit">
+      <UI entry="../ui/audit.tsx" title={"Audit"} />
       <ForEachFeature
         idPrefix="audit"
         agent={agents[tier]}

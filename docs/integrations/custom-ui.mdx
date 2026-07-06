@@ -14,7 +14,7 @@ There are two SDKs:
 
 Pick the client for plumbing, the React layer for views.
 
-For local workflow UIs, `bunx smithers-orchestrator ui RUN_ID` is the one-command launch path. If no Gateway is reachable on the local port, it starts `smithers gateway` for the workspace and waits before opening the browser. `smithers gateway` auto-mounts `.smithers/ui/<workflow>.tsx` files whose names match discovered workflow ids, so local UI launch does not require a hand-written `.smithers/gateway.ts`.
+For local workflow UIs, `bunx smithers-orchestrator ui RUN_ID` is the one-command launch path. If no Gateway is reachable on the local port, it starts `smithers gateway` for the workspace and waits before opening the browser. The workflow owns the UI route: put the browser source in `.smithers/ui/<workflow>.tsx`, declare it from the workflow with `<UI entry="../ui/<workflow>.tsx" />`, and the Gateway serves it at `/workflows/<workflow>`.
 
 ## Install
 
@@ -379,7 +379,7 @@ Every piece (pushed updates, reconnect, stale guards, abort on unmount, optimist
 
 ## Boot config (when the gateway hosts your UI)
 
-When you serve a UI directly off `gateway.register(name, workflow, { ui })`, the gateway sets `globalThis.__SMITHERS_GATEWAY_UI__` on the page before your bundle runs. `SmithersGatewayClient` reads it automatically. HTTP RPC calls go to `/v1/rpc/<method>` under `baseUrl`, and WebSocket streams use the boot `wsPath` (currently `/` under the Gateway origin, or that path after the socket separator for `ws+unix:` base URLs). Your UI code does not need to know; `new SmithersGatewayClient()` Just Works.
+When a workflow declares `<UI entry="../ui/<workflow>.tsx" />`, the gateway sets `globalThis.__SMITHERS_GATEWAY_UI__` on the page before your bundle runs. `SmithersGatewayClient` reads it automatically. HTTP RPC calls go to `/v1/rpc/<method>` under `baseUrl`, and WebSocket streams use the boot `wsPath` (currently `/` under the Gateway origin, or that path after the socket separator for `ws+unix:` base URLs). Your UI code does not need to know; `new SmithersGatewayClient()` Just Works.
 
 For a page hosted elsewhere, there is normally no boot global; pass an explicit `baseUrl` and token.
 
@@ -401,4 +401,4 @@ Always branch on `error.code`. Inspecting `error.message` is fine for logs but i
 
 - The full RPC catalog and event union live in [Gateway](/integrations/gateway).
 - The event payload shape is documented in [Event Types](/reference/event-types).
-- For a worked example of a UI registered against `gateway.register(..., { ui })`, see the workflow-UI starters under `examples/`.
+- For worked examples of workflow-owned UIs, see the workflow-UI starters under `examples/`.

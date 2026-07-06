@@ -506,9 +506,10 @@ const CURATED_SUBDIR = join("curated", "active");
  *
  * Each entry carries the pack directory it belongs to (absent for `explicit`
  * paths, which have no owning pack) so callers can resolve pack-relative
- * assets — e.g. the gateway auto-mounts `<packDir>/ui/<id>.tsx`, which must
- * come from the SAME pack as the workflow, not always the workspace's local
- * `.smithers` (a global `~/.smithers` workflow ships its UI in `~/.smithers/ui`).
+ * assets declared by the workflow, e.g. `<UI entry="../ui/<id>.tsx" />`, which
+ * must come from the SAME pack as the workflow, not always the workspace's
+ * local `.smithers` (a global `~/.smithers` workflow ships its UI in
+ * `~/.smithers/ui`).
  *
  * @param {string} [from]
  * @param {NodeJS.ProcessEnv} [env]

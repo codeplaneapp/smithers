@@ -4,6 +4,7 @@
 // smithers-description: First-time tutorial — scans your repo + coding-agent chat history, recommends a ranked list of Smithers workflows to build for your situation, lets you pick one, builds it with a custom UI via create-workflow, then launches + monitors + self-improves it. Ends with a "dive deeper" feature preview so you know what else to ask your agent.
 // smithers-tags: tutorial, onboarding, create-workflow, first-time
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { $ } from "bun";
 import { existsSync } from "node:fs";
 import { open, readFile, readdir, stat } from "node:fs/promises";
@@ -489,6 +490,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="make-workflow-tutorial">
+      <UI entry="../ui/make-workflow-tutorial.tsx" title={"Make Workflow Tutorial"} />
       <Sequence>
         {/* ── 1. Bootstrap: read repo structure + smithers docs (no LLM) ── */}
         <Task id="bootstrap" output={outputs.bootstrap}>

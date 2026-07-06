@@ -1,6 +1,7 @@
 // smithers-source: seeded
 // smithers-display-name: Review
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { panelists } from "../components/roles";
@@ -18,6 +19,7 @@ const { Workflow, smithers } = createSmithers({
 
 export default smithers((ctx) => (
   <Workflow name="review">
+    <UI entry="../ui/review.tsx" title={"Review"} />
     <ReviewPanel idPrefix="review" prompt={ctx.input.prompt} agents={panelists} />
   </Workflow>
 ));

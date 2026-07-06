@@ -4,6 +4,7 @@
 // smithers-description: Diagnose one failed or stuck Smithers run: pull events/logs, find the root cause, propose a fix/rewind/retry.
 // smithers-tags: ops, debugging
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { $ } from "bun";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
@@ -161,6 +162,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="triage-run">
+      <UI entry="../ui/triage-run.tsx" title={"Triage Run"} />
       <Sequence>
         {/* 1 — Deterministically pull run state + the recent event log. */}
         <Task id="gather" output={outputs.gather}>

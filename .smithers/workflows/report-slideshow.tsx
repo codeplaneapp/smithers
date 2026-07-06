@@ -4,6 +4,7 @@
 // smithers-description: Generate a concise HTML slideshow report from a Smithers run state and artifacts.
 // smithers-tags: ops, reporting
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { $ } from "bun";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
@@ -114,6 +115,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="report-slideshow">
+      <UI entry="../ui/report-slideshow.tsx" title={"Report Slideshow"} />
       <Sequence>
         {/* 1 — Deterministically capture the run state, nodes, and a summary. */}
         <Task id="gather" output={outputs.gather}>

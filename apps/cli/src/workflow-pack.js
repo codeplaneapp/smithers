@@ -121,8 +121,8 @@ const BUNDLED_VERSION_PINS = {
     mdxTypes: "2.0.13",
     nodeTypes: "25.6.0",
     // Seeded multi-file UIs (delegation-chain) import these at runtime; the
-    // gateway bundles workspace UIs from .smithers/ui, so the workspace must
-    // resolve them.
+    // gateway bundles workflow-owned UI entries from .smithers/ui, so the
+    // workspace must resolve them.
     xyflowReact: "12.11.1",
     dagre: "0.8.5",
     dagreTypes: "0.7.54",
@@ -177,7 +177,7 @@ function renderPackageJson(versions) {
             "@smithers-orchestrator/cli": smithersSpec,
             zod: versions.zodVersion,
             // Runtime deps of the seeded multi-file UIs (delegation-chain):
-            // the gateway bundles .smithers/ui/*.tsx from this workspace.
+            // the gateway bundles workflow-owned entries from this workspace.
             "@xyflow/react": versions.xyflowReactVersion,
             dagre: versions.dagreVersion,
             "@milkdown/crepe": versions.milkdownCrepeVersion,
@@ -1801,27 +1801,28 @@ function renderWorkflowFile(id, displayName, body, metadata = {}) {
         tags: metadata.tags ?? defaults.tags,
         aliases: metadata.aliases ?? defaults.aliases,
     };
+    const source = [
+        "// smithers-source: seeded",
+        "// smithers-metadata-version: 1",
+        `// smithers-display-name: ${displayName}`,
+        ...(resolvedMetadata.description ? [`// smithers-description: ${resolvedMetadata.description}`] : []),
+        ...(resolvedMetadata.tags?.length ? [`// smithers-tags: ${resolvedMetadata.tags.join(", ")}`] : []),
+        ...(resolvedMetadata.aliases?.length ? [`// smithers-aliases: ${resolvedMetadata.aliases.join(", ")}`] : []),
+        "/** @jsxImportSource smithers-orchestrator */",
+        ...body,
+        "",
+    ].join("\n");
     return {
         path: `.smithers/workflows/${id}.tsx`,
-        contents: [
-            "// smithers-source: seeded",
-            "// smithers-metadata-version: 1",
-            `// smithers-display-name: ${displayName}`,
-            ...(resolvedMetadata.description ? [`// smithers-description: ${resolvedMetadata.description}`] : []),
-            ...(resolvedMetadata.tags?.length ? [`// smithers-tags: ${resolvedMetadata.tags.join(", ")}`] : []),
-            ...(resolvedMetadata.aliases?.length ? [`// smithers-aliases: ${resolvedMetadata.aliases.join(", ")}`] : []),
-            "/** @jsxImportSource smithers-orchestrator */",
-            ...body,
-            "",
-        ].join("\n"),
+        contents: injectWorkflowOwnedUiDeclaration(source, id),
     };
 }
 /**
  * Every init-pack workflow that ships a custom Gateway UI. Each renders a
- * `.smithers/ui/<key>.tsx` (see the matching render*UiFile below) and is mounted
- * by renderGatewayFile at `/workflows/<key>`. The gateway lists/attributes runs
- * across these correctly even though they share the project DB (see the
- * gateway's adapter-dedup + run-attribution logic).
+ * `.smithers/ui/<key>.tsx` (see the matching render*UiFile below) and is
+ * mounted by the workflow's `<UI entry="../ui/<key>.tsx" />` declaration. The
+ * gateway lists/attributes runs across these correctly even though they share
+ * the project DB (see the gateway's adapter-dedup + run-attribution logic).
  * @type {Array<{ key: string; title: string }>}
  */
 const UI_WORKFLOWS = [
@@ -1857,6 +1858,37 @@ const UI_WORKFLOWS = [
     { key: "delegation-chain", title: "Delegation Chain" },
     { key: "make-workflow-tutorial", title: "Make Workflow Tutorial" },
 ];
+
+/**
+ * @param {string} id
+ * @returns {string | null}
+ */
+function workflowUiTitle(id) {
+    return UI_WORKFLOWS.find((workflow) => workflow.key === id)?.title ?? null;
+}
+
+/**
+ * @param {string} source
+ * @param {string} id
+ * @returns {string}
+ */
+function injectWorkflowOwnedUiDeclaration(source, id) {
+    const title = workflowUiTitle(id);
+    if (!title || /<UI\b/.test(source)) {
+        return source;
+    }
+    let next = source;
+    if (!/import\s*\{[^}]*\bUI\b[^}]*\}\s*from\s*["']smithers-orchestrator["']/.test(next)) {
+        next = next.replace(
+            "/** @jsxImportSource smithers-orchestrator */\n",
+            '/** @jsxImportSource smithers-orchestrator */\nimport { UI } from "smithers-orchestrator";\n',
+        );
+    }
+    return next.replace(
+        /^(\s*)<Workflow\b([^\n]*>\s*)$/m,
+        `$1<Workflow$2\n$1  <UI entry="../ui/${id}.tsx" title={${JSON.stringify(title)}} />`,
+    );
+}
 
 const DEDICATED_UI_KEYS = new Set(["kanban", "plan", "vcs"]);
 // Multi-file UIs shipped via GENERATED_SEEDED_FILES (see SEEDED_UI_IDS in
@@ -1971,21 +2003,24 @@ function renderGatewayFile(workflowIds) {
             "",
             "const gateway = new Gateway({ heartbeatMs: 15_000 });",
             "",
-            "// Mount each workflow + its UI independently. A workflow that fails to",
-            "// import (e.g. a broken prompt/MDX) disables only its own UI — the rest of",
+            "// Mount each workflow independently. Browser UIs are declared by each workflow",
+            "// with <UI entry=\"../ui/<key>.tsx\" /> and discovered by Gateway.register().",
+            "// A workflow that fails to import (e.g. a broken prompt/MDX) disables only itself — the rest of",
             "// the gateway and the other workflow UIs still come up.",
             "async function mountWorkflow(key: string, title: string) {",
             "  try {",
             "    const workflowEntry = resolve(here, \"workflows\", key + \".tsx\");",
             "    const mod = await import(\"./workflows/\" + key + \".tsx\");",
-            "    gateway.register(key, mod.default, {",
-            "      ui: { entry: resolve(here, \"ui\", key + \".tsx\"), title },",
-            "      entryFile: workflowEntry,",
-            "    });",
-            "    console.log(\"  \" + title + \" UI -> http://\" + host + \":\" + port + \"/workflows/\" + key);",
+            "    gateway.register(key, mod.default, { entryFile: workflowEntry });",
+            "    const mounted = (gateway as any).workflows?.get?.(key)?.ui;",
+            "    if (mounted) {",
+            "      console.log(\"  \" + title + \" UI -> http://\" + host + \":\" + port + \"/workflows/\" + key);",
+            "    } else {",
+            "      console.log(\"  \" + title + \" (no UI)\");",
+            "    }",
             "  } catch (err) {",
             "    const message = err instanceof Error ? err.message : String(err);",
-            "    console.warn(\"[gateway] skipped \" + key + \" UI: \" + message);",
+            "    console.warn(\"[gateway] skipped \" + key + \": \" + message);",
             "  }",
             "}",
             "",
@@ -4452,7 +4487,7 @@ function renderWorkflows(workflowIds) {
                 "// smithers-description: Implement ticket files from `.smithers/tickets/` in worktree branches with a Kanban UI.",
                 "// smithers-tags: tickets, ui, worktrees",
                 "/** @jsxImportSource smithers-orchestrator */",
-                'import { createSmithers, Sequence, Parallel, Worktree } from "smithers-orchestrator";',
+                'import { createSmithers, Sequence, Parallel, Worktree, UI } from "smithers-orchestrator";',
                 'import { readdirSync, readFileSync } from "node:fs";',
                 'import { resolve } from "node:path";',
                 'import { z } from "zod/v4";',
@@ -4573,6 +4608,7 @@ function renderWorkflows(workflowIds) {
                 "",
                 "  return (",
                 '    <Workflow name="kanban">',
+                '      <UI entry="../ui/kanban.tsx" title="Kanban" />',
                 "      <Sequence>",
                 "        <Task id=\"tickets\" output={outputs.tickets}>",
                 "          {{",

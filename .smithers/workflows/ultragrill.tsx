@@ -1,6 +1,7 @@
 // smithers-source: authored
 // smithers-display-name: UltraGrill
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers, Loop, Parallel, Task, WaitForEvent } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -89,6 +90,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="ultragrill">
+      <UI entry="../ui/ultragrill.tsx" title={"UltraGrill"} />
       <Parallel>
         {/* ── intake plane: drain utterances until the user ends the session ── */}
         <Loop id="intake" until={ended} maxIterations={ctx.input.maxTurns}>

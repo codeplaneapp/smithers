@@ -3,7 +3,12 @@ title: Custom Workflow UIs
 description: Build a first-class browser UI for your workflow with smithers ui, the Gateway, gateway-client, and gateway-react.
 ---
 
-A custom workflow UI is a small browser bundle that *lives next to your workflow* and talks to the Smithers Gateway through its domain API, RPC API, and live event streams. You write it once in `.smithers/ui/<workflow>.tsx`, the Gateway builds and serves it at `/workflows/<key>`, and `bunx smithers-orchestrator ui` opens it for a run with a stable `?runId=` deep link.
+A custom workflow UI is a small browser bundle that *belongs to your workflow*
+and talks to the Smithers Gateway through its domain API, RPC API, and live
+event streams. Declare it in the workflow with `<UI entry="../ui/<workflow>.tsx"
+/>`, keep the browser code in `.smithers/ui/<workflow>.tsx`, and the Gateway
+builds and serves it at `/workflows/<key>`. `bunx smithers-orchestrator ui`
+opens it for a run with a stable `?runId=` deep link.
 
 This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through smithers ui and the Gateway.
 
@@ -19,13 +24,15 @@ Local launch is one command:
 bunx smithers-orchestrator ui RUN_ID
 ```
 
-If no Gateway is reachable on the local port, `bunx smithers-orchestrator ui` starts `bunx smithers-orchestrator gateway` for the workspace and waits for it before opening the browser. The Gateway automatically mounts any `.smithers/ui/<workflow>.tsx` file whose name matches a discovered workflow id, so a hand-written `.smithers/gateway.ts` is not required for local UI launch. Use `--no-autostart` to require an already-running Gateway, or `--gateway <url>` to point at a remote one.
+If no Gateway is reachable on the local port, `bunx smithers-orchestrator ui` starts `bunx smithers-orchestrator gateway` for the workspace and waits for it before opening the browser. A hand-written `.smithers/gateway.ts` is not required for local UI launch as long as the workflow declares `<UI>`. Use `--no-autostart` to require an already-running Gateway, or `--gateway <url>` to point at a remote one.
+
+<Note>Moving an older `.smithers/ui/<workflow>.tsx` auto-mount or `gateway.register(..., { ui })` setup? See [Migrate to Workflow-Owned UIs](/guides/workflow-owned-ui-migration).</Note>
 
 ## How a custom UI is wired
 
 Three pieces collaborate:
 
-1. **The workflow registers its UI.** When you call `gateway.register("vcs", vcs, { ui: { entry: ".smithers/ui/vcs.tsx", title: "VCS" } })`, the Gateway bundles the entry file into a single browser script and serves it at `/workflows/vcs`. It also exposes a `GET /workflows/<key>/boot` config that the rendered page hydrates from.
+1. **The workflow declares its UI.** Add `<UI entry="../ui/vcs.tsx" title="VCS" />` inside `.smithers/workflows/vcs.tsx`. When the launcher calls `gateway.register("vcs", vcs, { entryFile })`, the Gateway discovers that declaration, bundles the entry file into a single browser script, and serves it at `/workflows/vcs`. It also exposes a `GET /workflows/<key>/boot` config that the rendered page hydrates from.
 
 2. **The Gateway serves an HTML shell.** Hitting `/workflows/vcs` returns a tiny HTML document with a `<div id="root">`, the bundled script, and a global `__SMITHERS_GATEWAY_UI__` object (the [`GatewayUiBootConfig`](#the-boot-config)) set before your script runs. The shell uses `?runId=<id>` from the query string to scope a session to one run; if it is omitted, your UI is responsible for showing a picker or empty state. The shell is also **theme-aware**: it inlines the [workflow UI style-guide tokens](/guides/workflow-ui-design) (light values, dark overrides, and `color-scheme`) so the document follows the OS `prefers-color-scheme` before your bundle loads, and it honors an explicit `?theme=dark` / `?theme=light` query param by stamping `data-theme` on `<html>` pre-paint. That query param is the channel an embedding host (for example an app rendering the page in an iframe) uses to push its own light/dark toggle into the UI.
 
@@ -126,7 +133,7 @@ type GatewayUiBootConfig = {
   rpcPath: string;       // "/v1/rpc"
   wsPath: string;        // "/": the WebSocket path under the Gateway origin
   assetBasePath: string; // where to resolve relative bundle assets
-  props: Record<string, unknown>; // free-form, set by `gateway.register({ ui: { props } })`
+  props: Record<string, unknown>; // free-form, set by `<UI props={...} />`
 };
 ```
 
@@ -343,17 +350,17 @@ The same shape works behind any reverse proxy (Cloudflare, Cloudflare Access, Ca
 
 ```bash
 # Just open the UI. If no Gateway is reachable on the local port, `ui` starts
-# one for you (it auto-mounts each workflow's UI from .smithers/ui/<key>.tsx).
+# one for you and serves workflow-owned <UI> declarations.
 bunx smithers-orchestrator ui                          # picks the most recent run
 bunx smithers-orchestrator ui RUN_ID                   # specific run
 
 # Or run the Gateway yourself (to keep it alive / choose the port), then open:
-bunx smithers-orchestrator gateway --port 7331         # serves every workspace workflow + its .smithers/ui/*.tsx
+bunx smithers-orchestrator gateway --port 7331         # serves every workspace workflow + declared <UI> entries
 bunx smithers-orchestrator ui RUN_ID --gateway http://127.0.0.1:7331   # point ui at it (--no-autostart never spawns one)
 
 ```
 
-The `bunx smithers-orchestrator ui` command resolves the most recent run when invoked without an id, prints the URL it opened, and exits. When no Gateway answers on the local port it **auto-starts one** (auto-mounting `.smithers/ui/<workflowKey>.tsx`); pass `--no-autostart` to disable that, or `--gateway <url>` to point at an existing one. Note: `up --serve` is a per-run HTTP server, **not** a full Gateway, so `ui` needs a Gateway.
+The `bunx smithers-orchestrator ui` command resolves the most recent run when invoked without an id, prints the URL it opened, and exits. When no Gateway answers on the local port it **auto-starts one** and discovers the run's workflow-owned `<UI>` declaration; pass `--no-autostart` to disable that, or `--gateway <url>` to point at an existing one. Note: `up --serve` is a per-run HTTP server, **not** a full Gateway, so `ui` needs a Gateway.
 
 ## Sample tests
 
@@ -361,7 +368,7 @@ A custom UI has two layers worth testing:
 
 1. **The bundle parses and boots without a network.** A Bun test that imports the module under a happy-dom registrator and asserts the React tree renders covers a regression-class of "the bundle broke because of a Vite/tsup mishap" failures cheaply. The reference is `packages/gateway-react/tests/gatewayReactBehavior.test.ts`; it constructs spy clients, drives every hook, and asserts they never surface a previous input's result after a re-render.
 
-2. **The Gateway serves it and the run flows through.** A real-backend Playwright test that boots a Gateway, registers a workflow with a `ui:` entry, executes a run to completion, and drives a real browser that:
+2. **The Gateway serves it and the run flows through.** A real-backend Playwright test that boots a Gateway, registers a workflow whose JSX graph declares `<UI entry="../ui/<key>.tsx" />`, executes a run to completion, and drives a real browser that:
    - deep-links to `/workflows/<key>?runId=<id>`,
    - asserts the iframe rendered the custom UI,
    - asserts `data-testid="demo-run-id"` matches `?runId=` (proof the boot path works),
@@ -372,7 +379,7 @@ The server package's Gateway UI tests are the closest in-repo reference for the 
 - A dependency-free vanilla bundle that reads `?runId=` from `location.search` and renders a heading. Use it to assert the bundle path without coupling to a UI library.
 - The same demo on `gateway-react`. Drive `createGatewayReactRoot`, `useGatewayRun`, and `useGatewayActions` against the real fixture Gateway to prove the React hooks survive an iframe boundary, a stale-data transition, and a button-driven action.
 
-Register your fixture with `gateway.register("<key>", workflow, { ui: { entry: "..." } })`. Execute the run to completion *before* binding the port so Playwright never races the run's tree.
+Register your fixture with `gateway.register("<key>", workflow, { entryFile: "/path/to/.smithers/workflows/<key>.tsx" })` and put `<UI entry="../ui/<key>.tsx" />` inside that workflow. Execute the run to completion *before* binding the port so Playwright never races the run's tree.
 
 ## Reference
 

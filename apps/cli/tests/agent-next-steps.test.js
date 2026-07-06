@@ -35,6 +35,7 @@ describe("buildAgentNextSteps", () => {
         const firstStep = next.description.split("\n")[1];
         expect(firstStep).toContain(".smithers/ui/implement.tsx");
         expect(firstStep).toContain("gateway-react");
+        expect(firstStep).toContain('<UI entry="../ui/implement.tsx"');
         expect(firstStep).toContain("smithers ui run-1");
         expect(firstStep).toContain("smithers ui --app");
         expect(next.commands.map((cmd) => cmd.command)).toContain("ui --app");
@@ -47,10 +48,12 @@ describe("buildAgentNextSteps", () => {
         expect(next.commands[0]).toEqual({ command: "ui run-1", description: "Open the custom workflow UI" });
     });
 
-    test("probes .smithers/ui/<id>.tsx under cwd when hasUi is not supplied", () => {
+    test("probes a workflow-owned .smithers/ui/<id>.tsx under cwd when hasUi is not supplied", () => {
         const repo = createTempRepo();
         mkdirSync(join(repo.dir, ".smithers", "ui"), { recursive: true });
+        mkdirSync(join(repo.dir, ".smithers", "workflows"), { recursive: true });
         writeFileSync(join(repo.dir, ".smithers", "ui", "implement.tsx"), "export default null;\n");
+        writeFileSync(join(repo.dir, ".smithers", "workflows", "implement.tsx"), '<Workflow name="implement"><UI entry="../ui/implement.tsx" /></Workflow>\n');
         const withUi = buildAgentNextSteps({ workflowId: "implement", runId: "run-1", cwd: repo.dir });
         expect(withUi.commands[0].description).toBe("Open the custom workflow UI");
         const withoutUi = buildAgentNextSteps({ workflowId: "other", runId: "run-1", cwd: repo.dir });

@@ -5,19 +5,28 @@ description: Declare a workflow-owned browser UI that the Gateway serves and the
 
 `<UI>` lets a workflow carry its own Gateway UI declaration in the workflow TSX
 instead of registering a separate UI from the launcher. The component renders
-nothing in the workflow graph; the Gateway discovers it, bundles the client-side
-React entry, and serves it from the workflow UI route.
+nothing in the workflow graph; the Gateway discovers it during
+`gateway.register()`, bundles the client-side React entry, and serves it from
+the workflow UI route.
 
 ```tsx
-import { UI, Workflow } from "smithers-orchestrator";
+import { createSmithers, UI } from "smithers-orchestrator";
+
+const { Workflow, Task, smithers } = createSmithers({
+  // schemas...
+});
 
 export default smithers(() => (
   <Workflow name="custom-view">
-    <UI entry="./ui/custom-view.tsx" title="Custom View" />
+    <UI entry="../ui/custom-view.tsx" title="Custom View" />
     {/* normal workflow nodes */}
   </Workflow>
 ));
 ```
+
+`entry` paths resolve relative to the workflow source file when the Gateway was
+given `entryFile`. This is the default for `smithers gateway` and generated
+`.smithers/gateway.ts` files.
 
 ## Props
 
@@ -33,3 +42,21 @@ export default smithers(() => (
 Inline literal children must be serializable DOM elements and text. Use
 `entry` or `source` when the UI needs hooks, event handlers, Gateway actions, or
 TanStack collection state.
+
+## Existing UIs
+
+Existing `.smithers/ui/<workflow>.tsx` files that call
+`createGatewayReactRoot(<App />)` should use `entry`:
+
+```tsx
+<UI entry="../ui/release.tsx" title="Release" />
+```
+
+For a component-export module, use `source`:
+
+```tsx
+<UI source="../ui/release-app.tsx" exportName="ReleaseApp" title="Release" />
+```
+
+See [Migrate to Workflow-Owned UIs](/guides/workflow-owned-ui-migration) for
+the launcher and workflow changes.

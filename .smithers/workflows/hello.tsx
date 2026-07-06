@@ -4,6 +4,7 @@
 // smithers-description: The smallest possible workflow: one agent task that runs the prompt in .smithers/prompts/hello.mdx. Your starting point for authoring your own.
 // smithers-tags: starter, hello-world
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -50,6 +51,7 @@ export default smithers((ctx) => {
   const greet = ctx.outputMaybe("greeting", { nodeId: "greet" });
   return (
     <Workflow name="hello">
+      <UI entry="../ui/hello.tsx" title={"Hello World"} />
       <Sequence>
         <Task id="greet" output={outputs.greeting} agent={agents.cheapFast}>
           <HelloPrompt name={name} />

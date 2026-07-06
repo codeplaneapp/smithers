@@ -1,7 +1,7 @@
 import { Gateway, mdxPlugin } from "smithers-orchestrator";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 mdxPlugin();
 
@@ -21,18 +21,17 @@ function displayName(key: string, source: string): string {
   return match ? match[1].trim() : key;
 }
 
-// Mount each workflow + its UI (when a matching `ui/<key>.tsx` exists) independently.
+// Mount each workflow independently. Browser UIs are declared by the workflow
+// itself with <UI entry="../ui/<key>.tsx" /> and discovered by Gateway.register().
 // A workflow that fails to import (e.g. a broken prompt/MDX) disables only itself —
 // the rest of the gateway and the other workflow UIs still come up.
 async function mountWorkflow(key: string, title: string) {
   try {
     const workflowEntry = resolve(here, "workflows", key + ".tsx");
     const mod = await import("./workflows/" + key + ".tsx");
-    const uiEntry = resolve(here, "ui", key + ".tsx");
-    const options: { ui?: { entry: string; title: string }; entryFile: string } = { entryFile: workflowEntry };
-    if (existsSync(uiEntry)) options.ui = { entry: uiEntry, title };
-    gateway.register(key, mod.default, options);
-    if (options.ui) {
+    gateway.register(key, mod.default, { entryFile: workflowEntry });
+    const mounted = (gateway as any).workflows?.get?.(key)?.ui;
+    if (mounted) {
       console.log("  " + title + " UI -> http://" + host + ":" + port + "/workflows/" + key);
     } else {
       console.log("  " + title + " (no UI)");

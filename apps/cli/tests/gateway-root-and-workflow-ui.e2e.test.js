@@ -23,7 +23,8 @@ import {
  *      return. The server package has unit coverage for the handler, but nothing
  *      exercised it through the generated `.smithers/gateway.ts` in a browser —
  *      this closes that gap.
- *   2. A workflow UI bundle builds, boots, and mounts in a real Chromium loaded
+ *   2. A workflow-owned <UI> declaration is discovered from workflow source.
+ *   3. A workflow UI bundle builds, boots, and mounts in a real Chromium loaded
  *      from the live gateway (`/workflows/plan`).
  *
  * No route mocking: a real `smithers init`, the generated gateway booted as a
@@ -68,6 +69,18 @@ async function waitForHealth(base, timeoutMs = 60_000) {
   return false;
 }
 
+async function listWorkflowUi(base, key) {
+  const response = await fetch(`${base}/v1/rpc/listWorkflows`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ filter: { hasUi: true } }),
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.ok).toBe(true);
+  return body.payload.find((workflow) => workflow.key === key);
+}
+
 browserTest(
   "gateway root routes to console/landing (not 404 JSON) and a workflow UI mounts",
   async () => {
@@ -89,6 +102,8 @@ browserTest(
     repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
 
     expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
+    expect(repo.read(".smithers/gateway.ts")).not.toContain("ui: { entry:");
+    expect(repo.read(".smithers/workflows/plan.tsx")).toContain('<UI entry="../ui/plan.tsx"');
 
     const port = await findOpenPort();
     const base = `http://127.0.0.1:${port}`;
@@ -101,6 +116,9 @@ browserTest(
     let browser;
     try {
       expect(await waitForHealth(base)).toBe(true);
+      expect(await listWorkflowUi(base, "plan")).toEqual(
+        expect.objectContaining({ key: "plan", hasUi: true, uiPath: "/workflows/plan" }),
+      );
 
       // 1a — Raw HTTP: `GET /` is a 302 (to a mounted console) or a 200 HTML
       // landing page. It must never be the old bare 404 NOT_FOUND JSON.

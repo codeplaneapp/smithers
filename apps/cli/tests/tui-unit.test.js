@@ -413,6 +413,7 @@ describe("tui helpers", () => {
         // AUTHORING the UI file — mirroring buildAgentNextSteps' wording.
         expect(lines[0]).toContain(".smithers/ui/hello.tsx");
         expect(lines[0]).toContain("gateway-react");
+        expect(lines[0]).toContain('<UI entry="../ui/hello.tsx"');
         expect(lines[0]).toContain("smithers ui run-1");
         expect(lines).toContainEqual(expect.stringContaining("smithers graph /wf/hello.tsx"));
         expect(lines).toContainEqual(expect.stringContaining("smithers tree run-1"));
@@ -441,10 +442,12 @@ describe("tui helpers", () => {
         }
     });
 
-    test("customUiExists resolves the .smithers/ui/<workflowId>.tsx convention", () => {
+    test("customUiExists resolves a workflow-owned .smithers/ui/<workflowId>.tsx declaration", () => {
         const cwd = mkdtempSync(join(tmpdir(), "smithers-tui-ui-"));
         mkdirSync(join(cwd, ".smithers", "ui"), { recursive: true });
+        mkdirSync(join(cwd, ".smithers", "workflows"), { recursive: true });
         writeFileSync(join(cwd, ".smithers", "ui", "hello.tsx"), "export default null;\n");
+        writeFileSync(join(cwd, ".smithers", "workflows", "hello.tsx"), '<Workflow name="hello"><UI entry="../ui/hello.tsx" /></Workflow>\n');
         expect(customUiExists("hello", cwd)).toBe(true);
         expect(customUiExists("missing", cwd)).toBe(false);
         expect(customUiExists(undefined, cwd)).toBe(false);

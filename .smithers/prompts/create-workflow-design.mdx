@@ -25,6 +25,9 @@ Custom UIs go in: {props.uiDir}
   instead of re-implementing the loop.
 - **One `.tsx` workflow** in `{props.workflowsDir}/<workflowName>.tsx`, importing
   `agents` from `../agents`, with `createSmithers({ input, ...outputTables })`.
+  If the workflow has a custom UI, import `UI` from `smithers-orchestrator` and
+  declare `<UI entry="../ui/<workflowName>.tsx" title="<Title>" />` as a direct
+  child of the root `<Workflow>`.
 - **Prompts as `.mdx`.** Each substantive AI task renders an `.mdx` prompt from
   `{props.promptsDir}` that ends with `REQUIRED OUTPUT:\n{props.schema}` so the
   task's Zod output schema is injected automatically.
@@ -44,7 +47,8 @@ Custom UIs go in: {props.uiDir}
 ## Design the custom UI (required)
 
 Every new workflow gets a matching custom run UI at
-`{props.uiDir}/<workflowName>.tsx` (rendered by `smithers ui <runId>`), built on
+`{props.uiDir}/<workflowName>.tsx` (rendered by `smithers ui <runId>` after the
+workflow declares `<UI entry="../ui/<workflowName>.tsx" />`), built on
 `smithers-orchestrator/gateway-react` (`createGatewayReactRoot`,
 `useGatewayRuns`, `useGatewayRunEvents`, `useGatewayNodeOutput`,
 `useGatewayActions`). Look at `{props.uiDir}/vcs.tsx` or

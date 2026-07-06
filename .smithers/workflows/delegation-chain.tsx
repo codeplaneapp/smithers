@@ -4,6 +4,7 @@
 // smithers-description: Recursive multi-tier delegation — strong models refine the goal, decompose into tiered chunks, de-risk with research/POC probes, then execute with per-node backpressure (reviews over jj commit ranges, checks, developer previews), live-editable outputs, cost forecasts, and full scoring.
 // smithers-tags: delegation, planning, concierge, migration
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { DelegationChain, createSmithers, delegationSchemas } from "smithers-orchestrator";
 import {
   estimateAccuracyScorer,
@@ -75,6 +76,7 @@ export default smithers((ctx) => {
       : undefined;
   return (
     <Workflow name="delegation-chain">
+      <UI entry="../ui/delegation-chain.tsx" title={"Delegation Chain"} />
       <DelegationChain
         prompt={input?.prompt ?? ""}
         agents={tierAgents}

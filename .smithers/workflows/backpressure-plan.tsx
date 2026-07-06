@@ -4,6 +4,7 @@
 // smithers-description: Turn acceptance criteria into a gate matrix (schema/test/eval/review/approval/trace) so a workflow cannot just try-its-best and move on.
 // smithers-tags: quality, backpressure
 /** @jsxImportSource smithers-orchestrator */
+import { UI } from "smithers-orchestrator";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -114,6 +115,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="backpressure-plan">
+      <UI entry="../ui/backpressure-plan.tsx" title={"Backpressure Plan"} />
       <Sequence>
         {/* 1 — Pull the prompt apart into atomic, verifiable acceptance criteria. */}
         <Task id="extract-criteria" output={outputs.extractCriteria} agent={agents.smart}>

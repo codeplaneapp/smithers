@@ -24,7 +24,8 @@ Based on what you find, write **1–3 sentences** telling the user:
 Be encouraging — this is their first workflow build. Make it feel like progress, not a wait.
 
 If the build just finished:
-- Celebrate it! Tell them the workflow file was written and point them to `.smithers/workflows/` and `.smithers/ui/`
+- Celebrate it! Tell them the workflow file was written, the custom UI source
+  lives in `.smithers/ui/`, and the workflow declares it with `<UI>`
 - Tell them how to run it: `bunx smithers-orchestrator workflow run {props.childRunId}`
 
 {props.schema}

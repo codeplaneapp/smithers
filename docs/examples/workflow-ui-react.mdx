@@ -3,7 +3,7 @@ title: Workflow UI (React)
 description: A complete `gateway-react` workflow UI you can drop next to a workflow, with boot, run state, pushed live events, metrics, node output, approvals, and a stale-data-free render model.
 ---
 
-This example is a minimal first-class React UI for a workflow that ships with the Gateway. It demonstrates every piece a real UI exercises: the `createGatewayReactRoot` bootstrap, reading `?runId=` and the boot config, live event subscription, node-output reads, a lifecycle action, and an approvals strip, all in one file. Drop it at `.smithers/ui/<your-workflow>.tsx`, register your workflow with `ui: { entry: ".smithers/ui/<your-workflow>.tsx" }`, and open it with `bunx smithers-orchestrator ui`.
+This example is a minimal first-class React UI for a workflow that ships with the Gateway. It demonstrates every piece a real UI exercises: the `createGatewayReactRoot` bootstrap, reading `?runId=` and the boot config, live event subscription, node-output reads, a lifecycle action, and an approvals strip, all in one file. Drop it at `.smithers/ui/<your-workflow>.tsx`, declare it from the workflow with `<UI entry="../ui/<your-workflow>.tsx" />`, and open it with `bunx smithers-orchestrator ui`.
 
 For the full conceptual walkthrough, see [Custom Workflow UIs](/guides/custom-workflow-ui).
 
@@ -178,29 +178,22 @@ if (typeof document !== "undefined") {
 createGatewayReactRoot(<App />);
 ```
 
-## Registering the UI
+## Declaring the UI
 
-In your workflow's gateway setup (the `bun .smithers/scripts/<workflow>.ts` boot, or your hosted server):
+In your workflow file:
 
-```ts
-import { Gateway } from "smithers-orchestrator";
-import { demoReactUi } from "./.smithers/workflows/demo-react-ui";
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, UI } from "smithers-orchestrator";
 
-const gateway = new Gateway({
-  heartbeatMs: 15_000,
-  auth: { mode: "token", tokens: { "dev-token": { role: "operator", scopes: ["*"] } } },
-});
+const { Workflow, Task, smithers } = createSmithers();
 
-gateway.register("demo-react-ui", demoReactUi, {
-  ui: {
-    entry: ".smithers/ui/demo-react-ui.tsx",
-    title: "Demo React Workflow",
-    // Optional free-form props surfaced as `__SMITHERS_GATEWAY_UI__.props`.
-    props: { brand: "demo" },
-  },
-});
-
-await gateway.listen({ port: 7331 });
+export default smithers(() => (
+  <Workflow name="demo-react-ui">
+    <UI entry="../ui/demo-react-ui.tsx" title="Demo React Workflow" props={{ brand: "demo" }} />
+    <Task id="ship">{{ ok: true }}</Task>
+  </Workflow>
+));
 ```
 
 Then:
@@ -210,7 +203,7 @@ bunx smithers-orchestrator up demo-react-ui -d
 bunx smithers-orchestrator ui                          # opens the bundle in your browser
 ```
 
-The bundle is served at `/workflows/demo-react-ui`. The HTML shell injects `__SMITHERS_GATEWAY_UI__` and `?runId=` before your script runs; `createGatewayReactRoot` picks both up automatically.
+The Gateway discovers the `<UI>` declaration when it registers the workflow with its `entryFile`. The bundle is served at `/workflows/demo-react-ui`. The HTML shell injects `__SMITHERS_GATEWAY_UI__` and `?runId=` before your script runs; `createGatewayReactRoot` picks both up automatically.
 
 ## Embedding it in `apps/smithers`
 

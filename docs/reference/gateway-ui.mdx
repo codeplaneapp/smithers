@@ -46,8 +46,8 @@ building your own rows that match the components.
 
 This is a full `.smithers/ui/<workflow>.tsx` bundle: a run picker, the node tree,
 a live event log, a node-output pane, and the approval queue, wired together with
-local state. Save it next to a workflow, register the workflow with
-`ui: { entry: ".smithers/ui/<workflow>.tsx" }`, and open it with
+local state. Save it next to a workflow, declare it from that workflow with
+`<UI entry="../ui/<workflow>.tsx" />`, and open it with
 `bunx smithers-orchestrator ui RUN_ID` (or `bunx smithers-orchestrator ui --workflow <workflow>`).
 To open the full local control surface instead of a single workflow UI, see
 [`bunx smithers-orchestrator ui --app`](#the-full-local-smithers-ui) below.
