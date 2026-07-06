@@ -80,16 +80,25 @@ function buildPrompt(registry: Registry): string {
   ].join("\n");
 }
 
-/** Pull the last parseable JSON object out of agent stdout. */
+/** Pull the last verdict-shaped JSON object out of agent stdout. Scans each
+ * `{` from the last one backwards; the first candidate that parses and carries
+ * a `changed` key wins. */
 export function extractJson(stdout: string): Record<string, unknown> | null {
-  for (let start = stdout.lastIndexOf("{"); start >= 0; start = stdout.lastIndexOf("{", start - 1)) {
-    const candidate = stdout.slice(start, stdout.lastIndexOf("}") + 1);
+  const end = stdout.lastIndexOf("}");
+  if (end < 0) return null;
+  let start = stdout.lastIndexOf("{", end);
+  while (start >= 0) {
+    const candidate = stdout.slice(start, end + 1);
     try {
       const parsed = JSON.parse(candidate);
       if (parsed && typeof parsed === "object" && "changed" in parsed) return parsed;
     } catch {
       /* keep scanning backwards */
     }
+    // lastIndexOf(_, -1) clamps to 0 and would re-find index 0 forever, so stop
+    // once the leftmost brace has been tried.
+    if (start === 0) break;
+    start = stdout.lastIndexOf("{", start - 1);
   }
   return null;
 }
