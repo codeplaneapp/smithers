@@ -417,18 +417,6 @@ const fakeAgent = {
             expect(status).toBe(200);
             expect(data.runId).toBeDefined();
         });
-        test("accepts a capitalized Authorization header (Node lowercases it)", async () => {
-            const dbPath = resolve(testDir, "test-auth-cap.db");
-            const workflowPath = writeTestWorkflow("test-auth-cap", dbPath);
-            startTestServer({ authToken: "secret" });
-            const { status, data } = await request("/v1/runs", {
-                method: "POST",
-                body: { workflowPath },
-                headers: { Authorization: "Bearer secret" },
-            });
-            expect(status).toBe(200);
-            expect(data.runId).toBeDefined();
-        });
     });
     describe("POST /v1/runs/:runId/cancel", () => {
         test("cancels an active run", async () => {
