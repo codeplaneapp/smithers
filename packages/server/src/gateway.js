@@ -10,7 +10,7 @@
 import { createServer } from "node:http";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { extname, join, relative, resolve, sep } from "node:path";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 import { Effect, Metric } from "effect";
 import { WebSocketServer } from "ws";
@@ -51,6 +51,8 @@ import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
 import { authorizeGatewayUiRequest } from "./gatewayUi/auth.js";
 import { bundleGatewayUiEntry } from "./gatewayUi/bundle.js";
 import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
+import { SmithersCtx } from "@smithers-orchestrator/driver";
+import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
@@ -107,6 +109,7 @@ import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
  *   schedule?: string;
  *   webhook?: GatewayWebhookConfig;
  *   ui?: ResolvedGatewayUiConfig | null;
+ *   tui?: ResolvedWorkflowTuiConfig | null;
  *   system?: boolean;
  *   entryFile?: string;
  * }} RegisteredWorkflow
@@ -126,7 +129,19 @@ import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
  *   title?: string;
  *   props?: Record<string, unknown>;
  *   builtin?: "operator";
+ *   inline?: { kind: "literal"; tree: unknown } | { kind: "component"; source: string; exportName?: string };
  * }} ResolvedGatewayUiConfig
+ */
+/**
+ * @typedef {{
+ *   kind: "tui";
+ *   title?: string;
+ *   props?: Record<string, unknown>;
+ *   entry?: string;
+ *   source?: string;
+ *   exportName?: string;
+ *   inline?: { kind: "literal"; tree: unknown } | { kind: "component"; source: string; exportName?: string };
+ * }} ResolvedWorkflowTuiConfig
  */
 /**
  * @typedef {{

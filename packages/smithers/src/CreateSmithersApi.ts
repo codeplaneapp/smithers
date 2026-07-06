@@ -11,6 +11,8 @@ import type {
 		continueAsNew as baseContinueAsNew,
 		Worktree as BaseWorktree,
 		Timer as BaseTimer,
+		UI as BaseUI,
+		TUI as BaseTUI,
 } from "@smithers-orchestrator/components";
 import type { ApprovalProps } from "@smithers-orchestrator/components/components/ApprovalProps";
 import type { DepsSpec } from "@smithers-orchestrator/components/components/DepsSpec";
@@ -51,6 +53,8 @@ export type CreateSmithersApi<Schema = unknown> = {
 		props: SignalProps<SignalSchema>,
 	) => React.ReactElement;
 	Timer: typeof BaseTimer;
+	UI: typeof BaseUI;
+	TUI: typeof BaseTUI;
 	useCtx: () => SmithersCtx<RuntimeSchema<Schema>>;
 	smithers: (
 		build: (ctx: SmithersCtx<RuntimeSchema<Schema>>) => React.ReactElement,

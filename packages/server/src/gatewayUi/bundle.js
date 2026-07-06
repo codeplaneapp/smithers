@@ -1,5 +1,7 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 // Pin BOTH react and react-dom to the copy this server package resolves.
@@ -8,6 +10,7 @@ const require = createRequire(import.meta.url);
 // crashed with mixed React copies as soon as a UI imported react-dom directly
 // (portals, flushSync, createRoot in shared components).
 const reactSpecifierRe = /^react(?:-dom)?(?:\/.*)?$/;
+const INLINE_UI_NAMESPACE = "smithers-inline-ui";
 
 function resolveReactPeer(specifier) {
     try {
@@ -16,6 +19,107 @@ function resolveReactPeer(specifier) {
     catch {
         return null;
     }
+}
+
+/**
+ * @param {string} source
+ * @returns {string}
+ */
+function moduleSpecifier(source) {
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(source)) {
+        return source;
+    }
+    if (source.startsWith("/") || /^[A-Za-z]:[\\/]/.test(source)) {
+        return pathToFileURL(source).href;
+    }
+    return source;
+}
+
+/**
+ * @param {unknown} inline
+ * @returns {inline is { kind: "literal"; tree: unknown } | { kind: "component"; source: string; exportName?: string }}
+ */
+function isInlineUi(inline) {
+    return Boolean(inline && typeof inline === "object" && "kind" in inline);
+}
+
+/**
+ * @param {{ inline?: unknown }} config
+ * @returns {string | null}
+ */
+function inlineEntrypoint(config) {
+    if (!isInlineUi(config.inline)) {
+        return null;
+    }
+    const digest = createHash("sha1").update(JSON.stringify(config.inline)).digest("hex").slice(0, 16);
+    return `smithers-inline-ui:${digest}`;
+}
+
+/**
+ * @param {{ inline?: unknown }} config
+ * @returns {import("bun").BunPlugin | null}
+ */
+function inlineUiPlugin(config) {
+    if (!isInlineUi(config.inline)) {
+        return null;
+    }
+    const contents = config.inline.kind === "literal"
+        ? renderLiteralInlineUiEntry(config.inline.tree)
+        : renderComponentInlineUiEntry(config.inline.source, config.inline.exportName ?? "default");
+    return {
+        name: "smithers-inline-ui-entry",
+        setup(build) {
+            build.onResolve({ filter: /^smithers-inline-ui:/ }, (args) => ({
+                path: args.path,
+                namespace: INLINE_UI_NAMESPACE,
+            }));
+            build.onLoad({ filter: /.*/, namespace: INLINE_UI_NAMESPACE }, () => ({
+                loader: "tsx",
+                contents,
+            }));
+        },
+    };
+}
+
+/**
+ * @param {unknown} tree
+ * @returns {string}
+ */
+function renderLiteralInlineUiEntry(tree) {
+    return [
+        'import { createElement } from "react";',
+        'import { createGatewayReactRoot } from "@smithers-orchestrator/gateway-react";',
+        `const tree = ${JSON.stringify(tree)};`,
+        "function inflate(node) {",
+        "  if (node == null || typeof node === 'string' || typeof node === 'number') return node;",
+        "  if (Array.isArray(node)) return node.map(inflate);",
+        "  const children = Array.isArray(node.children) ? node.children.map(inflate) : [];",
+        "  return createElement(node.type, node.props || null, ...children);",
+        "}",
+        "function App() { return inflate(tree); }",
+        "createGatewayReactRoot(createElement(App), { baseUrl: globalThis.location?.origin });",
+    ].join("\n");
+}
+
+/**
+ * @param {string} source
+ * @param {string} exportName
+ * @returns {string}
+ */
+function renderComponentInlineUiEntry(source, exportName) {
+    return [
+        'import { createElement } from "react";',
+        'import { createGatewayReactRoot } from "@smithers-orchestrator/gateway-react";',
+        `import * as InlineUiModule from ${JSON.stringify(moduleSpecifier(source))};`,
+        `const exportName = ${JSON.stringify(exportName)};`,
+        "const Component = exportName === 'default' ? InlineUiModule.default : InlineUiModule[exportName];",
+        "if (!Component) throw new Error(`Smithers inline UI export not found: ${exportName}`);",
+        "function App() {",
+        "  const boot = globalThis.__SMITHERS_GATEWAY_UI__ || {};",
+        "  return createElement(Component, { ...(boot.props || {}), boot, workflowKey: boot.workflowKey, mountPath: boot.mountPath });",
+        "}",
+        "createGatewayReactRoot(createElement(App), { baseUrl: globalThis.location?.origin });",
+    ].join("\n");
 }
 
 /**
@@ -30,7 +134,9 @@ export async function bundleGatewayUiEntry(config, cache) {
     const noCache = !!process.env.SMITHERS_GATEWAY_UI_NO_CACHE
         && process.env.SMITHERS_GATEWAY_UI_NO_CACHE !== "0"
         && process.env.SMITHERS_GATEWAY_UI_NO_CACHE !== "false";
-    const cached = noCache ? undefined : cache.get(String(config.entry));
+    const inlineEntry = inlineEntrypoint(config);
+    const cacheKey = inlineEntry ?? String(config.entry);
+    const cached = noCache ? undefined : cache.get(cacheKey);
     if (cached) {
         return cached;
     }
@@ -38,7 +144,7 @@ export async function bundleGatewayUiEntry(config, cache) {
         throw new SmithersError("INVALID_INPUT", "Gateway UI bundling requires Bun.build.");
     }
     const result = await Bun.build({
-        entrypoints: [String(config.entry)],
+        entrypoints: [inlineEntry ?? String(config.entry)],
         root: process.cwd(),
         target: "browser",
         format: "esm",
@@ -53,6 +159,7 @@ export async function bundleGatewayUiEntry(config, cache) {
             importSource: "react",
         },
         plugins: [
+            inlineUiPlugin(config),
             {
                 name: "smithers-react-peer-dedupe",
                 setup(build) {
@@ -62,7 +169,7 @@ export async function bundleGatewayUiEntry(config, cache) {
                     });
                 },
             },
-        ],
+        ].filter(Boolean),
     });
     if (!result.success) {
         const message = result.logs?.map((entry) => entry.message).filter(Boolean).join("\n")
@@ -72,7 +179,7 @@ export async function bundleGatewayUiEntry(config, cache) {
     const output = result.outputs.find((entry) => entry.path.endsWith(".js")) ?? result.outputs[0];
     const body = await output.text();
     if (!noCache) {
-        cache.set(String(config.entry), body);
+        cache.set(cacheKey, body);
     }
     return body;
 }
