@@ -198,6 +198,26 @@ process.stdout.write(lines.join("\\n") + "\\n");
             await rm(argsFileDir, { recursive: true, force: true });
         }
     }, 15_000);
+    test("PiAgent buildCommand omits the dead hints property; diagnosticHints carries the data", async () => {
+        const agent = new PiAgent({
+            mode: "json",
+            provider: "openai",
+            model: "gpt-5.4-mini",
+            apiKey: "pi-test-key",
+        });
+        const commandSpec = await agent.buildCommand({
+            prompt: "Ping?",
+            cwd: "/tmp",
+        });
+        expect(commandSpec.command).toBe("pi");
+        expect(commandSpec).not.toHaveProperty("hints");
+        // Diagnostics data lives on diagnosticHints(), which the preflight path reads.
+        expect(agent.diagnosticHints()).toEqual({
+            provider: "openai",
+            model: "gpt-5.4-mini",
+            apiKey: "pi-test-key",
+        });
+    });
     test("PiAgent json mode includes --print", async () => {
         const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-pi-json-print-"));
         const argsFile = join(argsFileDir, "args.json");
