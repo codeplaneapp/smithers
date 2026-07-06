@@ -1,7 +1,7 @@
 import { and, eq, getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { z } from "zod";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
@@ -114,8 +114,16 @@ export function selectOutputRowEffect(db, table, key) {
  * @param {_OutputKey} key
  * @returns {Promise<T | undefined>}
  */
-export function selectOutputRow(db, table, key) {
-    return Effect.runPromise(selectOutputRowEffect(db, table, key));
+export async function selectOutputRow(db, table, key) {
+    // Effect.runPromise rejects with a FiberFailure that drops the failure's
+    // `cause` chain; rethrow the SmithersError itself so callers can still
+    // reach the underlying driver error (e.g. a JSON.parse SyntaxError from a
+    // malformed row) through `cause`.
+    const exit = await Effect.runPromiseExit(selectOutputRowEffect(db, table, key));
+    if (Exit.isSuccess(exit)) {
+        return exit.value;
+    }
+    throw Cause.squash(exit.cause);
 }
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db

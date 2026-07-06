@@ -219,6 +219,23 @@ describe("getNodeOutputRoute status", () => {
       }),
     ).rejects.toMatchObject({ code: "MalformedOutputRow" });
   });
+
+  test("SyntaxError buried in the cause chain returns MalformedOutputRow", async () => {
+    // selectOutputRow wraps the JSON.parse SyntaxError in a SmithersError
+    // (DB_QUERY_FAILED) with the SyntaxError on `cause`. The wrapper's outer
+    // message deliberately lacks the json/parse/malformed keywords so this
+    // pins the cause-chain walk rather than the message heuristic.
+    await expect(
+      invokeRoute({
+        selectOutputRowImpl: async () => {
+          const wrapped = new Error("DB_QUERY_FAILED: select failed", {
+            cause: new SyntaxError("Unexpected token i in JSON"),
+          });
+          throw wrapped;
+        },
+      }),
+    ).rejects.toMatchObject({ code: "MalformedOutputRow" });
+  });
 });
 
 describe("getNodeOutputRoute input boundaries", () => {

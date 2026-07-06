@@ -128,6 +128,35 @@ describe("output row roundtrip", () => {
             sqlite.close();
         }
     });
+    test("malformed JSON row rejects with the SyntaxError reachable via cause", async () => {
+        const { table, db, sqlite } = createTableAndDb("results", z.object({ payload: z.object({ ok: z.boolean() }) }));
+        try {
+            sqlite.exec("INSERT INTO results (run_id, node_id, iteration, payload) VALUES ('r1', 'n1', 0, '{not json')");
+            let caught;
+            try {
+                await selectOutputRow(db, table, { runId: "r1", nodeId: "n1", iteration: 0 });
+            }
+            catch (error) {
+                caught = error;
+            }
+            expect(caught).toBeDefined();
+            // The rejection must be the SmithersError itself, not a FiberFailure
+            // that severs the cause chain — consumers (getNodeOutput's
+            // looksLikeMalformedOutputRow) walk `cause` to find the SyntaxError.
+            let sawSyntaxError = false;
+            for (let current = caught, depth = 0; current != null && depth < 8; depth += 1) {
+                if (current instanceof SyntaxError) {
+                    sawSyntaxError = true;
+                    break;
+                }
+                current = current.cause;
+            }
+            expect(sawSyntaxError).toBe(true);
+        }
+        finally {
+            sqlite.close();
+        }
+    });
 });
 describe("getAgentOutputSchema", () => {
     test("strips system columns from schema", () => {
