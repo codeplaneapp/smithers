@@ -5,6 +5,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
+const thisDir = dirname(fileURLToPath(import.meta.url));
+const monorepoRoot = resolve(thisDir, "../../../..");
 // Pin BOTH react and react-dom to the copy this server package resolves.
 // react-dom hard-requires a version-matched react, so deduping only `react`
 // (the old behavior) left react-dom resolving from the consumer workspace and
@@ -31,6 +33,10 @@ function resolveReactPeer(specifier) {
  */
 function resolveWorkspaceDependency(specifier, resolveDir) {
     const packageRoots = [
+        resolve(monorepoRoot, "packages/gateway-react/src"),
+        resolve(monorepoRoot, "packages/gateway-react"),
+        resolve(monorepoRoot, "packages/gateway-client/src"),
+        resolve(monorepoRoot, "packages/gateway-client"),
         resolve(process.cwd(), "packages/gateway-react/src"),
         resolve(process.cwd(), "packages/gateway-react"),
         resolve(process.cwd(), "packages/gateway-client/src"),
@@ -60,7 +66,7 @@ function resolveWorkspaceDependency(specifier, resolveDir) {
 function resolveSmithersUiDependency(specifier, resolveDir) {
     try {
         return require.resolve(specifier, {
-            paths: [resolveDir, process.cwd()].filter(Boolean),
+            paths: [resolveDir, monorepoRoot, process.cwd()].filter(Boolean),
         });
     }
     catch {
@@ -159,7 +165,7 @@ function renderLiteralInlineUiEntry(tree) {
 function renderComponentInlineUiEntry(source, exportName) {
     return [
         'import { createElement } from "react";',
-        'import { createGatewayReactRoot } from "@smithers-orchestrator/gateway-react/createGatewayReactRoot";',
+        'import { createRoot } from "react-dom/client";',
         `import * as InlineUiModule from ${JSON.stringify(moduleSpecifier(source))};`,
         `const exportName = ${JSON.stringify(exportName)};`,
         "const Component = exportName === 'default' ? InlineUiModule.default : InlineUiModule[exportName];",
@@ -168,7 +174,7 @@ function renderComponentInlineUiEntry(source, exportName) {
         "  const boot = globalThis.__SMITHERS_GATEWAY_UI__ || {};",
         "  return createElement(Component, { ...(boot.props || {}), boot, workflowKey: boot.workflowKey, mountPath: boot.mountPath });",
         "}",
-        "createGatewayReactRoot(createElement(App), { baseUrl: globalThis.location?.origin });",
+        "createRoot(document.getElementById('root')).render(createElement(App));",
     ].join("\n");
 }
 

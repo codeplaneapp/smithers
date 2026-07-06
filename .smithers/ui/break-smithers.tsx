@@ -195,7 +195,7 @@ function App() {
           <div style={{ padding: 24, textAlign: "center", color: theme.textMuted ?? "#8a8f98" }}>
             No <code>break-smithers</code> run yet. Launch one:
             <pre style={{ marginTop: 8, fontSize: 12 }}>
-              smithers up .smithers/workflows/break-smithers.tsx -d --input '{"deadlineIso":"2026-07-06T22:00:00-04:00"}'
+              {`smithers up .smithers/workflows/break-smithers.tsx -d --input '{"deadlineIso":"2026-07-06T22:00:00-04:00"}'`}
             </pre>
           </div>
         </section>

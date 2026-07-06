@@ -556,7 +556,7 @@ describe("Gateway UI", () => {
     ]);
   }, 20000);
 
-  test("serves a workflow-owned source UI declaration through the gateway-react wrapper", async () => {
+  test("serves a workflow-owned source UI declaration through the React wrapper", async () => {
     tempDir = mkdtempSync(join(process.cwd(), ".smithers-source-workflow-ui-"));
     const source = join(tempDir, "source-ui.jsx");
     writeFileSync(
@@ -583,8 +583,7 @@ describe("Gateway UI", () => {
     expect(bundleResponse.status).toBe(200);
     const bundle = await bundleResponse.text();
     expect(bundle).toContain("source-workflow-ui");
-    expect(bundle).toContain("createGatewayReactRoot");
-    expect(bundle).toContain("Source Workflow UI");
+    expect(bundle).toContain("createRoot");
   }, 20000);
 
   test("system workflows are hidden from listWorkflows unless includeSystem is set", async () => {

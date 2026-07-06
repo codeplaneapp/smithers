@@ -37,13 +37,15 @@ describe("hasCustomUi", () => {
         process.env.SMITHERS_HOME = "/global-home";
         try {
             const globalUi = resolve("/global-home", "ui", "implement.tsx");
+            const globalWorkflow = resolve("/global-home", "workflows", "implement.tsx");
             const seen = [];
             const exists = (p) => {
                 seen.push(p);
-                return p === globalUi;
+                return p === globalUi || p === globalWorkflow;
             };
+            const read = () => '<Workflow name="implement"><UI entry="../ui/implement.tsx" /></Workflow>';
             // Workspace candidate is absent, so only the global-pack branch matches.
-            expect(hasCustomUi("implement", "/work", exists)).toBe(true);
+            expect(hasCustomUi("implement", "/work", exists, read)).toBe(true);
             expect(seen).toContain(globalUi);
             expect(seen[0]).toContain("/work/.smithers/ui/implement.tsx");
             // A workflow with no global UI stays false.

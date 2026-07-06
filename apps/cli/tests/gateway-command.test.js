@@ -84,12 +84,24 @@ function spawnSmithers(args, options) {
 }
 
 function writeBasicUi(repo) {
-    repo.write(".smithers/ui/basic.tsx", [
-        "import React from \"react\";",
+    repo.write(".smithers/workflows/basic.tsx", [
+        "/** @jsxImportSource smithers-orchestrator */",
+        "import { createSmithers } from \"smithers-orchestrator\";",
         "",
-        "export default function BasicUi() {",
-        "  return <main>Basic UI</main>;",
-        "}",
+        "const { Workflow, Task, UI, smithers } = createSmithers({});",
+        "",
+        "export default smithers(() => (",
+        "  <Workflow name=\"basic\">",
+        "    <UI entry=\"../ui/basic.tsx\" title=\"Basic\" />",
+        "    <Task id=\"done\">{{ ok: true }}</Task>",
+        "  </Workflow>",
+        "));",
+        "",
+    ].join("\n"));
+    repo.write(".smithers/ui/basic.tsx", [
+        "import { createGatewayReactRoot } from \"smithers-orchestrator/gateway-react\";",
+        "",
+        "createGatewayReactRoot(<main>Basic UI</main>);",
         "",
     ].join("\n"));
 }
@@ -289,10 +301,10 @@ test("gateway discovers a global-pack workflow-owned UI when the workspace has n
     const smithersHome = join(globalHome.dir, ".smithers");
     globalHome.write(".smithers/workflows/globping.tsx", [
         "/** @jsxImportSource smithers-orchestrator */",
-        "import { createSmithers, UI } from \"smithers-orchestrator\";",
+        "import { createSmithers } from \"smithers-orchestrator\";",
         "import { z } from \"zod/v4\";",
         "",
-        "const { Workflow, Task, smithers, outputs } = createSmithers({",
+        "const { Workflow, Task, UI, smithers, outputs } = createSmithers({",
         "  output: z.object({ ok: z.boolean() }),",
         "});",
         "",

@@ -170,6 +170,7 @@ export default smithers((ctx) => {
       : '(no diff captured; write a representative message for the staged work)';
     return (
       <Workflow name="vcs">
+        <UI entry="../ui/vcs.tsx" title={"VCS"} />
         <Sequence>
           <Task id="vcs:diff" output={diffSchema}>{() => readDiff(tool)}</Task>
           <Task id="vcs:message" output={messageSchema} agent={agents.smart}>
@@ -187,6 +188,7 @@ export default smithers((ctx) => {
       : '(history unavailable)';
     return (
       <Workflow name="vcs">
+        <UI entry="../ui/vcs.tsx" title={"VCS"} />
         <Sequence>
           <Task id="vcs:log" output={logSchema}>{() => readLog(tool)}</Task>
           <Task id="vcs:rebasePlan" output={rebasePlanSchema} agent={agents.smart}>
@@ -199,6 +201,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="vcs">
+      <UI entry="../ui/vcs.tsx" title={"VCS"} />
       <Task id="vcs:status" output={statusSchema}>{() => readStatus(tool)}</Task>
     </Workflow>
   );

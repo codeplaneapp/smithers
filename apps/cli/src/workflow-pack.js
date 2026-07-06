@@ -3032,6 +3032,7 @@ function renderWorkflows(workflowIds) {
     ];
     const all = [
         renderWorkflowFile("vcs", "VCS", [
+            "import { UI } from \"smithers-orchestrator\";",
             "import { createSmithers, Task, Sequence } from 'smithers-orchestrator';",
             "import { execFileSync } from 'node:child_process';",
             "import { z } from 'zod/v4';",
@@ -3186,6 +3187,7 @@ function renderWorkflows(workflowIds) {
             "  if (action === 'log') {",
             "    return (",
             "      <Workflow name=\"vcs\">",
+            "        <UI entry=\"../ui/vcs.tsx\" title={\"VCS\"} />",
             "        <Task id=\"vcs:log\" output={logSchema}>{() => readLog(tool)}</Task>",
             "      </Workflow>",
             "    );",
@@ -3198,6 +3200,7 @@ function renderWorkflows(workflowIds) {
             "      : '(no diff captured; write a representative message for the staged work)';",
             "    return (",
             "      <Workflow name=\"vcs\">",
+            "        <UI entry=\"../ui/vcs.tsx\" title={\"VCS\"} />",
             "        <Sequence>",
             "          <Task id=\"vcs:diff\" output={diffSchema}>{() => readDiff(tool)}</Task>",
             "          <Task id=\"vcs:message\" output={messageSchema} agent={agents.smart}>",
@@ -3215,6 +3218,7 @@ function renderWorkflows(workflowIds) {
             "      : '(history unavailable)';",
             "    return (",
             "      <Workflow name=\"vcs\">",
+            "        <UI entry=\"../ui/vcs.tsx\" title={\"VCS\"} />",
             "        <Sequence>",
             "          <Task id=\"vcs:log\" output={logSchema}>{() => readLog(tool)}</Task>",
             "          <Task id=\"vcs:rebasePlan\" output={rebasePlanSchema} agent={agents.smart}>",
@@ -3227,6 +3231,7 @@ function renderWorkflows(workflowIds) {
             "",
             "  return (",
             "    <Workflow name=\"vcs\">",
+            "      <UI entry=\"../ui/vcs.tsx\" title={\"VCS\"} />",
             "      <Task id=\"vcs:status\" output={statusSchema}>{() => readStatus(tool)}</Task>",
             "    </Workflow>",
             "  );",

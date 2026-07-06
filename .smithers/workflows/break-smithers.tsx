@@ -6,7 +6,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers, UI } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { providers } from "../agents";
 
@@ -222,6 +222,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="break-smithers">
+      <UI entry="../ui/break-smithers.tsx" title={"Break Smithers · EDD loop"} />
       <Loop id="edd" until={deadlinePassed} maxIterations={maxIterations} onMaxReached="return-last">
         <Sequence>
           {/* 1. CLOCK — wall-clock deadline gate for the NEXT iteration. */}
