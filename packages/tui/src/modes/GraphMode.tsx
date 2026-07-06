@@ -5,6 +5,7 @@ import { useOverlayOpen } from "../OverlayContext.tsx";
 import { nodeGlyph, nodeGlyphColor, isModifiedKeyEvent } from "./treeUtils.ts";
 import {
   computeGraphLayout,
+  connectorArrow,
   edgesForConnector,
   hasIncomingEdge,
 } from "./graphUtils.ts";
@@ -16,8 +17,6 @@ const CARD_SLOT = CARD_H + ROW_GAP;
 const COMPACT_WIDTH = 100;
 const CARD_W_NORMAL = 20;
 const CARD_W_COMPACT = 14;
-const ARROW_W_NORMAL = 5;  // " ──▶" padded to 5
-const ARROW_W_COMPACT = 3; // " → " padded to 3
 
 // ─── NodeCard ────────────────────────────────────────────────────────────────
 
@@ -63,15 +62,16 @@ function NodeCard({
 function ConnectorColumn({
   numSlots,
   connEdges,
-  arrowWidth,
   compact,
 }: {
   numSlots: number;
   connEdges: Array<{ fromRow: number; toRow: number }>;
-  arrowWidth: number;
   compact: boolean;
 }) {
-  const arrow = compact ? " →  " : " ──▶ ";
+  const arrow = connectorArrow(compact);
+  // Cell width is derived from the arrow so the glyph can never overflow its
+  // column (see #582); a blank slot fills the same width with spaces.
+  const arrowWidth = arrow.length;
   const blank = " ".repeat(arrowWidth);
 
   const slots = Array.from({ length: numSlots }, (_, toRow) =>
@@ -142,7 +142,6 @@ export function GraphView({
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
   const cardWidth = compact ? CARD_W_COMPACT : CARD_W_NORMAL;
-  const arrowWidth = compact ? ARROW_W_COMPACT : ARROW_W_NORMAL;
 
   const layout = useMemo(
     () => computeGraphLayout(nodes, root),
@@ -253,7 +252,6 @@ export function GraphView({
           key={`conn-${c}`}
           numSlots={numSlots}
           connEdges={connEdges}
-          arrowWidth={arrowWidth}
           compact={compact}
         />,
       );

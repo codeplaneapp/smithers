@@ -3,6 +3,7 @@ import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import {
   computeColumnDepths,
   computeGraphLayout,
+  connectorArrow,
   edgesForConnector,
   hasIncomingEdge,
 } from "../src/modes/graphUtils.ts";
@@ -138,6 +139,22 @@ describe("graphUtils – edgesForConnector", () => {
     const layout = computeGraphLayout([a, b], null);
     const conn = edgesForConnector(layout.edges, layout.positions, 0);
     expect(conn).toHaveLength(0);
+  });
+});
+
+describe("graphUtils – connectorArrow", () => {
+  // Regression for #582: the compact arrow was " →  " (4 chars) rendered into a
+  // width-3 connector column, so arrow rows overflowed and were one cell wider
+  // than blank rows, skewing the graph. The arrow must fit its own column
+  // exactly in both modes, so callers can size the cell from `.length`.
+  it("compact arrow is exactly 3 columns wide (no overflow)", () => {
+    expect(connectorArrow(true)).toBe(" → ");
+    expect(connectorArrow(true).length).toBe(3);
+  });
+
+  it("normal arrow is exactly 5 columns wide", () => {
+    expect(connectorArrow(false)).toBe(" ──▶ ");
+    expect(connectorArrow(false).length).toBe(5);
   });
 });
 
