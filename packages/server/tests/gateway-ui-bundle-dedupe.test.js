@@ -68,4 +68,17 @@ describe("gateway UI bundle react dedupe", () => {
     // Sanity: the real (server-resolved) copies were bundled instead.
     expect(body).toContain("react-dom");
   });
+
+  test("defines process.env.NODE_ENV=production in served UI bundles", async () => {
+    // The default (cached) serving path bundles production React for the size
+    // win; a refactor of the Bun.build define could silently drop it. Pin it.
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-ui-nodeenv-"));
+    const entry = join(tempDir, "entry.tsx");
+    writeFileSync(entry, "console.log(process.env.NODE_ENV);\n");
+
+    const body = await bundleGatewayUiEntry({ entry }, new Map());
+
+    expect(body).toContain('console.log("production")');
+    expect(body).not.toContain('console.log("development")');
+  });
 });

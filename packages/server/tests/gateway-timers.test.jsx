@@ -224,6 +224,22 @@ describe("Gateway timer sweep", () => {
         await seedWaitingQuotaRun(adapter, "quota-noreset-run", "report", null);
         await gateway.processDueTimers();
         expect(resumed).toEqual([]);
+        // A no-reset run is never auto-resumed, so it must not pin the gateway
+        // awake: hasPendingTimers stays false and the gateway can idle out.
+        expect(gateway.hasPendingTimers).toBe(false);
+        expect(gateway.isIdle()).toBe(true);
+    });
+    test("keeps the gateway busy while a future-reset quota run is parked", async () => {
+        const dbPath = makeDbPath("quota-future-busy");
+        dbPaths.push(dbPath);
+        const { workflow, db } = createTimerHostWorkflow(dbPath);
+        gateway = new Gateway();
+        gateway.register("report", workflow);
+        gateway.resumeRunIfNeeded = async () => {};
+        const adapter = new SmithersDb(db);
+        await seedWaitingQuotaRun(adapter, "quota-future-busy-run", "report", Date.now() + 3_600_000);
+        await gateway.processDueTimers();
+        expect(gateway.hasPendingTimers).toBe(true);
     });
     test("fails a due run whose source changed instead of re-sweeping it forever", async () => {
         const dbPath = makeDbPath("source-changed");
