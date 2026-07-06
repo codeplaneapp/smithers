@@ -1062,7 +1062,7 @@ export function MarkdownEditor({
     typeof window === "undefined" ||
     typeof document === "undefined" ||
     !document?.createElement ||
-    (typeof navigator !== "undefined" && /happy-?dom|jsdom|bun/i.test(navigator.userAgent));
+    (typeof navigator !== "undefined" && /happy-?dom|jsdom|\bBun\//i.test(navigator.userAgent));
 
   useEffect(() => {
     fallbackValueRef.current = initialValue;

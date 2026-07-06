@@ -26,6 +26,7 @@ import {
   SkipPreviewsButton,
   dcCss,
   goalApprovalPendingOf,
+  pollPendingOf,
   runIdFromUrl,
 } from "./delegation-chain/dc-shared";
 
@@ -52,6 +53,7 @@ function App() {
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [pollSubmitted, setPollSubmitted] = useState(false);
   const [pollBusy, setPollBusy] = useState(false);
+  const [pollError, setPollError] = useState<string | null>(null);
 
   const gatewayActions = useGatewayActions();
   const runsQuery = useGatewayRuns({ filter: { limit: 30 } });
@@ -89,7 +91,7 @@ function App() {
   // agent's EMPTY refined prompt (the surface shows a warning instead of
   // leaving the paused run with nothing actionable).
   const showRefinedPrompt = goalApprovalPendingOf(graph);
-  const showPoll = (graph.phase === "scoring" || graph.phase === "done") && !pollSubmitted;
+  const showPoll = pollPendingOf(pendingApprovalIds) && !pollSubmitted;
   const nodeCount = Object.keys(graph.nodes).length;
 
   async function launch() {
@@ -112,9 +114,12 @@ function App() {
 
   async function submitPoll(answers: Parameters<typeof actions.submitPoll>[0], comment?: string) {
     setPollBusy(true);
+    setPollError(null);
     try {
       await actions.submitPoll(answers, comment);
       setPollSubmitted(true);
+    } catch (cause) {
+      setPollError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setPollBusy(false);
     }
@@ -239,6 +244,7 @@ function App() {
             ) : null}
             <ScoresPanel scores={graph.scores} />
             {showPoll ? <PollForm busy={pollBusy} onSubmit={(answers, comment) => void submitPoll(answers, comment)} /> : null}
+            {pollError ? <div className="error-strip">{pollError}</div> : null}
             {!selectedNode && unresolvedQuestions.length === 0 && !showRefinedPrompt && !showPoll && !graph.scores ? (
               <p className="muted" data-testid="dc-rail-empty">
                 Click a node to inspect its brief, output (editable), gates, and version history.
