@@ -1669,12 +1669,12 @@ async function buildNodeSnapshot(adapter, options) {
 // Schemas
 // ---------------------------------------------------------------------------
 const workflowArgs = z.object({
-    workflow: z.string().describe("Path to a .tsx workflow file"),
+    workflow: z.string().describe("Workflow ID (from `smithers workflow list`) or path to a .tsx workflow file"),
 });
-// `up` accepts an optional workflow path: omit it (or pass --interactive) to pick
-// one through the interactive terminal flow instead.
+// `up` accepts an optional workflow: omit it (or pass --interactive) to pick one
+// through the interactive terminal flow instead.
 const upArgs = z.object({
-    workflow: z.string().optional().describe("Path to a .tsx workflow file (omit with --interactive to pick one)"),
+    workflow: z.string().optional().describe("Workflow ID (from `smithers workflow list`) or path to a .tsx workflow file (omit with --interactive to pick one)"),
 });
 const upOptions = z.object({
     detach: z.boolean().default(false).describe("Run in background, print run ID, exit"),
@@ -2036,9 +2036,15 @@ function defaultEvalRunLabel() {
     return `${timestamp}-${crypto.randomUUID().slice(0, 8)}`;
 }
 /**
+ * Resolve a workflow argument that may be either a `.tsx` file path or a
+ * discovered workflow ID (as printed by `smithers workflow list`). Existing
+ * files are returned verbatim; otherwise the arg is treated as an ID and
+ * resolved to its entry file. Keeps `graph`/`up`/`eval`/`optimize` consistent
+ * with `workflow run`, which has always accepted IDs.
+ *
  * @param {string} workflowInput
  */
-function resolveWorkflowPathForEval(workflowInput) {
+function resolveWorkflowArg(workflowInput) {
     const asPath = resolve(process.cwd(), workflowInput);
     if (existsSync(asPath)) {
         return workflowInput;
@@ -2789,7 +2795,7 @@ async function resolveBrowserGateway(options) {
             : autostartAttempted && workspace
                 ? `\n\n${autostartFailureMessage ?? formatGatewayAutostartDiagnostics(workspace)}`
                 : "";
-        return { ok: false, message: `No Smithers Gateway reachable${base ? ` at ${base}` : " for this workspace"}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.${detail}` };
+        return { ok: false, message: `No Smithers Gateway reachable${base ? ` at ${base}` : " for this workspace"}. Start one with \`smithers gateway\` (it serves workflow-owned UIs declared with <UI>), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.${detail}` };
     }
     return { ok: true, base, token, workspace };
 }
@@ -3189,26 +3195,7 @@ async function runGatewayCommand(options) {
             ensureSmithersTables(workflow.db);
             setupSqliteCleanup(workflow);
             backendCleanups.push(() => closeWorkflowBackend(workflow));
-            // Auto-mount a custom UI when the workflow's own pack provides
-            // ui/<id>.tsx, so `smithers gateway` serves workflow UIs without
-            // requiring a hand-written .smithers/gateway.ts. The UI must come
-            // from the SAME pack the workflow was discovered in: a global
-            // `~/.smithers` workflow ships its UI in `~/.smithers/ui`, which a
-            // workspace-only lookup would miss (e.g. a sandbox repo with no
-            // local .smithers served entirely from the global pack).
-            const uiEntry = discovered.packDir
-                ? resolve(discovered.packDir, "ui", `${discovered.id}.tsx`)
-                : resolve(workspace, ".smithers", "ui", `${discovered.id}.tsx`);
-            if (existsSync(uiEntry)) {
-                gateway.register(discovered.id, workflow, {
-                    ui: { entry: uiEntry, title: titleizeWorkflowId(discovered.id) },
-                    system: discovered.system,
-                    entryFile: discovered.entryFile,
-                });
-            }
-            else {
-                gateway.register(discovered.id, workflow, { system: discovered.system, entryFile: discovered.entryFile });
-            }
+            gateway.register(discovered.id, workflow, { system: discovered.system, entryFile: discovered.entryFile });
             workflows.push(discovered.id);
         }
         catch (error) {
@@ -4792,16 +4779,39 @@ const cli = Cli.create({
         if (mode === "interactive") {
             let preselect;
             if (c.args.workflow) {
-                const entryFile = resolve(process.cwd(), c.args.workflow);
-                if (!existsSync(entryFile)) {
-                    return fail({ code: "WORKFLOW_NOT_FOUND", message: `Workflow file not found: ${c.args.workflow}`, exitCode: 4 });
+                const asPath = resolve(process.cwd(), c.args.workflow);
+                if (existsSync(asPath)) {
+                    const id = basename(c.args.workflow).replace(/\.[mc]?[tj]sx?$/i, "");
+                    preselect = { entryFile: asPath, id, displayName: id };
                 }
-                const id = basename(c.args.workflow).replace(/\.[mc]?[tj]sx?$/i, "");
-                preselect = { entryFile, id, displayName: id };
+                else {
+                    // Not a file — treat the arg as a discovered workflow ID, the
+                    // same way `smithers workflow run <id>` does.
+                    try {
+                        const discovered = resolveWorkflow(c.args.workflow, process.cwd());
+                        preselect = { entryFile: discovered.entryFile, id: discovered.id, displayName: discovered.displayName ?? discovered.id };
+                    }
+                    catch (err) {
+                        if (err instanceof SmithersError) {
+                            return fail({ code: err.code, message: err.message, exitCode: 4 });
+                        }
+                        throw err;
+                    }
+                }
             }
             return runTuiCommand(c, fail, { preselect });
         }
-        return executeUpCommand(c, c.args.workflow, c.options, fail);
+        let workflowFile;
+        try {
+            workflowFile = resolveWorkflowArg(c.args.workflow);
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({ code: err.code, message: err.message, exitCode: 4 });
+            }
+            throw err;
+        }
+        return executeUpCommand(c, workflowFile, c.options, fail);
     },
 })
     // =========================================================================
@@ -4943,7 +4953,7 @@ const cli = Cli.create({
     async run(c) {
         const fail = makeFail(c);
         try {
-            const workflowPath = resolveWorkflowPathForEval(c.args.workflow);
+            const workflowPath = resolveWorkflowArg(c.args.workflow);
             const loadedCases = loadEvalCases(process.cwd(), c.options.cases, {
                 maxCases: c.options.maxCases,
             });
@@ -5077,7 +5087,7 @@ const cli = Cli.create({
             defaultEvalRunLabel,
             formatRequestedJsonOutput,
             loadWorkflow,
-            resolveWorkflowPathForEval,
+            resolveWorkflowPathForEval: resolveWorkflowArg,
             setupAbortSignal,
             setupSqliteCleanup,
             setCommandExitOverride: (exitCode) => {
@@ -6894,8 +6904,9 @@ const cli = Cli.create({
     async run(c) {
         const fail = makeFail(c);
         try {
-            const resolvedWorkflowPath = resolve(process.cwd(), c.args.workflow);
-            const workflow = await loadWorkflow(c.args.workflow);
+            const workflowFile = resolveWorkflowArg(c.args.workflow);
+            const resolvedWorkflowPath = resolve(process.cwd(), workflowFile);
+            const workflow = await loadWorkflow(workflowFile);
             ensureSmithersTables(workflow.db);
             const schema = resolveSchema(workflow.db);
             const inputTable = schema.input;
@@ -6939,8 +6950,8 @@ const cli = Cli.create({
                 return value;
             })), {
                 cta: buildAgentNextSteps({
-                    workflowId: workflowIdFromPath(c.args.workflow),
-                    workflowFile: c.args.workflow,
+                    workflowId: workflowIdFromPath(workflowFile),
+                    workflowFile,
                     runId: c.options.runId,
                     justRan: "graph",
                 }),
@@ -7758,7 +7769,7 @@ const cli = Cli.create({
     // and opens <gateway><uiPath>?runId=<runId>.
     // =========================================================================
     .command("ui", {
-    description: "Open the custom UI for a workflow run in your browser. Starts a local Gateway automatically if none is running (serving workspace UIs from .smithers/ui/); pass --no-autostart or --gateway <url> to opt out.",
+    description: "Open the custom UI for a workflow run in your browser. Starts a local Gateway automatically if none is running (serving workflow-owned <UI> declarations); pass --no-autostart or --gateway <url> to opt out.",
     args: z.object({
         runId: z.string().optional().describe("Run to open. Defaults to the most recent run."),
     }),
