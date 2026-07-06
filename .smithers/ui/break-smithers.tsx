@@ -25,6 +25,13 @@ function fmtRemaining(ms: number): string {
   return `${h}h ${String(m).padStart(2, "0")}m ${String(sec).padStart(2, "0")}s`;
 }
 
+// getNodeOutput returns { status, row: {...} }; the task's fields live under .row.
+function rowOf(state: { data?: Record<string, unknown> }): Record<string, unknown> | undefined {
+  const d = state?.data;
+  if (d && typeof d === "object" && "row" in d) return (d as { row?: Record<string, unknown> }).row;
+  return d;
+}
+
 const SEV_COLOR: Record<string, string> = { high: "#e5484d", medium: "#f5a623", low: "#3aa675" };
 const KIND_COLOR: Record<string, string> = { docs: "#5b8def", code: "#a074e8", "eval-only": "#8a8f98" };
 
@@ -72,10 +79,10 @@ function RoundCard({ runId, iteration, sig, active }: { runId: string; iteration
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
 
-  const e = evalRun.data as { suite?: string; ok?: boolean; exitCode?: number } | undefined;
-  const f = friction.data as { title?: string; area?: string; severity?: string; kind?: string; whatWasBad?: string } | undefined;
-  const a = authored.data as { id?: string; verify?: string; tier?: string } | undefined;
-  const c = committed.data as { committed?: boolean; message?: string; note?: string } | undefined;
+  const e = rowOf(evalRun) as { suite?: string; ok?: boolean; exitCode?: number } | undefined;
+  const f = rowOf(friction) as { title?: string; area?: string; severity?: string; kind?: string; whatWasBad?: string } | undefined;
+  const a = rowOf(authored) as { id?: string; verify?: string; tier?: string } | undefined;
+  const c = rowOf(committed) as { committed?: boolean; message?: string; note?: string } | undefined;
 
   return (
     <div
@@ -134,7 +141,9 @@ function RoundCard({ runId, iteration, sig, active }: { runId: string; iteration
 function App() {
   const runsRaw = useGatewayRuns({ filter: { workflow: WORKFLOW, limit: 10 } });
   const runs = (runsRaw.data ?? []) as Array<{ runId: string; status?: string; createdAtMs?: number }>;
-  const runId = runs[0]?.runId;
+  // Pin to the run the URL names (smithers ui appends ?runId=…); fall back to newest.
+  const urlRunId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("runId") ?? undefined : undefined;
+  const runId = urlRunId ?? runs[0]?.runId;
 
   const { nodes, status } = useGatewayRunTree(runId);
   const nodesLite = nodes as unknown as NodeLite[];
@@ -148,7 +157,7 @@ function App() {
 
   // Live deadline from the most recent clock output.
   const clock = useGatewayNodeOutput({ runId, nodeId: "clock", iteration: maxRound });
-  const clockData = clock.data as { deadlineIso?: string; round?: number } | undefined;
+  const clockData = rowOf(clock) as { deadlineIso?: string; round?: number } | undefined;
   const deadlineMs = clockData?.deadlineIso ? Date.parse(clockData.deadlineIso) : Number.NaN;
 
   // 1s tick for the countdown.
