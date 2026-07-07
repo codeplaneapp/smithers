@@ -161,6 +161,34 @@ async function resolveCloudflareGetSandbox() {
 }
 
 /**
+ * Parse a sandbox run's result JSON and stamp the remote identifiers. Shared by
+ * exec and process execution modes so both reconcile the same way.
+ *
+ * @param {string} rawResult
+ * @param {{ command: string; remoteSandboxId: string; resultPath: string }} ctx
+ */
+function parseCloudflareSandboxResult(rawResult, { command, remoteSandboxId, resultPath }) {
+	if (rawResult.trim() === "") {
+		throw new Error(`Cloudflare sandbox command "${command}" produced no result JSON for sandbox "${remoteSandboxId}": the workflow entry must write result JSON to ${resultPath} (via SMITHERS_SANDBOX_RESULT_PATH) or print it to stdout.`);
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(rawResult);
+	} catch (error) {
+		throw new Error(`Cloudflare sandbox command "${command}" produced invalid result JSON for sandbox "${remoteSandboxId}" at ${resultPath}: ${error instanceof Error ? error.message : String(error)}. Raw output: ${rawResult.slice(0, 500)}`);
+	}
+	const remoteRunId = "bundlePath" in parsed
+		? parsed.remoteRunId ?? remoteSandboxId
+		: parsed.remoteRunId ?? parsed.runId ?? remoteSandboxId;
+	return {
+		...parsed,
+		remoteRunId,
+		workspaceId: parsed.workspaceId ?? remoteSandboxId,
+		containerId: parsed.containerId ?? remoteSandboxId,
+	};
+}
+
+/**
  * Builds a Smithers SandboxProvider backed by Cloudflare Sandbox SDK.
  *
  * @param {{
@@ -170,6 +198,7 @@ async function resolveCloudflareGetSandbox() {
  *   sandboxId?: (request: import("@smithers-orchestrator/sandbox").SandboxProviderRequest) => string;
  *   sandboxOptions?: Record<string, unknown>;
  *   keepAlive?: boolean;
+ *   sleepAfter?: string | number;
  *   workdir?: string;
  *   command?: string;
  *   env?: Record<string, string>;
@@ -200,6 +229,9 @@ export function createCloudflareSandboxProvider(options = {}) {
 				enableDefaultSession: false,
 				...(options.sandboxOptions ?? {}),
 				keepAlive: options.keepAlive ?? options.sandboxOptions?.keepAlive,
+				// Idle-hibernation window; the main container cost lever. Falls back
+				// to the Sandbox SDK default (~10m) when neither is set.
+				sleepAfter: options.sleepAfter ?? options.sandboxOptions?.sleepAfter,
 			});
 			active.set(`${request.runId}:${request.sandboxId}`, sandbox);
 			request.heartbeat({ sandboxId: request.sandboxId, stage: "cloudflare-sandbox-created", remoteSandboxId });
@@ -231,22 +263,26 @@ export function createCloudflareSandboxProvider(options = {}) {
 				SMITHERS_SANDBOX_RESULT_PATH: resultPath,
 			};
 			if (options.execution === "process") {
-				const process = await sandbox.startProcess(command, {
+				const proc = await sandbox.startProcess(command, {
 					cwd: workdir,
 					env,
 					timeout: request.toolTimeoutMs,
 				});
-				return {
-					status: "finished",
-					output: {
-						processId: process.id,
-						pid: process.pid,
-						status: process.status,
-					},
-					remoteRunId: remoteSandboxId,
-					workspaceId: remoteSandboxId,
-					containerId: remoteSandboxId,
-				};
+				request.heartbeat({ sandboxId: request.sandboxId, stage: "cloudflare-sandbox-process-started", remoteSandboxId, pid: proc.pid });
+				// A SandboxProvider.run() must return the run RESULT, not a bare pid.
+				// Wait for the detached process to exit, then reconcile the result
+				// bundle exactly like exec mode. (Previously this returned
+				// status:"finished" with only a pid and never collected a result —
+				// a silent success trap: the engine got no output/diff back.)
+				const exit = typeof proc.waitForExit === "function"
+					? await proc.waitForExit(request.toolTimeoutMs)
+					: undefined;
+				const exitCode = Number(exit?.exitCode ?? proc.exitCode ?? 0);
+				if (exitCode !== 0) {
+					throw new Error(`Cloudflare sandbox process "${command}" exited with code ${exitCode} for sandbox "${remoteSandboxId}".`);
+				}
+				const rawProcessResult = await readFileContent(await sandbox.readFile(resultPath));
+				return parseCloudflareSandboxResult(rawProcessResult, { command, remoteSandboxId, resultPath });
 			}
 
 			const result = await sandbox.exec(command, {
@@ -261,29 +297,7 @@ export function createCloudflareSandboxProvider(options = {}) {
 			const rawResult = stdout.startsWith("{")
 				? stdout
 				: await readFileContent(await sandbox.readFile(resultPath));
-			if (rawResult.trim() === "") {
-				throw new Error(`Cloudflare sandbox command "${command}" produced no result JSON for sandbox "${remoteSandboxId}": the workflow entry must write result JSON to ${resultPath} (via SMITHERS_SANDBOX_RESULT_PATH) or print it to stdout.`);
-			}
-			let parsed;
-			try {
-				parsed = JSON.parse(rawResult);
-			} catch (error) {
-				throw new Error(`Cloudflare sandbox command "${command}" produced invalid result JSON for sandbox "${remoteSandboxId}" at ${resultPath}: ${error instanceof Error ? error.message : String(error)}. Raw output: ${rawResult.slice(0, 500)}`);
-			}
-			if ("bundlePath" in parsed) {
-				return {
-					...parsed,
-					remoteRunId: parsed.remoteRunId ?? remoteSandboxId,
-					workspaceId: parsed.workspaceId ?? remoteSandboxId,
-					containerId: parsed.containerId ?? remoteSandboxId,
-				};
-			}
-			return {
-				...parsed,
-				remoteRunId: parsed.remoteRunId ?? parsed.runId ?? remoteSandboxId,
-				workspaceId: parsed.workspaceId ?? remoteSandboxId,
-				containerId: parsed.containerId ?? remoteSandboxId,
-			};
+			return parseCloudflareSandboxResult(rawResult, { command, remoteSandboxId, resultPath });
 		},
 		async cleanup(request) {
 			const key = `${request.runId}:${request.sandboxId}`;
@@ -333,7 +347,30 @@ export function createMockCloudflareSandboxEnvironment(handler) {
 				return { success: true, exitCode: 0, stdout: "", stderr: "" };
 			},
 			async startProcess(command) {
-				return { id: `${sandboxId}:process`, pid: 1, command, status: "running" };
+				if (destroyed) throw new Error(`Mock Cloudflare sandbox "${sandboxId}" is destroyed.`);
+				// Model a detached process that runs to completion: invoke the
+				// handler, write its result bundle, and expose waitForExit() so the
+				// provider can reconcile it (mirrors @cloudflare/sandbox's Process).
+				const requestEntry = [...files.entries()].find(([path]) => path.endsWith(DEFAULT_REQUEST_FILE));
+				const request = JSON.parse(requestEntry?.[1] ?? "{}");
+				const result = await handler({ command, request, files });
+				const resultPath = [...files.keys()].find((path) => path.endsWith(DEFAULT_RESULT_FILE)) ??
+					absolutePath(DEFAULT_WORKDIR, DEFAULT_RESULT_FILE);
+				files.set(resultPath, JSON.stringify(result));
+				return {
+					id: `${sandboxId}:process`,
+					pid: 1,
+					command,
+					status: "completed",
+					exitCode: 0,
+					async waitForExit() {
+						return { exitCode: 0 };
+					},
+					async getStatus() {
+						return "completed";
+					},
+					async kill() {},
+				};
 			},
 			async destroy() {
 				destroyed = true;

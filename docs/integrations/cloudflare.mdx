@@ -126,10 +126,11 @@ On Cloudflare, Smithers splits along the two execution modes described in
   every run uses `node:fs` and `node:child_process` (git/jj worktrees on a real
   filesystem), so a Node/Bun host is still required to *drive* runs. The
   Cloudflare provider also creates **one container per `<Sandbox>` `run()`**
-  (keyed `${runId}-${sandboxId}`) -- not per agent turn -- and its
-  `execution: "process"` mode is fire-and-forget (returns a pid, no result
-  reconciliation). Treat Workers-native execution as the storage +
-  in-process-agent path today, not turnkey serverless for CLI harnesses.
+  (keyed `${runId}-${sandboxId}`) -- not per agent turn. Both `exec` and
+  `process` execution modes wait for the work to finish and reconcile the result
+  bundle; set `sleepAfter` to control idle hibernation. Treat Workers-native
+  execution as the storage + in-process-agent path today, not turnkey serverless
+  for CLI harnesses.
 </Warning>
 
 What's billed on Cloudflare:
@@ -138,7 +139,7 @@ What's billed on Cloudflare:
 |---|---|
 | In-process SDK agents | Model API tokens (billed by the model provider, not Cloudflare) |
 | Worker / Durable Object control plane | Worker invocations + Durable Object requests and duration; DO-SQLite storage (rows read/written). Use **DO-SQLite** for durable run-of-record -- **D1 has no interactive transactions** and can leave partial state (see the D1 warning above) |
-| `@cloudflare/sandbox` container (per `<Sandbox>`) | Container wall-clock from create → teardown. Idle hibernation stays at the Sandbox SDK default unless you set it. `cleanup: "keep"` leaves the container billing until it hibernates; with the default `cleanup: "destroy"` the container is destroyed at the end of the boundary -- even in `execution: "process"` mode, whose `run()` returns a pid immediately and then hits provider cleanup |
+| `@cloudflare/sandbox` container (per `<Sandbox>`) | Container wall-clock from create → teardown. Idle hibernation follows `sleepAfter` (Sandbox SDK default ~10m if unset). `cleanup: "keep"` leaves the container billing until it hibernates; the default `cleanup: "destroy"` stops it at the end of the boundary -- in both `exec` and `process` modes, since `run()` awaits completion before cleanup |
 
 <Note>
   Cloudflare's own pricing for Workers, Durable Objects, and the Sandbox SDK

@@ -67,9 +67,10 @@ describe("createCloudflareSandboxProvider", () => {
 		expect(env.sandboxes.get("run-1-sandbox-1").destroyed).toBe(true);
 	});
 
-	test("can start a long-running process instead of waiting for a result bundle", async () => {
-		const env = createMockCloudflareSandboxEnvironment(() => {
-			throw new Error("exec should not be called");
+	test("process mode waits for the process to exit and reconciles the result bundle", async () => {
+		const env = createMockCloudflareSandboxEnvironment(async ({ command }) => {
+			expect(command).toBe("bun run worker.ts");
+			return { status: "finished", output: { trained: true } };
 		});
 		const provider = createCloudflareSandboxProvider({
 			binding: env.binding,
@@ -78,6 +79,7 @@ describe("createCloudflareSandboxProvider", () => {
 			command: "bun run worker.ts",
 			cleanup: "keep",
 		});
+		const heartbeats = [];
 		const result = await provider.run({
 			runId: "run-2",
 			sandboxId: "worker",
@@ -90,11 +92,18 @@ describe("createCloudflareSandboxProvider", () => {
 			maxOutputBytes: 1024,
 			toolTimeoutMs: 10_000,
 			config: {},
-			heartbeat: () => {},
+			heartbeat: (data) => heartbeats.push(data),
 		});
-		expect(result).toMatchObject({
+		// Not a bare pid: the detached process is awaited and its result bundle
+		// reconciled, with the remote identifiers stamped (regression: process
+		// mode used to fire-and-forget and return only a pid).
+		expect(result).toEqual({
 			status: "finished",
-			output: { processId: "run-2-worker:process", status: "running" },
+			output: { trained: true },
+			remoteRunId: "run-2-worker",
+			workspaceId: "run-2-worker",
+			containerId: "run-2-worker",
 		});
+		expect(heartbeats.some((h) => h?.stage === "cloudflare-sandbox-process-started")).toBe(true);
 	});
 });
