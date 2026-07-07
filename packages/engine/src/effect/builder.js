@@ -1,5 +1,21 @@
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
+import { createRequire } from "node:module";
+
+// bun:sqlite is Bun-only, and createBuilderDb (the only user) runs only on the
+// Bun sqlite path. Load it lazily via createRequire (which stays synchronous, so
+// createBuilderDb keeps its sync signature) so this module -- and therefore the
+// engine that transitively imports it -- IMPORTS on Node / V8 isolates, where
+// createBuilderDb is never called. Fixes engine load under a Node serverless host.
+const requireBun = createRequire(import.meta.url);
+/** @type {typeof import("bun:sqlite").Database | undefined} */
+let BunDatabase;
+function loadBunDatabase() {
+    return (BunDatabase ??= requireBun("bun:sqlite").Database);
+}
+/** @type {typeof import("drizzle-orm/bun-sqlite").drizzle | undefined} */
+let bunDrizzle;
+function loadBunDrizzle() {
+    return (bunDrizzle ??= requireBun("drizzle-orm/bun-sqlite").drizzle);
+}
 import { and, desc, eq } from "drizzle-orm";
 import { Context, Duration, Effect, Exit, Layer, Schedule, Schema, } from "effect";
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -686,6 +702,7 @@ function createInputTable() {
  * @param {BuilderStepHandle[]} handles
  */
 function createBuilderDb(filename, handles) {
+    const Database = loadBunDatabase();
     const sqlite = new Database(filename);
     sqlite.run("PRAGMA journal_mode = WAL");
     // 30s timeout: concurrent worktrees each spawn agent processes that all write
@@ -713,6 +730,7 @@ function createBuilderDb(filename, handles) {
     for (const handle of handles) {
         schema[handle.tableKey] = handle.table;
     }
+    const drizzle = loadBunDrizzle();
     const db = drizzle(sqlite, { schema });
     return {
         sqlite,
