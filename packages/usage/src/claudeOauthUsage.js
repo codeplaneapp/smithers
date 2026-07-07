@@ -21,10 +21,11 @@ const PROBE_TIMEOUT_MS = 6_000;
  * `none` report with a readable reason.
  *
  * @param {{ configDir?: string }} account
+ * @param {typeof readClaudeCredentials} [readCreds] Injectable for tests; defaults to `readClaudeCredentials`.
  * @returns {Promise<UsageProbe>}
  */
-export async function claudeOauthUsage(account) {
-    const creds = readClaudeCredentials(account);
+export async function claudeOauthUsage(account, readCreds = readClaudeCredentials) {
+    const creds = readCreds(account);
     if (!creds) {
         return { source: "none", error: "No Claude OAuth credentials in configDir or Keychain" };
     }

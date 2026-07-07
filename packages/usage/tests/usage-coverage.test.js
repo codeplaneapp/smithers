@@ -6,13 +6,16 @@ import {
     anthropicHeaderUsage,
     claudeOauthUsage,
     codexWhamUsage,
+    decodeJwtClaims,
     formatUsageReports,
+    getAccountUsage,
     getUsageForAccounts,
     googleUsage,
     humanizeDurationShort,
     openaiHeaderUsage,
     parseAnthropicRateLimitHeaders,
     parseCodexUsage,
+    parseDurationSeconds,
     parseOpenAiRateLimitHeaders,
     readUsageCache,
     readClaudeCredentials,
@@ -162,8 +165,11 @@ describe("credential readers", () => {
         expect(readClaudeCredentials({ configDir: badDir }, "linux")).toBeNull();
     });
 
-    test("readClaudeCredentials falls back to macOS Keychain credentials", async () => {
-        const spawnSync = mock((command, args) => {
+    test("readClaudeCredentials falls back to macOS Keychain credentials", () => {
+        // Inject spawnSync rather than mock.module + `?query` re-import: the
+        // re-imported module is a distinct instance whose coverage bun discards,
+        // and it also becomes the "reported" instance, masking the real one.
+        const spawn = mock((command, args) => {
             expect(command).toBe("security");
             expect(args).toEqual(["find-generic-password", "-s", "Claude Code-credentials", "-w"]);
             return {
@@ -173,24 +179,53 @@ describe("credential readers", () => {
                 })),
             };
         });
-        mock.module("node:child_process", () => ({ spawnSync }));
-        const { readClaudeCredentials: readWithKeychain } = await import(
-            `../src/readClaudeCredentials.js?keychain-success=${Date.now()}`
-        );
 
-        expect(readWithKeychain({}, "darwin")).toEqual({ accessToken: "keychain-token", expiresAt: 789 });
-        expect(spawnSync).toHaveBeenCalledTimes(1);
+        expect(readClaudeCredentials({}, "darwin", spawn)).toEqual({ accessToken: "keychain-token", expiresAt: 789 });
+        expect(spawn).toHaveBeenCalledTimes(1);
     });
 
-    test("readClaudeCredentials returns null when macOS Keychain has no credential", async () => {
-        const spawnSync = mock(() => ({ status: 44, stdout: Buffer.from("") }));
-        mock.module("node:child_process", () => ({ spawnSync }));
-        const { readClaudeCredentials: readWithKeychainMiss } = await import(
-            `../src/readClaudeCredentials.js?keychain-miss=${Date.now()}`
-        );
+    test("readClaudeCredentials handles Keychain hit with no stdout buffer", () => {
+        // status 0 but stdout undefined exercises the `?? ""` fallback on line 34.
+        const spawn = mock(() => ({ status: 0, stdout: undefined }));
+        expect(readClaudeCredentials({}, "darwin", spawn)).toBeNull();
+        expect(spawn).toHaveBeenCalledTimes(1);
+    });
 
-        expect(readWithKeychainMiss({}, "darwin")).toBeNull();
-        expect(spawnSync).toHaveBeenCalledTimes(1);
+    test("readClaudeCredentials returns null when macOS Keychain has no credential", () => {
+        const spawn = mock(() => ({ status: 44, stdout: Buffer.from("") }));
+        expect(readClaudeCredentials({}, "darwin", spawn)).toBeNull();
+        expect(spawn).toHaveBeenCalledTimes(1);
+    });
+
+    test("readClaudeCredentials degrades when the credentials file cannot be read or lacks a token", () => {
+        // existsSync true but readFileSync throws (path is a directory) -> readFileSafe catch.
+        const dir = tempDir();
+        mkdirSync(join(dir, ".credentials.json"));
+        expect(readClaudeCredentials({ configDir: dir }, "linux")).toBeNull();
+
+        // credentials present but no accessToken -> parseCredentials returns null.
+        const noToken = tempDir();
+        writeFileSync(join(noToken, ".credentials.json"), JSON.stringify({ claudeAiOauth: {} }));
+        expect(readClaudeCredentials({ configDir: noToken }, "linux")).toBeNull();
+
+        // valid token with a non-numeric expiresAt -> expiresAt omitted.
+        const noExpiry = tempDir();
+        writeFileSync(join(noExpiry, ".credentials.json"), JSON.stringify({
+            claudeAiOauth: { accessToken: "tok", expiresAt: "later" },
+        }));
+        expect(readClaudeCredentials({ configDir: noExpiry }, "linux")).toEqual({ accessToken: "tok" });
+    });
+
+    test("readCodexCredentials degrades on missing dir, malformed json, and absent token", () => {
+        expect(readCodexCredentials({})).toBeNull();
+
+        const bad = tempDir();
+        writeFileSync(join(bad, "auth.json"), "{not json");
+        expect(readCodexCredentials({ configDir: bad })).toBeNull();
+
+        const noToken = tempDir();
+        writeFileSync(join(noToken, "auth.json"), JSON.stringify({ tokens: {} }));
+        expect(readCodexCredentials({ configDir: noToken })).toBeNull();
     });
 
     test("readCodexCredentials falls back to the account id inside the id_token JWT", () => {
@@ -397,5 +432,273 @@ describe("getUsageForAccounts cache decisions", () => {
             [{ label: "k", provider: "kimi", configDir: "/x" }],
             { env: { SMITHERS_HOME: rootFile }, nowMs: Date.parse("2026-06-03T00:00:00.000Z") },
         )).resolves.toMatchObject([{ accountLabel: "k", source: "none" }]);
+    });
+
+    test("codex uses the 60s soft interval and claude-code re-probes past its 180s floor", async () => {
+        const env = { SMITHERS_HOME: tempDir() };
+        const claudeConfig = tempDir();
+        writeFileSync(join(claudeConfig, ".credentials.json"), JSON.stringify({
+            claudeAiOauth: { accessToken: "claude-token", expiresAt: 99999999999999 },
+        }));
+        writeUsageCache({
+            version: 1,
+            entries: {
+                cx: {
+                    report: {
+                        accountLabel: "cx", provider: "codex", authMode: "subscription",
+                        source: "oauth", stale: false, estimate: false,
+                        fetchedAt: "2026-06-03T00:03:00.000Z", windows: [], error: "codex-cached",
+                    },
+                },
+                cl: {
+                    report: {
+                        accountLabel: "cl", provider: "claude-code", authMode: "subscription",
+                        source: "oauth", stale: false, estimate: false,
+                        fetchedAt: "2026-06-03T00:00:00.000Z", windows: [], error: "claude-cached",
+                    },
+                },
+                km: {
+                    report: {
+                        accountLabel: "km", provider: "kimi", authMode: "subscription",
+                        source: "none", stale: false, estimate: false,
+                        fetchedAt: "2026-06-03T00:03:20.000Z", windows: [], error: "kimi-cached",
+                    },
+                },
+            },
+        }, env);
+        globalThis.fetch = mock(async () => jsonResponse(200, {
+            five_hour: { utilization: 10, resets_at: "2026-06-03T05:00:00.000Z" },
+        }));
+
+        const reports = await getUsageForAccounts(
+            [
+                { label: "cx", provider: "codex", configDir: "/x" },
+                { label: "cl", provider: "claude-code", configDir: claudeConfig },
+                { label: "km", provider: "kimi", configDir: "/x" },
+            ],
+            // codex age 30s (< 60s soft interval -> cached); kimi age 10s (< 30s
+            // default interval -> cached); claude age > 180s floor -> re-probed.
+            { env, nowMs: Date.parse("2026-06-03T00:03:30.000Z") },
+        );
+
+        const cx = reports.find((r) => r.accountLabel === "cx");
+        const cl = reports.find((r) => r.accountLabel === "cl");
+        const km = reports.find((r) => r.accountLabel === "km");
+        expect(cx).toMatchObject({ stale: true, error: "codex-cached" });
+        expect(km).toMatchObject({ stale: true, error: "kimi-cached" });
+        expect(cl?.stale).toBe(false);
+        expect(cl?.source).toBe("oauth");
+    });
+});
+
+describe("network probe error and success branches", () => {
+    test("anthropicHeaderUsage covers missing key, 401, success, and thrown error", async () => {
+        await expect(anthropicHeaderUsage({})).resolves.toEqual({
+            source: "none",
+            error: "Account has no API key set",
+        });
+
+        globalThis.fetch = mock(async () => jsonResponse(401, {}));
+        await expect(anthropicHeaderUsage({ apiKey: "bad" })).resolves.toEqual({
+            source: "none",
+            error: "ANTHROPIC_API_KEY rejected (401)",
+        });
+
+        globalThis.fetch = mock(async () => jsonResponse(200, {}, {
+            "anthropic-ratelimit-requests-limit": "100",
+            "anthropic-ratelimit-requests-remaining": "40",
+            "anthropic-ratelimit-requests-reset": "2026-06-03T00:01:00.000Z",
+        }));
+        const ok = await anthropicHeaderUsage({ apiKey: "good" });
+        expect(ok).toMatchObject({ source: "headers" });
+        expect(ok.error).toBeUndefined();
+        expect(ok.windows[0]).toMatchObject({ id: "requests-per-min", remaining: 40 });
+
+        globalThis.fetch = mock(async () => { throw new Error("boom"); });
+        await expect(anthropicHeaderUsage({ apiKey: "x" })).resolves.toMatchObject({
+            source: "none",
+            error: expect.stringContaining("Anthropic header probe failed: boom"),
+        });
+    });
+
+    test("openaiHeaderUsage covers missing key, 429, error status without headers, and thrown error", async () => {
+        await expect(openaiHeaderUsage({})).resolves.toEqual({
+            source: "none",
+            error: "Account has no API key set",
+        });
+
+        globalThis.fetch = mock(async () => jsonResponse(429, {}, {
+            "x-ratelimit-limit-requests": "50",
+            "x-ratelimit-remaining-requests": "0",
+            "x-ratelimit-reset-requests": "30s",
+            "retry-after": "9",
+        }));
+        const limited = await openaiHeaderUsage({ apiKey: "k" });
+        expect(limited).toMatchObject({ source: "headers" });
+        expect(limited.error).toContain("retry after 9s");
+
+        globalThis.fetch = mock(async () => jsonResponse(500, {}));
+        await expect(openaiHeaderUsage({ apiKey: "k" })).resolves.toEqual({
+            source: "none",
+            error: "OpenAI returned 500 with no rate-limit headers",
+        });
+
+        globalThis.fetch = mock(async () => { throw new Error("neterr"); });
+        await expect(openaiHeaderUsage({ apiKey: "k" })).resolves.toMatchObject({
+            source: "none",
+            error: expect.stringContaining("OpenAI header probe failed: neterr"),
+        });
+    });
+
+    test("claudeOauthUsage covers no creds, 401, 429, non-ok, and thrown error", async () => {
+        // Inject a null-returning reader: an empty configDir would otherwise fall
+        // back to the host Keychain, which is non-deterministic across machines.
+        await expect(claudeOauthUsage({ configDir: tempDir() }, () => null)).resolves.toEqual({
+            source: "none",
+            error: "No Claude OAuth credentials in configDir or Keychain",
+        });
+
+        const configDir = tempDir();
+        writeFileSync(join(configDir, ".credentials.json"), JSON.stringify({
+            claudeAiOauth: { accessToken: "claude-token", expiresAt: 99999999999999 },
+        }));
+
+        globalThis.fetch = mock(async () => jsonResponse(401, {}));
+        await expect(claudeOauthUsage({ configDir })).resolves.toMatchObject({
+            source: "none",
+            error: expect.stringContaining("rejected (401)"),
+        });
+
+        globalThis.fetch = mock(async () => jsonResponse(429, {}));
+        await expect(claudeOauthUsage({ configDir })).resolves.toMatchObject({
+            source: "none",
+            error: expect.stringContaining("rate limited (429)"),
+        });
+
+        globalThis.fetch = mock(async () => jsonResponse(503, {}));
+        await expect(claudeOauthUsage({ configDir })).resolves.toEqual({
+            source: "none",
+            error: "Claude usage endpoint returned 503",
+        });
+
+        globalThis.fetch = mock(async () => { throw new Error("down"); });
+        await expect(claudeOauthUsage({ configDir })).resolves.toMatchObject({
+            source: "none",
+            error: expect.stringContaining("Claude usage probe failed: down"),
+        });
+    });
+
+    test("claudeOauthUsage reports an expired token", () => {
+        const configDir = tempDir();
+        writeFileSync(join(configDir, ".credentials.json"), JSON.stringify({
+            claudeAiOauth: { accessToken: "claude-token", expiresAt: 1 },
+        }));
+        return expect(claudeOauthUsage({ configDir })).resolves.toEqual({
+            source: "none",
+            error: "Claude OAuth token expired; run `claude` to refresh",
+        });
+    });
+
+    test("codexWhamUsage covers no creds, 401, non-ok, and thrown error", async () => {
+        await expect(codexWhamUsage({ configDir: tempDir() })).resolves.toEqual({
+            source: "none",
+            error: "No Codex ChatGPT credentials in configDir/auth.json",
+        });
+
+        const configDir = tempDir();
+        writeFileSync(join(configDir, "auth.json"), JSON.stringify({
+            tokens: { access_token: "codex-token", account_id: "acct" },
+        }));
+
+        globalThis.fetch = mock(async () => jsonResponse(401, {}));
+        await expect(codexWhamUsage({ configDir })).resolves.toMatchObject({
+            source: "none",
+            error: expect.stringContaining("rejected (401)"),
+        });
+
+        globalThis.fetch = mock(async () => jsonResponse(502, {}));
+        await expect(codexWhamUsage({ configDir })).resolves.toEqual({
+            source: "none",
+            error: "Codex usage endpoint returned 502",
+        });
+
+        globalThis.fetch = mock(async () => { throw new Error("kaput"); });
+        await expect(codexWhamUsage({ configDir })).resolves.toMatchObject({
+            source: "none",
+            error: expect.stringContaining("Codex usage probe failed: kaput"),
+        });
+    });
+});
+
+describe("getAccountUsage provider routing", () => {
+    test("routes every supported provider through its adapter", async () => {
+        globalThis.fetch = mock(async () => jsonResponse(200, {}, {
+            "anthropic-ratelimit-requests-limit": "100",
+            "anthropic-ratelimit-requests-remaining": "99",
+            "x-ratelimit-limit-requests": "50",
+            "x-ratelimit-remaining-requests": "49",
+        }));
+
+        const claudeDir = tempDir();
+        writeFileSync(join(claudeDir, ".credentials.json"), JSON.stringify({
+            claudeAiOauth: { accessToken: "claude-token", expiresAt: 99999999999999 },
+        }));
+        const codexDir = tempDir();
+        writeFileSync(join(codexDir, "auth.json"), JSON.stringify({
+            tokens: { access_token: "codex-token", account_id: "acct" },
+        }));
+
+        const claude = await getAccountUsage({ label: "c", provider: "claude-code", configDir: claudeDir });
+        expect(claude).toMatchObject({ provider: "claude-code", source: "oauth" });
+
+        const codex = await getAccountUsage({ label: "x", provider: "codex", configDir: codexDir });
+        expect(codex).toMatchObject({ provider: "codex", source: "oauth" });
+
+        const anthropic = await getAccountUsage({ label: "a", provider: "anthropic-api", apiKey: "key" });
+        expect(anthropic).toMatchObject({ provider: "anthropic-api", source: "headers" });
+
+        const openai = await getAccountUsage({ label: "o", provider: "openai-api", apiKey: "key" });
+        expect(openai).toMatchObject({ provider: "openai-api", source: "headers" });
+
+        const antigravity = await getAccountUsage({ label: "g1", provider: "antigravity", configDir: "/x" });
+        expect(antigravity).toMatchObject({ provider: "antigravity", source: "none" });
+
+        const gemini = await getAccountUsage({ label: "g2", provider: "gemini-api", apiKey: "key" });
+        expect(gemini).toMatchObject({ provider: "gemini-api", source: "none" });
+
+        const unknown = await getAccountUsage({ label: "u", provider: "mystery", configDir: "/x" });
+        expect(unknown).toMatchObject({ source: "none" });
+        expect(unknown.error).toContain('Usage not supported for provider "mystery"');
+    });
+});
+
+describe("pure helper branches", () => {
+    test("decodeJwtClaims returns {} for an undecodable payload segment", () => {
+        // A middle segment that base64-decodes to invalid JSON -> JSON.parse throws.
+        expect(decodeJwtClaims("header.@@@@.sig")).toEqual({});
+    });
+
+    test("parseDurationSeconds handles microsecond units", () => {
+        expect(parseDurationSeconds("500us")).toBeCloseTo(0.0005, 9);
+        expect(parseDurationSeconds("500µs")).toBeCloseTo(0.0005, 9);
+        expect(parseDurationSeconds("1s500us")).toBeCloseTo(1.0005, 9);
+    });
+
+    test("formatUsageReports renders the empty-windows note row for both error and none sources", () => {
+        const out = formatUsageReports([
+            {
+                accountLabel: "erred", provider: "openai-api", authMode: "api-key",
+                source: "none", stale: false, estimate: false,
+                fetchedAt: "2026-06-03T00:00:00.000Z", windows: [], error: "boom happened",
+            },
+            {
+                accountLabel: "silent", provider: "kimi", authMode: "subscription",
+                source: "none", stale: false, estimate: false,
+                fetchedAt: "2026-06-03T00:00:00.000Z", windows: [],
+            },
+        ], Date.parse("2026-06-03T00:00:00.000Z"));
+
+        expect(out).toContain("boom happened");
+        expect(out).toContain("not supported");
     });
 });

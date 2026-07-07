@@ -14,9 +14,10 @@ import { join } from "node:path";
  *
  * @param {{ configDir?: string }} account
  * @param {NodeJS.Platform} [platform]
+ * @param {typeof spawnSync} [spawn] Injectable for tests; defaults to `node:child_process` `spawnSync`.
  * @returns {{ accessToken: string; expiresAt?: number } | null}
  */
-export function readClaudeCredentials(account, platform = process.platform) {
+export function readClaudeCredentials(account, platform = process.platform, spawn = spawnSync) {
     if (account.configDir) {
         const path = join(account.configDir, ".credentials.json");
         if (existsSync(path)) {
@@ -25,7 +26,7 @@ export function readClaudeCredentials(account, platform = process.platform) {
         }
     }
     if (platform === "darwin") {
-        const result = spawnSync(
+        const result = spawn(
             "security",
             ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
             { stdio: ["ignore", "pipe", "ignore"], timeout: 4_000 },
