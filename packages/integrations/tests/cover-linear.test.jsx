@@ -20,11 +20,10 @@ import { CreateIssue, OnIssueUpdate } from "../src/linear/components.js";
 
 const API_KEY = "lin_cover_key";
 
-/** Scripted real GraphQL server: per-operation FIFO queue of raw responses. */
 function startScriptServer() {
     /** @type {{ operation: string; variables: any }[]} */
     const requests = [];
-    /** @type {Map<string, Array<{ status?: number; headers?: Record<string,string>; data?: any; errors?: any }>>} */
+    /** @type {Map<string, Array<{ status?: number; headers?: Record<string,string>; data?: any; errors?: any; raw?: string }>>} */
     const scripts = new Map();
     const server = Bun.serve({
         port: 0,
@@ -116,8 +115,6 @@ describe("query retry + HTTP error branches", () => {
 
     test("falls back to exponential backoff when the reset header is non-positive", async () => {
         const s = server();
-        // reset present but not a positive future ms → retryDelayFromHeaders
-        // returns undefined and the client uses its own backoff.
         s.script("TeamByKey", { status: 500, headers: { "x-ratelimit-requests-reset": "0" } });
         s.script("TeamByKey", { data: { teams: { nodes: [TEAM] } } });
         const team = await Effect.runPromise(client(s.url).resolveTeam({ teamKey: "ENG" }));
@@ -151,7 +148,6 @@ describe("query retry + HTTP error branches", () => {
     });
 
     test("a network error is wrapped as delivery-failed", async () => {
-        // Port 1 refuses connections → fetch rejects → the tryPromise catch runs.
         const dead = makeLinearClient({ apiKey: API_KEY, apiBaseUrl: "http://127.0.0.1:1/graphql" });
         const error = await Effect.runPromise(Effect.flip(dead.query("query Ping { viewer { id } }")));
         expect(error.message).toMatch(/network error/);
@@ -197,8 +193,6 @@ describe("resolution + mutation failure branches", () => {
     });
     test("createIssue passes stateId/labelIds through and fails on an unsuccessful mutation", async () => {
         const s = server();
-        // teamId is given directly, so resolveTeam short-circuits (no TeamByKey);
-        // stateId + labelIds are passed straight through buildIssueInput.
         s.script("IssueCreate", { data: { issueCreate: { success: false } } });
         const error = await Effect.runPromise(Effect.flip(client(s.url).createIssue({
             teamId: "team-eng-id",
@@ -224,8 +218,6 @@ describe("resolution + mutation failure branches", () => {
     });
     test("buildIssueInput requires a team to resolve a state NAME or label names", async () => {
         const s = server();
-        // getIssue returns an issue with NO team, so buildIssueInput has no teamId
-        // to resolve the stateName against.
         s.script("Issue", { data: { issue: { id: "issue-uuid-1", identifier: "ENG-1", title: "t", url: "u" } } });
         const stateErr = await Effect.runPromise(Effect.flip(client(s.url).updateIssue("issue-uuid-1", { stateName: "Done" })));
         expect(stateErr.message).toMatch(/state name requires the issue's team/);
@@ -260,7 +252,6 @@ describe("LinearWebhookSource edge branches", () => {
         expect(source.verify(request)).toBe(true);
         const events = source.decode(request);
         expect(events.some((e) => e.correlationId === "ENG-7")).toBe(true);
-        // Sanity that the standalone decoder produces the same fan-out.
         expect(decodeLinearWebhook(request).length).toBe(events.length);
     });
 });

@@ -1,7 +1,7 @@
-// Coverage for the GitHub REST client rate-limit/retry-header/pagination edge
-// branches, the outbound deps-without-context guard, and the OnWebhook children
-// render-prop plus the issue/comment/push sugar listeners. Real GitHub-REST
-// fixture over HTTP + real renderFrame — no mocks.
+// Coverage for the GitHub REST client rate-limit/retry-header/schema/pagination
+// edge branches, the outbound deps-without-context guard, and the OnWebhook
+// children render-prop plus the issue/comment/push sugar listeners. Real
+// GitHub-REST fixture over HTTP + real renderFrame — no mocks.
 import { afterAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
@@ -15,7 +15,6 @@ import { makeGitHubClient, githubClientLayer, GitHubClient } from "../src/github
 import { OnWebhook, OnIssueOpened, OnIssueComment, OnPush } from "../src/github/components/OnWebhook.js";
 import { Comment } from "../src/github/components/outbound.js";
 
-/** Real HTTP fixture with endpoints for the untested client branches. */
 function startFixture() {
     const server = Bun.serve({
         port: 0,
@@ -26,8 +25,6 @@ function startFixture() {
                 headers: { "content-type": "application/json", .../** @type {any} */ (init).headers },
             });
             if (url.pathname === "/rl-403-remaining0") {
-                // 403 with exhausted remaining → rate-limited; reset (no retry-after)
-                // drives retryAfterMs's x-ratelimit-reset branch.
                 return json({ message: "Forbidden" }, {
                     status: 403,
                     headers: {
@@ -37,8 +34,6 @@ function startFixture() {
                 });
             }
             if (url.pathname === "/rl-403-past-reset") {
-                // Rate-limited, but the reset is already in the past → resetMs<=0,
-                // so retryAfterMs falls through the reset branch to null.
                 return json({ message: "Forbidden" }, {
                     status: 403,
                     headers: {
@@ -48,17 +43,12 @@ function startFixture() {
                 });
             }
             if (url.pathname === "/server-500") {
-                // Retryable 5xx whose retry-after is present-but-unparseable →
-                // retryAfterMs skips the retry-after return, finds no reset, and
-                // returns null.
                 return json({ message: "Internal" }, { status: 500, headers: { "retry-after": "later" } });
             }
             if (url.pathname === "/plain-text") {
-                // Non-JSON body exercises the JSON.parse catch (json = text).
                 return new Response("just plain text, not json", { status: 200 });
             }
             if (url.pathname === "/single-object") {
-                // paginate over a non-array, non-null page → pushes the object itself.
                 return json({ id: 1, name: "solo" });
             }
             if (url.pathname === "/typed") {
@@ -75,8 +65,6 @@ afterAll(() => fixture.server.stop(true));
 
 describe("GitHubClient rate-limit + parsing edge branches", () => {
     test("403 with x-ratelimit-remaining=0 is rate-limited and honors x-ratelimit-reset", async () => {
-        // maxRetries: 0 keeps it to a single attempt; the reset header still flows
-        // through retryAfterMs into the error details.
         const client = makeGitHubClient({ token: "t", apiBaseUrl: fixture.url, maxRetries: 0 });
         const error = await Effect.runPromise(client.request("GET", "/rl-403-remaining0").pipe(Effect.flip));
         expect(error.details?.status).toBe(403);
@@ -92,7 +80,7 @@ describe("GitHubClient rate-limit + parsing edge branches", () => {
         expect(error.details?.retryAfterMs).toBeNull();
     }, 10_000);
 
-    test("retryable 5xx with no rate-limit headers yields a null retryAfterMs", async () => {
+    test("retryable 5xx with an unparseable retry-after yields a null retryAfterMs", async () => {
         const client = makeGitHubClient({ token: "t", apiBaseUrl: fixture.url, maxRetries: 0 });
         const error = await Effect.runPromise(client.request("GET", "/server-500").pipe(Effect.flip));
         expect(error.details?.status).toBe(500);

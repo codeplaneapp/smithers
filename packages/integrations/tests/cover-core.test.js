@@ -1,7 +1,7 @@
 // Coverage for the core event-source / delivery / runtime plumbing: unit
 // branches that the durable-pipeline tests don't reach (readJsonPath, the
-// IntegrationError guard, webhook offer decode/validation/shutdown failures,
-// the delivery retry/swallow paths, and the IntegrationRuntime supervision,
+// IntegrationError guard, webhook offer verify/decode/validation failures, the
+// delivery retry/swallow paths, and the IntegrationRuntime supervision,
 // duplicate-id, unknown-source, and shutdown-squash seams). Real in-memory db,
 // real Effect runtime, real Queue-backed sources — no mocks.
 import { describe, expect, test } from "bun:test";
@@ -9,7 +9,7 @@ import { Effect, Stream } from "effect";
 import { createTestAdapter, seedWaitingEventRun } from "./helpers.js";
 import { readJsonPath } from "../src/core/readJsonPath.js";
 import { IntegrationError, isIntegrationError } from "../src/core/IntegrationError.js";
-import { makeWebhookSource, makePollingSource } from "../src/core/EventSource.js";
+import { makeWebhookSource } from "../src/core/EventSource.js";
 import { deliverEvent, deliverEvents } from "../src/core/deliverEvents.js";
 import { makeIntegrationRuntime } from "../src/core/IntegrationRuntime.js";
 
@@ -38,13 +38,9 @@ describe("readJsonPath", () => {
     });
     test("walks dotted paths and returns undefined at any missing/non-object segment", () => {
         expect(readJsonPath({ issue: { id: "ENG-1" } }, "issue.id")).toBe("ENG-1");
-        // Missing key mid-path.
         expect(readJsonPath({ issue: {} }, "issue.id")).toBeUndefined();
-        // Non-object along the way (a string is not walkable).
         expect(readJsonPath({ issue: "x" }, "issue.id")).toBeUndefined();
-        // Array along the way is treated as non-walkable.
         expect(readJsonPath({ issue: [1, 2] }, "issue.id")).toBeUndefined();
-        // Null root.
         expect(readJsonPath(null, "a")).toBeUndefined();
     });
 });
@@ -115,7 +111,6 @@ describe("makeWebhookSource offer failure branches", () => {
     test("a decoder producing a structurally invalid ExternalEvent surfaces decode-failed", async () => {
         const webhook = await Effect.runPromise(makeWebhookSource({
             id: "hook-invalid",
-            // Missing required ExternalEvent fields → decodeExternalEvent fails.
             decode: () => /** @type {any} */ ({ not: "an event" }),
         }));
         const error = await Effect.runPromise(webhook.offer({ headers: {}, rawBody: "{}" }).pipe(Effect.flip));
@@ -129,7 +124,6 @@ describe("makeWebhookSource offer failure branches", () => {
             decode: () => makeEvent({ source: "hook-closed" }),
         }));
         await Effect.runPromise(webhook.shutdown);
-        // After shutdown the queue can no longer accept the decoded batch.
         const exit = await Effect.runPromiseExit(webhook.offer({ headers: {}, rawBody: "{}" }));
         expect(exit._tag).toBe("Failure");
     });
@@ -139,10 +133,6 @@ describe("deliverEvent / deliverEvents error handling", () => {
     test("a per-run signal failure is retried, logged, and swallowed (delivered stays empty)", async () => {
         const { adapter } = createTestAdapter();
         await seedWaitingEventRun(adapter, { runId: "run-fault", signalName: EVENT_NAME, correlationId: "corr-1" });
-        // Real fault injection against the real delivery path: everything runs
-        // on the real adapter EXCEPT the signal write (`insertSignalWithNextSeq`,
-        // the one persist call signalRun makes), which is forced to fail so the
-        // per-run retry + catchAll swallow branch executes.
         const faultAdapter = new Proxy(adapter, {
             get(target, prop, receiver) {
                 if (prop === "insertSignalWithNextSeq") {
@@ -154,14 +144,11 @@ describe("deliverEvent / deliverEvents error handling", () => {
         });
         const result = await Effect.runPromise(deliverEvent(/** @type {any} */ (faultAdapter), makeEvent({ dedupeKey: "fault-1" })));
         expect(result.deduped).toBe(false);
-        // The run matched but every signal attempt failed → nothing delivered.
         expect(result.runIds).toEqual([]);
     }, 15_000);
 
     test("deliverEvents drains a source and swallows a per-event delivery error", async () => {
         const { adapter } = createTestAdapter();
-        // Fault-inject the dedupe write so deliverEvent errors; deliverEvents must
-        // log-and-continue (its per-event catchAll) rather than fail the stream.
         let failNext = true;
         const faultAdapter = new Proxy(adapter, {
             get(target, prop, receiver) {
@@ -181,9 +168,7 @@ describe("deliverEvent / deliverEvents error handling", () => {
         const badEvent = makeEvent({ dedupeKey: "drain-bad", source: "drain" });
         const goodEvent = makeEvent({ dedupeKey: "drain-good", source: "drain", correlationId: "none" });
         const source = { id: "drain", events: Stream.fromIterable([badEvent, goodEvent]) };
-        // Must complete without failing despite the poisoned first event.
         await Effect.runPromise(deliverEvents(/** @type {any} */ (faultAdapter), source));
-        // The good event was still recorded (delivery row inserted for it).
         expect(await adapter.insertIntegrationDeliveryIfNew({
             sourceId: "drain",
             dedupeKey: "drain-good",
@@ -222,8 +207,6 @@ describe("makeIntegrationRuntime", () => {
         const { adapter } = createTestAdapter();
         const runtime = makeIntegrationRuntime({
             adapter,
-            // verify → false makes offer fail with a typed invalid-signature error;
-            // handleWebhook unwraps Cause.failureOption and rethrows it raw.
             webhookSources: [{ id: "reject", verify: () => false, decode: () => makeEvent() }],
         });
         try {
@@ -241,9 +224,6 @@ describe("makeIntegrationRuntime", () => {
             adapter,
             webhookSources: [{ id: "gone", decode: () => makeEvent() }],
         });
-        // Shut the runtime (and its queue) down first; a subsequent offer is
-        // interrupted, so handleWebhook has no typed failure to surface and
-        // falls back to Cause.squash of the interrupt.
         await runtime.shutdown();
         const outcome = await runtime.handleWebhook("gone", { headers: {}, rawBody: "{}" }).then(
             () => ({ resolved: true }),
@@ -254,17 +234,13 @@ describe("makeIntegrationRuntime", () => {
 
     test("a source stream that fails is logged and supervised (restart back-off), then shut down cleanly", async () => {
         const { adapter } = createTestAdapter();
-        // A polling source whose poll always fails drives the supervise tapError
-        // + retry path; shutdown interrupts the restart-looping fiber.
-        const failingSource = makePollingSource({
+        const failingSource = {
             id: "flaky",
-            poll: () => Effect.fail(new IntegrationError("poll-failed", "always down", { sourceId: "flaky" })),
-        });
+            events: Stream.fail(new IntegrationError("poll-failed", "always down", { sourceId: "flaky" })),
+        };
         const runtime = makeIntegrationRuntime({ adapter, sources: [failingSource] });
-        // Give the supervised fiber a moment to fail at least once and log.
         await new Promise((resolve) => setTimeout(resolve, 50));
         await runtime.shutdown();
-        // Idempotent shutdown returns the same settled promise.
         await runtime.shutdown();
         expect(true).toBe(true);
     });
