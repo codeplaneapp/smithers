@@ -16,7 +16,7 @@ const inputSchema = z.object({
   name: z
     .string()
     .default("world")
-    .describe("Who to greet. Try `--name Ada`."),
+    .describe("Who to greet. Set it via the --input JSON; defaults to world."),
 });
 
 // What the agent must return: a single structured field, validated for you.
