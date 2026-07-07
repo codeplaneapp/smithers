@@ -8,6 +8,7 @@ import { Task } from "./Task.js";
 import { Parallel } from "./Parallel.js";
 import { Loop } from "./Ralph.js";
 import { Worktree } from "./Worktree.js";
+import { useOptionalSmithersContext } from "./useOptionalSmithersContext.js";
 /**
  * <Supervisor> — Boss plans, delegates to parallel workers, reviews, re-delegates failures.
  *
@@ -22,6 +23,9 @@ export function Supervisor(props) {
     const maxConcurrency = props.maxConcurrency ?? 5;
     const useWorktrees = props.useWorktrees ?? false;
     const workerNames = Object.keys(props.workers);
+    const ctx = useOptionalSmithersContext();
+    const latestReview = ctx?.latest?.(props.reviewOutput, `${prefix}-review`);
+    const allDone = latestReview?.allDone === true;
     // Build a worker Task element for each worker type.
     // At render time the runtime resolves which tasks are active based on
     // the plan output; here we declare one slot per worker type.
@@ -62,7 +66,7 @@ export function Supervisor(props) {
     // Loop: repeat until boss says allDone (runtime resolves `until` reactively)
     const delegateLoop = React.createElement(Loop, {
         id: `${prefix}-loop`,
-        until: false, // runtime re-evaluates reactively based on review output
+        until: allDone,
         maxIterations,
         onMaxReached: "return-last",
     }, loopBody);

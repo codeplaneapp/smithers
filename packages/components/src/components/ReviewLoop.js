@@ -6,6 +6,7 @@ import React from "react";
 import { Loop } from "./Ralph.js";
 import { Sequence } from "./Sequence.js";
 import { Task } from "./Task.js";
+import { useOptionalSmithersContext } from "./useOptionalSmithersContext.js";
 /**
  * Produce -> review -> fix -> repeat until approved.
  *
@@ -21,19 +22,13 @@ export function ReviewLoop(props) {
     const prefix = id ?? "review-loop";
     const produceId = `${prefix}-produce`;
     const reviewId = `${prefix}-review`;
-    // The Loop's `until` condition is always false here — at render time
-    // the runtime re-renders and re-evaluates. The composite defers the
-    // `until` condition to the host element which reads `reviewOutput`
-    // for the `approved` field.
-    //
-    // We pass `until={false}` because the condition is evaluated by the
-    // runtime reading the review output's `approved` field each frame.
-    // The Loop primitive re-renders the tree, and the runtime checks
-    // the review output to decide whether to continue.
+    const ctx = useOptionalSmithersContext();
+    const latestReview = ctx?.latest?.(reviewOutput, reviewId);
+    const approved = latestReview?.approved === true;
     const reviewerAgents = Array.isArray(reviewer) ? reviewer : [reviewer];
     return React.createElement(Loop, {
         id: prefix,
-        until: false,
+        until: approved,
         maxIterations,
         onMaxReached,
     }, React.createElement(Sequence, null, React.createElement(Task, {

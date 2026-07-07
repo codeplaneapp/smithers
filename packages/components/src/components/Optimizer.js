@@ -6,6 +6,7 @@ import React from "react";
 import { Loop } from "./Ralph.js";
 import { Sequence } from "./Sequence.js";
 import { Task } from "./Task.js";
+import { useOptionalSmithersContext } from "./useOptionalSmithersContext.js";
 /**
  * Generate -> evaluate -> improve loop with score convergence.
  *
@@ -17,17 +18,18 @@ import { Task } from "./Task.js";
 export function Optimizer(props) {
     if (props.skipIf)
         return null;
-    const { id, generator, evaluator, generateOutput, evaluateOutput, maxIterations = 10, onMaxReached = "return-last", children, } = props;
+    const { id, generator, evaluator, generateOutput, evaluateOutput, targetScore, maxIterations = 10, onMaxReached = "return-last", children, } = props;
     const prefix = id ?? "optimizer";
     const generateId = `${prefix}-generate`;
     const evaluateId = `${prefix}-evaluate`;
-    // `until` is false — the runtime re-renders and checks the evaluate
-    // output's `score` field against `targetScore` each frame.
-    // When no targetScore is set, the loop always runs all iterations.
+    const ctx = useOptionalSmithersContext();
+    const latestEvaluation = targetScore != null ? ctx?.latest?.(evaluateOutput, evaluateId) : undefined;
+    const score = typeof latestEvaluation?.score === "number" ? latestEvaluation.score : undefined;
+    const converged = targetScore != null && score != null && score >= targetScore;
     const isAgentEvaluator = typeof evaluator !== "function";
     return React.createElement(Loop, {
         id: prefix,
-        until: false,
+        until: converged,
         maxIterations,
         onMaxReached,
     }, React.createElement(Sequence, null, React.createElement(Task, {

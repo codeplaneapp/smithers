@@ -120,6 +120,19 @@ describe("composite component expansion coverage", () => {
         expect(result.tasks[0].meta.prompt).toContain("Provide an answer");
     });
 
+    test("HumanTask with non-finite maxAttempts fails extraction loudly instead of retrying forever", async () => {
+        await expect(
+            render(
+                <HumanTask
+                    id="human-unbounded"
+                    output="human_out"
+                    prompt="Approve?"
+                    maxAttempts={Number.POSITIVE_INFINITY}
+                />,
+            ),
+        ).rejects.toThrow('<HumanTask id="human-unbounded"> maxAttempts must be finite.');
+    });
+
     test("Runbook emits safe steps plus risky and critical approval gates", async () => {
         expect(Runbook({ skipIf: true, steps: [] })).toBeNull();
 
@@ -269,6 +282,19 @@ describe("composite component expansion coverage", () => {
 
     test("Panel covers direct agent/config panelists and moderation strategies", async () => {
         expect(Panel({ skipIf: true })).toBeNull();
+
+        await expect(render(
+            <Panel
+                id="empty"
+                panelists={[]}
+                moderator={agent}
+                panelistOutput="panel_out"
+                moderatorOutput="moderator_out"
+                strategy="synthesize"
+            >
+                review
+            </Panel>,
+        )).rejects.toThrow(/panelists.*at least one/i);
 
         const voteResult = await renderWithOutputs(
             <Panel
@@ -767,6 +793,87 @@ describe("composite component expansion coverage", () => {
         expect(seen.latencySlo).toEqual({ maxMs: 250 });
         expect(seen.tracking).toEqual({ tokens: false, latency: true });
         expect(seen.accumulator).toEqual(accumulator);
+    });
+
+    test("Aspects: a nested scope's own tokenBudget/latencySlo override the parent's instead of inheriting them", () => {
+        let seen;
+        renderToStaticMarkup(
+            <Aspects tokenBudget={{ max: 100 }} latencySlo={{ maxMs: 500 }}>
+                <Aspects tokenBudget={{ max: 10 }} latencySlo={{ maxMs: 5 }}>
+                    <AspectContext.Consumer>
+                        {(value) => {
+                            seen = value;
+                            return null;
+                        }}
+                    </AspectContext.Consumer>
+                </Aspects>
+            </Aspects>,
+        );
+
+        expect(seen.tokenBudget).toEqual({ max: 10 });
+        expect(seen.latencySlo).toEqual({ maxMs: 5 });
+    });
+
+    test("Aspects: nested scopes share the same accumulator instance rather than each creating a fresh one", () => {
+        let outer;
+        let inner;
+        renderToStaticMarkup(
+            <Aspects tokenBudget={{ max: 100 }}>
+                <AspectContext.Consumer>
+                    {(value) => {
+                        outer = value.accumulator;
+                        return (
+                            <Aspects latencySlo={{ maxMs: 5 }}>
+                                <AspectContext.Consumer>
+                                    {(innerValue) => {
+                                        inner = innerValue.accumulator;
+                                        return null;
+                                    }}
+                                </AspectContext.Consumer>
+                            </Aspects>
+                        );
+                    }}
+                </AspectContext.Consumer>
+            </Aspects>,
+        );
+
+        expect(inner).toBe(outer);
+    });
+
+    test("Aspects: a nested scope inherits the parent's latency tracking toggle when it declares no tracking of its own", () => {
+        let seen;
+        renderToStaticMarkup(
+            <Aspects tracking={{ latency: false }}>
+                <Aspects tokenBudget={{ max: 10 }}>
+                    <AspectContext.Consumer>
+                        {(value) => {
+                            seen = value;
+                            return null;
+                        }}
+                    </AspectContext.Consumer>
+                </Aspects>
+            </Aspects>,
+        );
+
+        expect(seen.tracking).toEqual({ tokens: true, latency: false });
+    });
+
+    test("Aspects: with no props at all, defaults to tracking both metrics and no budgets", () => {
+        let seen;
+        renderToStaticMarkup(
+            <Aspects>
+                <AspectContext.Consumer>
+                    {(value) => {
+                        seen = value;
+                        return null;
+                    }}
+                </AspectContext.Consumer>
+            </Aspects>,
+        );
+
+        expect(seen.tokenBudget).toBeUndefined();
+        expect(seen.latencySlo).toBeUndefined();
+        expect(seen.tracking).toEqual({ tokens: true, latency: true });
     });
 });
 

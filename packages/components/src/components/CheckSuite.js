@@ -3,11 +3,15 @@
 // @smithers-type-exports-end
 
 import React from "react";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { Sequence } from "./Sequence.js";
 import { Parallel } from "./Parallel.js";
 import { Task } from "./Task.js";
 /** @typedef {import("./CheckConfig.ts").CheckConfig} CheckConfig */
+
+const execAsync = promisify(exec);
 
 /**
  * Whether a single check's output row counts as a pass. A missing row (the
@@ -56,6 +60,39 @@ function normalizeChecks(checks) {
     }));
 }
 /**
+ * Execute a shell check and convert the process result into the same pass/fail
+ * shape used by agent checks, without failing the whole suite on a non-zero
+ * exit code.
+ * @param {string} command
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function runCommandCheck(command) {
+    try {
+        const result = await execAsync(command, { maxBuffer: 1024 * 1024 });
+        return {
+            passed: true,
+            ok: true,
+            command,
+            exitCode: 0,
+            stdout: result.stdout,
+            stderr: result.stderr,
+        };
+    }
+    catch (error) {
+        const err = /** @type {Error & { code?: unknown; signal?: unknown; stdout?: unknown; stderr?: unknown }} */ (error);
+        return {
+            passed: false,
+            ok: false,
+            command,
+            exitCode: typeof err.code === "number" ? err.code : null,
+            signal: typeof err.signal === "string" ? err.signal : null,
+            stdout: typeof err.stdout === "string" ? err.stdout : "",
+            stderr: typeof err.stderr === "string" ? err.stderr : "",
+            error: err.message,
+        };
+    }
+}
+/**
  * <CheckSuite> — Parallel checks with auto-aggregated pass/fail verdict.
  *
  * Composes: Sequence > Parallel[Task per check] > Task(verdict aggregator)
@@ -71,9 +108,6 @@ export function CheckSuite(props) {
     // Build parallel check tasks
     const checkTasks = normalized.map((check) => {
         const taskId = `${prefix}-${check.id}`;
-        const childContent = check.command
-            ? `Run check: ${check.command}`
-            : `Run check: ${check.label ?? check.id}`;
         const taskProps = {
             key: taskId,
             id: taskId,
@@ -81,6 +115,10 @@ export function CheckSuite(props) {
             continueOnFail,
             label: check.label ?? check.id,
         };
+        if (check.command) {
+            return React.createElement(Task, taskProps, () => runCommandCheck(check.command ?? ""));
+        }
+        const childContent = `Run check: ${check.label ?? check.id}`;
         if (check.agent) {
             taskProps.agent = check.agent;
         }

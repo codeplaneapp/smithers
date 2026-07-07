@@ -4,6 +4,7 @@
 // @smithers-type-exports-end
 
 import React from "react";
+import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { Sequence } from "./Sequence.js";
 import { Task } from "./Task.js";
 import { Approval } from "./Approval.js";
@@ -17,6 +18,7 @@ import { Approval } from "./Approval.js";
 export function Runbook(props) {
     if (props.skipIf)
         return null;
+    const ctx = React.useContext(SmithersContext);
     const prefix = props.id ?? "runbook";
     const onDeny = props.onDeny ?? "fail";
     const children = [];
@@ -47,6 +49,13 @@ export function Runbook(props) {
         else {
             // Risky or critical: Approval gate then Task
             const approvalId = `${stepId}-approval`;
+            const approvalOutput = `${approvalId}-decision`;
+            const shouldGateOnDecision = onDeny === "skip" && Boolean(ctx);
+            const decision = ctx?.outputMaybe(approvalOutput, { nodeId: approvalId });
+            const deniedAndSkipping = shouldGateOnDecision &&
+                decision != null &&
+                typeof decision === "object" &&
+                /** @type {Record<string, unknown>} */ (decision).approved === false;
             const isCritical = step.risk === "critical";
             const approvalTitle = props.approvalRequest?.title ??
                 `Approve ${isCritical ? "CRITICAL" : "risky"} step: ${label}`;
@@ -65,26 +74,29 @@ export function Runbook(props) {
             children.push(React.createElement(Approval, {
                 key: approvalId,
                 id: approvalId,
-                output: `${approvalId}-decision`,
+                output: approvalOutput,
                 request: {
                     title: approvalTitle,
                     summary: approvalSummary,
                     metadata: approvalMeta,
                 },
-                onDeny: onDeny === "skip" ? "skip" : "fail",
+                onDeny,
                 needs,
                 label: `Approve: ${label}`,
             }));
-            children.push(React.createElement(Task, {
-                key: stepId,
-                id: stepId,
-                output,
-                agent,
-                needs: { approval: approvalId },
-                label: `[${step.risk}] ${label}`,
-                children: step.command ?? `Execute step: ${label}`,
-            }));
-            previousStepId = stepId;
+            if (!deniedAndSkipping) {
+                children.push(React.createElement(Task, {
+                    key: stepId,
+                    id: stepId,
+                    output,
+                    agent,
+                    deps: shouldGateOnDecision ? { approval: approvalOutput } : undefined,
+                    needs: { approval: approvalId },
+                    label: `[${step.risk}] ${label}`,
+                    children: step.command ?? `Execute step: ${label}`,
+                }));
+            }
+            previousStepId = deniedAndSkipping ? approvalId : stepId;
         }
     }
     return React.createElement(Sequence, null, ...children);

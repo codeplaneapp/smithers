@@ -67,10 +67,14 @@ export function DriftDetector(props) {
         sequenceChildren.push(alertBranch);
     const sequence = React.createElement(Sequence, null, ...sequenceChildren);
     if (props.poll) {
+        const maxPolls = props.poll.maxPolls ?? 100;
+        if (!Number.isFinite(maxPolls)) {
+            throw new TypeError("DriftDetector poll.maxPolls must be a finite number.");
+        }
         return React.createElement(Loop, {
             id: `${prefix}-poll`,
             until: false,
-            maxIterations: props.poll.maxPolls ?? 100,
+            maxIterations: maxPolls,
             onMaxReached: "return-last",
         }, sequence);
     }
