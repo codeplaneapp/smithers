@@ -293,6 +293,21 @@ describe("runRpcCommandEffect branches", () => {
     await expect(promise).rejects.toThrow(/flagged boom/);
   });
 
+  test("tolerates stdin errors and a rejecting onJsonEvent, then times out", async () => {
+    const child = makeFakeChild();
+    const promise = start(child, {
+      timeoutMs: 50,
+      onJsonEvent: () => Promise.reject(new Error("event sink boom")),
+    });
+    await tick();
+    // stdin 'error' is swallowed by the attached no-op handler.
+    child.stdin.emit("error", new Error("epipe"));
+    // A parsed line drives onJsonEvent, whose rejection hits the .catch(noop).
+    child.stdout.write(JSON.stringify({ type: "note" }) + "\n");
+    // No finalize arrives, so the total timeout fires and kills the run.
+    await expect(promise).rejects.toThrow(/timed out after 50ms/);
+  });
+
   test("fires the delayed SIGKILL when no close clears the terminate timer", async () => {
     const child = makeFakeChild({ pid: 7777 });
     const promise = start(child, { idleTimeoutMs: 30 });
