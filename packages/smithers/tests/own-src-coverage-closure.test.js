@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { createSmithers, createSmithersPostgres } from "../src/create.js";
+import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
 
 setDefaultTimeout(60_000);
 
@@ -55,5 +56,21 @@ describe.skipIf(process.platform === "win32")("createSmithersPostgres BIGINT typ
     } finally {
       await api.close();
     }
+  });
+});
+
+describe("migrateSmithersStore source-open failures", () => {
+  test("an unopenable SQLite source surfaces an actionable DB_QUERY_FAILED", async () => {
+    // A directory sitting at the source dbPath makes bun:sqlite fail to open the
+    // file ("unable to open database file"). The migration must replace that raw
+    // engine text with the actionable "Could not open the legacy SQLite store"
+    // guidance (upgradeSqliteSourceStore's unopenable-source branch), not leak it.
+    const ws = mkdtempSync(join(tmpdir(), "smithers-migrate-unopenable-"));
+    dirs.push(ws);
+    mkdirSync(join(ws, ".smithers"), { recursive: true });
+    mkdirSync(join(ws, "smithers.db"), { recursive: true });
+    await expect(
+      migrateSmithersStore({ cwd: ws, from: "sqlite", to: "pglite", env: {} }),
+    ).rejects.toMatchObject({ code: "DB_QUERY_FAILED" });
   });
 });
