@@ -120,6 +120,61 @@ describe("fakeAgent", () => {
     }
   });
 
+  test("returns a text/files wrapper with no output when the schema rejects a text-only result", async () => {
+    // The result carries wrapper keys but its (absent) output cannot validate,
+    // so normalizeResult returns the text/files wrapper verbatim and still
+    // writes the declared files.
+    const dir = await mkdtemp(join(tmpdir(), "smithers-testing-"));
+    try {
+      const agent = fakeAgent(resultSchema, {
+        text: "just text",
+        files: { "a.txt": "x" },
+      });
+      const result = await agent.generate({ rootDir: dir });
+      expect(result).toEqual({ text: "just text" });
+      await expect(readFile(join(dir, "a.txt"), "utf8")).resolves.toBe("x");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("formats non-message validation issues via JSON.stringify", async () => {
+    // A custom SafeSchema whose failure issues are bare strings (not objects
+    // with a `message`) exercises the JSON.stringify fallback in formatIssues,
+    // and the bare-output assertSchema fallthrough in normalizeResult.
+    const failSchema = {
+      safeParse() {
+        return { success: false as const, error: { issues: ["boom"] } };
+      },
+    };
+    const agent = fakeAgent(failSchema, "bare-value");
+    await expect(agent.generate()).rejects.toThrow('Fake agent output failed validation: "boom"');
+  });
+
+  test("throws when declared files are given without a rootDir", async () => {
+    const agent = fakeAgent(z.any(), {
+      output: { ok: true },
+      files: { "note.txt": "hi\n" },
+    });
+    await expect(agent.generate()).rejects.toThrow("Fake agent files require a rootDir");
+  });
+
+  test("rejects a resolved path that escapes rootDir despite passing the segment check", async () => {
+    // "..foo" has no ".." *segment* (so the segment guard admits it) yet its
+    // path resolves to a name beginning with ".." relative to rootDir, which the
+    // second resolution guard rejects.
+    const dir = await mkdtemp(join(tmpdir(), "smithers-testing-"));
+    try {
+      const agent = fakeAgent(resultSchema, {
+        output: { summary: "ok", passed: true },
+        files: { "..foo": "y" },
+      });
+      await expect(agent.generate({ rootDir: dir })).rejects.toThrow("must stay inside rootDir");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("function script receives args and reset clears calls", async () => {
     const agent = fakeAgent(resultSchema, () => ({ output: { summary: "done", passed: true } }));
 
