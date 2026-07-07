@@ -62,6 +62,26 @@ describe("foldDelegation — cascade reaffirm by a replanned parent", () => {
   });
 });
 
+describe("foldDelegation — a node invalidated across two rounds", () => {
+  test("two invalidation rows on one node are ordered by round (invalidations sort)", () => {
+    const records: DelegationRecord[] = [
+      rec("dcGoal", "dc:goal:goal", 0, { logicalId: "goal", refinedPrompt: "x", assumptions: [], questionsAsked: 0 }),
+      rec("dcPlan", "dc:root:plan", 0, plan("root", "fable", [child("root/a", "opus", est(10, 1, 5))], est(20, 2, 10))),
+      rec("dcPlan", "dc:root/a:plan", 0, plan("root/a", "opus", [], est(10, 1, 5))),
+      // Round 2 arrives BEFORE round 1 in the record stream so the per-node
+      // invalidations array is genuinely out of order until `.sort` runs.
+      rec("dcReplan", "dc:root/a:replan-2", 0, { round: 2, logicalId: "root/a", decision: "invalidated", reason: "r2", trigger: { type: "user-edit", ref: "e1" } }),
+      rec("dcPlan", "dc:root/a:plan", 2, plan("root/a", "opus", [], est(14, 1, 7))),
+      rec("dcReplan", "dc:root/a:replan-1", 0, { round: 1, logicalId: "root/a", decision: "invalidated", reason: "r1", trigger: { type: "probe", ref: "h1" } }),
+      rec("dcPlan", "dc:root/a:plan", 1, plan("root/a", "opus", [], est(12, 1, 6))),
+    ];
+    const graph = foldDelegation(records);
+    // Two invalidations recorded → version reflects both rounds.
+    expect(graph.nodes["root/a"]!.versions.length).toBeGreaterThanOrEqual(2);
+    expect(graph.rootId).toBe("root");
+  });
+});
+
 describe("foldDelegation — multiple root candidates", () => {
   test("two parentless plan roots are ordered by the root-candidate comparator", () => {
     // Two independent trees: both "alpha" and "beta" have parentId null and a
