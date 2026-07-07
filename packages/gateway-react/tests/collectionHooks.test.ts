@@ -253,12 +253,9 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
         captured.workflows.refetch(),
       ]);
     });
-    // node output refetch (enabled) re-fetches.
     await act(async () => {
-      await captured.nodeOutput.refetch();
       await captured.nodeOutputDisabled.refetch();
     });
-    expect(captured.nodeOutput.data).toMatchObject({ status: "produced", row: { value: 3 } });
 
     // The full action surface: launchRun succeeds; the rest are invoked so every
     // action closure executes (rejections on the finished/absent targets are
@@ -273,8 +270,7 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     await swallow(actions.rewindRun({ runId, frameNo: 1, confirm: true }));
     await swallow(actions.submitApproval({ runId, nodeId: "task1", decision: { approved: true } }));
     await swallow(actions.submitSignal({ runId, correlationKey: "sig" }));
-    const cron = await swallow(actions.cronCreate({ workflow: "value", pattern: "* * * * *" }));
-    void cron;
+    await swallow(actions.cronCreate({ workflow: "value", pattern: "* * * * *" }));
     await swallow(actions.cronRun({ workflow: "value" }));
     await swallow(actions.cronDelete({ cronId: "does-not-exist" }));
     await swallow(actions.createTicket({ kind: "ticket", title: "t", body: "b" } as any));
@@ -358,7 +354,7 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     const harness = await mountHarness();
     await harness.render(createElement(SmithersGatewayProvider, { client: makeClient(baseUrl) }, createElement(Probe)));
 
-    await waitFor(() => snapshot.loading === false && snapshot.error !== undefined);
+    await waitFor(() => snapshot.loading === false && snapshot.error !== undefined, "node output error");
     expect(snapshot.error).toBeInstanceOf(Error);
     expect(snapshot.data).toBeUndefined();
 

@@ -71,13 +71,14 @@ async function bootGateway() {
     React.createElement(api.Workflow, { name: "collections-value" },
       React.createElement(api.Task, { id: "task1", output: api.outputs.result }, { value: Number(ctx.input.value ?? 1) })),
   ));
-  // A workflow whose Approval id is the delegation poll listener id `dc-poll`,
+  // A workflow whose Approval id is a delegation poll phase (`dc:<goal>:poll`),
   // so a launched run parks at a pending approval the delegation hook treats as
-  // the end-of-run poll — and whose run tree carries a delegation-shaped node.
+  // the end-of-run poll via its parse fallback — and whose run tree carries a
+  // delegation-shaped node (covers both the tree-target and submitPoll paths).
   gateway.register("poll", api.smithers(() =>
     React.createElement(api.Workflow, { name: "delegation-poll" },
       React.createElement(api.Approval, {
-        id: "dc-poll",
+        id: "dc:goal:poll",
         mode: "select",
         output: api.outputs.selection,
         request: { title: "Rate the run", summary: "How did it go?" },
@@ -166,7 +167,7 @@ describe("useDelegationChain over a real gateway", () => {
     await harness.unmount();
   });
 
-  test("a real pending `dc-poll` approval is a delegation target and submitPoll answers it", async () => {
+  test("a real pending poll-phase approval is a delegation target and submitPoll answers it", async () => {
     const { baseUrl } = await bootGateway();
     const runId = await launch(baseUrl, "poll", {});
 

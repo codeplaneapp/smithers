@@ -1,0 +1,609 @@
+/** @jsxImportSource react */
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+
+// Register a real DOM before react-dom/client is imported so useEffect/layout
+// effects and event delegation actually run. Idempotent guard keeps this safe
+// when another test file in the same bun process already registered.
+//
+// happy-dom installs a node:http-based `fetch` that can't read the gateway's
+// streaming SSE response (throws HPE_UNEXPECTED_CONTENT_LENGTH). Bun's native
+// fetch streams it fine, so capture it before registration and restore it after
+// — we want the real DOM (events/effects) with the real streaming transport.
+const nativeFetch = globalThis.fetch;
+try {
+  GlobalRegistrator.register();
+} catch {
+  /* already registered */
+}
+globalThis.fetch = nativeFetch;
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { act, createElement, type ReactElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { SmithersCollectionsProvider } from "@smithers-orchestrator/gateway-react";
+import {
+  ApprovalPanel,
+  ConnectionBadge,
+  LaunchButton,
+  NodeOutputView,
+  RunEventLog,
+  RunList,
+  RunTree,
+  SimpleWorkflowDashboard,
+  WorkflowPicker,
+} from "../src/index.ts";
+import { startInMemoryGateway, type InMemoryGateway, type SeedState } from "./inMemoryGateway.ts";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+type Harness = {
+  container: HTMLElement;
+  render: (element: ReactElement) => Promise<void>;
+  flush: (ms?: number) => Promise<void>;
+  unmount: () => Promise<void>;
+};
+
+let gateway: InMemoryGateway | undefined;
+const activeHarnesses: Harness[] = [];
+
+async function mount(gw: InMemoryGateway, element: ReactElement): Promise<Harness> {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  let root!: Root;
+  await act(async () => {
+    root = createRoot(container);
+  });
+  const wrapped = () =>
+    createElement(
+      SmithersCollectionsProvider,
+      { mode: { kind: "local" as const, apiBaseUrl: gw.baseUrl } },
+      element,
+    );
+  const harness: Harness = {
+    container,
+    render: async (next) => {
+      await act(async () => {
+        root.render(
+          createElement(
+            SmithersCollectionsProvider,
+            { mode: { kind: "local" as const, apiBaseUrl: gw.baseUrl } },
+            next,
+          ),
+        );
+      });
+      await harness.flush();
+    },
+    flush: async (ms = 20) => {
+      await act(async () => {
+        await sleep(ms);
+      });
+    },
+    unmount: async () => {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    },
+  };
+  activeHarnesses.push(harness);
+  await harness.render(element);
+  void wrapped;
+  return harness;
+}
+
+function click(el: Element | null) {
+  if (!el) throw new Error("click: element not found");
+  el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+}
+
+// Drive a React-controlled text input's onChange. Setting `.value` directly
+// updates React's value tracker so the synthetic onChange is suppressed; the
+// reliable path in this happy-dom + React 19 env is: deliver `focusin` through
+// React's delegation (start watching), set the value via the native prototype
+// setter (bypasses the tracker so React sees a real change), then a `keyup`
+// which makes React re-check and fire onChange.
+function setInputValue(el: HTMLInputElement, value: string) {
+  el.dispatchEvent(new Event("focusin", { bubbles: true }));
+  const nativeSetter = Object.getOwnPropertyDescriptor(
+    Object.getPrototypeOf(el) as object,
+    "value",
+  )?.set;
+  nativeSetter?.call(el, value);
+  el.dispatchEvent(new Event("keyup", { bubbles: true }));
+}
+
+function changeSelect(el: HTMLSelectElement, value: string) {
+  el.value = value;
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+afterEach(async () => {
+  for (const harness of activeHarnesses.splice(0)) {
+    await harness.unmount().catch(() => undefined);
+  }
+  if (gateway) {
+    await gateway.close();
+    gateway = undefined;
+  }
+});
+
+function boot(seed: SeedState = {}): InMemoryGateway {
+  gateway = startInMemoryGateway(seed);
+  return gateway;
+}
+
+const SAMPLE_TREE = {
+  root: {
+    id: 1,
+    name: "Workflow",
+    type: "workflow",
+    task: { nodeId: "root" },
+    children: [
+      { id: 2, name: "plan", type: "task", task: { nodeId: "plan", kind: "agent" } },
+      {
+        id: 3,
+        name: "loop",
+        type: "loop",
+        task: { nodeId: "loop" },
+        children: [
+          { id: 4, name: "attempt", type: "task", task: { nodeId: "task", kind: "agent", iteration: 0 } },
+          { id: 5, name: "attempt", type: "task", task: { nodeId: "task", kind: "agent", iteration: 1 } },
+        ],
+      },
+    ],
+  },
+  runState: { state: "running", blocked: { nodeId: "plan" } },
+};
+
+describe("ConnectionBadge (live SSE)", () => {
+  test("renders a connection status derived from the real stream", async () => {
+    const gw = boot();
+    const harness = await mount(gw, createElement(ConnectionBadge, { className: "chip" }));
+    await harness.flush(60);
+    const badge = harness.container.querySelector("[data-status]");
+    expect(badge).not.toBeNull();
+    // The stream connects against the real gateway, so it reaches online.
+    expect(badge?.getAttribute("data-status")).toBe("online");
+    expect(badge?.textContent).toContain("Connected");
+  });
+
+  test("renders offline styling when the stream endpoint rejects", async () => {
+    const gw = boot({ streamStatus: 500 });
+    const harness = await mount(gw, createElement(ConnectionBadge, {}));
+    await harness.flush(60);
+    const badge = harness.container.querySelector("[data-status]");
+    expect(badge).not.toBeNull();
+    expect(["offline", "connecting", "idle"]).toContain(badge?.getAttribute("data-status"));
+  });
+});
+
+describe("RunList", () => {
+  test("lists runs, selects on click, and polls", async () => {
+    const gw = boot({
+      runs: [
+        { runId: "run-a", workflowKey: "implement", status: "running", createdAtMs: Date.now() },
+        { runId: "run-b", status: "ok" },
+      ],
+    });
+    const selected: string[] = [];
+    const harness = await mount(
+      gw,
+      createElement(RunList, {
+        filter: { workflow: "implement", limit: 10 },
+        activeRunId: "run-a",
+        onSelect: (id: string) => selected.push(id),
+        pollMs: 30,
+      }),
+    );
+    await harness.flush(40);
+    const buttons = harness.container.querySelectorAll("button");
+    expect(buttons.length).toBe(2);
+    // run-a has createdAtMs (shortTime present); run-b has none (shortTime "").
+    click(buttons[1]);
+    await harness.flush();
+    expect(selected).toContain("run-b");
+    // Let the poll interval fire at least once.
+    await harness.flush(40);
+  });
+
+  test("shows the empty state when there are no runs and polling disabled", async () => {
+    const gw = boot({ runs: [] });
+    const harness = await mount(gw, createElement(RunList, { pollMs: 0 }));
+    await harness.flush(40);
+    expect(harness.container.textContent).toContain("No runs yet.");
+  });
+
+  test("renders the error banner when the runs hook reports an error", async () => {
+    // The local gateway path never surfaces an error (useGatewayRuns pins
+    // error: undefined), so drive the GatewayAsyncState error contract through
+    // the injected hook seam with a real function — no mocks.
+    const gw = boot({ runs: [] });
+    const harness = await mount(
+      gw,
+      createElement(RunList, {
+        pollMs: 0,
+        useRuns: () => ({
+          data: [],
+          error: new Error("gateway unreachable"),
+          loading: false,
+          refetch: async () => {},
+        }),
+      }),
+    );
+    await harness.flush(20);
+    expect(harness.container.textContent).toContain("gateway unreachable");
+  });
+
+  test("renders the fallback error text when the error has no message", async () => {
+    const gw = boot({ runs: [] });
+    const harness = await mount(
+      gw,
+      createElement(RunList, {
+        pollMs: 0,
+        useRuns: () => ({
+          data: [],
+          error: {} as Error,
+          loading: false,
+          refetch: async () => {},
+        }),
+      }),
+    );
+    await harness.flush(20);
+    expect(harness.container.textContent).toContain("Failed to load runs.");
+  });
+});
+
+describe("RunTree", () => {
+  test("renders the node tree and selects a node on click", async () => {
+    const gw = boot({ trees: { "run-a": SAMPLE_TREE } });
+    const selectedNodes: string[] = [];
+    const harness = await mount(
+      gw,
+      createElement(RunTree, {
+        runId: "run-a",
+        activeNodeId: "plan",
+        onSelectNode: (node: { id: string }) => selectedNodes.push(node.id),
+      }),
+    );
+    await harness.flush(50);
+    const buttons = harness.container.querySelectorAll("button");
+    expect(buttons.length).toBeGreaterThanOrEqual(4);
+    click(buttons[0]);
+    await harness.flush();
+    expect(selectedNodes.length).toBeGreaterThan(0);
+  });
+
+  test("renders the empty prompt with no runId", async () => {
+    const gw = boot();
+    const harness = await mount(gw, createElement(RunTree, { runId: undefined }));
+    await harness.flush(20);
+    expect(harness.container.textContent).toContain("Select a run.");
+  });
+
+  test("degrades to an empty tree without crashing when the tree endpoint fails", async () => {
+    const gw = boot({ failPaths: new Set(["/v1/api/runs/run-x/tree"]) });
+    const harness = await mount(gw, createElement(RunTree, { runId: "run-x" }));
+    await harness.flush(120);
+    // The nodes collection swallows the initial-sync failure and resolves
+    // ready-empty (useGatewayRunTree only reports `error` on a live-query error,
+    // not an initial fetch rejection), so RunTree renders no node rows rather
+    // than throwing. The container itself mounts.
+    expect(harness.container.querySelector("div")).not.toBeNull();
+    expect(harness.container.querySelectorAll("button").length).toBe(0);
+  });
+});
+
+describe("NodeOutputView", () => {
+  async function renderOutput(seedOutput: unknown, nodeId = "n1") {
+    const gw = boot({ outputs: { [`run-a:${nodeId}`]: seedOutput } });
+    const harness = await mount(
+      gw,
+      createElement(NodeOutputView, { runId: "run-a", nodeId, iteration: 0 }),
+    );
+    await harness.flush(50);
+    return harness;
+  }
+
+  test("no node selected", async () => {
+    const gw = boot();
+    const harness = await mount(gw, createElement(NodeOutputView, { runId: "run-a", nodeId: undefined }));
+    await harness.flush(20);
+    expect(harness.container.textContent).toContain("Select a node");
+  });
+
+  test("string output", async () => {
+    const harness = await renderOutput("hello world");
+    expect(harness.container.textContent).toContain("hello world");
+  });
+
+  test("produced envelope with row.output", async () => {
+    const harness = await renderOutput({ status: "produced", row: { output: "the-output" } });
+    expect(harness.container.textContent).toContain("the-output");
+  });
+
+  test("produced envelope with row.text", async () => {
+    const harness = await renderOutput({ status: "produced", row: { text: "the-text" } });
+    expect(harness.container.textContent).toContain("the-text");
+  });
+
+  test("produced envelope with an object row falls back to pretty JSON", async () => {
+    const harness = await renderOutput({ status: "produced", row: { foo: 42 } });
+    expect(harness.container.textContent).toContain("foo");
+  });
+
+  test("produced envelope with a string row", async () => {
+    const harness = await renderOutput({ status: "produced", row: "plain-string-row" });
+    expect(harness.container.textContent).toContain("plain-string-row");
+  });
+
+  test("pending envelope", async () => {
+    const harness = await renderOutput({ status: "pending" });
+    expect(harness.container.textContent).toContain("not available yet");
+  });
+
+  test("failed envelope", async () => {
+    const harness = await renderOutput({ status: "failed" });
+    expect(harness.container.textContent).toContain("failed before producing");
+  });
+
+  test("bare object output pretty-prints", async () => {
+    const harness = await renderOutput({ arbitrary: "data" });
+    expect(harness.container.textContent).toContain("arbitrary");
+  });
+
+  test("null output renders the no-output fallback", async () => {
+    const harness = await renderOutput(null);
+    expect(harness.container.textContent).toContain("No output.");
+  });
+
+  test("produced envelope with a null row", async () => {
+    const harness = await renderOutput({ status: "produced", row: null });
+    expect(harness.container.textContent).toContain("No output.");
+  });
+
+  test("error state when the output endpoint fails", async () => {
+    const gw = boot({ failPaths: new Set(["/v1/api/nodes/run-a/nboom/output"]) });
+    const harness = await mount(
+      gw,
+      createElement(NodeOutputView, { runId: "run-a", nodeId: "nboom" }),
+    );
+    await harness.flush(60);
+    // GatewayRpcError surfaces the gateway's own error message.
+    expect(harness.container.textContent).toContain("Forced failure");
+  });
+});
+
+describe("LaunchButton", () => {
+  test("launches and reports the new runId", async () => {
+    const gw = boot();
+    const launched: string[] = [];
+    const harness = await mount(
+      gw,
+      createElement(LaunchButton, {
+        workflow: "implement",
+        input: { prompt: "go" },
+        onLaunched: (id: string) => launched.push(id),
+      }),
+    );
+    await harness.flush(20);
+    const button = harness.container.querySelector("button")!;
+    expect(button.textContent).toContain("Launch implement");
+    click(button);
+    await harness.flush(60);
+    expect(launched.length).toBe(1);
+    expect(gw.launches[0]?.workflow).toBe("implement");
+  });
+
+  test("renders custom children and reports launch errors", async () => {
+    const gw = boot({ failPaths: new Set(["/v1/api/runs"]) });
+    const errors: Error[] = [];
+    const harness = await mount(
+      gw,
+      createElement(
+        LaunchButton,
+        { workflow: "broken", onError: (e: Error) => errors.push(e) },
+        "Go Now",
+      ),
+    );
+    await harness.flush(20);
+    const button = harness.container.querySelector("button")!;
+    expect(button.textContent).toContain("Go Now");
+    click(button);
+    await harness.flush(60);
+    expect(errors.length).toBe(1);
+  });
+});
+
+describe("WorkflowPicker", () => {
+  test("lists workflows and reports selection", async () => {
+    const gw = boot({
+      workflows: [
+        { key: "implement", readableName: "Implement" },
+        { key: "review" },
+      ],
+    });
+    const chosen: string[] = [];
+    const harness = await mount(
+      gw,
+      createElement(WorkflowPicker, { value: "implement", onChange: (k: string) => chosen.push(k), hasUiOnly: true }),
+    );
+    await harness.flush(40);
+    const select = harness.container.querySelector("select")!;
+    const options = select.querySelectorAll("option");
+    // placeholder + 2 workflows
+    expect(options.length).toBe(3);
+    changeSelect(select, "review");
+    await harness.flush();
+    expect(chosen).toContain("review");
+  });
+
+  test("renders with no value and hasUiOnly false", async () => {
+    const gw = boot({ workflows: [] });
+    const harness = await mount(gw, createElement(WorkflowPicker, {}));
+    await harness.flush(20);
+    expect(harness.container.querySelector("select")).not.toBeNull();
+  });
+});
+
+describe("ApprovalPanel", () => {
+  test("lists pending approvals and approves one", async () => {
+    const gw = boot({
+      approvals: [
+        {
+          runId: "run-a",
+          nodeId: "gate",
+          iteration: 0,
+          workflowKey: "implement",
+          requestTitle: "Ship it?",
+          requestSummary: "Deploy to prod",
+        },
+        { runId: "run-b", nodeId: "gate2", iteration: 1 },
+      ],
+    });
+    const harness = await mount(gw, createElement(ApprovalPanel, { filter: { workflow: "implement" }, pollMs: 40 }));
+    await harness.flush(50);
+    expect(harness.container.textContent).toContain("Ship it?");
+    // Second approval has no title/summary -> default title path.
+    expect(harness.container.textContent).toContain("Approval: gate2");
+    const approveButtons = [...harness.container.querySelectorAll("button")].filter(
+      (b) => b.textContent === "Approve",
+    );
+    click(approveButtons[0]);
+    await harness.flush(60);
+    expect(gw.approvalsSubmitted.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("denies an approval", async () => {
+    const gw = boot({
+      approvals: [{ runId: "run-c", nodeId: "gate", iteration: 0 }],
+    });
+    const harness = await mount(gw, createElement(ApprovalPanel, { pollMs: 0 }));
+    await harness.flush(50);
+    const denyButtons = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Deny");
+    click(denyButtons[0]);
+    await harness.flush(60);
+    expect(gw.approvalsSubmitted.some((row) => (row.decision as { approved?: boolean })?.approved === false)).toBe(true);
+  });
+
+  test("shows the empty state", async () => {
+    const gw = boot({ approvals: [] });
+    const harness = await mount(gw, createElement(ApprovalPanel, {}));
+    await harness.flush(40);
+    expect(harness.container.textContent).toContain("No approvals waiting.");
+  });
+});
+
+describe("RunEventLog", () => {
+  test("streams events with varied payloads and follows the tail", async () => {
+    const gw = boot({
+      events: {
+        "run-a": [
+          { runId: "run-a", seq: 1, event: "run.started", payload: "a string payload" },
+          { runId: "run-a", seq: 2, event: "node.ok", payload: { small: true } },
+          { runId: "run-a", seq: 3, event: "node.big", payload: { big: "x".repeat(500) } },
+          { runId: "run-a", seq: 4, event: "node.null", payload: null },
+          { runId: "run-a", seq: 5, event: "run.heartbeat", payload: { hb: 1 } },
+        ],
+      },
+    });
+    const harness = await mount(
+      gw,
+      createElement(RunEventLog, { runId: "run-a", maxEvents: 100, follow: true }),
+    );
+    await harness.flush(60);
+    expect(harness.container.textContent).toContain("run.started");
+    expect(harness.container.textContent).toContain("a string payload");
+  });
+
+  test("renders the select-a-run prompt with no runId", async () => {
+    const gw = boot();
+    const harness = await mount(gw, createElement(RunEventLog, { runId: undefined, follow: false }));
+    await harness.flush(20);
+    expect(harness.container.textContent).toContain("Select a run to stream");
+  });
+
+  test("shows the waiting/empty state for a run with no events", async () => {
+    const gw = boot({ events: { "run-empty": [] } });
+    const harness = await mount(gw, createElement(RunEventLog, { runId: "run-empty" }));
+    await harness.flush(40);
+    expect(harness.container.textContent).toMatch(/Waiting for events|No events/);
+  });
+
+  test("surfaces a stream error when the connection is unauthorized", async () => {
+    const gw = boot({ streamStatus: 401, events: { "run-a": [] } });
+    const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a" }));
+    await harness.flush(80);
+    expect(harness.container.textContent).toContain("Run event stream failed.");
+  });
+});
+
+describe("SimpleWorkflowDashboard", () => {
+  test("renders runs, starts a run, and selects rows", async () => {
+    const gw = boot({
+      runs: [
+        { runId: "run-aaaaaa11", workflowKey: "implement", status: "running", createdAtMs: Date.now() },
+        { runId: "run-bbbbbb22", workflowKey: "implement", status: "ok" },
+      ],
+      trees: { "run-aaaaaa11": SAMPLE_TREE },
+      events: { "run-aaaaaa11": [{ runId: "run-aaaaaa11", seq: 1, event: "run.started", payload: "hi" }] },
+    });
+    const harness = await mount(
+      gw,
+      createElement(SimpleWorkflowDashboard, {
+        workflow: "implement",
+        title: "Implement",
+        testId: "dash",
+        runLimit: 10,
+      }),
+    );
+    await harness.flush(80);
+    expect(harness.container.querySelector('[data-testid="dash"]')).not.toBeNull();
+    expect(harness.container.textContent).toContain("run-bbbb");
+
+    // Type a prompt and start a run. The typed prompt must reach the launch
+    // input, which proves the controlled-input onChange fired.
+    const input = harness.container.querySelector("input.input") as HTMLInputElement;
+    setInputValue(input, "do the thing");
+    await harness.flush();
+    const startButton = [...harness.container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Start"),
+    )!;
+    click(startButton);
+    await harness.flush(80);
+    const launch = gw.launches.find((l) => l.workflow === "implement");
+    expect(launch).toBeDefined();
+    expect((launch?.input as { prompt?: string })?.prompt).toBe("do the thing");
+
+    // Select the second run row.
+    const runRow = [...harness.container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("run-bbbb"),
+    );
+    if (runRow) {
+      click(runRow);
+      await harness.flush(40);
+    }
+  });
+
+  test("renders the empty state and reports a launch error", async () => {
+    const gw = boot({ runs: [], failPaths: new Set(["/v1/api/runs"]) });
+    const harness = await mount(
+      gw,
+      createElement(SimpleWorkflowDashboard, {
+        workflow: "implement",
+        promptPlaceholder: "prompt here",
+        initialPrompt: "seed",
+        inputFromPrompt: (prompt: string) => ({ text: prompt }),
+      }),
+    );
+    await harness.flush(60);
+    expect(harness.container.textContent).toContain("No runs yet.");
+    const startButton = [...harness.container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Start"),
+    )!;
+    click(startButton);
+    await harness.flush(80);
+    expect(harness.container.querySelector(".alert.err")).not.toBeNull();
+  });
+});

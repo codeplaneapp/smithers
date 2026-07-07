@@ -28,7 +28,7 @@ function shortRunId(runId: string): string {
   return runId.slice(0, 8);
 }
 
-function formatTime(ms: number | undefined): string {
+export function formatTime(ms: number | undefined): string {
   if (!ms) return "";
   try {
     return new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });

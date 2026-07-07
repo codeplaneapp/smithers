@@ -11,7 +11,7 @@ export type NodeOutputViewProps = {
   style?: CSSProperties;
 };
 
-function formatOutput(data: unknown): string {
+export function formatOutput(data: unknown): string {
   if (data == null) return "";
   if (typeof data === "string") return data;
   const envelope = data as Record<string, unknown>;

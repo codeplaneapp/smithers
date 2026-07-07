@@ -96,7 +96,7 @@ function keyFromDeleteMessage<TRow extends object, TKey extends string | number>
   return undefined;
 }
 
-function withBoundedRunEventSync<TRow extends GatewayRunEventRow, TKey extends string | number>(
+export function withBoundedRunEventSync<TRow extends GatewayRunEventRow, TKey extends string | number>(
   options: CollectionConfig<TRow, TKey>,
   maxRows: number,
 ): CollectionConfig<TRow, TKey> {
@@ -518,6 +518,10 @@ export function createSmithersCollections(
 export function createSmithersCollections(
   clientOrMode: SmithersDataClient | WorkspaceMode,
   queryClient: QueryClient,
+  // Injectable Electric-options loader; defaults to the real dynamic import.
+  // Used by tests to drive the multiplayer load-failure cleanup path without a
+  // live Electric dependency. Not part of the public overloads above.
+  loadElectric: () => Promise<SmithersElectricCollectionOptions> = loadSmithersElectricCollectionOptions,
 ): SmithersCollections | Promise<SmithersCollections> {
   const ownsClient = !isClient(clientOrMode);
   const client = ownsClient
@@ -526,7 +530,7 @@ export function createSmithersCollections(
   if (client.mode.kind !== "multiplayer") {
     return createSmithersCollectionsWithClient(client, ownsClient, queryClient);
   }
-  return loadSmithersElectricCollectionOptions()
+  return loadElectric()
     .then((electricCollectionOptions) => createSmithersCollectionsWithClient(client, ownsClient, queryClient, electricCollectionOptions))
     .catch((error) => {
       if (ownsClient) client.close();

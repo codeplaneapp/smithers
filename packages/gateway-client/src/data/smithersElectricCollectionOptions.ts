@@ -18,15 +18,30 @@ type ElectricMutationHandlers<TRow extends object, TKey extends string | number>
 let cachedElectricCollectionOptions: ElectricCollectionOptionsLoader | undefined;
 let cachedElectricCollectionOptionsPromise: Promise<ElectricCollectionOptionsLoader> | undefined;
 
-async function loadElectricCollectionOptions(): Promise<ElectricCollectionOptionsLoader> {
+async function resolveElectricCollectionOptions(
+  importer: () => Promise<unknown>,
+): Promise<ElectricCollectionOptionsLoader> {
+  const mod = await importer();
+  const options = (mod as { electricCollectionOptions?: unknown }).electricCollectionOptions;
+  if (typeof options !== "function") {
+    throw new Error("@tanstack/electric-db-collection did not export electricCollectionOptions.");
+  }
+  return options as ElectricCollectionOptionsLoader;
+}
+
+// `importer` is an injectable seam used only by tests to drive the "dependency
+// did not export electricCollectionOptions" failure path deterministically; it
+// bypasses the shared module cache so it can never poison the real loader.
+async function loadElectricCollectionOptions(
+  importer?: () => Promise<unknown>,
+): Promise<ElectricCollectionOptionsLoader> {
+  if (importer) return resolveElectricCollectionOptions(importer);
   if (cachedElectricCollectionOptions) return cachedElectricCollectionOptions;
-  cachedElectricCollectionOptionsPromise ??= import("@tanstack/electric-db-collection").then((mod) => {
-    const options = (mod as { electricCollectionOptions?: unknown }).electricCollectionOptions;
-    if (typeof options !== "function") {
-      throw new Error("@tanstack/electric-db-collection did not export electricCollectionOptions.");
-    }
-    cachedElectricCollectionOptions = options as ElectricCollectionOptionsLoader;
-    return cachedElectricCollectionOptions;
+  cachedElectricCollectionOptionsPromise ??= resolveElectricCollectionOptions(
+    () => import("@tanstack/electric-db-collection"),
+  ).then((options) => {
+    cachedElectricCollectionOptions = options;
+    return options;
   });
   return cachedElectricCollectionOptionsPromise;
 }
@@ -80,7 +95,7 @@ function createSmithersElectricCollectionOptions<
       params,
       headers: authHeaders(config.mode.token),
       liveSse: true,
-      transformer: (row: Record<string, unknown>) => config.mapRow(row),
+      transformer: config.mapRow,
     },
     onInsert: config.onInsert,
     onUpdate: config.onUpdate,

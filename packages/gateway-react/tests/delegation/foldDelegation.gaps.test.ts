@@ -1,7 +1,7 @@
 // Targeted coverage for the pure reducer's remaining branches: the
 // deterministic `stableStringify` tiebreak, the reaffirm-by-replanned-parent
-// cascade shortcut, and the multi-root-candidate ordering. All real data — no
-// mocks.
+// cascade shortcut, the two-invalidation ordering, and the multi-root-candidate
+// ordering. All real data — no mocks.
 import { describe, expect, test } from "bun:test";
 import { foldDelegation } from "../../src/delegation/foldDelegation.ts";
 import type { DelegationRecord, DcPlanChild, DcPlanRow, Estimate, Tier } from "../../src/delegation/types.ts";
@@ -43,7 +43,7 @@ describe("foldDelegation — cascade reaffirm by a replanned parent", () => {
     // root → root/a → root/a/x, where root/a/x DEPENDS on root/a (a dep edge, so
     // the cascade BFS traverses A → A/x). root/a is invalidated then replanned,
     // and its v2 plan still declares root/a/x → the redeclare IS the reaffirm,
-    // so the cascade `continue`s past A/x instead of downgrading it.
+    // so the cascade skips past A/x instead of downgrading it.
     const records: DelegationRecord[] = [
       rec("dcGoal", "dc:goal:goal", 0, { logicalId: "goal", refinedPrompt: "x", assumptions: [], questionsAsked: 0 }),
       rec("dcPlan", "dc:root:plan", 0, plan("root", "fable", [child("root/a", "opus", est(10, 1, 5))], est(20, 2, 10))),
@@ -76,9 +76,24 @@ describe("foldDelegation — a node invalidated across two rounds", () => {
       rec("dcPlan", "dc:root/a:plan", 1, plan("root/a", "opus", [], est(12, 1, 6))),
     ];
     const graph = foldDelegation(records);
-    // Two invalidations recorded → version reflects both rounds.
     expect(graph.nodes["root/a"]!.versions.length).toBeGreaterThanOrEqual(2);
     expect(graph.rootId).toBe("root");
+  });
+});
+
+describe("foldDelegation — pending questions ordered by (seq, logicalId)", () => {
+  test("two unresolved questions with the SAME seq fall back to the logicalId tiebreak", () => {
+    const q = (logicalId: string, seq: number) => ({
+      logicalId, seq, question: `Q${seq}?`, header: `Q${seq}`, kind: "select" as const,
+      options: [{ label: "yes", description: "do it" }], recommended: "yes", reason: "default", resolved: false,
+    });
+    const graph = foldDelegation([
+      rec("dcGoal", "dc:goal:goal", 0, { logicalId: "goal", refinedPrompt: "x", assumptions: [], questionsAsked: 2 }),
+      rec("dcQuestion", "dc:goal:question-1", 0, q("goal", 1)),
+      rec("dcQuestion", "dc:zoal:question-1", 0, q("zoal", 1)),
+    ]);
+    // Both unresolved questions surface; same seq → ordered by logicalId.
+    expect(graph.pendingQuestions.map((question) => question.logicalId)).toEqual(["goal", "zoal"]);
   });
 });
 

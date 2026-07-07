@@ -47,13 +47,24 @@ async function mountHarness(): Promise<Harness> {
   };
 }
 
+function multiplayerClient(workspaceId: string) {
+  return createSmithersDataClient({
+    mode: {
+      kind: "multiplayer",
+      apiBaseUrl: "http://127.0.0.1:1/",
+      electricBaseUrl: "http://127.0.0.1:1/",
+      workspaceId,
+      token: "operator-token",
+    },
+  });
+}
+
 describe("useSmithersCollections", () => {
   test("throws a clear error outside a <SmithersCollectionsProvider>", () => {
     function Probe() {
       useSmithersCollections();
       return null;
     }
-    // Render synchronously without a provider; the hook must throw.
     const container = document.createElement("div");
     const root = createRoot(container);
     expect(() => {
@@ -87,17 +98,26 @@ describe("SmithersCollectionsProvider", () => {
     await harness.unmount();
   });
 
-  test("a multiplayer client yields a collections PROMISE that resolves and mounts children", async () => {
-    const client = createSmithersDataClient({
-      mode: {
-        kind: "multiplayer",
-        apiBaseUrl: "http://127.0.0.1:1/",
-        electricBaseUrl: "http://127.0.0.1:1/",
-        workspaceId: "workspace-gaps",
-        token: "operator-token",
-      },
-    });
+  // NOTE: this cancelled-branch test runs BEFORE the resolve test on purpose:
+  // the first multiplayer render pays the cold `@tanstack/electric-db-collection`
+  // load, which settles on a macrotask that the render act does not flush — so
+  // the collections promise is still pending at unmount, and its late `.then`
+  // sees `cancelled` and closes the just-resolved collections (63-64).
+  test("unmounting a multiplayer provider mid-flight closes the resolved collections (cancelled branch)", async () => {
+    const client = multiplayerClient("workspace-gaps-cancel");
+    const harness = await mountHarness();
+    // Render: the effect registers the collections promise (still pending).
+    await harness.render(createElement(SmithersCollectionsProvider, { client }, createElement("div", null)));
+    // Unmount BEFORE the promise settles: cleanup sets `cancelled = true`.
+    await harness.unmount();
+    // Flush the pending import resolution so the cancelled `.then` runs.
+    await act(async () => { await new Promise((r) => setTimeout(r, 200)); });
+    client.close();
+    expect(true).toBe(true);
+  });
 
+  test("a multiplayer client yields a collections PROMISE that resolves and mounts children", async () => {
+    const client = multiplayerClient("workspace-gaps-resolve");
     let contextValue: any = null;
     function Consumer() {
       return createElement(SmithersCollectionsContext.Consumer, {
@@ -122,28 +142,5 @@ describe("SmithersCollectionsProvider", () => {
     // test owns closing it.
     await harness.unmount();
     client.close();
-  });
-
-  test("unmounting a multiplayer provider BEFORE the collections promise resolves closes the resolved collections (cancelled branch)", async () => {
-    const client = createSmithersDataClient({
-      mode: {
-        kind: "multiplayer",
-        apiBaseUrl: "http://127.0.0.1:1/",
-        electricBaseUrl: "http://127.0.0.1:1/",
-        workspaceId: "workspace-gaps-cancel",
-        token: "operator-token",
-      },
-    });
-
-    const harness = await mountHarness();
-    // Render then immediately unmount in the SAME macrotask window so the
-    // dynamic-import-backed collections promise is still pending at unmount —
-    // the cancelled guard closes the collections when it later resolves.
-    await harness.render(createElement(SmithersCollectionsProvider, { client }, createElement("div", null)));
-    await harness.unmount();
-    // Flush the pending import resolution so the cancelled `.then` runs.
-    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
-    client.close();
-    expect(true).toBe(true);
   });
 });

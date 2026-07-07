@@ -16,9 +16,17 @@ export type RunListProps = {
   pollMs?: number;
   className?: string;
   style?: CSSProperties;
+  /**
+   * Test seam: the runs hook to read from. Defaults to {@link useGatewayRuns}.
+   * Injectable so the error branch (which the local gateway path never triggers
+   * — `useGatewayRuns` currently returns `error: undefined`) can be exercised
+   * against the {@link GatewayAsyncState} contract without a live failure.
+   * @internal
+   */
+  useRuns?: typeof useGatewayRuns;
 };
 
-function shortTime(ms: number | undefined): string {
+export function shortTime(ms: number | undefined): string {
   if (!ms) return "";
   try {
     return new Date(ms).toLocaleTimeString();
@@ -39,8 +47,9 @@ export function RunList({
   pollMs = 2000,
   className,
   style,
+  useRuns = useGatewayRuns,
 }: RunListProps) {
-  const { data, loading, error, refetch } = useGatewayRuns(filter ? { filter } : undefined);
+  const { data, loading, error, refetch } = useRuns(filter ? { filter } : undefined);
   const runs = (data ?? []) as GatewayRunSummaryRow[];
 
   // listRuns is pull-only on the local gateway path, so poll to stay live.

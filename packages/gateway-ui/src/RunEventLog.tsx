@@ -18,7 +18,7 @@ export type RunEventLogProps = {
 // DOM; the full payload is inspectable via NodeOutputView.
 const PAYLOAD_PREVIEW_CHARS = 200;
 
-function summarize(payload: unknown): string {
+export function summarize(payload: unknown): string {
   if (payload == null) return "";
   if (typeof payload === "string") return payload;
   try {
