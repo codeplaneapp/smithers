@@ -182,14 +182,17 @@ function assertHandlersCallable(namespace, kindLabel, entries) {
 }
 
 export class GatewayExtensions {
-  /** @type {Map<string, GatewayExtensionDefinition>} */
-  namespaces = new Map();
+  constructor() {
+    /** @type {Map<string, GatewayExtensionDefinition>} */
+    this.namespaces = new Map();
 
-  /** Track resource + action keys per namespace so namespaced collisions are caught at register time. */
-  /** @type {Map<string, Set<string>>} */
-  invocableKeys = new Map();
-  /** @type {Map<string, Set<string>>} */
-  streamKeys = new Map();
+    // Track resource + action keys per namespace so namespaced collisions are
+    // caught at register time.
+    /** @type {Map<string, Set<string>>} */
+    this.invocableKeys = new Map();
+    /** @type {Map<string, Set<string>>} */
+    this.streamKeys = new Map();
+  }
 
   /**
    * @param {string} namespace

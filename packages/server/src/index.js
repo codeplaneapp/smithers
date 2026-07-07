@@ -833,8 +833,17 @@ function buildMirrorOnProgress(adapter, runId, workflowName, workflowPath, confi
     };
 }
 // Exposed for tests: the detached-run mirror projector, so the
-// ApprovalRequested/Granted/Denied projection can be exercised directly.
-export const __serverTestInternals = { buildMirrorOnProgress };
+// ApprovalRequested/Granted/Denied projection can be exercised directly, plus
+// the pure DB-identity/same-db predicates and the completed-run cleanup
+// scheduler (which are otherwise only reachable behind a live HTTP run loop).
+export const __serverTestInternals = {
+    buildMirrorOnProgress,
+    getDbIdentity,
+    isSameDb,
+    scheduleRunCleanup,
+    clearRunCleanupTimer,
+    runs,
+};
 /**
  * @param {ServerOptions} [opts]
  */
