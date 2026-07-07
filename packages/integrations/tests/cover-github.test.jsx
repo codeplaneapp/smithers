@@ -5,7 +5,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,6 +36,17 @@ function startFixture() {
                     },
                 });
             }
+            if (url.pathname === "/rl-403-past-reset") {
+                // Rate-limited, but the reset is already in the past → resetMs<=0,
+                // so retryAfterMs falls through the reset branch to null.
+                return json({ message: "Forbidden" }, {
+                    status: 403,
+                    headers: {
+                        "x-ratelimit-remaining": "0",
+                        "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) - 100),
+                    },
+                });
+            }
             if (url.pathname === "/server-500") {
                 // Retryable 5xx whose retry-after is present-but-unparseable →
                 // retryAfterMs skips the retry-after return, finds no reset, and
@@ -49,6 +60,9 @@ function startFixture() {
             if (url.pathname === "/single-object") {
                 // paginate over a non-array, non-null page → pushes the object itself.
                 return json({ id: 1, name: "solo" });
+            }
+            if (url.pathname === "/typed") {
+                return json({ login: "octocat", id: 583231 });
             }
             return json({ message: "Not Found" }, { status: 404 });
         },
@@ -71,6 +85,13 @@ describe("GitHubClient rate-limit + parsing edge branches", () => {
         expect(typeof error.details?.retryAfterMs).toBe("number");
     }, 10_000);
 
+    test("a past x-ratelimit-reset falls through to a null retryAfterMs", async () => {
+        const client = makeGitHubClient({ token: "t", apiBaseUrl: fixture.url, maxRetries: 0 });
+        const error = await Effect.runPromise(client.request("GET", "/rl-403-past-reset").pipe(Effect.flip));
+        expect(error.details?.rateLimited).toBe(true);
+        expect(error.details?.retryAfterMs).toBeNull();
+    }, 10_000);
+
     test("retryable 5xx with no rate-limit headers yields a null retryAfterMs", async () => {
         const client = makeGitHubClient({ token: "t", apiBaseUrl: fixture.url, maxRetries: 0 });
         const error = await Effect.runPromise(client.request("GET", "/server-500").pipe(Effect.flip));
@@ -89,6 +110,23 @@ describe("GitHubClient rate-limit + parsing edge branches", () => {
         const client = makeGitHubClient({ token: "t", apiBaseUrl: fixture.url });
         const items = await Effect.runPromise(client.paginate("/single-object"));
         expect(items).toEqual([{ id: 1, name: "solo" }]);
+    });
+
+    test("request decodes the response against an Effect Schema when one is given", async () => {
+        const client = makeGitHubClient({ token: "t", apiBaseUrl: fixture.url });
+        const user = await Effect.runPromise(client.request("GET", "/typed", undefined, {
+            schema: Schema.Struct({ login: Schema.String, id: Schema.Number }),
+        }));
+        expect(user).toEqual({ login: "octocat", id: 583231 });
+    });
+
+    test("a response that violates the given schema fails as decode-failed", async () => {
+        const client = makeGitHubClient({ token: "t", apiBaseUrl: fixture.url });
+        const error = await Effect.runPromise(client.request("GET", "/typed", undefined, {
+            schema: Schema.Struct({ login: Schema.Number }),
+        }).pipe(Effect.flip));
+        expect(error.details?.reason).toBe("decode-failed");
+        expect(error.message).toContain("schema validation");
     });
 
     test("githubClientLayer builds a Layer that provides the client", async () => {
