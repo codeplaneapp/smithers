@@ -9,7 +9,7 @@ async function runTask(task, options = {}) {
     }
     return validateOutput(task, await task.computeFn());
   }
-  const agent = Array.isArray(task.agent) ? task.agent[0] : task.agent;
+  const agent = Array.isArray(task.agent) ? task.agent[Math.min((options.attempt ?? 1) - 1, task.agent.length - 1)] : task.agent;
   if (!agent?.generate) {
     throw new TypeError(`Task ${task.nodeId} has no runnable agent, compute function, or static payload`);
   }
@@ -27,6 +27,7 @@ async function runTask(task, options = {}) {
   if (result && typeof result === "object" && "output" in result) {
     return validateOutput(task, result.output);
   }
+  if (task.outputSchema) return validateOutput(task, result);
   return result;
 }
 function validateOutput(task, value) {

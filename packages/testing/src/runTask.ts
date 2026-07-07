@@ -16,7 +16,9 @@ export async function runTask(task: TaskDescriptor, options: RunTaskOptions = {}
     }
     return validateOutput(task, await task.computeFn());
   }
-  const agent = Array.isArray(task.agent) ? task.agent[0] : task.agent;
+  const agent = Array.isArray(task.agent)
+    ? task.agent[Math.min((options.attempt ?? 1) - 1, task.agent.length - 1)]
+    : task.agent;
   if (!agent?.generate) {
     throw new TypeError(`Task ${task.nodeId} has no runnable agent, compute function, or static payload`);
   }
