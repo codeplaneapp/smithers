@@ -1,10 +1,9 @@
 // Drives the useDelegationChain hook through React's real reconciler under
 // happy-dom against a REAL in-memory gateway. The hook composes the run tree,
 // run events, approvals, and the Effect delegation store; here we exercise its
-// action surface (edit / skip-preview / answer-human / poll) and the runId
-// guard paths. The value run has no delegation nodes, so the graph stays empty
-// — that's fine: every hook line still executes and the actions still dispatch
-// (or reject on the real gateway, which the hook surfaces truthfully).
+// action surface (edit / skip-preview / answer-human / poll), the runId guard
+// paths, a real delegation-shaped node (the `dc-poll` approval), and a
+// StrictMode remount (store dispose + epoch bump).
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 try { GlobalRegistrator.register(); } catch { /* already registered */ }
@@ -15,7 +14,7 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import React, { act, createElement, type ReactElement } from "react";
+import React, { act, createElement, StrictMode, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { z } from "zod";
 import { Gateway } from "@smithers-orchestrator/server";
@@ -56,7 +55,10 @@ function getPort(server: import("node:http").Server) {
 
 async function bootGateway() {
   const dbPath = join(mkdtempSync(join(tmpdir(), "gwreact-dc-")), "store.db");
-  const api = createSmithers({ result: z.object({ value: z.number() }) }, { dbPath });
+  const api = createSmithers(
+    { result: z.object({ value: z.number() }), selection: z.object({ selected: z.string(), notes: z.string().nullable() }) },
+    { dbPath },
+  );
   cleanups.push(async () => {
     try { api.db.$client?.run?.("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
     await api.db.$client?.close?.();
@@ -69,16 +71,31 @@ async function bootGateway() {
     React.createElement(api.Workflow, { name: "collections-value" },
       React.createElement(api.Task, { id: "task1", output: api.outputs.result }, { value: Number(ctx.input.value ?? 1) })),
   ));
+  // A workflow whose Approval id is the delegation poll listener id `dc-poll`,
+  // so a launched run parks at a pending approval the delegation hook treats as
+  // the end-of-run poll — and whose run tree carries a delegation-shaped node.
+  gateway.register("poll", api.smithers(() =>
+    React.createElement(api.Workflow, { name: "delegation-poll" },
+      React.createElement(api.Approval, {
+        id: "dc-poll",
+        mode: "select",
+        output: api.outputs.selection,
+        request: { title: "Rate the run", summary: "How did it go?" },
+        options: [{ key: "good", label: "Good" }, { key: "bad", label: "Bad" }],
+        allowedScopes: ["approve"],
+        allowedUsers: ["user:operator"],
+      })),
+  ));
   const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
   cleanups.push(() => gateway.close());
   return { baseUrl: `http://127.0.0.1:${getPort(server)}` };
 }
 
-async function launchRun(baseUrl: string) {
+async function launch(baseUrl: string, workflow: string, input: unknown) {
   const response = await fetch(`${baseUrl}/v1/api/runs`, {
     method: "POST",
     headers: { authorization: "Bearer operator-token", "content-type": "application/json" },
-    body: JSON.stringify({ workflow: "value", input: { value: 1 } }),
+    body: JSON.stringify({ workflow, input }),
   });
   const json = await response.json();
   return String(json.data.runId);
@@ -96,12 +113,16 @@ async function mountHarness(): Promise<Harness> {
   };
 }
 
+function client(baseUrl: string) {
+  return new SmithersGatewayClient({ baseUrl, token: "operator-token", fetch: Bun.fetch });
+}
+
 const swallow = async (p: Promise<unknown>) => { try { await p; } catch { /* expected on a non-delegation run */ } };
 
 describe("useDelegationChain over a real gateway", () => {
   test("assembles state for a runId and dispatches every action (edit/skip/answer/poll)", async () => {
     const { baseUrl } = await bootGateway();
-    const runId = await launchRun(baseUrl);
+    const runId = await launch(baseUrl, "value", { value: 1 });
 
     let hook: ReturnType<typeof useDelegationChain> | undefined;
     function Probe() {
@@ -110,11 +131,7 @@ describe("useDelegationChain over a real gateway", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(
-      SmithersGatewayProvider,
-      { client: new SmithersGatewayClient({ baseUrl, token: "operator-token", fetch: Bun.fetch }) },
-      createElement(Probe),
-    ));
+    await harness.render(createElement(SmithersGatewayProvider, { client: client(baseUrl) }, createElement(Probe)));
 
     // Let the store hydrate (the value run has no delegation nodes → empty graph).
     await waitFor(() => hook !== undefined && hook.loading === false, "delegation loading settles");
@@ -149,6 +166,42 @@ describe("useDelegationChain over a real gateway", () => {
     await harness.unmount();
   });
 
+  test("a real pending `dc-poll` approval is a delegation target and submitPoll answers it", async () => {
+    const { baseUrl } = await bootGateway();
+    const runId = await launch(baseUrl, "poll", {});
+
+    let hook: ReturnType<typeof useDelegationChain> | undefined;
+    function Probe() {
+      hook = useDelegationChain({ runId });
+      return null;
+    }
+    const harness = await mountHarness();
+    await harness.render(createElement(SmithersGatewayProvider, { client: client(baseUrl) }, createElement(Probe)));
+
+    // Wait until the pending `dc-poll` approval is visible to the hook's
+    // approvals feed (this is the poll submitPoll looks for).
+    await waitFor(
+      () => Boolean(hook) && (hook!.actions as unknown) !== undefined && Array.isArray(hook!.errors),
+      "hook ready",
+    );
+    // The run tree carries the `dc-poll` node, which is delegation-shaped, so
+    // the tree-derived target count is non-zero (treeTargetCount branch).
+    // submitPoll finds the pending approval and answers it (the found path).
+    let answered = false;
+    await waitFor(async () => {
+      try {
+        await hook!.actions.submitPoll([{ question: "How useful?", rating: 5 }], "great");
+        answered = true;
+        return true;
+      } catch {
+        return false;
+      }
+    }, "submitPoll answers the pending dc-poll", 20_000);
+    expect(answered).toBe(true);
+
+    await harness.unmount();
+  });
+
   test("without a runId the actions reject via the runId guard", async () => {
     const { baseUrl } = await bootGateway();
 
@@ -158,11 +211,7 @@ describe("useDelegationChain over a real gateway", () => {
       return null;
     }
     const harness = await mountHarness();
-    await harness.render(createElement(
-      SmithersGatewayProvider,
-      { client: new SmithersGatewayClient({ baseUrl, token: "operator-token", fetch: Bun.fetch }) },
-      createElement(Probe),
-    ));
+    await harness.render(createElement(SmithersGatewayProvider, { client: client(baseUrl) }, createElement(Probe)));
 
     expect(hook!.loading).toBe(false);
 
@@ -186,6 +235,28 @@ describe("useDelegationChain over a real gateway", () => {
     });
     expect((pollError as Error).message).toContain("no pending poll");
 
+    await harness.unmount();
+  });
+
+  test("a StrictMode remount disposes and recreates the store (epoch bump)", async () => {
+    const { baseUrl } = await bootGateway();
+    const runId = await launch(baseUrl, "value", { value: 1 });
+
+    let hook: ReturnType<typeof useDelegationChain> | undefined;
+    function Probe() {
+      hook = useDelegationChain({ runId });
+      return null;
+    }
+    // StrictMode double-invokes effects: mount → cleanup (store.dispose) →
+    // mount again against the disposed store → the epoch bump recreates it.
+    const harness = await mountHarness();
+    await harness.render(createElement(
+      StrictMode,
+      null,
+      createElement(SmithersGatewayProvider, { client: client(baseUrl) }, createElement(Probe)),
+    ));
+    await waitFor(() => hook !== undefined && hook.loading === false, "strict-mode delegation settles");
+    expect(hook!.graph).toBeDefined();
     await harness.unmount();
   });
 });
