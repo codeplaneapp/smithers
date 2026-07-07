@@ -20,7 +20,7 @@ import { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";
 import { forkRun } from "@smithers-orchestrator/time-travel/fork";
 import { replayFromCheckpoint } from "@smithers-orchestrator/time-travel/replay";
 import { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
-import { buildTimeline, buildTimelineTree } from "@smithers-orchestrator/time-travel/timeline";
+import { buildTimelineEffect, buildTimelineTreeEffect } from "@smithers-orchestrator/time-travel/timeline";
 import { jumpToFrameRoute } from "@smithers-orchestrator/server/gatewayRoutes/jumpToFrame";
 import { runPromise } from "../smithersRuntime.js";
 import { pickTargetCheckpoint, runRestoreOnce } from "../restore.js";
@@ -1641,8 +1641,8 @@ export function createSemanticToolDefinitions(options = {}) {
             annotations: { readOnlyHint: true },
             handler: (input) => executeSemanticTool("get_timeline", async () => withDb(context, async (adapter) => ({
                 timeline: input.tree
-                    ? await buildTimelineTree(adapter, input.runId)
-                    : await buildTimeline(adapter, input.runId),
+                    ? await runPromise(buildTimelineTreeEffect(adapter, input.runId))
+                    : await runPromise(buildTimelineEffect(adapter, input.runId)),
             }))),
         },
         {
