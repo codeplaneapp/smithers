@@ -75,6 +75,21 @@ describe("handleAdminKeys gaps", () => {
     expect(badJson.status).toBe(400);
     expect(((await badJson.json()) as { error: string }).error).toContain("invalid JSON");
   });
+
+  test("400s when repos is not a string array", async () => {
+    const env = await buildTestEnv();
+    const worker = fixedWorker({});
+    const res = await worker.fetch(
+      new Request("https://review.test/api/admin/keys", {
+        method: "POST",
+        headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
+        body: JSON.stringify({ owner: "octo", repos: "not-an-array" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("repos must be a string array");
+  });
 });
 
 describe("handleAdminRepos gaps", () => {
@@ -218,6 +233,21 @@ describe("handleSessions gaps", () => {
     );
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toContain("invalid JSON");
+  });
+
+  test("400s a body carrying neither an oidcToken nor an apiKey", async () => {
+    const env = await buildTestEnv();
+    const worker = fixedWorker({});
+    const res = await worker.fetch(
+      new Request("https://review.test/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repo: "octo/widgets", pr: 1 }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("expected oidcToken or apiKey");
   });
 
   test("api-key path: missing repo, missing pr, and repo-not-authorized", async () => {
