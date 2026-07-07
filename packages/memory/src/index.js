@@ -4,6 +4,10 @@
 /** @typedef {import("./MemoryMessage.ts").MemoryMessage} MemoryMessage */
 /** @typedef {import("./MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */
 /** @typedef {import("./MemoryNamespaceKind.ts").MemoryNamespaceKind} MemoryNamespaceKind */
+/** @typedef {import("./MemoryNote.ts").MemoryNote} MemoryNote */
+/** @typedef {import("./MemoryNote.ts").SaveNoteInput} SaveNoteInput */
+/** @typedef {import("./MemoryNote.ts").NoteReadFilter} NoteReadFilter */
+/** @typedef {import("./MemoryProvenance.ts").MemoryProvenance} MemoryProvenance */
 /** @typedef {import("./MemoryProcessor.ts").MemoryProcessor} MemoryProcessor */
 /** @typedef {import("./MemoryProcessorConfig.ts").MemoryProcessorConfig} MemoryProcessorConfig */
 /** @typedef {import("./MemoryServiceApi.ts").MemoryServiceApi} MemoryServiceApi */
@@ -21,7 +25,7 @@
 export { namespaceToString } from "./namespaceToString.js";
 export { parseNamespace } from "./parseNamespace.js";
 // Schema (Drizzle tables)
-export { smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages, } from "./schema.js";
+export { smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages, smithersMemoryNotes, smithersMemoryNoteSupersessions, } from "./schema.js";
 // Store
 export { createMemoryStore } from "./store/createMemoryStore.js";
 // Processors

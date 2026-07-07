@@ -90,12 +90,18 @@ describe("MemoryService", () => {
             "deleteExpiredFacts",
             "deleteFact",
             "deleteThread",
+            "enableNoteSearch",
             "getFact",
+            "getNote",
             "getThread",
             "listFacts",
             "listMessages",
+            "listNotes",
             "saveMessage",
+            "saveNote",
+            "searchNotes",
             "setFact",
+            "setNoteStatus",
             "store",
         ]);
     });

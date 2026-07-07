@@ -5,5 +5,7 @@ export type MemoryMessage = {
   contentJson: string;
   runId?: string | null;
   nodeId?: string | null;
+  /** Provenance: completes the run coordinate alongside runId/nodeId. */
+  iteration?: number | null;
   createdAtMs: number;
 };

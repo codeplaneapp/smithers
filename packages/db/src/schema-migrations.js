@@ -132,6 +132,22 @@ const LEGACY_COLUMN_MIGRATIONS = [
         table: "_smithers_events",
         columns: [["timestamp_ms", "timestamp_ms INTEGER NOT NULL DEFAULT 0"]],
     },
+    {
+        id: "0021_memory_fact_provenance_columns",
+        name: "Add provenance columns to memory facts",
+        table: "_smithers_memory_facts",
+        columns: [
+            ["run_id", "run_id TEXT"],
+            ["node_id", "node_id TEXT"],
+            ["iteration", "iteration INTEGER"],
+        ],
+    },
+    {
+        id: "0022_memory_message_iteration_column",
+        name: "Add iteration provenance column to memory messages",
+        table: "_smithers_memory_messages",
+        columns: [["iteration", "iteration INTEGER"]],
+    },
 ];
 
 const EXTRA_INDEX_STATEMENTS = [
@@ -754,6 +770,33 @@ function buildMigrations(context) {
                 await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_integration_deliveries", context.createTableStatements)) });
                 await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_integration_cursors", context.createTableStatements)) });
                 return { tables: ["_smithers_integration_deliveries", "_smithers_integration_cursors"] };
+            },
+        },
+        {
+            id: "0023_add_memory_notes",
+            name: "Add append-only memory notes and supersession junction tables",
+            checksum: "packages/db/migrations/0023_add_memory_notes.sql",
+            isApplied: (sqlite) => tableExists(sqlite, "_smithers_memory_notes") &&
+                tableExists(sqlite, "_smithers_memory_note_supersessions"),
+            isAppliedPostgres: async (pgConn) => (await tableExistsPostgres(pgConn, "_smithers_memory_notes")) &&
+                (await tableExistsPostgres(pgConn, "_smithers_memory_note_supersessions")),
+            up: (sqlite) => {
+                sqlite.run(createTableStatementFor("_smithers_memory_notes", context.createTableStatements));
+                sqlite.run(createTableStatementFor("_smithers_memory_note_supersessions", context.createTableStatements));
+                sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_memory_notes_namespace_idx
+    ON _smithers_memory_notes (namespace, status, created_at_ms)`);
+                sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_memory_note_supersessions_target_idx
+    ON _smithers_memory_note_supersessions (supersedes_id)`);
+                return { tables: ["_smithers_memory_notes", "_smithers_memory_note_supersessions"] };
+            },
+            upPostgres: async (pgConn) => {
+                await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_memory_notes", context.createTableStatements)) });
+                await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_memory_note_supersessions", context.createTableStatements)) });
+                await pgConn.query({ text: translateDdl(POSTGRES, `CREATE INDEX IF NOT EXISTS _smithers_memory_notes_namespace_idx
+    ON _smithers_memory_notes (namespace, status, created_at_ms)`) });
+                await pgConn.query({ text: translateDdl(POSTGRES, `CREATE INDEX IF NOT EXISTS _smithers_memory_note_supersessions_target_idx
+    ON _smithers_memory_note_supersessions (supersedes_id)`) });
+                return { tables: ["_smithers_memory_notes", "_smithers_memory_note_supersessions"] };
             },
         },
         {

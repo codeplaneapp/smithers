@@ -4,7 +4,8 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { dbQueryDuration } from "@smithers-orchestrator/observability/metrics";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { namespaceToString } from "../namespaceToString.js";
-import { smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages, } from "../schema.js";
+import { parseNamespace } from "../parseNamespace.js";
+import { smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages, smithersMemoryNotes, smithersMemoryNoteSupersessions, } from "../schema.js";
 import { memoryFactReads } from "../memoryFactReads.js";
 import { memoryFactWrites } from "../memoryFactWrites.js";
 import { memoryMessageSaves } from "../memoryMessageSaves.js";
@@ -13,6 +14,10 @@ import { MemoryStoreService } from "./MemoryStoreService.js";
 /** @typedef {import("./MemoryStore.ts").MemoryStore} MemoryStore */
 /** @typedef {import("../MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */
 /** @typedef {import("../MemoryFact.ts").MemoryFact} MemoryFact */
+/** @typedef {import("../MemoryNote.ts").MemoryNote} MemoryNote */
+/** @typedef {import("../MemoryNote.ts").SaveNoteInput} SaveNoteInput */
+/** @typedef {import("../MemoryNote.ts").NoteReadFilter} NoteReadFilter */
+/** @typedef {import("../MemoryProvenance.ts").MemoryProvenance} MemoryProvenance */
 /** @typedef {import("../MemoryMessage.ts").MemoryMessage} MemoryMessage */
 /** @typedef {import("../MemoryThread.ts").MemoryThread} MemoryThread */
 /** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
@@ -60,8 +65,43 @@ function toFact(row) {
         createdAtMs: row.createdAtMs,
         updatedAtMs: row.updatedAtMs,
         ttlMs: row.ttlMs,
+        runId: row.runId,
+        nodeId: row.nodeId,
+        iteration: row.iteration,
     };
 }
+/**
+ * Project a note row onto the declared MemoryNote shape.
+ * @param {typeof smithersMemoryNotes.$inferSelect} row
+ * @returns {MemoryNote}
+ */
+function toNote(row) {
+    return {
+        id: row.id,
+        namespace: row.namespace,
+        body: row.body,
+        kind: row.kind,
+        tagsJson: row.tagsJson,
+        author: row.author,
+        status: row.status,
+        statusChangedAtMs: row.statusChangedAtMs,
+        createdAtMs: row.createdAtMs,
+        runId: row.runId,
+        nodeId: row.nodeId,
+        iteration: row.iteration,
+    };
+}
+/**
+ * The default read contract's supersession predicate: a note is hidden ONLY
+ * when a junction row points at it from a note whose CURRENT status is
+ * accepted. A pending or rejected superseder hides nothing — so
+ * propose-supersession-then-reject leaves the original live.
+ */
+const NOT_SUPERSEDED_BY_ACCEPTED = sql `NOT EXISTS (
+    SELECT 1 FROM _smithers_memory_note_supersessions __s
+    JOIN _smithers_memory_notes __sup ON __sup.id = __s.note_id
+    WHERE __s.supersedes_id = ${smithersMemoryNotes.id} AND __sup.status = 'accepted'
+  )`;
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -96,11 +136,19 @@ function makeMemoryStore(db) {
    * @param {string} key
    * @param {unknown} value
    * @param {number} [ttlMs]
+   * @param {MemoryProvenance} [provenance] Run coordinate of this write; a fact
+   *   records the LAST writer (upsert semantics). Explicit by design — never
+   *   inferred from ambient context.
    * @returns {Effect.Effect<void, SmithersError>}
    */
-    function setFactEffect(ns, key, value, ttlMs) {
+    function setFactEffect(ns, key, value, ttlMs, provenance) {
         const nsStr = namespaceToString(ns);
         const now = nowMs();
+        const stamp = {
+            runId: provenance?.runId ?? null,
+            nodeId: provenance?.nodeId ?? null,
+            iteration: provenance?.iteration ?? null,
+        };
         return Effect.gen(function* () {
             yield* Metric.increment(memoryFactWrites);
             yield* writeEffect("memory setFact", () => db
@@ -112,6 +160,7 @@ function makeMemoryStore(db) {
                 createdAtMs: now,
                 updatedAtMs: now,
                 ttlMs: ttlMs ?? null,
+                ...stamp,
             })
                 .onConflictDoUpdate({
                 target: [smithersMemoryFacts.namespace, smithersMemoryFacts.key],
@@ -119,6 +168,7 @@ function makeMemoryStore(db) {
                     valueJson: JSON.stringify(value),
                     updatedAtMs: now,
                     ttlMs: ttlMs ?? null,
+                    ...stamp,
                 },
             }));
         });
@@ -243,6 +293,7 @@ function makeMemoryStore(db) {
                 contentJson: msg.contentJson,
                 runId: msg.runId ?? null,
                 nodeId: msg.nodeId ?? null,
+                iteration: msg.iteration ?? null,
                 createdAtMs,
             })
                 .onConflictDoUpdate({
@@ -253,6 +304,7 @@ function makeMemoryStore(db) {
                     contentJson: msg.contentJson,
                     runId: msg.runId ?? null,
                     nodeId: msg.nodeId ?? null,
+                    iteration: msg.iteration ?? null,
                     createdAtMs,
                 },
             }));
@@ -281,6 +333,7 @@ function makeMemoryStore(db) {
             contentJson: row.contentJson,
             runId: row.runId,
             nodeId: row.nodeId,
+            iteration: row.iteration,
             createdAtMs: row.createdAtMs,
         }))));
     }
@@ -307,6 +360,193 @@ function makeMemoryStore(db) {
             .delete(smithersMemoryMessages)
             .where(and(eq(smithersMemoryMessages.threadId, threadId), inArray(smithersMemoryMessages.id, messageIds)))).pipe(Effect.map((result) => result?.changes ?? result?.rowsAffected ?? 0));
     }
+    // --- Note Effects (P2/P3: append-only knowledge) ---
+    /**
+   * FTS artifacts (P4) exist only after enableNoteSearch — KV-only and
+   * notes-without-search users never create them and pay nothing per write.
+   */
+    function noteFtsReady() {
+        const rows = db.all(sql `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_memory_fts_kinds'`);
+        return rows.length > 0;
+    }
+    /**
+   * @param {string} kind
+   */
+    function noteFtsKindEnabled(kind) {
+        if (!noteFtsReady()) {
+            return false;
+        }
+        const rows = db.all(sql `SELECT 1 AS ok FROM _smithers_memory_fts_kinds WHERE kind = ${kind}`);
+        return rows.length > 0;
+    }
+    /**
+   * Shared read-contract conditions for listNotes/searchNotes. The DEFAULT
+   * (no filter) is the stability contract: (a) not superseded by an ACCEPTED
+   * note, (b) status = 'accepted'. Filters widen.
+   * @param {NoteReadFilter} [filter]
+   */
+    function noteFilterConds(filter) {
+        const conds = [];
+        if (!filter?.includeSuperseded) {
+            conds.push(NOT_SUPERSEDED_BY_ACCEPTED);
+        }
+        const status = filter?.status ?? "accepted";
+        if (status !== "any") {
+            conds.push(Array.isArray(status)
+                ? inArray(smithersMemoryNotes.status, status)
+                : eq(smithersMemoryNotes.status, status));
+        }
+        if (filter?.kind) {
+            conds.push(eq(smithersMemoryNotes.kind, filter.kind));
+        }
+        return conds;
+    }
+    /**
+   * Append a note (immutable row) and its supersession edges atomically.
+   * Idempotent on id (crash-resume safe): a re-save with the same id is a
+   * no-op INSERT OR IGNORE — never an upsert, so history cannot be destroyed.
+   * @param {SaveNoteInput} input
+   * @returns {Effect.Effect<MemoryNote, SmithersError>}
+   */
+    function saveNoteEffect(input) {
+        const id = input.id ?? crypto.randomUUID();
+        const nsStr = namespaceToString(input.namespace);
+        const now = nowMs();
+        const note = {
+            id,
+            namespace: nsStr,
+            body: input.body,
+            kind: input.kind ?? null,
+            tagsJson: input.tags ? JSON.stringify(input.tags) : null,
+            author: input.author ?? null,
+            status: input.status ?? "accepted",
+            statusChangedAtMs: null,
+            createdAtMs: now,
+            runId: input.provenance?.runId ?? null,
+            nodeId: input.provenance?.nodeId ?? null,
+            iteration: input.provenance?.iteration ?? null,
+        };
+        const nsKind = parseNamespace(nsStr).kind;
+        return writeEffect("memory saveNote", () => Promise.resolve(db.transaction((tx) => {
+            tx.insert(smithersMemoryNotes).values(note).onConflictDoNothing().run();
+            for (const supersedesId of input.supersedes ?? []) {
+                tx.insert(smithersMemoryNoteSupersessions)
+                    .values({ noteId: id, supersedesId, createdAtMs: now })
+                    .onConflictDoNothing()
+                    .run();
+            }
+            if (noteFtsKindEnabled(nsKind)) {
+                tx.run(sql `INSERT INTO _smithers_memory_notes_fts (note_id, kind, body)
+            SELECT ${id}, ${nsKind}, ${note.body}
+            WHERE NOT EXISTS (SELECT 1 FROM _smithers_memory_notes_fts WHERE note_id = ${id})`);
+            }
+        }))).pipe(Effect.map(() => toNote(note)));
+    }
+    /**
+   * @param {string} id
+   * @returns {Effect.Effect<MemoryNote | undefined, SmithersError>}
+   */
+    function getNoteEffect(id) {
+        return readEffect("memory getNote", () => db
+            .select()
+            .from(smithersMemoryNotes)
+            .where(eq(smithersMemoryNotes.id, id))
+            .limit(1)).pipe(Effect.map((rows) => (rows[0] ? toNote(rows[0]) : undefined)));
+    }
+    /**
+   * @param {MemoryNamespace} ns
+   * @param {NoteReadFilter} [filter]
+   * @returns {Effect.Effect<MemoryNote[], SmithersError>}
+   */
+    function listNotesEffect(ns, filter) {
+        const nsStr = namespaceToString(ns);
+        return readEffect("memory listNotes", () => db
+            .select()
+            .from(smithersMemoryNotes)
+            .where(and(eq(smithersMemoryNotes.namespace, nsStr), ...noteFilterConds(filter)))
+            .orderBy(smithersMemoryNotes.createdAtMs)).pipe(Effect.map((rows) => rows.map(toNote)));
+    }
+    /**
+   * Flip a note's status — the ONE mutable exception to append-only. Body,
+   * labels, provenance, and supersession edges never change; the gate writes
+   * an answer about an existing note. Fails loud when the note is missing.
+   * @param {string} id
+   * @param {string} status
+   * @returns {Effect.Effect<void, SmithersError>}
+   */
+    function setNoteStatusEffect(id, status) {
+        const now = nowMs();
+        return writeEffect("memory setNoteStatus", () => db
+            .update(smithersMemoryNotes)
+            .set({ status, statusChangedAtMs: now })
+            .where(eq(smithersMemoryNotes.id, id))).pipe(Effect.flatMap((result) => {
+            const changes = Number(/** @type {any} */ (result)?.changes ?? /** @type {any} */ (result)?.rowsAffected ?? 0);
+            if (changes === 0) {
+                return Effect.fail(toSmithersError(new Error(`memory setNoteStatus: no note with id ${id}`), "memory setNoteStatus", { code: "DB_WRITE_FAILED", details: { noteId: id } }));
+            }
+            return Effect.void;
+        }));
+    }
+    /**
+   * Opt a namespace kind into note text search (P4). Creates the FTS5
+   * artifacts lazily on first call and backfills existing notes of that kind.
+   * Until this is called, no FTS table exists and note writes skip FTS
+   * entirely (zero write amplification for KV-only users).
+   * @param {string} kind
+   * @returns {Effect.Effect<void, SmithersError>}
+   */
+    function enableNoteSearchEffect(kind) {
+        return writeEffect("memory enableNoteSearch", () => Promise.resolve(db.transaction((tx) => {
+            tx.run(sql `CREATE TABLE IF NOT EXISTS _smithers_memory_fts_kinds (kind TEXT PRIMARY KEY)`);
+            tx.run(sql `CREATE VIRTUAL TABLE IF NOT EXISTS _smithers_memory_notes_fts USING fts5(note_id UNINDEXED, kind UNINDEXED, body)`);
+            tx.run(sql `INSERT INTO _smithers_memory_fts_kinds (kind) VALUES (${kind}) ON CONFLICT DO NOTHING`);
+            tx.run(sql `INSERT INTO _smithers_memory_notes_fts (note_id, kind, body)
+          SELECT n.id, ${kind}, n.body FROM _smithers_memory_notes n
+          WHERE n.namespace LIKE ${`${kind}:%`}
+            AND NOT EXISTS (SELECT 1 FROM _smithers_memory_notes_fts f WHERE f.note_id = n.id)`);
+        }))).pipe(Effect.asVoid);
+    }
+    /**
+   * FTS search over note bodies for an enabled namespace kind, rank order.
+   * Results honor the same read contract as listNotes (filters widen). Fails
+   * loud — not silently empty — when the kind was never enabled.
+   * @param {string} kind
+   * @param {string} query
+   * @param {number} [limit]
+   * @param {NoteReadFilter} [filter]
+   * @returns {Effect.Effect<MemoryNote[], SmithersError>}
+   */
+    function searchNotesEffect(kind, query, limit, filter) {
+        const max = limit ?? 20;
+        return Effect.gen(function* () {
+            if (!noteFtsKindEnabled(kind)) {
+                return yield* Effect.fail(toSmithersError(new Error(`memory searchNotes: note search is not enabled for namespace kind "${kind}" — call enableNoteSearch("${kind}") first`), "memory searchNotes", { code: "DB_QUERY_FAILED", details: { kind } }));
+            }
+            const matches = yield* readEffect("memory searchNotes", () => Promise.resolve(db.all(sql `SELECT note_id AS noteId FROM _smithers_memory_notes_fts
+             WHERE _smithers_memory_notes_fts MATCH ${query} AND kind = ${kind}
+             ORDER BY rank LIMIT ${max * 5}`)));
+            const ids = matches.map((row) => String(/** @type {any} */ (row).noteId));
+            if (ids.length === 0) {
+                return [];
+            }
+            const rows = yield* readEffect("memory searchNotes fetch", () => db
+                .select()
+                .from(smithersMemoryNotes)
+                .where(and(inArray(smithersMemoryNotes.id, ids), ...noteFilterConds(filter))));
+            const byId = new Map(rows.map((row) => [row.id, toNote(row)]));
+            const ordered = [];
+            for (const id of ids) {
+                const note = byId.get(id);
+                if (note) {
+                    ordered.push(note);
+                }
+                if (ordered.length >= max) {
+                    break;
+                }
+            }
+            return ordered;
+        });
+    }
     // --- Maintenance ---
     /**
    * @returns {Effect.Effect<number, SmithersError>}
@@ -321,7 +561,7 @@ function makeMemoryStore(db) {
     return {
         // Promise variants (delegate to Effect)
         getFact: (ns, key) => Effect.runPromise(getFactEffect(ns, key)),
-        setFact: (ns, key, value, ttlMs) => Effect.runPromise(setFactEffect(ns, key, value, ttlMs)),
+        setFact: (ns, key, value, ttlMs, provenance) => Effect.runPromise(setFactEffect(ns, key, value, ttlMs, provenance)),
         deleteFact: (ns, key) => Effect.runPromise(deleteFactEffect(ns, key)),
         listFacts: (ns) => Effect.runPromise(listFactsEffect(ns)),
         listAllFacts: () => Effect.runPromise(listAllFactsEffect()),
@@ -334,6 +574,12 @@ function makeMemoryStore(db) {
         countMessages: (threadId) => Effect.runPromise(countMessagesEffect(threadId)),
         deleteMessages: (threadId, messageIds) => Effect.runPromise(deleteMessagesEffect(threadId, messageIds)),
         deleteExpiredFacts: () => Effect.runPromise(deleteExpiredFactsEffect()),
+        saveNote: (input) => Effect.runPromise(saveNoteEffect(input)),
+        getNote: (id) => Effect.runPromise(getNoteEffect(id)),
+        listNotes: (ns, filter) => Effect.runPromise(listNotesEffect(ns, filter)),
+        setNoteStatus: (id, status) => Effect.runPromise(setNoteStatusEffect(id, status)),
+        enableNoteSearch: (kind) => Effect.runPromise(enableNoteSearchEffect(kind)),
+        searchNotes: (kind, query, limit, filter) => Effect.runPromise(searchNotesEffect(kind, query, limit, filter)),
         // Effect variants
         getFactEffect,
         setFactEffect,
@@ -349,6 +595,12 @@ function makeMemoryStore(db) {
         countMessagesEffect,
         deleteMessagesEffect,
         deleteExpiredFactsEffect,
+        saveNoteEffect,
+        getNoteEffect,
+        listNotesEffect,
+        setNoteStatusEffect,
+        enableNoteSearchEffect,
+        searchNotesEffect,
     };
 }
 /** @type {Layer.Layer<MemoryStoreService, never, BunSQLiteDatabase<any>>} */

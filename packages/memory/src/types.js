@@ -4,6 +4,10 @@
 /** @typedef {import("./MemoryMessage.ts").MemoryMessage} MemoryMessage */
 /** @typedef {import("./MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */
 /** @typedef {import("./MemoryNamespaceKind.ts").MemoryNamespaceKind} MemoryNamespaceKind */
+/** @typedef {import("./MemoryNote.ts").MemoryNote} MemoryNote */
+/** @typedef {import("./MemoryNote.ts").SaveNoteInput} SaveNoteInput */
+/** @typedef {import("./MemoryNote.ts").NoteReadFilter} NoteReadFilter */
+/** @typedef {import("./MemoryProvenance.ts").MemoryProvenance} MemoryProvenance */
 /** @typedef {import("./MemoryProcessor.ts").MemoryProcessor} MemoryProcessor */
 /** @typedef {import("./MemoryProcessorConfig.ts").MemoryProcessorConfig} MemoryProcessorConfig */
 /** @typedef {import("./MemoryServiceApi.ts").MemoryServiceApi} MemoryServiceApi */

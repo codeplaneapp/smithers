@@ -238,6 +238,8 @@ export { smithersScorers } from "./internal-schema/smithersScorers.js";
 export { smithersMemoryFacts } from "./internal-schema/smithersMemoryFacts.js";
 export { smithersMemoryThreads } from "./internal-schema/smithersMemoryThreads.js";
 export { smithersMemoryMessages } from "./internal-schema/smithersMemoryMessages.js";
+export { smithersMemoryNotes } from "./internal-schema/smithersMemoryNotes.js";
+export { smithersMemoryNoteSupersessions } from "./internal-schema/smithersMemoryNoteSupersessions.js";
 export const smithersVectors = sqliteTable("_smithers_vectors", {
     id: text("id").primaryKey(),
     namespace: text("namespace").notNull(),
