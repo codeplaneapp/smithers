@@ -9,15 +9,16 @@
  *   SMITHERS_ELECTRIC_URL=http://electric:3000/v1/shape \
  *   SMITHERS_GATEWAY_URL=http://gateway:7342 \
  *   SMITHERS_ELECTRIC_PROXY_PORT=8443 \
- *   node bin/smithers-electric-proxy.ts
+ *   node bin/smithers-electric-proxy.js
  */
-import {
-  createSmithersElectricProxy,
-  type SmithersElectricAuthContext,
-} from "../src/createSmithersElectricProxy.ts";
-import { serveSmithersElectricProxy } from "../src/serveSmithersElectricProxy.ts";
+import { createSmithersElectricProxy } from "../src/createSmithersElectricProxy.js";
+import { serveSmithersElectricProxy } from "../src/serveSmithersElectricProxy.js";
 
-function requireEnv(name: string): string {
+/**
+ * @param {string} name
+ * @returns {string}
+ */
+function requireEnv(name) {
   const value = process.env[name];
   if (!value) {
     throw new Error(`${name} is required`);
@@ -25,10 +26,12 @@ function requireEnv(name: string): string {
   return value;
 }
 
-async function deriveGrantsFromGateway(
-  gatewayUrl: string,
-  authorization: string,
-): Promise<SmithersElectricAuthContext | null> {
+/**
+ * @param {string} gatewayUrl
+ * @param {string} authorization
+ * @returns {Promise<import("../src/SmithersElectricProxyOptions.ts").SmithersElectricAuthContext | null>}
+ */
+async function deriveGrantsFromGateway(gatewayUrl, authorization) {
   // listRuns returns exactly the runs the token is authorized to read, so its
   // result is the authoritative grant set. A 401/403 means no access.
   const response = await fetch(`${gatewayUrl.replace(/\/+$/, "")}/v1/rpc/listRuns`, {
@@ -37,12 +40,12 @@ async function deriveGrantsFromGateway(
     body: JSON.stringify({}),
   }).catch(() => null);
   if (!response || !response.ok) return null;
-  const body = (await response.json().catch(() => null)) as { payload?: unknown } | null;
+  const body = /** @type {{ payload?: unknown } | null} */ (await response.json().catch(() => null));
   const payload = body?.payload;
   const rows = Array.isArray(payload) ? payload : [];
   const grantedRunIds = rows
-    .map((row) => (row && typeof row === "object" ? (row as { runId?: unknown }).runId : undefined))
-    .filter((id): id is string => typeof id === "string");
+    .map((row) => (row && typeof row === "object" ? (/** @type {{ runId?: unknown }} */ (row)).runId : undefined))
+    .filter((id) => typeof id === "string");
   return {
     principalId: authorization.slice(-12),
     scopes: ["run:read"],
@@ -50,7 +53,10 @@ async function deriveGrantsFromGateway(
   };
 }
 
-async function main(): Promise<void> {
+/**
+ * @returns {Promise<void>}
+ */
+async function main() {
   const electricUrl = requireEnv("SMITHERS_ELECTRIC_URL");
   const gatewayUrl = requireEnv("SMITHERS_GATEWAY_URL");
   const port = Number(process.env.SMITHERS_ELECTRIC_PROXY_PORT ?? 8443);

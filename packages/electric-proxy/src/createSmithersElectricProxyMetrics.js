@@ -1,29 +1,14 @@
-export type SmithersElectricProxyMetricSnapshot = {
-  shapeOpens: number;
-  shapeOpenRejected: number;
-  activeShapes: number;
-  replayGaps: number;
-  largeFrames: number;
-  forwardedBytes: number;
-  upstreamErrors: number;
-  lastSyncLagMs: number | null;
-};
-
-export type SmithersElectricProxyMetrics = {
-  snapshot(): SmithersElectricProxyMetricSnapshot;
-  incShapeOpen(): void;
-  incShapeOpenRejected(): void;
-  incReplayGap(): void;
-  incLargeFrame(): void;
-  incUpstreamError(): void;
-  addForwardedBytes(bytes: number): void;
-  setActiveShapes(count: number): void;
-  observeSyncLag(ms: number): void;
-  renderPrometheus(): string;
-};
-
-export function createSmithersElectricProxyMetrics(): SmithersElectricProxyMetrics {
-  const state: SmithersElectricProxyMetricSnapshot = {
+/**
+ * Build the in-process metrics registry for the Electric proxy: counters and
+ * gauges for shape opens/rejections, active streams, replay gaps, frame-bound
+ * violations, forwarded bytes, upstream errors, and sync lag, plus a Prometheus
+ * text rendering for the proxy's `/metrics` route.
+ *
+ * @returns {import("./SmithersElectricProxyMetrics.ts").SmithersElectricProxyMetrics}
+ */
+export function createSmithersElectricProxyMetrics() {
+  /** @type {import("./SmithersElectricProxyMetrics.ts").SmithersElectricProxyMetricSnapshot} */
+  const state = {
     shapeOpens: 0,
     shapeOpenRejected: 0,
     activeShapes: 0,

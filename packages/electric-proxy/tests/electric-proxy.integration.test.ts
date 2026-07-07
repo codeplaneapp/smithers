@@ -7,7 +7,7 @@
  * forwarding. SKIPS cleanly when Docker is unavailable.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createSmithersElectricProxy } from "../src/index.ts";
+import { createSmithersElectricProxy } from "../src/index.js";
 import {
   isDockerFixtureAvailable,
   startElectricFixture,

@@ -1,87 +1,28 @@
 import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
-import type { GatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
-import {
-  createSmithersElectricProxyMetrics,
-  type SmithersElectricProxyMetrics,
-} from "./createSmithersElectricProxyMetrics.ts";
-import {
-  smithersElectricCatalogWithOutputTables,
-  type SmithersElectricShapeDefinition,
-} from "./smithersElectricShapeCatalog.ts";
-import {
-  emitSmithersElectricEvent,
-  type SmithersElectricProxyObserver,
-} from "./createSmithersElectricProxyObserver.ts";
+import { createSmithersElectricProxyMetrics } from "./createSmithersElectricProxyMetrics.js";
+import { emitSmithersElectricEvent } from "./createSmithersElectricProxyObserver.js";
+import { smithersElectricCatalogWithOutputTables } from "./smithersElectricShapeCatalog.js";
 
-export type SmithersElectricAuthContext = {
-  principalId?: string;
-  userId?: string;
-  tokenId?: string;
-  scopes: readonly string[];
-  grantedRunIds?: readonly string[];
-  grantedWorkspaceIds?: readonly string[];
-  /**
-   * Single-user local-cloud installs (one tenant, no per-run partitioning) can
-   * opt OUT of run/workspace scoping by setting this. Absent or false, the
-   * proxy fails CLOSED: a run/workspace-scoped shape with no concrete grant
-   * array is rejected rather than forwarded unscoped. Cloud auth must derive
-   * concrete grants and leave this unset.
-   */
-  unscoped?: boolean;
-};
+/** @typedef {import("./SmithersElectricProxyOptions.ts").SmithersElectricAuthContext} SmithersElectricAuthContext */
+/** @typedef {import("./SmithersElectricProxyOptions.ts").SmithersElectricProxy} SmithersElectricProxy */
+/** @typedef {import("./SmithersElectricProxyOptions.ts").SmithersElectricProxyOptions} SmithersElectricProxyOptions */
+/** @typedef {import("./SmithersElectricProxyOptions.ts").SmithersElectricScopeDecision} SmithersElectricScopeDecision */
+/** @typedef {import("./SmithersElectricProxyMetrics.ts").SmithersElectricProxyMetrics} SmithersElectricProxyMetrics */
+/** @typedef {import("./SmithersElectricShapeDefinition.ts").SmithersElectricShapeDefinition} SmithersElectricShapeDefinition */
 
-export type SmithersElectricScopeDecision = {
-  event: "smithers-electric.scope";
-  allowed: boolean;
-  reason: string;
-  table: string;
-  shape: string;
-  requiredScope: GatewayScope;
-  principalId: string;
-};
+/**
+ * @typedef {{
+ *   values: Map<string, string[]>;
+ *   isNull: Set<string>;
+ * }} ParsedWhere
+ */
 
-export type SmithersElectricProxyOptions = {
-  electricUrl: string;
-  authenticate: (request: Request) => Promise<SmithersElectricAuthContext | null> | SmithersElectricAuthContext | null;
-  fetchClient?: typeof fetch;
-  now?: () => number;
-  rateLimits?: {
-    openPerMinute?: number;
-    activeMax?: number;
-  };
-  maxFrameBytes?: number;
-  catalog?: readonly SmithersElectricShapeDefinition[];
-  /**
-   * Explicit allowlist of workflow output-table names that may be opened as
-   * run-scoped shapes. Empty (the default) exposes NO output tables. Derive
-   * this from the real output-table registry — never a regex catch-all.
-   */
-  outputTables?: readonly string[];
-  /**
-   * Reclaim an active-shape slot whose stream never started draining after this
-   * many ms. Without it, a client that opens shapes but never reads or cancels
-   * the body holds active slots forever and self-DoSes with permanent 429s.
-   */
-  activeTtlMs?: number;
-  metrics?: SmithersElectricProxyMetrics;
-  observer?: SmithersElectricProxyObserver;
-  log?: (decision: SmithersElectricScopeDecision) => void;
-};
-
-export type SmithersElectricProxy = {
-  fetch(request: Request): Promise<Response>;
-  metrics: SmithersElectricProxyMetrics;
-};
-
-type ParsedWhere = {
-  values: Map<string, string[]>;
-  isNull: Set<string>;
-};
-
-type OpenBucket = {
-  windowStartMs: number;
-  count: number;
-};
+/**
+ * @typedef {{
+ *   windowStartMs: number;
+ *   count: number;
+ * }} OpenBucket
+ */
 
 // Per-principal abuse bounds (overridable via options): 60 shape opens/min,
 // 50 concurrent streams, 4 MiB per SSE frame, 5 min idle-slot reclaim.
@@ -91,30 +32,53 @@ const DEFAULT_MAX_FRAME_BYTES = 4 * 1024 * 1024;
 const DEFAULT_ACTIVE_TTL_MS = 5 * 60_000;
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 
-function json(status: number, payload: unknown, headers?: HeadersInit): Response {
+/**
+ * @param {number} status
+ * @param {unknown} payload
+ * @param {HeadersInit} [headers]
+ * @returns {Response}
+ */
+function json(status, payload, headers) {
   return new Response(JSON.stringify(payload), {
     status,
     headers: { ...JSON_HEADERS, ...Object.fromEntries(new Headers(headers)) },
   });
 }
 
-function q(value: string): string {
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function q(value) {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function listLiteral(values: readonly string[]): string {
+/**
+ * @param {readonly string[]} values
+ * @returns {string}
+ */
+function listLiteral(values) {
   return values.map(q).join(",");
 }
 
-function hasDuplicateSecurityParam(params: URLSearchParams): string | null {
+/**
+ * @param {URLSearchParams} params
+ * @returns {string | null}
+ */
+function hasDuplicateSecurityParam(params) {
   for (const name of ["table", "shape", "where", "key"]) {
     if (params.getAll(name).length > 1) return name;
   }
   return null;
 }
 
-function tokenizeWhere(where: string): string[] {
-  const tokens: string[] = [];
+/**
+ * @param {string} where
+ * @returns {string[]}
+ */
+function tokenizeWhere(where) {
+  /** @type {string[]} */
+  const tokens = [];
   let i = 0;
   while (i < where.length) {
     const ch = where[i];
@@ -167,13 +131,23 @@ function tokenizeWhere(where: string): string[] {
   return tokens;
 }
 
-function parseWhere(where: string): ParsedWhere {
+/**
+ * @param {string} where
+ * @returns {ParsedWhere}
+ */
+function parseWhere(where) {
   const tokens = tokenizeWhere(where);
-  const values = new Map<string, string[]>();
-  const isNull = new Set<string>();
+  /** @type {Map<string, string[]>} */
+  const values = new Map();
+  /** @type {Set<string>} */
+  const isNull = new Set();
   let i = 0;
   const peek = () => tokens[i];
-  const take = (expected?: string): string => {
+  /**
+   * @param {string} [expected]
+   * @returns {string}
+   */
+  const take = (expected) => {
     const token = tokens[i];
     if (token === undefined) throw new Error(`expected ${expected ?? "token"}, got end of where clause`);
     if (expected !== undefined && token !== expected) throw new Error(`expected ${expected}, got ${token}`);
@@ -187,7 +161,7 @@ function parseWhere(where: string): ParsedWhere {
     }
     // The tokenizer re-encodes string literals as JSON strings; everything
     // else is a bare token.
-    return token.startsWith("\"") ? (JSON.parse(token) as string) : token;
+    return token.startsWith("\"") ? /** @type {string} */ (JSON.parse(token)) : token;
   };
 
   while (i < tokens.length) {
@@ -201,7 +175,8 @@ function parseWhere(where: string): ParsedWhere {
       values.set(column, [takeValue()]);
     } else if (op === "in") {
       take("(");
-      const list: string[] = [];
+      /** @type {string[]} */
+      const list = [];
       for (;;) {
         list.push(takeValue());
         if (peek() === ",") {
@@ -225,11 +200,13 @@ function parseWhere(where: string): ParsedWhere {
   return { values, isNull };
 }
 
-function shapeForTable(
-  catalog: readonly SmithersElectricShapeDefinition[],
-  table: string,
-  shapeName?: string | null,
-): SmithersElectricShapeDefinition | undefined {
+/**
+ * @param {readonly SmithersElectricShapeDefinition[]} catalog
+ * @param {string} table
+ * @param {string | null} [shapeName]
+ * @returns {SmithersElectricShapeDefinition | undefined}
+ */
+function shapeForTable(catalog, table, shapeName) {
   if (shapeName) {
     return catalog.find((shape) => shape.name === shapeName && (shape.table === table || shape.table === "*" || table === ""));
   }
@@ -237,10 +214,12 @@ function shapeForTable(
     catalog.find((shape) => shape.tablePattern?.test(table));
 }
 
-function fillWhereTemplate(
-  shape: SmithersElectricShapeDefinition,
-  auth: SmithersElectricAuthContext,
-): string | null {
+/**
+ * @param {SmithersElectricShapeDefinition} shape
+ * @param {SmithersElectricAuthContext} auth
+ * @returns {string | null}
+ */
+function fillWhereTemplate(shape, auth) {
   if (!shape.whereTemplate) return null;
   let where = shape.whereTemplate;
   if (where.includes("{run_ids}")) {
@@ -260,12 +239,14 @@ function fillWhereTemplate(
   return where;
 }
 
-function ensureValuesAllowed(
-  column: string,
-  requested: readonly string[],
-  granted: readonly string[] | undefined,
-  unscoped: boolean,
-): void {
+/**
+ * @param {string} column
+ * @param {readonly string[]} requested
+ * @param {readonly string[] | undefined} granted
+ * @param {boolean} unscoped
+ * @returns {void}
+ */
+function ensureValuesAllowed(column, requested, granted, unscoped) {
   // A single-user local-cloud install (no per-run partitioning) may opt out of
   // scoping entirely. Otherwise this column is a scoping boundary and an
   // undefined grant array means "no access derived" — FAIL CLOSED rather than
@@ -281,11 +262,13 @@ function ensureValuesAllowed(
   }
 }
 
-function validateWhere(
-  shape: SmithersElectricShapeDefinition,
-  where: string | null,
-  auth: SmithersElectricAuthContext,
-): string | null {
+/**
+ * @param {SmithersElectricShapeDefinition} shape
+ * @param {string | null} where
+ * @param {SmithersElectricAuthContext} auth
+ * @returns {string | null}
+ */
+function validateWhere(shape, where, auth) {
   const unscoped = auth.unscoped === true;
   // A shape with no row-level scoping mechanism at all (no run/workspace/user
   // column AND no whereTemplate) is a whole-table read. Forwarding it to a
@@ -327,23 +310,31 @@ function validateWhere(
   return effectiveWhere;
 }
 
-type ActiveSlot = {
-  key: string;
-  acquiredAtMs: number;
-  /** Set true once the stream actually starts draining (first pull / cancel). */
-  draining: boolean;
-  released: boolean;
-  /**
-   * Tears down the upstream Electric stream bound to this slot. Reclaiming the
-   * local slot without this leaves the upstream connection open, so activeMax
-   * would stop bounding real upstream connections.
-   */
-  cancelUpstream?: () => void;
-};
+/**
+ * @typedef {{
+ *   key: string;
+ *   acquiredAtMs: number;
+ *   draining: boolean;
+ *   released: boolean;
+ *   cancelUpstream?: () => void;
+ * }} ActiveSlot
+ * `draining` is set true once the stream actually starts draining (first pull /
+ * cancel). `cancelUpstream` tears down the upstream Electric stream bound to
+ * this slot; reclaiming the local slot without it leaves the upstream
+ * connection open, so activeMax would stop bounding real upstream connections.
+ */
 
-function rateLimiter(now: () => number, openPerMinute: number, activeMax: number, activeTtlMs: number) {
-  const buckets = new Map<string, OpenBucket>();
-  const active = new Map<string, Set<ActiveSlot>>();
+/**
+ * @param {() => number} now
+ * @param {number} openPerMinute
+ * @param {number} activeMax
+ * @param {number} activeTtlMs
+ */
+function rateLimiter(now, openPerMinute, activeMax, activeTtlMs) {
+  /** @type {Map<string, OpenBucket>} */
+  const buckets = new Map();
+  /** @type {Map<string, Set<ActiveSlot>>} */
+  const active = new Map();
   const windowMs = 60_000;
 
   // Reclaim slots whose stream never started draining within the TTL window. A
@@ -365,14 +356,19 @@ function rateLimiter(now: () => number, openPerMinute: number, activeMax: number
       if (slots.size === 0) active.delete(key);
     }
   };
-  const countFor = (key: string) => active.get(key)?.size ?? 0;
+  /** @param {string} key */
+  const countFor = (key) => active.get(key)?.size ?? 0;
   const activeTotal = () => {
     let total = 0;
     for (const slots of active.values()) total += slots.size;
     return total;
   };
   return {
-    consumeOpen(key: string): boolean {
+    /**
+     * @param {string} key
+     * @returns {boolean}
+     */
+    consumeOpen(key) {
       const current = now();
       const bucket = buckets.get(key);
       if (!bucket || current - bucket.windowStartMs >= windowMs) {
@@ -383,19 +379,26 @@ function rateLimiter(now: () => number, openPerMinute: number, activeMax: number
       bucket.count += 1;
       return true;
     },
-    acquireActive(key: string): ActiveSlot | null {
+    /**
+     * @param {string} key
+     * @returns {ActiveSlot | null}
+     */
+    acquireActive(key) {
       sweepExpired();
       if (countFor(key) >= activeMax) return null;
-      const slot: ActiveSlot = { key, acquiredAtMs: now(), draining: false, released: false };
-      const slots = active.get(key) ?? new Set<ActiveSlot>();
+      /** @type {ActiveSlot} */
+      const slot = { key, acquiredAtMs: now(), draining: false, released: false };
+      const slots = active.get(key) ?? new Set();
       slots.add(slot);
       active.set(key, slots);
       return slot;
     },
-    markDraining(slot: ActiveSlot): void {
+    /** @param {ActiveSlot} slot */
+    markDraining(slot) {
       slot.draining = true;
     },
-    releaseActive(slot: ActiveSlot): void {
+    /** @param {ActiveSlot} slot */
+    releaseActive(slot) {
       if (slot.released) return;
       slot.released = true;
       const slots = active.get(slot.key);
@@ -407,7 +410,11 @@ function rateLimiter(now: () => number, openPerMinute: number, activeMax: number
   };
 }
 
-function copyForwardHeaders(headers: Headers): Headers {
+/**
+ * @param {Headers} headers
+ * @returns {Headers}
+ */
+function copyForwardHeaders(headers) {
   const out = new Headers();
   for (const [key, value] of headers) {
     const lower = key.toLowerCase();
@@ -418,7 +425,11 @@ function copyForwardHeaders(headers: Headers): Headers {
   return out;
 }
 
-function responseHeaders(headers: Headers): Headers {
+/**
+ * @param {Headers} headers
+ * @returns {Headers}
+ */
+function responseHeaders(headers) {
   const out = new Headers(headers);
   out.set("access-control-allow-origin", "*");
   out.set("access-control-expose-headers", "electric-handle, electric-offset");
@@ -431,13 +442,19 @@ function responseHeaders(headers: Headers): Headers {
  * CR-only gap test runs only until the first data byte of each frame, so the
  * hot path is O(frames), not O(bytes). Byte accounting stays exact so the size
  * guard is faithful to the original per-byte loop.
+ *
+ * @param {number} maxFrameBytes
  */
-function createFrameBoundScanner(maxFrameBytes: number) {
+function createFrameBoundScanner(maxFrameBytes) {
   let frameBytes = 0;
   let seenNewline = false;
   let gapCrOnly = true;
   return {
-    push(chunk: Uint8Array): "ok" | "exceeded" {
+    /**
+     * @param {Uint8Array} chunk
+     * @returns {"ok" | "exceeded"}
+     */
+    push(chunk) {
       let pos = 0;
       while (pos < chunk.length) {
         const nl = chunk.indexOf(10, pos);
@@ -472,21 +489,22 @@ function createFrameBoundScanner(maxFrameBytes: number) {
   };
 }
 
-function wrapBody(
-  body: ReadableStream<Uint8Array> | null,
-  metrics: SmithersElectricProxyMetrics,
-  maxFrameBytes: number,
-  hooks: {
-    onStart: () => void;
-    release: () => void;
-    /**
-     * Receives a callback that cancels the upstream reader and releases the
-     * slot. Wired to the active slot so a TTL reclaim can tear down the real
-     * upstream Electric stream, not just the local slot count.
-     */
-    registerCancel?: (cancel: () => void) => void;
-  },
-): ReadableStream<Uint8Array> | null {
+/**
+ * `registerCancel` receives a callback that cancels the upstream reader and
+ * releases the slot. It is wired to the active slot so a TTL reclaim can tear
+ * down the real upstream Electric stream, not just the local slot count.
+ *
+ * @param {ReadableStream<Uint8Array> | null} body
+ * @param {SmithersElectricProxyMetrics} metrics
+ * @param {number} maxFrameBytes
+ * @param {{
+ *   onStart: () => void;
+ *   release: () => void;
+ *   registerCancel?: (cancel: () => void) => void;
+ * }} hooks
+ * @returns {ReadableStream<Uint8Array> | null}
+ */
+function wrapBody(body, metrics, maxFrameBytes, hooks) {
   if (!body) {
     hooks.release();
     return null;
@@ -504,7 +522,7 @@ function wrapBody(
   });
   const scanner = createFrameBoundScanner(maxFrameBytes);
   let started = false;
-  return new ReadableStream<Uint8Array>({
+  return new ReadableStream({
     async pull(controller) {
       try {
         const chunk = await reader.read();
@@ -543,7 +561,10 @@ function wrapBody(
   });
 }
 
-function corsPreflight(): Response {
+/**
+ * @returns {Response}
+ */
+function corsPreflight() {
   return new Response(null, {
     status: 204,
     headers: {
@@ -555,11 +576,13 @@ function corsPreflight(): Response {
   });
 }
 
-function sanitizeQuery(
-  requestUrl: URL,
-  table: string,
-  where: string | null,
-): URLSearchParams {
+/**
+ * @param {URL} requestUrl
+ * @param {string} table
+ * @param {string | null} where
+ * @returns {URLSearchParams}
+ */
+function sanitizeQuery(requestUrl, table, where) {
   const params = new URLSearchParams(requestUrl.searchParams);
   params.delete("key");
   params.set("table", table);
@@ -569,7 +592,14 @@ function sanitizeQuery(
   return params;
 }
 
-export function createSmithersElectricProxy(options: SmithersElectricProxyOptions): SmithersElectricProxy {
+/**
+ * Build the auth, scope, rate-limit, and observability proxy that fronts an
+ * ElectricSQL shape endpoint for Smithers clients.
+ *
+ * @param {SmithersElectricProxyOptions} options
+ * @returns {SmithersElectricProxy}
+ */
+export function createSmithersElectricProxy(options) {
   const fetchClient = options.fetchClient ?? fetch;
   const now = options.now ?? (() => Date.now());
   const metrics = options.metrics ?? createSmithersElectricProxyMetrics();
@@ -582,10 +612,11 @@ export function createSmithersElectricProxy(options: SmithersElectricProxyOption
     options.activeTtlMs ?? DEFAULT_ACTIVE_TTL_MS,
   );
   const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES;
-  const reject = (
-    decisionBase: Omit<SmithersElectricScopeDecision, "allowed" | "reason">,
-    reason: string,
-  ) => {
+  /**
+   * @param {Omit<SmithersElectricScopeDecision, "allowed" | "reason">} decisionBase
+   * @param {string} reason
+   */
+  const reject = (decisionBase, reason) => {
     options.log?.({ ...decisionBase, allowed: false, reason });
     metrics.incShapeOpenRejected();
     emitSmithersElectricEvent(observer, {
@@ -598,7 +629,12 @@ export function createSmithersElectricProxy(options: SmithersElectricProxyOption
     });
   };
 
-  async function handleShape(request: Request, requestUrl: URL): Promise<Response> {
+  /**
+   * @param {Request} request
+   * @param {URL} requestUrl
+   * @returns {Promise<Response>}
+   */
+  async function handleShape(request, requestUrl) {
     const duplicate = hasDuplicateSecurityParam(requestUrl.searchParams);
     if (duplicate) {
       metrics.incShapeOpenRejected();
@@ -621,7 +657,7 @@ export function createSmithersElectricProxy(options: SmithersElectricProxyOption
     const principal = auth.principalId ?? auth.userId ?? auth.tokenId ?? "anonymous";
     const allowedByScope = hasGatewayScope(auth.scopes, shape.requiredScope, "listRuns");
     const decisionBase = {
-      event: "smithers-electric.scope" as const,
+      event: /** @type {const} */ ("smithers-electric.scope"),
       table: effectiveTable,
       shape: shape.name,
       requiredScope: shape.requiredScope,
@@ -632,7 +668,8 @@ export function createSmithersElectricProxy(options: SmithersElectricProxyOption
       return json(403, { error: "missing required gateway scope", requiredScope: shape.requiredScope });
     }
 
-    let where: string | null;
+    /** @type {string | null} */
+    let where;
     try {
       where = validateWhere(shape, requestUrl.searchParams.get("where"), auth);
     } catch (error) {
@@ -726,7 +763,11 @@ export function createSmithersElectricProxy(options: SmithersElectricProxyOption
 
   return {
     metrics,
-    async fetch(request: Request): Promise<Response> {
+    /**
+     * @param {Request} request
+     * @returns {Promise<Response>}
+     */
+    async fetch(request) {
       const requestUrl = new URL(request.url);
       if (request.method === "OPTIONS") return corsPreflight();
       if (requestUrl.pathname === "/healthz") return json(200, { status: "ok" });

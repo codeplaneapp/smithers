@@ -8,7 +8,7 @@
 // Expects rows seeded with run_id 'run-1','run-2','run-3'; grants cover only
 // run-1/run-2, so run-3 must be filtered out by the proxy's where-template fill.
 
-import { createSmithersElectricProxy } from "../../packages/electric-proxy/src/index.ts";
+import { createSmithersElectricProxy } from "../../packages/electric-proxy/src/index.js";
 
 const ELECTRIC_PORT = process.env.SMITHERS_ELECTRIC_PORT ?? "30001";
 

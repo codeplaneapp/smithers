@@ -13,7 +13,7 @@ import {
   createSmithersElectricProxy,
   serveSmithersElectricProxy,
   type SmithersElectricProxyServer,
-} from "../../electric-proxy/src/index.ts";
+} from "../../electric-proxy/src/index.js";
 import {
   isDockerFixtureAvailable,
   startElectricFixture,

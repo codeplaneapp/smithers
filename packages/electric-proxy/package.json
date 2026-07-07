@@ -5,18 +5,18 @@
   "type": "module",
   "sideEffects": false,
   "bin": {
-    "smithers-electric-proxy": "./bin/smithers-electric-proxy.ts"
+    "smithers-electric-proxy": "./bin/smithers-electric-proxy.js"
   },
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
     },
     "./*": {
-      "types": "./src/*.ts",
-      "import": "./src/*.ts",
-      "default": "./src/*.ts"
+      "types": "./src/index.d.ts",
+      "import": "./src/*.js",
+      "default": "./src/*.js"
     }
   },
   "files": [
@@ -24,6 +24,7 @@
     "bin/"
   ],
   "scripts": {
+    "build": "tsup --dts-only",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "test": "bun test tests"
   },

@@ -1,18 +1,7 @@
-import type { GatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
+/** @typedef {import("./SmithersElectricShapeDefinition.ts").SmithersElectricShapeDefinition} SmithersElectricShapeDefinition */
 
-export type SmithersElectricShapeDefinition = {
-  name: string;
-  table: string;
-  requiredScope: GatewayScope;
-  whereTemplate?: string;
-  runIdColumn?: string;
-  workspaceIdColumn?: string;
-  userPrivateColumn?: string;
-  tablePattern?: RegExp;
-  description?: string;
-};
-
-export const smithersElectricShapeCatalog: readonly SmithersElectricShapeDefinition[] = [
+/** @type {readonly SmithersElectricShapeDefinition[]} */
+export const smithersElectricShapeCatalog = [
   {
     name: "runs",
     table: "_smithers_runs",
@@ -87,7 +76,7 @@ export const smithersElectricShapeCatalog: readonly SmithersElectricShapeDefinit
     requiredScope: "run:read",
     description: "Registered cron schedules.",
   },
-] as const;
+];
 
 /**
  * Build a run-scoped shape entry for one workflow output table. Output tables
@@ -96,8 +85,11 @@ export const smithersElectricShapeCatalog: readonly SmithersElectricShapeDefinit
  * allowlist of real output-table names — derived from the output-table
  * registry — so only enumerated tables are reachable, each still scoped by
  * `run_id IN ({run_ids})`.
+ *
+ * @param {string} table
+ * @returns {SmithersElectricShapeDefinition}
  */
-export function outputTableShape(table: string): SmithersElectricShapeDefinition {
+export function outputTableShape(table) {
   return {
     name: `output:${table}`,
     table,
@@ -112,13 +104,15 @@ export function outputTableShape(table: string): SmithersElectricShapeDefinition
  * Compose the base `_smithers_*` shape catalog with explicit per-table entries
  * for the supplied output-table allowlist. Passing `[]` (the default) means no
  * output table is reachable at all.
+ *
+ * @param {readonly string[]} outputTables
+ * @returns {readonly SmithersElectricShapeDefinition[]}
  */
-export function smithersElectricCatalogWithOutputTables(
-  outputTables: readonly string[],
-): readonly SmithersElectricShapeDefinition[] {
+export function smithersElectricCatalogWithOutputTables(outputTables) {
   if (outputTables.length === 0) return smithersElectricShapeCatalog;
-  const seen = new Set<string>();
-  const extra: SmithersElectricShapeDefinition[] = [];
+  const seen = new Set();
+  /** @type {SmithersElectricShapeDefinition[]} */
+  const extra = [];
   for (const table of outputTables) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table) || seen.has(table)) continue;
     seen.add(table);

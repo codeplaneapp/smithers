@@ -1,19 +1,10 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { SmithersElectricProxy } from "./createSmithersElectricProxy.ts";
+import { createServer } from "node:http";
 
-export type ServeSmithersElectricProxyOptions = {
-  proxy: SmithersElectricProxy;
-  port?: number;
-  host?: string;
-};
-
-export type SmithersElectricProxyServer = {
-  server: Server;
-  port: number;
-  close(): Promise<void>;
-};
-
-function toFetchRequest(req: IncomingMessage): Request {
+/**
+ * @param {import("node:http").IncomingMessage} req
+ * @returns {Request}
+ */
+function toFetchRequest(req) {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (value === undefined) continue;
@@ -25,8 +16,14 @@ function toFetchRequest(req: IncomingMessage): Request {
   return new Request(`http://${host}${req.url ?? "/"}`, { method: req.method ?? "GET", headers });
 }
 
-async function writeFetchResponse(res: ServerResponse, response: Response): Promise<void> {
-  const headers: Record<string, string> = {};
+/**
+ * @param {import("node:http").ServerResponse} res
+ * @param {Response} response
+ * @returns {Promise<void>}
+ */
+async function writeFetchResponse(res, response) {
+  /** @type {Record<string, string>} */
+  const headers = {};
   response.headers.forEach((value, key) => {
     headers[key] = value;
   });
@@ -55,10 +52,11 @@ async function writeFetchResponse(res: ServerResponse, response: Response): Prom
  * runnable cloud entry point that fronts `electricsql/electric` with auth,
  * scope, grant-based where filling, rate limits, frame bounds, and
  * metrics/spans (the `/metrics` and `/healthz` routes are served by the proxy).
+ *
+ * @param {import("./ServeSmithersElectricProxyOptions.ts").ServeSmithersElectricProxyOptions} options
+ * @returns {Promise<import("./ServeSmithersElectricProxyOptions.ts").SmithersElectricProxyServer>}
  */
-export function serveSmithersElectricProxy(
-  options: ServeSmithersElectricProxyOptions,
-): Promise<SmithersElectricProxyServer> {
+export function serveSmithersElectricProxy(options) {
   const { proxy } = options;
   const server = createServer((req, res) => {
     void proxy
@@ -79,7 +77,7 @@ export function serveSmithersElectricProxy(
       resolve({
         server,
         port,
-        close: () => new Promise<void>((res, rej) => server.close((err) => (err ? rej(err) : res()))),
+        close: () => new Promise((res, rej) => server.close((err) => (err ? rej(err) : res()))),
       });
     });
   });

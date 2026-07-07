@@ -3,7 +3,7 @@ import {
   createSmithersElectricProxy,
   serveSmithersElectricProxy,
   type SmithersElectricProxyServer,
-} from "../src/index.ts";
+} from "../src/index.js";
 
 describe("serveSmithersElectricProxy (runnable HTTP server)", () => {
   let running: SmithersElectricProxyServer | undefined;

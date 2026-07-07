@@ -3,7 +3,7 @@ import {
   createSmithersElectricProxy,
   type SmithersElectricAuthContext,
   type SmithersElectricScopeDecision,
-} from "../src/index.ts";
+} from "../src/index.js";
 
 function auth(overrides: Partial<SmithersElectricAuthContext> = {}): SmithersElectricAuthContext {
   return {

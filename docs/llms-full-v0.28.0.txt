@@ -4993,6 +4993,12 @@ Both APIs use the graph resolver, so they match the path Smithers gives worker t
 - jj-backed worktrees include colocated git metadata, so git-native CLI agents such as Codex
   resolve the worktree directory as their repository root. Do not compensate by setting an
   agent `cwd`; that defeats the worktree isolation above.
+- **Dependencies are not installed in a fresh worktree.** Agent tasks inside a `<Worktree>`
+  get a `[smithers worktree isolation]` preamble prepended to their prompt: do all work inside
+  the worktree, install dependencies fresh there (e.g. `pnpm install` at the worktree root),
+  and never symlink node_modules from, or write into, the parent checkout. An install through
+  a shared node_modules link rewrites the parent checkout's workspace links to point into the
+  worktree, and every one of them dangles once the worktree is removed.
 - **jj continuously snapshots a worktree's working copy onto its bookmark.** A compute
   `<Task>` (or helper) that detects changes with `git status --porcelain` can see a *clean*
   tree and skip its work, because jj has already committed the working-copy edits to the
@@ -11324,10 +11330,11 @@ Gateway client exports:
 | `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider`, `SmithersCollectionsProvider`, `createGatewayReactRoot`, `useSmithersCollections`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `useGatewayRunTree`, `useGatewayConnectionStatus`, `useGatewayCrons`, `useGatewayMemoryFacts`, `useGatewayScores`, `useGatewayTickets`, `useGatewayPrompts` |
 
 <Note>
-  **Bundling in Next.js / webpack:** `gateway-client` transitively imports
-  `@smithers-orchestrator/electric-proxy`, which ships raw TypeScript sources.
-  Bun and Vite handle that natively, but webpack-based builds (Next.js) fail
-  hard unless you add it to
+  **Bundling in Next.js / webpack:** in published versions up to and including
+  0.28.0, `gateway-client` transitively imports
+  `@smithers-orchestrator/electric-proxy`, which shipped raw TypeScript
+  sources. Bun and Vite handle that natively, but webpack-based builds
+  (Next.js) fail hard unless you add it to
   [`transpilePackages`](https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages):
 
   ```js
@@ -11336,6 +11343,9 @@ Gateway client exports:
     transpilePackages: ["@smithers-orchestrator/electric-proxy"],
   };
   ```
+
+  Releases after 0.28.0 ship the package as plain JavaScript with bundled type
+  declarations, so the workaround is not needed there.
 </Note>
 
 ## REST domain API

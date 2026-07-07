@@ -6,7 +6,7 @@ import {
   type SmithersElectricAuthContext,
   type SmithersElectricProxyEvent,
   type SmithersElectricProxySpan,
-} from "../src/index.ts";
+} from "../src/index.js";
 
 function auth(overrides: Partial<SmithersElectricAuthContext> = {}): SmithersElectricAuthContext {
   return {
