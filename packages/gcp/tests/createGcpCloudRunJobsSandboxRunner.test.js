@@ -69,7 +69,7 @@ describe("createGcpCloudRunJobsSandboxRunner", () => {
 
 	test("createJob creates a per-run job before running and deleteJob removes it", async () => {
 		const client = makeJobsClient({ name: "exec-f", succeededCount: 1 });
-		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE, createJob: true });
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE, createJob: true, image: "gcr.io/smithers/sandbox-runner" });
 		await runner.run({ command: "x", env: {} });
 		expect(client.calls.create.length).toBe(1);
 		expect(runner.createdJob).toBe(true);

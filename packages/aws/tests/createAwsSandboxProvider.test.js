@@ -175,6 +175,29 @@ describe("createAwsSandboxProvider — fargate happy path", () => {
 		expect(env.store.has(requestKey)).toBe(false);
 	});
 
+	test("cleanup destroy deletes the container-authored RESULT object (Finding 5)", async () => {
+		const env = createMockAwsSandboxEnvironment(() => ({ status: "finished", output: { done: true } }));
+		const provider = createAwsSandboxProvider({ clients: env, ...FARGATE_OPTS });
+		const { request } = makeRequest();
+		await provider.run(request);
+		const prefix = `smithers/sandbox/${request.runId}/${request.sandboxId}`;
+		// The result JSON is written by the container and fetched via readFile; it is
+		// never registered as a "written" key, so before the fix it leaked past destroy.
+		const resultKey = `${prefix}/${encodeURIComponent(".smithers/sandbox-result.json")}`;
+		expect(env.store.has(resultKey)).toBe(true);
+		await provider.cleanup?.(request);
+		expect(env.store.has(resultKey)).toBe(false);
+	});
+
+	test("provider built with singular `client` alias runs identically to `clients` (Finding 15)", async () => {
+		const env = createMockAwsSandboxEnvironment(() => ({ status: "finished", output: { via: "alias" } }));
+		const provider = createAwsSandboxProvider({ client: env, ...FARGATE_OPTS, command: "node run.js" });
+		const result = await provider.run(makeRequest().request);
+		expect(result.status).toBe("finished");
+		expect(result.output).toEqual({ via: "alias" });
+		expect(String(result.remoteRunId)).toContain("arn:aws:ecs:");
+	});
+
 	test("cleanup keep leaves the task and objects", async () => {
 		const env = createMockAwsSandboxEnvironment(() => ({ status: "finished" }));
 		const provider = createAwsSandboxProvider({ clients: env, ...FARGATE_OPTS, cleanup: "keep" });
@@ -273,6 +296,22 @@ describe("createAwsSandboxProvider — codebuild mode", () => {
 		});
 		const provider = createAwsSandboxProvider({ clients: env, ...CODEBUILD_OPTS });
 		await expect(provider.run(makeRequest().request)).rejects.toThrow(/exited with code 1|no result JSON/i);
+	});
+
+	test("sub-5-minute toolTimeoutMs clamps timeoutInMinutesOverride to 5, not 1 (Finding 9)", async () => {
+		/** @type {any} */
+		let startInput;
+		const env = createMockAwsSandboxEnvironment(() => ({ status: "finished" }));
+		const startBuild = env.codebuild.startBuild;
+		env.codebuild.startBuild = async (input) => {
+			startInput = input;
+			return startBuild(input);
+		};
+		const provider = createAwsSandboxProvider({ clients: env, ...CODEBUILD_OPTS });
+		// makeRequest defaults toolTimeoutMs to 60_000 (1 minute) → ceil is 1, but
+		// CodeBuild requires 5..2160, so StartBuild would reject with 1.
+		await provider.run(makeRequest({ toolTimeoutMs: 60_000 }).request);
+		expect(startInput.timeoutInMinutesOverride).toBe(5);
 	});
 
 	test("cleanup destroy stops the build", async () => {

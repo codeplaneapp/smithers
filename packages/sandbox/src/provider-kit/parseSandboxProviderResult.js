@@ -8,10 +8,17 @@ import { SANDBOX_PROVIDER_RESULT_ENV } from "./SANDBOX_PROVIDER_RESULT_ENV.js";
  *
  * @param {string} raw
  * @param {string} remoteId
- * @param {{ provider?: string; resultPath?: string }} [context]
+ * @param {{ provider?: string; resultPath?: string; secrets?: string[] }} [context]
  * @returns {import("../SandboxProvider.ts").SandboxProviderResult & Record<string, unknown>}
  */
 export function parseSandboxProviderResult(raw, remoteId, context = {}) {
+	const scrub = (text) => {
+		let out = String(text);
+		for (const secret of context.secrets ?? []) {
+			if (secret) out = out.split(secret).join("[redacted]");
+		}
+		return out;
+	};
 	const trimmed = String(raw ?? "").trim();
 	if (trimmed === "") {
 		throw new SmithersError(
@@ -26,7 +33,7 @@ export function parseSandboxProviderResult(raw, remoteId, context = {}) {
 	} catch (error) {
 		throw new SmithersError(
 			"SANDBOX_EXECUTION_FAILED",
-			`Sandbox produced invalid result JSON: ${error instanceof Error ? error.message : String(error)}. Raw output: ${trimmed.slice(0, 500)}`,
+			`Sandbox produced invalid result JSON: ${scrub(error instanceof Error ? error.message : String(error))}. Raw output: ${scrub(trimmed.slice(0, 500))}`,
 			{ provider: context.provider, remoteId },
 		);
 	}

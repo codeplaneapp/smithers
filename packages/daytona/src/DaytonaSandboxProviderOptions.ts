@@ -19,6 +19,8 @@ export type DaytonaSandboxProviderOptions = {
 
 	/** Inject a Daytona SDK client double (tests / advanced wiring). */
 	client?: DaytonaClientLike;
+	/** Injectable SDK importer (tests only) to exercise the not-installed path. */
+	importSdk?: () => Promise<unknown>;
 	/** Options forwarded to `new Daytona(...)` when no `client` is injected. */
 	clientOptions?: DaytonaClientOptions;
 	/** Daytona API key. Falls back to `DAYTONA_API_KEY`. */

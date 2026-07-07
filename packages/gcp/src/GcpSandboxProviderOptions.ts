@@ -23,7 +23,7 @@ export type GcpStorageClient = {
 export type GcpRunJobsClient = {
 	jobPath?: (project: string, location: string, job: string) => string;
 	locationPath?: (project: string, location: string) => string;
-	runJob: (request: unknown) => Promise<[{ promise: () => Promise<[GcpCloudRunExecution]>; cancel?: () => Promise<unknown> }]>;
+	runJob: (request: unknown) => Promise<[{ promise: () => Promise<[GcpCloudRunExecution]>; cancel?: () => Promise<unknown>; metadata?: { name?: string } }]>;
 	createJob?: (request: unknown) => Promise<[{ promise: () => Promise<[unknown]> }]>;
 	deleteJob?: (request: unknown) => Promise<[{ promise: () => Promise<[unknown]> }]>;
 	/** Best-effort abort path invoked when a run is cancelled mid-execution. */
@@ -72,6 +72,8 @@ export type GcpSandboxProviderOptions = {
 	timeoutSec?: number;
 	/** Create a fresh per-run Cloud Run Job (LRO) instead of reusing `jobName`. */
 	createJob?: boolean;
+	/** Container image for the per-run job created when `createJob` is set. */
+	image?: string;
 	/** Compute the remote sandbox id. Default `${runId}-${sandboxId}`. */
 	sandboxId?: (request: SandboxProviderRequest) => string;
 	/** Inject SDK doubles as a combined `{ storage, run }` object (tests/advanced). */

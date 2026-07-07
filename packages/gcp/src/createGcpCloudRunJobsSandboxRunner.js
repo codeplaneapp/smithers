@@ -24,6 +24,92 @@ function toEnvList(env) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isPlainObject(value) {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {unknown[]} values
+ * @returns {string | undefined}
+ */
+function pickString(...values) {
+	for (const value of values) {
+		if (typeof value === "string" && value.trim().length > 0) {
+			return value.trim();
+		}
+	}
+	return undefined;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Record<string, unknown>}
+ */
+function plainObject(value) {
+	return isPlainObject(value) ? value : {};
+}
+
+/**
+ * Build the Cloud Run v2 Job payload needed by createJob. The public provider
+ * types intentionally stay narrow, but advanced callers may pass a partial
+ * `job`/`template`/`executionTemplate`/`container` object through this runner.
+ *
+ * @param {Record<string, unknown>} options
+ * @param {number | undefined} timeoutSec
+ * @param {string} provider
+ * @returns {Record<string, unknown>}
+ */
+function buildCreateJobBody(options, timeoutSec, provider) {
+	const sourceJob = plainObject(options.job);
+	const job = { ...sourceJob };
+	delete job.executionTemplate;
+
+	const executionTemplate = {
+		...plainObject(sourceJob.template),
+		...plainObject(sourceJob.executionTemplate),
+		...plainObject(options.template),
+		...plainObject(options.executionTemplate),
+	};
+	const taskTemplate = {
+		...plainObject(executionTemplate.template),
+		...plainObject(options.taskTemplate),
+	};
+	const existingContainers = Array.isArray(taskTemplate.containers)
+		? taskTemplate.containers.filter(isPlainObject).map((container) => ({ ...container }))
+		: [];
+	const container = {
+		...(existingContainers[0] ?? {}),
+		...plainObject(options.container),
+	};
+	const image = pickString(options.image, options.containerImage, container.image);
+	if (!image) {
+		throw new SmithersError(
+			"INVALID_INPUT",
+			"GCP sandbox provider createJob requires a container image in runner options (`image`) or a Cloud Run job template.",
+			{ provider },
+		);
+	}
+
+	container.image = image;
+	const workingDir = pickString(options.workingDir, options.workdir, container.workingDir);
+	if (workingDir) container.workingDir = workingDir;
+	if (!Array.isArray(container.env) && isPlainObject(options.env)) {
+		container.env = toEnvList(/** @type {Record<string, string>} */ (options.env));
+	}
+	if (timeoutSec && !isPlainObject(taskTemplate.timeout)) {
+		taskTemplate.timeout = { seconds: timeoutSec };
+	}
+
+	taskTemplate.containers = [container, ...existingContainers.slice(1)];
+	executionTemplate.template = taskTemplate;
+	job.template = executionTemplate;
+	return job;
+}
+
+/**
  * Derive a POSIX exit code from a Cloud Run v2 Execution. Cloud Run reports task
  * counts and conditions, not a numeric container exit code: a succeeded task is
  * exit 0, any failed task is exit 1.
@@ -75,6 +161,16 @@ function conditionMessage(conditions) {
  *   createJob?: boolean;
  *   timeoutSec?: number;
  *   provider?: string;
+ *   image?: string;
+ *   containerImage?: string;
+ *   workdir?: string;
+ *   workingDir?: string;
+ *   env?: Record<string, string>;
+ *   job?: Record<string, unknown>;
+ *   template?: Record<string, unknown>;
+ *   executionTemplate?: Record<string, unknown>;
+ *   taskTemplate?: Record<string, unknown>;
+ *   container?: Record<string, unknown>;
  * }} options
  */
 export function createGcpCloudRunJobsSandboxRunner(options) {
@@ -86,7 +182,10 @@ export function createGcpCloudRunJobsSandboxRunner(options) {
 	/** @type {string | undefined} */
 	let lastExecutionName;
 
-	async function ensureJob() {
+	/**
+	 * @param {number | undefined} timeoutSec
+	 */
+	async function ensureJob(timeoutSec) {
 		if (ensured) return;
 		ensured = true;
 		if (!options.createJob) return;
@@ -100,7 +199,8 @@ export function createGcpCloudRunJobsSandboxRunner(options) {
 		const parent = typeof jobsClient.locationPath === "function"
 			? jobsClient.locationPath(projectId, location)
 			: `projects/${projectId}/locations/${location}`;
-		const [operation] = await jobsClient.createJob({ parent, jobId: jobName, job: {} });
+		const job = buildCreateJobBody(options, timeoutSec, provider);
+		const [operation] = await jobsClient.createJob({ parent, jobId: jobName, job });
 		await operation.promise();
 		createdJob = true;
 	}
@@ -120,11 +220,11 @@ export function createGcpCloudRunJobsSandboxRunner(options) {
 			if (exec.signal?.aborted) {
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", "GCP sandbox execution was cancelled before start.", { provider });
 			}
-			await ensureJob();
 			const timeoutSec = options.timeoutSec
 				?? (Number.isFinite(exec.timeoutMs) && exec.timeoutMs && exec.timeoutMs > 0
 					? Math.ceil(exec.timeoutMs / 1000)
 					: undefined);
+			await ensureJob(timeoutSec);
 			const [operation] = await jobsClient.runJob({
 				name,
 				overrides: {

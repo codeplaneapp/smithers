@@ -133,8 +133,8 @@ export function createMockGcpSandboxEnvironment(handler, config = {}) {
 					failedCount: 0,
 					conditions: config.execution?.conditions ?? [{ type: "Completed", state: "CONDITION_SUCCEEDED" }],
 				}];
-				};
-				return [{ promise: resolveExecution, metadata: { name: executionName } }];
+			};
+			return [{ promise: resolveExecution, metadata: { name: executionName } }];
 		},
 	};
 

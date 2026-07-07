@@ -21,8 +21,7 @@ egress, secret scrubbing, and cleanup — this package only maps the small
 ## Prerequisites / env vars
 
 `@daytonaio/sdk` is an **optionalDependency**, imported lazily inside
-`createSession` (the package also tries the renamed `@daytona/sdk`). Install it
-to use the real provider:
+`createSession`. Install it to use the real provider:
 
 ```
 npm install @daytonaio/sdk

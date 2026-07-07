@@ -22,17 +22,21 @@ function toEcsEnvironment(env) {
  */
 function sleep(ms, signal) {
 	return new Promise((resolve, reject) => {
-		const timer = setTimeout(resolve, ms);
-		if (signal) {
-			signal.addEventListener(
-				"abort",
-				() => {
-					clearTimeout(timer);
-					reject(new Error("aborted"));
-				},
-				{ once: true },
-			);
-		}
+		/** @type {ReturnType<typeof setTimeout>} */
+		let timer;
+		const onAbort = () => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			reject(new Error("aborted"));
+		};
+		timer = setTimeout(() => {
+			// Detach the abort listener on the normal path too: a long poll would
+			// otherwise accrue one listener per 500ms tick on a shared signal
+			// (MaxListenersExceededWarning + unbounded growth).
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		if (signal) signal.addEventListener("abort", onAbort);
 	});
 }
 
@@ -51,7 +55,6 @@ function sleep(ms, signal) {
  *   securityGroups?: string[];
  *   assignPublicIp?: "ENABLED" | "DISABLED";
  *   containerName?: string;
- *   region?: string;
  *   captureLogs?: boolean;
  *   logs?: unknown;
  *   logGroupName?: string;

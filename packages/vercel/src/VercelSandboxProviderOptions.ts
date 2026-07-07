@@ -13,8 +13,12 @@ export type VercelSandboxClient = {
  * The subset of a live `@vercel/sandbox` `Sandbox` instance this provider uses.
  */
 export type VercelSandboxInstance = {
+	/** 1.x id accessor. Absent on 2.x, which exposes the id as `name`. */
 	readonly sandboxId?: string;
+	/** 2.x id accessor (the sandbox id / name). */
+	readonly name?: string;
 	writeFiles: (files: Array<{ path: string; content: unknown }>) => Promise<unknown>;
+	/** Resolves a Node `ReadableStream` (or `null`) in the real SDK. */
 	readFile: (options: { path: string }) => Promise<unknown>;
 	runCommand: (options: {
 		cmd: string;
@@ -41,11 +45,15 @@ export type VercelFinishedCommand = {
 /**
  * Options for `createVercelSandboxProvider`.
  *
- * Auth precedence: OIDC token (`options.oidcToken` / `VERCEL_OIDC_TOKEN`) is
- * preferred; otherwise an access token trio (`options.token`/`VERCEL_TOKEN` +
- * `options.teamId`/`VERCEL_TEAM_ID` + `options.projectId`/`VERCEL_PROJECT_ID`).
- * Credentials are passed to `Sandbox.create` only and never forwarded into the
- * remote command environment.
+ * Auth precedence: an OIDC token (`options.oidcToken` / `VERCEL_OIDC_TOKEN`) is
+ * preferred and is passed as the SDK's `token` field (which "could be an OIDC
+ * token or a personal access token"); otherwise an access-token trio
+ * (`options.token`/`VERCEL_TOKEN` + `options.teamId`/`VERCEL_TEAM_ID` +
+ * `options.projectId`/`VERCEL_PROJECT_ID`) is passed as `{ token, teamId,
+ * projectId }`. When none is configured, `Sandbox.create` is called without
+ * credentials so the SDK self-discovers them from the environment. Credentials
+ * are passed to `Sandbox.create` only and never forwarded into the remote
+ * command environment.
  */
 export type VercelSandboxProviderOptions = {
 	/** Override the provider id (defaults to `vercel-sandbox`). */
@@ -75,7 +83,7 @@ export type VercelSandboxProviderOptions = {
 	timeoutMs?: number;
 	/** Plan duration cap in ms. Default 45 minutes. Exceeding it is an error. */
 	maxDurationMs?: number;
-	/** OIDC token; overrides `VERCEL_OIDC_TOKEN`. */
+	/** OIDC token; overrides `VERCEL_OIDC_TOKEN`. Passed to the SDK as `token`. */
 	oidcToken?: string;
 	/** Access token; overrides `VERCEL_TOKEN`. */
 	token?: string;

@@ -40,9 +40,12 @@ export type GcpCloudRunExecution = {
 export type GcpRunJobsClient = {
 	jobPath?: (project: string, location: string, job: string) => string;
 	locationPath?: (project: string, location: string) => string;
-	runJob: (request: unknown) => Promise<[{ promise: () => Promise<[GcpCloudRunExecution]> }]>;
+	runJob: (request: unknown) => Promise<[{ promise: () => Promise<[GcpCloudRunExecution]>; cancel?: () => Promise<unknown>; metadata?: { name?: string } }]>;
 	createJob?: (request: unknown) => Promise<[{ promise: () => Promise<[unknown]> }]>;
 	deleteJob?: (request: unknown) => Promise<[{ promise: () => Promise<[unknown]> }]>;
+	/** Best-effort abort path invoked when a run is cancelled mid-execution. */
+	cancelExecution?: (request: unknown) => Promise<[{ promise?: () => Promise<[unknown]> }]>;
+	deleteExecution?: (request: unknown) => Promise<[{ promise?: () => Promise<[unknown]> }]>;
 };
 
 export type GcpSandboxClients = {
@@ -75,6 +78,8 @@ export type GcpSandboxProviderOptions = {
 	timeoutSec?: number;
 	/** Create a fresh per-run Cloud Run Job (LRO) instead of reusing `jobName`. */
 	createJob?: boolean;
+	/** Container image for the per-run job created when `createJob` is set. */
+	image?: string;
 	/** Compute the remote sandbox id. Default `${runId}-${sandboxId}`. */
 	sandboxId?: (request: SandboxProviderRequest) => string;
 	/** Inject SDK doubles as a combined `{ storage, run }` object (tests/advanced). */
@@ -144,7 +149,7 @@ export function createMockGcpSandboxEnvironment(
 /**
  * Build the Cloud Storage bundle transport a GCP sandbox session uses instead of
  * a shared filesystem. Every workdir-relative path maps to a deterministic
- * object under `<prefix>/<runId>/<sandboxId>/<basename(path)>`; writes upload,
+ * object under `<prefix>/<runId>/<sandboxId>/<encoded full workdir-relative path>`; writes upload,
  * reads download, and destroy removes the transient objects.
  */
 export function createGcpSandboxGcsTransport(options: {

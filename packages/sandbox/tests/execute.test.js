@@ -617,6 +617,31 @@ describe("executeSandbox", () => {
         ).rejects.toThrow("must include either bundlePath or status");
     });
 
+    test("rejects a provider streamLogPath that escapes the run root", async () => {
+        const rootDir = tempDir("smithers-provider-streamlog-escape-");
+        await expect(
+            __executeSandboxInternals.materializeProviderResult(
+                { status: "finished", output: { ok: true }, streamLogPath: "/etc/passwd" },
+                join(rootDir, ".smithers", "sandboxes", "run", "sbx", "result"),
+                rootDir,
+            ),
+        ).rejects.toThrow("escapes sandbox root");
+    });
+
+    test("honors an in-root provider streamLogPath", async () => {
+        const rootDir = tempDir("smithers-provider-streamlog-inroot-");
+        const logSrc = join(rootDir, ".smithers", "executions", "child", "logs");
+        mkdirSync(logSrc, { recursive: true });
+        writeFileSync(join(logSrc, "stream.ndjson"), "{\"event\":\"child\"}\n", "utf8");
+        const resultBundlePath = join(rootDir, ".smithers", "sandboxes", "run", "sbx", "result");
+        await __executeSandboxInternals.materializeProviderResult(
+            { status: "finished", output: { ok: true }, streamLogPath: join(logSrc, "stream.ndjson") },
+            resultBundlePath,
+            rootDir,
+        );
+        expect(readFileSync(join(resultBundlePath, "logs", "stream.ndjson"), "utf8")).toContain("child");
+    });
+
     test("rejects accepted provider diff bundles without an applier", async () => {
         const { adapter, db, sqlite } = createDb();
         const runtime = createRuntime(db, { runId: "run-provider-no-applier" });

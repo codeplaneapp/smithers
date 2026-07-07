@@ -93,7 +93,7 @@ export function createCommandSandboxProvider(options) {
 
 			const raw = stdoutIsJson ? stdout : await session.readFile(resultPath);
 			request.heartbeat({ sandboxId: request.sandboxId, stage: `${id}-result-read`, remoteId: session.remoteId });
-			return parseSandboxProviderResult(raw, session.remoteId, { provider: id, resultPath });
+			return parseSandboxProviderResult(raw, session.remoteId, { provider: id, resultPath, secrets });
 		},
 		async cleanup(request) {
 			const key = `${request.runId}:${request.sandboxId}`;

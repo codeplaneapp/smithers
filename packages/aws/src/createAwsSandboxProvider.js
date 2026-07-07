@@ -134,7 +134,6 @@ export function createAwsSandboxProvider(options = {}) {
 						securityGroups: options.securityGroups,
 						assignPublicIp: options.assignPublicIp,
 						containerName: options.containerName,
-						region,
 						captureLogs: options.captureLogs,
 						logs,
 						logGroupName: options.logGroupName,

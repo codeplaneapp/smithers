@@ -72,24 +72,22 @@ describe("createVercelSandboxProvider", () => {
 		expect(() => createVercelSandboxProvider({ maxDurationMs: 0, oidcToken: "t" })).toThrow(SmithersError);
 	});
 
-	test("run rejects with INVALID_INPUT when no auth is configured", async () => {
+	test("defers to SDK env self-discovery (no throw) when no auth is configured", async () => {
 		await withoutVercelEnv(async () => {
-			const provider = createVercelSandboxProvider({
-				client: createMockVercelSandboxEnvironment(() => ({ status: "finished" })),
-			});
-			const { request } = makeRequest();
-			let error;
-			try {
-				await provider.run(request);
-			} catch (e) {
-				error = e;
-			}
-			expect(error).toBeInstanceOf(SmithersError);
-			expect(error.code).toBe("INVALID_INPUT");
+			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+			const provider = createVercelSandboxProvider({ client: env });
+			const result = await provider.run(makeRequest().request);
+			// The real SDK self-discovers credentials from the environment, so we
+			// pass no credential fields rather than throwing.
+			expect(result).toMatchObject({ status: "finished" });
+			expect(env.createCalls[0].token).toBeUndefined();
+			expect(env.createCalls[0].teamId).toBeUndefined();
+			expect(env.createCalls[0].projectId).toBeUndefined();
+			expect("oidcToken" in env.createCalls[0]).toBe(false);
 		});
 	});
 
-	test("prefers the OIDC token for auth", async () => {
+	test("maps an explicit OIDC token into the SDK token field (no oidcToken param)", async () => {
 		await withoutVercelEnv(async () => {
 			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
 			const provider = createVercelSandboxProvider({
@@ -100,9 +98,12 @@ describe("createVercelSandboxProvider", () => {
 				projectId: "proj-1",
 			});
 			await provider.run(makeRequest().request);
-			expect(env.createCalls[0].oidcToken).toBe("oidc-abc");
-			expect(env.createCalls[0].token).toBeUndefined();
+			// OIDC is preferred and rides the `token` field; there is no fictional
+			// `oidcToken` create param, and the access-token trio is not sent.
+			expect(env.createCalls[0].token).toBe("oidc-abc");
 			expect(env.createCalls[0].teamId).toBeUndefined();
+			expect(env.createCalls[0].projectId).toBeUndefined();
+			expect("oidcToken" in env.createCalls[0]).toBe(false);
 		});
 	});
 
@@ -117,17 +118,18 @@ describe("createVercelSandboxProvider", () => {
 			});
 			await provider.run(makeRequest().request);
 			expect(env.createCalls[0]).toMatchObject({ token: "tok-def", teamId: "team-1", projectId: "proj-1" });
-			expect(env.createCalls[0].oidcToken).toBeUndefined();
+			expect("oidcToken" in env.createCalls[0]).toBe(false);
 		});
 	});
 
-	test("reads OIDC token from the environment", async () => {
+	test("reads the OIDC token from the environment into the SDK token field", async () => {
 		await withoutVercelEnv(async () => {
 			process.env.VERCEL_OIDC_TOKEN = "env-oidc";
 			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
 			const provider = createVercelSandboxProvider({ client: env });
 			await provider.run(makeRequest().request);
-			expect(env.createCalls[0].oidcToken).toBe("env-oidc");
+			expect(env.createCalls[0].token).toBe("env-oidc");
+			expect("oidcToken" in env.createCalls[0]).toBe(false);
 		});
 	});
 
@@ -196,6 +198,30 @@ describe("createVercelSandboxProvider", () => {
 			// Rejects on abort, not after the 60s command timeout.
 			expect(Date.now() - started).toBeLessThan(5_000);
 		});
+
+		test("forwards the tool timeout to the SDK runCommand input", async () => {
+			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+			const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
+			await provider.run(makeRequest({ toolTimeoutMs: 42_000 }).request);
+			expect(env.sandboxes[0]?.lastRunInput?.timeout).toBe(42_000);
+		});
+
+		test("local timeout rejects when the command never settles", async () => {
+			// A handler that never settles: only the local timeout race can end it.
+			const env = createMockVercelSandboxEnvironment(() => new Promise(() => {}));
+			const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
+			const started = Date.now();
+			let error;
+			try {
+				await provider.run(makeRequest({ toolTimeoutMs: 40 }).request);
+			} catch (e) {
+				error = e;
+			}
+			expect(error).toBeInstanceOf(SmithersError);
+			expect(error.code).toBe("SANDBOX_EXECUTION_FAILED");
+			expect(error.message).toContain("timed out");
+			expect(Date.now() - started).toBeLessThan(5_000);
+		});
 	});
 
 	test("ships the request JSON (input + config) into the sandbox and injects path env vars", async () => {
@@ -236,6 +262,39 @@ describe("createVercelSandboxProvider", () => {
 		expect(result.remoteRunId).toBe("vercel-sandbox-1");
 		expect(result.workspaceId).toBe("vercel-sandbox-1");
 		expect(result.containerId).toBe("vercel-sandbox-1");
+	});
+
+	test("fills remote ids from the 2.x sandbox .name when sandboxId is absent", async () => {
+		// The 2.x SDK exposes the id as `.name`, not `.sandboxId`. Emulate that
+		// shape by proxying the mock sandbox.
+		const base = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+		const client = {
+			create: async (opts) => {
+				const sandbox = await base.create(opts);
+				return new Proxy(sandbox, {
+					get(target, prop) {
+						if (prop === "sandboxId") return undefined;
+						if (prop === "name") return target.sandboxId;
+						return Reflect.get(target, prop);
+					},
+				});
+			},
+		};
+		const provider = createVercelSandboxProvider({ client, oidcToken: "t" });
+		const result = await provider.run(makeRequest().request);
+		expect(result.remoteRunId).toBe("vercel-sandbox-1");
+		expect(result.workspaceId).toBe("vercel-sandbox-1");
+		expect(result.containerId).toBe("vercel-sandbox-1");
+	});
+
+	test("decodes a Node ReadableStream result file so JSON round-trips", async () => {
+		// Real @vercel/sandbox readFile resolves a Node ReadableStream. This must
+		// FAIL against the old String()-based decoder (which yields "[object …]"
+		// and breaks the result-file JSON parse).
+		const env = createMockVercelSandboxEnvironment(() => ({ status: "finished", output: { ok: true, n: 42 } }), { streamReads: true });
+		const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
+		const result = await provider.run(makeRequest().request);
+		expect(result).toMatchObject({ status: "finished", output: { ok: true, n: 42 } });
 	});
 
 	describe("duration / plan cap", () => {

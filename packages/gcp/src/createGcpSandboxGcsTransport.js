@@ -3,8 +3,9 @@ import { GCP_SANDBOX_PROVIDER_ID } from "./GCP_SANDBOX_PROVIDER_ID.js";
 /**
  * Key a workdir path to a stable, collision-free object suffix. The full path
  * (not just its basename) is preserved so two distinct paths that share a
- * basename map to distinct GCS objects. Each segment is sanitized to the safe
- * object-name charset; empty and `.`/`..` segments are dropped.
+ * basename map to distinct GCS objects. Each segment is percent-encoded so the
+ * mapping is injective (unlike a lossy charset replace, where `a b` and `a_b`
+ * would collide); empty and `.`/`..` segments are dropped.
  *
  * @param {string} path
  * @returns {string}
@@ -13,7 +14,7 @@ function objectKeyFor(path) {
 	const segments = String(path)
 		.split("/")
 		.filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
-		.map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, "_"));
+		.map((segment) => encodeURIComponent(segment));
 	return segments.length > 0 ? segments.join("/") : "object";
 }
 

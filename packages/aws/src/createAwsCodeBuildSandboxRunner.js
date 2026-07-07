@@ -32,17 +32,21 @@ function buildspecFor(command) {
  */
 function sleep(ms, signal) {
 	return new Promise((resolve, reject) => {
-		const timer = setTimeout(resolve, ms);
-		if (signal) {
-			signal.addEventListener(
-				"abort",
-				() => {
-					clearTimeout(timer);
-					reject(new Error("aborted"));
-				},
-				{ once: true },
-			);
-		}
+		/** @type {ReturnType<typeof setTimeout>} */
+		let timer;
+		const onAbort = () => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			reject(new Error("aborted"));
+		};
+		timer = setTimeout(() => {
+			// Detach the abort listener on the normal path too: a long poll would
+			// otherwise accrue one listener per 500ms tick on a shared signal
+			// (MaxListenersExceededWarning + unbounded growth).
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		if (signal) signal.addEventListener("abort", onAbort);
 	});
 }
 
@@ -135,7 +139,11 @@ export async function createAwsCodeBuildSandboxRunner(options) {
 			if (execOpts.signal?.aborted) {
 				throw new SmithersError("SANDBOX_EXECUTION_FAILED", "AWS codebuild sandbox build was cancelled before launch.", { provider: AWS_SANDBOX_PROVIDER_ID });
 			}
-			const timeoutMinutes = Number.isFinite(execOpts.timeoutMs) && execOpts.timeoutMs > 0 ? Math.max(1, Math.ceil(execOpts.timeoutMs / 60_000)) : undefined;
+			// CodeBuild's `timeoutInMinutesOverride` must be 5..2160; a sub-5-minute
+			// toolTimeoutMs would otherwise send 1 and StartBuild rejects. Clamp to the
+			// AWS-legal range — the local poll deadline still enforces the shorter real
+			// timeout via `pollUntilComplete`.
+			const timeoutMinutes = Number.isFinite(execOpts.timeoutMs) && execOpts.timeoutMs > 0 ? Math.min(2160, Math.max(5, Math.ceil(execOpts.timeoutMs / 60_000))) : undefined;
 			const startInput = {
 				projectName,
 				sourceTypeOverride: "S3",

@@ -274,8 +274,13 @@ describe("createDaytonaSandboxProvider", () => {
 	});
 
 	test("missing SDK produces an actionable install error", async () => {
-		// No client injected + no SDK installed -> lazy import fails.
-		const provider = createDaytonaSandboxProvider({});
+		// Simulate the SDK not being installed via the injectable importer, so the
+		// test is deterministic whether or not @daytonaio/sdk is present locally.
+		const provider = createDaytonaSandboxProvider({
+			importSdk: async () => {
+				throw new Error("Cannot find package '@daytonaio/sdk'");
+			},
+		});
 		await expect(provider.run(makeRequest().request)).rejects.toThrow(/@daytonaio\/sdk|not installed/);
 	});
 });

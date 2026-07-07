@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 const REQUEST_FILE = ".smithers/sandbox-request.json";
 const RESULT_FILE = ".smithers/sandbox-result.json";
 
@@ -11,6 +13,12 @@ const RESULT_FILE = ".smithers/sandbox-result.json";
  * returns a finished command whose `stdout()`/`stderr()` are async and whose
  * `exitCode` is 0.
  *
+ * `Sandbox.create` in the real SDK takes `{ token, teamId?, projectId? }` (no
+ * `oidcToken`); this double records whatever options it is handed via
+ * `createCalls` without asserting a shape. When `config.streamReads` is set,
+ * `readFile` resolves a Node `Readable` (matching the real 2.x
+ * `Promise<NodeJS.ReadableStream | null>`) instead of a `Buffer`.
+ *
  * @param {(args: {
  *   command: string;
  *   request: Record<string, unknown>;
@@ -21,6 +29,7 @@ const RESULT_FILE = ".smithers/sandbox-result.json";
  *   fail?: string | string[];
  *   sandboxIdPrefix?: string;
  *   onDestroy?: () => void;
+ *   streamReads?: boolean;
  * }} [config]
  */
 export function createMockVercelSandboxEnvironment(handler, config = {}) {
@@ -44,6 +53,8 @@ export function createMockVercelSandboxEnvironment(handler, config = {}) {
 		let stopped = false;
 		let deleted = false;
 		let runCommandCalls = 0;
+		/** @type {Record<string, unknown> | undefined} */
+		let lastRunInput;
 
 		const sandbox = {
 			sandboxId,
@@ -53,6 +64,9 @@ export function createMockVercelSandboxEnvironment(handler, config = {}) {
 			domainCalls,
 			get runCommandCalls() {
 				return runCommandCalls;
+			},
+			get lastRunInput() {
+				return lastRunInput;
 			},
 			get stopped() {
 				return stopped;
@@ -72,10 +86,16 @@ export function createMockVercelSandboxEnvironment(handler, config = {}) {
 			},
 			async readFile({ path }) {
 				if (failures.has("readFile")) throw new Error("mock vercel readFile failure");
-				return Buffer.from(files.get(path) ?? "");
+				const content = files.get(path) ?? "";
+				// The real 2.x readFile resolves a Node ReadableStream; opt into that
+				// shape so the provider's stream decode path is exercised end-to-end.
+				if (config.streamReads) return Readable.from([Buffer.from(content)]);
+				return Buffer.from(content);
 			},
-			async runCommand({ cmd, args, cwd, env }) {
+			async runCommand(runInput) {
 				runCommandCalls += 1;
+				lastRunInput = runInput;
+				const { cmd, args, cwd, env } = runInput ?? {};
 				if (stopped || deleted) throw new Error(`mock vercel sandbox "${sandboxId}" is torn down`);
 				if (failures.has("exec") || failures.has("runCommand")) {
 					throw new Error("mock vercel runCommand failure");

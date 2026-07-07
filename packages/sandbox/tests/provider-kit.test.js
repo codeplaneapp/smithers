@@ -473,6 +473,18 @@ describe("parseSandboxProviderResult", () => {
 		expect(error.message).toContain("{broken");
 	});
 
+	test("scrubs context secrets from the invalid-JSON error snippet", () => {
+		let error;
+		try {
+			parseSandboxProviderResult("not json TOKEN=sk-secret-123", "r1", { secrets: ["sk-secret-123"] });
+		} catch (e) {
+			error = e;
+		}
+		expect(error).toBeInstanceOf(SmithersError);
+		expect(error.message).not.toContain("sk-secret-123");
+		expect(error.message).toContain("[redacted]");
+	});
+
 	test("throws on non-object JSON", () => {
 		expect(() => parseSandboxProviderResult("123", "r1")).toThrow(SmithersError);
 	});

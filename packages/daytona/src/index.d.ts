@@ -54,6 +54,7 @@ export type DaytonaSandboxProviderOptions = {
 	env?: Record<string, string>;
 	cleanup?: "destroy" | "keep";
 	client?: DaytonaClientLike;
+	importSdk?: () => Promise<unknown>;
 	clientOptions?: DaytonaClientOptions;
 	apiKey?: string;
 	apiUrl?: string;

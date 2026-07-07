@@ -189,7 +189,7 @@ describe("createGcpSandboxProvider", () => {
 
 	test("per-run createJob creates then deletes the job on destroy", async () => {
 		const env = createMockGcpSandboxEnvironment(() => ({ status: "finished" }));
-		const provider = createGcpSandboxProvider({ ...REQUIRED, createJob: true, client: env });
+		const provider = createGcpSandboxProvider({ ...REQUIRED, createJob: true, image: "gcr.io/smithers/sandbox-runner", client: env });
 		const { request } = makeRequest();
 		await provider.run(request);
 		expect(env.createdJobs.length).toBe(1);

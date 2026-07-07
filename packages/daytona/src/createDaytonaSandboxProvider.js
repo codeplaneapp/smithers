@@ -38,10 +38,24 @@ export function createDaytonaSandboxProvider(options = {}) {
 			const secrets = secretValuesFrom(options);
 			const client = await resolveDaytonaClient(options, id);
 			const createOptions = resolveDaytonaCreateOptions(options, request);
+			const provisioningTimeoutMs = request.toolTimeoutMs;
+			if (request.signal?.aborted) {
+				throw new SmithersError(
+					"SANDBOX_EXECUTION_FAILED",
+					"Daytona sandbox creation aborted before it started.",
+					{ provider: id },
+				);
+			}
 			let sandbox;
+			const createPromise = Promise.resolve().then(() => client.create(createOptions));
 			try {
-				sandbox = await client.create(createOptions);
+				sandbox = await raceWithAbort(createPromise, request.signal, {
+					abortMessage: "Daytona sandbox creation aborted.",
+					timeoutMs: provisioningTimeoutMs,
+					timeoutMessage: `Daytona sandbox creation timed out after ${provisioningTimeoutMs}ms.`,
+				});
 			} catch (error) {
+				deleteSandboxWhenReady(client, createPromise);
 				throw new SmithersError(
 					"SANDBOX_EXECUTION_FAILED",
 					`Daytona sandbox creation failed: ${scrubSecrets(messageOf(error), secrets)}`,
@@ -58,7 +72,21 @@ export function createDaytonaSandboxProvider(options = {}) {
 			// Newer SDKs return an already-running sandbox from create(); older
 			// ones require an explicit wait before exec.
 			if (sandbox.state !== "started" && typeof sandbox.waitUntilStarted === "function") {
-				await sandbox.waitUntilStarted();
+				const waitUntilStarted = sandbox.waitUntilStarted.bind(sandbox);
+				try {
+					await raceWithAbort(Promise.resolve().then(() => waitUntilStarted()), request.signal, {
+						abortMessage: "Daytona sandbox startup aborted.",
+						timeoutMs: provisioningTimeoutMs,
+						timeoutMessage: `Daytona sandbox startup timed out after ${provisioningTimeoutMs}ms.`,
+					});
+				} catch (error) {
+					await deleteSandboxQuietly(client, sandbox);
+					throw new SmithersError(
+						"SANDBOX_EXECUTION_FAILED",
+						`Daytona sandbox startup failed: ${scrubSecrets(messageOf(error), secrets)}`,
+						{ provider: id, remoteId: sandbox.id },
+					);
+				}
 			}
 			const remoteId = sandbox.id;
 
@@ -98,7 +126,7 @@ async function resolveDaytonaClient(options, id) {
 	if (options.client) {
 		return options.client;
 	}
-	const Daytona = await loadDaytonaSdk(id);
+	const Daytona = await loadDaytonaSdk(id, options.importSdk);
 	const clientOptions = options.clientOptions ?? {};
 	return new Daytona({
 		apiKey: options.apiKey ?? clientOptions.apiKey ?? process.env.DAYTONA_API_KEY,
@@ -108,26 +136,24 @@ async function resolveDaytonaClient(options, id) {
 }
 
 /**
- * Lazily load the Daytona SDK. The package is being renamed from
- * `@daytonaio/sdk` to `@daytona/sdk`, so try both before failing.
+ * Lazily load the Daytona SDK (`@daytonaio/sdk`). `importSdk` is an optional
+ * injectable importer used only by tests to exercise the not-installed path
+ * deterministically; production defaults to the real dynamic import.
  *
  * @param {string} id
+ * @param {(() => Promise<unknown>) | undefined} [importSdk]
  * @returns {Promise<new (options: import("./DaytonaSandboxProviderOptions.ts").DaytonaClientOptions) => import("./DaytonaSandboxProviderOptions.ts").DaytonaClientLike>}
  */
-async function loadDaytonaSdk(id) {
+async function loadDaytonaSdk(id, importSdk) {
 	let mod;
 	try {
-		mod = await import("@daytonaio/sdk");
-	} catch {
-		try {
-			mod = await import("@daytona/sdk");
-		} catch (error) {
-			throw new SmithersError(
-				"INVALID_INPUT",
-				`Daytona SDK is not installed. Run "npm install @daytonaio/sdk" (or pass options.client). Original error: ${messageOf(error)}`,
-				{ provider: id },
-			);
-		}
+		mod = await (importSdk ? importSdk() : import("@daytonaio/sdk"));
+	} catch (error) {
+		throw new SmithersError(
+			"INVALID_INPUT",
+			`Daytona SDK is not installed. Run "npm install @daytonaio/sdk" (or pass options.client). Original error: ${messageOf(error)}`,
+			{ provider: id },
+		);
 	}
 	const Daytona = mod?.Daytona ?? mod?.default?.Daytona ?? mod?.default;
 	if (typeof Daytona !== "function") {
@@ -230,27 +256,69 @@ function decodeToString(data) {
 }
 
 /**
- * Race an exec promise against an AbortSignal, guaranteeing the abort listener
- * is removed once the exec settles (resolve or reject). Without the explicit
+ * @param {import("./DaytonaSandboxProviderOptions.ts").DaytonaClientLike} client
+ * @param {Promise<import("./DaytonaSandboxProviderOptions.ts").DaytonaSandboxLike>} sandboxPromise
+ */
+function deleteSandboxWhenReady(client, sandboxPromise) {
+	void sandboxPromise.then((sandbox) => deleteSandboxQuietly(client, sandbox), () => undefined);
+}
+
+/**
+ * @param {import("./DaytonaSandboxProviderOptions.ts").DaytonaClientLike} client
+ * @param {import("./DaytonaSandboxProviderOptions.ts").DaytonaSandboxLike} sandbox
+ */
+async function deleteSandboxQuietly(client, sandbox) {
+	try {
+		await client.delete(sandbox);
+	} catch {
+		// Best-effort cleanup; preserve the provisioning failure that triggered it.
+	}
+}
+
+/**
+ * Race a promise against an AbortSignal, guaranteeing the abort listener
+ * is removed once the promise settles (resolve or reject). Without the explicit
  * removeEventListener, a long-lived shared signal would leak one listener per
- * exec, since `{ once: true }` only detaches when the abort event actually fires.
+ * operation, since `{ once: true }` only detaches when the abort event actually fires.
  *
  * @template T
- * @param {Promise<T>} execPromise
- * @param {AbortSignal} signal
+ * @param {Promise<T>} promise
+ * @param {AbortSignal | undefined} signal
+ * @param {{ abortMessage?: string; timeoutMs?: number; timeoutMessage?: string }} [options]
  * @returns {Promise<T>}
  */
-function raceWithAbort(execPromise, signal) {
+function raceWithAbort(promise, signal, options = {}) {
+	if (signal?.aborted) {
+		return Promise.reject(new Error(options.abortMessage ?? "Daytona sandbox command aborted."));
+	}
 	/** @type {() => void} */
 	let onAbort = () => {};
-	const abortPromise = /** @type {Promise<never>} */ (
-		new Promise((_resolve, reject) => {
-			onAbort = () => reject(new Error("Daytona sandbox command aborted."));
-			signal.addEventListener("abort", onAbort, { once: true });
-		})
-	);
-	return Promise.race([execPromise, abortPromise]).finally(() => {
-		signal.removeEventListener("abort", onAbort);
+	/** @type {ReturnType<typeof setTimeout> | undefined} */
+	let timeout;
+	const races = /** @type {Promise<T>[]} */ ([promise]);
+	if (signal) {
+		races.push(/** @type {Promise<T>} */ (
+			new Promise((_resolve, reject) => {
+				onAbort = () => reject(new Error(options.abortMessage ?? "Daytona sandbox command aborted."));
+				signal.addEventListener("abort", onAbort, { once: true });
+			})
+		));
+	}
+	const timeoutMs = options.timeoutMs;
+	if (typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+		races.push(/** @type {Promise<T>} */ (
+			new Promise((_resolve, reject) => {
+				timeout = setTimeout(() => reject(new Error(options.timeoutMessage ?? `Daytona sandbox command timed out after ${timeoutMs}ms.`)), timeoutMs);
+			})
+		));
+	}
+	return Promise.race(races).finally(() => {
+		if (signal) {
+			signal.removeEventListener("abort", onAbort);
+		}
+		if (timeout) {
+			clearTimeout(timeout);
+		}
 	});
 }
 

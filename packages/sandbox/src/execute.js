@@ -10,6 +10,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { validateSandboxBundle, writeSandboxBundle } from "./bundle.js";
+import { resolveSandboxPath } from "./sandboxPath.js";
 import { normalizeSandboxEgressConfig, redactSandboxEgressConfig, writeSandboxEgressFiles } from "./egress.js";
 import { SandboxTransport, layerForSandboxRuntime, resolveSandboxRuntime, } from "./transport.js";
 /** @typedef {import("./ExecuteSandboxOptions.ts").ExecuteSandboxOptions} ExecuteSandboxOptions */
@@ -180,11 +181,30 @@ function isSandboxBundleStatus(status) {
     return status === "finished" || status === "failed" || status === "cancelled";
 }
 /**
+ * A sandbox provider result is produced by untrusted code running inside the
+ * sandbox. `streamLogPath`, when present, is a HOST path the orchestrator will
+ * read and copy into the run bundle's logs/stream.ndjson. Confine it to the run
+ * root so a hostile sandbox cannot name an arbitrary host file (e.g. /etc/passwd,
+ * ~/.aws/credentials, ~/.ssh/id_rsa) and exfiltrate its contents into the
+ * collected bundle. Returns the resolved in-root path, or null when absent.
+ * Throws TOOL_PATH_ESCAPE when the path escapes the run root.
+ * @param {unknown} streamLogPath
+ * @param {string} rootDir
+ * @returns {string | null}
+ */
+function resolveProviderStreamLogPath(streamLogPath, rootDir) {
+    if (typeof streamLogPath !== "string" || streamLogPath.length === 0) {
+        return null;
+    }
+    return resolveSandboxPath(rootDir, streamLogPath);
+}
+/**
  * @param {SandboxProviderResult} result
  * @param {string} defaultBundlePath
+ * @param {string} rootDir
  * @returns {Promise<{ bundlePath: string; remoteRunId: string | null; workspaceId: string | null; containerId: string | null; }>}
  */
-async function materializeProviderResult(result, defaultBundlePath) {
+async function materializeProviderResult(result, defaultBundlePath, rootDir) {
     const source = asPlainObject(result);
     if (!source) {
         throw new SmithersError("SANDBOX_EXECUTION_FAILED", "Sandbox provider returned an invalid result.");
@@ -212,7 +232,7 @@ async function materializeProviderResult(result, defaultBundlePath) {
         output: source.outputs ?? source.output,
         status: source.status,
         runId: remoteRunId ?? undefined,
-        streamLogPath: typeof source.streamLogPath === "string" ? source.streamLogPath : null,
+        streamLogPath: resolveProviderStreamLogPath(source.streamLogPath, rootDir),
         patches: Array.isArray(source.patches) ? source.patches : undefined,
         artifacts: Array.isArray(source.artifacts) ? source.artifacts : undefined,
         diffBundle: source.diffBundle,
@@ -573,7 +593,7 @@ export async function executeSandbox(options) {
                 heartbeat: runtime.heartbeat,
             };
             const providerResult = await runSandboxProvider(provider, providerRequest);
-            const materialized = await materializeProviderResult(providerResult, providerRequest.resultBundlePath);
+            const materialized = await materializeProviderResult(providerResult, providerRequest.resultBundlePath, options.rootDir);
             const validated = await validateSandboxBundle(materialized.bundlePath);
             return await finalizeSandboxBundle({
                 adapter,

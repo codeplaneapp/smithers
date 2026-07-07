@@ -64,6 +64,12 @@ export function createAwsSandboxS3Transport(config) {
 	const secrets = config.secrets ?? [];
 	/** @type {Set<string>} */
 	const writtenKeys = new Set();
+	// Every key this session touches — written (request/CA) AND read (result) —
+	// so `cleanup: "destroy"` removes the container-authored result object too, not
+	// just the keys we uploaded. The result JSON is fetched via `readFile` and is
+	// never registered in `writtenKeys`, so it would otherwise leak past destroy.
+	/** @type {Set<string>} */
+	const touchedKeys = new Set();
 
 	/**
 	 * Map a workdir path to its collision-free S3 object key.
@@ -110,6 +116,7 @@ export function createAwsSandboxS3Transport(config) {
 				fail("upload", key, error);
 			}
 			writtenKeys.add(key);
+			touchedKeys.add(key);
 		},
 		/**
 		 * @param {string} path
@@ -117,6 +124,9 @@ export function createAwsSandboxS3Transport(config) {
 		 */
 		async readFile(path) {
 			const key = keyForPath(path);
+			// Register the key we read so cleanup removes the result object (written by
+			// the container, fetched here) even though we never uploaded it ourselves.
+			touchedKeys.add(key);
 			try {
 				const res = await s3.getObject({ Bucket: bucket, Key: key });
 				return await readBody(/** @type {{ Body?: unknown }} */ (res)?.Body);
@@ -125,13 +135,14 @@ export function createAwsSandboxS3Transport(config) {
 			}
 		},
 		/**
-		 * Delete every transient object this session wrote (request/result/CA).
+		 * Delete every transient object this session touched (request/result/CA).
 		 * @returns {Promise<void>}
 		 */
 		async deleteAll() {
-			if (writtenKeys.size === 0) return;
-			const keys = [...writtenKeys];
+			if (touchedKeys.size === 0) return;
+			const keys = [...touchedKeys];
 			writtenKeys.clear();
+			touchedKeys.clear();
 			try {
 				await s3.deleteObjects({ Bucket: bucket, Delete: { Objects: keys.map((Key) => ({ Key })) } });
 			} catch {

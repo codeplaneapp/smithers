@@ -65,6 +65,16 @@ describe("createMockGcpSandboxEnvironment", () => {
 		expect(second.name).toContain("exec-2");
 	});
 
+	test("runJob operation exposes the execution resource via LRO metadata", async () => {
+		const env = createMockGcpSandboxEnvironment(() => ({ status: "finished" }));
+		const [operation] = await env.run.runJob({
+			name: "projects/p/locations/l/jobs/j",
+			overrides: { containerOverrides: [{ env: [], args: ["sh", "-c", "echo hi"] }] },
+		});
+		expect(typeof operation.metadata?.name).toBe("string");
+		expect(String(operation.metadata.name)).toContain("/executions/");
+	});
+
 	test("injectable failed execution counts + conditions (no handler call, no result)", async () => {
 		let called = false;
 		const env = createMockGcpSandboxEnvironment(() => {

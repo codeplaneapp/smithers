@@ -71,6 +71,8 @@ export type AwsSandboxProviderOptions = {
 	captureLogs?: boolean;
 	/** CloudWatch log group to read when `captureLogs` is set. */
 	logGroupName?: string;
+	/** awslogs stream prefix used to locate the task's CloudWatch stream (defaults to the container name). */
+	awslogsStreamPrefix?: string;
 	/** Options forwarded to every constructed AWS SDK client (e.g. credentials, endpoint). */
 	clientOptions?: Record<string, unknown>;
 	/** Inject SDK doubles (tests) or real clients to reuse configuration. */
@@ -97,7 +99,7 @@ export type AwsSandboxProviderOptions = {
  * Build a Smithers SandboxProvider backed by AWS. Because AWS has no shared
  * filesystem between the orchestrator and the remote task, the request/result
  * bundle is transported through S3: `writeFile`/`readFile` map a workdir path to
- * `s3://<bucket>/smithers/sandbox/<runId>/<sandboxId>/<basename(path)>`, and the
+ * `s3://<bucket>/smithers/sandbox/<runId>/<sandboxId>/<encoded full workdir-relative path>`, and the
  * remote container round-trips the same keys via the injected
  * `SMITHERS_SANDBOX_S3_*` env vars.
  */
@@ -161,7 +163,7 @@ export function createMockAwsSandboxEnvironment(
 /**
  * Build the S3-backed file transport for one sandbox session. Every workdir
  * path maps to a single flat object key
- * `s3://<bucket>/smithers/sandbox/<runId>/<sandboxId>/<basename(path)>`. The
+ * `s3://<bucket>/smithers/sandbox/<runId>/<sandboxId>/<encoded full workdir-relative path>`. The
  * container round-trips the request/result JSON through the same keys.
  */
 export function createAwsSandboxS3Transport(config: {
@@ -199,7 +201,6 @@ export function createAwsEcsSandboxRunner(options: {
 	securityGroups?: string[];
 	assignPublicIp?: "ENABLED" | "DISABLED";
 	containerName?: string;
-	region?: string;
 	captureLogs?: boolean;
 	logs?: unknown;
 	logGroupName?: string;

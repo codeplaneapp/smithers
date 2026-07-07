@@ -43,9 +43,11 @@ export function createVercelSandboxProvider(options = {}) {
 		env: options.env,
 		cleanup: options.cleanup,
 		async createSession(request) {
-			// Resolve + validate auth BEFORE touching the SDK so a misconfigured
-			// provider fails fast with an actionable INVALID_INPUT.
-			const auth = resolveVercelAuth(options, id);
+			// Resolve auth BEFORE touching the SDK. Any explicit credential is
+			// mapped into the SDK's real `{ token, teamId?, projectId? }` shape;
+			// when none is given we hand the SDK an empty object so it can
+			// self-discover credentials from the environment (VERCEL_OIDC_TOKEN).
+			const auth = resolveVercelAuth(options);
 			const secrets = collectSecrets(options, auth);
 			const Sandbox = options.client ?? (await loadVercelSandbox(id));
 
@@ -81,9 +83,12 @@ export function createVercelSandboxProvider(options = {}) {
 				);
 			}
 
-			const remoteId = typeof sandbox.sandboxId === "string" && sandbox.sandboxId.length > 0
-				? sandbox.sandboxId
-				: `${request.runId}-${request.sandboxId}`;
+			// 1.x exposes the id as `.sandboxId`; 2.x renamed it to `.name`. Prefer
+			// whichever the running SDK provides, falling back to a synthetic id.
+			const remoteId =
+				(typeof sandbox.sandboxId === "string" && sandbox.sandboxId.length > 0 && sandbox.sandboxId) ||
+				(typeof sandbox.name === "string" && sandbox.name.length > 0 && sandbox.name) ||
+				`${request.runId}-${request.sandboxId}`;
 
 			// Reach durations beyond the create ceiling by extending, up to the cap.
 			if (desiredMs > createTimeoutMs) {
@@ -205,17 +210,23 @@ function raceCommand(commandPromise, signal, timeoutMs) {
 }
 
 /**
- * Build the auth object handed to `Sandbox.create`. OIDC is preferred; falls
- * back to the access-token trio. Throws INVALID_INPUT when neither is available.
+ * Build the auth object handed to `Sandbox.create`.
+ *
+ * The real `@vercel/sandbox` SDK takes `{ token, teamId?, projectId? }` — there
+ * is NO `oidcToken` create param. The `token` field "could be an OIDC token or a
+ * personal access token" (per the SDK doc), so an explicit OIDC token maps
+ * straight into `token`. An access-token trio maps to `{ token, teamId,
+ * projectId }`. When neither explicit credential is configured we return an
+ * empty object and let the SDK self-discover credentials from the environment
+ * (e.g. `VERCEL_OIDC_TOKEN` in `process.env`) rather than throwing.
  *
  * @param {import("./VercelSandboxProviderOptions.ts").VercelSandboxProviderOptions} options
- * @param {string} provider
- * @returns {{ oidcToken: string } | { token: string; teamId: string; projectId: string }}
+ * @returns {{ token: string } | { token: string; teamId: string; projectId: string } | {}}
  */
-function resolveVercelAuth(options, provider) {
+function resolveVercelAuth(options) {
 	const oidcToken = options.oidcToken ?? process.env.VERCEL_OIDC_TOKEN;
 	if (oidcToken) {
-		return { oidcToken };
+		return { token: oidcToken };
 	}
 	const token = options.token ?? process.env.VERCEL_TOKEN;
 	const teamId = options.teamId ?? process.env.VERCEL_TEAM_ID;
@@ -223,11 +234,8 @@ function resolveVercelAuth(options, provider) {
 	if (token && teamId && projectId) {
 		return { token, teamId, projectId };
 	}
-	throw new SmithersError(
-		"INVALID_INPUT",
-		"Vercel sandbox provider requires authentication: set VERCEL_OIDC_TOKEN (preferred), or VERCEL_TOKEN + VERCEL_TEAM_ID + VERCEL_PROJECT_ID (or pass them via options).",
-		{ provider },
-	);
+	// No explicit credentials: defer to the SDK's environment self-discovery.
+	return {};
 }
 
 /**
@@ -292,8 +300,13 @@ async function loadVercelSandbox(provider) {
 }
 
 /**
- * Decode whatever `sandbox.readFile` returns into a string (string, Buffer/
- * Uint8Array, ReadableStream, or an object exposing text()/content).
+ * Decode whatever `sandbox.readFile` returns into a string.
+ *
+ * The real `@vercel/sandbox` `readFile({ path })` resolves a Node
+ * `ReadableStream` (or `null`). Both a Node `Readable` and a web `ReadableStream`
+ * are async-iterable over their chunks, so a single `for await` covers both. The
+ * string / Uint8Array fast-paths and the `text()`/`content` object shapes are
+ * kept for test doubles and older SDK surfaces.
  *
  * @param {unknown} value
  * @returns {Promise<string>}
@@ -303,30 +316,34 @@ async function decodeVercelFile(value) {
 	if (typeof value === "string") return value;
 	if (value instanceof Uint8Array) return new TextDecoder().decode(value);
 	if (typeof value === "object") {
-		const obj = /** @type {{ text?: unknown; content?: unknown }} */ (value);
+		const obj = /** @type {{ text?: unknown; content?: unknown; [Symbol.asyncIterator]?: unknown }} */ (value);
+		if (typeof obj[Symbol.asyncIterator] === "function") {
+			return await readAsyncIterableToString(/** @type {AsyncIterable<unknown>} */ (value));
+		}
 		if (typeof obj.text === "function") {
 			return String(await /** @type {() => Promise<string> | string} */ (obj.text)());
 		}
 		if (obj.content instanceof Uint8Array) return new TextDecoder().decode(obj.content);
 		if (typeof obj.content === "string") return obj.content;
-		if (value instanceof ReadableStream) {
-			return await readStreamToString(value);
-		}
 	}
 	return String(value);
 }
 
 /**
- * @param {ReadableStream<Uint8Array>} stream
+ * Concatenate an async-iterable of chunks (Node `Readable` yields `Buffer`s, web
+ * `ReadableStream` yields `Uint8Array`s; strings are accepted too) into a string.
+ *
+ * @param {AsyncIterable<unknown>} iterable
  * @returns {Promise<string>}
  */
-async function readStreamToString(stream) {
-	const chunks = [];
-	const reader = stream.getReader();
-	while (true) {
-		const next = await reader.read();
-		if (next.done) break;
-		chunks.push(next.value);
+async function readAsyncIterableToString(iterable) {
+	const decoder = new TextDecoder();
+	let out = "";
+	for await (const chunk of iterable) {
+		if (typeof chunk === "string") out += chunk;
+		else if (chunk instanceof Uint8Array) out += decoder.decode(chunk, { stream: true });
+		else if (chunk != null) out += decoder.decode(new Uint8Array(Buffer.from(String(chunk))), { stream: true });
 	}
-	return new TextDecoder().decode(await new Blob(chunks).arrayBuffer());
+	out += decoder.decode();
+	return out;
 }

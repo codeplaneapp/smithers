@@ -161,6 +161,7 @@ export function createGcpSandboxProvider(options = {}) {
 				location,
 				jobName,
 				createJob: options.createJob,
+				image: options.image,
 				timeoutSec: options.timeoutSec,
 				provider: id,
 			});

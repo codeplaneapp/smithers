@@ -32,6 +32,15 @@ describe("createGcpSandboxGcsTransport", () => {
 		expect(await transport.readFile("/workspace/b/config.json")).toBe("BBB");
 	});
 
+	test("percent-encodes segments so lossy collisions cannot occur", () => {
+		const { transport } = makeTransport();
+		// A space vs an underscore must not collapse to the same object.
+		const spaced = transport.objectNameFor("/workspace/a b.json");
+		const scored = transport.objectNameFor("/workspace/a_b.json");
+		expect(spaced).not.toBe(scored);
+		expect(spaced).toContain("a%20b.json");
+	});
+
 	test("path mapping is stable across calls", () => {
 		const { transport } = makeTransport();
 		const a = transport.objectNameFor("/workspace/a.txt");
