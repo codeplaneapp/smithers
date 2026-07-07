@@ -36,6 +36,7 @@ given `entryFile`. This is the default for `smithers gateway` and generated
 | `source` | `string` | Client-safe module exporting a React component. The Gateway mounts it with React and passes boot props. |
 | `exportName` | `string` | Named export to read from `source`; defaults to `default`. |
 | `title` | `string` | Browser page title. |
+| `path` | `string` | URL route to mount the UI at. Defaults to `/workflows/<key>`. Ignored by `<TUI>`. |
 | `props` | `Record<string, unknown>` | Serializable props passed to a `source` component. |
 | `children` | `ReactNode` | Literal intrinsic React DOM tree for small inline views. |
 

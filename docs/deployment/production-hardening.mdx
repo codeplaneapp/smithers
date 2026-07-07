@@ -12,12 +12,11 @@ Run these checks before promoting a workflow module:
 ```bash
 pnpm check:effect
 pnpm check:deps
-pnpm check:architecture
 pnpm -r typecheck
 pnpm test
 ```
 
-The default CI workflow (`.github/workflows/ci.yml`) runs `check:effect`, `check:deps`, typecheck, and `test` on pull requests and pushes to `main`. `check:architecture` is a local pre-promotion gate and is not enforced by CI.
+The default CI workflow (`.github/workflows/ci.yml`) runs `check:effect`, `check:deps`, typecheck, and `test` on pull requests and pushes to `main`.
 
 ## Persistence
 

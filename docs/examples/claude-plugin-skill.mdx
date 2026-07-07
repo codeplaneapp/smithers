@@ -14,11 +14,11 @@ description: "Example from ~/.claude/plugins/smithers/. A Claude Code plugin tha
 ```json
 {
   "name": "smithers",
-  "version": "0.1.0",
-  "description": "Build AI agents with Solid.js - Declarative JSX for Claude orchestration",
-  "author": "William Cory",
+  "version": "0.2.0",
+  "description": "Durable control plane for long-running coding agents",
+  "author": "Smithers",
   "license": "MIT",
-  "repository": "https://github.com/evmts/smithers",
+  "repository": "https://github.com/smithersai/smithers",
   "keywords": ["orchestration", "multi-agent", "smithers", "workflow", "ai-agents", "claude", "jsx", "reactive"],
   "skills": ["skills/smithers"]
 }
@@ -28,7 +28,7 @@ description: "Example from ~/.claude/plugins/smithers/. A Claude Code plugin tha
 
 ```markdown
 ---
-name: smithers-orchestrator
+name: smithers
 description: Create and monitor multi-agent AI orchestrations using Smithers framework. Use when user wants to coordinate multiple AI agents, create complex workflows, build agent pipelines, or mentions "smithers", "multi-agent", "orchestration", "workflow", "agent coordination". Strongly recommends plan mode for orchestrations with 3+ phases.
 allowed-tools:
   - Read
@@ -50,9 +50,9 @@ recommend-plan-mode: true
 - Build agent pipelines with state management
 
 ## Quick Start
-1. Initialize: `bunx smithers-orchestrator init` (creates `.smithers/main.tsx`)
-2. Edit `.smithers/main.tsx` to define your agent workflow
-3. Monitor: `bunx smithers-orchestrator monitor`
+1. Initialize: `bunx smithers-orchestrator init` (installs the `.smithers/` pack: workflows, prompts, and UIs)
+2. Edit `.smithers/workflows/*.tsx` (and their `.smithers/prompts/*.mdx`) to define your workflow
+3. Run and monitor: `bunx smithers-orchestrator up <workflow>` then `bunx smithers-orchestrator monitor`
 ```
 
 ## EXAMPLES.md

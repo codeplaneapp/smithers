@@ -229,7 +229,7 @@ It returns `null` on failures and timeouts, including non-JJ directories. Smithe
 Walk upward from a directory and return the nearest `.jj` or `.git` root. JJ wins when both markers exist in the same directory.
 
 ```ts
-const root = await Effect.runPromise(findVcsRoot(process.cwd()));
+const root = findVcsRoot(process.cwd());
 ```
 
 ```ts
@@ -237,7 +237,7 @@ type VcsRoot =
   | { type: "jj"; root: string }
   | { type: "git"; root: string };
 
-function findVcsRoot(startDir: string): Effect.Effect<VcsRoot | null, never, never>;
+function findVcsRoot(startDir: string): VcsRoot | null;
 ```
 
 ## `resolveGitBinary()` and `resolveJjBinary()`

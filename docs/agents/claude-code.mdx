@@ -75,20 +75,20 @@ A plugin bundles the skill and MCP server behind a single install, namespaced as
 ```json
 {
   "name": "smithers",
-  "version": "0.1.0",
-  "description": "Durable control plane for long-running coding agents",
-  "skills": ["skills/smithers"],
-  "mcpServers": {
-    "smithers": { "command": "bunx", "args": ["smithers-orchestrator", "--mcp"] }
-  }
+  "version": "0.2.0",
+  "description": "Durable control plane for long-running coding agents"
 }
 ```
+
+The MCP server is wired through a sibling `.claude-plugin/.mcp.json`, and the
+skill is auto-discovered from the plugin's `skills/` directory, so neither is
+declared inside `plugin.json` itself.
 
 Install from a marketplace and reload without restarting:
 
 ```
 /plugin marketplace add smithersai/smithers
-/plugin install smithers@smithers
+/plugin install smithers@smithersai
 /reload-plugins
 ```
 

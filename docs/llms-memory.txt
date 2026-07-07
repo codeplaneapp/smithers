@@ -39,7 +39,7 @@ const ns = { kind: "workflow" as const, id: "code-review" };
 | Layer | API | Use for |
 |---|---|---|
 | Facts | `store.setFact(ns, key, value, ttlMs?)` / `store.getFact(ns, key)` / `store.listFacts(ns)` / `store.listAllFacts()` | Namespaced JSON facts. Optional TTL. Last-write-wins. `listAllFacts()` returns every fact across all namespaces (what `memory list` prints with no namespace). |
-| Message history | `store.createThread(ns, title?)`, `store.listThreads(ns)`, `store.saveMessage(msg)`, `store.listMessages(threadId, limit)`, `store.deleteMessages(threadId)` | Ordered chat threads per agent or user; list/delete to compact history. |
+| Message history | `store.createThread(ns, title?)`, `store.listThreads()`, `store.saveMessage(msg)`, `store.listMessages(threadId, limit)`, `store.deleteMessages(threadId, messageIds)` | Ordered chat threads per agent or user; list/delete to compact history. |
 | Maintenance | `store.deleteExpiredFacts()` plus processors | TTL cleanup and history compaction. |
 
 Every method has an Effect-returning twin (`store.listThreadsEffect`, `store.deleteMessagesEffect`, etc.) for use inside an Effect pipeline.

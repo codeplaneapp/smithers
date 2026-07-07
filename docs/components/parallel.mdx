@@ -8,6 +8,7 @@ import { Parallel } from "smithers-orchestrator";
 
 type ParallelProps = {
   id?: string;
+  label?: string; // display name for this group in run views (graph, /workflows mirror)
   maxConcurrency?: number; // default: no per-group cap; effective concurrency is min(this, the run-level --max-concurrency, which defaults to 4)
   skipIf?: boolean;
   children?: ReactNode;

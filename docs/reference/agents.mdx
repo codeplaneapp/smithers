@@ -327,6 +327,20 @@ Wraps the OpenCode CLI (`opencode run --format json`). Adds `agentName`,
 `attachFiles`, `continueSession`, `sessionId`, and `variant`. Native hijack is
 not yet supported. See [`OpenCodeAgentOptions`](/reference/types).
 
+### OpenClawAgent
+
+Wraps the OpenClaw gateway-backed agent CLI (`openclaw agent --message <prompt>
+--json`). Adds `agent`, `session`, `workspace`, `json`, and `continueSession`; a
+per-call `resumeSession` emits `--session-id`. See
+[`OpenClawAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/OpenClawAgentOptions.ts).
+
+### HermesCliAgent
+
+CLI-driver variant of Hermes (distinct from the SDK-based `HermesAgent` above),
+wrapping the `hermes` CLI. Adds `model`, `provider`, and `continueSession`, and
+emits `--model` / `--provider` flags. See
+[`HermesCliAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/HermesCliAgentOptions.ts).
+
 **Source** [`ClaudeCodeAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/ClaudeCodeAgent.js) · [`CodexAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/CodexAgent.js) · [`BaseCliAgentOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/BaseCliAgent/BaseCliAgentOptions.ts) · **Tests** [`claude-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/claude-support.test.js) · [`codex-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/codex-support.test.js) · **See also** [CLI Agents](/integrations/cli-agents), [Agents overview](/agents/overview)
 
 ## createHttpTool

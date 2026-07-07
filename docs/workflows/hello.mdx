@@ -9,7 +9,7 @@ complete workflow in the init pack and the recommended starting point for
 authoring your own. Edit the prompt (plain Markdown) to change what it does.
 
 ```bash
-bunx smithers-orchestrator workflow run hello --name Ada
+bunx smithers-orchestrator workflow run hello --input '{"name":"Ada"}'
 ```
 
 With no arguments, `name` defaults to `"world"`, so `workflow run hello` works on

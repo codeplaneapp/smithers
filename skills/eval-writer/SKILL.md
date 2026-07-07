@@ -35,8 +35,10 @@ behavior you'll need to hold steady over time.
 
 A suite is a `.jsonl` file under `.smithers/evals/`, one case per line. Each case
 is an `input` for the workflow plus an `expected` assertion. Assertions support
-`status` (run reached `finished`), `output` (exact match), and `outputContains`
-(partial / deep-subset match — the usual choice).
+`status` (run reached `finished`), `output` (exact match), `outputContains`
+(partial / deep-subset match, the usual choice), and `errorContains` (the run
+failed and its error message contains the given substring, for adversarial cases
+that expect a specific failure).
 
 ```jsonl
 {"id":"happy-path","input":{"prompt":"Draft release notes"},"expected":{"status":"finished"}}

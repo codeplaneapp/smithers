@@ -33,11 +33,14 @@ curl -X POST http://localhost:7331/v1/runs \
 ```ts
 type ServerOptions = {
   port?: number;              // default 7331
+  host?: string;              // default 127.0.0.1; a non-loopback bind requires authToken
   db?: unknown;               // enables GET /v1/runs and approvals listing
   authToken?: string;         // falls back to process.env.SMITHERS_API_KEY
+  insecure?: boolean;         // default false; allow a non-loopback bind with no authToken (dangerous)
   maxBodyBytes?: number;      // default 1_048_576
   rootDir?: string;           // sandbox root for workflow paths and tools
   allowNetwork?: boolean;     // default false; allows network in `bash`
+  integrations?: IntegrationsConfig; // external HMAC-verified integrations served by this process (requires db)
   headersTimeout?: number;    // default 30_000
   requestTimeout?: number;    // default 60_000
 };

@@ -10,16 +10,20 @@ Serve mode starts a Hono-based HTTP server alongside a running workflow. Every r
 ## CLI
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --serve --port 3000 --host 0.0.0.0
+bunx smithers-orchestrator up workflow.tsx --serve --port 3000 --host 0.0.0.0 --auth-token "$SMITHERS_API_KEY"
 ```
+
+A non-loopback `--host` (like `0.0.0.0`) requires `--auth-token` (or `--insecure` to opt out, which is dangerous). Binding to the default `127.0.0.1` needs neither.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--serve` | `false` | Enable HTTP server mode |
 | `--port` | `7331` | TCP port |
 | `--host` | `127.0.0.1` | Bind address |
-| `--auth-token` | `SMITHERS_API_KEY` env | Bearer token for auth |
+| `--auth-token` | `SMITHERS_API_KEY` env | Bearer token for auth; required for a non-loopback `--host` |
+| `--insecure` | `false` | Allow a non-loopback `--host` with no auth (exposes unauthenticated approve/deny/cancel; dangerous) |
 | `--metrics` | `true` | Expose `/metrics` Prometheus endpoint |
+| `--supervise` | `false` | Run the stale-run supervisor loop alongside `--serve` |
 
 The process stays alive after the workflow completes so final state remains queryable. Ctrl+C stops both the server and the workflow.
 

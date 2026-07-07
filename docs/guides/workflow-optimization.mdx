@@ -53,11 +53,21 @@ Observed result:
 
 ```json
 {
-  "baseline": { "score": 0.1, "passed": 0, "total": 1 },
-  "optimized": { "score": 1, "passed": 1, "total": 1 },
-  "improved": true,
-  "provider": "cerebras",
-  "model": "zai-glm-4.7"
+  "optimization": {
+    "schemaVersion": 1,
+    "id": "opt-...",
+    "strategy": "gepa",
+    "optimizer": { "name": "smithers-gepa", "provider": "cerebras", "model": "zai-glm-4.7" },
+    "workflowPath": "workflow.tsx",
+    "createdAtMs": 0,
+    "baseline": { "score": 0.1, "passed": 0, "total": 1 },
+    "optimized": { "score": 1, "passed": 1, "total": 1 },
+    "improvement": { "absolute": 0.9, "relative": 9 },
+    "promptTasks": [],
+    "promptPatches": {},
+    "reports": { "baseline": "...", "optimized": "..." },
+    "artifactPath": "artifacts/optimized.json"
+  }
 }
 ```
 

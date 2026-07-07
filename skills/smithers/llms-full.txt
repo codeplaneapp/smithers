@@ -1768,7 +1768,7 @@ For local and development work, use the CLI surfaces yourself:
 bunx smithers-orchestrator ps
 bunx smithers-orchestrator inspect RUN_ID --watch
 bunx smithers-orchestrator events RUN_ID --watch
-bunx smithers-orchestrator node RUN_ID NODE_ID
+bunx smithers-orchestrator node NODE_ID --runId RUN_ID
 bunx smithers-orchestrator scores RUN_ID
 bunx smithers-orchestrator why RUN_ID
 ```
@@ -2175,7 +2175,7 @@ commands[88]:
     purpose: Build a new Smithers workflow from a plain-English description. Dispatches to the create-workflow builder.
     args[1]{name,type,required,desc}:
       task,string,false,Plain-English description of the workflow to build (forwarded as the builder prompt)
-    flags[32]{name,short,type,default,desc}:
+    flags[35]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2207,6 +2207,8 @@ commands[88]:
       metrics,,boolean,true,Expose /metrics endpoint when --serve
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
+      verbose,,boolean,false,Show engine info logs (run lifecycle, agent sessions) on interactive runs
+      report,,boolean,true,Narrate the result with a cheap agent and open an HTML summary on interactive runs (disable with --no-report or SMITHERS_NO_REPORT=1)
       prompt,p,string,,Prompt text mapped to input.prompt when --input is omitted
       interactive,,boolean,false,Pick inputs through interactive terminal prompts and live-render the run
   - name: starters
@@ -2224,7 +2226,7 @@ commands[88]:
     purpose: Start or resume a workflow execution from a discovered workflow ID or a .tsx workflow file path
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
-    flags[32]{name,short,type,default,desc}:
+    flags[34]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2257,6 +2259,8 @@ commands[88]:
       interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (no silent fallback: fails with TUI_MONITOR_UNAVAILABLE if the tui package is missing, leaving the detached run running)
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
+      verbose,,boolean,false,Show engine info logs (run lifecycle, agent sessions) on interactive runs
+      report,,boolean,true,Narrate the result with a cheap agent and open an HTML summary on interactive runs (disable with --no-report or SMITHERS_NO_REPORT=1)
   - name: migrate
     purpose: Copy the legacy bun:sqlite smithers.db into PGlite or Postgres and write the migrated.json marker
     flags[3]{name,short,type,default,desc}:
@@ -2317,13 +2321,14 @@ commands[88]:
     purpose: Serve the multi-run Gateway RPC/WS control plane for the workspace DB (one singleton per workspace; a second start refuses); unlike up --serve, this is not tied to one run
     args[1]{name,type,required,desc}:
       action,enum,false,Manage the running singleton instead of serving: status | stop
-    flags[6]{name,short,type,default,desc}:
+    flags[7]{name,short,type,default,desc}:
       host,H,string,127.0.0.1,Gateway bind address
       port,p,number,7331,Preferred port (falls back to an ephemeral port when taken; clients discover the real port from the runtime state file)
       backend,,enum,,Workspace storage backend (sqlite|pglite|postgres)
       auth-token,,string,,Bearer token for HTTP/WS auth (or SMITHERS_API_KEY); required for a non-loopback host
       mint-token,,boolean,false,Mint a random bearer; require it on every request and record it only in the 0600 runtime state file
       insecure,,boolean,false,Allow a non-loopback host with NO auth (dangerous)
+      idle-timeout,,number,,Exit after this many ms with no clients, in-flight runs, or registered schedules (0 = stay up; autostarted daemons set this automatically); overridable via SMITHERS_GATEWAY_IDLE_MS
   - name: monitor
     purpose: Open the Smithers Monitor, the gateway's live web UI over every run in the workspace (served at /monitor, no .smithers pack required). Pure observation; launches no run, no workflow, no agents. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
     args[1]{name,type,required,desc}:
@@ -2336,11 +2341,10 @@ commands[88]:
       daemon,,boolean,true,Autostart the Gateway as a background daemon; --no-daemon (or SMITHERS_NO_DAEMON=1) disables daemonized autostart
   - name: bug
     purpose: File a smithers bug report to bug.smithers.sh; with --run it attaches the run's workflow, status, error, and last ~50 events with secrets scrubbed
-    flags[5]{name,short,type,default,desc}:
+    flags[4]{name,short,type,default,desc}:
       run,,string,,Attach this run's workflow name, status, error, and recent events to the report
       title,,string,,Bug title (derived from the run's error when omitted)
       body,,string,,Bug description body
-      json,,boolean,false,Print the filed bug id, URL, and payload as JSON
       endpoint,,string,https://bug.smithers.sh/api/bugs,Bug endpoint URL; the SMITHERS_BUG_ENDPOINT env var takes precedence
   - name: review
     purpose: Run code review plus story-form HTML walkthrough generation for a repo or PR
@@ -2376,9 +2380,10 @@ commands[88]:
     purpose: Tail lifecycle events for a run
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID
-    flags[4]{name,short,type,default,desc}:
+    flags[5]{name,short,type,default,desc}:
       follow,f,boolean,true,Poll for new events while run is active
-      since,,number,,Start after event sequence number
+      from-seq,,number,,Start from event sequence number (exclusive)
+      since,,number,,Deprecated alias of --from-seq (an event sequence number, not a duration)
       tail,n,number,50,Last N events
       follow-ancestry,,boolean,false,Include ancestor run events root-to-current
   - name: events
@@ -2406,7 +2411,7 @@ commands[88]:
   - name: chat-create
     purpose: Create and start a one-task auto-hijacked chat run
     flags[2]{name,short,type,default,desc}:
-      agent,,enum,,claude-code|codex|antigravity|gemini
+      agent,,enum,,claude-code|codex|antigravity
       cwd,,string,.,Working directory for the chat session
   - name: hijack
     purpose: Hand off the latest resumable agent session or Smithers-managed conversation
@@ -2656,7 +2661,7 @@ commands[88]:
     args[1]{name,type,required,desc}:
       question,string,false,Question to ask
     flags[6]{name,short,type,default,desc}:
-      agent,,enum,,claude|codex|antigravity|gemini|kimi|pi
+      agent,,enum,,claude|codex|antigravity|kimi|pi
       list-agents,,boolean,false,List detected agents and exit
       dump-prompt,,boolean,false,Print generated system prompt and exit
       tool-surface,,enum,semantic,semantic|raw
@@ -2709,7 +2714,7 @@ commands[88]:
   - name: agents.add
     purpose: Register a Smithers agent account, interactively or with flags
     flags[9]{name,short,type,default,desc}:
-      provider,,enum,,"claude-code|antigravity|codex|gemini|kimi|anthropic-api|openai-api|gemini-api"
+      provider,,enum,,"claude-code|antigravity|codex|kimi|anthropic-api|openai-api|gemini-api"
       label,,string,,Unique account label
       config-dir,,string,,Per-account CLI config dir for subscription providers
       api-key,,string,,API key for API-key providers
@@ -3349,6 +3354,7 @@ import { Parallel } from "smithers-orchestrator";
 
 type ParallelProps = {
   id?: string;
+  label?: string; // display name for this group in run views (graph, /workflows mirror)
   maxConcurrency?: number; // default: no per-group cap; effective concurrency is min(this, the run-level --max-concurrency, which defaults to 4)
   skipIf?: boolean;
   children?: ReactNode;
@@ -4153,8 +4159,7 @@ type SandboxProps = {
 
 The sandbox provider contract types are public exports from
 `"smithers-orchestrator/sandbox"`: `SandboxProvider`,
-`SandboxProviderRequest`, `SandboxProviderResult`,
-`SandboxDiffBundleLike`, `SandboxEgressConfig`, and
+`SandboxProviderRequest`, `SandboxProviderResult`, and
 `ExecuteSandboxOptions`. Import them with `import type` when writing adapters.
 
 ## Egress controls
@@ -7925,6 +7930,8 @@ type ScoreRow = {
   metaJson: string | null;
   inputJson: string | null;
   outputJson: string | null;
+  groundTruthJson: string | null;
+  contextJson: string | null;
   latencyMs: number | null;
   scoredAtMs: number;
   durationMs: number | null;
@@ -9070,7 +9077,7 @@ It returns `null` on failures and timeouts, including non-JJ directories. Smithe
 Walk upward from a directory and return the nearest `.jj` or `.git` root. JJ wins when both markers exist in the same directory.
 
 ```ts
-const root = await Effect.runPromise(findVcsRoot(process.cwd()));
+const root = findVcsRoot(process.cwd());
 ```
 
 ```ts
@@ -9078,7 +9085,7 @@ type VcsRoot =
   | { type: "jj"; root: string }
   | { type: "git"; root: string };
 
-function findVcsRoot(startDir: string): Effect.Effect<VcsRoot | null, never, never>;
+function findVcsRoot(startDir: string): VcsRoot | null;
 ```
 
 ## `resolveGitBinary()` and `resolveJjBinary()`
@@ -9765,7 +9772,7 @@ const result = await Effect.runPromise(runWorkflow(workflow, {
 }));
 
 result.runId;     // string
-result.status;    // "finished" | "failed" | "cancelled" | "continued" | "waiting-approval" | "waiting-event" | "waiting-timer"
+result.status;    // "finished" | "failed" | "cancelled" | "continued" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused"
 result.output;    // populated only if your schema has a key literally named `output`
 result.error;     // serialized SmithersError on failure
 ```
@@ -10360,11 +10367,21 @@ Observed result:
 
 ```json
 {
-  "baseline": { "score": 0.1, "passed": 0, "total": 1 },
-  "optimized": { "score": 1, "passed": 1, "total": 1 },
-  "improved": true,
-  "provider": "cerebras",
-  "model": "zai-glm-4.7"
+  "optimization": {
+    "schemaVersion": 1,
+    "id": "opt-...",
+    "strategy": "gepa",
+    "optimizer": { "name": "smithers-gepa", "provider": "cerebras", "model": "zai-glm-4.7" },
+    "workflowPath": "workflow.tsx",
+    "createdAtMs": 0,
+    "baseline": { "score": 0.1, "passed": 0, "total": 1 },
+    "optimized": { "score": 1, "passed": 1, "total": 1 },
+    "improvement": { "absolute": 0.9, "relative": 9 },
+    "promptTasks": [],
+    "promptPatches": {},
+    "reports": { "baseline": "...", "optimized": "..." },
+    "artifactPath": "artifacts/optimized.json"
+  }
 }
 ```
 
@@ -10648,7 +10665,7 @@ const ns = { kind: "workflow" as const, id: "code-review" };
 | Layer | API | Use for |
 |---|---|---|
 | Facts | `store.setFact(ns, key, value, ttlMs?)` / `store.getFact(ns, key)` / `store.listFacts(ns)` / `store.listAllFacts()` | Namespaced JSON facts. Optional TTL. Last-write-wins. `listAllFacts()` returns every fact across all namespaces (what `memory list` prints with no namespace). |
-| Message history | `store.createThread(ns, title?)`, `store.listThreads(ns)`, `store.saveMessage(msg)`, `store.listMessages(threadId, limit)`, `store.deleteMessages(threadId)` | Ordered chat threads per agent or user; list/delete to compact history. |
+| Message history | `store.createThread(ns, title?)`, `store.listThreads()`, `store.saveMessage(msg)`, `store.listMessages(threadId, limit)`, `store.deleteMessages(threadId, messageIds)` | Ordered chat threads per agent or user; list/delete to compact history. |
 | Maintenance | `store.deleteExpiredFacts()` plus processors | TTL cleanup and history compaction. |
 
 Every method has an Effect-returning twin (`store.listThreadsEffect`, `store.deleteMessagesEffect`, etc.) for use inside an Effect pipeline.
@@ -10865,34 +10882,6 @@ For each operation:
 
 Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
 
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
-Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
-
 ## Observability
 
 OpenAPI tool calls update the exported Effect metrics (`openApiToolCallsTotal`, `openApiToolCallErrorsTotal`, `openApiToolDuration`) and carry Effect log annotations/spans with the operation id, method, and path. The current tool factory does not emit `OpenApiToolCalled` onto the Smithers run event bus; that event variant is typed/categorized for future event-bus integration.
@@ -10957,11 +10946,14 @@ curl -X POST http://localhost:7331/v1/runs \
 ```ts
 type ServerOptions = {
   port?: number;              // default 7331
+  host?: string;              // default 127.0.0.1; a non-loopback bind requires authToken
   db?: unknown;               // enables GET /v1/runs and approvals listing
   authToken?: string;         // falls back to process.env.SMITHERS_API_KEY
+  insecure?: boolean;         // default false; allow a non-loopback bind with no authToken (dangerous)
   maxBodyBytes?: number;      // default 1_048_576
   rootDir?: string;           // sandbox root for workflow paths and tools
   allowNetwork?: boolean;     // default false; allows network in `bash`
+  integrations?: IntegrationsConfig; // external HMAC-verified integrations served by this process (requires db)
   headersTimeout?: number;    // default 30_000
   requestTimeout?: number;    // default 60_000
 };
@@ -11047,16 +11039,20 @@ Serve mode starts a Hono-based HTTP server alongside a running workflow. Every r
 ## CLI
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --serve --port 3000 --host 0.0.0.0
+bunx smithers-orchestrator up workflow.tsx --serve --port 3000 --host 0.0.0.0 --auth-token "$SMITHERS_API_KEY"
 ```
+
+A non-loopback `--host` (like `0.0.0.0`) requires `--auth-token` (or `--insecure` to opt out, which is dangerous). Binding to the default `127.0.0.1` needs neither.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--serve` | `false` | Enable HTTP server mode |
 | `--port` | `7331` | TCP port |
 | `--host` | `127.0.0.1` | Bind address |
-| `--auth-token` | `SMITHERS_API_KEY` env | Bearer token for auth |
+| `--auth-token` | `SMITHERS_API_KEY` env | Bearer token for auth; required for a non-loopback `--host` |
+| `--insecure` | `false` | Allow a non-loopback `--host` with no auth (exposes unauthenticated approve/deny/cancel; dangerous) |
 | `--metrics` | `true` | Expose `/metrics` Prometheus endpoint |
+| `--supervise` | `false` | Run the stale-run supervisor loop alongside `--serve` |
 
 The process stays alive after the workflow completes so final state remains queryable. Ctrl+C stops both the server and the workflow.
 
@@ -13518,7 +13514,7 @@ Hermes & Eliza page.
 `OpenClawAgent` wraps the OpenClaw gateway-backed agent CLI via
 `openclaw agent --message <prompt> --json`. Key additions: `agent`, `session`,
 `workspace`, `json`, and `continueSession`. A per-call `resumeSession` emits
-`--session <id>`, so Smithers can route retries or continuations into the right
+`--session-id <id>`, so Smithers can route retries or continuations into the right
 OpenClaw conversation when the installed CLI supports sessions.
 
 ```ts
@@ -13780,44 +13776,6 @@ const ops = new AnthropicAgent({
 
 The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `auth` (`bearer`, `basic`, or custom header), and `timeoutMs`. Results include `ok`, `status`, `statusText`, response `headers`, and a parsed JSON or text `body`.
 
-## Generic HTTP Tool
-
-`createHttpTool()` returns an AI SDK tool that can call any REST endpoint without an OpenAPI spec. Use it as the universal escape hatch when no curated connector or MCP server exists yet.
-
-```ts
-const http = createHttpTool({
-  defaultHeaders: { "user-agent": "smithers-workflow" },
-});
-
-const ops = new AnthropicAgent({
-  model: "claude-fable-5",
-  tools: { http },
-  instructions: "Use the HTTP tool only for APIs the workflow explicitly names.",
-  stopWhen: stepCountIs(20),
-});
-```
-
-The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `auth` (`bearer`, `basic`, or custom header), and `timeoutMs`. Results include `ok`, `status`, `statusText`, response `headers`, and a parsed JSON or text `body`.
-
-## Generic HTTP Tool
-
-`createHttpTool()` returns an AI SDK tool that can call any REST endpoint without an OpenAPI spec. Use it as the universal escape hatch when no curated connector or MCP server exists yet.
-
-```ts
-const http = createHttpTool({
-  defaultHeaders: { "user-agent": "smithers-workflow" },
-});
-
-const ops = new AnthropicAgent({
-  model: "claude-fable-5",
-  tools: { http },
-  instructions: "Use the HTTP tool only for APIs the workflow explicitly names.",
-  stopWhen: stepCountIs(20),
-});
-```
-
-The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `auth` (`bearer`, `basic`, or custom header), and `timeoutMs`. Results include `ok`, `status`, `statusText`, response `headers`, and a parsed JSON or text `body`.
-
 ## Hermes
 
 [Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) exposes an OpenAI-compatible HTTP API, so `HermesAgent` is a convenience subclass of `OpenAIAgent` that points the provider at your Hermes server and disables native structured output by default (a local Hermes server may not honor JSON-schema response formats).
@@ -13879,44 +13837,6 @@ Limits:
 **Choosing an agent for typed/JSON-output tasks.** Only `AnthropicAgent` and `OpenAIAgent` declare `supportsNativeStructuredOutput = true`, so when a `<Task>` has an `output` schema they pass it through the AI SDK's native structured-output API (`Output.object({ schema })`) and the result is schema-constrained. CLI agents (`ClaudeCodeAgent`, `CodexAgent`, etc.) do **not** set this flag: the engine falls back to injecting JSON instructions into the prompt and extracting the object from the model's text, and emits a `console.warn` ("engine ... does not support native structured output. Falling back to prompt-injection + text JSON extraction"). Schema-validation retries still run, but valid JSON shape does not guarantee meaningful values. For tasks whose primary job is producing typed/JSON output, prefer `AnthropicAgent`/`OpenAIAgent` (or, for an OpenAI-compatible endpoint that honors JSON schema, an `OpenAIAgent` with `nativeStructuredOutput` left enabled). `CodexAgent` additionally forwards the task schema to the CLI via `--output-schema` for constrained decoding, but the engine still wraps it with the prompt-injection fallback because the flag is unset.
 
 Pass a raw `ToolLoopAgent` directly if you prefer; the wrappers are convenience, not a separate runtime.
-
-## Transcription Tool
-
-Use `createTranscriptionTool` when an SDK agent needs to transcribe audio as part of its tool loop. The tool accepts either an `audioUrl` or `audioBase64` input and normalizes Whisper or Deepgram responses to `{ text, provider, language?, durationSeconds? }`.
-
-```ts
-import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/agents";
-
-const transcribeAudio = createTranscriptionTool({
-  provider: "deepgram", // or "whisper"
-  apiKey: process.env.DEEPGRAM_API_KEY!,
-});
-
-const agent = new AnthropicAgent({
-  model: "claude-fable-5",
-  tools: { transcribeAudio },
-  instructions: "Transcribe audio clips and summarize the result.",
-});
-```
-
-## Transcription Tool
-
-Use `createTranscriptionTool` when an SDK agent needs to transcribe audio as part of its tool loop. The tool accepts either an `audioUrl` or `audioBase64` input and normalizes Whisper or Deepgram responses to `{ text, provider, language?, durationSeconds? }`.
-
-```ts
-import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/agents";
-
-const transcribeAudio = createTranscriptionTool({
-  provider: "deepgram", // or "whisper"
-  apiKey: process.env.DEEPGRAM_API_KEY!,
-});
-
-const agent = new AnthropicAgent({
-  model: "claude-fable-5",
-  tools: { transcribeAudio },
-  instructions: "Transcribe audio clips and summarize the result.",
-});
-```
 
 ## Transcription Tool
 
@@ -14928,7 +14848,7 @@ The relationship is bidirectional:
 Smithers installs a **native Hermes plugin**, which is far richer than a bare MCP
 entry. MCP can only expose tools. The plugin adds:
 
-- **Slash commands** (`/smithers run|ps|inspect|approve|deny|watch`) usable in the
+- **Slash commands** (`/smithers run|ps|inspect|output|approve|deny|watch`) usable in the
   Hermes CLI and every gateway (Discord, Telegram, Slack).
 - **A live-run status injector** (`pre_llm_call` hook) so Hermes is aware of
   active and paused runs, and any pending approval gates, on every turn.
@@ -15762,6 +15682,8 @@ type RunStatus =
   | "waiting-approval"
   | "waiting-event"
   | "waiting-timer"
+  | "waiting-quota"
+  | "paused"
   | "finished"
   | "continued"
   | "failed"
@@ -15772,6 +15694,8 @@ type RunState =
   | "waiting-approval"
   | "waiting-event"
   | "waiting-timer"
+  | "waiting-quota"
+  | "paused"
   | "recovering"
   | "stale"
   | "orphaned"

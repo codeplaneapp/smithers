@@ -477,7 +477,7 @@ so Hermes can drive Smithers as its durable control plane. See the
 `OpenClawAgent` wraps the OpenClaw gateway-backed agent CLI via
 `openclaw agent --message <prompt> --json`. Key additions: `agent`, `session`,
 `workspace`, `json`, and `continueSession`. A per-call `resumeSession` emits
-`--session <id>`, so Smithers can route retries or continuations into the right
+`--session-id <id>`, so Smithers can route retries or continuations into the right
 OpenClaw conversation when the installed CLI supports sessions.
 
 ```ts

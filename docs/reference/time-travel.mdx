@@ -201,8 +201,8 @@ those rather than importing non-exported functions from the package.
 
 ```bash
 # Browse the timeline, then rewind to a checkpoint and resume.
-bunx smithers-orchestrator timeline --run-id RUN_ID
-bunx smithers-orchestrator rewind --run-id RUN_ID --node-id NODE_ID
+bunx smithers-orchestrator timeline RUN_ID
+bunx smithers-orchestrator rewind RUN_ID FRAME_NO
 ```
 
 **Source** [`time-travel/src`](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src) · **Tests** [`time-travel/tests`](https://github.com/smithersai/smithers/blob/main/packages/time-travel/tests) · **See also** [CLI overview](/cli/overview), [Revert](/runtime/revert), [`rewind-run` RPC](/rpc/rewind-run)

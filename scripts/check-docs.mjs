@@ -2537,7 +2537,7 @@ function checkVcsHelperDocsMatchCurrentExports() {
     [VCS_HELPERS_REFERENCE, "## `captureWorkspaceSnapshot(cwd?)`"],
     [VCS_HELPERS_REFERENCE, "This helper is exported by `@smithers-orchestrator/vcs`, not by the root facade."],
     [VCS_HELPERS_REFERENCE, "function captureWorkspaceSnapshot(cwd?: string): VcsEffect<WorkspaceSnapshot | null>;"],
-    [VCS_HELPERS_REFERENCE, "function findVcsRoot(startDir: string): Effect.Effect<VcsRoot | null, never, never>;"],
+    [VCS_HELPERS_REFERENCE, "function findVcsRoot(startDir: string): VcsRoot | null;"],
     [VCS_HELPERS_REFERENCE, "function resolveGitBinary(): ResolvedBinary;"],
     [VCS_HELPERS_REFERENCE, "function resolveJjBinary(): ResolvedBinary;"],
     [VCS_HELPERS_REFERENCE, "function vcsToolingStatus(): VcsToolingStatus;"],

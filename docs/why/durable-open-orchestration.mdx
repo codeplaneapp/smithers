@@ -84,9 +84,9 @@ This falls out of one design choice: state is the source of truth, and the plan 
 It buys three things for free. Resume, because re-rendering from current state needs no event log to replay. Time travel, because every render frame is a row, so forking a run is throwing away rows. SQL debugging, because state is queryable and an event chain is not.
 
 ```bash
-bunx smithers-orchestrator timeline r1        # every frame
-bunx smithers-orchestrator fork r1 --frame 4  # branch an alternate timeline
-bunx smithers-orchestrator diff r1 r1-fork    # compare two snapshots as a unified diff
+bunx smithers-orchestrator timeline r1                     # every frame
+bunx smithers-orchestrator fork workflow.tsx --run-id r1 --frame 4  # branch an alternate timeline
+bunx smithers-orchestrator diff r1 NODE_ID                 # a node's DiffBundle as a unified diff
 ```
 
 Git history for agent runs, with the actual run state in every frame.

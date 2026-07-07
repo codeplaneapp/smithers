@@ -12,7 +12,7 @@ const result = await Effect.runPromise(runWorkflow(workflow, {
 }));
 
 result.runId;     // string
-result.status;    // "finished" | "failed" | "cancelled" | "continued" | "waiting-approval" | "waiting-event" | "waiting-timer"
+result.status;    // "finished" | "failed" | "cancelled" | "continued" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "paused"
 result.output;    // populated only if your schema has a key literally named `output`
 result.error;     // serialized SmithersError on failure
 ```
