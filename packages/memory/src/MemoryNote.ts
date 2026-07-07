@@ -24,37 +24,3 @@ export type MemoryNote = {
   nodeId?: string | null;
   iteration?: number | null;
 };
-
-/** Input for saveNote — namespace as the structured object, tags as an array. */
-export type SaveNoteInput = {
-  namespace: import("./MemoryNamespace").MemoryNamespace;
-  body: string;
-  kind?: string;
-  tags?: string[];
-  author?: string;
-  /** Free-form; defaults to "accepted". Conventionally pending|accepted|rejected. */
-  status?: string;
-  provenance?: import("./MemoryProvenance").MemoryProvenance;
-  /**
-   * Note ids this note supersedes. Junction rows are written atomically with
-   * the note. Whether the superseded notes are HIDDEN depends on THIS note's
-   * status: only an accepted superseder hides its targets.
-   */
-  supersedes?: string[];
-  /** Provide to make retries idempotent; defaults to a random UUID. */
-  id?: string;
-};
-
-/**
- * Read filter for listNotes/searchNotes. The DEFAULT READ CONTRACT (no filter)
- * returns notes that are (a) not superseded by an ACCEPTED note and
- * (b) status = "accepted". Filters widen:
- * - status: a specific status, a set, or "any"
- * - includeSuperseded: true returns notes even when an accepted note supersedes them
- * - kind: narrows to one kind label
- */
-export type NoteReadFilter = {
-  status?: string | string[] | "any";
-  includeSuperseded?: boolean;
-  kind?: string;
-};

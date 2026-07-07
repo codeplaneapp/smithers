@@ -15,8 +15,8 @@ import { MemoryStoreService } from "./MemoryStoreService.js";
 /** @typedef {import("../MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */
 /** @typedef {import("../MemoryFact.ts").MemoryFact} MemoryFact */
 /** @typedef {import("../MemoryNote.ts").MemoryNote} MemoryNote */
-/** @typedef {import("../MemoryNote.ts").SaveNoteInput} SaveNoteInput */
-/** @typedef {import("../MemoryNote.ts").NoteReadFilter} NoteReadFilter */
+/** @typedef {import("../SaveNoteInput.ts").SaveNoteInput} SaveNoteInput */
+/** @typedef {import("../NoteReadFilter.ts").NoteReadFilter} NoteReadFilter */
 /** @typedef {import("../MemoryProvenance.ts").MemoryProvenance} MemoryProvenance */
 /** @typedef {import("../MemoryMessage.ts").MemoryMessage} MemoryMessage */
 /** @typedef {import("../MemoryThread.ts").MemoryThread} MemoryThread */

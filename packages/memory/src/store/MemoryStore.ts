@@ -4,7 +4,9 @@ import type { MemoryNamespace } from "../MemoryNamespace";
 import type { MemoryFact } from "../MemoryFact";
 import type { MemoryThread } from "../MemoryThread";
 import type { MemoryMessage } from "../MemoryMessage";
-import type { MemoryNote, SaveNoteInput, NoteReadFilter } from "../MemoryNote";
+import type { MemoryNote } from "../MemoryNote";
+import type { SaveNoteInput } from "../SaveNoteInput";
+import type { NoteReadFilter } from "../NoteReadFilter";
 import type { MemoryProvenance } from "../MemoryProvenance";
 
 export type MemoryStore = {
