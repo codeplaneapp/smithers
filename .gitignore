@@ -97,6 +97,8 @@ apps/observability/data/
 # with sqlite db + generated tsx).
 packages/server/tests/.test-serve-*/
 packages/server/tests/.test-workflows-*/
+packages/server/tests/.test-lifecycle-*/
+**/cov*/
 **/tmp/verification/
 .context/
 
