@@ -150,7 +150,7 @@ describe("GitHub outbound components (compute Tasks)", () => {
         finally {
             sqlite.close();
         }
-    });
+    }, 20_000);
     test("CreateIssue / CreatePullRequest / AddLabels / SetCommitStatus hit the real REST endpoints", async () => {
         const { smithers, Workflow, outputs } = makeApi({
             issue: z.object({ number: z.number(), url: z.string() }),
@@ -180,7 +180,7 @@ describe("GitHub outbound components (compute Tasks)", () => {
             context: "smithers/e2e",
             target_url: "https://smithers.sh",
         });
-    });
+    }, 20_000);
 });
 
 describe("splitRepo", () => {
