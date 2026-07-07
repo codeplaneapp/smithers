@@ -145,4 +145,45 @@ describe("renderWalkthroughHtml edge branches", () => {
     // 12 diff links → capped at 10 with a "+2 more" overflow link.
     expect(html).toContain("+2 more");
   });
+
+  test("renders the impact chip linked to the quiz, and as a plain span without one", async () => {
+    const files: ChangedFile[] = [file({ path: "src/auth.ts", insertions: 2, deletions: 0, diff: "" })];
+    const story = {
+      headline: "Impact",
+      synopsis: "An impactful change.",
+      chapters: [{ title: "c", blocks: [block({ kind: "diff", path: "src/auth.ts", intro: "" })] }],
+    };
+    const impact = { level: "high" as const, reasons: [{ signal: "security-sensitive path (auth)", path: "src/auth.ts" }] };
+    const quiz = {
+      impact,
+      questions: [
+        {
+          question: "What breaks when the token is empty?",
+          options: ["A bypass", "Nothing"],
+          correctIndex: 0,
+          explanation: "The guard returns early.",
+          path: "src/auth.ts",
+        },
+      ],
+    };
+    const base = {
+      title: "Impact",
+      story,
+      files,
+      comments: [] as WalkthroughInput["comments"],
+      repoDir: "/tmp/repo",
+      mode: "workspace",
+      ref: "workspace",
+      generatedAt: "2026-06-10T00:00:00.000Z",
+    };
+
+    // With a quiz the impact chip is an anchor to #quiz (and the reasons feed the title tooltip).
+    const withQuiz = await renderWalkthroughHtml({ ...base, impact, quiz });
+    expect(withQuiz).toContain('href="#quiz" title="security-sensitive path (auth)"');
+    expect(withQuiz).toContain("Reviewer quiz");
+
+    // Without a quiz the impact chip is a plain span carrying the same tooltip.
+    const noQuiz = await renderWalkthroughHtml({ ...base, impact });
+    expect(noQuiz).toContain('<span class="chip impact-high" title="security-sensitive path (auth)"');
+  });
 });
