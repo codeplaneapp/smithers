@@ -1,6 +1,6 @@
 # Kanban workflow speed benchmark
 
-Date: 2026-07-07. Harness: `benchmarks/kanban-bench/` (run with
+Date: 2026-07-07 (round 2 same day: fixes S1/S5/S6/S7 landed, re-measured below). Harness: `benchmarks/kanban-bench/` (run with
 `bun benchmarks/kanban-bench/bench.ts --label <name> --tickets 12 --concurrency 4 [--global-concurrency N] [--delays JSON]`).
 
 Motivation: users complain smithers is slow. This benchmark runs the REAL
@@ -157,9 +157,80 @@ User guidance (until the engine changes land):
 - Always pass `--input '{"maxConcurrency":N}'` to kanban; the zod default does
   not apply.
 
+## Round 2 (same day): S1/S5/S6/S7 landed and re-measured
+
+Commits: `7af334cf` (kanban gate + input default), `ee19d0c4` (engine
+starvation hint). Everything below measured with the fixes in.
+
+### S1 (warn form) proves out
+
+With demand 8+ against cap 4 the engine now logs once:
+`8 tasks want to run concurrently but maxConcurrency is 4; 4 are queued
+waiting for a free slot ... (CLI: smithers up --max-concurrency 8)` — visible
+in plain `smithers up` output (results/cap4/cli-stdout.log:196).
+
+### Concurrency sweep: the wall-vs-cap curve (12 tickets, realistic delays)
+
+| global cap | wall  | engine | avg in-flight |
+|-----------:|------:|-------:|--------------:|
+| 4 (default)| 87.6s | 86.4s  | 3.4 |
+| 8          | 62.6s | 61.5s  | 4.8 |
+| 12         | 55.8s | 54.2s  | 5.5 |
+| 16         | 58.4s | 56.2s  | 6.0 |
+| 24         | 57.3s | 55.6s  | 5.5 |
+
+Ideal 54.0s. The curve flattens at cap 12 = tickets-in-flight x 3 (the review
+fan-out); the 16/24 points sit ~2s above 12 within run-to-run noise. Guidance
+confirmed: cap >= in-flight tickets x (1 + reviewers) buys the whole win;
+beyond the knee there is nothing left to take.
+
+### S5 proof
+
+`smithers up kanban.tsx` with NO input (`--no-input` bench mode, delays on):
+max simultaneous implement+validate = 3, exactly the coalesced default. Before
+the fix the outer Parallel was unlimited and only the global cap throttled.
+
+### S6+S7 proof: the retry round now reviews the right code
+
+12 tickets, 3 forced first-round validation failures, cap 16 (agent calls by
+kind#iteration):
+
+| round          | before (63.3s)      | after (64.1s) |
+|----------------|---------------------|---------------|
+| review round 0 | 36 (9 on REJECTED code) | 27 (S6 skips failed tickets) |
+| review round 1 | 0 (fixes merged UNREVIEWED) | 9 (S7 forces re-review) |
+
+Same wall clock, same 67 total calls; the 9 wasted review sessions moved from
+rejected round-0 code to the re-implemented round-1 code that actually merges.
+
+### Scale sweep: S4 becomes measurable at 48 tickets (zero-delay)
+
+| tickets | engine | idle (no agent busy) | idle per completion | frames |
+|--------:|-------:|---------------------:|--------------------:|-------:|
+| 12      | 5.9s   | 4.6s                 | 62ms                | 75  |
+| 24      | 10.9s  | 8.2s                 | 56ms                | 147 |
+| 48      | 55.6s  | 38.0s                | 131ms               | 291 |
+
+Per-completion orchestrator dead time is flat to 24 tickets, then doubles by
+48: the per-frame `persistDriverFrame` full-table scans (S4) grow with
+accumulated nodes/outputs and are on the superlinear path. At 48 tickets the
+pure-orchestrator run spends 68% of its wall fully idle.
+
+## Remaining engine work (recommended order)
+
+1. **S2** — nested `<Parallel>` should count against ancestor caps (or add a
+   subtree-level concurrency semantic). Until then "maxConcurrency 4" neither
+   means 4 tickets nor bounds reviews, and users cannot reason about caps.
+2. **S3** — cache/TTL the per-task worktree `git fetch origin` + rebase
+   (~49 remote fetches per 12-ticket run against real remotes; 25-75s hidden).
+3. **S4** — incremental frame snapshots (skip unchanged tables, reuse the
+   previous frame's XML hash when the tree is unchanged) to flatten the 131ms
+   per-completion cost at 48+ tickets.
+4. **S1 (auto form)** — beyond the warning: default the cap to
+   `max(4, sum of declared Parallel caps)` so stock runs stop starving.
+
 ## Follow-ups
 
-- The retry-round re-review gap (finding 4) is a correctness issue worth its
-  own ticket independent of speed.
-- Re-run `wide` at 50+ tickets to find where the per-completion frame persist
-  (finding 5) becomes superlinear.
+- The retry-round re-review gap (finding 4) is FIXED (S7, `7af334cf`).
+- The 48-ticket superlinear frame persist is CONFIRMED (table above); S4 is
+  the fix.
