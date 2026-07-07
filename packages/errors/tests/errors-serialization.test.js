@@ -67,6 +67,40 @@ describe("errorToJson is JSON-safe on the error path", () => {
     expect(round.details.explode).toBeUndefined();
   });
 
+  test("survives a throwing own getter on a nested Error cause", () => {
+    // buildErrorJson keeps `cause` as the raw Error, so toJsonSafe walks the
+    // Error branch and iterates its own enumerable keys. A throwing getter on
+    // that Error must be skipped, not crash the recording path.
+    const inner = new Error("inner boom");
+    Object.defineProperty(inner, "explode", {
+      enumerable: true,
+      get() {
+        throw new Error("getter boom");
+      },
+    });
+    Object.defineProperty(inner, "kept", {
+      enumerable: true,
+      value: "safe",
+    });
+    const err = new SmithersError("INTERNAL_ERROR", "outer", undefined, inner);
+    const json = errorToJson(err);
+    expect(() => JSON.stringify(json)).not.toThrow();
+    const round = JSON.parse(JSON.stringify(json));
+    expect(round.cause.message).toBe("inner boom");
+    expect(round.cause.kept).toBe("safe");
+    expect(round.cause.explode).toBeUndefined();
+  });
+
+  test("sanitizes array details, mapping undefined entries to null", () => {
+    const err = new SmithersError("INTERNAL_ERROR", "boom", {
+      list: [1, "two", undefined, () => 3, 4n, Number.NaN],
+    });
+    const json = errorToJson(err);
+    expect(() => JSON.stringify(json)).not.toThrow();
+    const round = JSON.parse(JSON.stringify(json));
+    expect(round.details.list).toEqual([1, "two", null, null, "4", null]);
+  });
+
   test("converts non-finite numbers to null so JSON stays valid", () => {
     const err = new SmithersError("INTERNAL_ERROR", "boom", {
       nan: Number.NaN,
