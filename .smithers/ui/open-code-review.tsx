@@ -290,6 +290,7 @@ function App() {
   const hasPreview = preview !== null;
   const hasReview = review !== null;
   const hasSummary = summary !== null;
+  const isRunFullyComplete = hasTarget && hasPreview && hasReview && hasSummary;
   const activeStage = !hasTarget ? "target" : !hasPreview ? "preview" : !hasReview ? "review" : !hasSummary ? "summary" : "";
   const reviewableEntries = preview?.entries.filter((entry) => entry.willReview) ?? [];
   const excludedEntries = preview?.entries.filter((entry) => !entry.willReview) ?? [];
@@ -318,12 +319,12 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [activeRunId, eventCount, refresh]);
   useEffect(() => {
-    if (!activeRunId || (hasTarget && hasPreview && hasReview && hasSummary)) return;
+    if (!activeRunId || isRunFullyComplete) return;
     const interval = window.setInterval(() => {
       void refresh();
     }, 1_000);
     return () => window.clearInterval(interval);
-  }, [activeRunId, hasTarget, hasPreview, hasReview, hasSummary, refresh]);
+  }, [activeRunId, isRunFullyComplete, refresh]);
 
   async function launch() {
     setBusy(true);
@@ -355,15 +356,6 @@ function App() {
       setBusy(false);
     }
   }
-  useEffect(() => {
-    if (typeof window === "undefined" || !activeRunId || (hasReview && hasSummary)) return;
-    void refresh();
-    const id = window.setInterval(() => {
-      void refresh();
-    }, 1_000);
-    return () => window.clearInterval(id);
-  }, [activeRunId, hasReview, hasSummary, refresh]);
-
   return (
     <main className="shell" data-testid="open-code-review-ui">
       <style>{styles}</style>

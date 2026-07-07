@@ -1045,11 +1045,26 @@ function nearIdenticalContent(a: string, b: string) {
   const keyA = normalizedContentKey(a);
   const keyB = normalizedContentKey(b);
   if (keyA === keyB) return true;
+  const longer = Math.max(keyA.length, keyB.length);
   const shorter = Math.min(keyA.length, keyB.length);
-  if (shorter === 0) return false;
-  let shared = 0;
-  while (shared < shorter && keyA[shared] === keyB[shared]) shared += 1;
-  return shared / shorter >= 0.9;
+  if (shorter === 0 || shorter / longer < 0.9) return false;
+
+  const previous = Array.from({ length: keyB.length + 1 }, (_, index) => index);
+  for (let aIndex = 1; aIndex <= keyA.length; aIndex += 1) {
+    let diagonal = previous[0];
+    previous[0] = aIndex;
+    for (let bIndex = 1; bIndex <= keyB.length; bIndex += 1) {
+      const above = previous[bIndex];
+      const substitutionCost = keyA[aIndex - 1] === keyB[bIndex - 1] ? 0 : 1;
+      previous[bIndex] = Math.min(
+        previous[bIndex] + 1,
+        previous[bIndex - 1] + 1,
+        diagonal + substitutionCost,
+      );
+      diagonal = above;
+    }
+  }
+  return 1 - previous[keyB.length] / longer >= 0.9;
 }
 
 function commentLinesOverlap(
