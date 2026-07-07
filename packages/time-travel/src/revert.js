@@ -104,11 +104,17 @@ export async function revertToAttempt(adapter, opts) {
     }
     if (lastValidFrameNo >= 0) {
         try {
-            await Effect.runPromise(adapter.deleteFramesAfter(runId, lastValidFrameNo));
-            // Snapshots + vcs-tags are keyed (run_id, frame_no); discard them with
-            // the frames so a later fork/replay can't resurrect reverted state.
-            await Effect.runPromise(adapter.deleteSnapshotsAfter(runId, lastValidFrameNo));
-            await Effect.runPromise(adapter.deleteVcsTagsAfter(runId, lastValidFrameNo));
+            await adapter.withTransaction(
+                `revert to attempt ${runId}:${nodeId}:${iteration}:${attempt}`,
+                Effect.gen(function* () {
+                    yield* adapter.deleteFramesAfter(runId, lastValidFrameNo);
+                    // Snapshots and vcs-tags are keyed (run_id, frame_no) and are
+                    // the fork/hydration source; truncate them atomically with the
+                    // frames or fork/replay/timeline can read discarded state.
+                    yield* adapter.deleteSnapshotsAfter(runId, lastValidFrameNo);
+                    yield* adapter.deleteVcsTagsAfter(runId, lastValidFrameNo);
+                }),
+            );
         } catch (error) {
             const message = `VCS restored to ${jjPointer}, but DB frame cleanup failed: ${formatError(error)}`;
             const timestampMs = nowMs();
