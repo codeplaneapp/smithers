@@ -81,6 +81,17 @@ describe("SmithersGatewayClient", () => {
     expect(JSON.parse(String(calls[1].init.body))).toEqual({ runId: "run-1" });
   });
 
+  test("installs an unavailable-fetch stub when neither an option nor a global fetch exists", async () => {
+    const originalFetch = globalThis.fetch;
+    (globalThis as { fetch?: typeof fetch }).fetch = undefined;
+    try {
+      const client = new SmithersGatewayClient({ baseUrl: "http://gateway.test/" });
+      await expect(client.listRuns({})).rejects.toThrow(/fetch is not available/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("preserves ws+unix socket paths when opening WebSocket connections", async () => {
     FakeWebSocket.urls = [];
     globalThis.__SMITHERS_GATEWAY_UI__ = {
