@@ -29,6 +29,7 @@ export async function waitForClaudeMirrorChange(adapter, runId, options = {}) {
         if (typeof newestSeq === "number" && newestSeq > cursor) {
             let scanCursor = cursor;
             while (scanCursor < newestSeq) {
+                const pageStart = scanCursor;
                 const rows = await adapter.listEventHistory(runId, { afterSeq: scanCursor, limit: EVENT_PAGE_SIZE });
                 if (!Array.isArray(rows) || rows.length === 0) {
                     break;
@@ -38,9 +39,12 @@ export async function waitForClaudeMirrorChange(adapter, runId, options = {}) {
                     if (seq > scanCursor) {
                         scanCursor = seq;
                     }
-                    if (claudeMirrorRelevantEventTypes.has(String(row.type ?? ""))) {
+                    if (seq > pageStart && claudeMirrorRelevantEventTypes.has(String(row.type ?? ""))) {
                         return { timedOut: false };
                     }
+                }
+                if (scanCursor <= pageStart) {
+                    break;
                 }
             }
             cursor = scanCursor;

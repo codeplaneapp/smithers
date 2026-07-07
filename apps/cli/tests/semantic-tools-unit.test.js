@@ -8,6 +8,7 @@ import {
     createSemanticToolDefinitions,
     workflowSummarySchema,
 } from "../src/mcp/semantic-tools.js";
+import { registerSemanticTools } from "../src/mcp/semantic-server.js";
 
 const NOW = Date.UTC(2026, 0, 2, 3, 4, 5);
 const tempDirs = [];
@@ -243,6 +244,8 @@ function makeSemanticAdapter(overrides = {}) {
                 }),
             }),
         ],
+        listEventHistoryCalls: [],
+        upserts: [],
         latestChildByRunId: new Map([
             ["run-1", { runId: "child-run" }],
             ["child-run", { runId: "child-run" }],
@@ -251,6 +254,8 @@ function makeSemanticAdapter(overrides = {}) {
         ...overrides,
     };
     const adapter = {
+        internalStorage: state.internalStorage,
+        db: state.db,
         listRuns: async (limit, status) => state.runs
             .filter((run) => !status || run.status === status)
             .slice(0, limit),
@@ -283,6 +288,10 @@ function makeSemanticAdapter(overrides = {}) {
             node.nodeId === nodeId &&
             (node.iteration ?? 0) === iteration))),
         withTransactionEffect: (_writeGroup, operation) => operation,
+        withTransaction: async (_writeGroup, operation) => Effect.runPromise(operation),
+        insertRun: (row) => runnableEffect(Effect.sync(() => {
+            state.runs.push(row);
+        })),
         insertOrUpdateApproval: (row) => runnableEffect(Effect.sync(() => {
             const index = state.approvals.findIndex((approval) => approval.runId === row.runId &&
                 approval.nodeId === row.nodeId &&
@@ -343,8 +352,18 @@ function makeSemanticAdapter(overrides = {}) {
         ),
         listFrames: (_runId, _limit, _afterFrameNo) => Effect.succeed([]),
         deleteFramesAfter: (_runId, _frameNo) => Effect.succeed(undefined),
+        deleteSnapshotsAfter: (_runId, _frameNo) => Effect.succeed(undefined),
+        deleteVcsTagsAfter: (_runId, _frameNo) => Effect.succeed(undefined),
+        updateAttempt: () => Effect.succeed(undefined),
+        deleteOutputRow: () => Effect.succeed(undefined),
         listEvents: async (_runId, afterSeq) => afterSeq < 0 ? state.events : [],
-        listEventHistory: async () => state.historyEvents,
+        listEventHistory: async (runId, options) => {
+            state.listEventHistoryCalls.push({ runId, options });
+            if (typeof state.listEventHistoryImpl === "function") {
+                return state.listEventHistoryImpl(runId, options);
+            }
+            return state.historyEvents;
+        },
         listWorkspaceCheckpoints: async (runId) => {
             if (typeof state.listWorkspaceCheckpoints === "function") {
                 return state.listWorkspaceCheckpoints(runId);
@@ -400,6 +419,46 @@ function makeHarness(adapterState = {}) {
     };
 }
 
+function makePostgresTimeTravelStorage({ snapshots = [], branches = [], upserts = [] } = {}) {
+    return {
+        dialect: "postgres",
+        queryAll: async (sql, params) => {
+            if (sql.includes("_smithers_snapshots")) {
+                const runId = params[0];
+                return snapshots
+                    .filter((snapshot) => snapshot.runId === runId)
+                    .sort((left, right) => left.frameNo - right.frameNo);
+            }
+            if (sql.includes("_smithers_branches")) {
+                const parentRunId = params[0];
+                return branches.filter((branch) => branch.parentRunId === parentRunId);
+            }
+            throw new Error(`unexpected queryAll: ${sql}`);
+        },
+        queryOne: async (sql, params) => {
+            if (sql.includes("_smithers_snapshots")) {
+                const [runId, frameNo] = params;
+                return snapshots.find((snapshot) => snapshot.runId === runId && snapshot.frameNo === frameNo) ?? null;
+            }
+            if (sql.includes("_smithers_branches")) {
+                const [runId] = params;
+                return branches.find((branch) => branch.runId === runId) ?? null;
+            }
+            throw new Error(`unexpected queryOne: ${sql}`);
+        },
+        upsert: async (table, row) => {
+            upserts.push({ table, row });
+            if (table === "_smithers_snapshots") {
+                snapshots.push(row);
+            }
+            if (table === "_smithers_branches") {
+                branches.push(row);
+            }
+            return row;
+        },
+    };
+}
+
 function expectWorkflowSummaryMatchesSchema(workflow) {
     const declared = new Set(Object.keys(workflowSummarySchema.shape));
     for (const key of Object.keys(workflow)) {
@@ -409,6 +468,110 @@ function expectWorkflowSummaryMatchesSchema(workflow) {
 }
 
 describe("semantic tool definitions", () => {
+    test("registers only annotated tools and applies read-only scoping before serving", () => {
+        const registered = [];
+        const server = {
+            registerTool: (name, config, handler) => {
+                registered.push({ name, config, handler });
+            },
+        };
+        const definitions = createSemanticToolDefinitions({
+            cwd: () => "/tmp",
+            openDb: async () => {
+                throw new Error("openDb should not run during registration");
+            },
+        });
+
+        registerSemanticTools(server, definitions, { readOnly: true });
+
+        expect(registered.length).toBeGreaterThan(0);
+        expect(registered.map((tool) => tool.name)).not.toContain("run_workflow");
+        expect(registered.map((tool) => tool.name)).not.toContain("resolve_approval");
+        expect(registered.every((tool) => tool.config.annotations?.readOnlyHint === true)).toBe(true);
+        expect(registered.every((tool) => typeof tool.config.description === "string" && tool.config.description.length > 0)).toBe(true);
+        expect(registered.every((tool) => tool.config.inputSchema && tool.config.outputSchema)).toBe(true);
+
+        expect(() => registerSemanticTools(server, [
+            {
+                ...definitions[0],
+                annotations: undefined,
+            },
+        ])).toThrow(/Missing annotations/);
+        expect(() => registerSemanticTools(server, definitions, {
+            allowedTools: ["not_a_semantic_tool"],
+        })).toThrow(/Unknown semantic MCP tool/);
+    });
+
+    test("keeps text content and structuredContent envelopes in lockstep on success and failure", async () => {
+        const harness = makeHarness();
+        const ok = await harness.call("list_runs", { limit: 1 });
+        expect(JSON.parse(ok.content[0].text)).toEqual(ok.structuredContent);
+        expect(ok.structuredContent.ok).toBe(true);
+
+        const missingHarness = makeHarness({
+            runs: [],
+            nodes: [],
+            approvals: [],
+            attempts: [],
+        });
+        const failed = await missingHarness.call("get_run", { runId: "missing" });
+        expect(failed.isError).toBe(true);
+        expect(JSON.parse(failed.content[0].text)).toEqual(failed.structuredContent);
+        expect(failed.structuredContent).toMatchObject({
+            ok: false,
+            error: {
+                code: "RUN_NOT_FOUND",
+            },
+        });
+    });
+
+    test("list_workflows hides system workflows unless explicitly requested", async () => {
+        const harness = makeHarness();
+        mkdirSync(join(harness.cwd, ".smithers", "workflows"), { recursive: true });
+        writeFileSync(join(harness.cwd, ".smithers", "workflows", "public-flow.tsx"), "export default {};\n");
+        writeFileSync(
+            join(harness.cwd, ".smithers", "workflows", "internal-only.tsx"),
+            ["// smithers-system: true", "export default {};", ""].join("\n"),
+        );
+
+        const defaultList = await harness.call("list_workflows");
+        const defaultIds = defaultList.structuredContent.data.workflows.map((workflow) => workflow.id);
+        expect(defaultIds).toContain("public-flow");
+        expect(defaultIds).not.toContain("internal-only");
+
+        const includeSystem = await harness.call("list_workflows", { includeSystem: true });
+        const allIds = includeSystem.structuredContent.data.workflows.map((workflow) => workflow.id);
+        expect(allIds).toContain("public-flow");
+        expect(allIds).toContain("internal-only");
+    });
+
+    test("input schemas enforce defensive bounds and watch_run reports the clamped interval", async () => {
+        const harness = makeHarness({
+            runs: [runRow({ runId: "terminal-run", status: "finished", finishedAtMs: NOW })],
+            nodes: [],
+            approvals: [],
+            attempts: [],
+        });
+
+        expect(harness.tools.get("list_runs").inputSchema.safeParse({ limit: 0 }).success).toBe(false);
+        expect(harness.tools.get("list_runs").inputSchema.safeParse({ limit: 201 }).success).toBe(false);
+        expect(harness.tools.get("get_run_events").inputSchema.safeParse({ runId: "run-1", limit: 10_000 }).success).toBe(true);
+        expect(harness.tools.get("get_run_events").inputSchema.safeParse({ runId: "run-1", limit: 10_001 }).success).toBe(false);
+        expect(harness.tools.get("get_chat_transcript").inputSchema.safeParse({ runId: "run-1", tail: 0 }).success).toBe(false);
+        expect(harness.tools.get("ask_human").inputSchema.safeParse({ prompt: "Proceed?", pollSeconds: 0.249 }).success).toBe(false);
+        expect(harness.tools.get("run_workflow").inputSchema.safeParse({ workflowId: "demo", maxConcurrency: 0 }).success).toBe(false);
+        expect(harness.tools.get("run_workflow").inputSchema.safeParse({ workflowId: "demo", waitForStartMs: -1 }).success).toBe(false);
+
+        const watched = await harness.call("watch_run", {
+            runId: "terminal-run",
+            intervalMs: 1,
+            timeoutMs: 0,
+        });
+        expect(watched.structuredContent.ok).toBe(true);
+        expect(watched.structuredContent.data.intervalMs).toBe(500);
+        expect(watched.structuredContent.data.reachedTerminal).toBe(true);
+    });
+
     test("exposes the expected tools and validates run workflow resume input", async () => {
         const harness = makeHarness();
         expect([...harness.tools.keys()].sort()).toEqual([...SEMANTIC_TOOL_NAMES].sort());
@@ -754,6 +917,208 @@ describe("semantic tool definitions", () => {
         expect(res.isError).toBe(true);
         expect(res.structuredContent.error.code).toBe("TASK_ABORTED");
         expect(harness.state.cleanupCalls).toBe(1);
+    });
+
+    test("get_run_events forwards history filters and still enriches approval requests", async () => {
+        const harness = makeHarness({
+            historyEvents: [
+                eventRow({
+                    seq: 20,
+                    type: "ApprovalRequested",
+                    payloadJson: JSON.stringify({
+                        runId: "run-1",
+                        nodeId: "gate",
+                        iteration: 0,
+                    }),
+                }),
+            ],
+            listEventHistoryImpl: async (_runId, options) => [
+                eventRow({
+                    seq: options.afterSeq + 1,
+                    type: "ApprovalRequested",
+                    payloadJson: JSON.stringify({
+                        runId: "run-1",
+                        nodeId: "gate",
+                        iteration: 0,
+                    }),
+                }),
+            ],
+        });
+
+        const events = await harness.call("get_run_events", {
+            runId: "run-1",
+            afterSeq: 19,
+            limit: 25,
+            nodeId: "gate",
+            types: ["ApprovalRequested"],
+            sinceTimestampMs: NOW - 10_000,
+        });
+
+        expect(harness.state.listEventHistoryCalls).toEqual([
+            {
+                runId: "run-1",
+                options: {
+                    afterSeq: 19,
+                    limit: 25,
+                    nodeId: "gate",
+                    types: ["ApprovalRequested"],
+                    sinceTimestampMs: NOW - 10_000,
+                },
+            },
+        ]);
+        expect(events.structuredContent.ok).toBe(true);
+        expect(events.structuredContent.data.events).toHaveLength(1);
+        expect(events.structuredContent.data.events[0].payload).toMatchObject({
+            runId: "run-1",
+            nodeId: "gate",
+            iteration: 0,
+            request: { question: "ship?" },
+        });
+    });
+
+    test("covers semantic time-travel fork, replay, timeline, and running-run guard paths", async () => {
+        const snapshots = [
+            {
+                runId: "run-1",
+                frameNo: 0,
+                nodesJson: JSON.stringify([{ nodeId: "start", iteration: 0, state: "finished", lastAttempt: 1 }]),
+                outputsJson: "{}",
+                ralphJson: "[]",
+                inputJson: JSON.stringify({ prompt: "original" }),
+                vcsPointer: "vcs-0",
+                workflowHash: "hash-0",
+                contentHash: "content-0",
+                createdAtMs: NOW - 2_000,
+            },
+            {
+                runId: "run-1",
+                frameNo: 2,
+                nodesJson: JSON.stringify([{ nodeId: "artifact-node", iteration: 0, state: "finished", lastAttempt: 1 }]),
+                outputsJson: "{}",
+                ralphJson: "[]",
+                inputJson: JSON.stringify({ prompt: "original" }),
+                vcsPointer: "vcs-2",
+                workflowHash: "hash-2",
+                contentHash: "content-2",
+                createdAtMs: NOW - 1_000,
+            },
+            {
+                runId: "child-run",
+                frameNo: 0,
+                nodesJson: "[]",
+                outputsJson: "{}",
+                ralphJson: "[]",
+                inputJson: "{}",
+                vcsPointer: "vcs-child",
+                workflowHash: "hash-child",
+                contentHash: "content-child",
+                createdAtMs: NOW,
+            },
+        ];
+        const branches = [
+            {
+                runId: "child-run",
+                parentRunId: "run-1",
+                parentFrameNo: 2,
+                branchLabel: "existing child",
+                forkDescription: null,
+                createdAtMs: NOW - 500,
+            },
+        ];
+        const upserts = [];
+        const storage = makePostgresTimeTravelStorage({ snapshots, branches, upserts });
+        const harness = makeHarness({
+            internalStorage: storage,
+            runs: [
+                runRow({
+                    runId: "run-1",
+                    status: "finished",
+                    finishedAtMs: NOW,
+                    workflowHash: "parent-hash",
+                    vcsType: "jj",
+                    vcsRoot: "/tmp/work",
+                    vcsRevision: "parent-rev",
+                }),
+                runRow({
+                    runId: "child-run",
+                    workflowName: "demo",
+                    workflowPath: "/tmp/demo.workflow.tsx",
+                    parentRunId: "run-1",
+                    status: "finished",
+                    finishedAtMs: NOW,
+                }),
+                runRow({
+                    runId: "running-run",
+                    status: "running",
+                    finishedAtMs: null,
+                }),
+            ],
+            nodes: [],
+            approvals: [],
+            attempts: [],
+        });
+
+        const flatTimeline = await harness.call("get_timeline", { runId: "run-1" });
+        expect(flatTimeline.structuredContent.data.timeline).toMatchObject({
+            runId: "run-1",
+            branch: null,
+        });
+        expect(flatTimeline.structuredContent.data.timeline.frames.map((frame) => frame.frameNo)).toEqual([0, 2]);
+        expect(flatTimeline.structuredContent.data.timeline.frames[1].forkPoints[0]).toMatchObject({
+            runId: "child-run",
+            parentFrameNo: 2,
+        });
+
+        const treeTimeline = await harness.call("get_timeline", { runId: "run-1", tree: true });
+        expect(treeTimeline.structuredContent.data.timeline.children[0].timeline).toMatchObject({
+            runId: "child-run",
+            branch: {
+                parentRunId: "run-1",
+                parentFrameNo: 2,
+            },
+        });
+
+        const fork = await harness.call("fork_run", {
+            parentRunId: "run-1",
+            frameNo: 2,
+            resetNodes: ["artifact-node"],
+            inputOverrides: { prompt: "override", extra: true },
+            branchLabel: "semantic fork",
+        });
+        expect(fork.structuredContent.ok).toBe(true);
+        expect(fork.structuredContent.data.parentRunId).toBe("run-1");
+        expect(fork.structuredContent.data.parentFrameNo).toBe(2);
+        expect(fork.structuredContent.data.branch.branchLabel).toBe("semantic fork");
+        expect(JSON.parse(fork.structuredContent.data.snapshot.inputJson)).toEqual({
+            prompt: "override",
+            extra: true,
+        });
+        expect(JSON.parse(fork.structuredContent.data.snapshot.nodesJson)[0]).toMatchObject({
+            nodeId: "artifact-node",
+            state: "pending",
+            lastAttempt: null,
+        });
+        expect(upserts.some((entry) => entry.table === "_smithers_snapshots")).toBe(true);
+        expect(upserts.some((entry) => entry.table === "_smithers_branches")).toBe(true);
+
+        const replay = await harness.call("replay_run", {
+            parentRunId: "run-1",
+            frameNo: 2,
+            restoreVcs: false,
+            branchLabel: "semantic replay",
+        });
+        expect(replay.structuredContent.ok).toBe(true);
+        expect(replay.structuredContent.data.parentRunId).toBe("run-1");
+        expect(replay.structuredContent.data.vcsRestored).toBe(false);
+        expect(replay.structuredContent.data.vcsPointer).toBeNull();
+
+        const blocked = await harness.call("time_travel", {
+            runId: "running-run",
+            nodeId: "artifact-node",
+        });
+        expect(blocked.isError).toBe(true);
+        expect(blocked.structuredContent.error.code).toBe("RUN_STILL_RUNNING");
+        expect(blocked.structuredContent.error.message).toContain("Pass force=true");
     });
 
     test("serves semantic durability snapshot and restore tools", async () => {

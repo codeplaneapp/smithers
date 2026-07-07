@@ -2,7 +2,8 @@
 import { setJsonMode } from "./util/logger.ts";
 import { ensureCuratedSkillsFresh, formatRefreshNotice } from "./refreshCuratedSkills.js";
 import { extractBackendFlag, findFirstPositionalIndex, rewriteBareResumeFlagArgv } from "./argv-utils.js";
-import { CLI_JSON_ARGUMENT_MAX_BYTES, parseJsonArgument, tryParseJsonInput } from "./json-args.js";
+import { parseJsonArgument, tryParseJsonInput } from "./json-args.js";
+import { wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
 import { resolve, dirname, basename, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
@@ -28,9 +29,9 @@ import { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";
 import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
 import { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
 import { spawn } from "node:child_process";
+import { CronExpressionParser } from "cron-parser";
 import { buildAgentAskRequestRow, isHumanRequestPastTimeout, validateHumanRequestValue, waitForHumanAnswer, } from "@smithers-orchestrator/engine/human-requests";
 import { SmithersError } from "@smithers-orchestrator/errors";
-import { assertMaxBytes, assertMaxStringLength } from "@smithers-orchestrator/db/input-bounds";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
 import { isDaemonDisabled } from "./isDaemonDisabled.js";
 import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
@@ -219,107 +220,12 @@ function readBackendMarkerForCwd(cwd) {
         dir = next;
     }
 }
-const CLI_ARGUMENT_MAX_LENGTH = 4096;
-const CLI_IDENTIFIER_MAX_LENGTH = 256;
-const CLI_TEXT_ARGUMENT_MAX_LENGTH = 64 * 1024;
 // DB poll cadence for --follow loops (logs, chat): fast enough to feel live,
 // slow enough not to hammer sqlite.
 const FOLLOW_POLL_INTERVAL_MS = 500;
 // Hard-exit deadline once a graceful shutdown starts, so a hung shutdown never
 // requires `kill -9`.
 const FORCE_EXIT_BACKSTOP_MS = 5000;
-const CLI_HANDLER_BOUNDS_WRAPPED = Symbol("smithers.cliHandlerBoundsWrapped");
-/**
- * @param {string} path
- * @param {string} value
- */
-function validateCliStringArgument(path, value) {
-    // Strip array indices, keep the last dotted segment as the field name.
-    const trimmed = path.replace(/\[\d+\]/g, "");
-    const lastDot = trimmed.lastIndexOf(".");
-    const field = lastDot >= 0 ? trimmed.slice(lastDot + 1) : trimmed;
-    switch (field) {
-        case "runId":
-        case "requestId":
-        case "correlation":
-        case "correlationId":
-        case "name":
-            assertMaxStringLength(path, value, CLI_IDENTIFIER_MAX_LENGTH);
-            return;
-        case "workflow":
-        case "root":
-        case "logDir":
-            assertMaxStringLength(path, value, CLI_ARGUMENT_MAX_LENGTH);
-            return;
-        case "input":
-        case "data":
-        case "value":
-            assertMaxBytes(path, value, CLI_JSON_ARGUMENT_MAX_BYTES);
-            return;
-        case "prompt":
-        case "note":
-        case "authToken":
-            assertMaxStringLength(path, value, CLI_TEXT_ARGUMENT_MAX_LENGTH);
-            return;
-        default:
-            assertMaxStringLength(path, value, CLI_ARGUMENT_MAX_LENGTH);
-    }
-}
-/**
- * @param {unknown} value
- * @param {string} path
- */
-function assertCliArgumentBounds(value, path) {
-    if (value === null || value === undefined) {
-        return;
-    }
-    if (typeof value === "string") {
-        validateCliStringArgument(path, value);
-        return;
-    }
-    if (Array.isArray(value)) {
-        for (let index = 0; index < value.length; index += 1) {
-            assertCliArgumentBounds(value[index], `${path}[${index}]`);
-        }
-        return;
-    }
-    if (typeof value !== "object") {
-        return;
-    }
-    for (const [key, entry] of Object.entries(value)) {
-        assertCliArgumentBounds(entry, `${path}.${key}`);
-    }
-}
-/**
- * @param {Map<string, any>} commands
- */
-function wrapCliCommandHandlersWithInputBounds(commands) {
-    for (const entry of commands.values()) {
-        if (!entry || typeof entry !== "object") {
-            continue;
-        }
-        if ("_group" in entry) {
-            wrapCliCommandHandlersWithInputBounds(entry.commands);
-            continue;
-        }
-        if ("_fetch" in entry) {
-            continue;
-        }
-        if (entry[CLI_HANDLER_BOUNDS_WRAPPED]) {
-            continue;
-        }
-        const originalRun = entry.run;
-        if (typeof originalRun !== "function") {
-            continue;
-        }
-        entry.run = function wrappedRun(context) {
-            assertCliArgumentBounds(context.args, "args");
-            assertCliArgumentBounds(context.options, "options");
-            return originalRun.call(this, context);
-        };
-        entry[CLI_HANDLER_BOUNDS_WRAPPED] = true;
-    }
-}
 /**
  * @param {string | undefined} status
  */
@@ -334,6 +240,31 @@ function formatStatusExitCode(status) {
     if (status === "cancelled")
         return 2;
     return 1;
+}
+const LOG_FOLLOW_ACTIVE_STATES = new Set([
+    "running",
+    "waiting-approval",
+    "waiting-event",
+    "waiting-timer",
+]);
+/**
+ * @param {unknown} state
+ * @returns {boolean}
+ */
+function isLogFollowActiveState(state) {
+    return typeof state === "string" && LOG_FOLLOW_ACTIVE_STATES.has(state);
+}
+/**
+ * @param {string} runId
+ * @param {import("@smithers-orchestrator/db/runState").RunStateView | undefined} stateView
+ */
+function reportLogFollowInactiveDerivedState(runId, stateView) {
+    if (stateView?.state !== "stale" && stateView?.state !== "orphaned")
+        return;
+    const lastHeartbeatAt = stateView.unhealthy?.kind === "engine-heartbeat-stale"
+        ? stateView.unhealthy.lastHeartbeatAt
+        : undefined;
+    process.stderr.write(`[smithers] Run ${runId} is ${stateView.state}; stopping log follow${lastHeartbeatAt ? ` (last heartbeat ${lastHeartbeatAt})` : ""}.\n`);
 }
 /**
  * The run's output is the last task's stored output, which arrives as a row array
@@ -971,21 +902,25 @@ async function* streamRunEventsCommand(c) {
                 lastSeq = event.seq;
             }
         }
-        const isActive = run.status === "running" ||
-            run.status === "waiting-approval" ||
-            run.status === "waiting-event" ||
-            run.status === "waiting-timer";
+        const initialRunState = await computeRunStateFromRow(adapter, run);
+        const initialFollowState = initialRunState.state === "succeeded"
+            ? "finished"
+            : initialRunState.state;
+        const isActive = isLogFollowActiveState(initialFollowState);
         if (!c.options.follow || !isActive) {
+            if (c.options.follow) {
+                reportLogFollowInactiveDerivedState(c.args.runId, initialRunState);
+            }
             return c.ok(undefined, {
                 cta: {
                     commands: [{ command: `inspect ${c.args.runId}`, description: "Inspect run state" }],
                 },
             });
         }
-        let lastWaitingStatus = run.status === "waiting-approval" ||
-            run.status === "waiting-event" ||
-            run.status === "waiting-timer"
-            ? run.status
+        let lastWaitingStatus = initialFollowState === "waiting-approval" ||
+            initialFollowState === "waiting-event" ||
+            initialFollowState === "waiting-timer"
+            ? initialFollowState
             : undefined;
         while (true) {
             await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_INTERVAL_MS));
@@ -995,16 +930,19 @@ async function* streamRunEventsCommand(c) {
                 lastSeq = event.seq;
             }
             const currentRun = await adapter.getRun(c.args.runId);
-            const currentStatus = currentRun?.status;
+            const currentRunState = currentRun
+                ? await computeRunStateFromRow(adapter, currentRun)
+                : undefined;
+            const currentStatus = currentRunState?.state === "succeeded"
+                ? "finished"
+                : currentRunState?.state;
             if (currentStatus === "waiting-approval" ||
                 currentStatus === "waiting-event" ||
                 currentStatus === "waiting-timer") {
                 lastWaitingStatus = currentStatus;
             }
-            if (currentStatus !== "running" &&
-                currentStatus !== "waiting-approval" &&
-                currentStatus !== "waiting-event" &&
-                currentStatus !== "waiting-timer") {
+            if (!isLogFollowActiveState(currentStatus)) {
+                reportLogFollowInactiveDerivedState(c.args.runId, currentRunState);
                 const finalEvents = await adapter.listEvents(c.args.runId, lastSeq, 1000);
                 for (const event of finalEvents) {
                     yield formatLine(event);
@@ -3558,6 +3496,15 @@ const cronPathArgs = z.object({
     pattern: z.string().describe("Cron execution pattern (e.g. '0 * * * *')"),
     workflowPath: z.string().describe("Path or ID of the workflow to schedule"),
 });
+function validateCronPattern(pattern) {
+    try {
+        CronExpressionParser.parse(pattern);
+        return undefined;
+    }
+    catch (err) {
+        return err?.message ?? String(err);
+    }
+}
 // ---------------------------------------------------------------------------
 // smithers memory ...
 // ---------------------------------------------------------------------------
@@ -3926,6 +3873,15 @@ const cronCli = Cli.create({
     description: "Register a new workflow cron schedule.",
     args: cronPathArgs,
     async run(c) {
+        const fail = makeFail(c);
+        const cronError = validateCronPattern(c.args.pattern);
+        if (cronError) {
+            return fail({
+                code: "INVALID_CRON_PATTERN",
+                message: `Invalid cron pattern '${c.args.pattern}': ${cronError}`,
+                exitCode: 4,
+            });
+        }
         const { adapter, cleanup } = await findAndOpenDb();
         try {
             const cronId = crypto.randomUUID();
@@ -8841,7 +8797,11 @@ function reportFatalCliError(err) {
     }
     process.exit(1);
 }
-process.on("unhandledRejection", (reason) => {
-    reportFatalCliError(reason);
-});
-main().catch(reportFatalCliError);
+export { cli };
+
+if (process.env.SMITHERS_CLI_DISABLE_AUTO_MAIN !== "1") {
+    process.on("unhandledRejection", (reason) => {
+        reportFatalCliError(reason);
+    });
+    main().catch(reportFatalCliError);
+}

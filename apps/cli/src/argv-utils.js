@@ -27,7 +27,7 @@ function normalizeMcpSurface(value) {
  * @returns {readonly string[]}
  */
 function normalizeMcpAllowedTools(value) {
-    if (value === undefined) {
+    if (value === undefined || value.trim().length === 0 || value.trim().startsWith("-")) {
         throw new Error("Missing value for --allowed-tools. Expected a comma-separated semantic tool allowlist.");
     }
     return value

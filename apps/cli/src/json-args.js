@@ -20,6 +20,7 @@ export function readJsonArgumentPayload(raw, label) {
         }
         return payload;
     }
+    assertMaxBytes(label, raw, CLI_JSON_ARGUMENT_MAX_BYTES);
     return raw;
 }
 

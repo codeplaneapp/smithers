@@ -8,7 +8,11 @@
 // `tryParseJsonInput` returns a discriminated `{ ok }` result so the failure is
 // impossible to use as a value — every call site must `if (!parsed.ok) return`.
 import { describe, expect, test } from "bun:test";
-import { tryParseJsonInput } from "../src/json-args.js";
+import {
+    CLI_JSON_ARGUMENT_MAX_BYTES,
+    readJsonArgumentPayload,
+    tryParseJsonInput,
+} from "../src/json-args.js";
 
 describe("tryParseJsonInput", () => {
     test("parses a valid JSON object", () => {
@@ -43,5 +47,17 @@ describe("tryParseJsonInput", () => {
     test("a truncated array also fails closed", () => {
         const result = tryParseJsonInput("[1,2,", "input");
         expect(result.ok).toBe(false);
+    });
+
+    test("enforces the documented byte limit for inline positional JSON payloads", () => {
+        const exactLimit = "x".repeat(CLI_JSON_ARGUMENT_MAX_BYTES);
+        expect(readJsonArgumentPayload(exactLimit, "input")).toBe(exactLimit);
+
+        const result = tryParseJsonInput("x".repeat(CLI_JSON_ARGUMENT_MAX_BYTES + 1), "input");
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.error.code).toBe("INVALID_INPUT");
+            expect(result.error.message).toContain(`maximum size of ${CLI_JSON_ARGUMENT_MAX_BYTES}`);
+        }
     });
 });

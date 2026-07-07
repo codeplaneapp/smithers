@@ -123,6 +123,8 @@ function parseWorkflowFrontmatter(source) {
     const match = source.match(/\/\*\s*smithers\b[^\n]*\n([\s\S]*?)\*\//);
     if (!match)
         return {};
+    if (!isOnlyWhitespaceAndComments(source.slice(0, match.index ?? 0)))
+        return {};
     /** @type {Record<string, string | string[]>} */
     const out = {};
     const lines = match[1].split("\n");
@@ -156,6 +158,33 @@ function parseWorkflowFrontmatter(source) {
             : unquoteYaml(value);
     }
     return out;
+}
+/**
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isOnlyWhitespaceAndComments(value) {
+    let index = 0;
+    while (index < value.length) {
+        if (/\s/.test(value[index])) {
+            index += 1;
+            continue;
+        }
+        if (value.startsWith("//", index)) {
+            const next = value.indexOf("\n", index + 2);
+            index = next === -1 ? value.length : next + 1;
+            continue;
+        }
+        if (value.startsWith("/*", index)) {
+            const next = value.indexOf("*/", index + 2);
+            if (next === -1)
+                return false;
+            index = next + 2;
+            continue;
+        }
+        return false;
+    }
+    return true;
 }
 /**
  * @param {string} value

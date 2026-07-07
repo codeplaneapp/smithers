@@ -5,7 +5,7 @@ import { Cli, z } from "incur";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseMcpSurfaceArgv } from "../src/argv-utils.js";
-import { registerRawToolsOnMcpServer } from "../src/mcp/mcp-mode.js";
+import { registerRawToolsOnMcpServer, runMcpModeIfRequested } from "../src/mcp/mcp-mode.js";
 import { createSemanticMcpServer, registerSemanticTools, } from "../src/mcp/semantic-server.js";
 import { createSemanticToolDefinitions, SEMANTIC_TOOL_NAMES } from "../src/mcp/semantic-tools.js";
 const servers = [];
@@ -36,6 +36,36 @@ function tempCwd() {
     return dir;
 }
 describe("semantic MCP surface", () => {
+    test("stdio mode only takes over when --mcp is requested and preserves raw CLI serving", async () => {
+        let servedArgv = null;
+        const cli = {
+            serve: async (argv) => {
+                servedArgv = argv;
+            },
+        };
+
+        const skipped = await runMcpModeIfRequested(["workflow", "list"], {
+            cli,
+            version: "test",
+        });
+        expect(skipped).toBe(false);
+        expect(servedArgv).toBeNull();
+
+        const served = await runMcpModeIfRequested([
+            "--mcp",
+            "--surface",
+            "raw",
+            "--allowed-tools",
+            "list_runs",
+            "--read-only",
+        ], {
+            cli,
+            version: "test",
+        });
+        expect(served).toBe(true);
+        expect(servedArgv).toEqual(["--mcp"]);
+    });
+
     test("parses scoped outbound MCP options for the production --mcp entrypoint", () => {
         expect(parseMcpSurfaceArgv([
             "--mcp",

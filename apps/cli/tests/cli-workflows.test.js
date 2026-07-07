@@ -220,6 +220,24 @@ describe("discoverWorkflows — skill-parity spec", () => {
         expect(wf.tags).toEqual(["alpha", "beta"]);
     });
 
+    test("ignores frontmatter-like smithers blocks after executable code", () => {
+        const { root } = seed({
+            "late.tsx": [
+                "export const marker = true;",
+                "/* smithers",
+                "display-name: Late Metadata",
+                "description: This block is not frontmatter.",
+                "system: true",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+        });
+        const wf = discoverWorkflows(root)[0];
+        expect(wf.displayName).toBe("late");
+        expect(wf.description).toBe("Run the late Smithers workflow from this repository.");
+        expect(wf.system).toBe(false);
+    });
+
     test("legacy // smithers-key comments still work with no frontmatter", () => {
         const { root } = seed({
             "legacy.tsx": "// smithers-description: Old style.\nexport default {};",

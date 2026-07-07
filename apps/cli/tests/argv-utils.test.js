@@ -55,6 +55,22 @@ describe("argv-utils", () => {
                 "Invalid --surface value: invalid. Expected semantic, raw, or both.",
             );
         });
+
+        test("strips --read-only and rejects a missing allowed-tools value before another flag", () => {
+            expect(parseMcpSurfaceArgv(["mcp", "--read-only", "--allowed-tools", "get_run,list_runs"])).toEqual({
+                surface: "semantic",
+                argv: ["mcp"],
+                allowedTools: ["get_run", "list_runs"],
+                readOnly: true,
+            });
+
+            expect(() => parseMcpSurfaceArgv(["mcp", "--allowed-tools", "--read-only"])).toThrow(
+                "Missing value for --allowed-tools. Expected a comma-separated semantic tool allowlist.",
+            );
+            expect(() => parseMcpSurfaceArgv(["mcp", "--allowed-tools="])).toThrow(
+                "Missing value for --allowed-tools. Expected a comma-separated semantic tool allowlist.",
+            );
+        });
     });
 
     describe("findFirstPositionalIndex", () => {

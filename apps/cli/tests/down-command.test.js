@@ -8,6 +8,7 @@ import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages
 
 const CLI_ENTRY = resolve(import.meta.dir, "../src/index.js");
 const CLI_COMMAND_TIMEOUT_MS = 120_000;
+const STALE_LOG_EXIT_TIMEOUT_MS = 5_000;
 const FRESH_HEARTBEAT_LEEWAY_MS = 120_000;
 
 function freshHeartbeatMs() {
@@ -190,6 +191,59 @@ describe("smithers cancel live-run handling", () => {
 });
 
 describe("smithers logs --follow waiting-state CTA", () => {
+    test("default follow exits for a persisted running row whose heartbeat is already stale", async () => {
+        const repo = createTempRepo();
+        const { sqlite, adapter } = openRepoDb(repo);
+        try {
+            const now = Date.now();
+            await insertRunningRun(adapter, "stale-run", {
+                startedAtMs: now - 120_000,
+                heartbeatAtMs: now - 120_000,
+                runtimeOwnerId: "dead-engine",
+            });
+            await adapter.insertEventWithNextSeq({
+                runId: "stale-run",
+                type: "STALE_LOG_MARKER",
+                timestampMs: now - 1_000,
+                payloadJson: JSON.stringify({ marker: "stale-log-marker" }),
+            });
+
+            const proc = Bun.spawn(
+                [process.execPath, "run", CLI_ENTRY, "logs", "stale-run"],
+                {
+                    cwd: repo.dir,
+                    stdout: "pipe",
+                    stderr: "pipe",
+                    env: {
+                        ...process.env,
+                        SMITHERS_NO_SKILL_REFRESH: "1",
+                        SMITHERS_NO_UPDATE_CHECK: "1",
+                    },
+                },
+            );
+            const stdoutPromise = new Response(proc.stdout).text();
+            const stderrPromise = new Response(proc.stderr).text();
+            const timeout = new Promise((resolve) => {
+                setTimeout(() => resolve(null), STALE_LOG_EXIT_TIMEOUT_MS);
+            });
+            const exitCode = await Promise.race([proc.exited, timeout]);
+            if (exitCode === null) {
+                proc.kill("SIGTERM");
+                await proc.exited.catch(() => undefined);
+            }
+            const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
+
+            expect(exitCode, `stdout:\n${stdout}\nstderr:\n${stderr}`).toBe(0);
+            expect((stdout.match(/STALE_LOG_MARKER/g) ?? [])).toHaveLength(1);
+            expect((stdout.match(/stale-log-marker/g) ?? [])).toHaveLength(1);
+            expect(stderr).toContain("Run stale-run is stale");
+            expect(stderr).toContain("stopping log follow");
+        }
+        finally {
+            sqlite.close();
+        }
+    }, CLI_COMMAND_TIMEOUT_MS);
+
     // Regression: the waiting-approval/event/timer CTA branches keyed off
     // `currentStatus`, but the follow loop only exits once the run is NOT in a
     // waiting state, so currentStatus could never be a waiting status inside the
