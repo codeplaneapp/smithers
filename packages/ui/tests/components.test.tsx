@@ -9,6 +9,8 @@ import {
   Card,
   CardAction,
   CardContent,
+  CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
   composeSmithersUiStyles,
@@ -29,6 +31,7 @@ import {
   StatusPill,
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -129,6 +132,24 @@ describe("Card", () => {
     expect(html).toContain("sui-card-content");
     expect(html).toContain('data-slot="card"');
   });
+
+  test("renders the description and footer slots", () => {
+    const html = renderToStaticMarkup(
+      <Card>
+        <CardHeader>
+          <CardTitle>Runs</CardTitle>
+          <CardDescription>Recent activity</CardDescription>
+        </CardHeader>
+        <CardFooter>footer text</CardFooter>
+      </Card>,
+    );
+    expect(html).toContain("sui-card-description");
+    expect(html).toContain('data-slot="card-description"');
+    expect(html).toContain("Recent activity");
+    expect(html).toContain("sui-card-footer");
+    expect(html).toContain('data-slot="card-footer"');
+    expect(html).toContain("footer text");
+  });
 });
 
 describe("form controls", () => {
@@ -177,12 +198,16 @@ describe("Table", () => {
             <TableCell>abc123</TableCell>
           </TableRow>
         </TableBody>
+        <TableCaption>All runs</TableCaption>
       </Table>,
     );
     expect(html).toContain("sui-table-container");
     expect(html).toContain("sui-table");
     expect(html).toContain("<thead");
     expect(html).toContain("abc123");
+    expect(html).toContain("<caption");
+    expect(html).toContain('data-slot="table-caption"');
+    expect(html).toContain("All runs");
   });
 });
 

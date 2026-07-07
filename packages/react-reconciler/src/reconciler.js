@@ -454,12 +454,17 @@ const hookHost = globalThis;
 if (!hookHost.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
     installRDTHook();
 }
-reconciler.injectIntoDevTools({
+const injectedDevToolsConfig = {
     bundleType: typeof process !== "undefined" && process.env.NODE_ENV === "production" ? 0 : 1,
     version: "0.0.0",
     rendererPackageName: "@smithers-orchestrator/core-react",
     findFiberByHostInstance: () => null,
-});
+};
+reconciler.injectIntoDevTools(injectedDevToolsConfig);
+// Exposed for tests only. react-reconciler consumes this config internally and
+// never re-exposes `findFiberByHostInstance`, so this is the sole in-process
+// handle for asserting the headless "no host-instance fiber lookup" contract.
+export const __testingInjectedDevToolsConfig = injectedDevToolsConfig;
 export class SmithersRenderer {
     /** @type {HostContainer} */
     container;

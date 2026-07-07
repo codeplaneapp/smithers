@@ -8,6 +8,11 @@ import 'zod';
  * @returns {ExtractResult}
  */
 declare function extractFromHost(root: HostNode | null, opts?: ExtractOptions): ExtractResult;
+/**
+ * Test-only seam to override the dynamic runtime-module importer used by the
+ * <Subflow>/<Sandbox> computeFns. Returns a restore function.
+ */
+declare function __setRuntimeModuleLoader(loader: (specifier: string) => Promise<any>): () => void;
 type HostElement = HostElement$1;
 type HostText = HostText$1;
 type ExtractOptions = ExtractOptions$1;
@@ -16,4 +21,4 @@ type HostNode = HostNode$1;
 type TaskDescriptor = TaskDescriptor$1;
 type XmlNode = XmlNode$1;
 
-export { type ExtractOptions, type ExtractResult, type HostElement, type HostNode, type HostText, type TaskDescriptor, type XmlNode, extractFromHost };
+export { type ExtractOptions, type ExtractResult, type HostElement, type HostNode, type HostText, type TaskDescriptor, type XmlNode, __setRuntimeModuleLoader, extractFromHost };

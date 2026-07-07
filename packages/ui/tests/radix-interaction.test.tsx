@@ -12,16 +12,30 @@ import { createRoot, type Root } from "react-dom/client";
 import {
   Button,
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
   SMITHERS_UI_STYLE_ATTR,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from "../src/index";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -90,6 +104,11 @@ describe("Dialog", () => {
             <DialogDescription>Full details</DialogDescription>
           </DialogHeader>
           <p>body text</p>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button data-testid="dialog-done">Done</Button>
+            </DialogClose>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     );
@@ -126,6 +145,77 @@ describe("Dialog", () => {
 
     await click(document.querySelector(".sui-dialog-close")!);
     expect(document.querySelector(".sui-dialog-content")).toBeNull();
+  });
+
+  test("closes through a DialogClose in the footer", async () => {
+    await render(harness());
+    await click(document.querySelector('[data-slot="dialog-trigger"]')!);
+    const footer = document.querySelector('[data-slot="dialog-footer"]');
+    expect(footer).not.toBeNull();
+    const done = document.querySelector('[data-testid="dialog-done"]');
+    expect(done).not.toBeNull();
+    expect(done!.getAttribute("data-slot")).toBe("dialog-close");
+
+    await click(done!);
+    expect(document.querySelector(".sui-dialog-content")).toBeNull();
+  });
+});
+
+describe("Select", () => {
+  test("renders trigger, value, and the open listbox with items", async () => {
+    await render(
+      <Select defaultOpen defaultValue="fast">
+        <SelectTrigger>
+          <SelectValue placeholder="Model" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectLabel>Models</SelectLabel>
+            <SelectItem value="fast">Fast</SelectItem>
+            <SelectSeparator />
+            <SelectItem value="strong">Strong</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>,
+    );
+
+    const trigger = document.querySelector('[data-slot="select-trigger"]');
+    expect(trigger).not.toBeNull();
+    expect(trigger!.className).toContain("sui-select-trigger");
+
+    const content = document.querySelector('[data-slot="select-content"]');
+    expect(content).not.toBeNull();
+    expect(content!.className).toContain("sui-select-content");
+
+    expect(document.querySelector('[data-slot="select-label"]')).not.toBeNull();
+    expect(document.querySelector('[data-slot="select-separator"]')).not.toBeNull();
+    const items = document.querySelectorAll('[data-slot="select-item"]');
+    expect(items.length).toBe(2);
+    expect(document.body.textContent).toContain("Fast");
+    expect(document.body.textContent).toContain("Strong");
+  });
+});
+
+describe("Tooltip", () => {
+  test("renders the content when open through the provider", async () => {
+    await render(
+      <TooltipProvider>
+        <Tooltip defaultOpen>
+          <TooltipTrigger asChild>
+            <Button size="icon">?</Button>
+          </TooltipTrigger>
+          <TooltipContent>Explain the thing</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>,
+    );
+
+    const trigger = document.querySelector('[data-slot="tooltip-trigger"]');
+    expect(trigger).not.toBeNull();
+
+    const content = document.querySelector('[data-slot="tooltip-content"]');
+    expect(content).not.toBeNull();
+    expect(content!.className).toContain("sui-tooltip-content");
+    expect(document.body.textContent).toContain("Explain the thing");
   });
 });
 

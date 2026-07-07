@@ -24,7 +24,23 @@ import { resolveWorktreePath } from "../worktree-path.js";
 // - Inline <Subflow> validation and some legacy descriptor-shape details still
 //   differ, so replacing this implementation would not produce identical output
 //   for all inputs.
-const loadRuntimeModule = new Function("specifier", "return import(specifier)");
+let loadRuntimeModule = new Function("specifier", "return import(specifier)");
+/**
+ * Test-only seam to override the dynamic runtime-module importer used by the
+ * <Subflow>/<Sandbox> computeFns. Production behaviour is unchanged — the
+ * default native `import()` importer is used unless a test overrides it — so the
+ * heavy engine/sandbox packages those computeFns delegate to can be exercised
+ * without loading them for real. Returns a restore function.
+ * @param {(specifier: string) => Promise<any>} loader
+ * @returns {() => void}
+ */
+export function __setRuntimeModuleLoader(loader) {
+    const previous = loadRuntimeModule;
+    loadRuntimeModule = loader;
+    return () => {
+        loadRuntimeModule = previous;
+    };
+}
 // CLI agents (Claude Code, Codex, Gemini, Kimi) can spend many minutes reading
 // files and thinking without producing stdout. 5 min was still too aggressive:
 // reviewer agents on substantive diffs were getting killed mid-review and

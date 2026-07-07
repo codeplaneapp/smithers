@@ -651,6 +651,20 @@ export function extractGraph(root, opts) {
                 ? raw.approvalOnDeny
                 : undefined;
             const kind = raw.__smithersKind;
+            if (kind === "human" &&
+                typeof raw.retries === "number" &&
+                !Number.isFinite(raw.retries)) {
+                const maxAttempts = raw.meta &&
+                    typeof raw.meta === "object" &&
+                    !Array.isArray(raw.meta) &&
+                    typeof raw.meta.maxAttempts === "number"
+                    ? raw.meta.maxAttempts
+                    : raw.retries;
+                throw new SmithersError("INVALID_INPUT", `<HumanTask id="${logicalNodeId}"> maxAttempts must be finite.`, {
+                    nodeId: logicalNodeId,
+                    maxAttempts: String(maxAttempts),
+                });
+            }
             const isAgent = kind === "agent" || Boolean(raw.agent);
             const { retries, retryPolicy } = resolveRetryConfig(raw, isAgent);
             const isCompute = (kind === "compute" || kind === "human") && typeof raw.__smithersComputeFn === "function";

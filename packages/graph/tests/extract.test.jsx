@@ -105,6 +105,55 @@ describe("extractGraph", () => {
 		expect(result.tasks[1].aspects).toBeUndefined();
 	});
 
+	test("threads latencySlo.perTask onto the descriptor", () => {
+		const root = hostEl("smithers:workflow", {}, [
+			hostEl("smithers:task", {
+				id: "t1",
+				output: "t",
+				__aspects: {
+					latencySlo: { maxMs: 5000, perTask: 1000, onExceeded: "warn" },
+				},
+			}),
+		]);
+		const result = extractGraph(root);
+		expect(result.tasks[0].aspects).toEqual({
+			latencySlo: { maxMs: 5000, perTask: 1000, onExceeded: "warn" },
+		});
+	});
+
+	test("drops an unrecognized onExceeded value instead of passing it through", () => {
+		const root = hostEl("smithers:workflow", {}, [
+			hostEl("smithers:task", {
+				id: "t1",
+				output: "t",
+				__aspects: {
+					tokenBudget: { max: 100, onExceeded: "explode" },
+					latencySlo: { maxMs: 100, onExceeded: "explode" },
+				},
+			}),
+		]);
+		const result = extractGraph(root);
+		expect(result.tasks[0].aspects).toEqual({
+			tokenBudget: { max: 100 },
+			latencySlo: { maxMs: 100 },
+		});
+	});
+
+	test("drops a tokenBudget/latencySlo missing its numeric limit instead of producing a broken budget", () => {
+		const root = hostEl("smithers:workflow", {}, [
+			hostEl("smithers:task", {
+				id: "t1",
+				output: "t",
+				__aspects: {
+					tokenBudget: { onExceeded: "warn" },
+					latencySlo: { onExceeded: "warn" },
+				},
+			}),
+		]);
+		const result = extractGraph(root);
+		expect(result.tasks[0].aspects).toBeUndefined();
+	});
+
 	test("throws on missing task id", () => {
 		expect(() => extractGraph(hostEl("smithers:task", { output: "t" }))).toThrow(
 			"Task id is required",
@@ -285,6 +334,108 @@ describe("extractGraph", () => {
 			).tasks[0];
 			expect(task.retries).toBe(3);
 			expect(task.retryPolicy).toEqual(policy);
+		});
+
+		test("noRetry wins over explicit retries but keeps an explicit retryPolicy", () => {
+			const policy = { backoff: "fixed", initialDelayMs: 10 };
+			const task = extractGraph(
+				hostEl("smithers:task", {
+					id: "t1",
+					output: "t",
+					noRetry: true,
+					retries: 5,
+					retryPolicy: policy,
+				}),
+			).tasks[0];
+			expect(task.retries).toBe(0);
+			expect(task.retryPolicy).toEqual(policy);
+		});
+
+		test("noRetry cancels the free agent retry granted with continueOnFail", () => {
+			const task = extractGraph(
+				hostEl("smithers:task", {
+					id: "t1",
+					output: "t",
+					noRetry: true,
+					continueOnFail: true,
+					__smithersKind: "agent",
+					agent: { generate: async () => ({}) },
+				}),
+			).tasks[0];
+			expect(task.retries).toBe(0);
+			expect(task.retryPolicy).toBeUndefined();
+		});
+
+		test("NaN retries is ignored and falls back to the infinite-retry default", () => {
+			const task = extractGraph(
+				hostEl("smithers:task", { id: "t1", output: "t", retries: Number.NaN }),
+			).tasks[0];
+			expect(task.retries).toBe(Infinity);
+			expect(task.retryPolicy).toEqual({ backoff: "exponential", initialDelayMs: 1000 });
+		});
+	});
+
+	describe("human task maxAttempts guard", () => {
+		test("non-finite retries on a human task throws INVALID_INPUT with the meta maxAttempts", () => {
+			const root = hostEl("smithers:workflow", {}, [
+				hostEl("smithers:task", {
+					id: "gate",
+					output: "human_out",
+					__smithersKind: "human",
+					retries: Infinity,
+					meta: { humanTask: true, maxAttempts: Infinity },
+				}),
+			]);
+			let thrown;
+			try {
+				extractGraph(root);
+			}
+			catch (error) {
+				thrown = error;
+			}
+			expect(thrown).toBeDefined();
+			expect(thrown.code).toBe("INVALID_INPUT");
+			expect(thrown.message).toContain('<HumanTask id="gate"> maxAttempts must be finite.');
+			expect(thrown.details).toEqual({ nodeId: "gate", maxAttempts: "Infinity" });
+		});
+
+		test("the guard falls back to the raw retries value when meta has no numeric maxAttempts", () => {
+			const root = hostEl("smithers:workflow", {}, [
+				hostEl("smithers:task", {
+					id: "gate",
+					output: "human_out",
+					__smithersKind: "human",
+					retries: Number.NaN,
+					meta: { humanTask: true },
+				}),
+			]);
+			let thrown;
+			try {
+				extractGraph(root);
+			}
+			catch (error) {
+				thrown = error;
+			}
+			expect(thrown).toBeDefined();
+			expect(thrown.code).toBe("INVALID_INPUT");
+			expect(thrown.details).toEqual({ nodeId: "gate", maxAttempts: "NaN" });
+		});
+
+		test("finite retries on a human task extracts normally", () => {
+			const task = extractGraph(
+				hostEl("smithers:workflow", {}, [
+					hostEl("smithers:task", {
+						id: "gate",
+						output: "human_out",
+						__smithersKind: "human",
+						retries: 3,
+						__smithersComputeFn: () => ({}),
+						meta: { humanTask: true, maxAttempts: 4 },
+					}),
+				]),
+			).tasks[0];
+			expect(task.retries).toBe(3);
+			expect(task.kind).toBe("human");
 		});
 	});
 
