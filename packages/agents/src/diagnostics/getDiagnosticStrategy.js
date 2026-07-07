@@ -558,9 +558,11 @@ const googleAuthCheck = {
                 };
             }
         }
-        // No API key — check gcloud auth
+        // No API key — check gcloud auth. Honor the diagnostic env (like every
+        // other spawnSync check here) so gcloud resolves against the same PATH.
         const result = spawnSync("gcloud", ["auth", "print-access-token"], {
             stdio: ["pipe", "pipe", "pipe"],
+            env: ctx.env,
             timeout: 3_000,
         });
         const elapsed = performance.now() - start;

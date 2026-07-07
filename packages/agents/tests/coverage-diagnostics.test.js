@@ -99,7 +99,10 @@ describe("claude api_key_valid credential resolution", () => {
 
   test("fails when no key, no CLI login, and no credentials on disk", async () => {
     const cfg = temp("smithers-claude-empty-");
-    const r = await apiKey().run({ env: { CLAUDE_CONFIG_DIR: cfg, PATH: "" }, cwd: "/tmp" });
+    // A bogus PATH ensures neither `claude` nor (on macOS) `security` resolves,
+    // so credential discovery genuinely comes up empty.
+    const bogus = join(temp("smithers-nobin-"), "nope");
+    const r = await apiKey().run({ env: { CLAUDE_CONFIG_DIR: cfg, PATH: bogus }, cwd: "/tmp" });
     expect(r.status).toBe("fail");
   });
   test("passes with valid OAuth credentials on disk", async () => {
@@ -221,16 +224,15 @@ describe("pi google checks", () => {
   test("api key: passes via a gcloud access token when no key is set", async () => {
     const binDir = temp("smithers-gcloud-ok-");
     makeFakeNodeCliSync(binDir, "gcloud", `process.stdout.write("ya29.fake-token\\n");process.exit(0);`);
-    process.env.PATH = `${binDir}:${realPath ?? ""}`;
-    const r = await auth().run({ env: {}, cwd: "/tmp" });
+    // The fake gcloud shadows any real one because ctx.env.PATH is searched first.
+    const r = await auth().run({ env: { PATH: `${binDir}:${realPath ?? ""}` }, cwd: "/tmp" });
     expect(r.status).toBe("pass");
     expect(r.message).toContain("gcloud");
   });
 
   test("api key: fails when no key and gcloud is unavailable", async () => {
-    const emptyDir = temp("smithers-gcloud-none-");
-    process.env.PATH = emptyDir;
-    expect((await auth().run({ env: {}, cwd: "/tmp" })).status).toBe("fail");
+    const bogus = join(temp("smithers-gcloud-none-"), "nope");
+    expect((await auth().run({ env: { PATH: bogus }, cwd: "/tmp" })).status).toBe("fail");
   });
 
   test("rate limit: skips without a key, and probes with one", async () => {
@@ -257,6 +259,17 @@ describe("amp + apiKey env mapping", () => {
   });
   test("diagnosticApiKeyEnv maps a google provider apiKey", () => {
     expect(diagnosticApiKeyEnv("pi", { provider: "google", apiKey: "g" })).toEqual({ GOOGLE_API_KEY: "g" });
+  });
+  test("antigravity api-key and rate-limit checks both skip", async () => {
+    const strategy = getDiagnosticStrategy("antigravity");
+    expect((await check(strategy, "api_key_valid").run({ env: {}, cwd: "/tmp" })).status).toBe("skip");
+    expect((await check(strategy, "rate_limit_status").run({ env: {}, cwd: "/tmp" })).status).toBe("skip");
+  });
+  test("pi with an unrecognized bare model resolves no provider and passes auth to pi", async () => {
+    const strategy = getDiagnosticStrategy("pi", { model: "llama-3-70b" });
+    const r = await check(strategy, "api_key_valid").run({ env: {}, cwd: "/tmp" });
+    expect(r.status).toBe("skip");
+    expect(r.message).toContain("unset");
   });
 });
 
