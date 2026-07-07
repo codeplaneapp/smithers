@@ -36,7 +36,7 @@ function truncateToBytes(text, maxBytes, keep = "head") {
  * @param {import("node:child_process").ChildProcess} child
  * @param {boolean} detached
  */
-function killChildTree(child, detached) {
+export function killChildTree(child, detached) {
     if (!child.pid) {
         child.kill("SIGKILL");
         return;

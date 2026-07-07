@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { withAbort } from "../src/withAbort.js";
+import { withAbort, abortPromise } from "../src/withAbort.js";
 
 /**
  * Wrap an AbortSignal so we can count how many "abort" listeners are added and
@@ -54,5 +54,74 @@ describe("withAbort — listener cleanup", () => {
     const controller = new AbortController();
     const result = await withAbort(Promise.resolve(42), controller.signal);
     expect(result).toBe(42);
+  });
+
+  test("rejects with AbortError when the signal aborts mid-flight", async () => {
+    const controller = new AbortController();
+    // A promise that never settles on its own, so the abort listener is the
+    // only thing that can win the race — exercising the onAbort handler.
+    const pending = new Promise(() => {});
+    const promise = withAbort(pending, controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  test("removes the abort listener after an aborted race", async () => {
+    const controller = new AbortController();
+    const counts = trackAbortListeners(controller.signal);
+    const promise = withAbort(new Promise(() => {}), controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+    expect(counts.added - counts.removed).toBe(0);
+  });
+});
+
+describe("abortPromise — direct", () => {
+  test("returns null when no signal is supplied", () => {
+    expect(abortPromise(undefined)).toBeNull();
+  });
+
+  test("attaches an abort listener and rejects once when a live signal fires", async () => {
+    const controller = new AbortController();
+    const handle = abortPromise(controller.signal);
+    expect(handle).not.toBeNull();
+    controller.abort();
+    await expect(handle.promise).rejects.toMatchObject({ name: "AbortError" });
+    // cleanup detaches the listener without throwing.
+    expect(() => handle.cleanup()).not.toThrow();
+  });
+
+  test("an already-aborted signal yields an immediately-rejecting handle with a no-op cleanup", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const handle = abortPromise(controller.signal);
+    expect(handle).not.toBeNull();
+    // Attach the rejection assertion synchronously so the eagerly-created
+    // rejected promise is never treated as unhandled.
+    const assertion = expect(handle.promise).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    // The no-op cleanup for the already-aborted branch must be callable.
+    expect(() => handle.cleanup()).not.toThrow();
+    await assertion;
+  });
+
+  test("keeps the default no-op cleanup when the listener cannot be attached", async () => {
+    // A live (non-aborted) signal whose addEventListener throws leaves the
+    // Promise executor unable to install the removeEventListener cleanup, so the
+    // returned handle keeps its default no-op cleanup — which must be callable.
+    const fakeSignal = {
+      aborted: false,
+      addEventListener() {
+        throw new Error("cannot attach");
+      },
+      removeEventListener() {},
+    };
+    const handle = abortPromise(/** @type {any} */ (fakeSignal));
+    expect(handle).not.toBeNull();
+    // Swallow the executor's rejection so it is never flagged as unhandled.
+    const rejection = expect(handle.promise).rejects.toThrow("cannot attach");
+    expect(() => handle.cleanup()).not.toThrow();
+    await rejection;
   });
 });

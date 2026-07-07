@@ -18,7 +18,7 @@ function throwIfAborted(signal) {
  * @param {AbortSignal} [signal]
  * @returns {{ promise: Promise<never>, cleanup: () => void } | null}
  */
-function abortPromise(signal) {
+export function abortPromise(signal) {
     if (!signal)
         return null;
     if (signal.aborted)
