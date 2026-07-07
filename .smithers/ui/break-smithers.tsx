@@ -56,7 +56,7 @@ function Badge({ text, color }: { text: string; color: string }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-      <span style={{ fontSize: 11, color: theme.textMuted ?? "#8a8f98", minWidth: 70, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
+      <span style={{ fontSize: 11, color: theme.textDim ?? "#8a8f98", minWidth: 70, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
       <span style={{ fontSize: 13, color: theme.text ?? "#e6e6e6" }}>{children}</span>
     </div>
   );
@@ -100,7 +100,7 @@ function RoundCard({ runId, iteration, sig, active }: { runId: string; iteration
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontSize: 15, fontWeight: 700, color: theme.text ?? "#e6e6e6" }}>Round {iteration}</span>
         {active ? <Badge text="live" color="#5b8def" /> : null}
-        {e?.suite ? <span style={{ fontSize: 12, color: theme.textMuted ?? "#8a8f98" }}>suite: {e.suite}</span> : null}
+        {e?.suite ? <span style={{ fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>suite: {e.suite}</span> : null}
         {e ? <Badge text={e.ok ? "evals ok" : `evals exit ${e.exitCode}`} color={e.ok ? "#3aa675" : "#e5484d"} /> : null}
       </div>
 
@@ -110,18 +110,18 @@ function RoundCard({ runId, iteration, sig, active }: { runId: string; iteration
             <span style={{ fontSize: 14, fontWeight: 600, color: theme.text ?? "#e6e6e6" }}>🔨 {f.title}</span>
             {f.severity ? <Badge text={f.severity} color={SEV_COLOR[f.severity] ?? "#8a8f98"} /> : null}
             {f.kind ? <Badge text={f.kind} color={KIND_COLOR[f.kind] ?? "#8a8f98"} /> : null}
-            {f.area ? <span style={{ fontSize: 12, color: theme.textMuted ?? "#8a8f98" }}>{f.area}</span> : null}
+            {f.area ? <span style={{ fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>{f.area}</span> : null}
           </div>
-          {f.whatWasBad ? <div style={{ fontSize: 12, color: theme.textMuted ?? "#9aa0a6", lineHeight: 1.5 }}>{f.whatWasBad}</div> : null}
+          {f.whatWasBad ? <div style={{ fontSize: 12, color: theme.textDim ?? "#9aa0a6", lineHeight: 1.5 }}>{f.whatWasBad}</div> : null}
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: theme.textMuted ?? "#8a8f98" }}>· breaking smithers…</div>
+        <div style={{ fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>· breaking smithers…</div>
       )}
 
       {a?.id ? (
         <Field label="eval">
           <code style={{ background: "#00000033", padding: "1px 6px", borderRadius: 4 }}>{a.id}</code>
-          {a.verify ? <span style={{ marginLeft: 8, fontSize: 12, color: theme.textMuted ?? "#8a8f98" }}>verify: {a.verify} · {a.tier}</span> : null}
+          {a.verify ? <span style={{ marginLeft: 8, fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>verify: {a.verify} · {a.tier}</span> : null}
         </Field>
       ) : null}
 
@@ -130,7 +130,7 @@ function RoundCard({ runId, iteration, sig, active }: { runId: string; iteration
           {c.committed ? (
             <span style={{ color: "#3aa675" }}>✓ {c.message || c.note}</span>
           ) : (
-            <span style={{ color: theme.textMuted ?? "#8a8f98" }}>— {c.note}</span>
+            <span style={{ color: theme.textDim ?? "#8a8f98" }}>— {c.note}</span>
           )}
         </Field>
       ) : null}
@@ -201,7 +201,7 @@ function App() {
     >
       {!runId ? (
         <section className="card">
-          <div style={{ padding: 24, textAlign: "center", color: theme.textMuted ?? "#8a8f98" }}>
+          <div style={{ padding: 24, textAlign: "center", color: theme.textDim ?? "#8a8f98" }}>
             No <code>break-smithers</code> run yet. Launch one:
             <pre style={{ marginTop: 8, fontSize: 12 }}>
               {`smithers up .smithers/workflows/break-smithers.tsx -d --input '{"deadlineIso":"2026-07-06T22:00:00-04:00"}'`}
@@ -212,7 +212,7 @@ function App() {
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
           {/* Left: the round-by-round EDD feed. */}
           <section style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: theme.textMuted ?? "#8a8f98", fontFamily: "monospace" }}>{runId}</div>
+            <div style={{ fontSize: 12, color: theme.textDim ?? "#8a8f98", fontFamily: "monospace" }}>{runId}</div>
             {rounds.map((i) => (
               <RoundCard key={i} runId={runId} iteration={i} sig={sigFor(i)} active={i === maxRound && status === "running"} />
             ))}
@@ -221,11 +221,11 @@ function App() {
           {/* Right: live low-level views. */}
           <section style={{ display: "flex", flexDirection: "column", gap: 12, position: "sticky", top: 12 }}>
             <div>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.textMuted ?? "#8a8f98", marginBottom: 6 }}>Run tree</div>
+              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.textDim ?? "#8a8f98", marginBottom: 6 }}>Run tree</div>
               <RunTree runId={runId} style={{ maxHeight: 320 }} />
             </div>
             <div>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.textMuted ?? "#8a8f98", marginBottom: 6 }}>Live events</div>
+              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.textDim ?? "#8a8f98", marginBottom: 6 }}>Live events</div>
               <RunEventLog runId={runId} style={{ maxHeight: 360 }} />
             </div>
           </section>

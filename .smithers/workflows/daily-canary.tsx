@@ -410,7 +410,7 @@ Return JSON:
           </Task>
         ) : null}
 
-        {prepare && canary && memoryUpdate && bugHunt ? (
+        {prepare && canary && memory && memoryUpdate && bugHunt ? (
           <Task id="output" output={outputs.output} retries={0}>
             {() => {
               const summaryPath =
