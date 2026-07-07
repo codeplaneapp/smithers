@@ -72,6 +72,13 @@ describe("SmithersGatewayClient", () => {
     expect(calls[0].init.method).toBe("POST");
     expect(calls[0].init.body).toBe(JSON.stringify({ filter: { hasUi: true } }));
     expect(new Headers(calls[0].init.headers).get("content-type")).toBe("application/json");
+
+    // pauseRun is a thin typed RPC wrapper like the others; exercise it so the
+    // full stable-RPC surface is driven end to end.
+    await client.pauseRun({ runId: "run-1" });
+    expect(calls[1].url).toBe("http://gateway.test/v1/rpc/pauseRun");
+    expect(calls[1].init.method).toBe("POST");
+    expect(JSON.parse(String(calls[1].init.body))).toEqual({ runId: "run-1" });
   });
 
   test("preserves ws+unix socket paths when opening WebSocket connections", async () => {

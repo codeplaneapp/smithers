@@ -520,4 +520,48 @@ describe("streamRunEvents subscribe AbortSignal handling (real WS server)", () =
     // Prompt rejection proves the signal short-circuits the stalled subscribe.
     expect(Date.now() - start).toBeLessThan(1000);
   });
+
+  test("aborting mid-backoff wakes the resilient loop instead of sleeping out the full delay", async () => {
+    // The server drops every socket right after subscribe with no terminal
+    // frame, so the resilient generator falls into its real backoff sleep. A
+    // deliberately long backoff means the sleep is still running when the caller
+    // aborts — the abort listener must clear the timer and resolve immediately,
+    // and the loop must then stop rather than reconnecting.
+    running = startRealGatewayServer({
+      onSubscribed: (ws) => {
+        setTimeout(() => ws.close(), 5);
+      },
+    });
+    const client = new SmithersGatewayClient({ baseUrl: running.baseUrl });
+    const controller = new AbortController();
+    let reconnects = 0;
+
+    const started = Date.now();
+    const iterate = (async () => {
+      for await (const _frame of client.streamRunEventsResilient(
+        { runId: "run-1" },
+        {
+          signal: controller.signal,
+          // A long, non-jittered backoff so the abort lands inside the sleep.
+          backoff: { baseMs: 2_000, maxMs: 10_000, factor: 2, jitter: 0 },
+          onReconnect: () => {
+            reconnects += 1;
+            // Fire the abort a beat AFTER the sleep begins (not before it), so
+            // sleepWithSignal registers its abort listener and is woken by it.
+            setTimeout(() => controller.abort(), 40);
+          },
+        },
+      )) {
+        void _frame;
+      }
+    })();
+
+    await iterate;
+    const elapsed = Date.now() - started;
+    // The loop entered backoff once and was woken by the abort well before the
+    // 2s sleep would have elapsed.
+    expect(reconnects).toBe(1);
+    expect(elapsed).toBeLessThan(1_500);
+    expect(controller.signal.aborted).toBe(true);
+  });
 });
