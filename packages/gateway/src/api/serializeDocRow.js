@@ -1,13 +1,18 @@
-import { normalizeApiRow } from "./normalizeApiRow.ts";
+import { normalizeApiRow } from "./normalizeApiRow.js";
 
-export function serializeDocRow<Row extends Record<string, unknown>>(row: Row): Row {
+/**
+ * @template {Record<string, unknown>} Row
+ * @param {Row} row
+ * @returns {Row}
+ */
+export function serializeDocRow(row) {
   const normalized = normalizeApiRow(row);
-  return {
+  return /** @type {Row} */ (/** @type {unknown} */ ({
     path: normalized.path,
     kind: normalized.kind,
     content: normalized.content,
     contentHash: normalized.contentHash,
     updatedAtMs: normalized.updatedAtMs,
     deletedAtMs: normalized.deletedAtMs ?? null,
-  } as unknown as Row;
+  }));
 }

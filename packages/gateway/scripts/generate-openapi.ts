@@ -8,9 +8,9 @@ import {
   getRequiredScopeForGatewayMethod,
   type GatewayRpcDefinition,
   type JsonSchema,
-} from "../src/rpc/index.ts";
-import { GATEWAY_SCOPE_DESCRIPTIONS, GATEWAY_SCOPE_VALUES } from "../src/auth/scopes.ts";
-import type { GatewayScope } from "../src/auth/scopes.ts";
+} from "../src/rpc/index.js";
+import { GATEWAY_SCOPE_DESCRIPTIONS, GATEWAY_SCOPE_VALUES } from "../src/auth/scopes.js";
+import type { GatewayScope } from "../src/auth/scopes.js";
 
 type OpenApiDocument = {
   openapi: string;

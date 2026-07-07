@@ -12,8 +12,8 @@ import {
   successSchema,
   requestFrameSchema,
 } from "../scripts/generate-openapi.ts";
-import { GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, SMITHERS_API_VERSION } from "../src/rpc/index.ts";
-import { GATEWAY_SCOPE_VALUES } from "../src/auth/scopes.ts";
+import { GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, SMITHERS_API_VERSION } from "../src/rpc/index.js";
+import { GATEWAY_SCOPE_VALUES } from "../src/auth/scopes.js";
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 

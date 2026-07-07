@@ -1,4 +1,4 @@
-export const apiCollectionNames = [
+export const apiCollectionNames = /** @type {const} */ ([
   "runs",
   "run_events",
   "nodes",
@@ -7,4 +7,4 @@ export const apiCollectionNames = [
   "crons",
   "tickets",
   "docs",
-] as const;
+]);

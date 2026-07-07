@@ -1,6 +1,11 @@
-import { normalizeApiRow } from "./normalizeApiRow.ts";
+import { normalizeApiRow } from "./normalizeApiRow.js";
 
-export function serializeRunEventRow<Row extends Record<string, unknown>>(row: Row): Row {
+/**
+ * @template {Record<string, unknown>} Row
+ * @param {Row} row
+ * @returns {Row}
+ */
+export function serializeRunEventRow(row) {
   const normalized = normalizeApiRow(row);
   const payloadJson = normalized.payloadJson;
   let payload = normalized.payload;
@@ -11,11 +16,11 @@ export function serializeRunEventRow<Row extends Record<string, unknown>>(row: R
       payload = payloadJson;
     }
   }
-  return {
+  return /** @type {Row} */ (/** @type {unknown} */ ({
     runId: normalized.runId,
     seq: normalized.seq,
     event: normalized.event ?? normalized.type,
     payload,
     ...(normalized.timestampMs === undefined ? {} : { timestampMs: normalized.timestampMs }),
-  } as unknown as Row;
+  }));
 }

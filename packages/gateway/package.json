@@ -6,24 +6,24 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
     },
     "./rpc": {
-      "types": "./src/rpc/index.ts",
-      "import": "./src/rpc/index.ts",
-      "default": "./src/rpc/index.ts"
+      "types": "./src/rpc/index.d.ts",
+      "import": "./src/rpc/index.js",
+      "default": "./src/rpc/index.js"
     },
     "./auth/scopes": {
-      "types": "./src/auth/scopes.ts",
-      "import": "./src/auth/scopes.ts",
-      "default": "./src/auth/scopes.ts"
+      "types": "./src/auth/scopes.d.ts",
+      "import": "./src/auth/scopes.js",
+      "default": "./src/auth/scopes.js"
     },
     "./api": {
-      "types": "./src/api/index.ts",
-      "import": "./src/api/index.ts",
-      "default": "./src/api/index.ts"
+      "types": "./src/api/index.d.ts",
+      "import": "./src/api/index.js",
+      "default": "./src/api/index.js"
     }
   },
   "files": [
@@ -33,7 +33,7 @@
   "scripts": {
     "generate:openapi": "bun run scripts/generate-openapi.ts",
     "check:openapi": "bun run scripts/generate-openapi.ts --check",
-    "build": "bun run check:openapi && tsc -p tsconfig.json --noEmit",
+    "build": "bun run check:openapi && tsup --dts-only",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test tests"
   },

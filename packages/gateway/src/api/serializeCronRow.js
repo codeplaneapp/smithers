@@ -1,6 +1,11 @@
-import { normalizeApiRow } from "./normalizeApiRow.ts";
+import { normalizeApiRow } from "./normalizeApiRow.js";
 
-export function serializeCronRow<Row extends Record<string, unknown>>(row: Row): Row {
+/**
+ * @template {Record<string, unknown>} Row
+ * @param {Row} row
+ * @returns {Row}
+ */
+export function serializeCronRow(row) {
   const normalized = normalizeApiRow(row);
   const workflowPath = typeof normalized.workflowPath === "string" ? normalized.workflowPath : "";
   const workflow = typeof normalized.workflow === "string"
@@ -8,7 +13,7 @@ export function serializeCronRow<Row extends Record<string, unknown>>(row: Row):
     : workflowPath.startsWith("gateway:")
       ? workflowPath.slice("gateway:".length)
       : workflowPath;
-  return {
+  return /** @type {Row} */ (/** @type {unknown} */ ({
     cronId: normalized.cronId,
     pattern: normalized.pattern,
     workflowPath,
@@ -18,5 +23,5 @@ export function serializeCronRow<Row extends Record<string, unknown>>(row: Row):
     lastRunAtMs: normalized.lastRunAtMs ?? null,
     nextRunAtMs: normalized.nextRunAtMs ?? null,
     errorJson: normalized.errorJson ?? null,
-  } as unknown as Row;
+  }));
 }

@@ -1,8 +1,13 @@
-import { normalizeApiRow } from "./normalizeApiRow.ts";
+import { normalizeApiRow } from "./normalizeApiRow.js";
 
-export function serializeMemoryFactRow<Row extends Record<string, unknown>>(row: Row): Row {
+/**
+ * @template {Record<string, unknown>} Row
+ * @param {Row} row
+ * @returns {Row}
+ */
+export function serializeMemoryFactRow(row) {
   const normalized = normalizeApiRow(row);
-  return {
+  return /** @type {Row} */ (/** @type {unknown} */ ({
     namespace: normalized.namespace,
     key: normalized.key,
     valueJson: normalized.valueJson,
@@ -10,5 +15,5 @@ export function serializeMemoryFactRow<Row extends Record<string, unknown>>(row:
     createdAtMs: normalized.createdAtMs,
     updatedAtMs: normalized.updatedAtMs,
     ttlMs: normalized.ttlMs ?? null,
-  } as unknown as Row;
+  }));
 }

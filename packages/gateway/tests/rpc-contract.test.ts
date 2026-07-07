@@ -50,8 +50,8 @@ import {
   type CreateTicketRequest,
   type UpdateTicketRequest,
   type DeleteTicketRequest,
-} from "../src/rpc/index.ts";
-import { GATEWAY_SCOPE_VALUES, hasGatewayScope, type GatewayScope } from "../src/auth/scopes.ts";
+} from "../src/rpc/index.js";
+import { GATEWAY_SCOPE_VALUES, hasGatewayScope, type GatewayScope } from "../src/auth/scopes.js";
 
 /**
  * A minimal, dependency-free JSON Schema validator covering exactly the schema

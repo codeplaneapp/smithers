@@ -1,10 +1,15 @@
-import { normalizeApiRow } from "./normalizeApiRow.ts";
+import { normalizeApiRow } from "./normalizeApiRow.js";
 
-export function serializeRunRow<Row extends Record<string, unknown>>(row: Row): Row {
+/**
+ * @template {Record<string, unknown>} Row
+ * @param {Row} row
+ * @returns {Row}
+ */
+export function serializeRunRow(row) {
   const normalized = normalizeApiRow(row);
   if (normalized.workflowKey === undefined && typeof normalized.configJson === "string") {
     try {
-      const config = JSON.parse(normalized.configJson) as { gatewayWorkflowKey?: unknown };
+      const config = /** @type {{ gatewayWorkflowKey?: unknown }} */ (JSON.parse(normalized.configJson));
       if (typeof config.gatewayWorkflowKey === "string") {
         normalized.workflowKey = config.gatewayWorkflowKey;
       }
@@ -15,5 +20,5 @@ export function serializeRunRow<Row extends Record<string, unknown>>(row: Row): 
   if (normalized.workflowKey === undefined && typeof normalized.workflowName === "string") {
     normalized.workflowKey = normalized.workflowName;
   }
-  return normalized as Row;
+  return /** @type {Row} */ (normalized);
 }

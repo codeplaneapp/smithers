@@ -1,6 +1,8 @@
-import { getRequiredScopeForGatewayMethod } from "../rpc/index.ts";
+import { getRequiredScopeForGatewayMethod } from "../rpc/index.js";
 
-export const GATEWAY_SCOPE_VALUES = [
+/** @typedef {(typeof GATEWAY_SCOPE_VALUES)[number]} GatewayScope */
+
+export const GATEWAY_SCOPE_VALUES = /** @type {const} */ ([
   "run:read",
   "run:write",
   "run:admin",
@@ -15,11 +17,10 @@ export const GATEWAY_SCOPE_VALUES = [
   "ticket:read",
   "ticket:write",
   "observability:read",
-] as const;
+]);
 
-export type GatewayScope = (typeof GATEWAY_SCOPE_VALUES)[number];
-
-export const GATEWAY_SCOPE_DESCRIPTIONS: Record<GatewayScope, string> = {
+/** @type {Record<GatewayScope, string>} */
+export const GATEWAY_SCOPE_DESCRIPTIONS = {
   "run:read": "Read run state, summaries, event streams, node output, and node diffs.",
   "run:write": "Launch, resume, and cancel runs.",
   "run:admin": "Perform elevated run control such as hijack and rewind.",
@@ -36,15 +37,27 @@ export const GATEWAY_SCOPE_DESCRIPTIONS: Record<GatewayScope, string> = {
   "observability:read": "Read DevTools and other observability streams.",
 };
 
-const RUN_SCOPE_ORDER: GatewayScope[] = ["run:read", "run:write", "run:admin"];
-const CRON_SCOPE_ORDER: GatewayScope[] = ["cron:read", "cron:write"];
-const TICKET_SCOPE_ORDER: GatewayScope[] = ["ticket:read", "ticket:write"];
+/** @type {GatewayScope[]} */
+const RUN_SCOPE_ORDER = ["run:read", "run:write", "run:admin"];
+/** @type {GatewayScope[]} */
+const CRON_SCOPE_ORDER = ["cron:read", "cron:write"];
+/** @type {GatewayScope[]} */
+const TICKET_SCOPE_ORDER = ["ticket:read", "ticket:write"];
 
-export function isGatewayScope(scope: string): scope is GatewayScope {
-  return (GATEWAY_SCOPE_VALUES as readonly string[]).includes(scope);
+/**
+ * @param {string} scope
+ * @returns {scope is GatewayScope}
+ */
+export function isGatewayScope(scope) {
+  return /** @type {readonly string[]} */ (GATEWAY_SCOPE_VALUES).includes(scope);
 }
 
-function gatewayScopeImplies(granted: GatewayScope, required: GatewayScope): boolean {
+/**
+ * @param {GatewayScope} granted
+ * @param {GatewayScope} required
+ * @returns {boolean}
+ */
+function gatewayScopeImplies(granted, required) {
   if (granted === required) {
     return true;
   }
@@ -60,7 +73,12 @@ function gatewayScopeImplies(granted: GatewayScope, required: GatewayScope): boo
   return false;
 }
 
-function legacyAccessImplies(scope: string, required: GatewayScope): boolean {
+/**
+ * @param {string} scope
+ * @param {GatewayScope} required
+ * @returns {boolean}
+ */
+function legacyAccessImplies(scope, required) {
   switch (scope) {
     case "read":
       return required === "run:read" || required === "cron:read" || required === "account:read" || required === "memory:read" || required === "prompt:read" || required === "score:read" || required === "ticket:read" || required === "observability:read";
@@ -82,8 +100,12 @@ function legacyAccessImplies(scope: string, required: GatewayScope): boolean {
  * not a run:admin method that happens to share the matched name/prefix. We gate
  * the grant on the dispatched method's own required scope so a name/prefix grant
  * can confer at most what that method legitimately needs.
+ *
+ * @param {string} methodName
+ * @param {GatewayScope} requiredScope
+ * @returns {boolean}
  */
-function methodGrantSatisfiesRequiredScope(methodName: string, requiredScope: GatewayScope): boolean {
+function methodGrantSatisfiesRequiredScope(methodName, requiredScope) {
   const methodScope = getRequiredScopeForGatewayMethod(methodName);
   if (methodScope === undefined) {
     return false;
@@ -91,11 +113,13 @@ function methodGrantSatisfiesRequiredScope(methodName: string, requiredScope: Ga
   return gatewayScopeImplies(methodScope, requiredScope);
 }
 
-export function hasGatewayScope(
-  grantedScopes: readonly string[],
-  requiredScope: GatewayScope,
-  methodName?: string,
-): boolean {
+/**
+ * @param {readonly string[]} grantedScopes
+ * @param {GatewayScope} requiredScope
+ * @param {string} [methodName]
+ * @returns {boolean}
+ */
+export function hasGatewayScope(grantedScopes, requiredScope, methodName) {
   const normalized = grantedScopes.map((scope) => scope.trim()).filter(Boolean);
   if (normalized.includes("*")) {
     return true;

@@ -1,8 +1,13 @@
-import { normalizeApiRow } from "./normalizeApiRow.ts";
+import { normalizeApiRow } from "./normalizeApiRow.js";
 
-export function serializeScoreRow<Row extends Record<string, unknown>>(row: Row): Row {
+/**
+ * @template {Record<string, unknown>} Row
+ * @param {Row} row
+ * @returns {Row}
+ */
+export function serializeScoreRow(row) {
   const normalized = normalizeApiRow(row);
-  return {
+  return /** @type {Row} */ (/** @type {unknown} */ ({
     runId: normalized.runId,
     nodeId: normalized.nodeId,
     iteration: normalized.iteration ?? 0,
@@ -15,5 +20,5 @@ export function serializeScoreRow<Row extends Record<string, unknown>>(row: Row)
     scoredAtMs: normalized.scoredAtMs,
     latencyMs: normalized.latencyMs ?? null,
     durationMs: normalized.durationMs ?? null,
-  } as unknown as Row;
+  }));
 }

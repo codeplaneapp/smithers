@@ -59,6 +59,7 @@
     "pg": "^8.22.0"
   },
   "devDependencies": {
+    "@effect/platform-node": "^0.107.0",
     "@types/bun": "latest",
     "typescript": "~6.0.3"
   }
