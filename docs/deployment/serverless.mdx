@@ -33,11 +33,14 @@ can run depends on the runtime's system access:
   works today. Two portability efforts are in flight:
 
   - **Node runtime** (Vercel Node functions, Lambda Node): closest, since Node
-    has `fs` + `child_process`. The engine no longer hard-binds the Bun platform
-    layer (`RunOptions.effectPlatformLayer` accepts `NodeContext.layer`), but a
-    residual chain of `bun:sqlite` / `drizzle-orm/bun-sqlite` value imports still
-    keeps the engine module from loading under plain Node -- being removed
-    incrementally (lazy-loaded so the module imports on Node).
+    has `fs` + `child_process`. The engine module now **imports cleanly under
+    plain Node** (all `bun:sqlite`-reaching value imports are lazy-loaded, guarded
+    by a node-subprocess regression test), and it no longer hard-binds the Bun
+    platform layer (`RunOptions.effectPlatformLayer` accepts `NodeContext.layer`,
+    supplied by your entrypoint from `@effect/platform-node`). Still to land
+    before calling it supported: an end-to-end run-under-Node validation, and
+    the worker-task dispatch path (`@effect/cluster` single-runner) which still
+    requires bun-sqlite when a workflow dispatches worker tasks.
   - **Isolates** (Workers, Edge): further out -- the engine and gateway also use
     `node:fs` / `node:child_process` (git/jj worktrees on a real filesystem),
     which an `@effect/platform` `FileSystem`/`Command` seam must abstract. Today
