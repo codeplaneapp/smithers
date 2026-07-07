@@ -150,7 +150,7 @@ describe("shared/generic structured events", () => {
     test("message_start builds a message payload from nested text shapes", () => {
         const r = normalizeStructuredEventForFamily(
             "opencode",
-            { message: { role: "assistant", content: "hi", id: "m1" } },
+            { message: { role: "assistant", content: "hi" }, id: "m1" },
             "message_start",
         );
         expect(kinds(r)).toEqual(["message.start"]);

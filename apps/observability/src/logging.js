@@ -13,9 +13,16 @@ const LOG_LEVEL_WARNING = 3;
 const LOG_LEVEL_ERROR = 4;
 const LOG_RUNNER_KEY = Symbol.for("smithers.observability.logRunner");
 
-/** @returns {number} */
-function resolveMinLevel() {
-    const env = process.env.SMITHERS_LOG_LEVEL?.toLowerCase();
+/**
+ * Resolve the minimum imperative log level. The environment value is an
+ * injectable parameter (defaulting to `SMITHERS_LOG_LEVEL`) so the mapping is
+ * testable without re-importing the module; module state still captures the
+ * env-derived value once at load time.
+ *
+ * @param {string | undefined} [env]
+ * @returns {number}
+ */
+export function resolveMinLevel(env = process.env.SMITHERS_LOG_LEVEL?.toLowerCase()) {
     switch (env) {
         case "none": return Infinity;
         case "trace":
@@ -75,8 +82,15 @@ export function setSmithersLogRunner(runner) {
     };
 }
 
-/** @param {number} level */
-function toEffectLogLevel(level) {
+/**
+ * Map an imperative smithers log level to the Effect log level used when
+ * running the log program. Exported alongside {@link resolveMinLevel} so the
+ * level mapping (including the catch-all `LogLevel.All` fallback) can be
+ * exercised directly with injected level values.
+ *
+ * @param {number} level
+ */
+export function toEffectLogLevel(level) {
     switch (level) {
         case LOG_LEVEL_DEBUG: return LogLevel.Debug;
         case LOG_LEVEL_INFO: return LogLevel.Info;
