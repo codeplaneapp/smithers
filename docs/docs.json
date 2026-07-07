@@ -125,6 +125,7 @@
           "guides/alerting",
           "guides/agent-trace-otel-verification",
           "deployment/reference",
+          "deployment/serverless",
           "deployment/control-plane",
           "deployment/production-hardening"
         ]

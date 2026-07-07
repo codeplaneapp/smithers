@@ -1,0 +1,112 @@
+---
+title: Serverless deployment
+description: How to run the Smithers control plane serverlessly across platforms -- pick a host, a storage descriptor, and (for full-OS agents) a sandbox provider. Includes the per-platform matrix and cost drivers.
+---
+
+# Serverless deployment
+
+Deploying Smithers serverlessly is three independent choices. This page maps
+each choice onto the platforms Smithers supports today, states honestly what
+runs where, and points at the exact exports. For the conceptual model behind it
+(in-process vs full-OS agents, what's billed), read
+[Where agents run, sandboxes & cost](/concepts/execution-model) first.
+
+1. **A control-plane host** -- where the engine drives the run.
+2. **A storage descriptor** -- where durable run state lives.
+3. **A sandbox provider** -- *only* if your workflow uses CLI / full-OS agents
+   via [`<Sandbox>`](/components/sandbox); in-process SDK agents need none.
+
+## 1. Control-plane host
+
+The engine renders the workflow, schedules tasks, and persists frames. Where it
+can run depends on the runtime's system access:
+
+| Host | Runtime | Runs the engine today? |
+|---|---|---|
+| A Node/Bun server (ECS, App Runner, Cloud Run service, GKE, a VM) | Full Node/Bun | ✅ Yes |
+| Vercel **Node** serverless function | Node (has `fs` + `child_process`) | ✅ Yes |
+| AWS Lambda (Node) | Node | ✅ Yes |
+| Cloudflare **Worker** | V8 isolate (no `fs`/`child_process`) | ⚠️ In progress |
+| Vercel **Edge** function | V8 isolate | ⚠️ In progress |
+
+<Warning>
+  **Isolates (Cloudflare Workers, Vercel Edge) cannot drive a run yet.** The
+  engine and gateway statically use `node:fs` and `node:child_process` (they
+  materialize git/jj worktrees on a real filesystem), so they do not load in a
+  V8 isolate. An `@effect/platform` refactor to make those swappable is in
+  flight. Today, on an isolate you can host **storage + in-process SDK agents**
+  (via `createSmithersCloudflare`), but the run driver still needs a Node/Bun
+  host. Every **Node-based** host above runs the full engine unchanged.
+</Warning>
+
+## 2. Storage descriptor
+
+Durable run state is dialect-abstracted (`sqlite | postgres`), so the same
+control plane runs on any of these:
+
+| Descriptor | Use for |
+|---|---|
+| `bun:sqlite` (default) | Local dev on Bun. |
+| PGlite | Embedded Postgres, zero external DB. |
+| Postgres | Production: RDS, Cloud SQL, Neon, Supabase, any Postgres. Use the pooled/serverless endpoint on functions. |
+| `createCloudflareDurableObjectSqliteDescriptor` | Cloudflare Workers durable run-of-record (real interactive transactions). |
+| `createCloudflareD1SqliteDescriptor` | Cloudflare D1 -- **read-mostly only** (no interactive transactions; unsafe for durable run state). |
+
+On Node hosts, point Smithers at Postgres and you are done. On Cloudflare, build
+the API with `createSmithersCloudflare` over the Durable Object SQLite
+descriptor (see [Cloudflare](/integrations/cloudflare)).
+
+## 3. Sandbox provider (only for full-OS / CLI agents)
+
+In-process SDK agents (`AnthropicAgent`, `OpenAIAgent`, `HermesAgent`,
+`ElizaAgent`) need **no** provider -- they are HTTPS calls in your process. CLI
+agents (`ClaudeCodeAgent`, `CodexAgent`, `OpenCodeAgent`, …) spawn a vendor
+binary and must run inside a container, which a `SandboxProvider` supplies at
+each `<Sandbox>` boundary. Each provider ships a `create…SandboxProvider`, a
+`register…SandboxProvider`, and a `createMock…SandboxEnvironment` test double.
+
+| Platform | Package | Create fn · provider id | Execution · transport |
+|---|---|---|---|
+| Cloudflare | `@smithers-orchestrator/cloudflare` | `createCloudflareSandboxProvider` · `cloudflare-sandbox` | `@cloudflare/sandbox` container |
+| AWS | `@smithers-orchestrator/aws` | `createAwsSandboxProvider` · `aws-sandbox` | Fargate (ECS) or CodeBuild runner · S3 bundle transport |
+| GCP | `@smithers-orchestrator/gcp` | `createGcpSandboxProvider` · `gcp-sandbox` | Cloud Run Jobs runner · GCS bundle transport |
+| Vercel | `@smithers-orchestrator/vercel` | `createVercelSandboxProvider` · `vercel-sandbox` | Vercel Sandbox compute |
+| Daytona | `@smithers-orchestrator/daytona` | `createDaytonaSandboxProvider` · `daytona-sandbox` | Daytona sandboxes |
+| Any host (Docker) | `@smithers-orchestrator/sandbox` | Docker `http-runner` | Local/remote Docker |
+
+<Note>
+  There is no dedicated Kubernetes provider yet. On a cluster, run the
+  control plane as a normal Node deployment and use the Docker `http-runner`
+  (or register a custom `SandboxProvider` that submits a K8s Job) for the
+  full-OS agent path.
+</Note>
+
+## Per-platform recipes
+
+| Platform | Control plane | Storage | Sandbox provider (CLI agents) | Status |
+|---|---|---|---|---|
+| **Local / any VM** | Node/Bun | `bun:sqlite` / PGlite / Postgres | Docker `http-runner` | ✅ Full |
+| **Vercel (Node fn)** | Node function | Postgres (Neon pooled) | `createVercelSandboxProvider` | ✅ Full |
+| **AWS** | ECS / App Runner / Lambda | Postgres (RDS) | `createAwsSandboxProvider` (Fargate/CodeBuild) | ✅ Full |
+| **GCP** | Cloud Run service / GKE | Postgres (Cloud SQL) | `createGcpSandboxProvider` (Cloud Run Jobs) | ✅ Full |
+| **Kubernetes** | Node deployment | Postgres | Docker `http-runner` / custom | ✅ Full (no first-class provider yet) |
+| **Cloudflare** | Worker + Durable Object | DO-SQLite | `createCloudflareSandboxProvider` | ⚠️ Storage + SDK agents; run driver in progress |
+
+## What it costs
+
+Three independent axes (detailed in
+[the execution model](/concepts/execution-model#what-you-pay-for----three-billing-axes)):
+
+- **Model tokens / subscription** -- billed by the model provider.
+- **Control-plane host compute** -- your Node function/server wall-clock (or
+  Worker/DO requests + duration on Cloudflare).
+- **Sandbox provider compute** -- only when a `<Sandbox>` runs: the container/VM
+  wall-clock from create → run → teardown, plus the bundle-transport storage
+  (S3/GCS/DO). A workflow of only in-process SDK agents pays this axis nothing.
+
+## Read next
+
+- [Where agents run, sandboxes & cost](/concepts/execution-model) -- the model.
+- [Cloudflare](/integrations/cloudflare) -- Workers, DO-SQLite, and the provider.
+- [AWS](/integrations/aws-sandbox-provider) · [GCP](/integrations/gcp-sandbox-provider) · [Vercel](/integrations/vercel-sandbox-provider) · [Daytona](/integrations/daytona-sandbox-provider) sandbox providers.
+- [Control plane](/deployment/control-plane) · [Production hardening](/deployment/production-hardening).
