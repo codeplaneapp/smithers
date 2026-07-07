@@ -115,6 +115,22 @@ describe("replayFromCheckpoint", () => {
         expect(analyzeNode?.state).toBe("pending");
         expect(analyzeNode?.lastAttempt).toBeNull();
     });
+    test("restoreVcs runs the VCS revision restore step and reports it in the result", async () => {
+        const { adapter } = createTestDb();
+        await captureSnapshot(adapter, "parent-run", 4, sampleData());
+        // No VCS tag was recorded for this frame, so the restore step resolves
+        // to restored:false without touching the working copy — but the
+        // restoreVcs branch (assigning vcsRestored/vcsPointer/vcsError) runs.
+        const result = await replayFromCheckpoint(adapter, {
+            parentRunId: "parent-run",
+            frameNo: 4,
+            restoreVcs: true,
+            cwd: "/repo",
+        });
+        expect(result.vcsRestored).toBe(false);
+        expect(result.vcsPointer).toBeNull();
+        expect(result.vcsError).toBeUndefined();
+    });
     test("fails when parent snapshot does not exist", async () => {
         const { adapter } = createTestDb();
         await expect(replayFromCheckpoint(adapter, {

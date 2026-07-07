@@ -212,6 +212,116 @@ describe("VCS restore success paths", () => {
         }
     });
 
+    test("revertToAttempt returns the VCS error and emits a failed RevertFinished when restore fails", async () => {
+        restoreCalls.length = 0;
+        const { adapter, sqlite } = buildDb();
+        try {
+            const runId = "run-revert-vcs-fails";
+            await seedRun(adapter, runId, { targetPointer: "change-fail" });
+            const beforeFrames = await adapter.listFrames(runId, 10);
+            const { revertToAttempt } = await import("../src/revert.js");
+            const events = [];
+
+            const result = await revertToAttempt(adapter, {
+                runId,
+                nodeId: "target",
+                iteration: 0,
+                attempt: 1,
+                onProgress: (event) => events.push(event),
+            });
+
+            expect(result).toEqual({ success: false, error: "restore failed", jjPointer: "change-fail" });
+            expect(restoreCalls).toEqual([{ pointer: "change-fail", cwd: "/repo" }]);
+            expect(events.map((event) => event.type)).toEqual(["RevertStarted", "RevertFinished"]);
+            expect(events.at(-1)).toMatchObject({ success: false, error: "restore failed", jjPointer: "change-fail" });
+            // A failed restore leaves the frames untouched (no DB cleanup runs).
+            expect(await adapter.listFrames(runId, 10)).toEqual(beforeFrames);
+        } finally {
+            sqlite.close();
+        }
+    });
+
+    test("revertToAttempt stringifies a non-Error thrown during DB cleanup", async () => {
+        restoreCalls.length = 0;
+        const { adapter, sqlite } = buildDb();
+        try {
+            const runId = "run-revert-nonerror-cleanup";
+            await seedRun(adapter, runId);
+            // A torn transaction can reject with a non-Error value; formatError
+            // must coerce it via String(error) rather than reading .message.
+            const failingAdapter = Object.create(adapter);
+            failingAdapter.withTransaction = () => Promise.reject("frame cleanup exploded");
+            const { revertToAttempt } = await import("../src/revert.js");
+            const events = [];
+
+            const result = await revertToAttempt(failingAdapter, {
+                runId,
+                nodeId: "target",
+                iteration: 0,
+                attempt: 1,
+                onProgress: (event) => events.push(event),
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.jjPointer).toBe("change-target");
+            expect(result.error).toContain("DB frame cleanup failed");
+            expect(result.error).toContain("frame cleanup exploded");
+            expect(events.at(-1)).toMatchObject({ type: "RevertFinished", success: false });
+            const run = await Effect.runPromise(adapter.getRun(runId));
+            expect(["needs_attention", "failed"]).toContain(run?.status);
+        } finally {
+            sqlite.close();
+        }
+    });
+
+    test("jumpToFrame uses the default jj-backed pointer impls when none are injected", async () => {
+        restoreCalls.length = 0;
+        const { adapter, sqlite } = buildDb();
+        try {
+            await seedRun(adapter, "run-jump-default");
+            await adapter.insertFrame({
+                runId: "run-jump-default",
+                frameNo: 0,
+                createdAtMs: 100,
+                xmlJson: JSON.stringify({ kind: "element", tag: "smithers:workflow", props: {} }),
+                xmlHash: "jh0",
+            });
+            await adapter.insertFrame({
+                runId: "run-jump-default",
+                frameNo: 1,
+                createdAtMs: 200,
+                xmlJson: JSON.stringify({ kind: "element", tag: "smithers:workflow", props: { frame: 1 } }),
+                xmlHash: "jh1",
+            });
+            await adapter.insertFrame({
+                runId: "run-jump-default",
+                frameNo: 2,
+                createdAtMs: 300,
+                xmlJson: JSON.stringify({ kind: "element", tag: "smithers:workflow", props: { frame: 2 } }),
+                xmlHash: "jh2",
+            });
+            const { jumpToFrame } = await import("../src/jumpToFrame.js");
+
+            // No getCurrentPointerImpl / revertToPointerImpl are injected, so the
+            // module's default jj-backed impls run against the mocked vcs/jj seam.
+            const result = await jumpToFrame({
+                adapter,
+                runId: "run-jump-default",
+                frameNo: 1,
+                confirm: true,
+                caller: "user:owner",
+            });
+
+            expect(result.ok).toBe(true);
+            expect(result.newFrameNo).toBe(1);
+            // The default getJjPointer + revertToJjPointer seams were exercised.
+            expect(restoreCalls.some((call) => call.fn === "getJjPointer")).toBe(true);
+            expect(restoreCalls.some((call) => call.pointer === "change-target")).toBe(true);
+        } finally {
+            sqlite.close();
+        }
+    });
+
     test("timeTravel reports vcsRestored true after a successful restore", async () => {
         restoreCalls.length = 0;
         const { adapter, sqlite } = buildDb();
