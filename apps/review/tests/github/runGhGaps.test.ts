@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runGh } from "../../src/github/runGh";
+import { runGh, runGhJsonLines } from "../../src/github/runGh";
 
 const FAKE_GH = fileURLToPath(new URL("./fixtures/fake-gh", import.meta.url));
 
@@ -43,5 +43,16 @@ describe("runGh failure branches", () => {
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe("runGhJsonLines", () => {
+  test("parses one record per line, unwraps double-encoded strings, and skips junk", async () => {
+    // Injected gh (the seam the function exposes) returns mixed lines: a plain
+    // object, a double-encoded JSON string, a blank line, and unparseable junk.
+    const gh = async () =>
+      ['{"a":1}', JSON.stringify(JSON.stringify({ b: 2 })), "", "not json at all", '"plain string"'].join("\n");
+    const records = await runGhJsonLines("/tmp", ["api", "x"], gh);
+    expect(records).toEqual([{ a: 1 }, { b: 2 }]);
   });
 });
