@@ -2,12 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Cli, z } from "incur";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { parseMcpSurfaceArgv } from "../src/argv-utils.js";
 import { registerRawToolsOnMcpServer } from "../src/mcp/mcp-mode.js";
 import { createSemanticMcpServer, registerSemanticTools, } from "../src/mcp/semantic-server.js";
-import { SEMANTIC_TOOL_NAMES } from "../src/mcp/semantic-tools.js";
+import { createSemanticToolDefinitions, SEMANTIC_TOOL_NAMES } from "../src/mcp/semantic-tools.js";
 const servers = [];
 const clients = [];
+const tempDirs = [];
 afterEach(async () => {
     while (clients.length > 0) {
         const client = clients.pop();
@@ -21,7 +24,17 @@ afterEach(async () => {
             await server.close();
         }
     }
+    while (tempDirs.length > 0) {
+        rmSync(tempDirs.pop(), { recursive: true, force: true });
+    }
 });
+function tempCwd() {
+    const root = join(process.cwd(), "tmp", "verification");
+    mkdirSync(root, { recursive: true });
+    const dir = mkdtempSync(join(root, "smithers-semantic-mcp-"));
+    tempDirs.push(dir);
+    return dir;
+}
 describe("semantic MCP surface", () => {
     test("parses scoped outbound MCP options for the production --mcp entrypoint", () => {
         expect(parseMcpSurfaceArgv([
@@ -164,6 +177,56 @@ describe("semantic MCP surface", () => {
         expect(seenExtra.signal).toBeInstanceOf(AbortSignal);
         expect(seenExtra.requestId).toBeDefined();
     });
+
+    test("run_workflow validates the real workflow summary through Client.callTool", async () => {
+        const cwd = tempCwd();
+        mkdirSync(join(cwd, ".smithers", "workflows"), { recursive: true });
+        writeFileSync(join(cwd, ".smithers", "workflows", "quick.tsx"), [
+            "/** @jsxImportSource smithers-orchestrator */",
+            'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+            'import { z } from "zod";',
+            "const { smithers, outputs } = createSmithers({ result: z.object({ value: z.number() }) });",
+            "export default smithers(() => (",
+            '  <Workflow name="quick">',
+            '    <Task id="answer" output={outputs.result}>',
+            "      {{ value: 42 }}",
+            "    </Task>",
+            "  </Workflow>",
+            "));",
+            "",
+        ].join("\n"));
+        const server = createSemanticMcpServer({
+            name: "smithers-test",
+            version: "test",
+            allowedTools: [],
+        });
+        registerSemanticTools(server, createSemanticToolDefinitions({ cwd: () => cwd }).filter((tool) => tool.name === "run_workflow"));
+        servers.push(server);
+        const client = new Client({
+            name: "smithers-semantic-test-client",
+            version: "test",
+        });
+        clients.push(client);
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        await Promise.all([
+            server.connect(serverTransport),
+            client.connect(clientTransport),
+        ]);
+
+        const result = await client.callTool({
+            name: "run_workflow",
+            arguments: {
+                workflowId: "quick",
+                runId: "semantic-mcp-quick",
+                waitForTerminal: true,
+            },
+        });
+        expect(result.structuredContent.ok).toBe(true);
+        expect(result.structuredContent.data.workflow.id).toBe("quick");
+        expect(result.structuredContent.data.workflow.path).toBe(result.structuredContent.data.workflow.entryFile);
+        expect(result.structuredContent.data.launchMode).toBe("waited");
+        expect(result.structuredContent.data.status).toBe("finished");
+    }, 30_000);
 
     test("rejects invalid semantic tool discovery definitions before serving", () => {
         const baseTool = {

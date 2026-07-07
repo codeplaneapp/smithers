@@ -175,9 +175,9 @@ describe("smithers eval command", () => {
         if (result.exitCode !== 0) {
             throw new Error(`smithers eval exited ${result.exitCode}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
         }
-        expect(result.stdout).toContain("Eval suite: smoke");
+        expect(result.stdout).toContain("suiteId: smoke");
         expect(result.stdout).toContain("eval-smoke-ci-alpha");
-        expect(result.stdout).toContain("Dry run only");
+        expect(result.stdout).toContain("plannedCases: 1");
     });
 
     test("runs cases, checks outputs, and writes a report", () => {

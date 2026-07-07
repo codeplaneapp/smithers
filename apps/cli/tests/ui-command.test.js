@@ -382,7 +382,23 @@ describe("smithers ui", () => {
 
     test("autostarts a local Gateway when no Gateway is already listening", async () => {
         const repo = createTempRepo();
-        writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+        repo.write(".smithers/workflows/basic.tsx", [
+            "/** @jsxImportSource smithers-orchestrator */",
+            "import { createSmithers, Workflow, Task, UI } from \"smithers-orchestrator\";",
+            "import { z } from \"zod\";",
+            "",
+            "const { smithers, outputs } = createSmithers({",
+            "  result: z.object({ ok: z.boolean() }),",
+            "});",
+            "",
+            "export default smithers(() => (",
+            "  <Workflow name=\"basic\">",
+            "    <UI entry=\"../ui/basic.tsx\" title=\"Basic UI\" />",
+            "    <Task id=\"write-result\" output={outputs.result}>{{ ok: true }}</Task>",
+            "  </Workflow>",
+            "));",
+            "",
+        ].join("\n"));
         repo.write(".smithers/ui/basic.tsx", [
             "import React from \"react\";",
             "",

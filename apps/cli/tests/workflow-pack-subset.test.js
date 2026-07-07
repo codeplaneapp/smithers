@@ -65,9 +65,9 @@ test("selecting a workflow subset installs exactly that subset + transitive deps
     const workflowFiles = readdirSync(workflowDir)
         .filter((f) => f.endsWith(".tsx"))
         .map((f) => f.replace(/\.tsx$/, ""));
-    // System workflows (durable init, post-failure autopsy) are ALWAYS installed
+    // System workflows (durable init, post-failure autopsy, upgrade) are ALWAYS installed
     // regardless of the selection — the closure force-includes them.
-    expect(workflowFiles.sort()).toEqual([...selected, "init", "post-failure"].sort());
+    expect(workflowFiles.sort()).toEqual([...selected, "init", "post-failure", "upgrade"].sort());
 
     // --- components ---
     const componentDir = join(smithersDir, "components");

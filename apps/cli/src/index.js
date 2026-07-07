@@ -2104,6 +2104,26 @@ function resolveSupervisorOptions(intervalRaw, staleThresholdRaw, maxConcurrent,
     };
 }
 /**
+ * @param {UpCommandOptions} options
+ */
+function validateUpOptionConsistency(options) {
+    if (options.supervise && !options.serve) {
+        return {
+            code: "SUPERVISE_REQUIRES_SERVE",
+            message: "--supervise on `smithers up` requires --serve. Use `smithers supervise` for standalone mode.",
+            exitCode: 4,
+        };
+    }
+    if (Boolean(options.resumeClaimOwner) !== Boolean(options.resumeClaimHeartbeat)) {
+        return {
+            code: "INVALID_RESUME_CLAIM",
+            message: "--resume-claim-owner and --resume-claim-heartbeat must be provided together.",
+            exitCode: 4,
+        };
+    }
+    return null;
+}
+/**
  * @param {EventsCommandOptions} options
  * @returns {NormalizedEventsQuery}
  */
@@ -2146,7 +2166,6 @@ function normalizeEventsQuery(options) {
  */
 async function executeUpCommand(c, workflowPath, options, fail) {
     try {
-        const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
         let input;
         let annotations;
         try {
@@ -2183,6 +2202,19 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 exitCode: 4,
             });
         }
+        const optionError = validateUpOptionConsistency(options);
+        if (optionError)
+            return fail(optionError);
+        try {
+            workflowPath = resolveWorkflowArg(workflowPath);
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({ code: err.code, message: err.message, exitCode: 4 });
+            }
+            throw err;
+        }
+        const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
         const { resume, resumeRunId } = normalizeResumeOption(options.resume);
         const runId = options.runId ?? resumeRunId;
         // Detached mode: spawn ourselves as a background process
@@ -2304,20 +2336,6 @@ async function executeUpCommand(c, workflowPath, options, fail) {
         }
         if (options.backend) {
             process.env.SMITHERS_BACKEND = options.backend;
-        }
-        if (options.supervise && !options.serve) {
-            return fail({
-                code: "SUPERVISE_REQUIRES_SERVE",
-                message: "--supervise on `smithers up` requires --serve. Use `smithers supervise` for standalone mode.",
-                exitCode: 4,
-            });
-        }
-        if (Boolean(options.resumeClaimOwner) !== Boolean(options.resumeClaimHeartbeat)) {
-            return fail({
-                code: "INVALID_RESUME_CLAIM",
-                message: "--resume-claim-owner and --resume-claim-heartbeat must be provided together.",
-                exitCode: 4,
-            });
         }
         const workflow = await loadWorkflow(workflowPath);
         // If the workspace has been migrated to pglite (backend.json says pglite)
@@ -2459,7 +2477,10 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                     process.stderr.write(`${pc.dim(report.opened ? `↗ opened ${relReport}` : `report written to ${relReport}`)}\n`);
                 }
             }
-            return c.ok(summarizeRunResult(result), {
+            const outputResult = c.format === "json" || c.format === "jsonl"
+                ? result
+                : summarizeRunResult(result);
+            return c.ok(outputResult, {
                 cta: result.runId ? withAgentNextSteps({
                     workflowId: workflowIdFromPath(workflowPath),
                     workflowFile: workflowPath,
@@ -4816,17 +4837,10 @@ const cli = Cli.create({
             }
             return runTuiCommand(c, fail, { preselect });
         }
-        let workflowFile;
-        try {
-            workflowFile = resolveWorkflowArg(c.args.workflow);
-        }
-        catch (err) {
-            if (err instanceof SmithersError) {
-                return fail({ code: err.code, message: err.message, exitCode: 4 });
-            }
-            throw err;
-        }
-        return executeUpCommand(c, workflowFile, c.options, fail);
+        const optionError = validateUpOptionConsistency(c.options);
+        if (optionError)
+            return fail(optionError);
+        return executeUpCommand(c, c.args.workflow, c.options, fail);
     },
 })
     // =========================================================================

@@ -71,10 +71,11 @@ test("single-task legacy workflow (plan) ends with a deterministic output task, 
   expect(run.json.status).toBe("finished");
   // The terminal output task derives `stepCount` from the plan it read — a field
   // the raw plan task never produces — so its presence proves the output task
-  // ran and became the run's surfaced output.
-  expect(run.json.output).toBeDefined();
-  expect(Array.isArray(run.json.output.steps)).toBe(true);
-  expect(run.json.output.stepCount).toBe(run.json.output.steps.length);
+  // ran. Machine JSON preserves the raw output-table row array.
+  expect(Array.isArray(run.json.output)).toBe(true);
+  const output = run.json.output[0];
+  expect(Array.isArray(output.steps)).toBe(true);
+  expect(output.stepCount).toBe(output.steps.length);
 });
 
 test("component-based legacy workflow (review) aggregates reviewer verdicts in its output task", () => {
@@ -89,10 +90,11 @@ test("component-based legacy workflow (review) aggregates reviewer verdicts in i
   expect(run.json.status).toBe("finished");
   // The output task counts reviewers and folds their verdicts — fields no single
   // reviewer's output carries — so they prove the aggregate task fired.
-  expect(run.json.output).toBeDefined();
-  expect(run.json.output.reviewers).toBeGreaterThanOrEqual(1);
-  expect(typeof run.json.output.approved).toBe("boolean");
-  expect(typeof run.json.output.totalIssues).toBe("number");
+  expect(Array.isArray(run.json.output)).toBe(true);
+  const output = run.json.output[0];
+  expect(output.reviewers).toBeGreaterThanOrEqual(1);
+  expect(typeof output.approved).toBe("boolean");
+  expect(typeof output.totalIssues).toBe("number");
 });
 
 test("validation-loop legacy workflow (implement) surfaces files changed + verdicts in its output task", () => {
@@ -108,8 +110,9 @@ test("validation-loop legacy workflow (implement) surfaces files changed + verdi
   // The output task reads the last implement attempt plus the validate + review
   // verdicts the ValidationLoop produced — the aggregated shape (filesChanged +
   // allTestsPassing + approved) is what no single inner task emits together.
-  expect(run.json.output).toBeDefined();
-  expect(Array.isArray(run.json.output.filesChanged)).toBe(true);
-  expect(typeof run.json.output.allTestsPassing).toBe("boolean");
-  expect(typeof run.json.output.approved).toBe("boolean");
+  expect(Array.isArray(run.json.output)).toBe(true);
+  const output = run.json.output[0];
+  expect(Array.isArray(output.filesChanged)).toBe(true);
+  expect(typeof output.allTestsPassing).toBe("boolean");
+  expect(typeof output.approved).toBe("boolean");
 });

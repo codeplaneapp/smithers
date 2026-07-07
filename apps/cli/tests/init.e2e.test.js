@@ -37,6 +37,7 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "  export type OutputTarget = any;",
         "  export type SmithersCtx<T = any> = any;",
         "  export const Workflow: any;",
+        "  export const UI: any;",
         "  export const Task: any;",
         "  export const Sequence: any;",
         "  export const Parallel: any;",

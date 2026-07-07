@@ -147,7 +147,9 @@ class FakeInput extends EventEmitter {
     }
     /** Drive the prompt's onKeypress directly, mirroring readline keypress events. */
     keypress(seq, key) {
-        this.emit("keypress", seq, key);
+        this.emit("keypress", seq, typeof key === "object" && key !== null
+            ? { sequence: seq, ...key }
+            : key);
     }
 }
 
