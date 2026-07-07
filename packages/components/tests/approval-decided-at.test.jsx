@@ -4,6 +4,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
+import { z } from "zod";
 import { Approval } from "../src/components/index.js";
 import { createTestSmithers } from "./helpers.js";
 
@@ -127,5 +128,50 @@ describe("Approval regression: decidedAt and autoApprove callback evaluation", (
             conditionMet: true,
             revertOnMet: false,
         });
+    });
+
+    test("decision falls back to an explicit null note when the schema rejects a note-less payload", async () => {
+        const { db, cleanup } = createTestSmithers({});
+        ensureSmithersTables(db);
+        const adapter = new SmithersDb(db);
+        try {
+            await adapter.insertOrUpdateApproval({
+                runId: "run",
+                nodeId: "approval-note-required",
+                iteration: 0,
+                status: "approved",
+                requestedAtMs: 1,
+                decidedAtMs: null,
+                note: null,
+                decidedBy: null,
+                requestJson: null,
+                decisionJson: null,
+                autoApproved: false,
+            });
+            // A schema that REQUIRES `note` makes the note-less base fail safeParse,
+            // forcing the `{ ...base, note: null }` fallback.
+            const noteRequired = z.object({
+                approved: z.boolean(),
+                decidedBy: z.string().nullable(),
+                decidedAt: z.string().nullable(),
+                note: z.string(),
+            });
+            const rendered = await render(
+                <Approval id="approval-note-required" output={noteRequired} request={{ title: "Approve" }} />,
+            );
+            const decision = await withTaskRuntime(
+                runtimeFor(db, "run", "approval-note-required"),
+                () => rendered.tasks[0].computeFn(),
+            );
+            expect(decision).toEqual({
+                approved: true,
+                decidedBy: null,
+                decidedAt: null,
+                note: null,
+            });
+        }
+        finally {
+            cleanup();
+        }
     });
 });

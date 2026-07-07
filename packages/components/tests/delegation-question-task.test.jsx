@@ -120,3 +120,62 @@ describe("DelegationQuestionTask answer folding", () => {
         }
     });
 });
+
+describe("DelegationQuestionTask no-input paths", () => {
+    test("computing outside a Smithers task throws HUMAN_TASK_OUTSIDE_RUNTIME", async () => {
+        const rendered = await render(
+            <DelegationQuestionTask id="dc:goal:question-1" output="dcQuestion" form={baseForm} prompt="p" />,
+        );
+        // No withTaskRuntime wrapper -> getTaskRuntime() is null.
+        await expect(rendered.tasks[0].computeFn()).rejects.toThrow(/only be resolved while a Smithers task is executing/);
+    });
+
+    test("no approval and no human response throws HUMAN_TASK_NO_INPUT", async () => {
+        const { db, cleanup } = createTestSmithers({});
+        ensureSmithersTables(db);
+        const rendered = await render(
+            <DelegationQuestionTask id="dc:goal:question-1" output="dcQuestion" form={baseForm} prompt="p" />,
+        );
+        try {
+            await expect(
+                withTaskRuntime(runtimeFor(db, "run", "dc:goal:question-1"), () => rendered.tasks[0].computeFn()),
+            ).rejects.toThrow(/No human input received/);
+        }
+        finally {
+            cleanup();
+        }
+    });
+
+    test("a cancelled human request throws HUMAN_TASK_CANCELLED", async () => {
+        const { db, cleanup } = createTestSmithers({});
+        ensureSmithersTables(db);
+        const adapter = new SmithersDb(db);
+        await adapter.insertHumanRequest({
+            requestId: "human:run:dc:goal:question-1:0",
+            runId: "run",
+            nodeId: "dc:goal:question-1",
+            iteration: 0,
+            kind: "ask",
+            status: "cancelled",
+            prompt: "q1?",
+            schemaJson: null,
+            optionsJson: null,
+            responseJson: null,
+            requestedAtMs: 1,
+            answeredAtMs: null,
+            answeredBy: null,
+            timeoutAtMs: null,
+        });
+        const rendered = await render(
+            <DelegationQuestionTask id="dc:goal:question-1" output="dcQuestion" form={baseForm} prompt="p" />,
+        );
+        try {
+            await expect(
+                withTaskRuntime(runtimeFor(db, "run", "dc:goal:question-1"), () => rendered.tasks[0].computeFn()),
+            ).rejects.toThrow(/was cancelled/);
+        }
+        finally {
+            cleanup();
+        }
+    });
+});

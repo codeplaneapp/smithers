@@ -745,6 +745,28 @@ describe("DelegationExecution", () => {
         expect(approval.needsApproval).toBe(true);
     });
 
+    test("throws when approval gates materialize but outputs.dcApproval is missing", async () => {
+        const approvalGates = {
+            dcGates: [
+                gatesRow("root", []),
+                gatesRow("root/core", []),
+                gatesRow("root/docs", []),
+                gatesRow("root/core/b", []),
+                gatesRow("root/core/a", [{ method: "approval", policyMatch: "pushes to main" }]),
+            ],
+        };
+        const passed = {
+            dcExec: [{ nodeId: "dc:root:core:a:exec", iteration: 0, logicalId: "root/core/a", attempt: 1, summary: "s", artifacts: [] }],
+        };
+        const { dcApproval, ...outputsWithoutApproval } = outputs;
+        await expect(
+            renderWithOutputs(
+                <DelegationExecution agents={agents} outputs={outputsWithoutApproval} approvalPolicy="approve pushes to main" />,
+                { ...completePlans, ...approvalGates, ...passed },
+            ),
+        ).rejects.toThrow(/outputs\.dcApproval is not provided/);
+    });
+
     test("dev-preview gates render only for nodes that declared them, after exec, and gate the attempt loop", async () => {
         const previewGates = {
             dcGates: [

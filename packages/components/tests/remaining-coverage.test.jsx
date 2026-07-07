@@ -487,6 +487,8 @@ describe("remaining component branch coverage", () => {
                 enumEntries: { _zod: { def: { type: "enum", entries: { first: "first" } } } },
                 objectFallback: { _zod: { def: { type: "object" } } },
                 customDescription: { _zod: { def: { type: "custom", description: "Custom" } } },
+                // A literal with no values array falls back to the placeholder.
+                emptyLiteral: { _zod: { def: { type: "literal", values: [] } } },
                 noDef: {},
             },
         };
@@ -497,6 +499,7 @@ describe("remaining component branch coverage", () => {
             enumEntries: "first",
             objectFallback: {},
             customDescription: "Custom",
+            emptyLiteral: "value",
             noDef: "value",
         });
     });
