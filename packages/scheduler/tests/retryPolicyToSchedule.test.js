@@ -69,6 +69,18 @@ describe("retryPolicyToSchedule edge inputs", () => {
     expect(retryScheduleDelayMs(schedule, 30)).toBe(cap);
   });
 
+  test("an unrecognized backoff clamps to the fixed default instead of crashing", () => {
+    // Regression: this used to fall through the switch, return undefined, and
+    // blow up later with `undefined is not an object (evaluating
+    // 'schedule.initial')` when the first retry delay was computed.
+    const schedule = retryPolicyToSchedule({
+      backoff: "quadratic",
+      initialDelayMs: 100,
+    });
+    expect(retryScheduleDelayMs(schedule, 1)).toBe(100);
+    expect(retryScheduleDelayMs(schedule, 5)).toBe(100);
+  });
+
   test("returns a real Schedule object (shape check)", () => {
     const schedule = retryPolicyToSchedule({
       backoff: "fixed",

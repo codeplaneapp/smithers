@@ -42,7 +42,7 @@ function parseBool(value) {
  */
 function parseNum(value, fallback) {
     const parsed = value ? Number(value) : NaN;
-    return !Number.isNaN(parsed) ? parsed : fallback;
+    return Number.isFinite(parsed) ? parsed : fallback;
 }
 /**
  * @param {readonly { readonly ralphId: string; readonly iteration: number }[]} loopStack

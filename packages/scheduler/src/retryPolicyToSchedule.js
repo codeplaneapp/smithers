@@ -16,11 +16,14 @@ export function retryPolicyToSchedule(policy) {
     const backoff = policy.backoff ?? "fixed";
     const capDelay = Schedule.modifyDelay((_out, delay) => Duration.min(delay, Duration.millis(MAX_RETRY_DELAY_MS)));
     switch (backoff) {
-        case "fixed":
-            return capDelay(Schedule.fixed(Duration.millis(base)));
         case "linear":
             return capDelay(Schedule.linear(Duration.millis(base)));
         case "exponential":
             return capDelay(Schedule.exponential(Duration.millis(base)));
+        default:
+            // Unrecognized backoff values (e.g. from untyped JSON config) clamp
+            // to the same "fixed" default as an absent backoff, rather than
+            // returning undefined and crashing delay computation mid-run.
+            return capDelay(Schedule.fixed(Duration.millis(base)));
     }
 }
