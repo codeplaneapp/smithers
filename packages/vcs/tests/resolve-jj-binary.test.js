@@ -4,7 +4,9 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { Effect } from "effect";
 import * as BunContext from "@effect/platform-bun/BunContext";
+import { accessSync, constants as fsConstants } from "node:fs";
 import { resolveBundledJjPath, resolveJjBinary } from "../src/resolveJjBinary.js";
+import { ensureJjExecutable } from "../src/ensureJjExecutable.js";
 import { runJj } from "../src/jj.js";
 
 const ENV_KEY = "SMITHERS_JJ_PATH";
@@ -82,6 +84,36 @@ describe("resolveJjBinary", () => {
 
 	test("returns null on unsupported platforms", () => {
 		expect(resolveBundledJjPath({ platform: "freebsd", arch: "x64" })).toBeNull();
+	});
+
+	test.skipIf(process.platform === "win32")(
+		"ensureJjExecutable adds the exec bit to a non-executable bundled binary",
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jj-execbit-"));
+			const file = path.join(dir, "jj");
+			// Simulate a binary installed WITHOUT its exec bit (the bun/pnpm
+			// postinstall-skipped case that produced EACCES in the wild).
+			await fs.writeFile(file, "#!/usr/bin/env bash\necho ok\n", { mode: 0o644 });
+			expect(() => accessSync(file, fsConstants.X_OK)).toThrow();
+			ensureJjExecutable(file);
+			expect(() => accessSync(file, fsConstants.X_OK)).not.toThrow();
+		},
+	);
+
+	test.skipIf(process.platform === "win32")(
+		"ensureJjExecutable leaves an already-executable binary untouched",
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jj-execbit-ok-"));
+			const file = path.join(dir, "jj");
+			await fs.writeFile(file, "#!/usr/bin/env bash\necho ok\n", { mode: 0o755 });
+			// Must not throw even though nothing needs repair.
+			ensureJjExecutable(file);
+			expect(() => accessSync(file, fsConstants.X_OK)).not.toThrow();
+		},
+	);
+
+	test("ensureJjExecutable is a no-op (does not throw) for a missing path", () => {
+		expect(() => ensureJjExecutable(path.join(os.tmpdir(), "definitely-missing-jj-xyz"))).not.toThrow();
 	});
 
 	test("runJj spawns the resolved binary (override branch)", async () => {

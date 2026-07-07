@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { ensureJjExecutable } from "./ensureJjExecutable.js";
 
 const require = createRequire(import.meta.url);
 
@@ -67,6 +68,9 @@ export function resolveJjBinary() {
 	const override = process.env.SMITHERS_JJ_PATH;
 	if (override && existsSync(override)) return { path: override, source: "env" };
 	const bundled = resolveBundledJjPath();
-	if (bundled) return { path: bundled, source: "bundled" };
+	if (bundled) {
+		ensureJjExecutable(bundled);
+		return { path: bundled, source: "bundled" };
+	}
 	return { path: "jj", source: "path" };
 }

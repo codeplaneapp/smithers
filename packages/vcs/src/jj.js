@@ -251,8 +251,21 @@ export function workspaceAdd(name, path, opts = {}) {
         // Report every attempt: the first uses the current jj syntax, so its error
         // is the real cause; later ones are legacy-syntax fallbacks whose noise
         // (e.g. "unexpected argument '--wc-path'") used to mask it.
-        const hint = ` (partial state may exist at ${path}; consider removing it before retrying)`;
-        return { success: false, error: errors.join("; ") + hint };
+        const joined = errors.join("; ");
+        // A spawn EACCES means the resolved jj binary is not executable — most
+        // often the bundled binary installed without its exec bit (bun/pnpm
+        // skip lifecycle scripts) or a macOS quarantine flag. Point at the
+        // concrete fixes rather than leaving the raw "permission denied".
+        const jjBinary = resolveJjBinary();
+        const permissionDenied = /EACCES|permission denied|PermissionDenied/i.test(joined);
+        const hint = permissionDenied
+            ? ` (cannot execute the jj binary at ${jjBinary.path}. Fix with \`chmod +x ${jjBinary.path}\`` +
+                (process.platform === "darwin"
+                    ? `, clear macOS quarantine with \`xattr -d com.apple.quarantine ${jjBinary.path}\`,`
+                    : ",") +
+                ` or point SMITHERS_JJ_PATH at a working jj)`
+            : ` (partial state may exist at ${path}; consider removing it before retrying)`;
+        return { success: false, error: joined + hint };
     }).pipe(Effect.annotateLogs({
         cwd: opts.cwd ?? "",
         workspaceName: name,
