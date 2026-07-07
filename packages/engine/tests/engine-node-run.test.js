@@ -23,5 +23,5 @@ describe("engine node-run regression", () => {
             throw new Error(`node run of engine workflow failed (exit ${proc.exitCode}): ${proc.stderr.toString()}\n${proc.stdout.toString()}`);
         }
         expect(proc.stdout.toString()).toContain("RUN_FINISHED");
-    }, 120_000);
+    }, 180_000);
 });

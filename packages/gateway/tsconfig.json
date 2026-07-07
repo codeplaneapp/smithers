@@ -6,6 +6,7 @@
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "strict": true,
+    "ignoreDeprecations": "6.0",
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
     "declaration": true,

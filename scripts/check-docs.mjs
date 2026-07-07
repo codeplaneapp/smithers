@@ -70,7 +70,8 @@ const OPENAPI_DECLARATIONS = join(root, "packages/openapi/src/index.d.ts");
 const GATEWAY_CLIENT_INDEX = join(root, "packages/gateway-client/src/index.ts");
 const GATEWAY_CLIENT_SOURCE = join(root, "packages/gateway-client/src/SmithersGatewayClient.ts");
 const GATEWAY_CLIENT_RPC_TYPE_MAP = join(root, "packages/gateway-client/src/GatewayRpcTypeMap.ts");
-const GATEWAY_RPC_INDEX = join(root, "packages/gateway/src/rpc/index.ts");
+const GATEWAY_RPC_INDEX = join(root, "packages/gateway/src/rpc/index.js");
+const GATEWAY_RPC_TYPES = join(root, "packages/gateway/src/rpc/gatewayRpcTypes.ts");
 const GATEWAY_REACT_INDEX = join(root, "packages/gateway-react/src/index.ts");
 const GATEWAY_REACT_ASYNC_STATE = join(root, "packages/gateway-react/src/GatewayAsyncState.ts");
 const GATEWAY_REACT_USE_GATEWAY_RUN = join(root, "packages/gateway-react/src/useGatewayRun.ts");
@@ -1180,15 +1181,15 @@ function checkGatewayAuthDocsMatchRuntimeDefaults() {
 
 function checkGatewayGetRunDocsMatchResponseShape() {
   const files = new Map([
-    [join(root, "packages/gateway/src/rpc/index.ts"), readFileSync(join(root, "packages/gateway/src/rpc/index.ts"), "utf8")],
+    [GATEWAY_RPC_INDEX, readFileSync(GATEWAY_RPC_INDEX, "utf8")],
     [join(root, "docs/rpc/get-run.mdx"), readFileSync(join(root, "docs/rpc/get-run.mdx"), "utf8")],
     [join(root, "docs/integrations/gateway.mdx"), readFileSync(join(root, "docs/integrations/gateway.mdx"), "utf8")],
     [join(root, "docs/guides/custom-workflow-ui.mdx"), readFileSync(join(root, "docs/guides/custom-workflow-ui.mdx"), "utf8")],
     [join(root, "docs/examples/workflow-ui-react.mdx"), readFileSync(join(root, "docs/examples/workflow-ui-react.mdx"), "utf8")],
   ]);
   const required = [
-    [join(root, "packages/gateway/src/rpc/index.ts"), "Fetch one run record with node-state counts and optional derived runState."],
-    [join(root, "packages/gateway/src/rpc/index.ts"), "responseSchema: runRecord"],
+    [GATEWAY_RPC_INDEX, "Fetch one run record with node-state counts and optional derived runState."],
+    [GATEWAY_RPC_INDEX, "responseSchema: runRecord"],
     [join(root, "docs/rpc/get-run.mdx"), "Response: run record with `summary` and optional `runState: RunStateView`"],
     [join(root, "docs/integrations/gateway.mdx"), "getRun,runId,Run record + optional runState"],
     [join(root, "docs/guides/custom-workflow-ui.mdx"), "{ data: Record<string, unknown>, loading, error, refetch }"],
@@ -1196,8 +1197,8 @@ function checkGatewayGetRunDocsMatchResponseShape() {
     [join(root, "docs/examples/workflow-ui-react.mdx"), "runRecord?.runState?.state ?? runRecord?.status"],
   ];
   const forbidden = [
-    [join(root, "packages/gateway/src/rpc/index.ts"), "Fetch the current RunStateView for one run."],
-    [join(root, "packages/gateway/src/rpc/index.ts"), 'responseSchema: objectSchema({}, [], "RunStateView.", true)'],
+    [GATEWAY_RPC_INDEX, "Fetch the current RunStateView for one run."],
+    [GATEWAY_RPC_INDEX, 'responseSchema: objectSchema({}, [], "RunStateView.", true)'],
     [join(root, "docs/rpc/get-run.mdx"), "Response: `RunStateView`"],
     [join(root, "docs/integrations/gateway.mdx"), "getRun,runId,RunStateView,"],
     [join(root, "docs/guides/custom-workflow-ui.mdx"), "RunStateView, refetches as the seq advances"],
@@ -1227,12 +1228,13 @@ function checkGatewayGetRunDocsMatchResponseShape() {
 function checkGatewayStreamDevToolsDocsMatchRuntimeShape() {
   const files = new Map([
     [GATEWAY_RPC_INDEX, readFileSync(GATEWAY_RPC_INDEX, "utf8")],
+    [GATEWAY_RPC_TYPES, readFileSync(GATEWAY_RPC_TYPES, "utf8")],
     [join(root, "packages/server/src/gateway.js"), readFileSync(join(root, "packages/server/src/gateway.js"), "utf8")],
     [join(root, "docs/rpc/stream-dev-tools.mdx"), readFileSync(join(root, "docs/rpc/stream-dev-tools.mdx"), "utf8")],
     [GATEWAY_INTEGRATION, readFileSync(GATEWAY_INTEGRATION, "utf8")],
   ]);
   const required = [
-    [GATEWAY_RPC_INDEX, "export type StreamDevToolsRequest = {\n  runId: string;\n  afterSeq?: number;\n  fromSeq?: number;\n};"],
+    [GATEWAY_RPC_TYPES, "export type StreamDevToolsRequest = {\n  runId: string;\n  afterSeq?: number;\n  fromSeq?: number;\n};"],
     [GATEWAY_RPC_INDEX, "requestSchema: objectSchema({ runId, afterSeq, fromSeq }, [\"runId\"]),"],
     [GATEWAY_RPC_INDEX, "exampleResponse: { streamId: \"stream_01\", runId: \"run_01\", fromSeq: 10, afterSeq: 10 },"],
     [join(root, "packages/server/src/gateway.js"), "fromSeq: typeof fromSeq === \"number\" ? fromSeq : null,\n                        afterSeq: typeof fromSeq === \"number\" ? fromSeq : null,"],
@@ -1271,13 +1273,14 @@ function checkGatewayCancelRunDocsMatchRuntimeErrors() {
   const cancelRunDoc = join(root, "docs/rpc/cancel-run.mdx");
   const files = new Map([
     [GATEWAY_RPC_INDEX, readFileSync(GATEWAY_RPC_INDEX, "utf8")],
+    [GATEWAY_RPC_TYPES, readFileSync(GATEWAY_RPC_TYPES, "utf8")],
     [serverSource, readFileSync(serverSource, "utf8")],
     [cancelRunDoc, readFileSync(cancelRunDoc, "utf8")],
     [GATEWAY_INTEGRATION, readFileSync(GATEWAY_INTEGRATION, "utf8")],
   ]);
   const required = [
     [serverSource, 'return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently active");'],
-    [GATEWAY_RPC_INDEX, '| "RUN_NOT_ACTIVE"'],
+    [GATEWAY_RPC_TYPES, '| "RUN_NOT_ACTIVE"'],
     [GATEWAY_RPC_INDEX, 'RUN_NOT_ACTIVE: { version: SMITHERS_API_VERSION, code: "RUN_NOT_ACTIVE", httpStatus: 409'],
     [GATEWAY_RPC_INDEX, 'errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RUN_NOT_ACTIVE", "Internal"],'],
     [cancelRunDoc, "include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RUN_NOT_ACTIVE`, and `Internal`"],
