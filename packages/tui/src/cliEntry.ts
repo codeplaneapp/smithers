@@ -20,11 +20,17 @@ import { fileURLToPath } from "node:url";
  * bare `smithers` on PATH (unpredictable / possibly stale); they should surface
  * a clear error or disable the action instead.
  */
-export function resolveCliEntry(): string | null {
+export function resolveCliEntry(
+  // Injectable module resolver so the not-installed fallback (resolution
+  // throwing → null) is exercisable in an environment where the CLI package
+  // *is* resolvable. Production callers pass nothing and get the real
+  // `import.meta.resolve`.
+  resolveModule: (specifier: string) => string = (specifier) => import.meta.resolve(specifier),
+): string | null {
   const fromEnv = process.env.SMITHERS_CLI;
   if (fromEnv) return fromEnv;
   try {
-    const entryUrl = import.meta.resolve("@smithers-orchestrator/cli");
+    const entryUrl = resolveModule("@smithers-orchestrator/cli");
     return fileURLToPath(entryUrl);
   } catch {
     return null;

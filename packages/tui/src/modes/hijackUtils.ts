@@ -32,6 +32,16 @@ function matchesAny(name: string, hints: readonly string[]): boolean {
   return hints.some((h) => name.includes(h));
 }
 
+function activeAttemptKey(nodeId: string, payload: Record<string, unknown> | undefined): string {
+  const rawIteration = payload?.["iteration"] ?? payload?.["attempt"];
+  return JSON.stringify([nodeId, typeof rawIteration === "number" ? rawIteration : 0]);
+}
+
+function hasAttemptIdentity(payload: Record<string, unknown> | undefined): boolean {
+  const rawIteration = payload?.["iteration"] ?? payload?.["attempt"];
+  return typeof rawIteration === "number";
+}
+
 /**
  * Node ids with a live agent session, derived from events: a node that has a
  * start signal more recently than any terminal signal is still running. This is
@@ -39,7 +49,7 @@ function matchesAny(name: string, hints: readonly string[]): boolean {
  * non-root nodes to `queued`).
  */
 export function activeNodeIdsFromEvents(events: readonly GatewayEventFrame[]): Set<string> {
-  const active = new Set<string>();
+  const activeAttempts = new Map<string, string>();
   for (const ev of events) {
     const { name: rawName, payload } = unwrapEvent(ev);
     const name = rawName.toLowerCase();
@@ -50,12 +60,18 @@ export function activeNodeIdsFromEvents(events: readonly GatewayEventFrame[]): S
     const nodeId = typeof rawNodeId === "string" ? rawNodeId : undefined;
     if (!nodeId) continue;
     if (matchesAny(name, END_HINTS)) {
-      active.delete(nodeId);
+      if (hasAttemptIdentity(payload)) {
+        activeAttempts.delete(activeAttemptKey(nodeId, payload));
+      } else {
+        for (const [key, activeNodeId] of activeAttempts) {
+          if (activeNodeId === nodeId) activeAttempts.delete(key);
+        }
+      }
     } else if (matchesAny(name, START_HINTS)) {
-      active.add(nodeId);
+      activeAttempts.set(activeAttemptKey(nodeId, payload), nodeId);
     }
   }
-  return active;
+  return new Set(activeAttempts.values());
 }
 
 /**

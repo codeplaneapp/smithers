@@ -99,20 +99,24 @@ export function flattenTree(
 
   const result: FlatNode[] = [];
 
-  function walk(n: GatewayRunNode, depth: number) {
+  function walk(n: GatewayRunNode, depth: number, visiting: Set<string>) {
+    const key = runNodeKey(n);
+    if (visiting.has(key)) return;
+    visiting.add(key);
     const childIds = n.childIds ?? [];
     const hasChildren = childIds.length > 0;
-    const isCollapsed = collapsed.has(runNodeKey(n));
+    const isCollapsed = collapsed.has(key);
     result.push({ node: n, depth, hasChildren, isCollapsed });
     if (!isCollapsed && hasChildren) {
       for (const childId of childIds) {
         const child = nodeMap.get(childId);
-        if (child) walk(child, depth + 1);
+        if (child) walk(child, depth + 1, visiting);
       }
     }
+    visiting.delete(key);
   }
 
-  walk(root, 0);
+  walk(root, 0, new Set());
   return result;
 }
 

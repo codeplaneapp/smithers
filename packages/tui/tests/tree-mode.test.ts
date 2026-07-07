@@ -81,6 +81,32 @@ describe("treeUtils", () => {
       const result = flattenTree(nodes, root, collapsed);
       expect(result[0]!.isCollapsed).toBe(true);
     });
+
+    it("uses unique row keys for duplicate logical node ids and per-attempt collapse", () => {
+      const root = node("root", { key: "root", childIds: ["body#0", "body#1"] });
+      const attempt0 = node("body", { key: "body#0", parentId: "root", iteration: 0, childIds: ["leaf#0"] });
+      const attempt1 = node("body", { key: "body#1", parentId: "root", iteration: 1, childIds: ["leaf#1"] });
+      const leaf0 = node("leaf", { key: "leaf#0", parentId: "body#0", iteration: 0 });
+      const leaf1 = node("leaf", { key: "leaf#1", parentId: "body#1", iteration: 1 });
+
+      const result = flattenTree([root, attempt0, attempt1, leaf0, leaf1], root, new Set(["body#0"]));
+
+      expect(result.map((r) => [r.node.key, r.node.id, r.depth])).toEqual([
+        ["root", "root", 0],
+        ["body#0", "body", 1],
+        ["body#1", "body", 1],
+        ["leaf#1", "leaf", 2],
+      ]);
+    });
+
+    it("does not recurse forever when malformed childIds contain a cycle", () => {
+      const root = node("root", { childIds: ["a"] });
+      const a = node("a", { parentId: "root", childIds: ["root"] });
+
+      const result = flattenTree([root, a], root, new Set());
+
+      expect(result.map((r) => r.node.id)).toEqual(["root", "a"]);
+    });
   });
 
   describe("nodeGlyph", () => {

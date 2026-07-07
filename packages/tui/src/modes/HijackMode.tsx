@@ -26,13 +26,19 @@ type Phase = "selecting" | "handing-off" | "returned";
  * node (resolveHijackCandidate matches it against the attempt's nodeId), so the
  * right agent session is handed off.
  */
-function hijackCommand(runId: string, nodeId: string): { command: string; args: string[] } | null {
-  const cliPath = resolveCliEntry();
+export function hijackCommand(
+  runId: string,
+  nodeId: string,
+  // Injectable so the "no CLI entry" branch is exercisable in a repo where the
+  // CLI package always resolves. Production passes nothing.
+  resolveCli: () => string | null = resolveCliEntry,
+): { command: string; args: string[] } | null {
+  const cliPath = resolveCli();
   if (!cliPath) return null;
   return { command: process.argv[0] ?? "bun", args: [cliPath, "hijack", runId, "--target", nodeId] };
 }
 
-function Selecting({
+export function Selecting({
   nodes,
   onSelect,
   onCancel,
@@ -81,14 +87,16 @@ function Selecting({
   );
 }
 
-function HandingOff({
+export function HandingOff({
   runId,
   node,
   onDone,
+  resolveCli = resolveCliEntry,
 }: {
   runId: string;
   node: GatewayRunNode;
   onDone: (code: number | null) => void;
+  resolveCli?: () => string | null;
 }) {
   const renderer = useRenderer();
   const nodeId = node.id;
@@ -101,7 +109,7 @@ function HandingOff({
   onDoneRef.current = onDone;
 
   useEffect(() => {
-    const cmd = hijackCommand(runId, nodeId);
+    const cmd = hijackCommand(runId, nodeId, resolveCli);
     if (!cmd) {
       // No CLI entry resolvable — can't hand off. Surface as an error exit
       // rather than guessing a `smithers` on PATH.
@@ -127,7 +135,7 @@ function HandingOff({
   );
 }
 
-function Returned({
+export function Returned({
   node,
   exitCode,
   onDismiss,
@@ -172,9 +180,11 @@ function Returned({
 export function HijackMode({
   runId,
   onBack,
+  resolveCli = resolveCliEntry,
 }: {
   runId: string;
   onBack?: () => void;
+  resolveCli?: () => string | null;
 }) {
   const { nodes } = useRunTree(runId);
   const { events } = useRunEvents(runId, { maxEvents: TUI_EVENT_CAP });
@@ -187,7 +197,7 @@ export function HijackMode({
 
   // Hijack runs through the real CLI; without a resolvable entry it can't work,
   // so say so plainly instead of offering a hand-off that would fail.
-  if (resolveCliEntry() === null) {
+  if (resolveCli() === null) {
     return (
       <box width="100%" height="100%" flexDirection="column">
         <text fg="#ff5f5f">  HIJACK unavailable — cannot resolve the smithers CLI.</text>
@@ -206,6 +216,7 @@ export function HijackMode({
       <HandingOff
         runId={runId}
         node={selectedNode}
+        resolveCli={resolveCli}
         onDone={(code) => {
           setExitCode(code);
           setPhase("returned");

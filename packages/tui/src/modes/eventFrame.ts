@@ -69,7 +69,8 @@ export function nodeLogEvents(
     const { nodeId: evNodeId, payload } = normalizeFrame(e);
     if (evNodeId !== nodeId) return false;
     if (iteration === undefined) return true;
-    const evIter = typeof payload?.["iteration"] === "number" ? (payload["iteration"] as number) : 0;
+    const rawIteration = payload?.["iteration"] ?? payload?.["attempt"];
+    const evIter = typeof rawIteration === "number" ? rawIteration : 0;
     return evIter === (iteration ?? 0);
   });
 }

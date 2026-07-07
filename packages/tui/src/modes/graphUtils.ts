@@ -31,15 +31,17 @@ export function computeColumnDepths(
   const depths = new Map<string, number>();
 
   function bfsFrom(startKey: string, startDepth: number) {
-    const queue: Array<[string, number]> = [[startKey, startDepth]];
+    const queue: Array<[string, number, readonly string[]]> = [[startKey, startDepth, []]];
     while (queue.length > 0) {
-      const [key, d] = queue.shift()!;
+      const [key, d, path] = queue.shift()!;
+      if (path.includes(key)) continue;
       const prev = depths.get(key) ?? -1;
       if (d <= prev) continue;
       depths.set(key, d);
       const n = nodeMap.get(key);
+      const nextPath = [...path, key];
       for (const childKey of n?.childIds ?? []) {
-        if (nodeMap.has(childKey)) queue.push([childKey, d + 1]);
+        if (nodeMap.has(childKey)) queue.push([childKey, d + 1, nextPath]);
       }
     }
   }

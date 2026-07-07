@@ -98,6 +98,16 @@ describe("nodeLogEvents", () => {
     expect(nodeLogEvents(events, "n-1", 0).map((e) => e.seq)).toEqual([1]);
   });
 
+  it("matches the attempt alias when filtering logs for a loop/retry attempt", () => {
+    const events = [
+      wrapped(1, "node.start", { nodeId: "loop", attempt: 0 }),
+      wrapped(2, "tool.use", { nodeId: "loop", attempt: 1, name: "bash" }),
+      wrapped(3, "tool.use", { nodeId: "loop", iteration: 1, name: "read_file" }),
+    ];
+    expect(nodeLogEvents(events, "loop", 1).map((e) => e.seq)).toEqual([2, 3]);
+    expect(nodeLogEvents(events, "loop", 0).map((e) => e.seq)).toEqual([1]);
+  });
+
   it("matches by id alone for container nodes (iteration undefined)", () => {
     const events = [
       wrapped(1, "node.start", { nodeId: "n-1", iteration: 0 }),
@@ -162,6 +172,22 @@ describe("hijack readers on wrapped frames", () => {
     const active = activeNodeIdsFromEvents(events);
     expect(active.has("n-2")).toBe(true);
     expect(active.has("n-1")).toBe(false);
+  });
+
+  it("tracks active loop/retry attempts independently for hijack detection", () => {
+    const events = [
+      wrapped(1, "node.start", { nodeId: "loop", iteration: 0 }),
+      wrapped(2, "node.start", { nodeId: "loop", iteration: 1 }),
+      wrapped(3, "node.end", { nodeId: "loop", iteration: 0 }),
+    ];
+
+    expect(activeNodeIdsFromEvents(events).has("loop")).toBe(true);
+    expect(
+      activeNodeIdsFromEvents([
+        ...events,
+        wrapped(4, "node.end", { nodeId: "loop", iteration: 1 }),
+      ]).has("loop"),
+    ).toBe(false);
   });
 
   it("builds hijack candidates from wrapped events even when the tree is empty", () => {

@@ -111,6 +111,33 @@ describe("graphUtils – computeGraphLayout", () => {
     expect(layout.colGroups[1]).toContain("a");
     expect(layout.colGroups[2]).toContain("b");
   });
+
+  it("keys duplicate logical node ids by unique row key", () => {
+    const root = node("root", { key: "root", childIds: ["body#0", "body#1"] });
+    const attempt0 = node("body", { key: "body#0", parentId: "root", iteration: 0 });
+    const attempt1 = node("body", { key: "body#1", parentId: "root", iteration: 1 });
+
+    const layout = computeGraphLayout([root, attempt0, attempt1], root);
+
+    expect(layout.positions.get("body#0")).toEqual({ col: 1, row: 0 });
+    expect(layout.positions.get("body#1")).toEqual({ col: 1, row: 1 });
+    expect(layout.positions.has("body")).toBe(false);
+    expect(layout.edges).toEqual([
+      { fromId: "root", toId: "body#0" },
+      { fromId: "root", toId: "body#1" },
+    ]);
+  });
+
+  it("terminates on malformed cyclic child links", () => {
+    const root = node("root", { childIds: ["a"] });
+    const a = node("a", { parentId: "root", childIds: ["root"] });
+
+    const layout = computeGraphLayout([root, a], root);
+
+    expect(layout.positions.get("root")).toEqual({ col: 0, row: 0 });
+    expect(layout.positions.get("a")).toEqual({ col: 1, row: 0 });
+    expect(layout.numCols).toBe(2);
+  });
 });
 
 describe("graphUtils – edgesForConnector", () => {
