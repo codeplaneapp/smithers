@@ -87,7 +87,11 @@ export default smithers((ctx) => {
           let runId: string | null = pinnedRunId || null;
           let status = "unknown";
           if (!runId) {
-            const ps = runCli(["ps", "--json"]) as { runs?: PsRun[] } | null;
+            // High --limit: this workflow's own frequent ticks flood the recent
+            // list, so the default limit-20 hides the target run entirely.
+            const ps = runCli(["ps", "--json", "--limit", "500"]) as {
+              runs?: PsRun[];
+            } | null;
             const runs = ps?.runs ?? [];
             const matches = runs.filter((r) => r.workflowId === workflowId);
             // Prefer a live run over a finished/cancelled one of the same

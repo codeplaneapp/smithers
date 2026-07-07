@@ -11,3 +11,6 @@ pg/
 migrated.json
 dist/
 .DS_Store
+# test-fortress operational artifacts (status page + cron/gateway/run logs)
+test-fortress-status.html
+test-fortress*.log
