@@ -82,6 +82,26 @@ describe("TracingServiceLive.annotate error/empty paths", () => {
     });
 });
 
+describe("TracingServiceLive.withSpan / withCorrelation (direct src import)", () => {
+    test("withSpan infers the span name and withCorrelation seeds the context", async () => {
+        const program = Effect.gen(function* () {
+            const tracing = yield* TracingService;
+            return yield* tracing.withCorrelation(
+                { runId: "run-live", traceId: "trace-live", spanId: "span-live" },
+                tracing.withSpan(
+                    "tool:apply",
+                    Effect.gen(function* () {
+                        const span = yield* Effect.currentSpan;
+                        return span.name;
+                    }),
+                    { toolName: "apply" },
+                ),
+            );
+        }).pipe(Effect.provide(TracingServiceLive));
+        await expect(Effect.runPromise(program)).resolves.toBe("smithers.tool");
+    });
+});
+
 describe("getCurrentSmithersTraceAnnotations (span-storage-backed)", () => {
     test("returns undefined when no span is stored", () => {
         expect(spanAnnotations()).toBeUndefined();

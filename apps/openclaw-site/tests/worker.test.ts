@@ -59,4 +59,16 @@ describe("OpenClaw site worker", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, service: "openclaw-site" });
   });
+
+  test("rejects non-GET/HEAD methods with 405", async () => {
+    const response = await createOpenClawSiteWorker().fetch(
+      new Request("https://openclaw.smithers.sh/", { method: "POST" }),
+      makeEnv(),
+    );
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, HEAD");
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(await response.text()).toBe("method not allowed");
+  });
 });

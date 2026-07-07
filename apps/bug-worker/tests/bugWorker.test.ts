@@ -88,6 +88,22 @@ describe("bug worker", () => {
     expect(res.status).toBe(413);
   });
 
+  test("declared content-length over the cap is rejected 413 before the body is read", async () => {
+    const worker = createBugWorker();
+    const request = new Request("https://bug.smithers.sh/api/bugs", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "cf-connecting-ip": "203.0.113.99",
+        "content-length": String(256 * 1024 + 1),
+      },
+      body: JSON.stringify({ title: "big" }),
+    });
+    const res = await worker.fetch(request, makeEnv());
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "payload too large", maxBytes: 256 * 1024 });
+  });
+
   test("oversized streamed body with no content-length is rejected 413 by the stream counter", async () => {
     const worker = createBugWorker();
     const oversized = new TextEncoder().encode(JSON.stringify({ title: "big", body: "x".repeat(256 * 1024 + 1) }));
@@ -111,6 +127,18 @@ describe("bug worker", () => {
 
     const res = await worker.fetch(request, makeEnv());
     expect(res.status).toBe(413);
+  });
+
+  test("post with an empty (null) body reads as \"\" and is rejected 400 as non-JSON", async () => {
+    const worker = createBugWorker();
+    const request = new Request("https://bug.smithers.sh/api/bugs", {
+      method: "POST",
+      headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.55" },
+    });
+    expect(request.body).toBeNull();
+    const res = await worker.fetch(request, makeEnv());
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "body must be JSON" });
   });
 
   test("rate limit trips at 21 posts from one IP within the hour", async () => {
@@ -166,6 +194,16 @@ describe("bug worker", () => {
       makeEnv(),
     );
     expect(res.status).toBe(404);
+  });
+
+  test("unmatched route falls through to 404", async () => {
+    const worker = createBugWorker();
+    const res = await worker.fetch(
+      new Request("https://bug.smithers.sh/nope", { method: "DELETE" }),
+      makeEnv(),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not found" });
   });
 
   test("OPTIONS preflight allows POST from anywhere", async () => {

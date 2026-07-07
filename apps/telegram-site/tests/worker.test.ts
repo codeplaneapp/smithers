@@ -147,4 +147,45 @@ describe("reference Mini App /approve endpoint", () => {
     );
     expect(response.status).toBe(405);
   });
+
+  test("rejects an expired initData with 401 (auth_date older than the max age)", async () => {
+    const stale = String(Math.floor(Date.now() / 1000) - 4000); // > 3600s old
+    const initData = signInitData(
+      { auth_date: stale, query_id: "AAstale", user: JSON.stringify({ id: 7 }) },
+      BOT_TOKEN,
+    );
+    const response = await worker.fetch(
+      approveRequest(initData, { decision: "approve" }),
+      makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }),
+    );
+    expect(response.status).toBe(401);
+    expect(await response.text()).toContain("expired");
+  });
+
+  test("a malformed (non-JSON) POST body is treated as an empty body → 400", async () => {
+    const initData = signInitData(initDataFields(), BOT_TOKEN);
+    const request = new Request("https://telegram.smithers.sh/approve", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `tma ${initData}` },
+      body: "{ this is not valid json",
+    });
+    const response = await worker.fetch(request, makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }));
+    // request.json() throws → body defaults to {} → no decision → 400.
+    expect(response.status).toBe(400);
+  });
+
+  test("a valid signature with a non-JSON user field yields a null approver", async () => {
+    // The `user` field survives HMAC verification but is not valid JSON, so
+    // parseJson swallows the error and returns null.
+    const initData = signInitData(
+      { auth_date: String(Math.floor(Date.now() / 1000)), user: "not-json" },
+      BOT_TOKEN,
+    );
+    const response = await worker.fetch(
+      approveRequest(initData, { decision: "reject", requestId: "r-2" }),
+      makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, decision: "reject", requestId: "r-2", approver: null });
+  });
 });
