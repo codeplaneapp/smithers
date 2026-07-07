@@ -39,6 +39,7 @@ type EventSourceLike = {
   addEventListener(type: string, listener: (event: MessageEvent) => void): void;
   close(): void;
 };
+type StreamHttpError = Error & { status: number };
 
 const unavailableFetch = (() => Promise.reject(new Error("fetch is not available in this environment."))) as unknown as typeof fetch;
 
@@ -70,6 +71,16 @@ function headers(token: string | undefined, json = false) {
   if (json) next.set("content-type", "application/json");
   if (token) next.set("authorization", `Bearer ${token}`);
   return next;
+}
+
+function isUnauthorizedStatus(status: number) {
+  return status === 401 || status === 403;
+}
+
+function streamHttpStatus(cause: unknown) {
+  if (typeof cause !== "object" || cause === null || !("status" in cause)) return undefined;
+  const status = (cause as { status?: unknown }).status;
+  return typeof status === "number" ? status : undefined;
 }
 
 function append(search: URLSearchParams, key: string, value: unknown) {
@@ -185,7 +196,9 @@ function fetchEventSource(
         signal: abort.signal,
       });
       if (!response.ok || !response.body) {
-        fail(new Error(`Smithers stream request failed with HTTP ${response.status}.`));
+        fail(Object.assign(new Error(`Smithers stream request failed with HTTP ${response.status}.`), {
+          status: response.status,
+        }) as StreamHttpError);
         return;
       }
       source.onopen?.(new Event("open"));
@@ -272,6 +285,11 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       source?.close();
       source = null;
       if (closed || (streamListeners.size === 0 && waiters.size === 0)) return;
+      const status = streamHttpStatus(streamCause);
+      if (status !== undefined && isUnauthorizedStatus(status)) {
+        setStatus({ status: "unauthorized" });
+        return;
+      }
       const reconnectingSince = state.reconnectingSince ?? Date.now();
       setStatus({ status: "offline", reconnectingSince });
       const backoff = Math.min(STREAM_RECONNECT_MAX_MS, STREAM_RECONNECT_BASE_MS * 2 ** reconnectAttempt) +
@@ -310,7 +328,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
   const readEnvelope = async <T>(path: string, response: Response): Promise<ApiEnvelope<T>> => {
     const json = await response.json().catch(() => undefined) as ApiEnvelope<T> | undefined;
     if (!json?.ok) {
-      if (response.status === 401 || response.status === 403) setStatus({ status: "unauthorized" });
+      if (isUnauthorizedStatus(response.status)) setStatus({ status: "unauthorized" });
       throw new GatewayRpcError({
         method: path,
         status: response.status,

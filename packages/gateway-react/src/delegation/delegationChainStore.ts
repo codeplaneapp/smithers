@@ -338,7 +338,8 @@ export function createDelegationChainStore(options: {
           } else if (inFlightNow.size === 0 && !(yield* Ref.get(hydrated)) && !inputsNow.treeLoading) {
             // Only hydrate when nothing is outstanding: in-flight keys are
             // excluded from `due`, so an empty `due` with a forked fetch still
-            // pending must NOT flip hydrated — OutputsSettled does that.
+            // pending must NOT flip hydrated. A later reconcile after the
+            // fetch settles will hydrate once every target is accounted for.
             yield* Ref.set(hydrated, true);
           }
         }
@@ -376,7 +377,6 @@ export function createDelegationChainStore(options: {
                 for (const { key } of results) next.delete(key);
                 return next;
               });
-              yield* Ref.set(hydrated, true);
               yield* reconcile;
             }),
         }),

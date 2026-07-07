@@ -14,14 +14,20 @@ export type NodeOutputViewProps = {
 function formatOutput(data: unknown): string {
   if (data == null) return "";
   if (typeof data === "string") return data;
-  const record = data as Record<string, unknown>;
+  const envelope = data as Record<string, unknown>;
+  if (envelope.status === "pending") return "Output is not available yet.";
+  if (envelope.status === "failed") return "This node failed before producing output.";
+  const payload = envelope.status === "produced" ? envelope.row : data;
+  if (payload == null) return "";
+  if (typeof payload === "string") return payload;
+  const record = payload as Record<string, unknown>;
   // Common shapes: { output } or { text } carry the human-readable payload.
   if (typeof record.output === "string") return record.output;
   if (typeof record.text === "string") return record.text;
   try {
-    return JSON.stringify(data, null, 2);
+    return JSON.stringify(payload, null, 2);
   } catch {
-    return String(data);
+    return String(payload);
   }
 }
 
