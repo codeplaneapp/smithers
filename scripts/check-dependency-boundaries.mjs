@@ -2,11 +2,13 @@
 import { builtinModules } from "node:module";
 import {
   existsSync,
+  lstatSync,
   readdirSync,
   readFileSync,
   statSync,
 } from "node:fs";
-import { basename, extname, join, relative, sep } from "node:path";
+import { basename, extname, join, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
 const repoRoot = process.cwd();
@@ -79,22 +81,22 @@ function findWorkspacePackages() {
 }
 
 /** @param {string} dir @param {string[]} out @param {string[]} [nestedPackageDirs] */
-function collectSourceFiles(dir, out, nestedPackageDirs) {
+export function collectSourceFiles(dir, out, nestedPackageDirs) {
   const absDir = join(repoRoot, dir);
   if (!isDirectory(absDir)) return;
   for (const entry of readdirSync(absDir)) {
     if (ignoredDirs.has(entry)) continue;
     const child = join(dir, entry);
     const absChild = join(repoRoot, child);
-    // Tolerate dangling symlinks (e.g. stale worktrees left by workflow runs):
-    // statSync follows the link and throws ENOENT on a broken target. Skipping
-    // keeps the dependency-boundary gate from crashing on local cruft.
+    // Skip symlinks before stat-following can recurse through workspace cycles
+    // or crash on dangling local artifacts left by workflow runs.
     let stats;
     try {
-      stats = statSync(absChild);
+      stats = lstatSync(absChild);
     } catch {
       continue;
     }
+    if (stats.isSymbolicLink()) continue;
     if (stats.isDirectory()) {
       // A nested package.json with a name marks a standalone package (e.g. a
       // shipped plugin such as apps/cli/src/openclaw-plugin). Its files are
@@ -258,45 +260,51 @@ function dependencySets(pkg) {
   return { runtime, dev };
 }
 
-const workspacePackages = findWorkspacePackages();
-const workspaceNames = new Set(workspacePackages.map((pkg) => pkg.name));
-/** @type {Array<{ file: string; specifier: string; packageName: string; section: "dependencies" | "devDependencies" }>} */
-const violations = [];
+function main() {
+  const workspacePackages = findWorkspacePackages();
+  const workspaceNames = new Set(workspacePackages.map((pkg) => pkg.name));
+  /** @type {Array<{ file: string; specifier: string; packageName: string; section: "dependencies" | "devDependencies" }>} */
+  const violations = [];
 
-const packageQueue = [...workspacePackages];
-let checkedPackageCount = 0;
-while (packageQueue.length > 0) {
-  const pkg = packageQueue.shift();
-  checkedPackageCount += 1;
-  const { files, nestedPackageDirs } = filesForPackage(pkg);
-  for (const nestedDir of nestedPackageDirs) {
-    const nestedPkg = readPackage(nestedDir);
-    if (nestedPkg) packageQueue.push(nestedPkg);
-  }
-  const deps = dependencySets(pkg);
-  for (const file of files) {
-    const devOnly = isDevOnlyFile(file);
-    const allowed = devOnly ? deps.dev : deps.runtime;
-    const expectedSection = devOnly ? "devDependencies" : "dependencies";
-    for (const specifier of importSpecifiersForFile(file)) {
-      const packageName = packageNameForSpecifier(specifier);
-      if (!packageName || packageName === pkg.name) continue;
-      if (allowed.has(packageName)) continue;
-      violations.push({ file, specifier, packageName, section: expectedSection });
+  const packageQueue = [...workspacePackages];
+  let checkedPackageCount = 0;
+  while (packageQueue.length > 0) {
+    const pkg = packageQueue.shift();
+    checkedPackageCount += 1;
+    const { files, nestedPackageDirs } = filesForPackage(pkg);
+    for (const nestedDir of nestedPackageDirs) {
+      const nestedPkg = readPackage(nestedDir);
+      if (nestedPkg) packageQueue.push(nestedPkg);
     }
+    const deps = dependencySets(pkg);
+    for (const file of files) {
+      const devOnly = isDevOnlyFile(file);
+      const allowed = devOnly ? deps.dev : deps.runtime;
+      const expectedSection = devOnly ? "devDependencies" : "dependencies";
+      for (const specifier of importSpecifiersForFile(file)) {
+        const packageName = packageNameForSpecifier(specifier);
+        if (!packageName || packageName === pkg.name) continue;
+        if (allowed.has(packageName)) continue;
+        violations.push({ file, specifier, packageName, section: expectedSection });
+      }
+    }
+  }
+
+  if (violations.length > 0) {
+    console.error("Dependency boundary check failed: undeclared imports found.\n");
+    for (const violation of violations) {
+      const workspaceHint = workspaceNames.has(violation.packageName) ? "workspace dependency" : "dependency";
+      console.error(
+        `- ${relative(repoRoot, join(repoRoot, violation.file))} imports ${violation.specifier}; ` +
+          `declare ${violation.packageName} as a ${workspaceHint} in ${violation.section}.`,
+      );
+    }
+    process.exitCode = 1;
+  } else {
+    console.log(`Dependency boundary check passed for ${checkedPackageCount} package(s).`);
   }
 }
 
-if (violations.length > 0) {
-  console.error("Dependency boundary check failed: undeclared imports found.\n");
-  for (const violation of violations) {
-    const workspaceHint = workspaceNames.has(violation.packageName) ? "workspace dependency" : "dependency";
-    console.error(
-      `- ${relative(repoRoot, join(repoRoot, violation.file))} imports ${violation.specifier}; ` +
-        `declare ${violation.packageName} as a ${workspaceHint} in ${violation.section}.`,
-    );
-  }
-  process.exitCode = 1;
-} else {
-  console.log(`Dependency boundary check passed for ${checkedPackageCount} package(s).`);
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main();
 }
