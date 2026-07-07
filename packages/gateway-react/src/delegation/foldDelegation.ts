@@ -453,12 +453,10 @@ function cascadeStage(state: FoldState): FoldState {
         seen.add(id);
         const target = nodes.get(id);
         if (!target) continue;
-        if (target.parentId === via && nodes.has(via) && redeclaredByReplannedParent(nodes.get(via)!, id)) {
-          // Reached as a child of an invalidated-and-replanned ancestor whose
-          // current plan kept this node: the new plan row IS the reaffirm,
-          // for it and its subtree.
-          continue;
-        }
+        // Reached as a child of an invalidated-and-replanned ancestor whose
+        // current plan kept this node: the new plan row IS the reaffirm, for it
+        // and its subtree.
+        if (target.parentId === via && nodes.has(via) && redeclaredByReplannedParent(nodes.get(via)!, id)) continue;
         for (const next of dependents.get(id) ?? []) queue.push({ id: next, via: id });
         if (target.probeRow || target.isGoal) continue;
         if (cascadeResolved(target, invalidation.round)) continue;
