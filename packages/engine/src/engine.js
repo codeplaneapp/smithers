@@ -25,6 +25,7 @@ import { EventBus } from "./events.js";
 import { AgentTraceCollector } from "./AgentTraceCollector.js";
 import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj";
 import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
+import { createSlotStarvationHint } from "./slotStarvationHint.js";
 import { startDurability } from "./startDurability.js";
 import { startDocFileSync } from "./startDocFileSync.js";
 import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
@@ -5076,10 +5077,15 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const budgetSkippedKeys = new Set();
     let activeTaskCount = 0;
     const taskWaiters = [];
+    const slotStarvationHint = createSlotStarvationHint(maxConcurrency);
     const acquireTaskSlot = async () => {
         if (activeTaskCount < maxConcurrency) {
             activeTaskCount += 1;
             return;
+        }
+        const starvationHint = slotStarvationHint.onSlotWait(activeTaskCount, taskWaiters.length + 1);
+        if (starvationHint) {
+            logWarning(starvationHint, { runId, maxConcurrency, waiting: taskWaiters.length + 1 }, "engine:concurrency");
         }
         await new Promise((resolveWaiter) => {
             taskWaiters.push(resolveWaiter);

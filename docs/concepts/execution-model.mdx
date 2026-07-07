@@ -115,9 +115,11 @@ whether a cold per-turn container is viable:
   in flight: the **Node runtime** (Vercel Node functions, Lambda) is closest --
   it has `fs` + `child_process`, the engine module now imports cleanly under
   plain Node, and the platform layer is injectable
-  (`RunOptions.effectPlatformLayer` accepts `NodeContext.layer`); end-to-end
-  run-under-Node validation and the worker-task dispatch path (still bun-sqlite)
-  remain. **Isolates** (Cloudflare Workers, Vercel Edge) are further out and
+  (`RunOptions.effectPlatformLayer` accepts `NodeContext.layer`); a run now
+  completes end-to-end under plain Node (regression-tested: a compute-task
+  workflow on PGlite, with the worker-task dispatch path falling back to
+  in-memory message storage instead of bun-sqlite), and agent-task and gateway
+  validation under Node remain. **Isolates** (Cloudflare Workers, Vercel Edge) are further out and
   also need the `node:fs`/`node:child_process` seam; a Worker can host the
   **storage + in-process-agent** path today, but not the run driver.
 </Warning>

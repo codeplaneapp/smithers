@@ -113,7 +113,20 @@ function errorSchema(definition: GatewayRpcDefinition) {
   };
 }
 
-function successSchema(definition: GatewayRpcDefinition) {
+/**
+ * Named return type for the exported frame-schema builders. Without it, tsc
+ * infers a structural type that references the rpc index bundle's internal
+ * `JsonSchema$1` alias, which cannot be named in this file's declaration
+ * output (TS4058).
+ */
+type RpcFrameSchema = {
+  type: "object";
+  required: readonly string[];
+  additionalProperties: false;
+  properties: Record<string, JsonSchema>;
+};
+
+function successSchema(definition: GatewayRpcDefinition): RpcFrameSchema {
   return {
     type: "object",
     required: ["type", "id", "ok", "apiVersion", "payload"],
@@ -128,7 +141,7 @@ function successSchema(definition: GatewayRpcDefinition) {
   };
 }
 
-function requestFrameSchema(definition: GatewayRpcDefinition) {
+function requestFrameSchema(definition: GatewayRpcDefinition): RpcFrameSchema {
   return {
     type: "object",
     required: ["method", "params"],
