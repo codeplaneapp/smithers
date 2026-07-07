@@ -208,6 +208,105 @@ process.exit(0);
             await rm(fake.dir, { recursive: true, force: true });
         }
     });
+    test("classifies a rejected rate_limit_event (out_of_credits) as a quota error with a reset time", async () => {
+        // Claude emits a stream-json rate_limit_event when the subscription
+        // window rejects the request. Historically this line was ignored, the
+        // run failed on empty output, and the raw JSON tail was stored as the
+        // error instead of parking the run as waiting-quota.
+        const resetsAt = Math.floor(Date.now() / 1000) + 1800;
+        const fake = await makeFakeClaude(`
+process.stdout.write(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: ${resetsAt}, rateLimitType: "five_hour", overageStatus: "rejected", overageDisabledReason: "out_of_credits", isUsingOverage: false } }) + "\\n");
+process.exit(1);
+`);
+        try {
+            process.env.PATH = prependPath(fake.dir, originalPath);
+            const agent = new ClaudeCodeAgent({ model: "claude-fable-5", env: { PATH: process.env.PATH } });
+            let error;
+            try {
+                await agent.generate({ messages: [{ role: "user", content: "audit this" }] });
+            }
+            catch (err) {
+                error = err;
+            }
+            expect(error).toBeDefined();
+            expect(error?.code).toBe("AGENT_QUOTA_EXCEEDED");
+            expect(error?.details?.failureQuota).toBe(true);
+            const resetMs = error?.details?.quotaResetAtMs;
+            expect(typeof resetMs).toBe("number");
+            expect(resetMs).toBeGreaterThan(Date.now());
+            expect(resetMs).toBeLessThanOrEqual(resetsAt * 1000 + 60_000);
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
+    test("classifies a rejected rate_limit_event on a clean exit (code 0) as a quota error", async () => {
+        const fake = await makeFakeClaude(`
+process.stdout.write(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "five_hour", overageStatus: "rejected", overageDisabledReason: "out_of_credits" } }) + "\\n");
+process.exit(0);
+`);
+        try {
+            process.env.PATH = prependPath(fake.dir, originalPath);
+            const agent = new ClaudeCodeAgent({ model: "claude-fable-5", env: { PATH: process.env.PATH } });
+            let error;
+            try {
+                await agent.generate({ messages: [{ role: "user", content: "audit this" }] });
+            }
+            catch (err) {
+                error = err;
+            }
+            expect(error).toBeDefined();
+            expect(error?.code).toBe("AGENT_QUOTA_EXCEEDED");
+            expect(error?.details?.failureQuota).toBe(true);
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
+    test("does not treat an allowed rate_limit_event as an error", async () => {
+        const fake = await makeFakeClaude(`
+process.stdout.write(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour" } }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "hello" }] } }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "hello" }) + "\\n");
+process.exit(0);
+`);
+        try {
+            process.env.PATH = prependPath(fake.dir, originalPath);
+            const agent = new ClaudeCodeAgent({ model: "claude-fable-5", env: { PATH: process.env.PATH } });
+            const result = await agent.generate({ messages: [{ role: "user", content: "hi" }] });
+            expect(result.text).toBe("hello");
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
+    test("stores the distilled stream error, not the raw stdout tail, when claude exits nonzero", async () => {
+        // Historically a failed claude run persisted the last stdout line (the
+        // system/init JSON) as the attempt error. The interpreter's distilled
+        // completed-event error must win over the raw tail.
+        const fake = await makeFakeClaude(`
+process.stdout.write(JSON.stringify({ type: "system", subtype: "init", cwd: "/tmp", session_id: "abc", tools: ["Bash"] }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "result", subtype: "error", is_error: true, error: "API Error: 500 upstream connect error" }) + "\\n");
+process.exit(1);
+`);
+        try {
+            process.env.PATH = prependPath(fake.dir, originalPath);
+            const agent = new ClaudeCodeAgent({ model: "claude-fable-5", env: { PATH: process.env.PATH } });
+            let error;
+            try {
+                await agent.generate({ messages: [{ role: "user", content: "audit this" }] });
+            }
+            catch (err) {
+                error = err;
+            }
+            expect(error).toBeDefined();
+            expect(String(error?.message ?? "")).toContain("500 upstream connect error");
+            expect(String(error?.message ?? "")).not.toContain('"subtype":"init"');
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
     test("does not add --verbose for text output by default", async () => {
         const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-claude-args-"));
         const argsFile = join(argsFileDir, "args.json");

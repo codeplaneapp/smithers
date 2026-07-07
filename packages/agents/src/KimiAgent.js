@@ -180,7 +180,7 @@ async function ensureKimiCredentialsUsable(shareDir, agentId, agentModel) {
         const reason = lastFailure.reason === "no-refresh-token"
             ? `OAuth token expired at ${lastFailure.expiredAt} and no refresh_token is stored`
             : `OAuth token expired at ${lastFailure.expiredAt}; auto-refresh failed: ${lastFailure.reason}`;
-        throw new SmithersError("AGENT_CONFIG_INVALID", `${reason}. Run \`kimi login\` to re-authenticate, then resume the run. (agent="${agentId}", model="${agentModel}", credentials="${credsDir}")`, {
+        throw new SmithersError("AGENT_CONFIG_INVALID", `${reason}. Run \`kimi login\` to re-authenticate, then recover the failed task with \`smithers retry-task <workflow> --run-id <id> --node-id <node>\` (a plain \`--resume\` re-fails immediately because the attempt budget is already spent). (agent="${agentId}", model="${agentModel}", credentials="${credsDir}")`, {
             failureRetryable: false,
             agentId,
             agentEngine: "kimi",

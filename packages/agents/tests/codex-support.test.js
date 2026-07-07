@@ -109,4 +109,32 @@ process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");
             await rm(argsFileDir, { recursive: true, force: true });
         }
     });
+    test("distills the turn.failed message instead of storing codex stderr log noise", async () => {
+        // Historically a codex failure persisted the stderr tail
+        // ("ERROR codex_models_manager::manager: failed to refresh available
+        // models...") as the attempt error while the clean turn.failed message
+        // in the stdout stream was discarded.
+        const fake = await makeFakeCodex(`
+process.stderr.write("2026-06-27T18:45:30.098342Z ERROR codex_models_manager::manager: failed to refresh available models: stream disconnected before completion\\n");
+process.stdout.write(JSON.stringify({ type: "turn.failed", error: { message: "stream disconnected before completion: connection reset by upstream" } }) + "\\n");
+process.exit(1);
+`);
+        try {
+            process.env.PATH = prependPath(fake.dir, originalPath);
+            const agent = new CodexAgent({ env: { PATH: process.env.PATH } });
+            let error;
+            try {
+                await agent.generate({ messages: [{ role: "user", content: "do the thing" }] });
+            }
+            catch (err) {
+                error = err;
+            }
+            expect(error).toBeDefined();
+            expect(String(error?.message ?? "")).toContain("connection reset by upstream");
+            expect(String(error?.message ?? "")).not.toContain("codex_models_manager");
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
 });

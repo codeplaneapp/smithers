@@ -156,3 +156,23 @@ describe("classifyQuotaError — error metadata", () => {
         expect(err?.details?.agentModel).toBe("<unset>");
     });
 });
+
+describe("classifyQuotaError — machine tokens", () => {
+    test("detects out_of_credits (claude rate_limit_event overageDisabledReason)", () => {
+        const err = classifyQuotaError('{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","overageStatus":"rejected","overageDisabledReason":"out_of_credits"}}', "claude");
+        expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+        expect(err?.details?.failureQuota).toBe(true);
+    });
+    test("detects usage_limit_reached (codex 429 body)", () => {
+        const err = classifyQuotaError('http 429 Too Many Requests: {"error":{"type":"usage_limit_reached","plan_type":"pro"}}', "codex");
+        expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+    });
+    test("detects a rejected rate_limit_event JSON line", () => {
+        const err = classifyQuotaError('{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1781766000,"rateLimitType":"five_hour"}}', "claude");
+        expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+    });
+    test("does not classify an allowed rate_limit_event", () => {
+        const err = classifyQuotaError('{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour"}}', "claude");
+        expect(err).toBeNull();
+    });
+});

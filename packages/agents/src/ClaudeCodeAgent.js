@@ -191,6 +191,28 @@ export class ClaudeCodeAgent extends BaseCliAgent {
             if (!payloadType) {
                 return [];
             }
+            if (payloadType === "rate_limit_event") {
+                // A rejected rate_limit_event means the subscription window or
+                // credits are exhausted; without this branch the line falls
+                // through to `return []`, the run fails on empty output, and
+                // the raw JSON tail gets stored as the error. Synthesize a
+                // prose banner so the shared quota classifier parks the run as
+                // waiting-quota (and picks up the reset time when present).
+                const info = isRecord(payload.rate_limit_info) ? payload.rate_limit_info : {};
+                const status = asString(info.status);
+                const overageStatus = asString(info.overageStatus);
+                const rejected = status === "rejected" || overageStatus === "rejected";
+                if (rejected && !limitBannerText) {
+                    const windowLabel = asString(info.rateLimitType) ?? "usage";
+                    const reason = asString(info.overageDisabledReason);
+                    const resetsAt = typeof info.resetsAt === "number" ? info.resetsAt : null;
+                    const resetSeconds = resetsAt != null
+                        ? Math.max(1, Math.round(resetsAt - Date.now() / 1000))
+                        : null;
+                    limitBannerText = `Claude ${windowLabel} usage limit exceeded (rate_limit_event rejected${reason ? `: ${reason}` : ""}).${resetSeconds != null ? ` Retry after ${resetSeconds} seconds.` : ""}`;
+                }
+                return [];
+            }
             if (payloadType === "system" && asString(payload.subtype) === "init") {
                 const parsedSessionId = asString(payload.session_id);
                 if (parsedSessionId) {

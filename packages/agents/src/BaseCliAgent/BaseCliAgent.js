@@ -29,6 +29,13 @@ const QUOTA_PATTERNS = [
     // Claude/Fable subscription banners (arrive on stdout, exit 0).
     /\bout\s+of\s+usage\s+credits\b/i,
     /\brun\s+\/usage-credits\b/i,
+    // Machine tokens: claude-code stream-json rate_limit_event lines and API
+    // payloads carry underscored identifiers (e.g. "overageDisabledReason":
+    // "out_of_credits", codex 429 bodies with "usage_limit_reached") that the
+    // prose patterns above never match.
+    /\bout_of_credits\b/i,
+    /\busage_limit_reached\b/i,
+    /"rate_limit_event"[\s\S]{0,300}?"(?:status"\s*:\s*"rejected|rejected)"/i,
 ];
 
 /**
@@ -522,9 +529,16 @@ function extractErrorFromJsonPayload(raw) {
     for (let i = lines.length - 1; i >= 0; i--) {
         try {
             const parsed = JSON.parse(lines[i]);
-            if (parsed?.type !== "error")
+            // codex emits {"type":"turn.failed","error":{"message":...}} or a
+            // top-level {"type":"error","message":...}; claude nests the
+            // message under error.data/error. Accept all of these shapes so
+            // the distilled provider message wins over raw stderr log noise.
+            if (parsed?.type !== "error" && parsed?.type !== "turn.failed")
                 continue;
-            const message = parsed?.error?.data?.message ?? parsed?.error?.message ?? parsed?.error?.name;
+            const message = parsed?.error?.data?.message
+                ?? parsed?.error?.message
+                ?? parsed?.message
+                ?? parsed?.error?.name;
             if (typeof message === "string" && message.trim()) {
                 return message.trim();
             }
@@ -1045,7 +1059,22 @@ export class BaseCliAgent {
                         const structuredError = (commandSpec.outputFormat === "json" || commandSpec.outputFormat === "stream-json")
                             ? extractErrorFromJsonPayload(result.stdout)
                             : undefined;
+                        // Prefer a distilled error over the raw stdout tail: a
+                        // stream-json stdout tail is usually an init line or
+                        // token-usage event, not the failure. The interpreter's
+                        // completed event already carries the distilled error
+                        // when the stream surfaced one.
+                        const rawInterpreterError = completedEvent?.ok === false && typeof completedEvent.error === "string"
+                            ? completedEvent.error.trim()
+                            : "";
+                        // The interpreter's generic onExit fallback ("<CLI>
+                        // exited with code N") carries less signal than stderr;
+                        // only a real distilled message may outrank it.
+                        const interpreterError = /exited with code/i.test(rawInterpreterError)
+                            ? ""
+                            : rawInterpreterError;
                         const errorText = structuredError ||
+                            interpreterError ||
                             filteredStderr ||
                             result.stdout.trim() ||
                             `CLI exited with code ${result.exitCode}`;
