@@ -16,6 +16,7 @@ import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertJsonPayloadWithinBounds, assertOptionalStringMaxLength, assertPositiveFiniteInteger, } from "@smithers-orchestrator/db/input-bounds";
 import { buildPlanTree, buildStateKey, } from "./scheduler.js";
+import { buildWorktreeIsolationNotice, WORKTREE_ISOLATION_NOTICE_MARKER } from "./buildWorktreeIsolationNotice.js";
 import { resolveForkSessionMessages } from "./resolveForkSessionMessages.js";
 import { getDefinedToolMetadata } from "./getDefinedToolMetadata.js";
 import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot, } from "@smithers-orchestrator/time-travel/snapshot";
@@ -3380,6 +3381,16 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     maybeCompleteHijack();
                 };
                 let effectivePrompt = desc.prompt ?? "";
+                // Tasks running in an isolated worktree get an explicit isolation
+                // contract up front. Without it, agents finding no node_modules
+                // improvise symlink-sharing with the parent checkout and corrupt
+                // its node_modules (dangling links once the worktree is deleted).
+                const worktreeIsolationNotice = desc.worktreePath
+                    ? buildWorktreeIsolationNotice(desc.worktreePath, toolConfig.rootDir)
+                    : null;
+                if (worktreeIsolationNotice && !effectivePrompt.includes(WORKTREE_ISOLATION_NOTICE_MARKER)) {
+                    effectivePrompt = `${worktreeIsolationNotice}\n\n${effectivePrompt}`;
+                }
                 supportsNativeStructuredOutput = effectiveAgent.supportsNativeStructuredOutput === true;
                 if (desc.outputTable && !supportsNativeStructuredOutput) {
                     const engineName = typeof attemptMeta.agentEngine === "string"

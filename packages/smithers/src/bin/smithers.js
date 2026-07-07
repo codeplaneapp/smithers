@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
     getExplicitWorkflowPath,
     findNearestLocalSmithersCli,
     findNearestWorkflowLocalCli,
 } from "./smithers-delegation.js";
+import { danglingWorkspaceLinkHint } from "./danglingWorkspaceLinkHint.js";
 
 /**
  * When a project-local `smithers` install exists (the workflow pack's
@@ -51,5 +53,16 @@ function delegateToLocalCliIfPresent() {
 }
 
 if (!delegateToLocalCliIfPresent()) {
-    await import("@smithers-orchestrator/cli");
+    try {
+        await import("@smithers-orchestrator/cli");
+    } catch (error) {
+        // A dangling workspace link (e.g. rewritten to point into a removed
+        // git worktree) surfaces here as a bare ENOENT import error. Name the
+        // broken links and the fix before rethrowing.
+        const hint = danglingWorkspaceLinkHint(dirname(fileURLToPath(import.meta.url)));
+        if (hint) {
+            console.error(hint);
+        }
+        throw error;
+    }
 }

@@ -99,4 +99,45 @@ describe("Worktree runtime", () => {
             catch { }
         }
     }, WORKTREE_RUNTIME_TIMEOUT_MS);
+    test("injects the worktree isolation notice into agent prompts", async () => {
+        if (!hasGit())
+            return;
+        const { root, repoDir } = await createGitRepoWithoutOrigin();
+        const api = createSmithers({ outputA: z.object({ value: z.number() }) }, { dbPath: join(root, "db.sqlite") });
+        /** @type {string | null} */
+        let seenPrompt = null;
+        const agent = {
+            id: "prompt-capture",
+            tools: {},
+            /** @param {{ prompt?: string }} args */
+            generate: async (args) => {
+                seenPrompt = args.prompt ?? null;
+                return { output: { value: 1 } };
+            },
+        };
+        const workflow = api.smithers((_ctx) => (<Workflow name="isolation-notice">
+          <Worktree id="wt" path="../linked-notice">
+            <Task id="task1" agent={agent} output={api.outputs.outputA}>
+              Do the work.
+            </Task>
+          </Worktree>
+        </Workflow>));
+        try {
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
+            expect(result.status).toBe("finished");
+            expect(seenPrompt).not.toBeNull();
+            expect(seenPrompt).toContain("[smithers worktree isolation]");
+            expect(seenPrompt).toContain(`the parent checkout at ${repoDir}`);
+            expect(seenPrompt).toContain("NEVER symlink node_modules");
+            expect(seenPrompt).toContain("Do the work.");
+            // The notice names the parent checkout, and the task text follows it.
+            expect(seenPrompt?.indexOf("[smithers worktree isolation]")).toBeLessThan(seenPrompt?.indexOf("Do the work.") ?? -1);
+        }
+        finally {
+            try {
+                api.db.$client?.close?.();
+            }
+            catch { }
+        }
+    }, WORKTREE_RUNTIME_TIMEOUT_MS);
 });
