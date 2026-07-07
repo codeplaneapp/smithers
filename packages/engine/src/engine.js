@@ -3125,14 +3125,17 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     attempt: attemptNo,
                 },
             };
+            let selectedHealthyAgent = false;
             for (let i = startIndex; i < selectionPool.length; i++) {
                 const candidate = selectionPool[i];
                 effectiveAgent = candidate;
                 if (!isPreflightCapableAgent(candidate)) {
+                    selectedHealthyAgent = true;
                     break;
                 }
                 try {
                     await runAgentPreflightOnce(candidate, preflightSelectOptions, toolConfig.agentPreflightCache);
+                    selectedHealthyAgent = true;
                     break;
                 }
                 catch (selectionPreflightError) {
@@ -3144,8 +3147,31 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         disabledAgents.add(candidate);
                     }
                     // Advance to the next candidate; if this was the last one,
-                    // effectiveAgent stays set to it and the preflight block below
-                    // surfaces the terminal failure exactly as before.
+                    // the backward scan below gets a chance before the preflight
+                    // block surfaces the terminal failure.
+                }
+            }
+            // Backward fallback: the final attempt maps to the LAST rung, so a
+            // dead terminal agent (e.g. an uninstalled fallback CLI) has no
+            // forward candidate and would burn the run's last attempt on an
+            // agent that can never work. Fall back to the nearest EARLIER
+            // preflight-passing agent instead. Only when every candidate fails
+            // does the original terminal pick survive to reproduce the error.
+            if (!selectedHealthyAgent && startIndex > 0) {
+                for (let i = startIndex - 1; i >= 0; i--) {
+                    const candidate = selectionPool[i];
+                    if (!isPreflightCapableAgent(candidate)) {
+                        effectiveAgent = candidate;
+                        break;
+                    }
+                    try {
+                        await runAgentPreflightOnce(candidate, preflightSelectOptions, toolConfig.agentPreflightCache);
+                        effectiveAgent = candidate;
+                        break;
+                    }
+                    catch {
+                        // keep scanning earlier rungs
+                    }
                 }
             }
             const priorToolCalls = attemptNo > 1

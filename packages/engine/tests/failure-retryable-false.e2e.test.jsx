@@ -186,6 +186,88 @@ describe("failureRetryable=false short-circuits engine retries", () => {
         }
     }, 15_000);
 
+    test("the final attempt falls back to an earlier healthy agent when the terminal rung is uninstalled", async () => {
+        // Regression: attempt N maps to ladder rung N (capped at the last). On
+        // the final attempt the mapped rung is the LAST agent; when that agent
+        // is uninstalled ("agy not found on PATH") there is no forward
+        // candidate, and the run used to burn its final attempt on an agent
+        // that could never work. Selection must fall back to the nearest
+        // earlier preflight-passing agent.
+        const { smithers, outputs, cleanup, db } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        try {
+            let healthyGenerate = 0;
+            const flakyLead = {
+                id: "flaky-lead",
+                model: "lead-model",
+                cliEngine: "fake-cli",
+                tools: {},
+                async preflight() { },
+                async generate() {
+                    // Fails attempt 1 so the scheduler retries onto rung 2.
+                    throw new SmithersError("AGENT_CLI_ERROR", "transient stream failure", {
+                        failureRetryable: true,
+                    });
+                },
+            };
+            const healthyMiddle = {
+                id: "healthy-middle",
+                model: "middle-model",
+                cliEngine: "fake-cli",
+                tools: {},
+                supportsNativeStructuredOutput: true,
+                async preflight() { },
+                async generate() {
+                    healthyGenerate += 1;
+                    if (healthyGenerate === 1) {
+                        // Fails attempt 2 so the final attempt maps to rung 3.
+                        throw new SmithersError("AGENT_CLI_ERROR", "transient provider failure", {
+                            failureRetryable: true,
+                        });
+                    }
+                    return { output: { value: 7 } };
+                },
+            };
+            const uninstalledTerminal = {
+                id: "agy-not-installed",
+                model: "gemini-3.1-pro-preview",
+                cliEngine: "fake-cli",
+                tools: {},
+                async preflight() {
+                    throw new SmithersError("AGENT_CONFIG_INVALID", "antigravity: cli_installed=fail: agy not found on PATH", {
+                        failureRetryable: false,
+                        preflight: true,
+                    });
+                },
+                async generate() {
+                    throw new Error("must never run");
+                },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="terminal-rung-fallback">
+                    <Task
+                        id="impl"
+                        output={outputs.outputA}
+                        agent={[flakyLead, healthyMiddle, uninstalledTerminal]}
+                        retries={2}
+                    >
+                        The terminal rung is uninstalled; the final attempt must reuse an earlier healthy agent.
+                    </Task>
+                </Workflow>
+            ));
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+            expect(result.status).toBe("finished");
+            expect(healthyGenerate).toBe(2);
+            const attempts = await adapter.listAttempts(result.runId, "impl", 0);
+            const finished = attempts.filter((a) => a.state === "finished");
+            expect(finished).toHaveLength(1);
+            const meta = JSON.parse(finished[0]?.metaJson ?? "{}");
+            expect(meta.agentId).toBe("healthy-middle");
+        } finally {
+            cleanup();
+        }
+    }, 20_000);
+
     test("a failover chain whose every agent fails preflight still fails terminally", async () => {
         const { smithers, outputs, cleanup, db } = createTestSmithers(outputSchemas);
         const adapter = new SmithersDb(db);
