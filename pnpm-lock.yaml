@@ -1805,6 +1805,9 @@ importers:
       '@smithers-orchestrator/gateway':
         specifier: workspace:*
         version: link:../gateway
+      '@smithers-orchestrator/graph':
+        specifier: workspace:*
+        version: link:../graph
       '@smithers-orchestrator/integrations':
         specifier: workspace:*
         version: link:../integrations
@@ -1848,9 +1851,6 @@ importers:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
         version: 20.10.6
-      '@smithers-orchestrator/graph':
-        specifier: workspace:*
-        version: link:../graph
       '@types/bun':
         specifier: latest
         version: 1.3.14
