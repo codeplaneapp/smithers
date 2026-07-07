@@ -3,16 +3,21 @@ import { ExtractResult as ExtractResult$1 } from '../ExtractResult.js';
 import 'zod';
 
 /**
+ * Test-only seam to override the dynamic runtime-module importer used by the
+ * <Subflow>/<Sandbox> computeFns. Production behaviour is unchanged — the
+ * default native `import()` importer is used unless a test overrides it — so the
+ * heavy engine/sandbox packages those computeFns delegate to can be exercised
+ * without loading them for real. Returns a restore function.
+ * @param {(specifier: string) => Promise<any>} loader
+ * @returns {() => void}
+ */
+declare function __setRuntimeModuleLoader(loader: (specifier: string) => Promise<any>): () => void;
+/**
  * @param {HostNode | null} root
  * @param {ExtractOptions} [opts]
  * @returns {ExtractResult}
  */
 declare function extractFromHost(root: HostNode | null, opts?: ExtractOptions): ExtractResult;
-/**
- * Test-only seam to override the dynamic runtime-module importer used by the
- * <Subflow>/<Sandbox> computeFns. Returns a restore function.
- */
-declare function __setRuntimeModuleLoader(loader: (specifier: string) => Promise<any>): () => void;
 type HostElement = HostElement$1;
 type HostText = HostText$1;
 type ExtractOptions = ExtractOptions$1;
