@@ -139,6 +139,7 @@ describe("deferred state bridge pure helpers", () => {
         expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: null })).toBe(false);
         expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: { revertOnMet: true } })).toBe(false);
         expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: { conditionMet: false } })).toBe(false);
+        expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: { after: -1 } })).toBe(false);
         expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: { after: 0 } })).toBe(true);
         expect(await I.shouldAutoApprove({
             getRun: () => Effect.succeed(null),
@@ -822,6 +823,26 @@ describe("deferred state bridge state transitions", () => {
             expect(await I.resolveApprovalTaskStateBridge(adapter, db, "auto-run", autoDesc, makeEventBus())).toEqual({
                 handled: false,
             });
+
+            const negativeAutoDesc = makeDesc(tables, {
+                nodeId: "negative-auto",
+                needsApproval: true,
+                approvalAutoApprove: { after: -1, audit: true },
+            });
+            const negativeEventBus = makeEventBus();
+            await insertRun(adapter, "negative-auto-run");
+            expect(await I.resolveApprovalTaskStateBridge(adapter, db, "negative-auto-run", negativeAutoDesc, negativeEventBus)).toEqual({
+                handled: true,
+                state: "waiting-approval",
+            });
+            expect(await Effect.runPromise(adapter.getApproval("negative-auto-run", "negative-auto", 0))).toMatchObject({
+                status: "requested",
+                autoApproved: false,
+            });
+            expect(negativeEventBus.events.map((event) => event.type)).toEqual([
+                "ApprovalRequested",
+                "NodeWaitingApproval",
+            ]);
         }
         finally {
             cleanup();

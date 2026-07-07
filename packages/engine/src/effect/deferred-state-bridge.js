@@ -61,13 +61,24 @@ function shouldClearAsyncWaitMetric(snapshot) {
  * @param {_TaskDescriptor} desc
  */
 function buildApprovalRequestJson(desc) {
+    const metadata = {};
+    if (desc.meta && typeof desc.meta === "object") {
+        for (const [key, value] of Object.entries(desc.meta)) {
+            if (key === "requestTitle" || key === "requestSummary")
+                continue;
+            metadata[key] = value;
+        }
+    }
     return JSON.stringify({
         mode: desc.approvalMode ?? "gate",
         waitAsync: desc.waitAsync === true,
-        title: desc.label ?? null,
+        title: desc.meta && typeof desc.meta.requestTitle === "string"
+            ? desc.meta.requestTitle
+            : desc.label ?? null,
         summary: desc.meta && typeof desc.meta.requestSummary === "string"
             ? desc.meta.requestSummary
             : null,
+        metadata,
         options: desc.approvalOptions ?? [],
         allowedScopes: desc.approvalAllowedScopes ?? [],
         allowedUsers: desc.approvalAllowedUsers ?? [],
@@ -245,7 +256,10 @@ async function shouldAutoApprove(adapter, runId, desc) {
         return false;
     }
     const after = typeof config.after === "number" ? config.after : 0;
-    if (after <= 0) {
+    if (!Number.isFinite(after) || after < 0) {
+        return false;
+    }
+    if (after === 0) {
         return true;
     }
     const run = await Effect.runPromise(adapter.getRun(runId));

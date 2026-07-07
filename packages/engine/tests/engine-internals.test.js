@@ -469,6 +469,29 @@ describe("engine internals: durability, options and graph helpers", () => {
         detach();
     });
 
+    test("validates remaining run option bounds and default log-dir resolution", () => {
+        expect(I.resolveLogDir("/tmp/root", "run-1", undefined)).toBe(
+            resolvePath("/tmp/root", ".smithers", "executions", "run-1", "logs"),
+        );
+        expect(I.coercePositiveInt("workers", undefined, 3)).toBe(3);
+        expect(I.coercePositiveInt("workers", "4", 1)).toBe(4);
+        expect(() => I.coercePositiveInt("workers", "4.9", 1)).toThrow("workers");
+        expect(() => I.coercePositiveInt("workers", 0, 1)).toThrow("workers");
+        expect(() => I.coercePositiveInt("workers", Number.POSITIVE_INFINITY, 1)).toThrow("workers");
+
+        expect(() => I.validateRunOptions({ input: {}, maxOutputBytes: 0 })).toThrow("maxOutputBytes");
+        expect(() => I.validateRunOptions({ input: {}, maxOutputBytes: Number.NaN })).toThrow("maxOutputBytes");
+        expect(() => I.validateRunOptions({ input: {}, toolTimeoutMs: -1 })).toThrow("toolTimeoutMs");
+        expect(() => I.validateRunOptions({
+            input: {},
+            resumeClaim: {
+                claimOwnerId: "x".repeat(257),
+                claimHeartbeatAtMs: 1,
+                restoreHeartbeatAtMs: 1,
+            },
+        })).toThrow("resumeClaim.claimOwnerId");
+    });
+
     test("extracts workflow imports and resolves local imports", async () => {
         expect(I.getWorkflowImportScanLoader("file.tsx")).toBe("tsx");
         expect(I.getWorkflowImportScanLoader("file.cts")).toBe("ts");
@@ -592,6 +615,57 @@ describe("engine internals: durability, options and graph helpers", () => {
             ["timer::0", 1_000],
             ["timer::1", 2_000],
         ]));
+    });
+
+    test("continueRunAsNew rejects oversized continuation state before writing child state", async () => {
+        const { sqlite, db, schema, adapter } = makeContinueDb();
+        const runId = "continue-as-new-oversized-source";
+        await insertRun(adapter, runId);
+        sqlite
+            .query("INSERT INTO input_wide (run_id, prompt, count) VALUES (?, ?, ?)")
+            .run(runId, "seed", 1);
+
+        const oversizedPayload = { blob: "x".repeat(10 * 1024 * 1024) };
+        let caught;
+        try {
+            await I.continueRunAsNew({
+                db,
+                adapter,
+                schema,
+                inputTable: inputWideTable,
+                runId,
+                workflowPath: "/tmp/workflow.ts",
+                runMetadata: {
+                    workflowHash: "new-hash",
+                    vcsType: "git",
+                    vcsRoot: "/repo",
+                    vcsRevision: "new-rev",
+                },
+                currentFrameNo: 3,
+                continuation: {
+                    reason: "loop",
+                    iteration: 1,
+                    loopId: "loop",
+                    statePayload: oversizedPayload,
+                },
+                ralphState: new Map(),
+            });
+        }
+        catch (error) {
+            caught = error;
+        }
+
+        expect(caught).toBeInstanceOf(SmithersError);
+        expect(caught?.code).toBe("CONTINUATION_STATE_TOO_LARGE");
+        expect(caught?.details?.maxBytes).toBe(10 * 1024 * 1024);
+        expect(caught?.details?.carriedStateBytes).toBeGreaterThan(10 * 1024 * 1024);
+
+        const childRun = await Effect.runPromise(adapter.getLatestChildRun(runId));
+        expect(childRun).toBeUndefined();
+        const events = await Effect.runPromise(adapter.listEvents(runId, -1, 100));
+        expect(events.some((event) => event.type === "RunContinuedAsNew")).toBe(false);
+        const sourceRun = await Effect.runPromise(adapter.getRun(runId));
+        expect(sourceRun?.status).toBe("running");
     });
 
     test("resolveWorkflowOutputTable resolves declared outputs and fails fast on unregistered targets", () => {

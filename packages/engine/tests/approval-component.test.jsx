@@ -31,6 +31,7 @@ describe("<Approval>", () => {
         expect(snapshot.tasks[0]?.approvalOnDeny).toBe("continue");
         expect(snapshot.tasks[0]?.label).toBe("Publish release?");
         expect(snapshot.tasks[0]?.meta).toEqual({
+            requestTitle: "Publish release?",
             requestSummary: "Deployment passed staging.",
             risk: "high",
         });

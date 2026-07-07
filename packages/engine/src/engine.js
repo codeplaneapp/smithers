@@ -2398,9 +2398,23 @@ export function resolveTaskOutputs(tasks, workflow) {
             }
         }
         const raw = task.outputSchema;
+        const explicitOutputKey = typeof task.outputTableName === "string" && task.outputTableName.length > 0
+            ? task.outputTableName
+            : undefined;
+        if (!task.outputTable && explicitOutputKey && workflow.schemaRegistry) {
+            const entry = workflow.schemaRegistry.get(explicitOutputKey);
+            if (entry) {
+                task.outputTable = entry.table;
+                task.outputTableName = explicitOutputKey;
+                if (!task.outputSchema || typeof task.outputSchema === "string") {
+                    task.outputSchema = entry.zodSchema;
+                }
+                continue;
+            }
+        }
         const hasAmbiguousOutputSchema = Boolean(raw && typeof raw === "object" && workflow.ambiguousZodSchemas?.has(raw));
         // Resolve ZodObject via outputSchema when no outputRef resolved.
-        if (!task.outputTable && raw && typeof raw === "object" && workflow.zodToKeyName) {
+        if (!task.outputTable && !explicitOutputKey && raw && typeof raw === "object" && workflow.zodToKeyName) {
             const keyName = workflow.zodToKeyName.get(raw);
             if (keyName && workflow.schemaRegistry) {
                 const entry = workflow.schemaRegistry.get(keyName);

@@ -186,4 +186,67 @@ describe("EventBus queued persist failure surfaces once", () => {
     }
     expect(secondFlushThrew).toBe(false);
   });
+
+  test("queued DB persistence is serialized and later events wait for earlier writes", async () => {
+    const inserted = [];
+    let releaseFirst;
+    let firstStarted;
+    const firstStartedPromise = new Promise((resolve) => {
+      firstStarted = resolve;
+    });
+    const firstReleasePromise = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    const db = {
+      insertEvent(row) {
+        inserted.push({ phase: "start", type: row.type, seq: row.seq });
+        if (row.type === "First") {
+          firstStarted();
+          return firstReleasePromise.then(() => {
+            inserted.push({ phase: "finish", type: row.type, seq: row.seq });
+          });
+        }
+        inserted.push({ phase: "finish", type: row.type, seq: row.seq });
+      },
+    };
+    const bus = new EventBus({ db, startSeq: 10 });
+
+    const first = bus.emitEventQueued(makeEvent({ type: "First", runId: "run-queue" }));
+    await firstStartedPromise;
+    const second = bus.emitEventQueued(makeEvent({ type: "Second", runId: "run-queue" }));
+    await Promise.resolve();
+
+    expect(inserted).toEqual([{ phase: "start", type: "First", seq: 10 }]);
+
+    releaseFirst();
+    await Promise.all([first, second]);
+    await Effect.runPromise(bus.flush());
+
+    expect(inserted).toEqual([
+      { phase: "start", type: "First", seq: 10 },
+      { phase: "finish", type: "First", seq: 10 },
+      { phase: "start", type: "Second", seq: 11 },
+      { phase: "finish", type: "Second", seq: 11 },
+    ]);
+  });
+
+  test("queued persistence continues after a failed write and flush clears the captured error", async () => {
+    const inserted = [];
+    const db = {
+      insertEvent(row) {
+        inserted.push(row.type);
+        if (row.type === "Fails") {
+          throw new Error("db unavailable");
+        }
+      },
+    };
+    const bus = new EventBus({ db });
+
+    await bus.emitEventQueued(makeEvent({ type: "Fails", runId: "run-queue-fail" }));
+    await bus.emitEventQueued(makeEvent({ type: "Recovers", runId: "run-queue-fail" }));
+
+    expect(inserted).toEqual(["Fails", "Recovers"]);
+    await expect(Effect.runPromise(bus.flush())).rejects.toThrow("db unavailable");
+    await expect(Effect.runPromise(bus.flush())).resolves.toBeUndefined();
+  });
 });

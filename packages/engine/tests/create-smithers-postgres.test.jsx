@@ -163,4 +163,44 @@ describe("createSmithers (postgres)", () => {
             await api.close();
         }
     });
+
+    test("continue-as-new fails without spawning a child when carried state exceeds the size limit", async () => {
+        const api = PG_URL
+            ? await createSmithersPostgres(
+                { result: z.object({ reached: z.boolean() }) },
+                { provider: "postgres", connectionString: PG_URL },
+            )
+            : await createSmithersPostgres(
+                { result: z.object({ reached: z.boolean() }) },
+                { provider: "pglite" },
+            );
+        try {
+            const runId = uniqueRunId("cs-pg-can-large");
+            const oversizedState = { blob: "x".repeat(10 * 1024 * 1024) };
+            const workflow = api.smithers(() => (
+                <Workflow name="cs-pg-can-large">
+                    <Sequence>
+                        <ContinueAsNew state={oversizedState} />
+                        <Task id="unreachable" output={api.outputs.result}>
+                            {{ reached: true }}
+                        </Task>
+                    </Sequence>
+                </Workflow>
+            ));
+
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
+            expect(result.status).toBe("failed");
+
+            const adapter = new SmithersDb(api.db);
+            const sourceRun = await adapter.getRun(runId);
+            expect(sourceRun?.status).toBe("failed");
+            expect(JSON.parse(sourceRun?.errorJson ?? "{}").code).toBe("CONTINUATION_STATE_TOO_LARGE");
+            expect(await adapter.getLatestChildRun(runId)).toBeUndefined();
+
+            const events = await adapter.listEvents(runId, -1, 100);
+            expect(events.some((event) => event.type === "RunContinuedAsNew")).toBe(false);
+        } finally {
+            await api.close();
+        }
+    });
 });
