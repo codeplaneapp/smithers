@@ -1,16 +1,31 @@
+import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, onTestFinished, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SUPERVISOR_EVENT_RUN_ID, supervisorPollEffect, } from "../src/supervisor.js";
+import { createTempRepo, pinSqliteBackend } from "../../../packages/smithers/tests/e2e-helpers.js";
 const now = 1_750_000_000_000;
+const CLI_ENTRY = join(import.meta.dir, "..", "src", "index.js");
+
 function createTestDb() {
     const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db);
+    const adapter = new SmithersDb(db);
+    return { adapter, sqlite };
+}
+/**
+ * @param {ReturnType<typeof createTempRepo>} repo
+ */
+function createRepoDb(repo) {
+    pinSqliteBackend(repo.dir);
+    const sqlite = new Database(repo.path("smithers.db"));
     const db = drizzle(sqlite);
     ensureSmithersTables(db);
     const adapter = new SmithersDb(db);
@@ -151,7 +166,162 @@ async function eventPayloads(adapter, runId, type) {
         .filter((event) => event.type === type)
         .map((event) => JSON.parse(event.payloadJson));
 }
+/**
+ * @param {number} ms
+ */
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+/**
+ * @param {string} label
+ * @param {() => boolean | Promise<boolean>} predicate
+ * @param {number} [timeoutMs]
+ */
+async function waitForCondition(label, predicate, timeoutMs = 5_000) {
+    const startedAt = Date.now();
+    let lastError;
+    while (Date.now() - startedAt < timeoutMs) {
+        try {
+            if (await predicate()) {
+                return;
+            }
+        }
+        catch (error) {
+            lastError = error;
+        }
+        await sleep(50);
+    }
+    const suffix = lastError instanceof Error ? `: ${lastError.message}` : "";
+    throw new Error(`Timed out waiting for ${label}${suffix}`);
+}
+/**
+ * @param {string[]} args
+ * @param {{ cwd: string; env?: Record<string, string | undefined> }} options
+ */
+function spawnCli(args, options) {
+    const child = spawn(process.execPath, ["run", CLI_ENTRY, ...args], {
+        cwd: options.cwd,
+        env: {
+            ...process.env,
+            NO_COLOR: "1",
+            FORCE_COLOR: "0",
+            CI: "1",
+            SMITHERS_NO_SKILL_REFRESH: "1",
+            SMITHERS_BACKEND: "sqlite",
+            ...options.env,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+    });
+    const closePromise = new Promise((resolve) => {
+        child.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    onTestFinished(async () => {
+        if (child.exitCode === null && child.signalCode === null) {
+            child.kill("SIGKILL");
+            await Promise.race([closePromise, sleep(1_000)]);
+        }
+    });
+    return { child, closePromise, stdout: () => stdout, stderr: () => stderr };
+}
+/**
+ * @param {string} dbPath
+ */
+function readSupervisorEventTypes(dbPath) {
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+        return sqlite
+            .query("SELECT type FROM _smithers_events WHERE run_id = ? ORDER BY seq ASC")
+            .all(SUPERVISOR_EVENT_RUN_ID)
+            .map((row) => String(row.type));
+    }
+    finally {
+        sqlite.close();
+    }
+}
+/**
+ * @param {string} stdout
+ */
+function parseJsonStdout(stdout) {
+    const trimmed = stdout.trim();
+    expect(trimmed.length, "stdout should contain a JSON document").toBeGreaterThan(0);
+    try {
+        return JSON.parse(trimmed);
+    }
+    catch (error) {
+        throw new Error(`stdout is not parseable JSON:\n${stdout}`, { cause: error });
+    }
+}
+/**
+ * @param {unknown} value
+ */
+function stoppedStatus(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const record = /** @type {Record<string, any>} */ (value);
+    if (record.status !== undefined) {
+        return record.status;
+    }
+    if (record.data && typeof record.data === "object" && !Array.isArray(record.data)) {
+        return record.data.status;
+    }
+    return undefined;
+}
 describe("supervisor e2e", () => {
+    test("standalone supervise dry-run exits cleanly on SIGTERM and persists supervisor events", async () => {
+        const repo = createTempRepo();
+        const { sqlite } = createRepoDb(repo);
+        sqlite.close();
+        const dbPath = repo.path("smithers.db");
+        const supervisor = spawnCli([
+            "supervise",
+            "--dry-run",
+            "--interval",
+            "100ms",
+            "--stale-threshold",
+            "1s",
+            "--max-concurrent",
+            "1",
+            "--format",
+            "json",
+        ], { cwd: repo.dir });
+        let eventTypes = [];
+        try {
+            await waitForCondition("supervisor startup stderr", () => supervisor.stderr().includes("Supervisor started"));
+            await waitForCondition("persisted supervisor event", () => {
+                eventTypes = readSupervisorEventTypes(dbPath);
+                return eventTypes.includes("SupervisorStarted") || eventTypes.includes("SupervisorPollCompleted");
+            });
+            supervisor.child.kill("SIGTERM");
+            const exit = await Promise.race([
+                supervisor.closePromise,
+                sleep(3_000).then(() => ({ timedOut: true })),
+            ]);
+            expect(exit, `${supervisor.stdout()}\n${supervisor.stderr()}`).not.toMatchObject({ timedOut: true });
+            expect(exit, `${supervisor.stdout()}\n${supervisor.stderr()}`).toMatchObject({ code: 0 });
+            const parsed = parseJsonStdout(supervisor.stdout());
+            expect(stoppedStatus(parsed)).toBe("stopped");
+            eventTypes = readSupervisorEventTypes(dbPath);
+            expect(eventTypes.some((type) => type === "SupervisorStarted" || type === "SupervisorPollCompleted")).toBe(true);
+        }
+        finally {
+            if (supervisor.child.exitCode === null && supervisor.child.signalCode === null) {
+                supervisor.child.kill("SIGKILL");
+                await Promise.race([supervisor.closePromise, sleep(1_000)]);
+            }
+        }
+    }, 20_000);
+
     test("supervisor detects and resumes multiple stale runs in priority order", async () => {
         const { adapter, sqlite } = createTestDb();
         const workflows = createWorkflowDir();
