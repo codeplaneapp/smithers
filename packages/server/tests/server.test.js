@@ -221,6 +221,68 @@ const fakeAgent = {
 	`);
         return workflowPath;
     }
+    describe("host/origin defense", () => {
+        test("rejects a non-loopback Host without authToken", async () => {
+            startTestServer();
+            const { status, data } = await request("/v1/runs", {
+                headers: { Host: "evil.com" },
+            });
+            expect(status).toBe(403);
+            expect(data.error.code).toBe("FORBIDDEN");
+            expect(data.error.message).toBe("Host is not allowed");
+        });
+        test("rejects a non-loopback Origin without authToken", async () => {
+            startTestServer();
+            const { status, data } = await request("/v1/runs", {
+                method: "POST",
+                headers: { Origin: "http://evil.com" },
+                body: { workflowPath: "x" },
+            });
+            expect(status).toBe(403);
+            expect(data.error.code).toBe("FORBIDDEN");
+            expect(data.error.message).toBe("Origin is not allowed");
+        });
+        test("allows loopback Host without authToken", async () => {
+            const { db, cleanup } = buildDb();
+            ensureSmithersTables(db);
+            startTestServer({ db });
+            const { status } = await request("/v1/runs", {
+                headers: { Host: "127.0.0.1:9999" },
+            });
+            expect(status).toBe(200);
+            cleanup();
+        });
+        test("skips the host defense when authToken is configured", async () => {
+            const { db, cleanup } = buildDb();
+            ensureSmithersTables(db);
+            startTestServer({ authToken: "secret", db });
+            const { status } = await request("/v1/runs", {
+                headers: { Host: "evil.com", "x-smithers-key": "secret" },
+            });
+            expect(status).toBe(200);
+            cleanup();
+        });
+        test("SMITHERS_SERVER_TRUST_ANY_HOST=1 opts out of the host defense", async () => {
+            const saved = process.env.SMITHERS_SERVER_TRUST_ANY_HOST;
+            try {
+                process.env.SMITHERS_SERVER_TRUST_ANY_HOST = "1";
+                const { db, cleanup } = buildDb();
+                ensureSmithersTables(db);
+                startTestServer({ db });
+                const { status } = await request("/v1/runs", {
+                    headers: { Host: "evil.com" },
+                });
+                expect(status).toBe(200);
+                cleanup();
+            }
+            finally {
+                if (saved === undefined)
+                    delete process.env.SMITHERS_SERVER_TRUST_ANY_HOST;
+                else
+                    process.env.SMITHERS_SERVER_TRUST_ANY_HOST = saved;
+            }
+        });
+    });
     describe("POST /v1/runs", () => {
         test("starts a new run and returns runId", async () => {
             const dbPath = resolve(testDir, "test1.db");

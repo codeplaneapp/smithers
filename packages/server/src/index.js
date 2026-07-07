@@ -434,6 +434,79 @@ function assertAuth(req, authToken) {
     }
 }
 /**
+ * Whether an HTTP `Host` (or `Origin`) authority names a loopback interface.
+ * Mirrors serve.js / gateway.js (`isLoopbackHost`): a page at evil.com rebound to
+ * 127.0.0.1 sends `Host: evil.com`, so requiring a loopback Host rejects it.
+ * Handles an optional :port and IPv6 brackets, and treats `*.localhost` and the
+ * whole 127/8 block as loopback.
+ * @param {string} hostHeader
+ * @returns {boolean}
+ */
+function isLoopbackHost(hostHeader) {
+    let host = hostHeader.trim().toLowerCase();
+    if (host.startsWith("[")) {
+        const end = host.indexOf("]");
+        host = end >= 0 ? host.slice(1, end) : host.slice(1);
+    }
+    else {
+        const colon = host.lastIndexOf(":");
+        if (colon >= 0 && colon === host.indexOf(":") && /^\d+$/.test(host.slice(colon + 1))) {
+            host = host.slice(0, colon);
+        }
+    }
+    return (host === "localhost"
+        || host === "::1"
+        || host === "::ffff:127.0.0.1"
+        || host.endsWith(".localhost")
+        || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host));
+}
+/**
+ * Whether a browser `Origin` header points at a loopback authority. An
+ * opaque/`null` or unparseable Origin is treated as non-loopback (rejected).
+ * @param {string} origin
+ * @returns {boolean}
+ */
+function isLoopbackOrigin(origin) {
+    let parsed;
+    try {
+        parsed = new URL(origin);
+    }
+    catch {
+        return false;
+    }
+    return isLoopbackHost(parsed.host);
+}
+/**
+ * DNS-rebinding + cross-origin CSRF defense for the unauthenticated local bind,
+ * mirroring serve.js / gateway.js (spec decision 16a). With no authToken every
+ * request is trusted, so a browser page rebound to 127.0.0.1 (non-loopback Host),
+ * or a plain cross-origin "simple" POST (loopback Host, non-loopback Origin),
+ * could drive the mutating control-plane routes — launch/resume/cancel/approve/
+ * deny/signal a run, and load an arbitrary workflow module. Only the
+ * unauthenticated path is gated: a configured token is the real gate, and a
+ * remote authenticated client legitimately sends a non-loopback Host. `insecure`
+ * (opts.insecure) or SMITHERS_SERVER_TRUST_ANY_HOST opts out for a deliberate
+ * remote unauth bind.
+ * @param {IncomingMessage} req
+ * @param {string} [authToken]
+ * @param {boolean} [insecure]
+ */
+function assertAllowedHostOrigin(req, authToken, insecure) {
+    if (authToken)
+        return;
+    const trustAnyHost = process.env.SMITHERS_SERVER_TRUST_ANY_HOST;
+    if (insecure === true || trustAnyHost === "1" || trustAnyHost === "true")
+        return;
+    const host = req.headers["host"];
+    if (host && !isLoopbackHost(host)) {
+        throw new HttpError(403, "FORBIDDEN", "Host is not allowed");
+    }
+    const origin = req.headers["origin"];
+    if (origin && !isLoopbackOrigin(origin)) {
+        throw new HttpError(403, "FORBIDDEN", "Origin is not allowed");
+    }
+}
+/**
  * @param {string} workflowPath
  * @param {string} [rootDir]
  * @returns {string}
@@ -779,6 +852,7 @@ function startServerInternal(opts = {}) {
     const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     const rootDir = opts.rootDir ? resolve(opts.rootDir) : undefined;
     const allowNetwork = Boolean(opts.allowNetwork);
+    const insecure = Boolean(opts.insecure);
     const headersTimeout = opts.headersTimeout ?? DEFAULT_HEADERS_TIMEOUT;
     const requestTimeout = opts.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT;
     if (serverDb) {
@@ -849,6 +923,7 @@ function startServerInternal(opts = {}) {
                 return sendJson(res, 202, { accepted: true });
             }
             assertAuth(req, authToken);
+            assertAllowedHostOrigin(req, authToken, insecure);
             if (method === "GET" && url.pathname === "/metrics") {
                 return sendText(res, 200, renderPrometheusMetrics(), prometheusContentType);
             }

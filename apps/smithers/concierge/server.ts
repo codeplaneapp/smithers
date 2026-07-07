@@ -180,6 +180,53 @@ async function parseChatRequest(request: Request): Promise<ValidationResult> {
   return validateChatBody(parsed);
 }
 
+/**
+ * Whether an HTTP `Origin` authority names a loopback interface. Mirrors the
+ * local gateway guard: a browser page at evil.com talking to 127.0.0.1 carries
+ * the evil.com Origin, while the same-origin/proxied app carries loopback.
+ */
+function isLoopbackHost(hostHeader: string): boolean {
+  let host = hostHeader.trim().toLowerCase();
+  if (host.startsWith("[")) {
+    const end = host.indexOf("]");
+    host = end >= 0 ? host.slice(1, end) : host.slice(1);
+  } else {
+    const colon = host.lastIndexOf(":");
+    if (colon >= 0 && colon === host.indexOf(":") && /^\d+$/.test(host.slice(colon + 1))) {
+      host = host.slice(0, colon);
+    }
+  }
+
+  return (
+    host === "localhost" ||
+    host === "::1" ||
+    host === "::ffff:127.0.0.1" ||
+    host.endsWith(".localhost") ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+  );
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    return isLoopbackHost(new URL(origin).host);
+  } catch {
+    return false;
+  }
+}
+
+function rejectDisallowedBrowserOrigin(request: Request): Response | null {
+  const origin = request.headers.get("origin");
+  if (origin) {
+    return isLoopbackOrigin(origin) ? null : new Response("Origin is not allowed", { status: 403 });
+  }
+
+  const secFetchSite = request.headers.get("sec-fetch-site")?.toLowerCase();
+  if (secFetchSite === "cross-site") {
+    return new Response("Origin is not allowed", { status: 403 });
+  }
+  return null;
+}
+
 /** The local gateway whose registered workflows the concierge can background. */
 const GATEWAY_BASE = (process.env.SMITHERS_GATEWAY_PROXY_TARGET ?? "http://127.0.0.1:7331").replace(
   /\/+$/,
@@ -242,6 +289,9 @@ async function buildSystemPrompt(clientSystem: string | undefined): Promise<stri
 }
 
 async function handleChat(request: Request): Promise<Response> {
+  const disallowedOrigin = rejectDisallowedBrowserOrigin(request);
+  if (disallowedOrigin) return disallowedOrigin;
+
   const env = process.env;
   const codexCredential = codexCredentialFromEnv(env);
   const conciergeConfig = resolveConciergeModelConfig(env);
