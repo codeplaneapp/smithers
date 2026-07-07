@@ -118,13 +118,14 @@ async function fileSize(path) {
 }
 /**
  * @template A
+ * @param {(runtime: SandboxRuntime) => import("effect").Layer.Layer<SandboxTransport>} layerFor
  * @param {SandboxRuntime} runtime
  * @param {Effect.Effect<A, SmithersError, SandboxTransport>} effect
  * @returns {Promise<A>}
  */
-async function transportCall(runtime, effect) {
+async function transportCall(layerFor, runtime, effect) {
     const started = performance.now();
-    const value = await Effect.runPromise(effect.pipe(Effect.provide(layerForSandboxRuntime(runtime))));
+    const value = await Effect.runPromise(effect.pipe(Effect.provide(layerFor(runtime))));
     await Effect.runPromise(Metric.update(sandboxTransportDurationMs, performance.now() - started));
     return value;
 }
@@ -476,6 +477,12 @@ export async function executeSandbox(options) {
     const provider = resolveSandboxProvider(options.provider);
     const requestedRuntime = options.runtime;
     const selectedRuntime = provider ? provider.id : resolveSandboxRuntime(requestedRuntime ?? "bubblewrap");
+    // Sandbox transport layer resolver. Defaults to the built-in runtime layers;
+    // an injected resolver lets callers/tests supply an alternate transport
+    // implementation without changing the runtime selection logic.
+    const transportLayerFor = typeof options.transportLayerFor === "function"
+        ? options.transportLayerFor
+        : layerForSandboxRuntime;
     const createdAtMs = nowMs();
     const rawConfig = asPlainObject(options.config) ?? {};
     const egress = normalizeSandboxEgressConfig(rawConfig.egress);
@@ -626,9 +633,9 @@ export async function executeSandbox(options) {
             cpuLimit: rawConfig.cpuLimit,
             workspace: rawConfig.workspace,
         };
-        handle = await transportCall(selectedRuntime, sandboxTransport((svc) => svc.create(transportConfig)));
+        handle = await transportCall(transportLayerFor, selectedRuntime, sandboxTransport((svc) => svc.create(transportConfig)));
         const sandboxHandle = requireSandboxHandle(handle, options.sandboxId);
-        await transportCall(selectedRuntime, sandboxTransport((svc) => svc.ship(requestBundlePath, sandboxHandle)));
+        await transportCall(transportLayerFor, selectedRuntime, sandboxTransport((svc) => svc.ship(requestBundlePath, sandboxHandle)));
         const bundleSizeBytes = await fileSize(join(requestBundlePath, "README.md"));
         await emitSandboxEvent(runtimeDb, {
             type: "SandboxShipped",
@@ -657,7 +664,7 @@ export async function executeSandbox(options) {
             bundlePath: null,
         });
         if (options.config?.command) {
-            await transportCall(selectedRuntime, sandboxTransport((svc) => svc.execute(resolveSandboxCommand(options.config?.command), sandboxHandle, runtime.signal)));
+            await transportCall(transportLayerFor, selectedRuntime, sandboxTransport((svc) => svc.execute(resolveSandboxCommand(options.config?.command), sandboxHandle, runtime.signal)));
         }
         runtime.heartbeat({
             sandboxId: options.sandboxId,
@@ -706,7 +713,7 @@ export async function executeSandbox(options) {
             // The child run's live stream log, copied into the result bundle.
             streamLogPath: join(options.rootDir, ".smithers", "executions", child.runId, "logs", "stream.ndjson"),
         });
-        const collected = await transportCall(selectedRuntime, sandboxTransport((svc) => svc.collect(sandboxHandle)));
+        const collected = await transportCall(transportLayerFor, selectedRuntime, sandboxTransport((svc) => svc.collect(sandboxHandle)));
         const validated = await validateSandboxBundle(collected.bundlePath);
         return await finalizeSandboxBundle({
             adapter,
@@ -760,7 +767,7 @@ export async function executeSandbox(options) {
         // failure can hide leaked resources (orphaned containers, undeleted workspaces),
         // so surface it as a WARNING instead of discarding it silently.
         if (handle) {
-            await transportCall(selectedRuntime, sandboxTransport((svc) => svc.cleanup(handle))).catch((cleanupError) => {
+            await transportCall(transportLayerFor, selectedRuntime, sandboxTransport((svc) => svc.cleanup(handle))).catch((cleanupError) => {
                 logWarning("sandbox transport cleanup failed", {
                     runId: runtime.runId,
                     sandboxId: options.sandboxId,

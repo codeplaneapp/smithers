@@ -9,6 +9,41 @@ import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { __executeSandboxInternals, executeSandbox, registerSandboxProvider } from "../src/execute.js";
 import { setSmithersLogRunner } from "@smithers-orchestrator/observability/logging";
+import { Effect, Layer } from "effect";
+import { mkdir, cp, rm } from "node:fs/promises";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SandboxEntityExecutor } from "../src/effect/sandbox-entity.js";
+import { makeSandboxTransportLayer } from "../src/transport.js";
+import { makeBaseSandboxHandle } from "../src/effect/process-runner.js";
+
+/**
+ * A real (non-mock) sandbox transport layer whose local-fs create/ship/collect
+ * succeed but whose cleanup deterministically rejects — the actual Effect
+ * transport machinery, wired to an executor that fails only on teardown.
+ * @returns {import("effect").Layer.Layer<import("../src/transport.js").SandboxTransport>}
+ */
+function failingCleanupTransportLayer() {
+    const executor = SandboxEntityExecutor.of({
+        create: (config) =>
+            Effect.tryPromise(async () => {
+                const handle = makeBaseSandboxHandle(config);
+                await mkdir(handle.requestPath, { recursive: true });
+                await mkdir(handle.resultPath, { recursive: true });
+                return handle;
+            }),
+        ship: (bundlePath, handle) =>
+            Effect.tryPromise(async () => {
+                await rm(handle.requestPath, { recursive: true, force: true });
+                await mkdir(handle.requestPath, { recursive: true });
+                await cp(bundlePath, handle.requestPath, { recursive: true });
+            }),
+        execute: () => Effect.succeed({ exitCode: 0 }),
+        collect: (handle) => Effect.succeed({ bundlePath: handle.resultPath }),
+        cleanup: () =>
+            Effect.fail(new SmithersError("SANDBOX_EXECUTION_FAILED", "transport cleanup boom")),
+    });
+    return makeSandboxTransportLayer(Layer.succeed(SandboxEntityExecutor, executor));
+}
 
 /**
  * @param {string} prefix
@@ -162,6 +197,28 @@ describe("executeSandbox", () => {
             image: "example/sandbox",
             env: { PUBLIC_MODE: "[redacted]", SECRET_TOKEN: "[redacted]" },
         });
+        // redactSandboxConfig returns non-object configs untouched.
+        expect(__executeSandboxInternals.redactSandboxConfig("not-an-object")).toBe("not-an-object");
+        expect(__executeSandboxInternals.redactSandboxConfig(null)).toBe(null);
+        // resolveSandboxProvider rejects an object without a run() function.
+        expect(() => __executeSandboxInternals.resolveSandboxProvider({ id: "no-run" })).toThrow(
+            "must be a registered provider id or a provider object",
+        );
+    });
+
+    test("registerSandboxProvider validates the provider object and id", () => {
+        expect(() => registerSandboxProvider(null)).toThrow(
+            "must be an object with a run(request) function",
+        );
+        expect(() => registerSandboxProvider({ id: "x" })).toThrow(
+            "must be an object with a run(request) function",
+        );
+        expect(() => registerSandboxProvider({ run: async () => ({ status: "finished" }) })).toThrow(
+            "must include a non-empty id",
+        );
+        expect(() =>
+            registerSandboxProvider({ id: "   ", run: async () => ({ status: "finished" }) }),
+        ).toThrow("must include a non-empty id");
     });
 
     test("runs a child workflow, collects the bundle, and persists sandbox events", async () => {
@@ -546,6 +603,58 @@ describe("executeSandbox", () => {
             expect(await eventTypes(adapter, "run-cleanup-success")).toEqual([
                 "SandboxCreated",
                 "SandboxShipped",
+                "SandboxBundleReceived",
+                "SandboxCompleted",
+            ]);
+        }
+        finally {
+            restoreLogger();
+            sqlite.close();
+        }
+    });
+
+    test("a failing transport cleanup does not mask a successful run result and is surfaced", async () => {
+        const { adapter, db, sqlite } = createDb();
+        const rootDir = tempDir("smithers-sandbox-transport-cleanup-");
+        const runtime = createRuntime(db, { runId: "run-transport-cleanup" });
+        let loggedWarnings = 0;
+        const restoreLogger = setSmithersLogRunner({
+            runFork() {
+                loggedWarnings += 1;
+            },
+            async runPromise() { },
+        });
+        try {
+            // The transport create/ship/collect succeed and the child run finishes,
+            // but the transport layer's cleanup() rejects in the finally block. The
+            // successful output must survive and no rejection may escape.
+            const output = await runInRuntime(runtime, {
+                sandboxId: "sandbox-transport-cleanup",
+                runtime: "codeplane",
+                rootDir,
+                reviewDiffs: false,
+                transportLayerFor: () => failingCleanupTransportLayer(),
+                executeChildWorkflow: async () => {
+                    writeChildLog(rootDir, "child-transport-cleanup", "{\"stage\":\"done\"}\n");
+                    return {
+                        runId: "child-transport-cleanup",
+                        status: "finished",
+                        output: { answer: 99 },
+                    };
+                },
+            });
+
+            expect(output).toEqual({ answer: 99 });
+            // The swallowed transport cleanup failure must be surfaced (logged).
+            expect(loggedWarnings).toBeGreaterThanOrEqual(1);
+            // The persisted status reflects the real run, not the cleanup failure.
+            expect(await adapter.getSandbox("run-transport-cleanup", "sandbox-transport-cleanup")).toMatchObject({
+                status: "finished",
+            });
+            expect(await eventTypes(adapter, "run-transport-cleanup")).toEqual([
+                "SandboxCreated",
+                "SandboxShipped",
+                "SandboxHeartbeat",
                 "SandboxBundleReceived",
                 "SandboxCompleted",
             ]);
