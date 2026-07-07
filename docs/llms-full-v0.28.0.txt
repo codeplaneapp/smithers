@@ -11323,6 +11323,21 @@ Gateway client exports:
 | `smithers-orchestrator/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createSmithersCollections`, `createSmithersDataClient`, `WorkspaceMode`, `SmithersCollections`, `SmithersDataClient`, collection row types, `gatewayKeys`, `smithersCollectionKeys`, `smithersLocalCollectionOptions`, `smithersElectricCollectionOptions`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes` |
 | `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider`, `SmithersCollectionsProvider`, `createGatewayReactRoot`, `useSmithersCollections`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `useGatewayRunTree`, `useGatewayConnectionStatus`, `useGatewayCrons`, `useGatewayMemoryFacts`, `useGatewayScores`, `useGatewayTickets`, `useGatewayPrompts` |
 
+<Note>
+  **Bundling in Next.js / webpack:** `gateway-client` transitively imports
+  `@smithers-orchestrator/electric-proxy`, which ships raw TypeScript sources.
+  Bun and Vite handle that natively, but webpack-based builds (Next.js) fail
+  hard unless you add it to
+  [`transpilePackages`](https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages):
+
+  ```js
+  // next.config.mjs
+  export default {
+    transpilePackages: ["@smithers-orchestrator/electric-proxy"],
+  };
+  ```
+</Note>
+
 ## REST domain API
 
 The Gateway also exposes a typed REST domain surface under `/v1/api/*`. These
