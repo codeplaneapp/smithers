@@ -40,4 +40,19 @@ describe("createProgressReporter error formatting", () => {
     expect(lines[1]).toBe("quiz failed: 42");
     expect(lines[2]).toBe("verify-findings failed: unknown error");
   });
+
+  test("a rejecting loadRows is swallowed by the print chain", async () => {
+    const lines: string[] = [];
+    const reporter = createProgressReporter({
+      loadRows: async () => {
+        throw new Error("db is gone");
+      },
+      write: (line) => lines.push(line),
+    });
+    // A per-file NodeFinished enqueues a job that calls loadRows → the rejection
+    // must be caught by the chain's `.catch(() => {})` rather than crashing flush.
+    reporter.onEvent({ type: "NodeFinished", nodeId: "review-file-1-src-foo-ts", timestampMs: 1_000 });
+    await expect(reporter.flush()).resolves.toBeUndefined();
+    expect(lines).toEqual([]);
+  });
 });
