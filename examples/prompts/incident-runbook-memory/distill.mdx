@@ -1,0 +1,11 @@
+The team has accumulated these lessons on "{props.topic}":
+
+{props.lessons.map((l, i) => `${i + 1}. ${l}`).join("\n")}
+
+They keep recurring — distill them into ONE runbook rule that replaces them all.
+The rule must stand on its own for a responder who has read none of the lessons,
+preserve everything the lessons agree on, and invent no policy they don't support.
+
+Call propose_runbook_rule exactly once with the rule. It is recorded as PENDING —
+a human approves or rejects it at the gate, so write it to survive that review.
+Then return the ruleNoteId the tool gave you and a one-paragraph rationale.
