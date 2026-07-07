@@ -218,10 +218,12 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     expect(captured.runTreeDisabled.nodes).toEqual([]);
     expect(captured.runTreeDisabled.root).toBeNull();
 
-    // Node output for the finished task resolves once the run completes.
+    // Node output: the hook fetched once on mount (before task1 existed → the
+    // real "Node not found" error path). Once the run completes, an explicit
+    // refetch resolves the produced output (the success path).
     await waitFor(() => captured.run.data?.status === "finished", "run finished");
-    await waitFor(() => captured.nodeOutput.loading === false, "node output settled");
-    if (captured.nodeOutput.error) throw new Error(`nodeOutput error: ${captured.nodeOutput.error.message}`);
+    await act(async () => { await captured.nodeOutput.refetch(); });
+    await waitFor(() => captured.nodeOutput.loading === false && captured.nodeOutput.data !== undefined, "node output settled");
     expect(captured.nodeOutput.data).toMatchObject({ status: "produced", row: { value: 3 } });
     expect(captured.nodeOutputDisabled.loading).toBe(false);
 
