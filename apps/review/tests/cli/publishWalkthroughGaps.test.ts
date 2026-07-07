@@ -69,6 +69,19 @@ describe("publishWalkthrough config + upload", () => {
     await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("publish failed: HTTP 429 rate limited");
   });
 
+  test("swallows a failing response body read and still reports the HTTP status", async () => {
+    const { htmlPath, homeDir } = tempSetup();
+    process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
+    process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
+    // A response whose .text() rejects → the `.catch(() => "")` guard yields "".
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 500,
+      text: () => Promise.reject(new Error("stream broke")),
+    })) as unknown as typeof fetch;
+    await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("publish failed: HTTP 500");
+  });
+
   test("throws when the success response omits a url", async () => {
     const { htmlPath, homeDir } = tempSetup();
     process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
