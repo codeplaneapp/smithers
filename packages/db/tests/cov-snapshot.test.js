@@ -134,4 +134,13 @@ describe("snapshot.js loadRunOutputRowsEffect (sqlite)", () => {
         expect(all.length).toBe(2);
         sqlite.close();
     });
+
+    test("surfaces a DB error (missing physical table) through the catch branch", async () => {
+        const table = zodToTable("rows_missing", z.object({ flag: z.boolean() }));
+        const sqlite = new Database(":memory:"); // table never created
+        const db = drizzle(sqlite, { schema: { rowsMissing: table } });
+        const exit = await Effect.runPromiseExit(loadRunOutputRowsEffect(db, table, "r1"));
+        expect(exit._tag).toBe("Failure");
+        sqlite.close();
+    });
 });

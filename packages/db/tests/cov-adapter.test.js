@@ -102,20 +102,59 @@ describe("adapter: frames", () => {
     test("insertFrame keyframe+delta, reconstructFrameXml, getLastFrame", async () => {
         const { adapter } = createDb();
         await adapter.insertRun(runRow("r1"));
-        const frameXml = (state) => canonicalizeXml({
+        // A LARGE frame so a one-task change produces a delta smaller than the full
+        // XML — this makes insertFrame store frame 1 as a delta (the delta-shorter
+        // branch), and reconstructFrameXml then re-applies that delta over the
+        // keyframe (the apply-delta-in-chain branch).
+        const frameXml = (changedState) => canonicalizeXml({
             kind: "element",
             tag: "smithers:workflow",
             props: { name: "wf" },
-            children: [{ kind: "element", tag: "smithers:task", props: { id: "t::0", state }, children: [] }],
+            children: Array.from({ length: 60 }, (_, i) => ({
+                kind: "element",
+                tag: "smithers:task",
+                props: { id: `task-${i}::0`, state: i === 0 ? changedState : "pending", label: `Task number ${i}` },
+                children: [],
+            })),
         });
         await adapter.insertFrameEffect({ runId: "r1", frameNo: 0, createdAtMs: now, xmlHash: "h0", xmlJson: frameXml("pending") });
         await adapter.insertFrame({ runId: "r1", frameNo: 1, createdAtMs: now + 1, xmlHash: "h1", xmlJson: frameXml("finished") });
+        // Confirm frame 1 was delta-encoded (proves the delta-shorter branch ran).
+        const raw = await adapter.listFrames("r1", 10);
+        expect(raw.find((f) => f.frameNo === 1)?.encoding).toBe("delta");
+        // Reconstruct must re-inflate the delta chain back to the full frame.
         const reconstructed = await Effect.runPromise(adapter.reconstructFrameXml("r1", 1));
         expect(reconstructed).toBe(frameXml("finished"));
         const last = await adapter.getLastFrame("r1");
         expect(last.frameNo).toBe(1);
         // reconstruct a frame that doesn't exist → undefined
         expect(await Effect.runPromise(adapter.reconstructFrameXml("r1", 99))).toBeUndefined();
+    });
+
+    test("reconstructFrameXml surfaces a corrupt delta payload through the apply catch", async () => {
+        const { sqlite, adapter } = createDb();
+        await adapter.insertRun(runRow("r1"));
+        // Insert a valid keyframe and a corrupt DELTA frame directly (cold cache),
+        // so reconstruct re-applies the bad delta and the apply Effect.try catch runs.
+        sqlite.run(`INSERT INTO _smithers_frames (run_id, frame_no, created_at_ms, xml_json, xml_hash, encoding) VALUES ('r1', 0, ?, '{"kind":"element","tag":"w","props":{},"children":[]}', 'h0', 'keyframe')`, [now]);
+        sqlite.run(`INSERT INTO _smithers_frames (run_id, frame_no, created_at_ms, xml_json, xml_hash, encoding) VALUES ('r1', 1, ?, '{not-valid-delta', 'h1', 'delta')`, [now + 1]);
+        const exit = await Effect.runPromiseExit(adapter.reconstructFrameXml("r1", 1));
+        expect(exit._tag).toBe("Failure");
+    });
+
+    test("insertFrame surfaces a corrupt previous frame through the encode catch", async () => {
+        const { adapter } = createDb();
+        await adapter.insertRun(runRow("r1"));
+        // Frame 0 stored with unparseable XML; encoding frame 1 against it throws.
+        await adapter.insertFrame({ runId: "r1", frameNo: 0, createdAtMs: now, xmlHash: "h0", xmlJson: "{not-valid-xml" });
+        let error;
+        try {
+            await adapter.insertFrame({ runId: "r1", frameNo: 1, createdAtMs: now + 1, xmlHash: "h1", xmlJson: '{"kind":"element","tag":"w","props":{},"children":[]}' });
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeDefined();
+        expect(String(error)).toMatch(/encode frame delta/);
     });
 });
 
@@ -256,6 +295,7 @@ describe("adapter: Effect-suffixed wrappers delegate to their base methods", () 
         sqlite.exec(zodToCreateTableSQL("eff_out", schema));
         await adapter.upsertOutputRow(table, { runId: "r1", nodeId: "n1", iteration: 0 }, { v: 1 });
 
+        await adapter.updateRunEffect("r1", { status: "running", heartbeatAtMs: now + 5 });
         expect((await adapter.getRunEffect("r1")).runId).toBe("r1");
         expect(Array.isArray(await adapter.listRunsEffect(10))).toBe(true);
         expect(Array.isArray(await adapter.listStaleRunningRunsEffect(now + 1))).toBe(true);
