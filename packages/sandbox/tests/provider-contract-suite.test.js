@@ -50,3 +50,51 @@ createSandboxProviderContractSuite({
 	expectedProviderId: "reference-command-sandbox",
 	createProvider: createReferenceProvider,
 });
+
+/**
+ * A second contract-suite pass through a provider that fully drives the request
+ * seam the default fixture exposes: it invokes the passed handler eagerly (so the
+ * id-only contract test still exercises its handler) and calls the request's
+ * workflow()/build() and executeChildWorkflow() before delegating to the real
+ * kit-backed provider. A nesting-capable provider legitimately touches those.
+ *
+ * @param {(args: { command: string; request: Record<string, unknown>; files: Map<string, string>; env: Record<string, string> }) => any} handler
+ * @param {Record<string, unknown>} [providerOptions]
+ */
+function createRequestExhaustingProvider(handler, providerOptions = {}) {
+	// Cover the "provider id" contract test, whose handler is never reached via run().
+	try {
+		handler({ command: "probe", request: {}, files: new Map(), env: {} });
+	} catch {
+		// The handler's return value is irrelevant here; we only need it invoked.
+	}
+	const base = createReferenceProvider(handler, providerOptions);
+	return {
+		id: base.id,
+		async run(request) {
+			const workflow = /** @type {{ (): { build?: () => unknown } } | undefined} */ (
+				/** @type {Record<string, unknown>} */ (request).workflow
+			);
+			if (typeof workflow === "function") {
+				const built = workflow();
+				if (built && typeof built.build === "function") {
+					built.build();
+				}
+			}
+			const executeChildWorkflow = /** @type {(() => Promise<unknown>) | undefined} */ (
+				/** @type {Record<string, unknown>} */ (request).executeChildWorkflow
+			);
+			if (typeof executeChildWorkflow === "function") {
+				await executeChildWorkflow();
+			}
+			return base.run(request);
+		},
+		cleanup: base.cleanup,
+	};
+}
+
+createSandboxProviderContractSuite({
+	name: "reference command sandbox provider (request seam exhausted)",
+	expectedProviderId: "reference-command-sandbox",
+	createProvider: createRequestExhaustingProvider,
+});

@@ -139,9 +139,13 @@ async function validateSandboxBundleWriteParams(params) {
 }
 /**
  * @param {string} bundlePath
+ * @param {{ lstatLogs?: typeof lstat }} [fsOverrides] Injection seam for the
+ *   final logs lstat, so tests can exercise the TOCTOU re-check that guards a
+ *   symlink appearing between the bundle walk and the logs stat.
  * @returns {Promise<ValidatedSandboxBundle>}
  */
-export async function validateSandboxBundle(bundlePath) {
+export async function validateSandboxBundle(bundlePath, fsOverrides = {}) {
+    const lstatLogs = fsOverrides.lstatLogs ?? lstat;
     const resolvedReadme = resolveSandboxPath(bundlePath, "README.md");
     const readmeStats = await lstat(resolvedReadme).catch(() => null);
     if (readmeStats?.isSymbolicLink()) {
@@ -173,7 +177,7 @@ export async function validateSandboxBundle(bundlePath) {
         assertPatchPathSafe(bundlePath, patchPath);
     }
     const logsPath = resolveSandboxPath(bundlePath, "logs/stream.ndjson");
-    const logsStats = await lstat(logsPath).catch(() => null);
+    const logsStats = await lstatLogs(logsPath).catch(() => null);
     if (logsStats?.isSymbolicLink()) {
         throw new SmithersError("TOOL_PATH_ESCAPE", "Sandbox bundle logs may not be a symlink.", { bundlePath });
     }

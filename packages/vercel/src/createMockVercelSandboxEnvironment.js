@@ -118,14 +118,16 @@ export function createMockVercelSandboxEnvironment(handler, config = {}) {
 						return "";
 					},
 				};
-			},
-			async extendTimeout(ms) {
-				extendTimeoutCalls.push(ms);
-			},
-			domain(port) {
-				domainCalls.push(port);
-				return `https://${sandboxId}-${port}.vercel.run`;
-			},
+				},
+				async extendTimeout(ms) {
+					extendTimeoutCalls.push(ms);
+					if (failures.has("extendTimeout")) throw new Error("mock vercel extendTimeout failure");
+				},
+				domain(port) {
+					domainCalls.push(port);
+					if (failures.has("domain")) throw new Error("mock vercel domain failure");
+					return `https://${sandboxId}-${port}.vercel.run`;
+				},
 			async stop() {
 				stopped = true;
 				config.onDestroy?.();

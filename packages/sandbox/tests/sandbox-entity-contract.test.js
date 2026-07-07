@@ -17,6 +17,11 @@ const handle = {
     resultPath: "/tmp/smithers/.smithers/sandboxes/run-entity-contract/sb-1/result",
 };
 describe("sandbox entity contract", () => {
+    test("exposes constructable service tag classes", () => {
+        expect(new SandboxEntityExecutor()).toBeInstanceOf(SandboxEntityExecutor);
+        expect(new SandboxTransport()).toBeInstanceOf(SandboxTransport);
+    });
+
     test("preserves the sandbox transport contract through entity dispatch", async () => {
         const calls = [];
         const executorLayer = Layer.succeed(SandboxEntityExecutor, SandboxEntityExecutor.of({

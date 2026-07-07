@@ -49,6 +49,7 @@ export type CloudflareSandboxProviderOptions = {
 	setupFiles?: Record<string, { content: string; encoding?: "utf-8" | "base64" }>;
 	execution?: "exec" | "process";
 	cleanup?: "destroy" | "keep";
+	importCloudflareSandbox?: () => Promise<{ getSandbox?: unknown }>;
 };
 
 export function createCloudflareSandboxProvider(options?: CloudflareSandboxProviderOptions): SandboxProvider;

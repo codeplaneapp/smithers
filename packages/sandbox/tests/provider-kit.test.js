@@ -199,6 +199,24 @@ describe("createCommandSandboxProvider", () => {
 		expect(error.message).toContain("truncated");
 	});
 
+	test("nonzero exit with short non-JSON stderr is surfaced without truncation", async () => {
+		const s = makeSession({
+			exec: () => ({ exitCode: 4, stdout: "not json", stderr: "boom short stderr" }),
+		});
+		const provider = createCommandSandboxProvider({ id: "kit", createSession: () => s.session });
+		const { request } = makeRequest({ maxOutputBytes: 1_000 });
+		let error;
+		try {
+			await provider.run(request);
+		} catch (e) {
+			error = e;
+		}
+		expect(error).toBeInstanceOf(SmithersError);
+		expect(error.code).toBe("SANDBOX_EXECUTION_FAILED");
+		expect(error.message).toContain("boom short stderr");
+		expect(error.message).not.toContain("truncated");
+	});
+
 	test("nonzero exit but JSON stdout present is a success", async () => {
 		const s = makeSession({
 			exec: () => ({ exitCode: 7, stdout: JSON.stringify({ status: "finished" }), stderr: "warning" }),
@@ -471,6 +489,18 @@ describe("parseSandboxProviderResult", () => {
 		}
 		expect(error).toBeInstanceOf(SmithersError);
 		expect(error.message).toContain("{broken");
+	});
+
+	test("scrubs context secrets from the invalid-JSON error snippet", () => {
+		let error;
+		try {
+			parseSandboxProviderResult("not json TOKEN=sk-secret-123", "r1", { secrets: ["sk-secret-123"] });
+		} catch (e) {
+			error = e;
+		}
+		expect(error).toBeInstanceOf(SmithersError);
+		expect(error.message).not.toContain("sk-secret-123");
+		expect(error.message).toContain("[redacted]");
 	});
 
 	test("scrubs context secrets from the invalid-JSON error snippet", () => {

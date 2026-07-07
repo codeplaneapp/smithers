@@ -16,8 +16,8 @@ import {
     DockerSandboxExecutorLive,
 } from "../src/effect/http-runner.js";
 import { BubblewrapSandboxExecutorLive } from "../src/effect/socket-runner.js";
-import { layerForSandboxRuntime, resolveSandboxRuntime } from "../src/transport.js";
-import { bubblewrapArgs, dockerArgs, sandboxExecArgs, sandboxRunnerEnv, spawnSandboxCommand } from "../src/effect/process-runner.js";
+import { SandboxTransport, layerForSandboxRuntime, resolveSandboxRuntime } from "../src/transport.js";
+import { bubblewrapArgs, dockerArgs, normalizeSandboxHandleControls, sandboxExecArgs, sandboxRunnerEnv, spawnSandboxCommand } from "../src/effect/process-runner.js";
 
 const isWindows = process.platform === "win32";
 
@@ -660,4 +660,237 @@ describe("spawnSandboxCommand cancellation", () => {
         expect(caught?.code).not.toBe("PROCESS_SPAWN_FAILED");
         expect(performance.now() - start).toBeLessThan(8000);
     }, 15_000);
+});
+
+/**
+ * Create a real regular file and return its path, so a runtime that expects a
+ * directory ancestor there fails with ENOTDIR (deterministic on any host,
+ * including root, where permission bits would be ignored).
+ * @param {string} prefix
+ */
+function makeFilePath(prefix) {
+    const path = join(tempDir(prefix), "afile");
+    writeFileSync(path, "x", "utf8");
+    return path;
+}
+
+/**
+ * @param {string} runtime
+ * @param {string} requestPath
+ * @param {string} [resultPath]
+ */
+function bareHandle(runtime, requestPath, resultPath = "/tmp/does-not-matter/result") {
+    return {
+        runtime,
+        runId: "run",
+        sandboxId: "sandbox",
+        sandboxRoot: "/tmp/does-not-matter",
+        requestPath,
+        resultPath,
+        allowNetwork: false,
+    };
+}
+
+describe("sandbox config normalization", () => {
+    test("sandboxRunnerEnv falls back to a default PATH when the host has none", async () => {
+        await withEnv({ PATH: undefined, TMPDIR: undefined, TMP: undefined, TEMP: undefined }, async () => {
+            const env = sandboxRunnerEnv();
+            expect(env.PATH).toBe("/usr/local/bin:/usr/bin:/bin");
+        });
+    });
+
+    test("rejects malformed env, ports, volumes, and resource limits", () => {
+        expect(() => normalizeSandboxHandleControls({ env: "nope" })).toThrow("flat object");
+        expect(() => normalizeSandboxHandleControls({ env: { "1bad": "v" } })).toThrow("valid environment variable names");
+        expect(() => normalizeSandboxHandleControls({ env: { GOOD: 123 } })).toThrow("must be strings");
+        expect(() => normalizeSandboxHandleControls({ env: { GOOD: "x".repeat(64 * 1024 + 1) } })).toThrow("outside supported bounds");
+        expect(() => normalizeSandboxHandleControls({ ports: "nope" })).toThrow("must be an array");
+        expect(() => normalizeSandboxHandleControls({ ports: ["nope"] })).toThrow("must be objects");
+        expect(() => normalizeSandboxHandleControls({ ports: [{ host: 0, container: 1 }] })).toThrow("between 1 and 65535");
+        expect(() => normalizeSandboxHandleControls({ volumes: "nope" })).toThrow("must be an array");
+        expect(() => normalizeSandboxHandleControls({ volumes: ["nope"] })).toThrow("must be objects");
+        expect(() => normalizeSandboxHandleControls({ volumes: [{ host: "relative", container: "/abs" }] })).toThrow("must be an absolute path");
+        expect(() => normalizeSandboxHandleControls({ memoryLimit: "not-a-limit" })).toThrow("resource limit");
+    });
+
+    test("accepts and canonicalizes valid resource limits, ports, volumes, and workspace controls", () => {
+        const controls = normalizeSandboxHandleControls({
+            memoryLimit: "512m",
+            cpuLimit: "0.5",
+            ports: [{ host: 8080, container: 80 }],
+            volumes: [{ host: "/tmp/cache", container: "/cache", readonly: true }],
+            workspace: { name: "  ws  ", snapshotId: "  snap  ", idleTimeoutSecs: 12.9, persistence: "sticky" },
+        });
+        expect(controls.memoryLimit).toBe("512m");
+        expect(controls.cpuLimit).toBe("0.5");
+        expect(controls.ports).toEqual([{ host: 8080, container: 80 }]);
+        expect(controls.volumes).toEqual([{ host: "/tmp/cache", container: "/cache", readonly: true }]);
+        expect(controls.workspace).toEqual({ name: "ws", snapshotId: "snap", idleTimeoutSecs: 12, persistence: "sticky" });
+    });
+
+    test("rejects malformed workspace controls", () => {
+        expect(() => normalizeSandboxHandleControls({ workspace: { name: "" } })).toThrow("non-empty name");
+        expect(() => normalizeSandboxHandleControls({ workspace: { name: "ok", snapshotId: "" } })).toThrow("snapshotId must be a non-empty string");
+        expect(() => normalizeSandboxHandleControls({ workspace: { name: "ok", idleTimeoutSecs: -1 } })).toThrow("idleTimeoutSecs must be a non-negative number");
+        expect(() => normalizeSandboxHandleControls({ workspace: { name: "ok", persistence: "weird" } })).toThrow("persistence must be ephemeral or sticky");
+    });
+
+    test("bubblewrap fails closed on port publishing, cpu limits, and managed workspaces", () => {
+        const base = { requestPath: "/tmp/request", resultPath: "/tmp/result", allowNetwork: false };
+        expect(() => bubblewrapArgs("run", { ...base, ports: [{ host: 1, container: 1 }] })).toThrow("explicit port publishing");
+        expect(() => bubblewrapArgs("run", { ...base, cpuLimit: "0.5" })).toThrow("cpuLimit");
+        expect(() => bubblewrapArgs("run", { ...base, workspace: { name: "ws" } })).toThrow("managed workspace controls");
+    });
+
+    test("docker fails closed on managed workspace controls", () => {
+        expect(() =>
+            dockerArgs("run", { requestPath: "/tmp/request", resultPath: "/tmp/result", allowNetwork: false, workspace: { name: "ws" } }),
+        ).toThrow("managed workspace controls");
+    });
+});
+
+describe("spawnSandboxCommand result mapping", () => {
+    test.skipIf(isWindows)("resolves with exitCode 0 when the sandbox command succeeds", async () => {
+        const result = await Effect.runPromise(
+            spawnSandboxCommand("sh", ["-c", "exit 0"], { cwd: process.cwd(), runtime: "test", timeoutMs: 10_000 }),
+        );
+        expect(result).toEqual({ exitCode: 0 });
+    });
+
+    test.skipIf(isWindows)("fails with the runtime, command, and exit code when the command exits nonzero", async () => {
+        let caught;
+        try {
+            await Effect.runPromise(
+                spawnSandboxCommand("sh", ["-c", "printf oops 1>&2; exit 7"], { cwd: process.cwd(), runtime: "widget", timeoutMs: 10_000 }),
+            );
+        }
+        catch (error) {
+            caught = error;
+        }
+        expect(caught).toBeDefined();
+        expect(String(caught?.message ?? "")).toContain("widget sandbox command exited with code 7");
+    });
+});
+
+describe("sandbox transport executor error paths", () => {
+    test.skipIf(isWindows)("docker create surfaces a workspace mkdir failure after docker info succeeds", async () => {
+        const fakeDocker = makeFakeDockerBin();
+        // rootDir is a real directory so `docker info` (cwd=rootDir) succeeds, but
+        // `.smithers` is a regular file so the request-path mkdir hits ENOTDIR.
+        const rootDir = tempDir("smithers-docker-badroot-");
+        writeFileSync(join(rootDir, ".smithers"), "x", "utf8");
+        await withEnv({ PATH: `${fakeDocker.binDir}:${process.env.PATH ?? ""}` }, async () => {
+            await expect(
+                runExecutor(DockerSandboxExecutorLive, (executor) =>
+                    executor.create(configFor(rootDir, "run-docker-badroot", "sandbox", "docker")),
+                ),
+            ).rejects.toThrow(/create docker sandbox workspace|ENOTDIR/i);
+        });
+    });
+
+    test("docker ship surfaces a copy failure for a missing bundle", async () => {
+        const handle = bareHandle("docker", join(tempDir("smithers-docker-ship-"), "request"));
+        await expect(
+            runExecutor(DockerSandboxExecutorLive, (executor) =>
+                executor.ship(join(tempDir("smithers-docker-nobundle-"), "does-not-exist"), handle),
+            ),
+        ).rejects.toThrow(/ship docker bundle|ENOENT/i);
+    });
+
+    test("docker cleanup surfaces an rm failure", async () => {
+        const handle = bareHandle("docker", join(makeFilePath("smithers-docker-clean-"), "request"));
+        await expect(
+            runExecutor(DockerSandboxExecutorLive, (executor) => executor.cleanup(handle)),
+        ).rejects.toThrow(/cleanup docker sandbox workspace|ENOTDIR/i);
+    });
+
+    test("codeplane create surfaces a workspace mkdir failure", async () => {
+        const fileRoot = makeFilePath("smithers-codeplane-badroot-");
+        await withEnv({ CODEPLANE_API_URL: "http://codeplane.test", CODEPLANE_API_KEY: "test-key" }, async () => {
+            await expect(
+                runExecutor(CodeplaneSandboxExecutorLive, (executor) =>
+                    executor.create(configFor(fileRoot, "run-codeplane-badroot", "sandbox", "codeplane")),
+                ),
+            ).rejects.toThrow(/create codeplane sandbox workspace|ENOTDIR/i);
+        });
+    });
+
+    test("codeplane ship surfaces a copy failure for a missing bundle", async () => {
+        const handle = bareHandle("codeplane", join(tempDir("smithers-codeplane-ship-"), "request"));
+        await expect(
+            runExecutor(CodeplaneSandboxExecutorLive, (executor) =>
+                executor.ship(join(tempDir("smithers-codeplane-nobundle-"), "does-not-exist"), handle),
+            ),
+        ).rejects.toThrow(/ship codeplane bundle|ENOENT/i);
+    });
+
+    test("codeplane cleanup surfaces an rm failure", async () => {
+        const handle = bareHandle("codeplane", join(makeFilePath("smithers-codeplane-clean-"), "request"));
+        await expect(
+            runExecutor(CodeplaneSandboxExecutorLive, (executor) => executor.cleanup(handle)),
+        ).rejects.toThrow(/cleanup codeplane sandbox workspace|ENOTDIR/i);
+    });
+
+    test.skipIf(isWindows)("bubblewrap create surfaces a workspace mkdir failure", async () => {
+        const fake = makeFakeBin("sandbox-exec");
+        const fileRoot = makeFilePath("smithers-bubblewrap-badroot-");
+        await withPlatform("darwin", () =>
+            withBunWhich((command) => (command === "sandbox-exec" ? fake.binPath : null), async () => {
+                await expect(
+                    runExecutor(BubblewrapSandboxExecutorLive, (executor) =>
+                        executor.create(configFor(fileRoot, "run-bwrap-badroot", "sandbox", "bubblewrap")),
+                    ),
+                ).rejects.toThrow(/create sandbox workspace|ENOTDIR/i);
+            }),
+        );
+    });
+
+    test("bubblewrap ship surfaces a copy failure for a missing bundle", async () => {
+        const handle = bareHandle("bubblewrap", join(tempDir("smithers-bubblewrap-ship-"), "request"));
+        await expect(
+            runExecutor(BubblewrapSandboxExecutorLive, (executor) =>
+                executor.ship(join(tempDir("smithers-bubblewrap-nobundle-"), "does-not-exist"), handle),
+            ),
+        ).rejects.toThrow(/ship sandbox bundle|ENOENT/i);
+    });
+
+    test("bubblewrap cleanup surfaces an rm failure", async () => {
+        const handle = bareHandle("bubblewrap", join(makeFilePath("smithers-bubblewrap-clean-"), "request"));
+        await expect(
+            runExecutor(BubblewrapSandboxExecutorLive, (executor) => executor.cleanup(handle)),
+        ).rejects.toThrow(/cleanup sandbox workspace|ENOTDIR/i);
+    });
+
+    test("bubblewrap execute reports the missing Linux bwrap binary", async () => {
+        const handle = bareHandle("bubblewrap", "/tmp/does-not-matter/request");
+        await withPlatform("linux", () =>
+            withBunWhich(() => null, async () => {
+                await expect(
+                    runExecutor(BubblewrapSandboxExecutorLive, (executor) => executor.execute("npm test", handle)),
+                ).rejects.toThrow("bwrap");
+            }),
+        );
+    });
+});
+
+describe("sandbox transport service", () => {
+    test("builds the transport service and maps entity operation failures", async () => {
+        await withEnv({ CODEPLANE_API_URL: "http://codeplane.test", CODEPLANE_API_KEY: "test-key" }, async () => {
+            const handle = bareHandle("codeplane", "/tmp/does-not-matter/request");
+            let caught;
+            try {
+                await Effect.runPromise(
+                    Effect.flatMap(SandboxTransport, (svc) => svc.execute("npm test", handle)).pipe(
+                        Effect.provide(layerForSandboxRuntime("codeplane")),
+                        Effect.scoped,
+                    ),
+                );
+            }
+            catch (error) {
+                caught = error;
+            }
+            expect(caught).toBeDefined();
+            expect(String(caught?.message ?? "")).toContain("sandbox entity execute failed");
+        });
+    });
 });

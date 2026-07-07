@@ -68,6 +68,12 @@ export type VercelSandboxProviderOptions = {
 	cleanup?: "destroy" | "keep";
 	/** Inject a `Sandbox`-like factory double (tests / advanced users). */
 	client?: VercelSandboxClient;
+	/**
+	 * Injectable importer for the optional `@vercel/sandbox` SDK. Used only by
+	 * tests to exercise the not-installed / bad-export paths deterministically;
+	 * production defaults to the real dynamic import.
+	 */
+	importSdk?: () => Promise<unknown>;
 	/** Vercel runtime image. Defaults to `node24`. */
 	runtime?: string;
 	/** Requested vCPUs for the sandbox. */

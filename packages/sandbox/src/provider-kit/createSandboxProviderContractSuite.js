@@ -178,11 +178,16 @@ export function createSandboxProviderContractSuite(config) {
 
 		test("cleanup \"keep\" does not call destroy", async () => {
 			let destroyed = false;
-			const provider = createProvider(() => ({ status: "finished" }), { cleanup: "keep", onDestroy: () => { destroyed = true; } });
+			const markDestroyed = () => { destroyed = true; };
+			const provider = createProvider(() => ({ status: "finished" }), { cleanup: "keep", onDestroy: markDestroyed });
 			const { request } = buildRequest();
 			await provider.run(request);
 			await provider.cleanup?.(request);
 			expect(destroyed).toBe(false);
+			// Prove the spy itself works, so the false above means cleanup
+			// really skipped destroy rather than the spy being inert.
+			markDestroyed();
+			expect(destroyed).toBe(true);
 		});
 
 		test("cleanup is idempotent when called twice", async () => {

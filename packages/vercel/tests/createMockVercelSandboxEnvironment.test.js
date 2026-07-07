@@ -90,6 +90,22 @@ describe("createMockVercelSandboxEnvironment", () => {
 		await expect(env.create({})).rejects.toThrow(/create failure/);
 	});
 
+	test("writeFiles stringifies a non-buffer object content via toString", async () => {
+		const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+		const sandbox = await env.create({});
+		await sandbox.writeFiles([{ path: "/obj.txt", content: { toString: () => "object-string" } }]);
+		expect(sandbox.files.get("/obj.txt")).toBe("object-string");
+	});
+
+	test("writeFiles stringifies primitive (non-object) content via the fallback", async () => {
+		const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+		const sandbox = await env.create({});
+		await sandbox.writeFiles([{ path: "/num.txt", content: 42 }]);
+		expect(sandbox.files.get("/num.txt")).toBe("42");
+		await sandbox.writeFiles([{ path: "/nil.txt", content: null }]);
+		expect(sandbox.files.get("/nil.txt")).toBe("");
+	});
+
 	test("fault injection makes runCommand and writeFiles reject", async () => {
 		const execEnv = createMockVercelSandboxEnvironment(() => ({ status: "finished" }), { fail: ["exec", "writeFiles"] });
 		const sandbox = await execEnv.create({});

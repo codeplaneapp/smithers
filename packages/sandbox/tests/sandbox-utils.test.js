@@ -50,6 +50,12 @@ describe("assertPathWithinRoot", () => {
         const nonexistent = join(root, "a", "b", "c.txt");
         await expect(assertPathWithinRoot(root, nonexistent)).resolves.toBeUndefined();
     });
+    test("rejects when the root directory itself cannot be realpath'd", async () => {
+        // The rootDir does not exist, so realpath(root) fails and the effect
+        // surfaces the wrapped "realpath root" error before walking the target.
+        const missingRoot = join(mkdtempSync(join(tmpdir(), "sandbox-")), "does", "not", "exist");
+        await expect(assertPathWithinRoot(missingRoot, join(missingRoot, "child"))).rejects.toThrow(/realpath root|ENOENT/i);
+    });
     test("rejects realpath failures other than missing path segments", async () => {
         if (process.platform === "win32") {
             return;

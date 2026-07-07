@@ -150,14 +150,15 @@ async function readFileContent(value) {
 }
 
 /**
+ * @param {(() => Promise<{ getSandbox?: unknown }>) | undefined} importModule
  * @returns {Promise<(binding: unknown, sandboxId: string, options?: Record<string, unknown>) => unknown>}
  */
-async function resolveCloudflareGetSandbox() {
-	const mod = await import("@cloudflare/sandbox");
+async function resolveCloudflareGetSandbox(importModule) {
+	const mod = await (importModule ? importModule() : import("@cloudflare/sandbox"));
 	if (typeof mod.getSandbox !== "function") {
 		throw new Error("@cloudflare/sandbox does not export getSandbox().");
 	}
-	return mod.getSandbox;
+	return /** @type {(binding: unknown, sandboxId: string, options?: Record<string, unknown>) => unknown} */ (mod.getSandbox);
 }
 
 /**
@@ -205,6 +206,7 @@ function parseCloudflareSandboxResult(rawResult, { command, remoteSandboxId, res
  *   setupFiles?: Record<string, { content: string; encoding?: "utf-8" | "base64" }>;
  *   execution?: "exec" | "process";
  *   cleanup?: "destroy" | "keep";
+ *   importCloudflareSandbox?: () => Promise<{ getSandbox?: unknown }>;
  * }} options
  * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
  */
@@ -219,7 +221,7 @@ export function createCloudflareSandboxProvider(options = {}) {
 	return {
 		id,
 		async run(request) {
-			const getSandbox = options.getSandbox ?? await resolveCloudflareGetSandbox();
+			const getSandbox = options.getSandbox ?? await resolveCloudflareGetSandbox(options.importCloudflareSandbox);
 			const binding = typeof options.binding === "function" ? options.binding(request) : options.binding;
 			if (!binding) {
 				throw new Error("Cloudflare sandbox provider requires a Durable Object binding.");

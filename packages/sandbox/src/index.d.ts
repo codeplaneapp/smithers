@@ -137,9 +137,14 @@ type ValidatedSandboxBundle$1 = {
 
 /**
  * @param {string} bundlePath
+ * @param {{ lstatLogs?: typeof lstat }} [fsOverrides] Injection seam for the
+ *   final logs lstat, so tests can exercise the TOCTOU re-check that guards a
+ *   symlink appearing between the bundle walk and the logs stat.
  * @returns {Promise<ValidatedSandboxBundle>}
  */
-declare function validateSandboxBundle(bundlePath: string): Promise<ValidatedSandboxBundle>;
+declare function validateSandboxBundle(bundlePath: string, fsOverrides?: {
+    lstatLogs?: typeof import("node:fs/promises").lstat;
+}): Promise<ValidatedSandboxBundle>;
 /**
  * @param {{ bundlePath: string; output: unknown; status: "finished" | "failed" | "cancelled"; runId?: string; streamLogPath?: string | null; patches?: Array<{ path: string; content: string }>; artifacts?: Array<{ path: string; content: string }>; diffBundle?: unknown; }} params
  */

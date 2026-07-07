@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SANDBOX_MAX_PATCH_FILES, SANDBOX_MAX_README_BYTES, validateSandboxBundle, writeSandboxBundle, } from "../src/bundle.js";
@@ -113,6 +114,32 @@ describe("sandbox bundle", () => {
             writeFileSync(join(bundlePath, "patches", `${String(i).padStart(4, "0")}.patch`), "diff --git a/a b/a\n", "utf8");
         }
         await expect(validateSandboxBundle(bundlePath)).rejects.toThrow("too many patch files");
+    });
+    test("rejects a symlinked logs stream inside the bundle", async () => {
+        const bundlePath = tempDir("smithers-sandbox-bundle-");
+        writeFileSync(join(bundlePath, "README.md"), JSON.stringify({ outputs: {}, status: "finished" }), "utf8");
+        mkdirSync(join(bundlePath, "logs"), { recursive: true });
+        const realTarget = join(bundlePath, "real-stream.ndjson");
+        writeFileSync(realTarget, "{\"event\":\"started\"}\n", "utf8");
+        symlinkSync(realTarget, join(bundlePath, "logs", "stream.ndjson"));
+        await expect(validateSandboxBundle(bundlePath)).rejects.toThrow("may not contain symlinks");
+    });
+    test("rejects a logs stream that becomes a symlink after the bundle walk (TOCTOU re-check)", async () => {
+        const bundlePath = tempDir("smithers-sandbox-bundle-");
+        writeFileSync(join(bundlePath, "README.md"), JSON.stringify({ outputs: {}, status: "finished" }), "utf8");
+        mkdirSync(join(bundlePath, "logs"), { recursive: true });
+        const realTarget = join(bundlePath, "real-stream.ndjson");
+        writeFileSync(realTarget, "{\"event\":\"started\"}\n", "utf8");
+        let plantedAt = null;
+        const lstatLogs = async (path) => {
+            // Simulate a racing writer: the symlink appears only when the
+            // final logs lstat runs, after walkFiles already passed.
+            symlinkSync(realTarget, path);
+            plantedAt = path;
+            return lstat(path);
+        };
+        await expect(validateSandboxBundle(bundlePath, { lstatLogs })).rejects.toThrow("logs may not be a symlink");
+        expect(plantedAt).toBe(join(bundlePath, "logs", "stream.ndjson"));
     });
     test("rejects oversized README", async () => {
         const bundlePath = tempDir("smithers-sandbox-bundle-");

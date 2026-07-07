@@ -16,6 +16,11 @@ const SandboxTransportTag = /** @type {Context.TagClass<SandboxTransport, "Sandb
     Context.Tag("SandboxTransport")()
 );
 export class SandboxTransport extends SandboxTransportTag {
+    // Explicit constructor (identical to the implicit one) so runtime
+    // construction is observable; JSC never records implicit constructors.
+    constructor(...args) {
+        super(...args);
+    }
 }
 /**
  * @template R, E

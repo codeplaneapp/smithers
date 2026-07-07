@@ -49,7 +49,7 @@ export function createVercelSandboxProvider(options = {}) {
 			// self-discover credentials from the environment (VERCEL_OIDC_TOKEN).
 			const auth = resolveVercelAuth(options);
 			const secrets = collectSecrets(options, auth);
-			const Sandbox = options.client ?? (await loadVercelSandbox(id));
+			const Sandbox = options.client ?? (await loadVercelSandbox(id, options.importSdk));
 
 			const desiredMs = options.timeoutMs ?? request.toolTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
 			if (desiredMs > maxDurationMs) {
@@ -90,35 +90,52 @@ export function createVercelSandboxProvider(options = {}) {
 				(typeof sandbox.name === "string" && sandbox.name.length > 0 && sandbox.name) ||
 				`${request.runId}-${request.sandboxId}`;
 
-			// Reach durations beyond the create ceiling by extending, up to the cap.
-			if (desiredMs > createTimeoutMs) {
-				request.heartbeat(redactSandboxProviderValue({
-					sandboxId: request.sandboxId,
-					stage: `${id}-timeout-extend`,
-					level: "warn",
-					remoteId,
-					requestedMs: desiredMs,
-					createTimeoutMs,
-					capMs: maxDurationMs,
-				}));
-				if (typeof sandbox.extendTimeout === "function") {
-					await sandbox.extendTimeout(desiredMs);
-				}
-			}
+				try {
+					// Reach durations beyond the create ceiling by extending, up to the cap.
+					if (desiredMs > createTimeoutMs) {
+						request.heartbeat(redactSandboxProviderValue({
+							sandboxId: request.sandboxId,
+							stage: `${id}-timeout-extend`,
+							level: "warn",
+							remoteId,
+							requestedMs: desiredMs,
+							createTimeoutMs,
+							capMs: maxDurationMs,
+						}));
+						if (typeof sandbox.extendTimeout === "function") {
+							await sandbox.extendTimeout(desiredMs);
+						}
+					}
 
-			// Surface reachable domains for any declared ports.
-			if (Array.isArray(options.ports) && options.ports.length > 0 && typeof sandbox.domain === "function") {
-				const domains = {};
-				for (const port of options.ports) {
-					domains[String(port)] = sandbox.domain(port);
+					// Surface reachable domains for any declared ports.
+					if (Array.isArray(options.ports) && options.ports.length > 0 && typeof sandbox.domain === "function") {
+						const domains = {};
+						for (const port of options.ports) {
+							domains[String(port)] = sandbox.domain(port);
+						}
+						request.heartbeat(redactSandboxProviderValue({
+							sandboxId: request.sandboxId,
+							stage: `${id}-ports`,
+							remoteId,
+							domains,
+						}));
+					}
+				} catch (error) {
+					await destroyVercelSandbox(sandbox, false).catch((cleanupError) => {
+						request.heartbeat(redactSandboxProviderValue({
+							sandboxId: request.sandboxId,
+							stage: `${id}-cleanup-failed`,
+							level: "warn",
+							remoteId,
+							error: scrubSecrets(messageOf(cleanupError), secrets),
+						}));
+					});
+					throw new SmithersError(
+						"SANDBOX_EXECUTION_FAILED",
+						`Vercel sandbox setup failed: ${scrubSecrets(messageOf(error), secrets)}`,
+						{ provider: id, remoteId },
+					);
 				}
-				request.heartbeat(redactSandboxProviderValue({
-					sandboxId: request.sandboxId,
-					stage: `${id}-ports`,
-					remoteId,
-					domains,
-				}));
-			}
 
 			return {
 				remoteId,
@@ -151,21 +168,25 @@ export function createVercelSandboxProvider(options = {}) {
 						stdout: String(await done.stdout()),
 						stderr: String(await done.stderr()),
 					};
-				},
-				async destroy() {
-					if (persist) {
-						if (typeof sandbox.stop === "function") await sandbox.stop();
-						return;
-					}
-					if (typeof sandbox.delete === "function") {
-						await sandbox.delete();
-						return;
-					}
-					if (typeof sandbox.stop === "function") await sandbox.stop();
-				},
-			};
-		},
-	});
+					},
+					async destroy() {
+						await destroyVercelSandbox(sandbox, persist);
+					},
+				};
+			},
+		});
+	}
+
+async function destroyVercelSandbox(sandbox, persist) {
+	if (persist) {
+		if (typeof sandbox.stop === "function") await sandbox.stop();
+		return;
+	}
+	if (typeof sandbox.delete === "function") {
+		await sandbox.delete();
+		return;
+	}
+	if (typeof sandbox.stop === "function") await sandbox.stop();
 }
 
 /**
@@ -277,14 +298,18 @@ function messageOf(error) {
 
 /**
  * Lazily import the optional `@vercel/sandbox` SDK, with an actionable error.
+ * `importSdk` is an optional injectable importer used only by tests to exercise
+ * the not-installed / bad-export paths deterministically; production defaults to
+ * the real dynamic import.
  *
  * @param {string} provider
+ * @param {(() => Promise<unknown>) | undefined} [importSdk]
  * @returns {Promise<import("./VercelSandboxProviderOptions.ts").VercelSandboxClient>}
  */
-async function loadVercelSandbox(provider) {
+async function loadVercelSandbox(provider, importSdk) {
 	let mod;
 	try {
-		mod = await import("@vercel/sandbox");
+		mod = await (importSdk ? importSdk() : import("@vercel/sandbox"));
 	} catch (error) {
 		throw new SmithersError(
 			"INVALID_INPUT",

@@ -72,6 +72,12 @@ describe("createVercelSandboxProvider", () => {
 		expect(() => createVercelSandboxProvider({ maxDurationMs: 0, oidcToken: "t" })).toThrow(SmithersError);
 	});
 
+	test("rejects a non-positive or non-finite timeoutMs up front", () => {
+		expect(() => createVercelSandboxProvider({ timeoutMs: 0, oidcToken: "t" })).toThrow(SmithersError);
+		expect(() => createVercelSandboxProvider({ timeoutMs: -5, oidcToken: "t" })).toThrow(SmithersError);
+		expect(() => createVercelSandboxProvider({ timeoutMs: Number.NaN, oidcToken: "t" })).toThrow(SmithersError);
+	});
+
 	test("defers to SDK env self-discovery (no throw) when no auth is configured", async () => {
 		await withoutVercelEnv(async () => {
 			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
@@ -297,6 +303,39 @@ describe("createVercelSandboxProvider", () => {
 		expect(result).toMatchObject({ status: "finished", output: { ok: true, n: 42 } });
 	});
 
+	test("fills remote ids from the 2.x sandbox .name when sandboxId is absent", async () => {
+		// The 2.x SDK exposes the id as `.name`, not `.sandboxId`. Emulate that
+		// shape by proxying the mock sandbox.
+		const base = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+		const client = {
+			create: async (opts) => {
+				const sandbox = await base.create(opts);
+				return new Proxy(sandbox, {
+					get(target, prop) {
+						if (prop === "sandboxId") return undefined;
+						if (prop === "name") return target.sandboxId;
+						return Reflect.get(target, prop);
+					},
+				});
+			},
+		};
+		const provider = createVercelSandboxProvider({ client, oidcToken: "t" });
+		const result = await provider.run(makeRequest().request);
+		expect(result.remoteRunId).toBe("vercel-sandbox-1");
+		expect(result.workspaceId).toBe("vercel-sandbox-1");
+		expect(result.containerId).toBe("vercel-sandbox-1");
+	});
+
+	test("decodes a Node ReadableStream result file so JSON round-trips", async () => {
+		// Real @vercel/sandbox readFile resolves a Node ReadableStream. This must
+		// FAIL against the old String()-based decoder (which yields "[object …]"
+		// and breaks the result-file JSON parse).
+		const env = createMockVercelSandboxEnvironment(() => ({ status: "finished", output: { ok: true, n: 42 } }), { streamReads: true });
+		const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
+		const result = await provider.run(makeRequest().request);
+		expect(result).toMatchObject({ status: "finished", output: { ok: true, n: 42 } });
+	});
+
 	describe("duration / plan cap", () => {
 		test("a duration within the create ceiling does not extend", async () => {
 			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
@@ -335,13 +374,29 @@ describe("createVercelSandboxProvider", () => {
 			expect(env.sandboxes).toHaveLength(0);
 		});
 
-		test("a raised maxDurationMs permits a longer duration", async () => {
-			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
-			const provider = createVercelSandboxProvider({ client: env, oidcToken: "t", timeoutMs: 60 * 60_000, maxDurationMs: 90 * 60_000 });
-			await provider.run(makeRequest().request);
-			expect(env.sandboxes[0].extendTimeoutCalls).toEqual([60 * 60_000]);
+			test("a raised maxDurationMs permits a longer duration", async () => {
+				const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+				const provider = createVercelSandboxProvider({ client: env, oidcToken: "t", timeoutMs: 60 * 60_000, maxDurationMs: 90 * 60_000 });
+				await provider.run(makeRequest().request);
+				expect(env.sandboxes[0].extendTimeoutCalls).toEqual([60 * 60_000]);
+			});
+
+			test("post-create setup failure destroys the created sandbox", async () => {
+				const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }), { fail: "extendTimeout" });
+				const provider = createVercelSandboxProvider({ client: env, oidcToken: "t", timeoutMs: 10 * 60_000 });
+				let error;
+				try {
+					await provider.run(makeRequest().request);
+				} catch (e) {
+					error = e;
+				}
+				expect(error).toBeInstanceOf(SmithersError);
+				expect(error.code).toBe("SANDBOX_EXECUTION_FAILED");
+				expect(error.message).toContain("setup failed");
+				expect(env.sandboxes).toHaveLength(1);
+				expect(env.sandboxes[0].deleted).toBe(true);
+			});
 		});
-	});
 
 	test("declared ports surface sandbox domains in a heartbeat", async () => {
 		const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
@@ -397,6 +452,186 @@ describe("createVercelSandboxProvider", () => {
 		expect(error).toBeInstanceOf(SmithersError);
 		expect(error.code).toBe("SANDBOX_EXECUTION_FAILED");
 		expect(error.message).not.toContain("super-secret-oidc-token");
+	});
+
+	test("exec with neither a signal nor a timeout returns the command promise directly", async () => {
+		// request.toolTimeoutMs undefined + no signal => raceCommand short-circuits.
+		const env = createMockVercelSandboxEnvironment(() => ({ status: "finished", output: { ok: true } }));
+		const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
+		const result = await provider.run(makeRequest({ toolTimeoutMs: undefined }).request);
+		expect(result).toMatchObject({ status: "finished", output: { ok: true } });
+		// No per-command timeout was forwarded to the SDK.
+		expect("timeout" in (env.sandboxes[0]?.lastRunInput ?? {})).toBe(false);
+	});
+
+	describe("teardown variants", () => {
+		test("a setup failure whose cleanup delete also fails emits a cleanup-failed heartbeat", async () => {
+			const secret = "cleanup-secret-xyz";
+			const base = createMockVercelSandboxEnvironment(() => ({ status: "finished" }), { fail: "extendTimeout" });
+			const client = {
+				create: async (opts) => {
+					const sandbox = await base.create(opts);
+					return new Proxy(sandbox, {
+						get(target, prop) {
+							if (prop === "delete") {
+								return async () => {
+									throw new Error(`delete failed using ${secret}`);
+								};
+							}
+							return Reflect.get(target, prop);
+						},
+					});
+				},
+			};
+			const provider = createVercelSandboxProvider({
+				client,
+				oidcToken: "t",
+				timeoutMs: 10 * 60_000,
+				env: { CLEANUP_SECRET: secret },
+			});
+			const { request, heartbeats } = makeRequest();
+			let error;
+			try {
+				await provider.run(request);
+			} catch (e) {
+				error = e;
+			}
+			expect(error).toBeInstanceOf(SmithersError);
+			expect(error.code).toBe("SANDBOX_EXECUTION_FAILED");
+			expect(error.message).toContain("setup failed");
+			const cleanupBeat = heartbeats.find((h) => String(h?.stage ?? "").endsWith("-cleanup-failed"));
+			expect(cleanupBeat).toBeDefined();
+			expect(cleanupBeat.level).toBe("warn");
+			// The env secret is scrubbed out of the cleanup-failed heartbeat error.
+			expect(JSON.stringify(cleanupBeat)).not.toContain(secret);
+		});
+
+		test("destroy stops the sandbox when the SDK exposes no delete (non-persist)", async () => {
+			const base = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+			const client = {
+				create: async (opts) => {
+					const sandbox = await base.create(opts);
+					return new Proxy(sandbox, {
+						get(target, prop) {
+							// Emulate an SDK surface that only supports stop(), no delete().
+							if (prop === "delete") return undefined;
+							return Reflect.get(target, prop);
+						},
+					});
+				},
+			};
+			const provider = createVercelSandboxProvider({ client, oidcToken: "t" });
+			const { request } = makeRequest();
+			await provider.run(request);
+			await provider.cleanup?.(request);
+			expect(base.sandboxes[0].stopped).toBe(true);
+			expect(base.sandboxes[0].deleted).toBe(false);
+		});
+	});
+
+	describe("readFile decode shapes", () => {
+		/**
+		 * Wrap a mock env so the result-file `readFile` resolves an arbitrary SDK
+		 * value shape carrying the JSON string, exercising decodeVercelFile.
+		 * @param {(str: string) => unknown} wrap
+		 */
+		function envWithReadShape(wrap) {
+			const base = createMockVercelSandboxEnvironment(() => ({ status: "finished", output: { ok: true, n: 7 } }));
+			return {
+				base,
+				client: {
+					create: async (opts) => {
+						const sandbox = await base.create(opts);
+						return new Proxy(sandbox, {
+							get(target, prop) {
+								if (prop === "readFile") {
+									return async (arg) => {
+										const buf = await target.readFile(arg);
+										return wrap(Buffer.from(buf).toString("utf-8"));
+									};
+								}
+								return Reflect.get(target, prop);
+							},
+						});
+					},
+				},
+			};
+		}
+
+		test("decodes a { text() } result file", async () => {
+			const { client } = envWithReadShape((str) => ({ text: async () => str }));
+			const provider = createVercelSandboxProvider({ client, oidcToken: "t" });
+			const result = await provider.run(makeRequest().request);
+			expect(result).toMatchObject({ status: "finished", output: { ok: true, n: 7 } });
+		});
+
+		test("decodes a { content: Uint8Array } result file", async () => {
+			const { client } = envWithReadShape((str) => ({ content: Buffer.from(str) }));
+			const provider = createVercelSandboxProvider({ client, oidcToken: "t" });
+			const result = await provider.run(makeRequest().request);
+			expect(result).toMatchObject({ status: "finished", output: { ok: true, n: 7 } });
+		});
+
+		test("decodes a { content: string } result file", async () => {
+			const { client } = envWithReadShape((str) => ({ content: str }));
+			const provider = createVercelSandboxProvider({ client, oidcToken: "t" });
+			const result = await provider.run(makeRequest().request);
+			expect(result).toMatchObject({ status: "finished", output: { ok: true, n: 7 } });
+		});
+
+		test("falls back to String(value) for an unrecognized object shape", async () => {
+			const { client } = envWithReadShape((str) => ({ toString: () => str }));
+			const provider = createVercelSandboxProvider({ client, oidcToken: "t" });
+			const result = await provider.run(makeRequest().request);
+			expect(result).toMatchObject({ status: "finished", output: { ok: true, n: 7 } });
+		});
+	});
+
+	describe("optional SDK loading via importSdk", () => {
+		test("imports the SDK and runs when no client is injected", async () => {
+			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished", output: { loaded: true } }));
+			const provider = createVercelSandboxProvider({
+				oidcToken: "t",
+				importSdk: async () => ({ Sandbox: env }),
+			});
+			const result = await provider.run(makeRequest().request);
+			expect(result).toMatchObject({ status: "finished", output: { loaded: true } });
+			expect(env.createCalls).toHaveLength(1);
+		});
+
+		test("a failing import produces an actionable install error", async () => {
+			const provider = createVercelSandboxProvider({
+				oidcToken: "t",
+				importSdk: async () => {
+					throw new Error("Cannot find package '@vercel/sandbox'");
+				},
+			});
+			let error;
+			try {
+				await provider.run(makeRequest().request);
+			} catch (e) {
+				error = e;
+			}
+			expect(error).toBeInstanceOf(SmithersError);
+			expect(error.code).toBe("INVALID_INPUT");
+			expect(error.message).toContain("@vercel/sandbox");
+		});
+
+		test("a module without a valid Sandbox export throws INVALID_INPUT", async () => {
+			const provider = createVercelSandboxProvider({
+				oidcToken: "t",
+				importSdk: async () => ({ Sandbox: { notCreate: true } }),
+			});
+			let error;
+			try {
+				await provider.run(makeRequest().request);
+			} catch (e) {
+				error = e;
+			}
+			expect(error).toBeInstanceOf(SmithersError);
+			expect(error.code).toBe("INVALID_INPUT");
+			expect(error.message).toContain("does not export");
+		});
 	});
 
 	test("an exec failure is surfaced and options.env secrets are scrubbed", async () => {

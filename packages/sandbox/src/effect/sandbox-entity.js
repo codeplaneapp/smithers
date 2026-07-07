@@ -119,6 +119,11 @@ const SandboxEntityExecutorTag = /** @type {Context.TagClass<SandboxEntityExecut
     Context.Tag("SandboxEntityExecutor")()
 );
 export class SandboxEntityExecutor extends SandboxEntityExecutorTag {
+    // Explicit constructor (identical to the implicit one) so runtime
+    // construction is observable; JSC never records implicit constructors.
+    constructor(...args) {
+        super(...args);
+    }
 }
 /**
  * @param {{ runId: string; sandboxId: string; }} input

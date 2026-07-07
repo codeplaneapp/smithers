@@ -70,6 +70,32 @@ describe("createMockDaytonaSandboxEnvironment", () => {
 		await expect(sandbox.process.executeCommand("run", "/workspace", {}, 60)).rejects.toThrow(/destroyed/);
 	});
 
+	test("decode stringifies non-string, non-binary content on upload", async () => {
+		const env = createMockDaytonaSandboxEnvironment(() => ({ status: "finished" }));
+		const sandbox = await env.create({});
+		await sandbox.fs.uploadFile(42, "/workspace/num.txt");
+		const back = await sandbox.fs.downloadFile("/workspace/num.txt");
+		expect(back.toString("utf8")).toBe("42");
+	});
+
+	test("executeCommand falls back to file-suffix lookup when env path vars are absent", async () => {
+		let seen;
+		const env = createMockDaytonaSandboxEnvironment((args) => {
+			seen = args;
+			return { status: "finished", output: { ok: 2 } };
+		});
+		const sandbox = await env.create({});
+		await sandbox.fs.uploadFile(
+			Buffer.from(JSON.stringify({ runId: "r9", sandboxId: "s9" })),
+			"/deep/nested/.smithers/sandbox-request.json",
+		);
+		const res = await sandbox.process.executeCommand("run", "/workspace", {}, 60);
+		expect(res).toEqual({ exitCode: 0, result: "" });
+		expect(seen.request).toEqual({ runId: "r9", sandboxId: "s9" });
+		const written = sandbox.files.get("/workspace/.smithers/sandbox-result.json");
+		expect(JSON.parse(written)).toEqual({ status: "finished", output: { ok: 2 } });
+	});
+
 	test("fault injection makes create/exec/upload reject", async () => {
 		const failCreate = createMockDaytonaSandboxEnvironment(() => ({ status: "finished" }), { failCreate: true });
 		await expect(failCreate.create({})).rejects.toThrow(/create failed/);
