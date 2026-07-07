@@ -5,7 +5,7 @@
 // duplicate-id, unknown-source, and shutdown-squash seams). Real in-memory db,
 // real Effect runtime, real Queue-backed sources — no mocks.
 import { describe, expect, test } from "bun:test";
-import { Effect, Fiber, Queue, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { createTestAdapter, seedWaitingEventRun } from "./helpers.js";
 import { readJsonPath } from "../src/core/readJsonPath.js";
 import { IntegrationError, isIntegrationError } from "../src/core/IntegrationError.js";
@@ -68,6 +68,39 @@ describe("isIntegrationError", () => {
 });
 
 describe("makeWebhookSource offer failure branches", () => {
+    test("a verifier that throws surfaces invalid-signature", async () => {
+        const webhook = await Effect.runPromise(makeWebhookSource({
+            id: "hook-verify-throw",
+            verify: () => {
+                throw new Error("verifier blew up");
+            },
+            decode: () => makeEvent(),
+        }));
+        const error = await Effect.runPromise(webhook.offer({ headers: {}, rawBody: "{}" }).pipe(Effect.flip));
+        expect(error.details?.reason).toBe("invalid-signature");
+        expect(error.message).toContain("verification threw");
+        await Effect.runPromise(webhook.shutdown);
+    });
+    test("a verifier that returns false surfaces invalid-signature without enqueueing", async () => {
+        const webhook = await Effect.runPromise(makeWebhookSource({
+            id: "hook-verify-false",
+            verify: () => false,
+            decode: () => makeEvent(),
+        }));
+        const error = await Effect.runPromise(webhook.offer({ headers: {}, rawBody: "{}" }).pipe(Effect.flip));
+        expect(error.details?.reason).toBe("invalid-signature");
+        expect(error.message).toContain("verification failed");
+        await Effect.runPromise(webhook.shutdown);
+    });
+    test("a passing verifier + decoder accepts the event", async () => {
+        const webhook = await Effect.runPromise(makeWebhookSource({
+            id: "hook-ok",
+            verify: () => true,
+            decode: () => makeEvent(),
+        }));
+        expect(await Effect.runPromise(webhook.offer({ headers: {}, rawBody: "{}" }))).toEqual({ accepted: 1 });
+        await Effect.runPromise(webhook.shutdown);
+    });
     test("a decoder that throws surfaces decode-failed", async () => {
         const webhook = await Effect.runPromise(makeWebhookSource({
             id: "hook-throw",
@@ -127,14 +160,30 @@ describe("deliverEvent / deliverEvents error handling", () => {
 
     test("deliverEvents drains a source and swallows a per-event delivery error", async () => {
         const { adapter } = createTestAdapter();
-        // An event whose delivery fails: insertIntegrationDeliveryIfNew rejects a
-        // NULL dedupeKey, so deliverEvent errors and deliverEvents logs+continues.
-        const badEvent = makeEvent({ dedupeKey: /** @type {any} */ (null), source: "drain" });
+        // Fault-inject the dedupe write so deliverEvent errors; deliverEvents must
+        // log-and-continue (its per-event catchAll) rather than fail the stream.
+        let failNext = true;
+        const faultAdapter = new Proxy(adapter, {
+            get(target, prop, receiver) {
+                if (prop === "insertIntegrationDeliveryIfNew") {
+                    return (/** @type {any} */ row) => {
+                        if (failNext) {
+                            failNext = false;
+                            return Effect.fail(new IntegrationError("delivery-failed", "dedupe write forced to fail"));
+                        }
+                        return Reflect.get(target, prop, receiver).call(target, row);
+                    };
+                }
+                const original = Reflect.get(target, prop, receiver);
+                return typeof original === "function" ? original.bind(target) : original;
+            },
+        });
+        const badEvent = makeEvent({ dedupeKey: "drain-bad", source: "drain" });
         const goodEvent = makeEvent({ dedupeKey: "drain-good", source: "drain", correlationId: "none" });
         const source = { id: "drain", events: Stream.fromIterable([badEvent, goodEvent]) };
         // Must complete without failing despite the poisoned first event.
-        await Effect.runPromise(deliverEvents(adapter, source));
-        // The good event was still recorded (delivery row inserted).
+        await Effect.runPromise(deliverEvents(/** @type {any} */ (faultAdapter), source));
+        // The good event was still recorded (delivery row inserted for it).
         expect(await adapter.insertIntegrationDeliveryIfNew({
             sourceId: "drain",
             dedupeKey: "drain-good",
@@ -167,6 +216,40 @@ describe("makeIntegrationRuntime", () => {
         } finally {
             await runtime.shutdown();
         }
+    });
+
+    test("handleWebhook rethrows the raw typed offer failure (not the FiberFailure wrapper)", async () => {
+        const { adapter } = createTestAdapter();
+        const runtime = makeIntegrationRuntime({
+            adapter,
+            // verify → false makes offer fail with a typed invalid-signature error;
+            // handleWebhook unwraps Cause.failureOption and rethrows it raw.
+            webhookSources: [{ id: "reject", verify: () => false, decode: () => makeEvent() }],
+        });
+        try {
+            const error = await runtime.handleWebhook("reject", { headers: {}, rawBody: "{}" }).catch((e) => e);
+            expect(isIntegrationError(error)).toBe(true);
+            expect(error.reason).toBe("invalid-signature");
+        } finally {
+            await runtime.shutdown();
+        }
+    });
+
+    test("handleWebhook against a shut-down source surfaces the squashed interrupt (defect path)", async () => {
+        const { adapter } = createTestAdapter();
+        const runtime = makeIntegrationRuntime({
+            adapter,
+            webhookSources: [{ id: "gone", decode: () => makeEvent() }],
+        });
+        // Shut the runtime (and its queue) down first; a subsequent offer is
+        // interrupted, so handleWebhook has no typed failure to surface and
+        // falls back to Cause.squash of the interrupt.
+        await runtime.shutdown();
+        const outcome = await runtime.handleWebhook("gone", { headers: {}, rawBody: "{}" }).then(
+            () => ({ resolved: true }),
+            (error) => ({ rejected: true, error }),
+        );
+        expect(outcome.rejected).toBe(true);
     });
 
     test("a source stream that fails is logged and supervised (restart back-off), then shut down cleanly", async () => {
@@ -217,22 +300,4 @@ describe("makeIntegrationRuntime", () => {
             await runtime.shutdown();
         }
     }, 15_000);
-});
-
-describe("Queue-backed webhook source rejects a shut-down offer batch", () => {
-    test("offering to a source whose queue was externally shut down fails", async () => {
-        // Directly exercise the accepted===false / interrupt branch: a source
-        // built over a bounded queue we shut down out from under the offer.
-        const webhook = await Effect.runPromise(makeWebhookSource({
-            id: "manual",
-            capacity: 1,
-            decode: () => makeEvent({ source: "manual" }),
-        }));
-        await Effect.runPromise(webhook.shutdown);
-        const exit = await Effect.runPromiseExit(webhook.offer({ headers: {}, rawBody: "{}" }));
-        expect(exit._tag).toBe("Failure");
-        // Ensure the underlying Queue import is exercised via a real bounded queue.
-        const q = await Effect.runPromise(Queue.bounded(1));
-        await Effect.runPromise(Queue.shutdown(q));
-    });
 });
