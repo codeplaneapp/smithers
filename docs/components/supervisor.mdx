@@ -65,6 +65,7 @@ import { Task } from "./Task.js";
 import { Parallel } from "./Parallel.js";
 import { Loop } from "./Ralph.js";
 import { Worktree } from "./Worktree.js";
+import { useOptionalSmithersContext } from "./useOptionalSmithersContext.js";
 /**
  * <Supervisor> — Boss plans, delegates to parallel workers, reviews, re-delegates failures.
  *
@@ -79,6 +80,9 @@ export function Supervisor(props) {
     const maxConcurrency = props.maxConcurrency ?? 5;
     const useWorktrees = props.useWorktrees ?? false;
     const workerNames = Object.keys(props.workers);
+    const ctx = useOptionalSmithersContext();
+    const latestReview = ctx?.latest?.(props.reviewOutput, `${prefix}-review`);
+    const allDone = latestReview?.allDone === true;
     // Build a worker Task element for each worker type.
     // At render time the runtime resolves which tasks are active based on
     // the plan output; here we declare one slot per worker type.
@@ -119,7 +123,7 @@ export function Supervisor(props) {
     // Loop: repeat until boss says allDone (runtime resolves `until` reactively)
     const delegateLoop = React.createElement(Loop, {
         id: `${prefix}-loop`,
-        until: false, // runtime re-evaluates reactively based on review output
+        until: allDone,
         maxIterations,
         onMaxReached: "return-last",
     }, loopBody);
@@ -571,6 +575,30 @@ export function Worktree(props) {
         return null;
     const next = { id: props.id, path: props.path, branch: props.branch, baseBranch: props.baseBranch };
     return React.createElement("smithers:worktree", next, props.children);
+}
+```
+
+```js useOptionalSmithersContext.js
+import React from "react";
+import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+
+/**
+ * Read the workflow context when React is rendering the component, but allow
+ * direct structural expansion tests to call composite wrappers as plain
+ * functions. In that direct-call path React throws the standard invalid hook
+ * error; treating it as "no context yet" preserves the static element shape.
+ */
+export function useOptionalSmithersContext() {
+    try {
+        return React.useContext(SmithersContext);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/Invalid hook call|dispatcher\.useContext|useContext/i.test(message)) {
+            return null;
+        }
+        throw error;
+    }
 }
 ```
 

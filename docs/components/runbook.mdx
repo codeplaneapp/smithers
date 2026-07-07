@@ -63,6 +63,7 @@ The `<Runbook>` implementation and the files it imports, straight from the packa
 // @smithers-type-exports-end
 
 import React from "react";
+import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { Sequence } from "./Sequence.js";
 import { Task } from "./Task.js";
 import { Approval } from "./Approval.js";
@@ -76,6 +77,7 @@ import { Approval } from "./Approval.js";
 export function Runbook(props) {
     if (props.skipIf)
         return null;
+    const ctx = React.useContext(SmithersContext);
     const prefix = props.id ?? "runbook";
     const onDeny = props.onDeny ?? "fail";
     const children = [];
@@ -106,6 +108,13 @@ export function Runbook(props) {
         else {
             // Risky or critical: Approval gate then Task
             const approvalId = `${stepId}-approval`;
+            const approvalOutput = `${approvalId}-decision`;
+            const shouldGateOnDecision = onDeny === "skip" && Boolean(ctx);
+            const decision = ctx?.outputMaybe(approvalOutput, { nodeId: approvalId });
+            const deniedAndSkipping = shouldGateOnDecision &&
+                decision != null &&
+                typeof decision === "object" &&
+                /** @type {Record<string, unknown>} */ (decision).approved === false;
             const isCritical = step.risk === "critical";
             const approvalTitle = props.approvalRequest?.title ??
                 `Approve ${isCritical ? "CRITICAL" : "risky"} step: ${label}`;
@@ -124,29 +133,67 @@ export function Runbook(props) {
             children.push(React.createElement(Approval, {
                 key: approvalId,
                 id: approvalId,
-                output: `${approvalId}-decision`,
+                output: approvalOutput,
                 request: {
                     title: approvalTitle,
                     summary: approvalSummary,
                     metadata: approvalMeta,
                 },
-                onDeny: onDeny === "skip" ? "skip" : "fail",
+                onDeny,
                 needs,
                 label: `Approve: ${label}`,
             }));
-            children.push(React.createElement(Task, {
-                key: stepId,
-                id: stepId,
-                output,
-                agent,
-                needs: { approval: approvalId },
-                label: `[${step.risk}] ${label}`,
-                children: step.command ?? `Execute step: ${label}`,
-            }));
-            previousStepId = stepId;
+            if (!deniedAndSkipping) {
+                children.push(React.createElement(Task, {
+                    key: stepId,
+                    id: stepId,
+                    output,
+                    agent,
+                    deps: shouldGateOnDecision ? { approval: approvalOutput } : undefined,
+                    needs: { approval: approvalId },
+                    label: `[${step.risk}] ${label}`,
+                    children: step.command ?? `Execute step: ${label}`,
+                }));
+            }
+            previousStepId = deniedAndSkipping ? approvalId : stepId;
         }
     }
     return React.createElement(Sequence, null, ...children);
+}
+```
+
+```js context.js
+// @smithers-type-exports-begin
+/** @typedef {import("./OutputSnapshot.ts").OutputSnapshot} OutputSnapshot */
+/** @typedef {import("./SmithersCtxOptions.ts").SmithersCtxOptions} SmithersCtxOptions */
+// @smithers-type-exports-end
+
+import React from "react";
+import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+export { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+/** @type {React.Context<SmithersCtx<any> | null>} */
+export const SmithersContext = React.createContext(null);
+SmithersContext.displayName = "SmithersContext";
+/**
+ * @template Schema
+ * @returns {{ SmithersContext: React.Context<SmithersCtx<Schema> | null>, useCtx: () => SmithersCtx<Schema> }}
+ */
+export function createSmithersContext() {
+    /** @type {React.Context<SmithersCtx<Schema> | null>} */
+    const Context = React.createContext(null);
+    Context.displayName = "SmithersContext";
+    /**
+   * @returns {SmithersCtx<Schema>}
+   */
+    function useCtx() {
+        const ctx = React.useContext(Context);
+        if (!ctx) {
+            throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "useCtx() must be called inside a <Workflow> created by createSmithers()");
+        }
+        return ctx;
+    }
+    return { SmithersContext: Context, useCtx };
 }
 ```
 
@@ -674,6 +721,7 @@ export function Approval(props) {
         }
         : undefined;
     const requestMeta = {
+        requestTitle: props.request.title,
         ...(props.request.summary ? { requestSummary: props.request.summary } : {}),
         ...(options ? { approvalOptions: options } : {}),
         ...(props.allowedScopes?.length ? { approvalAllowedScopes: props.allowedScopes } : {}),

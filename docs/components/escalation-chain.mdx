@@ -784,6 +784,7 @@ export function Approval(props) {
         }
         : undefined;
     const requestMeta = {
+        requestTitle: props.request.title,
         ...(props.request.summary ? { requestSummary: props.request.summary } : {}),
         ...(options ? { approvalOptions: options } : {}),
         ...(props.allowedScopes?.length ? { approvalAllowedScopes: props.allowedScopes } : {}),
