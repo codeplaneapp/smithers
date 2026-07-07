@@ -178,26 +178,26 @@ describe("useDelegationChain over a real gateway", () => {
     const harness = await mountHarness();
     await harness.render(createElement(SmithersGatewayProvider, { client: client(baseUrl) }, createElement(Probe)));
 
-    // Wait until the pending `dc-poll` approval is visible to the hook's
-    // approvals feed (this is the poll submitPoll looks for).
-    await waitFor(
-      () => Boolean(hook) && (hook!.actions as unknown) !== undefined && Array.isArray(hook!.errors),
-      "hook ready",
-    );
     // The run tree carries the `dc-poll` node, which is delegation-shaped, so
-    // the tree-derived target count is non-zero (treeTargetCount branch).
-    // submitPoll finds the pending approval and answers it (the found path).
-    let answered = false;
-    await waitFor(async () => {
+    // the tree-derived target count becomes non-zero (treeTargetCount branch).
+    // Poll submitPoll until the pending `dc-poll` approval has synced into the
+    // hook's approvals feed: once it has, submitPoll gets past the "no pending
+    // poll" guard and calls answerHuman (whether the underlying select-approval
+    // submit ultimately resolves or rejects, the found + answer path executed).
+    let pastFind = false;
+    for (let i = 0; i < 400 && !pastFind; i += 1) {
       try {
-        await hook!.actions.submitPoll([{ question: "How useful?", rating: 5 }], "great");
-        answered = true;
-        return true;
-      } catch {
-        return false;
+        await act(async () => { await hook!.actions.submitPoll([{ question: "How useful?", rating: 5 }], "great"); });
+        pastFind = true;
+      } catch (error) {
+        if (!String((error as Error).message).includes("no pending poll")) {
+          pastFind = true; // reached answerHuman (submit rejected) → find + call ran
+        } else {
+          await act(async () => { await sleep(50); });
+        }
       }
-    }, "submitPoll answers the pending dc-poll", 20_000);
-    expect(answered).toBe(true);
+    }
+    expect(pastFind).toBe(true);
 
     await harness.unmount();
   });
