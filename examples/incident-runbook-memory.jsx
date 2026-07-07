@@ -142,12 +142,14 @@ export default smithers((ctx) => {
             LIVE knowledge (accepted, not superseded by an accepted note), so the
             triager never sees rejected proposals or lessons a ratified rule
             replaced. searchNotes is FTS over note bodies, indexed lazily on the
-            first enableNoteSearch call. Facts are the mutable scratch lane. */}
+            first enableNoteSearch call; its index spans every namespace of the
+            kind, so the namespace filter keeps recall to OUR team's notes on a
+            shared database. Facts are the mutable scratch lane. */}
         <Task id="recall" output={outputs.recall}>
           {async () => {
             await store.enableNoteSearch("user"); // idempotent; creates the FTS index on first use
             const rules = await store.listNotes(OPS, { kind: "runbook-rule" });
-            const lessons = (await store.searchNotes("user", topic)).filter((n) => n.kind === "lesson");
+            const lessons = (await store.searchNotes("user", topic, undefined, { namespace: OPS })).filter((n) => n.kind === "lesson");
             const onCall = await store.getFact(OPS, "on-call");
             return {
                 rules: rules.map((n) => n.body),

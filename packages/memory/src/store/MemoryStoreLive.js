@@ -362,6 +362,24 @@ function makeMemoryStore(db) {
     }
     // --- Note Effects (P2/P3: append-only knowledge) ---
     /**
+   * Note writes and search ride the synchronous sqlite driver (sync
+   * transactions for note+edge atomicity, FTS5 for search), which the
+   * Postgres/PGlite backends do not provide — there, fail loud up front
+   * instead of surfacing an obscure driver TypeError mid-write. Migration
+   * 0023 still creates the note tables on Postgres so the data model is
+   * ready when this path is ported.
+   * @param {"DB_QUERY_FAILED" | "DB_WRITE_FAILED"} code
+   * @param {string} label
+   * @returns {Effect.Effect<void, SmithersError>}
+   */
+    function requireSqliteNotesEffect(code, label) {
+        const anyDb = /** @type {any} */ (db);
+        if (anyDb?.dialect === "postgres" || typeof anyDb?.all !== "function") {
+            return Effect.fail(toSmithersError(new Error(`${label}: memory notes require the sqlite backend (bun:sqlite) — this database does not expose the synchronous sqlite driver`), label, { code, details: { operation: label } }));
+        }
+        return Effect.void;
+    }
+    /**
    * FTS artifacts (P4) exist only after enableNoteSearch — KV-only and
    * notes-without-search users never create them and pay nothing per write.
    */
@@ -399,12 +417,17 @@ function makeMemoryStore(db) {
         if (filter?.kind) {
             conds.push(eq(smithersMemoryNotes.kind, filter.kind));
         }
+        if (filter?.namespace) {
+            conds.push(eq(smithersMemoryNotes.namespace, namespaceToString(filter.namespace)));
+        }
         return conds;
     }
     /**
    * Append a note (immutable row) and its supersession edges atomically.
    * Idempotent on id (crash-resume safe): a re-save with the same id is a
    * no-op INSERT OR IGNORE — never an upsert, so history cannot be destroyed.
+   * Returns the PERSISTED row: on an id conflict the note you get back is
+   * the one the database holds, not the input that lost the race.
    * @param {SaveNoteInput} input
    * @returns {Effect.Effect<MemoryNote, SmithersError>}
    */
@@ -427,7 +450,7 @@ function makeMemoryStore(db) {
             iteration: input.provenance?.iteration ?? null,
         };
         const nsKind = parseNamespace(nsStr).kind;
-        return writeEffect("memory saveNote", () => Promise.resolve(db.transaction((tx) => {
+        return requireSqliteNotesEffect("DB_WRITE_FAILED", "memory saveNote").pipe(Effect.zipRight(writeEffect("memory saveNote", () => Promise.resolve(db.transaction((tx) => {
             tx.insert(smithersMemoryNotes).values(note).onConflictDoNothing().run();
             for (const supersedesId of input.supersedes ?? []) {
                 tx.insert(smithersMemoryNoteSupersessions)
@@ -440,7 +463,14 @@ function makeMemoryStore(db) {
             SELECT ${id}, ${nsKind}, ${note.body}
             WHERE NOT EXISTS (SELECT 1 FROM _smithers_memory_notes_fts WHERE note_id = ${id})`);
             }
-        }))).pipe(Effect.map(() => toNote(note)));
+        })))),
+        // Read back so an id-conflict no-op returns the row the database
+        // actually holds rather than echoing the ignored input.
+        Effect.zipRight(readEffect("memory saveNote readback", () => db
+            .select()
+            .from(smithersMemoryNotes)
+            .where(eq(smithersMemoryNotes.id, id))
+            .limit(1))), Effect.map((rows) => toNote(rows[0])));
     }
     /**
    * @param {string} id
@@ -496,7 +526,7 @@ function makeMemoryStore(db) {
    * @returns {Effect.Effect<void, SmithersError>}
    */
     function enableNoteSearchEffect(kind) {
-        return writeEffect("memory enableNoteSearch", () => Promise.resolve(db.transaction((tx) => {
+        return requireSqliteNotesEffect("DB_WRITE_FAILED", "memory enableNoteSearch").pipe(Effect.zipRight(writeEffect("memory enableNoteSearch", () => Promise.resolve(db.transaction((tx) => {
             tx.run(sql `CREATE TABLE IF NOT EXISTS _smithers_memory_fts_kinds (kind TEXT PRIMARY KEY)`);
             tx.run(sql `CREATE VIRTUAL TABLE IF NOT EXISTS _smithers_memory_notes_fts USING fts5(note_id UNINDEXED, kind UNINDEXED, body)`);
             tx.run(sql `INSERT INTO _smithers_memory_fts_kinds (kind) VALUES (${kind}) ON CONFLICT DO NOTHING`);
@@ -504,12 +534,19 @@ function makeMemoryStore(db) {
           SELECT n.id, ${kind}, n.body FROM _smithers_memory_notes n
           WHERE n.namespace LIKE ${`${kind}:%`}
             AND NOT EXISTS (SELECT 1 FROM _smithers_memory_notes_fts f WHERE f.note_id = n.id)`);
-        }))).pipe(Effect.asVoid);
+        }))))).pipe(Effect.asVoid);
     }
     /**
    * FTS search over note bodies for an enabled namespace kind, rank order.
    * Results honor the same read contract as listNotes (filters widen). Fails
    * loud — not silently empty — when the kind was never enabled.
+   *
+   * Scope: the FTS index is per namespace KIND, so matches span every
+   * namespace of that kind; pass filter.namespace to keep results
+   * namespace-local. Bound: the read contract is applied to the top
+   * `limit * 5` FTS matches, so a corpus where most matches are superseded
+   * or pending can return fewer than `limit` even when more live matches
+   * exist further down the rank order.
    * @param {string} kind
    * @param {string} query
    * @param {number} [limit]
@@ -519,6 +556,7 @@ function makeMemoryStore(db) {
     function searchNotesEffect(kind, query, limit, filter) {
         const max = limit ?? 20;
         return Effect.gen(function* () {
+            yield* requireSqliteNotesEffect("DB_QUERY_FAILED", "memory searchNotes");
             if (!noteFtsKindEnabled(kind)) {
                 return yield* Effect.fail(toSmithersError(new Error(`memory searchNotes: note search is not enabled for namespace kind "${kind}" — call enableNoteSearch("${kind}") first`), "memory searchNotes", { code: "DB_QUERY_FAILED", details: { kind } }));
             }

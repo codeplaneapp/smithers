@@ -6,7 +6,7 @@
 //   (e) FTS is lazy per namespace kind; fact writes are unaffected
 //   (f) the migration is additive on a db with existing facts
 // Criterion (b) — consolidation end-to-end under the engine — lives in
-// tests/notes-consolidation.e2e.test.js.
+// packages/smithers/tests/memory-consolidation.e2e.test.jsx.
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -116,7 +116,9 @@ describe("notes: append-only + default read contract", () => {
 
     test("saveNote is idempotent on id (no upsert — history cannot be destroyed)", async () => {
         await store.saveNote({ namespace: USER_NS, body: "original", id: "fixed-id" });
-        await store.saveNote({ namespace: USER_NS, body: "SHOULD NOT REPLACE", id: "fixed-id" });
+        const resaved = await store.saveNote({ namespace: USER_NS, body: "SHOULD NOT REPLACE", id: "fixed-id" });
+        // The return value reflects the PERSISTED row, not the ignored input.
+        expect(resaved.body).toBe("original");
         const note = await store.getNote("fixed-id");
         expect(note.body).toBe("original");
     });
@@ -273,6 +275,16 @@ describe("lazy FTS (criterion e)", () => {
         expect(widened).toHaveLength(3);
     });
 
+    test("searchNotes spans every namespace of the kind; filter.namespace narrows to one", async () => {
+        await store.enableNoteSearch("user");
+        await store.saveNote({ namespace: USER_NS, body: "zebra lesson from our team" });
+        await store.saveNote({ namespace: { kind: "user", id: "other-team" }, body: "zebra lesson from another team" });
+        const kindWide = await store.searchNotes("user", "zebra");
+        expect(kindWide).toHaveLength(2);
+        const scoped = await store.searchNotes("user", "zebra", undefined, { namespace: USER_NS });
+        expect(scoped.map((n) => n.body)).toEqual(["zebra lesson from our team"]);
+    });
+
     test("opt-in is per namespace KIND: notes of other kinds stay unindexed", async () => {
         await store.enableNoteSearch("user");
         await store.saveNote({ namespace: GLOBAL_NS, body: "global zebra doctrine" });
@@ -287,6 +299,19 @@ describe("lazy FTS (criterion e)", () => {
         await store.enableNoteSearch("user");
         const hits = await store.searchNotes("user", "zebra");
         expect(hits).toHaveLength(1); // no duplicate index rows
+    });
+});
+
+describe("non-sqlite backends fail loud", () => {
+    // Notes ride the synchronous sqlite driver (sync transactions + FTS5).
+    // A Postgres/PGlite connection descriptor (dialect: "postgres", no sync
+    // drizzle surface) must produce a clear error, not an obscure TypeError
+    // from a missing .run()/.all().
+    test("saveNote / enableNoteSearch / searchNotes reject with an explicit sqlite-required error", async () => {
+        const store = createMemoryStore(/** @type {any} */ ({ dialect: "postgres" }));
+        await expect(store.saveNote({ namespace: USER_NS, body: "x" })).rejects.toThrow(/sqlite/);
+        await expect(store.enableNoteSearch("user")).rejects.toThrow(/sqlite/);
+        await expect(store.searchNotes("user", "x")).rejects.toThrow(/sqlite/);
     });
 });
 
