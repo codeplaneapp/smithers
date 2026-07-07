@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { basename, relative, resolve } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { basename, isAbsolute, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { dddRoot } from "./dddRoot.ts";
 import type { Feature } from "./featuresSchema.ts";
@@ -16,6 +16,9 @@ import { validateFeatures } from "./validateFeatures.ts";
  */
 const OPEN_STATUSES = new Set(["broken", "partial", "missing", "missing-tests"]);
 const DDD_WORKFLOW_SOURCE_KEYS = ["docs-driven-development", "ddd-generate-docs", "ddd-bug-scan"];
+const MAX_MARKDOWN_DEPTH = 12;
+const MAX_MARKDOWN_FILES = 500;
+const MAX_MARKDOWN_FILE_BYTES = 1024 * 1024;
 
 function titleOf(markdown: string, fallback: string): string {
   const heading = markdown.split(/\r?\n/).find((line) => line.startsWith("# "));
@@ -34,13 +37,46 @@ export function docLevelOf(contentRelPath: string): "product" | "technical" {
   return "technical";
 }
 
-function collectMarkdown(dir: string): string[] {
-  if (!existsSync(dir)) return [];
+function safeRealpath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return "";
+  }
+}
+
+function isInsidePath(path: string, root: string): boolean {
+  const rel = relative(root, path);
+  return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function collectMarkdown(dir: string, rootReal = safeRealpath(dir), depth = 0, state = { files: 0 }): string[] {
+  if (!rootReal || !existsSync(dir) || depth > MAX_MARKDOWN_DEPTH || state.files >= MAX_MARKDOWN_FILES) return [];
   const out: string[] = [];
-  for (const entry of readdirSync(dir).sort()) {
-    const full = resolve(dir, entry);
-    if (statSync(full).isDirectory()) out.push(...collectMarkdown(full));
-    else if (entry.endsWith(".md")) out.push(full);
+  let entries: string[];
+  try {
+    entries = readdirSync(dir).sort();
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (state.files >= MAX_MARKDOWN_FILES) break;
+    try {
+      const full = resolve(dir, entry);
+      const linkStat = lstatSync(full);
+      if (linkStat.isSymbolicLink()) continue;
+      if (linkStat.isDirectory()) {
+        out.push(...collectMarkdown(full, rootReal, depth + 1, state));
+      } else if (entry.endsWith(".md") && linkStat.isFile() && linkStat.size <= MAX_MARKDOWN_FILE_BYTES) {
+        const real = realpathSync(full);
+        const fileStat = statSync(real);
+        if (!isInsidePath(real, rootReal) || !fileStat.isFile() || fileStat.size > MAX_MARKDOWN_FILE_BYTES) continue;
+        state.files += 1;
+        out.push(real);
+      }
+    } catch {
+      continue;
+    }
   }
   return out;
 }
@@ -94,15 +130,22 @@ export function generateUiModules(root: string = dddRoot()): { docs: number; tic
   );
 
   // --- ddd-docsContent.generated.ts ---
-  const docs = collectMarkdown(contentDir).map((full) => {
-    const content = readFileSync(full, "utf8");
-    const path = relative(contentDir, full).replaceAll("\\", "/");
-    return {
-      path,
-      title: titleOf(content, basename(full).replace(/\.md$/, "")),
-      level: docLevelOf(path),
-      content,
-    };
+  const contentRootReal = safeRealpath(contentDir);
+  const docs = collectMarkdown(contentDir, contentRootReal).flatMap((full) => {
+    try {
+      const fileStat = statSync(full);
+      if (!contentRootReal || !fileStat.isFile() || fileStat.size > MAX_MARKDOWN_FILE_BYTES) return [];
+      const content = readFileSync(full, "utf8");
+      const path = relative(contentRootReal, full).replaceAll("\\", "/");
+      return [{
+        path,
+        title: titleOf(content, basename(full).replace(/\.md$/, "")),
+        level: docLevelOf(path),
+        content,
+      }];
+    } catch {
+      return [];
+    }
   });
   writeFileSync(
     resolve(uiDir, "ddd-docsContent.generated.ts"),

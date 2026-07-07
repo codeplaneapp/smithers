@@ -39,7 +39,19 @@ function statusWeight(status: string): number {
   return 0;
 }
 
-function taskTypeFor(status: string): TriageCandidate["taskType"] {
+function gapWeight(gapText: string): number {
+  if (/\b(security|auth|bypass|critical|crash|corrupt|loss|bug|broken|fails?|error)\b/i.test(gapText)) return 50;
+  if (/\b(test|e2e|coverage|proof|playwright|unit)\b/i.test(gapText)) return 25;
+  if (/\b(review|audit)\b/i.test(gapText)) return 20;
+  if (/\b(implement|build|add support|missing)\b/i.test(gapText)) return 15;
+  return gapText ? 10 : 0;
+}
+
+function taskTypeFor(status: string, gapText = ""): TriageCandidate["taskType"] {
+  if (/\b(test|e2e|coverage|proof|playwright|unit)\b/i.test(gapText)) return "e2e";
+  if (/\b(review|audit|security)\b/i.test(gapText)) return "review";
+  if (/\b(bug|broken|fails?|crash|error)\b/i.test(gapText)) return "fix";
+  if (/\b(implement|build|add support|missing)\b/i.test(gapText)) return "feature";
   if (status === "broken") return "fix";
   if (status === "missing-tests") return "e2e";
   if (status === "missing") return "feature";
@@ -59,20 +71,23 @@ function filesFromDiffHints(diffHints: string[] = []): string[] {
 
 export function triageCandidates(features: Feature[], max = 8): TriageCandidate[] {
   return features
-    .filter((feature) => feature.status !== "fixed")
+    .filter((feature) => feature.status !== "fixed" || (feature.missing ?? []).filter(Boolean).length > 0)
     .map((feature) => {
       const status = feature.status;
       const priority = feature.priority;
-      const missing = feature.missing ?? [];
+      const missing = (feature.missing ?? []).filter(Boolean);
+      const gapText = missing.join(" ");
       return {
         featureId: feature.id,
         title: feature.title,
         status,
         priority,
         owner: feature.owner,
-        score: priorityWeight(priority) + statusWeight(status),
-        taskType: taskTypeFor(status),
-        reason: `${priority.toUpperCase()} ${status} feature. ${feature.summary}`.trim(),
+        score: priorityWeight(priority) + (status === "fixed" ? gapWeight(gapText) : statusWeight(status) + gapWeight(gapText)),
+        taskType: taskTypeFor(status, gapText),
+        reason: status === "fixed"
+          ? `${priority.toUpperCase()} fixed feature has open gap(s). ${gapText}`.trim()
+          : `${priority.toUpperCase()} ${status} feature. ${feature.summary}`.trim(),
         tests: feature.tests ?? [],
         files: filesFromDiffHints(feature.diffHints),
         acceptance:

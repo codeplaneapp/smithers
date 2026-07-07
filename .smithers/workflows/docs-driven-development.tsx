@@ -4,10 +4,12 @@
 import { UI } from "smithers-orchestrator";
 import { Approval, createSmithers, Loop, Sequence, Task } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod/v4";
 import { providers } from "../lib/ddd/dddAgents.ts";
 import { dddRootOrCwd } from "../lib/ddd/dddRoot.ts";
+import { validateFeatures } from "../lib/ddd/validateFeatures.ts";
 
 // Repo root: walk up from cwd until .smithers/spec/features.json is found, so
 // the workflow behaves the same whether launched from the repo root or from
@@ -265,8 +267,23 @@ export function ticketSlug(value: unknown): string {
     .slice(0, 80) || "ticket";
 }
 
+function shortTicketHash(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 8);
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
 export function ticketPathFor(runId: string, item: any): string {
-  return `docs-driven-development--${ticketSlug(runId)}--${String(item.slot ?? "0").padStart(2, "0")}-${ticketSlug(item.featureId ?? item.title)}`;
+  const identity = JSON.stringify({
+    featureId: String(item.featureId ?? item.feature_id ?? ""),
+    title: String(item.title ?? ""),
+    taskType: String(item.taskType ?? item.task_type ?? ""),
+    reason: String(item.reason ?? ""),
+    acceptance: stringList(item.acceptance),
+  });
+  return `docs-driven-development--${ticketSlug(runId)}--${String(item.slot ?? "0").padStart(2, "0")}-${ticketSlug(item.featureId ?? item.title)}-${shortTicketHash(identity)}`;
 }
 
 export function ticketMarkdownFor(runId: string, item: any): string {
@@ -295,27 +312,56 @@ export function ticketMarkdownFor(runId: string, item: any): string {
   ].filter((line) => line !== "").join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
+function writeTriageTicketFile(directory: string, path: string, content: string): { path: string; created: boolean } {
+  const tryWrite = (candidate: string): { path: string; created: boolean } | undefined => {
+    const full = `${directory}/${candidate}.md`;
+    try {
+      writeFileSync(full, content, { flag: "wx" });
+      return { path: candidate, created: true };
+    } catch (error) {
+      const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+      if (code !== "EEXIST") throw error;
+      try {
+        if (readFileSync(full, "utf8") === content) return { path: candidate, created: false };
+      } catch {}
+      return undefined;
+    }
+  };
+
+  const first = tryWrite(path);
+  if (first) return first;
+  const contentHash = shortTicketHash(content);
+  for (let index = 0; index < 20; index += 1) {
+    const suffix = index === 0 ? contentHash : `${contentHash}-${index + 1}`;
+    const written = tryWrite(`${path}-${suffix}`);
+    if (written) return written;
+  }
+  throw new Error(`could not materialize unique triage ticket for ${path}`);
+}
+
 export function materializeTriageTickets(runId: string, triage: any) {
   const directory = `${ROOT}/.smithers/tickets`;
   mkdirSync(directory, { recursive: true });
   const now = Date.now();
   const selected = Array.isArray(triage?.selected) ? triage.selected : [];
   const featureTitles = featureTitleById();
+  let created = 0;
   const tickets = selected.map((item: any) => {
     const featureId = String(item.featureId ?? item.feature_id ?? "");
     const featureTitle = String(item.featureTitle ?? item.feature_title ?? featureTitles.get(featureId) ?? "");
     const enriched = { ...item, featureId, featureTitle };
     const path = ticketPathFor(runId, enriched);
     const content = ticketMarkdownFor(runId, enriched);
-    writeFileSync(`${directory}/${path}.md`, content);
-    return { path, kind: "ticket", featureId, featureTitle, content, status: "todo", updatedAtMs: now };
+    const written = writeTriageTicketFile(directory, path, content);
+    if (written.created) created += 1;
+    return { path: written.path, kind: "ticket", featureId, featureTitle, content, status: "todo", updatedAtMs: now };
   });
   return {
-    created: tickets.length,
+    created,
     directory,
     tickets,
     summary: tickets.length
-      ? `Materialized ${tickets.length} triage ticket(s) into ${directory}.`
+      ? `Materialized ${created} new triage ticket(s) into ${directory}; ${tickets.length - created} already existed.`
       : "No triage selections were available to materialize.",
   };
 }
@@ -371,11 +417,8 @@ export function auditAgent(ctx: any) {
 // to actually be clean before declaring complete.
 export function featuresStillIncomplete(): number {
   try {
-    const features = JSON.parse(readFileSync(`${ROOT}/.smithers/spec/features.json`, "utf8")) as Array<{ status?: string }>;
-    // Exactly the open statuses featuresSchema.ts can produce ("fixed" is the
-    // only closed state).
-    const open = new Set(["broken", "partial", "missing", "missing-tests"]);
-    return features.filter((feature) => open.has(String(feature.status))).length;
+    const features = validateFeatures(ROOT);
+    return features.filter((feature) => feature.status !== "fixed" || (feature.missing ?? []).filter(Boolean).length > 0).length;
   } catch {
     return -1; // unreadable → don't claim completion on a read error
   }

@@ -3,13 +3,16 @@
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod/v4";
 import { providers } from "../lib/ddd/dddAgents.ts";
 import { dddRootOrCwd } from "../lib/ddd/dddRoot.ts";
 
 const ROOT = dddRootOrCwd();
+const FEATURES_LOCK_TIMEOUT_MS = 60_000;
+const FEATURES_LOCK_POLL_MS = 100;
 
 const codex = providers.codex;
 
@@ -74,6 +77,116 @@ export function bugSlug(value: unknown): string {
     .slice(0, 80) || "bug";
 }
 
+function shortBugHash(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 8);
+}
+
+function bugPathPart(value: unknown, max: number): string {
+  return bugSlug(value).slice(0, max) || "bug";
+}
+
+function bugTicketBaseName(finding: any): string {
+  const identityHash = shortBugHash(JSON.stringify({
+    file: String(finding.file ?? ""),
+    title: String(finding.title ?? ""),
+    severity: String(finding.severity ?? ""),
+    evidence: String(finding.evidence ?? ""),
+    suggestedFix: String(finding.suggestedFix ?? ""),
+  }));
+  return [
+    "ddd-bug-scan",
+    bugPathPart(finding.file || finding.featureId || "repo", 56),
+    bugPathPart(finding.id || "finding", 48),
+    bugPathPart(finding.title || "bug", 56),
+    identityHash,
+  ].join("--");
+}
+
+function errorCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+}
+
+function writeUniqueBugTicket(directory: string, baseName: string, content: string): { name: string; created: boolean } {
+  const tryWrite = (candidate: string): { name: string; created: boolean } | undefined => {
+    const name = `${candidate}.md`;
+    const full = resolve(directory, name);
+    try {
+      writeFileSync(full, content, { flag: "wx" });
+      return { name, created: true };
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST") throw error;
+      try {
+        if (readFileSync(full, "utf8") === content) return { name, created: false };
+      } catch {}
+      return undefined;
+    }
+  };
+
+  const first = tryWrite(baseName);
+  if (first) return first;
+  const contentHash = shortBugHash(content);
+  for (let index = 0; index < 20; index += 1) {
+    const suffix = index === 0 ? contentHash : `${contentHash}-${index + 1}`;
+    const written = tryWrite(`${baseName}-${suffix}`);
+    if (written) return written;
+  }
+  throw new Error(`could not materialize unique bug ticket for ${baseName}`);
+}
+
+function sleepSync(ms: number) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function acquireFeaturesLock(featuresPath: string): { fd: number; path: string } {
+  const lockPath = `${featuresPath}.lock`;
+  const deadline = Date.now() + FEATURES_LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      const fd = openSync(lockPath, "wx");
+      writeFileSync(fd, `${process.pid}\n`);
+      return { fd, path: lockPath };
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST") throw error;
+      if (Date.now() >= deadline) throw new Error(`Timed out acquiring ${lockPath}`);
+      sleepSync(FEATURES_LOCK_POLL_MS);
+    }
+  }
+}
+
+function releaseFeaturesLock(lock: { fd: number; path: string }) {
+  try {
+    closeSync(lock.fd);
+  } catch {}
+  try {
+    rmSync(lock.path, { force: true });
+  } catch {}
+}
+
+function writeFeaturesAtomic(featuresPath: string, features: Array<Record<string, any>>) {
+  const tempPath = `${featuresPath}.${process.pid}.${Date.now()}.tmp`;
+  let fd: number | undefined;
+  try {
+    fd = openSync(tempPath, "w", 0o600);
+    writeFileSync(fd, `${JSON.stringify(features, null, 2)}\n`);
+    try {
+      fsyncSync(fd);
+    } catch {}
+    closeSync(fd);
+    fd = undefined;
+    renameSync(tempPath, featuresPath);
+  } catch (error) {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {}
+    }
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {}
+    throw error;
+  }
+}
+
 export function bugTicketMarkdown(runId: string, finding: any): string {
   return [
     `# ${finding.title || finding.id}`,
@@ -122,9 +235,8 @@ function readFeatureRows(featuresPath: string): { features: Array<Record<string,
 
 /**
  * Materialize confirmed findings as tickets and features.json gaps, then
- * rebuild the derived docs so the UI backlog picks them up. Dedupe: a finding
- * whose ticket file already exists (same slug) is skipped, so re-running the
- * scan never double-files.
+ * rebuild the derived docs so the UI backlog picks them up. Exact duplicate
+ * tickets are skipped, so re-running the scan never double-files.
  */
 export function fileBugTickets(runId: string, confirmed: any[], root: string = ROOT) {
   const directory = resolve(root, ".smithers/tickets");
@@ -157,67 +269,65 @@ export function fileBugTickets(runId: string, confirmed: any[], root: string = R
       featureTitle: finding.featureTitle ?? featureMeta.get(String(finding.featureId ?? ""))?.title ?? "",
       priority: finding.priority ?? featureMeta.get(String(finding.featureId ?? ""))?.priority ?? "",
     };
-    const name = `ddd-bug-scan--${bugSlug(finding.file || finding.featureId || "repo")}--${bugSlug(finding.title || finding.id)}.md`;
-    const full = resolve(directory, name);
-    if (existsSync(full)) {
-      skippedExisting += 1;
-      continue;
-    }
     try {
-      writeFileSync(full, bugTicketMarkdown(runId, enrichedFinding));
-      ticketPaths.push(name);
+      const written = writeUniqueBugTicket(directory, bugTicketBaseName(finding), bugTicketMarkdown(runId, enrichedFinding));
+      if (written.created) ticketPaths.push(written.name);
+      else skippedExisting += 1;
     } catch (error) {
-      ticketErrors.push(`Failed to write ticket ${name}: ${readableError(error)}`);
+      ticketErrors.push(`Failed to write ticket for ${finding.id || finding.title || "finding"}: ${readableError(error)}`);
     }
   }
 
   // Record each confirmed bug as a missing[] gap on its feature so the spec
   // stays the source of truth and the generated backlog includes it.
   const featuresUpdated: string[] = [];
-  const updateFeatures = readFeatureRows(featuresPath);
-  if (updateFeatures.error && !specErrors.includes(updateFeatures.error)) {
-    specErrors.push(updateFeatures.error);
-  }
-  if (!updateFeatures.error) {
-    const features = updateFeatures.features;
-    for (const finding of confirmed) {
-      const feature = features.find((f) => f.id === finding.featureId);
-      if (!feature) continue;
-      const gap = `Bug (${finding.severity}): ${finding.title}${finding.file ? ` [${finding.file}]` : ""}`;
-      const missing: string[] = Array.isArray(feature.missing) ? feature.missing : [];
-      let changed = false;
-      if (!missing.includes(gap)) {
-        feature.missing = [...missing, gap];
-        changed = true;
-      }
-      if (feature.status === "fixed") {
-        feature.status = "broken";
-        changed = true;
-      }
-      if (changed && !featuresUpdated.includes(feature.id)) featuresUpdated.push(feature.id);
-    }
-    if (featuresUpdated.length > 0) {
-      try {
-        writeFileSync(featuresPath, `${JSON.stringify(features, null, 2)}\n`);
-      } catch (error) {
-        specErrors.push(`Failed to write ${featuresPath}: ${readableError(error)}`);
-        featuresUpdated.length = 0;
-      }
-    }
-  }
-
   let buildPassed = false;
+  let lock: { fd: number; path: string } | undefined;
   try {
-    execFileSync("bun", [".smithers/lib/ddd/build.ts"], {
-      cwd: root,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      maxBuffer: 32 * 1024 * 1024,
-    });
-    buildPassed = true;
+    lock = acquireFeaturesLock(featuresPath);
+    const updateFeatures = readFeatureRows(featuresPath);
+    if (updateFeatures.error && !specErrors.includes(updateFeatures.error)) {
+      specErrors.push(updateFeatures.error);
+    }
+    if (!updateFeatures.error) {
+      const features = updateFeatures.features;
+      for (const finding of confirmed) {
+        const feature = features.find((f) => f.id === finding.featureId);
+        if (!feature) continue;
+        const gap = `Bug (${finding.severity}): ${finding.title}${finding.file ? ` [${finding.file}]` : ""}`;
+        const missing: string[] = Array.isArray(feature.missing) ? feature.missing : [];
+        let changed = false;
+        if (!missing.includes(gap)) {
+          feature.missing = [...missing, gap];
+          changed = true;
+        }
+        if (feature.status === "fixed") {
+          feature.status = "broken";
+          changed = true;
+        }
+        if (changed && !featuresUpdated.includes(feature.id)) featuresUpdated.push(feature.id);
+      }
+      if (featuresUpdated.length > 0) {
+        writeFeaturesAtomic(featuresPath, features);
+      }
+    }
+    try {
+      execFileSync("bun", [".smithers/lib/ddd/build.ts"], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        maxBuffer: 32 * 1024 * 1024,
+      });
+      buildPassed = true;
+    } catch (error) {
+      buildPassed = false;
+      buildErrors.push(`Spec build failed: ${readableError(error)}`);
+    }
   } catch (error) {
-    buildPassed = false;
-    buildErrors.push(`Spec build failed: ${readableError(error)}`);
+    specErrors.push(`Failed to update ${featuresPath}: ${readableError(error)}`);
+    featuresUpdated.length = 0;
+  } finally {
+    if (lock) releaseFeaturesLock(lock);
   }
 
   const ticketCreationPassed = ticketErrors.length === 0;
