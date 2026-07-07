@@ -26,6 +26,9 @@ function arg(name: string, fallback: string): string {
 
 const label = arg("label", "run");
 const tickets = Number(arg("tickets", "12"));
+// --no-input runs the workflow with NO --input at all (the bare `smithers up`
+// path: the workflow must supply its own cap default).
+const noInput = process.argv.includes("--no-input");
 const workflowConcurrency = Number(arg("concurrency", "4"));
 const globalConcurrency = Number(arg("global-concurrency", "4"));
 const delays = JSON.parse(arg("delays", "{}"));
@@ -49,8 +52,7 @@ const cliArgs = [
   join(sandbox.root, ".smithers/workflows/kanban.tsx"),
   "--run-id",
   runId,
-  "--input",
-  JSON.stringify({ maxConcurrency: workflowConcurrency }),
+  ...(noInput ? [] : ["--input", JSON.stringify({ maxConcurrency: workflowConcurrency })]),
   "--max-concurrency",
   String(globalConcurrency),
 ];
