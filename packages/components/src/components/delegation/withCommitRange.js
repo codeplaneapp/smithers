@@ -60,11 +60,15 @@ export async function captureWorkingCopyCommit(cwd) {
  * explicit-only tool allowlist) drop the wrapper — capture is then simply
  * absent, which the schema allows.
  * @param {AgentLike | AgentLike[]} agent
+ * @param {(cwd: string) => Promise<{ commit: string; vcs: "jj" | "git" } | null>} [probe]
+ *   The working-copy commit probe. Defaults to `captureWorkingCopyCommit`;
+ *   injectable so the best-effort `.catch` fallback (a probe that rejects
+ *   rather than resolving null) is exercisable.
  * @returns {AgentLike | AgentLike[]}
  */
-export function withCommitRange(agent) {
+export function withCommitRange(agent, probe = captureWorkingCopyCommit) {
     if (Array.isArray(agent)) {
-        return agent.map((entry) => /** @type {AgentLike} */ (withCommitRange(entry)));
+        return agent.map((entry) => /** @type {AgentLike} */ (withCommitRange(entry, probe)));
     }
     if (!agent || typeof agent.generate !== "function") {
         return agent;
@@ -79,11 +83,11 @@ export function withCommitRange(agent) {
                 const cwd = typeof args?.rootDir === "string" && args.rootDir.length > 0
                     ? args.rootDir
                     : process.cwd();
-                const before = await captureWorkingCopyCommit(cwd).catch(() => null);
+                const before = await probe(cwd).catch(() => null);
                 const result = await target.generate.call(target, args);
                 if (!before)
                     return result;
-                const after = await captureWorkingCopyCommit(cwd).catch(() => null);
+                const after = await probe(cwd).catch(() => null);
                 if (!after || after.vcs !== before.vcs)
                     return result;
                 if (result === null || typeof result !== "object" || Array.isArray(result))

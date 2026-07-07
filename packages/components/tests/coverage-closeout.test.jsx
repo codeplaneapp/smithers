@@ -389,10 +389,68 @@ describe("withCommitRange defensive probe failure", () => {
 		expect(await captureWorkingCopyCommit(/** @type {any} */ (123))).toBeNull();
 	});
 
+	test("captureWorkingCopyCommit runs the real jj/git probes against a directory", async () => {
+		// Drives run() -> execFile -> its (error, stdout) callback for real. In a
+		// repo this returns a commit; in a bare dir both probes fail and it is null.
+		const result = await captureWorkingCopyCommit(process.cwd());
+		expect(result === null || (typeof result.commit === "string" && (result.vcs === "jj" || result.vcs === "git"))).toBe(true);
+	});
+
 	test("withCommitRange leaves a bare (non-generate) value untouched", () => {
 		expect(withCommitRange(null)).toBeNull();
 		const notAgent = { id: "x" };
 		expect(withCommitRange(notAgent)).toBe(notAgent);
+	});
+
+	test("withCommitRange merges a measured commitRange into structured output (injected probe)", async () => {
+		let n = 0;
+		const probe = async () => {
+			n += 1;
+			return { commit: n === 1 ? "aaa" : "bbb", vcs: "jj" };
+		};
+		const inner = { id: "exec", generate: async () => ({ output: { logicalId: "root/a" } }) };
+		const wrapped = withCommitRange(inner, probe);
+		expect(wrapped.id).toBe("exec"); // proxy passthrough for non-generate props
+		const result = await wrapped.generate(); // no args -> process.cwd() branch
+		expect(result.output.commitRange).toEqual({ from: "aaa", to: "bbb", vcs: "jj" });
+	});
+
+	test("withCommitRange leaves output untouched when the vcs flips between probes", async () => {
+		let n = 0;
+		const probe = async () => {
+			n += 1;
+			return { commit: "c", vcs: n === 1 ? "jj" : "git" };
+		};
+		const inner = { id: "exec", generate: async () => ({ output: { logicalId: "x" } }) };
+		const result = await withCommitRange(inner, probe).generate({ rootDir: "/repo" });
+		expect(result.output.commitRange).toBeUndefined();
+	});
+
+	test("withCommitRange swallows a rejecting before-probe and a rejecting after-probe", async () => {
+		const inner = { id: "exec", generate: async () => ({ output: { logicalId: "x" } }) };
+		// before-probe rejects -> `.catch(() => null)` -> before null -> passthrough.
+		const rejectBefore = withCommitRange(inner, async () => {
+			throw new Error("no vcs");
+		});
+		expect((await rejectBefore.generate({ rootDir: "/repo" })).output.commitRange).toBeUndefined();
+		// before resolves, after rejects -> after `.catch(() => null)` -> null -> passthrough.
+		let n = 0;
+		const rejectAfter = withCommitRange(inner, async () => {
+			n += 1;
+			if (n === 1) return { commit: "aaa", vcs: "jj" };
+			throw new Error("after failed");
+		});
+		expect((await rejectAfter.generate({ rootDir: "/repo" })).output.commitRange).toBeUndefined();
+	});
+
+	test("withCommitRange passes non-object and output-less results through unchanged (injected probe)", async () => {
+		const probe = async () => ({ commit: "c", vcs: "jj" });
+		expect(await withCommitRange({ id: "s", generate: async () => "text" }, probe).generate({ rootDir: "/r" })).toBe("text");
+		const noOutput = await withCommitRange({ id: "o", generate: async () => ({ text: "hi" }) }, probe).generate({ rootDir: "/r" });
+		expect(noOutput).toEqual({ text: "hi" });
+		// Array of agents wraps element-wise (map arrow), threading the probe.
+		const arr = withCommitRange([{ id: "a", generate: async () => ({ output: {} }) }], probe);
+		expect(Array.isArray(arr)).toBe(true);
 	});
 });
 
