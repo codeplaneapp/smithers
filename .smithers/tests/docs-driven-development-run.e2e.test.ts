@@ -94,7 +94,10 @@ describe("docs-driven-development real workflow run", () => {
     expect(materialized.row.tickets[0].featureId).toBe("docs-driven-development");
     expect(materialized.row.tickets[0].featureTitle).toBe("Docs driven development");
     expect(materialized.row.tickets[0].content).toContain("Prove DDD workflow execution");
-    const ticketPath = join(repo.root, ".smithers/tickets/docs-driven-development--ddd-run-fallback--01-docs-driven-development.md");
+    expect(materialized.row.tickets[0].path).toMatch(
+      /^docs-driven-development--ddd-run-fallback--01-docs-driven-development-[0-9a-f]{8}$/,
+    );
+    const ticketPath = join(repo.root, ".smithers/tickets", `${materialized.row.tickets[0].path}.md`);
     expect(existsSync(ticketPath)).toBe(true);
     expect(readFileSync(ticketPath, "utf8")).toContain("Task type: e2e");
     expect(readFileSync(ticketPath, "utf8")).toContain("Feature title: Docs driven development");

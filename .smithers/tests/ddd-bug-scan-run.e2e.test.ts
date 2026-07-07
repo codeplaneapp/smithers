@@ -256,7 +256,9 @@ describe("ddd-bug-scan real workflow run", () => {
     expect(filed.row.created).toBe(1);
     expect(filed.row.featuresUpdated).toEqual(["known-feature"]);
     expect(filed.row.buildPassed).toBe(true);
-    expect(filed.row.ticketPaths[0]).toBe("ddd-bug-scan--packages-core-src-trim.ts--null-trim-crashes.md");
+    expect(filed.row.ticketPaths[0]).toMatch(
+      /^ddd-bug-scan--packages-core-src-trim\.ts--null-trim--null-trim-crashes--[0-9a-f]{8}\.md$/,
+    );
 
     const ticketPath = join(repo.root, ".smithers/tickets", filed.row.ticketPaths[0]);
     expect(existsSync(ticketPath)).toBe(true);

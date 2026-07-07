@@ -85,14 +85,19 @@ function bugPathPart(value: unknown, max: number): string {
   return bugSlug(value).slice(0, max) || "bug";
 }
 
-function bugTicketBaseName(finding: any): string {
-  const identityHash = shortBugHash(JSON.stringify({
+function bugTicketIdentity(finding: any): string {
+  return JSON.stringify({
+    featureId: String(finding.featureId ?? ""),
     file: String(finding.file ?? ""),
     title: String(finding.title ?? ""),
     severity: String(finding.severity ?? ""),
     evidence: String(finding.evidence ?? ""),
     suggestedFix: String(finding.suggestedFix ?? ""),
-  }));
+  });
+}
+
+function bugTicketBaseName(finding: any): string {
+  const identityHash = shortBugHash(bugTicketIdentity(finding));
   return [
     "ddd-bug-scan",
     bugPathPart(finding.file || finding.featureId || "repo", 56),
@@ -107,7 +112,7 @@ function errorCode(error: unknown): string {
 }
 
 function writeUniqueBugTicket(directory: string, baseName: string, content: string): { name: string; created: boolean } {
-  const tryWrite = (candidate: string): { name: string; created: boolean } | undefined => {
+  const tryWrite = (candidate: string, existingIsDuplicate = false): { name: string; created: boolean } | undefined => {
     const name = `${candidate}.md`;
     const full = resolve(directory, name);
     try {
@@ -115,6 +120,7 @@ function writeUniqueBugTicket(directory: string, baseName: string, content: stri
       return { name, created: true };
     } catch (error) {
       if (errorCode(error) !== "EEXIST") throw error;
+      if (existingIsDuplicate) return { name, created: false };
       try {
         if (readFileSync(full, "utf8") === content) return { name, created: false };
       } catch {}
@@ -122,7 +128,7 @@ function writeUniqueBugTicket(directory: string, baseName: string, content: stri
     }
   };
 
-  const first = tryWrite(baseName);
+  const first = tryWrite(baseName, true);
   if (first) return first;
   const contentHash = shortBugHash(content);
   for (let index = 0; index < 20; index += 1) {
@@ -250,6 +256,7 @@ export function fileBugTickets(runId: string, confirmed: any[], root: string = R
   }
   const ticketPaths: string[] = [];
   let skippedExisting = 0;
+  const seenTicketIdentities = new Set<string>();
   const featureMeta = new Map<string, { title: string; priority: string }>();
   const featuresPath = resolve(root, ".smithers/spec/features.json");
   const initialFeatures = readFeatureRows(featuresPath);
@@ -270,6 +277,12 @@ export function fileBugTickets(runId: string, confirmed: any[], root: string = R
       priority: finding.priority ?? featureMeta.get(String(finding.featureId ?? ""))?.priority ?? "",
     };
     try {
+      const identity = bugTicketIdentity(finding);
+      if (seenTicketIdentities.has(identity)) {
+        skippedExisting += 1;
+        continue;
+      }
+      seenTicketIdentities.add(identity);
       const written = writeUniqueBugTicket(directory, bugTicketBaseName(finding), bugTicketMarkdown(runId, enrichedFinding));
       if (written.created) ticketPaths.push(written.name);
       else skippedExisting += 1;

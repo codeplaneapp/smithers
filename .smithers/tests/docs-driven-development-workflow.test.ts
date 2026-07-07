@@ -205,8 +205,10 @@ describe("docs-driven-development workflow guards", () => {
       ],
     });
     expect(full.created).toBe(1);
-    expect(full.tickets[0].path).toBe("docs-driven-development--run-with-spaces--02-docs-driven-development");
-    const written = join(root, ".smithers/tickets/docs-driven-development--run-with-spaces--02-docs-driven-development.md");
+    expect(full.tickets[0].path).toMatch(
+      /^docs-driven-development--run-with-spaces--02-docs-driven-development-[0-9a-f]{8}$/,
+    );
+    const written = join(root, ".smithers/tickets", `${full.tickets[0].path}.md`);
     expect(existsSync(written)).toBe(true);
     expect(readFileSync(written, "utf8")).toContain("Task type: fix");
   });
@@ -239,17 +241,19 @@ describe("docs-driven-development workflow guards", () => {
 
     expect(full.created).toBe(2);
     expect(full.tickets[0]).toMatchObject({
-      path: "docs-driven-development--path-shape-run--01-docs-driven-development",
       featureId: "docs-driven-development",
       featureTitle: "Docs driven development",
     });
+    expect(full.tickets[0].path).toMatch(
+      /^docs-driven-development--path-shape-run--01-docs-driven-development-[0-9a-f]{8}$/,
+    );
     expect(full.tickets[1]).toMatchObject({
-      path: "docs-driven-development--path-shape-run--02-ticket",
       featureId: "",
       featureTitle: "Snake Case Feature",
     });
+    expect(full.tickets[1].path).toMatch(/^docs-driven-development--path-shape-run--02-ticket-[0-9a-f]{8}$/);
 
-    const materializedPath = join(root, ".smithers/tickets/docs-driven-development--path-shape-run--01-docs-driven-development.md");
+    const materializedPath = join(root, ".smithers/tickets", `${full.tickets[0].path}.md`);
     expect(existsSync(materializedPath)).toBe(true);
     const materialized = readFileSync(materializedPath, "utf8");
     expect(materialized).toContain("Feature title: Docs driven development");

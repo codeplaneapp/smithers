@@ -240,7 +240,9 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     expect(first.skippedExisting).toBe(0);
     expect(first.featuresUpdated).toEqual(["known-feature"]);
     expect(first.buildPassed).toBe(true);
-    expect(first.ticketPaths[0]).toBe("ddd-bug-scan--packages-server-src-index.ts--trim-crashes-on-null.md");
+    expect(first.ticketPaths[0]).toMatch(
+      /^ddd-bug-scan--packages-server-src-index\.ts--bug-1--trim-crashes-on-null--[0-9a-f]{8}\.md$/,
+    );
 
     const ticket = readFileSync(join(root, ".smithers/tickets", first.ticketPaths[0]), "utf8");
     expect(ticket).toContain("# Trim crashes on null");
@@ -336,7 +338,7 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
         missing: "not-an-array",
       },
     ]);
-    const { fileBugTickets, bugSlug } = await bugScanModule();
+    const { fileBugTickets } = await bugScanModule();
     const finding = {
       id: "bug-1",
       title: "Existing ticket still updates feature",
@@ -346,9 +348,22 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
       evidence: "existing(null) throws",
       suggestedFix: "Handle null.",
     };
-    mkdirSync(join(root, ".smithers/tickets"), { recursive: true });
-    const ticketName = `ddd-bug-scan--${bugSlug(finding.file)}--${bugSlug(finding.title)}.md`;
-    writeFileSync(join(root, ".smithers/tickets", ticketName), "# Existing ticket\n");
+    const preexisting = fileBugTickets("run-preexisting", [finding], root);
+    expect(preexisting.created).toBe(1);
+    expect(preexisting.ticketPaths[0]).toMatch(
+      /^ddd-bug-scan--packages-server-src-existing\.ts--bug-1--existing-ticket-still-updates-feature--[0-9a-f]{8}\.md$/,
+    );
+    writeFeatures(root, [
+      {
+        id: "known-feature",
+        title: "Known Feature",
+        summary: "Known feature summary.",
+        status: "fixed",
+        priority: "p0",
+        owner: "product",
+        missing: "not-an-array",
+      },
+    ]);
 
     const result = fileBugTickets("run-existing", [finding], root);
     expect(result.created).toBe(0);
