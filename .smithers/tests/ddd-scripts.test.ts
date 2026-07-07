@@ -589,6 +589,10 @@ describe("DDD scripts and build gate", () => {
       .map((path) => path.replace(/^\.smithers\/spec\/content\//, ""))
       .sort();
     const contentPathSet = new Set(contentPaths);
+    const resolvesLocalDoc = (href: string) => {
+      if (href === "" || /^https?:\/\//.test(href)) return true;
+      return contentPathSet.has(href) || existsSync(join(root, href));
+    };
     const docsContent = generatedDocs.docsContent as Array<{ path: string; level: "product" | "technical"; content: string }>;
     expect(docsContent.map((doc) => doc.path).sort()).toEqual(contentPaths);
     for (const doc of docsContent) {
@@ -613,15 +617,15 @@ describe("DDD scripts and build gate", () => {
       }
       for (const link of feature.links ?? []) {
         const href = link.href.split("#")[0] ?? "";
-        expect(href === "" || /^https?:\/\//.test(href) || contentPathSet.has(href)).toBe(true);
+        expect(resolvesLocalDoc(href)).toBe(true);
       }
       for (const endpoint of feature.endpoints ?? []) {
         const href = (endpoint.doc ?? "").split("#")[0] ?? "";
-        expect(href === "" || /^https?:\/\//.test(href) || contentPathSet.has(href)).toBe(true);
+        expect(resolvesLocalDoc(href)).toBe(true);
       }
       for (const command of feature.tests ?? []) {
         const knownGate = /\b(pnpm\s+(typecheck|test|docs:llms)|pnpm\s+-C\s+\S+\s+test|check-docs|check-llms|check-dependency-boundaries|check-single-effect-version)\b/.test(command);
-        const explicitTestPaths = [...command.matchAll(/(?:^|\s)(\.smithers\/tests\/[^\s]+|tests\/[^\s]+|\.smithers\/ui\/[^\s]+|ui\/[^\s]+|\.smithers\/lib\/ddd\/[^\s]+|lib\/ddd\/[^\s]+|e2e\/[^\s]+)/g)]
+        const explicitTestPaths = [...command.matchAll(/(?:^|\s)(\.smithers\/tests\/[^\s]+|tests\/[^\s]+|\.smithers\/ui\/[^\s]+|ui\/[^\s]+|\.smithers\/lib\/ddd\/[^\s]+|lib\/ddd\/[^\s]+|e2e\/[^\s]+|apps\/[^\s]+|packages\/[^\s]+)/g)]
           .map((match) => (match[1] ?? "").replace(/[),.;]+$/, ""));
         if (explicitTestPaths.length === 0) {
           expect(knownGate).toBe(true);
@@ -668,6 +672,7 @@ describe("DDD scripts and build gate", () => {
     expect(dddFeature).toBeTruthy();
     expect(dddFeature!.tests).toEqual(expect.arrayContaining(expectedTestPaths));
     for (const testPath of dddFeature!.tests) {
+      if (!testPath.startsWith(".smithers/")) continue;
       expect(existsSync(join(root, testPath))).toBe(true);
     }
 

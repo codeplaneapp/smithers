@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { providers } from "../lib/ddd/dddAgents.ts";
 import { dddRootOrCwd } from "../lib/ddd/dddRoot.ts";
 
 const ROOT = dddRootOrCwd();

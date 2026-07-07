@@ -344,8 +344,8 @@ describe("docs-driven-development workflow guards", () => {
     expect(source).toContain("tier, group, userValue, capabilities, endpoints, links");
     expect(source).toContain("every link href must resolve to an existing content file");
     expect(source).toContain("do not recursively start another docs-driven-development workflow");
-    expect(source).toContain("NEVER edit the orchestration source of THIS running workflow");
-    expect(source).toContain(".smithers/workflows/docs-driven-development.tsx and .smithers/lib/ddd/*.ts are OFF-LIMITS");
+    expect(source).toContain("OFF-LIMITS: never edit the DDD pack machinery itself");
+    expect(source).toContain("NEVER edit the DDD pack machinery");
     expect(source).toContain("record it precisely in your summary");
   });
 });

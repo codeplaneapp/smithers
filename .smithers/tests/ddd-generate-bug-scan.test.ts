@@ -434,9 +434,8 @@ describe("ddd-generate-docs and ddd-bug-scan helpers", () => {
     expect(generateSource).toContain("preserve tier, group, userValue, capabilities, endpoints, and links");
     expect(generateSource).toContain("run \"bun .smithers/lib/ddd/build.ts\"");
     expect(generateSource).toContain("Set approved=true only when the spec is honest and the build passes");
-    expect(generateSource).toContain("Do not edit running orchestration files for this DDD surface");
-    expect(generateSource).toContain(".smithers/workflows/ddd-generate-docs.tsx");
-    expect(generateSource).toContain(".smithers/workflows/ddd-bug-scan.tsx");
+    expect(generateSource).toContain("OFF-LIMITS — never edit, delete, or rewrite the DDD pack's own machinery");
+    expect(generateSource).toContain(".smithers/workflows/ddd-*.tsx");
     expect(generateSource).toContain(".smithers/workflows/docs-driven-development.tsx");
 
     expect(bugScanSource).toContain("READ-ONLY: do not modify any file");

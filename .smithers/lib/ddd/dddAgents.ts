@@ -1,11 +1,12 @@
 // Self-contained agent providers for the docs-driven-development pack.
 //
 // The DDD workflows (ddd-generate-docs, ddd-bug-scan, ddd-improve,
-// docs-driven-development) used to `import { providers } from "../agents"`,
-// which coupled them to each repo's bespoke `.smithers/agents.ts`. That made
-// the pack non-portable: a target repo whose agents.ts exports a different
-// shape (e.g. multi's `codexMini`/`codexGoal`, or a repo with no `providers`
-// export at all) breaks every DDD workflow at import time.
+// docs-driven-development) `import { providers } from "../lib/ddd/dddAgents.ts"`
+// — i.e. from here — instead of the repo's `../agents`. Importing from the
+// host repo's bespoke `.smithers/agents.ts` made the pack non-portable: a
+// target repo whose agents.ts exports a different shape (e.g. multi's
+// `codexMini`/`codexGoal`, or a repo with no `providers` export at all) broke
+// every DDD workflow at import time.
 //
 // DDD only ever needs three roles — a Fable-class planner/reviewer, a Sonnet
 // trivial editor, and Codex the implementer — so it owns them here, under

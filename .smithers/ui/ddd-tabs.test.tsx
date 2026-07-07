@@ -1173,7 +1173,7 @@ describe("DDD tabs and components", () => {
     expect(body).toContain("<Task>");
     expect(body).not.toContain("**Status:**");
     expect(body).not.toContain("docs\\_owner");
-    expect([...harness.container.querySelectorAll("code")].map((node) => text(node))).toContain("pnpm -C .smithers test");
+    expect([...harness.container.querySelectorAll("code")].map((node) => text(node))).toContain(".smithers/tests/open-code-review.test.ts");
 
     const docsLink = harness.container.querySelector("button.doc-link") as HTMLButtonElement | null;
     if (docsLink) {
