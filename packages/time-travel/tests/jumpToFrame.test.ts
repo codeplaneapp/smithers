@@ -533,3 +533,203 @@ describe("jumpToFrame", () => {
     }
   });
 });
+
+describe("jumpToFrame seams and rollback", () => {
+  test("runs step hooks, broadcasts the event, resumes the loop, and skips missing output tables", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-seams");
+      // A to-be-deleted node whose output table does not exist exercises the
+      // "no such table" continue branch of the output truncation.
+      await adapter.insertNode({
+        runId: "run-seams", nodeId: "task:three", iteration: 0, state: "finished",
+        lastAttempt: 1, updatedAtMs: 285, outputTable: "out_missing", label: "three",
+      });
+      await adapter.insertAttempt({
+        runId: "run-seams", nodeId: "task:three", iteration: 0, attempt: 1, state: "finished",
+        startedAtMs: 280, finishedAtMs: 290, jjPointer: "ptr-three", jjCwd: null,
+      });
+
+      const steps: Array<{ stage: string; step: string }> = [];
+      const events: unknown[] = [];
+      let resumed = false;
+      let reconcilerCaptured = false;
+      let reconcilerRebuilt = false;
+
+      const result = await jumpToFrame({
+        adapter,
+        runId: "run-seams",
+        frameNo: 1,
+        confirm: true,
+        caller: "user:owner",
+        ...makeNoVcsHooks(),
+        hooks: {
+          beforeStep: async (step: string) => { steps.push({ stage: "before", step }); },
+          afterStep: async (step: string) => { steps.push({ stage: "after", step }); },
+        },
+        emitEvent: (event: unknown) => { events.push(event); },
+        pauseRunLoop: async () => {},
+        resumeRunLoop: async () => { resumed = true; },
+        captureReconcilerState: async () => { reconcilerCaptured = true; return { snap: 1 }; },
+        rebuildReconcilerState: async (_xml: string) => { reconcilerRebuilt = true; },
+      } as never);
+
+      expect(result.ok).toBe(true);
+      expect(events).toHaveLength(1);
+      expect(resumed).toBe(true);
+      expect(reconcilerCaptured).toBe(true);
+      expect(reconcilerRebuilt).toBe(true);
+      expect(steps.some((s) => s.stage === "after" && s.step === "resume-event-loop")).toBe(true);
+      expect(steps.some((s) => s.stage === "before" && s.step === "truncate-outputs")).toBe(true);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("a failed event broadcast is logged and non-fatal (non-Error rejection)", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-emitfail");
+      const logs: Array<{ level: string; message: string; fields: Record<string, unknown> }> = [];
+
+      const result = await jumpToFrame({
+        adapter,
+        runId: "run-emitfail",
+        frameNo: 1,
+        confirm: true,
+        caller: "user:owner",
+        ...makeNoVcsHooks(),
+        // Throw a non-Error so formatError must coerce it via String().
+        emitEvent: () => { throw "emit exploded"; },
+        onLog: async (level: string, message: string, fields: Record<string, unknown>) => {
+          logs.push({ level, message, fields });
+        },
+      } as never);
+
+      expect(result.ok).toBe(true);
+      const emitLogEntry = logs.find((l) => l.message.includes("emit broadcast failed"));
+      expect(emitLogEntry).toBeDefined();
+      expect(String(emitLogEntry?.fields.error)).toContain("emit exploded");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("a post-commit resume failure still resolves as a committed success", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-postcommit");
+      const logs: Array<{ level: string; message: string }> = [];
+
+      const result = await jumpToFrame({
+        adapter,
+        runId: "run-postcommit",
+        frameNo: 1,
+        confirm: true,
+        caller: "user:owner",
+        ...makeNoVcsHooks(),
+        pauseRunLoop: async () => {},
+        resumeRunLoop: async () => { throw new Error("resume boom"); },
+        onLog: async (level: string, message: string) => { logs.push({ level, message }); },
+      } as never);
+
+      // The durable jump committed, so a resume failure after commit is tolerated.
+      expect(result.ok).toBe(true);
+      expect(result.newFrameNo).toBe(1);
+      expect(logs.some((l) => l.message.includes("resume after commit failed"))).toBe(true);
+      expect(logs.some((l) => l.message.includes("post-commit step failed"))).toBe(true);
+      // The frame truncation is durable.
+      const frames = await adapter.listFrames("run-postcommit", 100);
+      expect(frames.every((frame) => frame.frameNo <= 1)).toBe(true);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("a pre-commit failure rolls back and flags the run when the rollback is partial", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-rollback");
+      const logs: Array<{ level: string; message: string }> = [];
+
+      await expect(
+        jumpToFrame({
+          adapter,
+          runId: "run-rollback",
+          frameNo: 1,
+          confirm: true,
+          caller: "user:owner",
+          // No pre-jump pointer: the sandbox rollback cannot be restored.
+          getCurrentPointerImpl: async () => null,
+          revertToPointerImpl: async () => ({ success: true }),
+          captureReconcilerState: async () => ({ snap: 1 }),
+          // Both rollback steps fail, forcing the "needs attention" partial path.
+          restoreReconcilerState: async () => { throw new Error("restore boom"); },
+          pauseRunLoop: async () => {},
+          resumeRunLoop: async () => { throw new Error("resume boom"); },
+          // Fail the durable transaction before it commits.
+          hooks: {
+            beforeStep: async (step: string) => {
+              if (step === "truncate-frames") throw new Error("hook boom");
+            },
+          },
+          onLog: async (level: string, message: string) => { logs.push({ level, message }); },
+        } as never),
+      ).rejects.toMatchObject({ code: "RewindFailed" });
+
+      // The run was flagged for attention and nothing durable was truncated.
+      const run = await adapter.getRun("run-rollback");
+      expect(["needs_attention", "failed"]).toContain(run?.status);
+      const frames = await adapter.listFrames("run-rollback", 100);
+      expect(frames.map((f) => f.frameNo).sort()).toEqual([0, 1, 2]);
+      expect(logs.some((l) => l.message.includes("rollback partial"))).toBe(true);
+      const audits = await listRewindAuditRows(adapter, { runId: "run-rollback" });
+      expect(audits.at(-1)?.result).toBe("partial");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("a terminal audit-update failure is logged but does not undo a committed jump", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-auditfail");
+      // A trigger that vetoes UPDATEs to the audit table makes the terminal
+      // audit update (in the finally) a real DB fault after a committed jump.
+      // The durable jump already committed, so it must still resolve as a
+      // success while the audit-write failure is caught and logged.
+      sqlite.exec(`
+        CREATE TRIGGER block_audit_update BEFORE UPDATE ON _smithers_time_travel_audit
+        BEGIN
+          SELECT RAISE(ABORT, 'audit update blocked');
+        END;
+      `);
+      const logs: Array<{ level: string; message: string; fields: Record<string, unknown> }> = [];
+
+      const result = await jumpToFrame({
+        adapter,
+        runId: "run-auditfail",
+        frameNo: 1,
+        confirm: true,
+        caller: "user:owner",
+        ...makeNoVcsHooks(),
+        onLog: async (level: string, message: string, fields: Record<string, unknown>) => {
+          logs.push({ level, message, fields });
+        },
+      } as never);
+
+      expect(result.ok).toBe(true);
+      // The durable jump committed (frame 2 truncated) even though the audit
+      // update was vetoed and left the row at "in_progress".
+      const frames = await adapter.listFrames("run-auditfail", 100);
+      expect(frames.every((frame) => frame.frameNo <= 1)).toBe(true);
+      const auditFailLog = logs.find((l) => l.message.includes("audit write failed"));
+      expect(auditFailLog).toBeDefined();
+      expect(auditFailLog?.level).toBe("error");
+      const audits = await listRewindAuditRows(adapter, { runId: "run-auditfail" });
+      expect(audits.at(-1)?.result).toBe("in_progress");
+    } finally {
+      sqlite.close();
+    }
+  });
+});
