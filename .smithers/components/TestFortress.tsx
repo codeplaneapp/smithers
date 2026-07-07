@@ -3,6 +3,12 @@
 import { Loop, Parallel, Sequence, Task, type AgentLike } from "smithers-orchestrator";
 import { z } from "zod/v4";
 
+// Absorb transient provider rate-limits (429s from bursting fable agents look
+// like AGENT_QUOTA_EXCEEDED). Exponential backoff from 10s → ~5 min total, so a
+// short rate-limit window clears rather than turning a harden step into a
+// permanent continueOnFail failure (= empty coverage for that group).
+const LOOP_RETRY = { maxAttempts: 6, backoff: "exponential", initialDelay: "10s" } as const;
+
 /**
  * <TestFortress> — debate-hardened test coverage for one code path.
  *
@@ -290,6 +296,7 @@ export function TestFortressTrack({
                 id={hardenNode}
                 output={outputs.tfHarden}
                 agent={implementAgent}
+                retry={LOOP_RETRY}
                 continueOnFail
                 timeoutMs={90 * 60_000}
                 heartbeatTimeoutMs={10 * 60_000}
@@ -301,6 +308,7 @@ export function TestFortressTrack({
                 id={gapNode}
                 output={outputs.tfGap}
                 agent={reviewAgent}
+                retry={LOOP_RETRY}
                 continueOnFail
                 timeoutMs={30 * 60_000}
                 heartbeatTimeoutMs={10 * 60_000}
@@ -313,6 +321,7 @@ export function TestFortressTrack({
                   id={forNode}
                   output={outputs.tfArg}
                   agent={debateAgent}
+                  retry={LOOP_RETRY}
                   continueOnFail
                   timeoutMs={20 * 60_000}
                   heartbeatTimeoutMs={10 * 60_000}
@@ -323,6 +332,7 @@ export function TestFortressTrack({
                   id={againstNode}
                   output={outputs.tfArg}
                   agent={debateAgent}
+                  retry={LOOP_RETRY}
                   continueOnFail
                   timeoutMs={20 * 60_000}
                   heartbeatTimeoutMs={10 * 60_000}
@@ -335,6 +345,7 @@ export function TestFortressTrack({
                 id={judgeNode}
                 output={outputs.tfVerdict}
                 agent={judgeAgent}
+                retry={LOOP_RETRY}
                 continueOnFail
                 timeoutMs={20 * 60_000}
                 heartbeatTimeoutMs={10 * 60_000}
