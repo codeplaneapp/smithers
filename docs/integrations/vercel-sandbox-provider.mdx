@@ -27,6 +27,12 @@ import {
 ## Credentials
 
 `@vercel/sandbox` is an optional dependency, imported lazily inside the session.
+Install it to use the real provider:
+
+```bash
+npm install @vercel/sandbox
+```
+
 OIDC is preferred; the access-token trio is the fallback. Auth is resolved and
 validated before the SDK is touched, so a misconfigured provider fails fast with
 `INVALID_INPUT`. These values are used only to create the sandbox. They are
@@ -104,13 +110,12 @@ declared, the reachable `sandbox.domain(port)` is surfaced through a heartbeat.
 
 ## Duration and plan cap
 
-The default session timeout is 5 minutes, which is also Vercel's create-time
-ceiling. `options.timeoutMs` (or `request.toolTimeoutMs`) maps to the create
-`timeout`. Durations above the 5-minute ceiling are reached by warning through a
-heartbeat and calling `sandbox.extendTimeout()`, up to `options.maxDurationMs`
-(default 45 minutes). A request above the cap throws `INVALID_INPUT` rather than
-provisioning a sandbox that would overrun the plan. Raise `maxDurationMs` for
-Pro (up to 5 hours).
+The default session timeout is 5 minutes. `options.timeoutMs` (or
+`request.toolTimeoutMs`) maps to the create `timeout`. Durations above the
+5-minute default warn through a heartbeat and call `sandbox.extendTimeout()`, up
+to `options.maxDurationMs` (default 45 minutes). A request above that cap throws
+`INVALID_INPUT` rather than provisioning a sandbox that would overrun the plan.
+Raise `maxDurationMs` for Pro (up to 5 hours).
 
 ## Cleanup and cost
 

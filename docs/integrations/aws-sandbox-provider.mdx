@@ -95,7 +95,7 @@ vars so the entry can find them:
 - `SMITHERS_SANDBOX_REQUEST_S3_KEY`: S3 key of the request JSON.
 - `SMITHERS_SANDBOX_RESULT_S3_KEY`: S3 key the entry must write the result to.
 
-Every workdir path maps to `s3://<bucket>/<prefix>/<basename(path)>`. The entry
+Every workdir path maps to `s3://<bucket>/<prefix>/<runId>/<sandboxId>/<encodeURIComponent(workdir-relative path)>` so two files that share a basename never collide. The entry
 either prints the result JSON to stdout or writes it to the result key. An infra
 failure (task or build fails with no result written) throws. A result file with
 `status: "failed"` is a normal failed bundle. Fargate reports a real numeric

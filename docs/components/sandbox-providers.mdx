@@ -85,10 +85,13 @@ There are three ways to pick a provider, in precedence order:
    `registerSandboxProvider(createVercelSandboxProvider({...}))` then
    `<Sandbox provider="vercel-sandbox" />`. The provider packages also export
    `register<Provider>SandboxProvider(...)` convenience wrappers.
-3. **Env default.** `SMITHERS_SANDBOX_PROVIDER=daytona-sandbox` selects a
-   registered id only. It never auto-creates a cloud client. Precedence mirrors
-   the DB-backend chain: an explicit `provider` prop wins, then workflow config,
-   then `SMITHERS_SANDBOX_PROVIDER`, then the local default.
+3. **Env default (planned, not yet shipped).** A future `SMITHERS_SANDBOX_PROVIDER`
+   env var will select a registered id when a `<Sandbox>` sets no explicit
+   `provider`, resolving a registered id only (never auto-creating a cloud
+   client). It is not implemented yet; setting it today has no effect. The
+   intended precedence, once shipped, mirrors the DB-backend chain: an explicit
+   `provider` prop wins, then workflow config, then `SMITHERS_SANDBOX_PROVIDER`,
+   then the local default. Until then, select a provider with method 1 or 2.
 
 Credentials always come from factory options first and the vendor env chain
 second. They are never required in `request.config`.

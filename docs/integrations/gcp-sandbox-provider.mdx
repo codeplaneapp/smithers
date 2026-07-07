@@ -45,8 +45,9 @@ The provider does not create the bucket. Set these up first:
 - A Cloud Storage `bucket` that already exists (the transport). Set a short
   lifecycle TTL on the `smithers/sandbox/` prefix to reap crash leftovers.
 - A Cloud Run `jobName` to run, or set `createJob` to have a per-run Job created
-  and torn down. The job's service account needs read/write on the bucket
-  prefix.
+  and torn down. When `createJob` is set you must also pass a container `image`
+  (Cloud Run requires one to create the Job). The job's service account needs
+  read/write on the bucket prefix.
 
 ## Required options
 
@@ -99,7 +100,7 @@ runner injects four extra vars:
 - `SMITHERS_SANDBOX_RESULT_GCS_OBJECT`: object the entry must write result JSON to.
 
 Every workdir-relative path maps to
-`<prefix>/<runId>/<sandboxId>/<basename(path)>`. Cloud Run reports task counts
+`<prefix>/<runId>/<sandboxId>/<percent-encoded workdir-relative path>` (the full path, not just the basename, so same-named files never collide). Cloud Run reports task counts
 and conditions, not a numeric exit code: a succeeded task is exit 0 and a failed
 task is exit 1. An infra failure (execution failed, no result written) throws. A
 run that writes `status: "failed"` result JSON is a normal failed bundle the kit

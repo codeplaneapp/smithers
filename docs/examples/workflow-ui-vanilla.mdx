@@ -169,13 +169,16 @@ The React `useGatewayRpc` source in [`packages/gateway-react/src/useGatewayRpc.t
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, UI } from "smithers-orchestrator";
+import { z } from "zod";
 
-const { Workflow, Task, smithers } = createSmithers();
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  result: z.object({ ok: z.boolean() }),
+});
 
 export default smithers(() => (
   <Workflow name="demo-vanilla-ui">
     <UI entry="../ui/demo-vanilla-ui.ts" title="Demo Vanilla Workflow" />
-    <Task id="ship">{{ ok: true }}</Task>
+    <Task id="ship" output={outputs.result}>{{ ok: true }}</Task>
   </Workflow>
 ));
 ```

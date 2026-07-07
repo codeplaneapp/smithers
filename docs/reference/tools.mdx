@@ -290,9 +290,24 @@ whose executable basename is `curl`, `wget`, `npm`, `bun`, or `pip`, any token
 beginning with `http://` or `https://`, and `git` together with a `push`,
 `pull`, `fetch`, `clone`, or `remote` token (throwing `TOOL_NETWORK_DISABLED`
 or `TOOL_GIT_REMOTE_DISABLED`). Local git commands such as `git status` are
-allowed. On macOS, a blocked `bash` additionally runs under `sandbox-exec` with
-a network-deny profile when available.
+allowed.
 </Note>
+
+<Warning>
+**This denylist is not isolation on Linux.** True OS-level network isolation is
+enforced **only on macOS**, where a blocked `bash` runs under `sandbox-exec`
+with a network-deny profile (when `sandbox-exec` is available). On Linux and
+every other platform, including the environments Smithers runs in for CI,
+cloud, and production, `allowNetwork:false` cannot enforce a kernel sandbox and
+falls back to the token/basename denylist above. That denylist is best-effort
+defense-in-depth, **not** a security boundary: it is trivially bypassable by a
+shell, an interpreter (`python -c` assembling a URL from parts, bash
+`/dev/tcp`), or a renamed binary. When isolation is unenforced, Smithers logs a
+`TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely on
+`allowNetwork:false` to sandbox untrusted code.** For untrusted workloads, run
+them under a real [`<Sandbox>`](/components/sandbox) provider with egress
+controls instead.
+</Warning>
 
 ```tsx
 import { ToolLoopAgent as Agent } from "ai";

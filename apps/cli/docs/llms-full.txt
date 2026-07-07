@@ -4539,10 +4539,13 @@ There are three ways to pick a provider, in precedence order:
    `registerSandboxProvider(createVercelSandboxProvider({...}))` then
    `<Sandbox provider="vercel-sandbox" />`. The provider packages also export
    `register<Provider>SandboxProvider(...)` convenience wrappers.
-3. **Env default.** `SMITHERS_SANDBOX_PROVIDER=daytona-sandbox` selects a
-   registered id only. It never auto-creates a cloud client. Precedence mirrors
-   the DB-backend chain: an explicit `provider` prop wins, then workflow config,
-   then `SMITHERS_SANDBOX_PROVIDER`, then the local default.
+3. **Env default (planned, not yet shipped).** A future `SMITHERS_SANDBOX_PROVIDER`
+   env var will select a registered id when a `<Sandbox>` sets no explicit
+   `provider`, resolving a registered id only (never auto-creating a cloud
+   client). It is not implemented yet; setting it today has no effect. The
+   intended precedence, once shipped, mirrors the DB-backend chain: an explicit
+   `provider` prop wins, then workflow config, then `SMITHERS_SANDBOX_PROVIDER`,
+   then the local default. Until then, select a provider with method 1 or 2.
 
 Credentials always come from factory options first and the vendor env chain
 second. They are never required in `request.config`.
@@ -14330,6 +14333,22 @@ plus a remote-operation token is blocked.
 
 Local git commands (`git status`, `git diff`, `git log`) are allowed.
 
+<Warning>
+**Enforcement vs. bypassable denylist.** True OS-level network isolation is
+enforced **only on macOS**, where a blocked `bash` runs under `sandbox-exec`
+with a network-deny profile (when `sandbox-exec` is available). On Linux and
+every other platform, including the environments Smithers runs in for CI,
+cloud, and production, `allowNetwork:false` cannot enforce a kernel sandbox and
+degrades to the token/basename denylist in the table above. That denylist is
+best-effort defense-in-depth, **not** a security boundary: it is trivially
+bypassable by a shell, an interpreter (`python -c` assembling a URL from parts,
+bash `/dev/tcp`), or a renamed binary. When isolation is unenforced, Smithers
+logs a `TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely
+on `allowNetwork:false` to sandbox untrusted code**. Run untrusted workloads
+under a real `<Sandbox>` provider with egress controls
+instead.
+</Warning>
+
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
@@ -14979,9 +14998,8 @@ import {
 
 ## Credentials
 
-`@daytonaio/sdk` is an optional dependency, imported lazily inside the session
-(the package also tries the renamed `@daytona/sdk`). Install it to use the real
-provider:
+`@daytonaio/sdk` is an optional dependency, imported lazily inside the session.
+Install it to use the real provider:
 
 ```
 npm install @daytonaio/sdk
@@ -15112,6 +15130,12 @@ import {
 ## Credentials
 
 `@vercel/sandbox` is an optional dependency, imported lazily inside the session.
+Install it to use the real provider:
+
+```bash
+npm install @vercel/sandbox
+```
+
 OIDC is preferred; the access-token trio is the fallback. Auth is resolved and
 validated before the SDK is touched, so a misconfigured provider fails fast with
 `INVALID_INPUT`. These values are used only to create the sandbox. They are
@@ -15189,13 +15213,12 @@ declared, the reachable `sandbox.domain(port)` is surfaced through a heartbeat.
 
 ## Duration and plan cap
 
-The default session timeout is 5 minutes, which is also Vercel's create-time
-ceiling. `options.timeoutMs` (or `request.toolTimeoutMs`) maps to the create
-`timeout`. Durations above the 5-minute ceiling are reached by warning through a
-heartbeat and calling `sandbox.extendTimeout()`, up to `options.maxDurationMs`
-(default 45 minutes). A request above the cap throws `INVALID_INPUT` rather than
-provisioning a sandbox that would overrun the plan. Raise `maxDurationMs` for
-Pro (up to 5 hours).
+The default session timeout is 5 minutes. `options.timeoutMs` (or
+`request.toolTimeoutMs`) maps to the create `timeout`. Durations above the
+5-minute default warn through a heartbeat and call `sandbox.extendTimeout()`, up
+to `options.maxDurationMs` (default 45 minutes). A request above that cap throws
+`INVALID_INPUT` rather than provisioning a sandbox that would overrun the plan.
+Raise `maxDurationMs` for Pro (up to 5 hours).
 
 ## Cleanup and cost
 
@@ -15305,7 +15328,7 @@ vars so the entry can find them:
 - `SMITHERS_SANDBOX_REQUEST_S3_KEY`: S3 key of the request JSON.
 - `SMITHERS_SANDBOX_RESULT_S3_KEY`: S3 key the entry must write the result to.
 
-Every workdir path maps to `s3://<bucket>/<prefix>/<basename(path)>`. The entry
+Every workdir path maps to `s3://<bucket>/<prefix>/<runId>/<sandboxId>/<encodeURIComponent(workdir-relative path)>` so two files that share a basename never collide. The entry
 either prints the result JSON to stdout or writes it to the result key. An infra
 failure (task or build fails with no result written) throws. A result file with
 `status: "failed"` is a normal failed bundle. Fargate reports a real numeric
@@ -15383,8 +15406,9 @@ The provider does not create the bucket. Set these up first:
 - A Cloud Storage `bucket` that already exists (the transport). Set a short
   lifecycle TTL on the `smithers/sandbox/` prefix to reap crash leftovers.
 - A Cloud Run `jobName` to run, or set `createJob` to have a per-run Job created
-  and torn down. The job's service account needs read/write on the bucket
-  prefix.
+  and torn down. When `createJob` is set you must also pass a container `image`
+  (Cloud Run requires one to create the Job). The job's service account needs
+  read/write on the bucket prefix.
 
 ## Required options
 
@@ -15437,7 +15461,7 @@ runner injects four extra vars:
 - `SMITHERS_SANDBOX_RESULT_GCS_OBJECT`: object the entry must write result JSON to.
 
 Every workdir-relative path maps to
-`<prefix>/<runId>/<sandboxId>/<basename(path)>`. Cloud Run reports task counts
+`<prefix>/<runId>/<sandboxId>/<percent-encoded workdir-relative path>` (the full path, not just the basename, so same-named files never collide). Cloud Run reports task counts
 and conditions, not a numeric exit code: a succeeded task is exit 0 and a failed
 task is exit 1. An infra failure (execution failed, no result written) throws. A
 run that writes `status: "failed"` result JSON is a normal failed bundle the kit
