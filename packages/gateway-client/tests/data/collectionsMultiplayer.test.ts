@@ -87,6 +87,59 @@ describe("createSmithersCollections multiplayer", () => {
     expect(collections.prompts().id).toContain("prompts");
   });
 
+  test("optimistic Electric inserts run their mutation handler and match the returned txid", async () => {
+    const { fetchImpl, calls } = capturingFetch();
+    const queryClient = new QueryClient();
+    const client = createSmithersDataClient({ mode: multiplayerMode, fetch: fetchImpl });
+    const collections = await createSmithersCollections(client, queryClient);
+    cleanups.push(() => {
+      collections.close();
+      client.close();
+      queryClient.clear();
+    });
+
+    // An optimistic insert into an Electric-backed collection runs onInsert
+    // synchronously; onInsert persists via the REST API and feeds the returned
+    // txid into txidMatch for Electric confirmation. The shape stream never
+    // confirms here, so isPersisted stays pending — we only need the handler to
+    // have run, proving the txid-matching path executed.
+    const crons = collections.crons();
+    const cronTx = crons.insert({ cronId: "c-mp", workflow: "value", pattern: "* * * * *", enabled: true } as never);
+    const runs = collections.runs();
+    const runTx = runs.insert({ runId: "r-mp", workflow: "value", input: {}, status: "running" } as never);
+
+    await Promise.race([
+      Promise.allSettled([cronTx.isPersisted.promise, runTx.isPersisted.promise]),
+      new Promise((resolve) => setTimeout(resolve, 300)),
+    ]);
+
+    expect(calls.some((call) => call.method === "POST" && call.path === "/v1/api/crons")).toBe(true);
+    expect(calls.some((call) => call.method === "POST" && call.path === "/v1/api/runs")).toBe(true);
+  }, 10_000);
+
+  test("txidMatch rejects an optimistic insert whose write returns no usable txid", async () => {
+    const queryClient = new QueryClient();
+    // The REST write acknowledges without a txid, so txidMatch must throw and the
+    // optimistic insert rolls back.
+    const noTxidFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const body = url.pathname === "/v1/api/crons" && init?.method === "POST"
+        ? { ok: true, data: { cronId: "c-no-txid" } }
+        : { ok: true, data: {} };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const client = createSmithersDataClient({ mode: multiplayerMode, fetch: noTxidFetch });
+    const collections = await createSmithersCollections(client, queryClient);
+    cleanups.push(() => {
+      collections.close();
+      client.close();
+      queryClient.clear();
+    });
+    const crons = collections.crons();
+    const tx = crons.insert({ cronId: "c-no-txid", workflow: "value", pattern: "* * * * *", enabled: true } as never);
+    await expect(tx.isPersisted.promise).rejects.toThrow(/txid/i);
+  }, 10_000);
+
   test("owned multiplayer client is closed when the Electric load fails", async () => {
     const { fetchImpl } = capturingFetch();
     const queryClient = new QueryClient();
