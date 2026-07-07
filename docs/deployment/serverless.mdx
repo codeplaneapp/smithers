@@ -23,20 +23,26 @@ can run depends on the runtime's system access:
 
 | Host | Runtime | Runs the engine today? |
 |---|---|---|
-| A Node/Bun server (ECS, App Runner, Cloud Run service, GKE, a VM) | Full Node/Bun | ✅ Yes |
-| Vercel **Node** serverless function | Node (has `fs` + `child_process`) | ✅ Yes |
-| AWS Lambda (Node) | Node | ✅ Yes |
-| Cloudflare **Worker** | V8 isolate (no `fs`/`child_process`) | ⚠️ In progress |
-| Vercel **Edge** function | V8 isolate | ⚠️ In progress |
+| A container running **Bun** (ECS, App Runner, Cloud Run service, GKE, a VM) | Bun | ✅ Yes |
+| The **Node** runtime (Vercel Node function, AWS Lambda Node, a Node server) | Node (has `fs` + `child_process`) | ⚠️ In progress |
+| Cloudflare **Worker** / Vercel **Edge** | V8 isolate (no `fs`/`child_process`) | ⚠️ In progress |
 
 <Warning>
-  **Isolates (Cloudflare Workers, Vercel Edge) cannot drive a run yet.** The
-  engine and gateway statically use `node:fs` and `node:child_process` (they
-  materialize git/jj worktrees on a real filesystem), so they do not load in a
-  V8 isolate. An `@effect/platform` refactor to make those swappable is in
-  flight. Today, on an isolate you can host **storage + in-process SDK agents**
-  (via `createSmithersCloudflare`), but the run driver still needs a Node/Bun
-  host. Every **Node-based** host above runs the full engine unchanged.
+  **The engine currently requires the Bun runtime.** Run it on any container
+  platform (ECS, App Runner, Cloud Run, GKE, a VM) under Bun and the full engine
+  works today. Two portability efforts are in flight:
+
+  - **Node runtime** (Vercel Node functions, Lambda Node): closest, since Node
+    has `fs` + `child_process`. The engine no longer hard-binds the Bun platform
+    layer (`RunOptions.effectPlatformLayer` accepts `NodeContext.layer`), but a
+    residual chain of `bun:sqlite` / `drizzle-orm/bun-sqlite` value imports still
+    keeps the engine module from loading under plain Node -- being removed
+    incrementally (lazy-loaded so the module imports on Node).
+  - **Isolates** (Workers, Edge): further out -- the engine and gateway also use
+    `node:fs` / `node:child_process` (git/jj worktrees on a real filesystem),
+    which an `@effect/platform` `FileSystem`/`Command` seam must abstract. Today
+    an isolate can host **storage + in-process SDK agents** (via
+    `createSmithersCloudflare`), but not the run driver.
 </Warning>
 
 ## 2. Storage descriptor
@@ -85,13 +91,16 @@ each `<Sandbox>` boundary. Each provider ships a `create…SandboxProvider` and 
 
 ## Per-platform recipes
 
-| Platform | Control plane | Storage | Sandbox provider (CLI agents) | Status |
+The control plane runs under **Bun** on any of these container platforms today;
+the Node-runtime and isolate paths are in progress (see the host section above).
+
+| Platform | Control plane (Bun container) | Storage | Sandbox provider (CLI agents) | Status |
 |---|---|---|---|---|
-| **Local / any VM** | Node/Bun | `bun:sqlite` / PGlite / Postgres | Docker `http-runner` | ✅ Full |
-| **Vercel (Node fn)** | Node function | Postgres (Neon pooled) | `createVercelSandboxProvider` | ✅ Full |
-| **AWS** | ECS / App Runner / Lambda | Postgres (RDS) | `createAwsSandboxProvider` (Fargate/CodeBuild) | ✅ Full |
-| **GCP** | Cloud Run service / GKE | Postgres (Cloud SQL) | `createGcpSandboxProvider` (Cloud Run Jobs) | ✅ Full |
-| **Kubernetes** | Node deployment | Postgres | Docker `http-runner` / custom | ✅ Full (no first-class provider yet) |
+| **Local / any VM** | Bun | `bun:sqlite` / PGlite / Postgres | Docker `http-runner` | ✅ Full |
+| **AWS** | Bun on ECS / App Runner | Postgres (RDS) | `createAwsSandboxProvider` (Fargate/CodeBuild) | ✅ Full |
+| **GCP** | Bun on Cloud Run / GKE | Postgres (Cloud SQL) | `createGcpSandboxProvider` (Cloud Run Jobs) | ✅ Full |
+| **Kubernetes** | Bun deployment | Postgres | Docker `http-runner` / custom | ✅ Full (no first-class provider yet) |
+| **Vercel** | Node function | Postgres (Neon pooled) | `createVercelSandboxProvider` | ⚠️ Node-runtime engine load in progress |
 | **Cloudflare** | Worker + Durable Object | DO-SQLite | `createCloudflareSandboxProvider` | ⚠️ Storage + SDK agents; run driver in progress |
 
 ## What it costs

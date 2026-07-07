@@ -110,12 +110,15 @@ whether a cold per-turn container is viable:
   Durable-Object-SQLite / D1 descriptors) and the SDK agents are Worker-native,
   but the **core engine that advances every run** uses `node:fs` and
   `node:child_process` (it materializes git/jj worktrees on a real filesystem),
-  and the gateway is a `node:http` server. So a Node/Bun host with a filesystem
-  is still required to *drive* runs today. On Cloudflare a Worker can host the
-  **storage + in-process-agent** path; a fully Workers-native driver is not
-  shipped yet. On **Vercel**, the Node serverless runtime *does* provide `fs` and
-  `child_process`, so it is far less blocked than a Cloudflare Worker isolate --
-  but Vercel **Edge** functions are isolate-like and hit the same limits.
+  and the gateway is a `node:http` server. So today the engine runs on a **Bun**
+  host with a filesystem (a container on ECS/Cloud Run/GKE/a VM). Two efforts are
+  in flight: the **Node runtime** (Vercel Node functions, Lambda) is closest --
+  it has `fs` + `child_process`, and the engine no longer hard-binds the Bun
+  platform layer, but a residual chain of `bun:sqlite`/`drizzle-orm/bun-sqlite`
+  value imports still keeps the engine module from loading under plain Node
+  (being lazy-loaded away). **Isolates** (Cloudflare Workers, Vercel Edge) are
+  further out and also need the `node:fs`/`node:child_process` seam; a Worker can
+  host the **storage + in-process-agent** path today, but not the run driver.
 </Warning>
 
 ## "Sandbox" means three different things
