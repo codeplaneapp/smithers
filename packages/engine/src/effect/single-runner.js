@@ -1,5 +1,4 @@
 import * as SingleRunner from "@effect/cluster/SingleRunner";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Effect, Layer, Scope } from "effect";
 import { fromTaggedErrorPayload } from "@smithers-orchestrator/errors/fromTaggedErrorPayload";
 import { toTaggedErrorPayload } from "@smithers-orchestrator/errors/toTaggedErrorPayload";
@@ -15,6 +14,16 @@ import { isUnknownWorkerError, isTaskResultFailure, TaskWorkerEntity, } from "./
 /** @typedef {import("./TaskFailure.ts").TaskFailure} TaskFailure */
 /** @typedef {import("./WorkerTaskError.ts").WorkerTaskError} WorkerTaskError */
 
+// @effect/sql-sqlite-bun statically imports bun:sqlite, which breaks module
+// load under plain Node (serverless hosts). buildSingleRunnerRuntime -- the
+// only user -- is async and runs only when a worker task is first dispatched,
+// so load the client lazily via a memoized dynamic import. Under Bun this
+// resolves the exact same ESM module the old static import did.
+/** @type {Promise<typeof import("@effect/sql-sqlite-bun/SqliteClient")> | undefined} */
+let sqliteClientModulePromise;
+function loadSqliteClient() {
+    return (sqliteClientModulePromise ??= import("@effect/sql-sqlite-bun/SqliteClient"));
+}
 const workerExecutions = new Map();
 const workerErrors = new Map();
 const dispatchSubscribers = new Set();
@@ -123,6 +132,7 @@ async function runRegisteredExecution(task) {
  * @returns {Promise<SingleRunnerRuntime>}
  */
 async function buildSingleRunnerRuntime() {
+    const SqliteClient = await loadSqliteClient();
     const runnerLayer = SingleRunner.layer({ runnerStorage: "memory" }).pipe(Layer.provide(Layer.orDie(SqliteClient.layer({
         filename: ":memory:",
         disableWAL: true,
