@@ -95,6 +95,132 @@ describe("createGcpCloudRunJobsSandboxRunner", () => {
 		expect(client.calls.run.length).toBe(0);
 	});
 
+	test("falls back to a constructed job resource name when jobPath is absent", async () => {
+		const execution = { name: "exec-nopath", succeededCount: 1 };
+		const client = {
+			async runJob() {
+				return [{ promise: async () => [execution] }];
+			},
+		};
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		expect(runner.remoteId).toBe("projects/p/locations/l/jobs/j");
+		await runner.run({ command: "x", env: {} });
+	});
+
+	test("createJob without an image or template rejects with INVALID_INPUT", async () => {
+		const client = makeJobsClient({ name: "exec-noimg", succeededCount: 1 });
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE, createJob: true });
+		await expect(runner.run({ command: "x", env: {} })).rejects.toThrow(/requires a container image/);
+	});
+
+	test("createJob folds runner env into the created container's env list", async () => {
+		const client = makeJobsClient({ name: "exec-env", succeededCount: 1 });
+		const runner = createGcpCloudRunJobsSandboxRunner({
+			jobsClient: client,
+			...BASE,
+			createJob: true,
+			image: "gcr.io/smithers/runner",
+			workingDir: "/workspace",
+			env: { BUILD_ENV: "ci" },
+			timeoutSec: 90,
+		});
+		await runner.run({ command: "x", env: {} });
+		const job = client.calls.create[0].job;
+		const container = job.template.template.containers[0];
+		expect(container.image).toBe("gcr.io/smithers/runner");
+		expect(container.workingDir).toBe("/workspace");
+		expect(container.env).toEqual([{ name: "BUILD_ENV", value: "ci" }]);
+		expect(job.template.template.timeout).toEqual({ seconds: 90 });
+	});
+
+	test("a rejected execution LRO surfaces the underlying error", async () => {
+		const client = {
+			jobPath: (p, l, j) => `projects/${p}/locations/${l}/jobs/${j}`,
+			async runJob() {
+				return [{ promise: async () => { throw new Error("execution LRO failed"); } }];
+			},
+		};
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		await expect(runner.run({ command: "x", env: {} })).rejects.toThrow(/execution LRO failed/);
+	});
+
+	test("createJob merges pre-existing container templates into the created job", async () => {
+		const client = makeJobsClient({ name: "exec-tmpl", succeededCount: 1 });
+		const runner = createGcpCloudRunJobsSandboxRunner({
+			jobsClient: client,
+			...BASE,
+			createJob: true,
+			taskTemplate: { containers: [{ image: "tmpl-img", resources: { limits: { cpu: "1" } } }, { name: "sidecar" }] },
+		});
+		await runner.run({ command: "x", env: {} });
+		const containers = client.calls.create[0].job.template.template.containers;
+		expect(containers[0].image).toBe("tmpl-img");
+		expect(containers[0].resources).toEqual({ limits: { cpu: "1" } });
+		expect(containers[1]).toEqual({ name: "sidecar" });
+	});
+
+	test("createJob requires a client that exposes createJob()", async () => {
+		const client = {
+			jobPath: (p, l, j) => `projects/${p}/locations/${l}/jobs/${j}`,
+			locationPath: (p, l) => `projects/${p}/locations/${l}`,
+			async runJob() {
+				return [{ promise: async () => [{ name: "exec-x", succeededCount: 1 }] }];
+			},
+		};
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE, createJob: true, image: "img" });
+		await expect(runner.run({ command: "x", env: {} })).rejects.toThrow(/requires a JobsClient with createJob/);
+	});
+
+	test("a failed Completed condition (no counts) maps to exit 1 with its message", async () => {
+		const client = makeJobsClient({
+			name: "exec-cond",
+			succeededCount: 0,
+			failedCount: 0,
+			conditions: [{ type: "Completed", state: "CONDITION_FAILED", message: "timed out" }],
+		});
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		const result = await runner.run({ command: "x", env: {} });
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toBe("timed out");
+	});
+
+	test("no failure signal at all maps to exit 0", async () => {
+		const client = makeJobsClient({
+			name: "exec-ok",
+			succeededCount: 0,
+			failedCount: 0,
+			conditions: [{ type: "Completed", state: "CONDITION_SUCCEEDED" }],
+		});
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		const result = await runner.run({ command: "x", env: {} });
+		expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+	});
+
+	test("abort falls back to deleteExecution when cancelExecution is absent", async () => {
+		const deleted = [];
+		const client = {
+			jobPath: (p, l, j) => `projects/${p}/locations/${l}/jobs/${j}`,
+			async runJob(request) {
+				return [{
+					promise: () => new Promise(() => {}),
+					metadata: { name: `${request.name}/executions/exec-del` },
+				}];
+			},
+			async deleteExecution(request) {
+				deleted.push(request);
+				return [{ promise: async () => [{}] }];
+			},
+		};
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE });
+		const controller = new AbortController();
+		const pending = runner.run({ command: "x", env: {}, signal: controller.signal });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		controller.abort();
+		await expect(pending).rejects.toThrow(/cancel/i);
+		expect(deleted.length).toBe(1);
+		expect(String(deleted[0].name)).toContain("/executions/");
+	});
+
 	test("abort after runJob starts rejects promptly and attempts cancellation", async () => {
 		const cancelled = [];
 		let lroCancelled = false;

@@ -162,11 +162,15 @@ describe("resolveTelegramConfig throw", () => {
     });
 });
 
-describe("markdown empty code-block escape guard", () => {
+describe("markdown escape branches", () => {
     test("an empty fenced code block escapes its (empty) body without error", () => {
         // The fenced-code body is empty, so escapeCode receives "" and hits its
         // empty guard.
         expect(convertMarkdownToTelegram("```\n```")).toBe("```\n```");
+    });
+    test("single-asterisk italic converts to underscore italic", () => {
+        // Exercises the single-`*` italic replacement (distinct from `**bold**`).
+        expect(convertMarkdownToTelegram("a *italic* b")).toContain("_italic_");
     });
 });
 

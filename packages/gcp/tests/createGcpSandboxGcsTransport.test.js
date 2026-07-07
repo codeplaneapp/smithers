@@ -70,6 +70,31 @@ describe("createGcpSandboxGcsTransport", () => {
 		expect(env.objects.size).toBe(0);
 	});
 
+	test("decodes a Uint8Array download payload", async () => {
+		const storage = {
+			bucket: () => ({
+				file: () => ({
+					async save() {},
+					async download() {
+						return new TextEncoder().encode("uint8-content");
+					},
+					async delete() {},
+				}),
+			}),
+		};
+		const transport = createGcpSandboxGcsTransport({ storage, bucket: "b", prefix: "p", runId: "R", sandboxId: "S" });
+		expect(await transport.readFile("/x/y.txt")).toBe("uint8-content");
+	});
+
+	test("mapping getter exposes the accumulated path -> object map", () => {
+		const { transport } = makeTransport();
+		transport.objectNameFor("/workspace/a.txt");
+		transport.objectNameFor("/workspace/b.txt");
+		const mapping = transport.mapping;
+		expect(mapping.get("/workspace/a.txt")).toBe("smithers/sandbox/R/R-S/workspace/a.txt");
+		expect(mapping.size).toBe(2);
+	});
+
 	test("trailing-slash prefix is normalized", () => {
 		const { transport } = makeTransport({ prefix: "custom/prefix/" });
 		expect(transport.prefix).toBe("custom/prefix");

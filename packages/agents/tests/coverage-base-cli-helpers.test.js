@@ -49,6 +49,12 @@ describe("extractPrompt", () => {
     });
     expect(extractPrompt({ other: 1 })).toEqual({ prompt: "" });
   });
+  test("coerces non-string/array/null message content via String()", () => {
+    expect(extractPrompt({ messages: [{ role: "user", content: 42 }] })).toEqual({
+      prompt: "USER: 42",
+      systemFromMessages: undefined,
+    });
+  });
 });
 
 describe("normalizeCodexConfig", () => {
@@ -198,6 +204,7 @@ describe("createAgentStdoutTextEmitter", () => {
     const lines = [
       "", // blank line ignored
       "not json", // parse failure ignored
+      "123", // parses to a non-object → early return
       JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "A" } }),
       JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "B" } }),
       JSON.stringify({ type: "text_delta", delta: "C" }),

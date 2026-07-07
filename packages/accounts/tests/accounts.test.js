@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
     accountsFilePath,
@@ -15,6 +15,7 @@ import {
     removeAccount,
     writeAccounts,
 } from "../src/index.js";
+import { withAccountsLock } from "../src/withAccountsLock.js";
 
 /** @type {string[]} */
 const tempDirs = [];
@@ -505,6 +506,121 @@ describe("addAccount/removeAccount fail closed on a corrupt accounts.json", () =
         // The corrupt file is preserved byte-for-byte for the user to recover,
         // not silently overwritten with a fresh single-account file.
         expect(readFileSync(path, "utf8")).toBe(corrupt);
+    });
+});
+
+describe("withAccountsLock in-process contention (EEXIST retry paths)", () => {
+    /**
+     * Pre-create the O_EXCL lock file so openSync(lockPath, "wx") fails with
+     * EEXIST and the acquirer enters the retry loop. These branches only fire
+     * under real contention, which the subprocess concurrency tests trigger in
+     * *other* processes (so they don't count toward this process's coverage).
+     * Driving the same lock file directly exercises them here for real.
+     */
+    function lockPathFor(env) {
+        const p = `${accountsFilePath(env)}.lock`;
+        mkdirSync(dirname(p), { recursive: true });
+        return p;
+    }
+
+    test("breaks an orphaned (stale) lock and then acquires", () => {
+        const env = newSmithersHome();
+        const lockPath = lockPathFor(env);
+        // A leftover lock from a crashed holder, aged past STALE_LOCK_MS (30s).
+        writeFileSync(lockPath, "12345\n0\n", { mode: 0o600 });
+        const stale = new Date(Date.now() - 60_000);
+        utimesSync(lockPath, stale, stale);
+
+        let ran = false;
+        const result = withAccountsLock(env, () => {
+            ran = true;
+            // While we hold it the lock file exists again (freshly created).
+            expect(existsSync(lockPath)).toBe(true);
+            return "held";
+        });
+        expect(ran).toBe(true);
+        expect(result).toBe("held");
+        // Released on the way out.
+        expect(existsSync(lockPath)).toBe(false);
+    });
+
+    test("spin-waits on a fresh lock, then acquires when it is released", () => {
+        const env = newSmithersHome();
+        const lockPath = lockPathFor(env);
+        // A FRESH lock (mtime ~= now) is NOT stale, so the acquirer must fall
+        // through to the busy-wait spin instead of breaking it.
+        writeFileSync(lockPath, "999\n0\n", { mode: 0o600 });
+
+        const realNow = Date.now;
+        const base = realNow();
+        let n = 0;
+        // Virtual clock: drive one full spin iteration, then release the lock
+        // (as a concurrent holder would) so the next openSync succeeds.
+        Date.now = () => {
+            n += 1;
+            if (n === 1) return base; // line: deadline = base + 10s
+            if (n === 2) return base; // EEXIST deadline check -> not timed out
+            if (n === 3) return base; // stale check -> age ~0, not stale
+            if (n === 4) return base; // spinUntil = base + 5
+            if (n === 5) return base; // while: base < base+5 -> spin body runs
+            // Spin exits now; simulate the holder releasing the lock.
+            rmSync(lockPath, { force: true });
+            return base + 10; // while: base+10 >= spinUntil -> exit spin
+        };
+        let acquired = false;
+        try {
+            withAccountsLock(env, () => {
+                acquired = true;
+            });
+        } finally {
+            Date.now = realNow;
+        }
+        expect(acquired).toBe(true);
+        expect(existsSync(lockPath)).toBe(false);
+    });
+
+    test("retries when the lock vanishes between EEXIST and stat, then times out", () => {
+        const env = newSmithersHome();
+        const lockPath = lockPathFor(env);
+        // A dangling symlink: openSync("wx") still fails EEXIST (the link
+        // exists), but statSync() follows it to a missing target and throws
+        // ENOENT -> the "lock vanished, retry" branch. It never resolves, so
+        // the acquirer eventually times out.
+        symlinkSync(join(env.SMITHERS_HOME, "no-such-target"), lockPath);
+
+        const realNow = Date.now;
+        const base = realNow();
+        let n = 0;
+        Date.now = () => {
+            n += 1;
+            if (n === 1) return base; // deadline = base + 10s
+            if (n === 2) return base; // iter1 deadline check -> not timed out
+            // iter1: statSync throws (dangling symlink) -> continue
+            return base + 20_000; // iter2 deadline check -> timed out -> throw
+        };
+        try {
+            expect(() => withAccountsLock(env, () => "unreached"))
+                .toThrow(/Timed out acquiring accounts lock/);
+        } finally {
+            Date.now = realNow;
+        }
+    });
+
+    test("rethrows a non-EEXIST openSync error (permission denied)", () => {
+        if (process.platform === "win32") return;
+        // Root bypasses filesystem permission bits, so EACCES won't fire there.
+        if (typeof process.getuid === "function" && process.getuid() === 0) return;
+        const env = newSmithersHome();
+        mkdirSync(env.SMITHERS_HOME, { recursive: true });
+        // Non-writable directory -> openSync("wx") fails with EACCES, not
+        // EEXIST, so the acquirer must propagate it instead of retrying.
+        chmodSync(env.SMITHERS_HOME, 0o500);
+        try {
+            expect(() => withAccountsLock(env, () => "unreached")).toThrow();
+        } finally {
+            // Restore write so afterEach's recursive rm can clean up.
+            chmodSync(env.SMITHERS_HOME, 0o700);
+        }
     });
 });
 

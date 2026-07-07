@@ -242,6 +242,9 @@ describe("amp + apiKey env mapping + provider resolution", () => {
   test("diagnosticApiKeyEnv maps a google provider apiKey", () => {
     expect(diagnosticApiKeyEnv("pi", { provider: "google", apiKey: "g" })).toEqual({ GOOGLE_API_KEY: "g" });
   });
+  test("diagnosticApiKeyEnv returns undefined for an unrecognized provider", () => {
+    expect(diagnosticApiKeyEnv("pi", { provider: "cohere", apiKey: "x" })).toBeUndefined();
+  });
   test("pi with an unrecognized bare model resolves no provider and passes auth to pi", async () => {
     const strategy = getDiagnosticStrategy("pi", { model: "llama-3-70b" });
     const r = await check(strategy, "api_key_valid").run({ env: {}, cwd: "/tmp" });

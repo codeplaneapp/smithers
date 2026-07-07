@@ -78,7 +78,7 @@ async function resolveStorageClient(provider, options) {
 	if (injected) return injected;
 	let mod;
 	try {
-		mod = await import("@google-cloud/storage");
+		mod = await (options.importStorageSdk ? options.importStorageSdk() : import("@google-cloud/storage"));
 	} catch (error) {
 		throw new SmithersError(
 			"SANDBOX_EXECUTION_FAILED",
@@ -106,7 +106,7 @@ async function resolveRunClient(provider, options) {
 	if (injected) return injected;
 	let mod;
 	try {
-		mod = await import("@google-cloud/run");
+		mod = await (options.importRunSdk ? options.importRunSdk() : import("@google-cloud/run"));
 	} catch (error) {
 		throw new SmithersError(
 			"SANDBOX_EXECUTION_FAILED",

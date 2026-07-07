@@ -97,6 +97,16 @@ describe("createHttpTool", () => {
     expect(result.body).toEqual({ late: true });
   });
 
+  test("parses a full-URL allowlist entry down to its host", async () => {
+    const calls = stub(() => Response.json({ ok: 1 }));
+    const tool = createHttpTool({
+      defaultHeaders: { "x-secret": "s" },
+      allowedHosts: ["https://api.example.com/ignored/path", "  HTTP://Other.Example  "],
+    });
+    await tool.execute({ url: "https://api.example.com/x" }, callOptions);
+    expect(calls[0].init.headers.get("x-secret")).toBe("s");
+  });
+
   test("tolerates an unparseable baseUrl when resolving the allowlist", async () => {
     stub(() => Response.json({ ok: true }));
     const tool = createHttpTool({ baseUrl: "::::not a url", defaultHeaders: { "x-secret": "s" } });

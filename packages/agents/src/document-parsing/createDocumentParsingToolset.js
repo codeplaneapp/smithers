@@ -94,6 +94,16 @@ function normalizeInput(input) {
   if (!value.source || typeof value.source !== "object") {
     throw new Error("parse_document requires a source");
   }
+  const source = /** @type {Record<string, unknown>} */ (value.source);
+  if (source.type === "url" && typeof source.url !== "string") {
+    throw new Error("parse_document source.url is required for url sources");
+  }
+  if (source.type === "base64" && typeof source.data !== "string") {
+    throw new Error("parse_document source.data is required for base64 sources");
+  }
+  if (source.type === "text" && typeof source.text !== "string") {
+    throw new Error("parse_document source.text is required for text sources");
+  }
   return value;
 }
 

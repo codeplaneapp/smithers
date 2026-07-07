@@ -82,6 +82,16 @@ export type GcpSandboxProviderOptions = {
 	clients?: GcpSandboxClients;
 	/** Options forwarded to the real SDK client constructors when not injected. */
 	clientOptions?: { storage?: Record<string, unknown>; run?: Record<string, unknown> };
+	/**
+	 * Injectable importer for `@google-cloud/storage`; tests only. Production
+	 * defaults to the real dynamic import.
+	 */
+	importStorageSdk?: () => Promise<unknown>;
+	/**
+	 * Injectable importer for `@google-cloud/run`; tests only. Production defaults
+	 * to the real dynamic import.
+	 */
+	importRunSdk?: () => Promise<unknown>;
 	/** Invoked from the session teardown; used by the contract suite. */
 	onDestroy?: () => void | Promise<void>;
 };

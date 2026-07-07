@@ -291,8 +291,8 @@ function raceWithAbort(promise, signal, options = {}) {
 	if (signal?.aborted) {
 		return Promise.reject(new Error(options.abortMessage ?? "Daytona sandbox command aborted."));
 	}
-	/** @type {() => void} */
-	let onAbort = () => {};
+	/** @type {(() => void) | undefined} */
+	let onAbort;
 	/** @type {ReturnType<typeof setTimeout> | undefined} */
 	let timeout;
 	const races = /** @type {Promise<T>[]} */ ([promise]);
@@ -313,7 +313,7 @@ function raceWithAbort(promise, signal, options = {}) {
 		));
 	}
 	return Promise.race(races).finally(() => {
-		if (signal) {
+		if (signal && onAbort) {
 			signal.removeEventListener("abort", onAbort);
 		}
 		if (timeout) {

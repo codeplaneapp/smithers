@@ -464,5 +464,44 @@ describe("ElizaAgent", () => {
             // The runtime's stop() must have been called to release resources.
             expect(stopCalls.length).toBe(1);
         });
+
+        test("stop() during init swallows a rejecting runtime.stop()", async () => {
+            let resolveInit!: () => void;
+            const initBlocker = new Promise<void>((resolve) => {
+                resolveInit = resolve;
+            });
+            let stopCalled = 0;
+            const fake = {
+                async initialize() {
+                    await initBlocker;
+                },
+                async useModel(_type: string, _params: { prompt: string }) {
+                    return "text";
+                },
+                async stop() {
+                    stopCalled++;
+                    // Rejecting here exercises the `.catch(() => {})` cleanup guard
+                    // in #ensureRuntime's stop-during-init branch.
+                    throw new Error("runtime stop exploded");
+                },
+            };
+
+            const agent = new ElizaAgent(
+                { character: testCharacter },
+                { runtimeFactory: async () => fake as any }
+            );
+
+            // Start init (blocks), then stop before it completes.
+            const preflightPromise = agent.preflight().catch(() => {});
+            const stopPromise = agent.stop();
+
+            // Let init finish; it sees #stopped and calls the rejecting stop().
+            resolveInit();
+
+            // stop() must resolve cleanly despite the runtime's stop() rejecting.
+            await expect(stopPromise).resolves.toBeUndefined();
+            await preflightPromise;
+            expect(stopCalled).toBe(1);
+        });
     });
 });

@@ -15,14 +15,16 @@ import { Effect } from "effect";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createSmithers, renderFrame } from "smithers-orchestrator";
+import { createSmithers, renderFrame, runWorkflow, signalRun } from "smithers-orchestrator";
 import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { OnCallbackQuery, OnMessage, OnWebAppData } from "../src/telegram/components/OnMessage.js";
 import { listenerCorrelationId } from "../src/telegram/components/listenerInternals.js";
 import { resolveOutboundDeps } from "../src/telegram/components/outboundInternals.js";
 import { AnswerCallbackQuery, EditMessage, SendDocument, SendMessage, TelegramSendResultSchema } from "../src/telegram/components/SendMessage.js";
 import { TelegramApproval, telegramApprovalSchemas } from "../src/telegram/components/TelegramApproval.js";
-import { telegramApprovalDecisionSchema } from "../src/telegram/approval.js";
+import { approvalToken, telegramApprovalCallbackData, telegramApprovalDecisionSchema } from "../src/telegram/approval.js";
+import { TELEGRAM_CALLBACK_QUERY_EVENT } from "../src/telegram/TelegramSource.js";
 import { startTelegramFixture } from "./telegram-fixture.js";
 
 const fixture = startTelegramFixture();
@@ -239,7 +241,7 @@ describe("outbound builders (compute functions against the real fixture)", () =>
     }, 20_000);
 });
 
-describe("TelegramApproval skip guard", () => {
+describe("TelegramApproval render + skip guard", () => {
     test("skipIf renders nothing", async () => {
         const { smithers, Workflow, outputs } = makeApi({
             ...telegramApprovalSchemas,
@@ -256,4 +258,53 @@ describe("TelegramApproval skip guard", () => {
         const frame = await render(workflow, { runId: "tg-approval-skip" });
         expect(frame.tasks).toHaveLength(0);
     });
+
+    test("renders the prompt + wait node (thread id, title-only request)", async () => {
+        const { smithers, Workflow, outputs } = makeApi({
+            ...telegramApprovalSchemas,
+            decision: telegramApprovalDecisionSchema,
+        });
+        const workflow = smithers(() => React.createElement(Workflow, { name: "tg-approval-render" }, React.createElement(TelegramApproval, {
+            id: "gate",
+            chatId: 777,
+            threadId: 3,
+            config: telegramConfig,
+            request: { title: "Deploy?" },
+            output: outputs.decision,
+        })));
+        const frame = await render(workflow, { runId: "tg-approval-render" });
+        expect(frame.tasks.find((t) => t.nodeId === "gate:ask")).toBeDefined();
+    });
+
+    test("best-effort: a press whose answer/edit calls fail still resolves the approval", async () => {
+        const api = makeApi({
+            ...telegramApprovalSchemas,
+            decision: telegramApprovalDecisionSchema,
+        });
+        const workflow = api.smithers(() => React.createElement(api.Workflow, { name: "tg-approval-hiccup" }, React.createElement(TelegramApproval, {
+            id: "gate",
+            chatId: 777,
+            config: telegramConfig,
+            request: { title: "Deploy?", summary: "Ship it" },
+            output: api.outputs.decision,
+        })));
+        const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(first.status).toBe("waiting-event");
+        // Both post-press UI calls fail server-side; the decision must still land.
+        fixture.queueResponse("answerCallbackQuery", { status: 500, body: { ok: false, error_code: 500, description: "boom" } });
+        fixture.queueResponse("editMessageText", { status: 500, body: { ok: false, error_code: 500, description: "boom" } });
+        const adapter = new SmithersDb(api.db);
+        await Effect.runPromise(signalRun(adapter, first.runId, TELEGRAM_CALLBACK_QUERY_EVENT, {
+            id: "cbq-hiccup",
+            from: { id: 7, username: "will" },
+            data: telegramApprovalCallbackData({ kind: "approve" }, approvalToken("gate")),
+            message: { message_id: 700, date: 1_700_000_000, chat: { id: 777, type: "private" } },
+        }, { correlationId: "chat:777", receivedBy: "integration:telegram" }));
+        const resumed = await Effect.runPromise(runWorkflow(workflow, { runId: first.runId, resume: true, input: {} }));
+        expect(resumed.status).toBe("finished");
+        const rows = api.db.select().from(api.tables.decision).all();
+        expect(rows).toHaveLength(1);
+        expect(Boolean(rows[0].approved)).toBe(true);
+        expect(rows[0].decidedBy).toBe("@will");
+    }, 20_000);
 });
