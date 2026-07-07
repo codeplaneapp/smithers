@@ -520,6 +520,28 @@ describe("retryTask branches", () => {
     }
   });
 
+  test("resetDependents:false resets only the target node", async () => {
+    const { adapter, sqlite } = createTestDb();
+    try {
+      await adapter.insertRun({ runId: "run-solo", workflowName: "wf", status: "failed", createdAtMs: 1 });
+      await adapter.insertNode({
+        runId: "run-solo", nodeId: "task:target", iteration: 0, state: "failed", lastAttempt: 1, updatedAtMs: 100, outputTable: "", label: null,
+      });
+      await adapter.insertNode({
+        runId: "run-solo", nodeId: "task:downstream", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 200, outputTable: "", label: null,
+      });
+
+      const result = await retryTask(adapter, { runId: "run-solo", nodeId: "task:target", resetDependents: false });
+      expect(result.success).toBe(true);
+      expect(result.resetNodes).toEqual(["task:target"]);
+
+      const downstream = await adapter.getNode("run-solo", "task:downstream", 0);
+      expect(downstream?.state).toBe("finished");
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("dependents are ordered by attempt sequence and higher iterations are always reset", async () => {
     const { adapter, sqlite } = createTestDb();
     try {
