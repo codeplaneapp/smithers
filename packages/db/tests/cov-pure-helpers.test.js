@@ -287,6 +287,14 @@ describe("output-schema-descriptor", () => {
         expect(byName.withDefault.optional).toBe(true);
     });
 
+    test("a wrapper nested past the unwrap guard resolves to unknown (post-loop return)", () => {
+        let deep = z.string();
+        for (let i = 0; i < 40; i += 1) deep = i % 2 === 0 ? deep.optional() : deep.nullable();
+        const descriptor = buildOutputSchemaDescriptor(z.object({ deep }));
+        expect(descriptor.fields[0].name).toBe("deep");
+        expect(descriptor.fields[0].type).toBe("unknown");
+    });
+
     test("reports a warning for unsupported constructs (multi-value literal / bigint)", () => {
         const warnings = [];
         buildOutputSchemaDescriptor(
