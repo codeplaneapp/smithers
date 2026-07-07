@@ -50,6 +50,8 @@ const CORE_PAGES = [
   // The two anchor pages
   "tour.mdx",
   "how-it-works.mdx",
+  // Where agents run, sandboxes & cost (the execution model + serverless).
+  "concepts/execution-model.mdx",
   "guides/context-engineering.mdx",
   "guides/agent-operating-playbook.mdx",
   // JSX surface (single page now — installation + quickstart are stubs)
@@ -171,6 +173,8 @@ const INTEGRATIONS_PAGES = [
   "integrations/vercel-sandbox-provider.mdx",
   "integrations/aws-sandbox-provider.mdx",
   "integrations/gcp-sandbox-provider.mdx",
+  // Serverless deployment: pick a host + storage descriptor + sandbox provider.
+  "deployment/serverless.mdx",
   "examples/run-on-plue.mdx",
 ];
 

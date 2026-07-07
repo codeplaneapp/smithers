@@ -1029,6 +1029,156 @@ The full list, with the fix for each, is in [Common Footguns](/guides/common-foo
 
 ---
 
+## Where agents run, sandboxes & cost
+
+> The execution model behind Smithers agents -- in-process SDK agents vs full-OS CLI agents, when a container spins up, how sandboxes are billed, and which harnesses are serverless.
+
+If you have read [How it Works](/how-it-works) and still cannot tell *where an
+agent actually runs*, what it costs, or which harnesses are "serverless", this
+page is the answer. It is the one place that states the execution model plainly.
+
+## The default is: no container
+
+Which execution mode you get is decided by the **agent class**, not by a per-turn
+setting:
+
+- **SDK agents run in-process.** `AnthropicAgent` and `OpenAIAgent` (and
+  `HermesAgent`) extend the AI SDK's `ToolLoopAgent`; the opt-in `ElizaAgent`
+  wraps an elizaOS `AgentRuntime` in the same process. All of them make plain
+  HTTPS calls to a model provider. There is **no subprocess and no
+  container** -- the agent's "environment" is your own process. These are the only
+  agents that run unchanged inside a JS-only serverless runtime (a Cloudflare
+  Worker, a Vercel function).
+- **CLI / full-OS agents run as a child process.** `ClaudeCodeAgent`,
+  `CodexAgent`, `AntigravityAgent`, `OpenCodeAgent`, and every other CLI agent extend
+  `BaseCliAgent`, which spawns the vendor binary (`claude`, `codex`, `opencode`,
+  …) via `node:child_process`. **By default that child process runs on the host,
+  in `rootDir`** (`this.cwd ?? options?.rootDir ?? process.cwd()`) -- the same machine
+  that is driving the run. There is no automatic per-turn container.
+
+<Note>
+  **Neither mode spins up an isolated OS per turn.** SDK agents are API calls in
+  your process; CLI agents are local child processes in `rootDir`. A full OS
+  environment is **opt-in** -- you wrap the work in [`<Sandbox>`](/components/sandbox).
+</Note>
+
+### Three common guesses -- all reasonable, all wrong by default
+
+Newcomers consistently guess the same three things. Here is the correction:
+
+| Guess | Reality |
+|---|---|
+| "Each agent turn spins up a fresh sandbox that pauses between turns." | No -- by default no agent is containerized at all. Containerization is an explicit `<Sandbox>` choice, and pause/resume is a *provider* feature you opt into. |
+| "OpenCode is serverless, Claude Code never is." | Half right. OpenCode is **not** in-process serverless -- it is still a spawned binary that needs a container; it just goes serverless *via a cheap cold per-boundary container* when its API keys come from the environment. Claude Code is "never" **only** in subscription mode; with an API key it is exactly as serverless as OpenCode. |
+| "The real axis is which vendor." | The real axis is **in-process SDK vs subprocess CLI**, and within CLI, **stateless (API key) vs stateful (subscription OAuth + resumable session on disk)**. |
+
+## What you pay for -- three billing axes
+
+There is no single "cost of running an agent." There are three independent axes,
+and a given run may touch one, two, or all three:
+
+| Axis | What it is |
+|---|---|
+| **Model tokens / subscription** | The model provider bills per input/output token (SDK agents, or CLI agents in API-key mode), or draws down a subscription quota (Claude Pro/Max, ChatGPT Plus/Pro) in subscription mode. |
+| **Host compute** | When a CLI agent runs locally (the default), it consumes the machine that is driving the run -- your laptop, a CI runner, a long-lived server. |
+| **Sandbox / provider compute** | Only when you opt into [`<Sandbox>`](/components/sandbox): the provider's container or VM wall-clock, from create → run → teardown (longer if kept warm or left idling), plus any provider storage. |
+
+## Opting into a full OS: `<Sandbox>`
+
+[`<Sandbox>`](/components/sandbox) runs a child workflow (or a single step)
+inside an isolated runtime -- whole-graph, per-step, or mixed, your choice. It
+renders as exactly **one scheduler task per boundary** (not per agent turn);
+children never become parent-run tasks. The runtime is pluggable
+(`bubblewrap`, `docker`, `codeplane`, `cloudflare`) or any custom provider you
+register -- e.g. the Freestyle VM example adapter.
+
+The lifecycle at a `<Sandbox>` boundary is: **create the sandbox when the task
+starts → run the harness → capture a diff bundle of what changed → tear it down**
+(unless you keep it). Cleanup, idle timeout, and reuse are the **provider's**
+decision, not a Smithers-core per-turn guarantee. The Cloudflare provider, for
+example, creates one container keyed `${runId}-${sandboxId}`, defaults
+`cleanup: "destroy"`, and can `keep` the container or hold it warm with
+`keepAlive`. A Freestyle VM exposes explicit `start()` / `stop()` / `fork()` /
+`delete()` and `idleTimeoutSeconds`.
+
+<Note>
+  Running a CLI agent in a fresh per-turn container is a **composition you
+  author**, not a built-in switch: wrap the agent's `<Task>` in a child workflow
+  behind `<Sandbox provider={…}>`. No agent adapter creates or pauses a container
+  on its own -- `BaseCliAgent` always spawns on the local host.
+</Note>
+
+## Statefulness -- warm vs cold containers
+
+CLI agents keep credentials and resumable sessions **on disk**, which decides
+whether a cold per-turn container is viable:
+
+- **API-key billing → cold containers are fine.** Pass `apiKey` and the agent
+  forwards `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`; sessions are stateless per
+  turn, so a fresh (cold) container each turn works.
+- **Subscription billing → needs a warm/persistent environment.**
+  `ClaudeCodeAgent` *clears* `ANTHROPIC_API_KEY` so the CLI bills your Claude
+  Pro/Max subscription, and it reads credentials materialized by a one-time
+  interactive `/login` at `<CLAUDE_CONFIG_DIR>/.credentials.json`. `CodexAgent`
+  mirrors this with `CODEX_HOME` / `auth.json` and bills the ChatGPT
+  subscription. A cold container has none of that on disk, so subscription mode
+  needs the credential/session directory to persist -- a sticky/warm container or
+  a mounted credential volume.
+
+## Serverless compatibility at a glance
+
+| Harness | Mode | Serverless verdict | Cost driver |
+|---|---|---|---|
+| `AnthropicAgent`, `OpenAIAgent`, `HermesAgent`, `ElizaAgent` | In-process SDK | ✅ Agent is fully serverless -- runs inside a Worker/function, no container | Model tokens |
+| `OpenCodeAgent` | CLI child process | ⚠️ Serverless via a **cold** per-boundary container (`<Sandbox>`) when keys come from env; a subscription `opencode auth login` puts credentials on disk like the others | Tokens + container wall-clock |
+| `ClaudeCodeAgent` -- API-key mode (`apiKey` set) | CLI child process | ⚠️ Same as OpenCode: cold per-boundary container works | Tokens + container wall-clock |
+| `ClaudeCodeAgent` / `CodexAgent` -- subscription mode (default) | CLI child process | ⚠️ Needs a **warm/sticky** container or mounted credential volume | Subscription quota + warm container time |
+| `AntigravityAgent`, `PiAgent`, `KimiAgent`, `ForgeAgent`, `AmpAgent`, others | CLI child process | ⚠️ Container required; warm vs cold depends on the CLI's session/credential handling | Tokens/subscription + container time |
+
+<Warning>
+  **Not fully serverless end-to-end today.** The DB layer (dialect + Cloudflare
+  Durable-Object-SQLite / D1 descriptors) and the SDK agents are Worker-native,
+  but the **core engine that advances every run** uses `node:fs` and
+  `node:child_process` (it materializes git/jj worktrees on a real filesystem),
+  and the gateway is a `node:http` server. So today the engine runs on a **Bun**
+  host with a filesystem (a container on ECS/Cloud Run/GKE/a VM). Two efforts are
+  in flight: the **Node runtime** (Vercel Node functions, Lambda) is closest --
+  it has `fs` + `child_process`, the engine module now imports cleanly under
+  plain Node, and the platform layer is injectable
+  (`RunOptions.effectPlatformLayer` accepts `NodeContext.layer`); a run now
+  completes end-to-end under plain Node (regression-tested: a compute-task
+  workflow on PGlite, with the worker-task dispatch path falling back to
+  in-memory message storage instead of bun-sqlite), and agent-task and gateway
+  validation under Node remain. **Isolates** (Cloudflare Workers, Vercel Edge) are further out and
+  also need the `node:fs`/`node:child_process` seam; a Worker can host the
+  **storage + in-process-agent** path today, but not the run driver.
+</Warning>
+
+## "Sandbox" means three different things
+
+This overloading is the single biggest source of confusion -- name the sense you
+mean:
+
+1. **Tool sandbox** -- the built-in tools (`read`/`write`/`edit`/`grep`/`bash`)
+   jailed to `rootDir`, with symlinks/network/timeouts denied by default. A
+   path/permission jail, **not** an OS boundary.
+2. **A CLI agent's own internal policy** -- e.g. Codex's
+   `sandbox: "read-only" | "workspace-write" | "danger-full-access"`
+   (seatbelt/seccomp inside the vendor binary). Passed straight through to the
+   CLI; unrelated to the other two.
+3. **The [`<Sandbox>`](/components/sandbox) component** -- compute isolation: a
+   provider-backed container/VM that runs a child workflow. This is the only one
+   that gives an agent "a real computer."
+
+## Read next
+
+- [Sandbox component](/components/sandbox): the JSX surface and providers.
+- [CLI agents](/integrations/cli-agents): per-harness auth, billing, and sessions.
+- [SDK agents](/integrations/sdk-agents): in-process provider-backed agents.
+- [Cloudflare](/integrations/cloudflare): Workers, Durable Object SQLite, and the sandbox provider.
+
+---
+
 ## Context Engineering
 
 > The layered control system behind a reliable agent workflow, the three execution levers, and how Smithers does it for you.
