@@ -1,6 +1,5 @@
 /** @jsxImportSource smithers-orchestrator */
 import { afterEach, describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
 import { startServer, __serverTestInternals } from "../src/index.js";
 import { sleep } from "../../smithers/tests/helpers.js";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -84,42 +83,6 @@ export default smithers(() => (
     return workflowPath;
   }
 
-  function writeSlowWorkflow(name, dbPath) {
-    const workflowPath = resolve(testDir, `${name}.tsx`);
-    writeFileSync(
-      workflowPath,
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
-import { z } from "zod";
-const fakeAgent = {
-  id: "fake",
-  tools: {},
-  generate: async (args) => {
-    await new Promise((res, rej) => {
-      const timer = setTimeout(res, 60000);
-      const abort = () => { clearTimeout(timer); const e = new Error("aborted"); e.name = "AbortError"; rej(e); };
-      if (args.abortSignal?.aborted) { abort(); return; }
-      args.abortSignal?.addEventListener("abort", abort, { once: true });
-    });
-    return { output: { value: 1 } };
-  },
-};
-const { smithers, Workflow, Task, outputs } = createSmithers(
-  { outputA: z.object({ value: z.number() }) },
-  { dbPath: "${dbPath}" },
-);
-export default smithers(() => (
-  <Workflow name="${name}">
-    <Task id="task1" output={outputs.outputA} agent={fakeAgent}>
-      run the slow task
-    </Task>
-  </Workflow>
-));
-`,
-    );
-    return workflowPath;
-  }
-
   async function waitForStatus(req, runId, predicate, timeoutMs = 8000) {
     const deadline = Date.now() + timeoutMs;
     let last;
@@ -146,34 +109,32 @@ export default smithers(() => (
     expect(["finished", "failed", "continued"]).toContain(status);
   });
 
-  test("launch .catch runs when runWorkflow rejects on a DB failure", async () => {
+  test("launch .catch runs when runWorkflow rejects", async () => {
     makeDir();
-    // Keep the DB in its own subdirectory so we can remove it out from under the
-    // in-flight run without touching the (already-loaded) workflow module.
-    const dbDir = resolve(testDir, "launch-catch-db");
-    mkdirSync(dbDir, { recursive: true });
-    const dbPath = resolve(dbDir, "run.db");
-    const workflowPath = writeSlowWorkflow("launch-catch", dbPath);
+    const dbPath = resolve(testDir, "launch-catch.db");
+    const workflowPath = writeLiteralWorkflow("launch-catch", dbPath);
     server = startServer({ port: 0, host: "127.0.0.1" });
     const req = request(getPort(server));
 
-    const start = await req("/v1/runs", { method: "POST", body: { workflowPath } });
+    // An input object whose nested array exceeds the engine's per-run input
+    // bound passes the server's shape checks and body parse, but trips
+    // validateRunOptions at the very top of runWorkflow -> the Effect FAILS, so
+    // Effect.runPromise REJECTS and the launch `.catch` runs (logError +
+    // clearRunCleanupTimer + runs.delete). A resolve would instead keep the
+    // record for COMPLETED_RUN_RETENTION_MS (60s), so a fast removal proves the
+    // `.catch` fired.
+    const start = await req("/v1/runs", {
+      method: "POST",
+      body: { workflowPath, input: { oversized: Array(600).fill(0) } },
+    });
     expect(start.status).toBe(200);
     const runId = start.data.runId;
-    // Wait until the slow task is genuinely in-flight (DB actively written).
-    await waitForStatus(req, runId, (s) => s === "running");
-    expect(__serverTestInternals.runs.has(runId)).toBe(true);
-    // Yank the DB directory: subsequent heartbeat/frame writes hit a disk I/O
-    // error, so runWorkflow REJECTS (infra failure, not a normal task failure),
-    // driving the launch `.catch` -> immediate runs.delete. A resolve, by
-    // contrast, would keep the record for COMPLETED_RUN_RETENTION_MS (60s).
-    rmSync(dbDir, { recursive: true, force: true });
-    const deadline = Date.now() + 15000;
+    const deadline = Date.now() + 8000;
     while (__serverTestInternals.runs.has(runId) && Date.now() < deadline) {
-      await sleep(50);
+      await sleep(40);
     }
     expect(__serverTestInternals.runs.has(runId)).toBe(false);
-  }, 30000);
+  });
 
   test("resume .then finalizes when resuming an already-finished run", async () => {
     makeDir();
@@ -198,47 +159,30 @@ export default smithers(() => (
     await sleep(300);
   });
 
-  test("resume .catch runs when resume's runWorkflow rejects on a DB failure", async () => {
+  test("resume .catch runs when resume's runWorkflow rejects", async () => {
     makeDir();
-    const dbDir = resolve(testDir, "resume-catch-db");
-    mkdirSync(dbDir, { recursive: true });
-    const dbPath = resolve(dbDir, "run.db");
-    const workflowPath = writeSlowWorkflow("resume-catch", dbPath);
+    const dbPath = resolve(testDir, "resume-catch.db");
+    const workflowPath = writeLiteralWorkflow("resume-catch", dbPath);
     server = startServer({ port: 0, host: "127.0.0.1" });
     const req = request(getPort(server));
 
-    // Start the slow run, then interrupt the server so the run is left mid-flight
-    // (status "running") without a graceful cancel; the DB row's heartbeat then
-    // goes stale, making the run resumable.
     const start = await req("/v1/runs", { method: "POST", body: { workflowPath } });
     expect(start.status).toBe(200);
     const runId = start.data.runId;
-    await waitForStatus(req, runId, (s) => s === "running");
-    const srv = server;
-    const closed = new Promise((r) => srv.on("close", r));
-    srv.close();
-    server = undefined;
-    await closed;
-    await sleep(300);
+    await waitForStatus(req, runId, (s) => ["finished", "continued"].includes(s));
 
-    // Force the persisted run's heartbeat stale so resume proceeds into runWorkflow.
-    const sqlite = new Database(dbPath);
-    sqlite.run("UPDATE _smithers_runs SET status = 'running', heartbeat_at_ms = 1000 WHERE run_id = ?", [runId]);
-    sqlite.close();
-
-    // New server; resume re-runs the slow task (wide window), then yank the DB so
-    // resume's runWorkflow REJECTS -> resume `.catch` (immediate runs.delete).
-    server = startServer({ port: 0, host: "127.0.0.1" });
-    const req2 = request(getPort(server));
-    const resumed = await req2(`/v1/runs/${runId}/resume`, { method: "POST", body: { workflowPath } });
+    // The finished run is resumable; an oversized input trips validateRunOptions
+    // inside resume's runWorkflow, so the Effect FAILS and resume's `.catch`
+    // fires (logError + clearRunCleanupTimer + runs.delete).
+    const resumed = await req(`/v1/runs/${runId}/resume`, {
+      method: "POST",
+      body: { workflowPath, input: { oversized: Array(600).fill(0) } },
+    });
     expect(resumed.status).toBe(200);
-    await waitForStatus(req2, runId, (s) => s === "running");
-    expect(__serverTestInternals.runs.has(runId)).toBe(true);
-    rmSync(dbDir, { recursive: true, force: true });
-    const deadline = Date.now() + 15000;
+    const deadline = Date.now() + 8000;
     while (__serverTestInternals.runs.has(runId) && Date.now() < deadline) {
-      await sleep(50);
+      await sleep(40);
     }
     expect(__serverTestInternals.runs.has(runId)).toBe(false);
-  }, 30000);
+  });
 });
