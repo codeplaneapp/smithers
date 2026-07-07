@@ -39,3 +39,4 @@ export * from "./buildClaudeWorkflowPhasePlan.js";
 export * from "./deriveClaudeWorkflowPhases.js";
 export * from "./deriveClaudeWorkflowPhasesFromFrame.js";
 export * from "./worktree-path.js";
+export * from "./escapeSmithersDir.js";

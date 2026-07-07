@@ -1,4 +1,4 @@
-import { resolve, dirname, join, relative, isAbsolute } from "node:path";
+import { resolve, dirname, join, relative, isAbsolute, sep } from "node:path";
 import { existsSync, statSync } from "node:fs";
 
 /**
@@ -26,9 +26,18 @@ export function findSmithersAnchorDir(from) {
                 return undefined;
             }
         }
-        const candidate = join(dir, ".smithers");
-        if (existsSync(candidate) && statSync(candidate).isDirectory()) {
-            return dir;
+        // Never anchor on a `.smithers` that is itself nested inside another
+        // `.smithers` (e.g. `<repo>/.smithers/workflows/.smithers`). When `dir`
+        // already sits inside a `.smithers` tree, keep walking up to the real
+        // workspace root instead of returning the nested pack. This both
+        // prevents a genesis of nested workspaces and lets repos that already
+        // have one self-heal.
+        const dirIsInsideSmithers = dir.split(sep).includes(".smithers");
+        if (!dirIsInsideSmithers) {
+            const candidate = join(dir, ".smithers");
+            if (existsSync(candidate) && statSync(candidate).isDirectory()) {
+                return dir;
+            }
         }
         const parent = dirname(dir);
         // Stop at the root of whatever drive/volume `from` is on. On Windows CI

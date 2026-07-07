@@ -11,6 +11,7 @@ import { schemaSignature } from "@smithers-orchestrator/db/schema-signature";
 import { withSqliteWriteRetry } from "@smithers-orchestrator/db/write-retry";
 import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
 import { classifyClaudeWorkflowNodeKind } from "@smithers-orchestrator/graph/classifyClaudeWorkflowNodeKind";
+import { escapeSmithersDir } from "@smithers-orchestrator/graph/escapeSmithersDir";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
@@ -1706,7 +1707,7 @@ function resolveRootDir(opts, workflowPath) {
     if (opts.rootDir)
         return resolve(opts.rootDir);
     if (workflowPath)
-        return resolve(dirname(workflowPath));
+        return escapeSmithersDir(dirname(workflowPath));
     return resolve(process.cwd());
 }
 /**

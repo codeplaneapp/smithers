@@ -8,6 +8,7 @@ export { PhasePlanTask, buildClaudeWorkflowPhasePlan } from './buildClaudeWorkfl
 export { deriveClaudeWorkflowPhases } from './deriveClaudeWorkflowPhases.js';
 export { deriveClaudeWorkflowPhasesFromFrame } from './deriveClaudeWorkflowPhasesFromFrame.js';
 export { resetRelativeWorktreePathWarningForTest, resolveWorktreePath } from './worktree-path.js';
+export { escapeSmithersDir } from './escapeSmithersDir.js';
 import 'zod';
 
 type AgentLike = AgentLike$1;

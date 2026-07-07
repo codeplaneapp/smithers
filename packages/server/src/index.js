@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { resolve, dirname, sep, basename } from "node:path";
 import { Effect, Metric } from "effect";
 import { isRunHeartbeatFresh, runWorkflow } from "@smithers-orchestrator/engine";
+import { escapeSmithersDir } from "@smithers-orchestrator/graph/escapeSmithersDir";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
@@ -982,7 +983,7 @@ function startServerInternal(opts = {}) {
                     throw new HttpError(404, "RUN_NOT_FOUND", "Run id does not exist");
                 }
                 const mirrorAdapter = serverAdapter && !sameDb ? serverAdapter : null;
-                const effectiveRoot = rootDir ?? dirname(workflowPath);
+                const effectiveRoot = rootDir ?? escapeSmithersDir(dirname(workflowPath));
                 const workflowName = basename(workflowPath, ".tsx");
                 const mirrorOnProgress = buildMirrorOnProgress(mirrorAdapter, runId, workflowName, workflowPath, JSON.stringify({
                     maxConcurrency: body.config?.maxConcurrency ?? null,
@@ -1073,7 +1074,7 @@ function startServerInternal(opts = {}) {
                     sameDb,
                 }, "server:resume");
                 const mirrorAdapter = serverAdapter && !sameDb ? serverAdapter : null;
-                const effectiveRoot = rootDir ?? dirname(workflowPath);
+                const effectiveRoot = rootDir ?? escapeSmithersDir(dirname(workflowPath));
                 const workflowName = basename(workflowPath, ".tsx");
                 const mirrorOnProgress = buildMirrorOnProgress(mirrorAdapter, runId, workflowName, workflowPath, JSON.stringify({
                     maxConcurrency: body.config?.maxConcurrency ?? null,

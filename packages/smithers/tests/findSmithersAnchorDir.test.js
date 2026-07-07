@@ -66,4 +66,16 @@ describe("findSmithersAnchorDir", () => {
     // No HOME guard, no .smithers ancestor -> the fsRoot guard ends the walk.
     expect(findSmithersAnchorDir(join(scratch, "x", "y"))).toBeUndefined();
   });
+
+  test("skips a nested .smithers/workflows/.smithers and anchors on the real workspace root", () => {
+    const home = makeHome();
+    const project = join(home, "project");
+    // Real workspace pack.
+    mkdirSync(join(project, ".smithers", "workflows"), { recursive: true });
+    // A stray NESTED pack left by a prior buggy run.
+    mkdirSync(join(project, ".smithers", "workflows", ".smithers"), { recursive: true });
+    // Invoked from inside the nested workflows dir, resolution must escape past
+    // the nested .smithers and land on the real project root, not the nested one.
+    expect(findSmithersAnchorDir(join(project, ".smithers", "workflows"))).toBe(project);
+  });
 });
