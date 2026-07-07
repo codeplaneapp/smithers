@@ -137,6 +137,15 @@ export default smithers((ctx) => {
   const sota = ctx.outputMaybe(outputs.sota, { nodeId: "sota-research" });
   const smoke = ctx.outputMaybe(outputs.smoke, { nodeId: "run-existing-benchmarks-and-evals" });
   const research = ctx.outputMaybe(outputs.benchmarkResearch, { nodeId: "research-benchmark-updates" });
+  const runLabel = ctx.input.runLabel ?? new Date().toISOString().slice(0, 10);
+  const summaryPath = ctx.input.summaryPath ?? "/tmp/smithers-daily-research-summary.md";
+  const sotaSummaryPath = ctx.input.sotaSummaryPath ?? "/tmp/sota-research-summary.md";
+  const runSotaResearch = ctx.input.runSotaResearch ?? true;
+  const runBenchmarkSmoke = ctx.input.runBenchmarkSmoke ?? true;
+  const runEvalSmoke = ctx.input.runEvalSmoke ?? true;
+  const evalModel = ctx.input.evalModel ?? "codex";
+  const evalMaxCases = ctx.input.evalMaxCases ?? 1;
+  const evalConcurrency = ctx.input.evalConcurrency ?? 2;
 
   return (
     <Workflow name="daily-benchmark-maintenance">
@@ -153,11 +162,11 @@ export default smithers((ctx) => {
           })}
         </Task>
 
-        {ctx.input.runSotaResearch ? (
+        {runSotaResearch ? (
           <Task id="sota-research" output={outputs.sota} retries={0}>
             {() => {
               const cmd = run("bun", ["scripts/sota-research.ts"], {
-                SOTA_SUMMARY_PATH: ctx.input.sotaSummaryPath,
+                SOTA_SUMMARY_PATH: sotaSummaryPath,
               });
               return {
                 ok: cmd.ok,
@@ -168,24 +177,24 @@ export default smithers((ctx) => {
           </Task>
         ) : null}
 
-        {inventory && (ctx.input.runBenchmarkSmoke || ctx.input.runEvalSmoke) ? (
+        {inventory && (runBenchmarkSmoke || runEvalSmoke) ? (
           <Task id="run-existing-benchmarks-and-evals" output={outputs.smoke} retries={0}>
             {() => {
               const commands: z.infer<typeof commandSchema>[] = [];
-              if (ctx.input.runBenchmarkSmoke) {
+              if (runBenchmarkSmoke) {
                 commands.push(run("bun", ["test", "benchmarks/fleet"]));
                 commands.push(run("bun", ["benchmarks/site/make-site.ts"]));
               }
-              if (ctx.input.runEvalSmoke) {
+              if (runEvalSmoke) {
                 commands.push(
                   run("bun", [
                     "evals/harness/run-all.ts",
                     "--only-model",
-                    ctx.input.evalModel,
+                    evalModel,
                     "--max-cases",
-                    String(ctx.input.evalMaxCases),
+                    String(evalMaxCases),
                     "-j",
-                    String(ctx.input.evalConcurrency),
+                    String(evalConcurrency),
                   ]),
                 );
               }
@@ -240,17 +249,17 @@ Return JSON with:
         {inventory && smoke && research ? (
           <Task id="output" output={outputs.output} retries={0}>
             {() => {
-              mkdirSync(dirname(ctx.input.summaryPath), { recursive: true });
+              mkdirSync(dirname(summaryPath), { recursive: true });
               const allCommands = [...(sota?.commands ?? []), ...(smoke?.commands ?? [])];
               const ok = (sota?.ok ?? true) && smoke.ok;
               const summary = [
-                `# Daily Smithers benchmark maintenance: ${ctx.input.runLabel}`,
+                `# Daily Smithers benchmark maintenance: ${runLabel}`,
                 "",
                 `Overall: ${ok ? "ok" : "attention needed"}`,
                 "",
                 "## SOTA research",
                 sota?.summary ?? "Skipped.",
-                readMaybe(ctx.input.sotaSummaryPath),
+                readMaybe(sotaSummaryPath),
                 "",
                 "## Existing benchmark/eval smoke",
                 smoke.summary,
@@ -260,13 +269,13 @@ Return JSON with:
                 research.summary || "(no summary)",
                 research.details || "",
               ].join("\n");
-              writeFileSync(ctx.input.summaryPath, `${summary.trim()}\n`);
+              writeFileSync(summaryPath, `${summary.trim()}\n`);
               if (!ok) {
-                throw new Error(`Daily benchmark maintenance failed; see ${ctx.input.summaryPath}`);
+                throw new Error(`Daily benchmark maintenance failed; see ${summaryPath}`);
               }
               return {
                 ok,
-                summaryPath: ctx.input.summaryPath,
+                summaryPath,
                 summary,
                 commands: allCommands,
                 benchmarkResearch: research,

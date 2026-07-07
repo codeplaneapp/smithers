@@ -35,15 +35,15 @@ function shortId(id: string): string {
 
 function extractOutput(value: unknown): OutputData | null {
   if (!isRecord(value)) return null;
-  const candidate = isRecord(value.output) ? value.output : value;
+  const candidate = isRecord(value.row) ? value.row : value;
   return isRecord(candidate) ? (candidate as OutputData) : null;
 }
 
 function asText(value: unknown): string | null {
   if (typeof value === "string") return value;
   if (!isRecord(value)) return null;
-  if (typeof value.markdown === "string") return value.markdown;
-  if (isRecord(value.output) && typeof value.output.markdown === "string") return value.output.markdown;
+  const row = isRecord(value.row) ? value.row : value;
+  if (typeof row.markdown === "string") return row.markdown;
   return null;
 }
 

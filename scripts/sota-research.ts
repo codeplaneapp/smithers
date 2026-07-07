@@ -159,15 +159,25 @@ export function computeReplacements(oldRegistry: Registry, newRegistry: Registry
   return replacements;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function sweepReplacements(replacements: Map<string, string>): string[] {
   if (replacements.size === 0) return [];
+  const sortedReplacements = [...replacements].sort(([a], [b]) => b.length - a.length);
   const changed: string[] = [];
   for (const dir of SWEEP_DIRS) {
     for (const path of walk(resolve(ROOT, dir))) {
       if (![...SWEEP_EXTENSIONS].some((ext) => path.endsWith(ext))) continue;
       const before = readFileSync(path, "utf8");
       let after = before;
-      for (const [oldId, newId] of replacements) after = after.split(oldId).join(newId);
+      for (const [oldId, newId] of sortedReplacements) {
+        after = after.replace(
+          new RegExp(`(^|[^A-Za-z0-9._:/-])${escapeRegExp(oldId)}(?=$|[^A-Za-z0-9._:/-])`, "g"),
+          (_match, prefix) => `${prefix}${newId}`,
+        );
+      }
       if (after !== before) {
         writeFileSync(path, after);
         changed.push(path.slice(ROOT.length + 1));

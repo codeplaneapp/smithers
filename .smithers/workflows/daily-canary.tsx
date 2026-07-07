@@ -181,8 +181,9 @@ function factEntriesFromMemoryCommand(command: z.infer<typeof commandSchema>): {
 }
 
 function workspaceDir(input: z.infer<typeof inputSchema>): string {
-  if (input.workspaceDir.trim()) return resolve(input.workspaceDir);
-  return resolve(ROOT, ".smithers-canary-state", input.mode);
+  const requestedWorkspaceDir = input.workspaceDir ?? "";
+  if (requestedWorkspaceDir.trim()) return resolve(requestedWorkspaceDir);
+  return resolve(ROOT, ".smithers-canary-state", input.mode ?? "fresh");
 }
 
 function prepareWorkspace(mode: string, dir: string): void {
@@ -217,14 +218,16 @@ export default smithers((ctx) => {
       <Sequence>
         <Task id="prepare" output={outputs.prepare} retries={0}>
           {() => {
+            const mode = ctx.input.mode ?? "fresh";
+            const runLabel = ctx.input.runLabel ?? new Date().toISOString().slice(0, 10);
             const dir = workspaceDir(ctx.input);
-            prepareWorkspace(ctx.input.mode, dir);
+            prepareWorkspace(mode, dir);
             return {
-              mode: ctx.input.mode,
+              mode,
               repoRoot: ROOT,
               workspaceDir: dir,
               cliPath: join(ROOT, "apps/cli/src/index.js"),
-              runLabel: ctx.input.runLabel,
+              runLabel,
             };
           }}
         </Task>
@@ -260,7 +263,7 @@ export default smithers((ctx) => {
                 commands.push(
                   run("bun", [prepare.cliPath, "memory", "get", MEMORY_NAMESPACE, "canary-probe", "--format", "json"], prepare.workspaceDir),
                 );
-                if (ctx.input.runHello) {
+                if (ctx.input.runHello ?? true) {
                   commands.push(
                     run(
                       "bun",
@@ -396,7 +399,7 @@ Return JSON:
                   const row = item as { runLabel?: unknown; mode?: unknown };
                   return row.runLabel !== entry.runLabel || row.mode !== entry.mode;
                 }),
-              ].slice(0, ctx.input.lruLimit);
+              ].slice(0, (ctx.input.lruLimit ?? 30));
               const cmd = run(
                 "bun",
                 [prepare.cliPath, "memory", "set", MEMORY_NAMESPACE, MEMORY_KEY, JSON.stringify(entries), "--format", "json"],
@@ -411,7 +414,7 @@ Return JSON:
           <Task id="output" output={outputs.output} retries={0}>
             {() => {
               const summaryPath =
-                ctx.input.summaryPath.trim() ||
+                (ctx.input.summaryPath ?? "").trim() ||
                 join("/tmp", `smithers-canary-${prepare.mode}-${prepare.runLabel}.md`);
               mkdirSync(dirname(summaryPath), { recursive: true });
               const summary = [
