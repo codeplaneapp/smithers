@@ -33,7 +33,7 @@
   "scripts": {
     "generate:openapi": "bun run scripts/generate-openapi.ts",
     "check:openapi": "bun run scripts/generate-openapi.ts --check",
-    "build": "bun run check:openapi && tsup --dts-only",
+    "build": "bun run check:openapi && node ../../scripts/clean-dts.mjs src && tsup --dts-only",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test tests"
   },
