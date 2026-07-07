@@ -7,13 +7,16 @@ import { runDiagnostics } from "./runDiagnostics.js";
  * @param {Record<string, string>} env
  * @param {string} cwd
  * @param {{ provider?: string; model?: string; apiKey?: string }} [hints]
+ * @param {typeof runDiagnostics} [run] injectable runner (defaults to
+ *   runDiagnostics); overridable so the never-rejects-in-practice failure path
+ *   can be exercised in tests.
  * @returns {Promise<DiagnosticReport | null> | null}
  */
-export function launchDiagnostics(command, env, cwd, hints) {
+export function launchDiagnostics(command, env, cwd, hints, run = runDiagnostics) {
     const strategy = getDiagnosticStrategy(command, hints);
     if (!strategy)
         return null;
     const apiKeyEnv = diagnosticApiKeyEnv(command, hints);
     const effectiveEnv = apiKeyEnv ? { ...env, ...apiKeyEnv } : env;
-    return runDiagnostics(strategy, { env: effectiveEnv, cwd }).catch(() => null);
+    return run(strategy, { env: effectiveEnv, cwd }).catch(() => null);
 }
