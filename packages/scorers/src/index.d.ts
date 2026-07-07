@@ -49,6 +49,18 @@ type PlanSolidityOptions$2 = {
     penalties?: Partial<Record<"NODE_INVALIDATED" | "REDELEGATED" | "GATE_FAILED" | "REPLAN_REQUESTED", number>>;
 };
 
+/**
+ * USD price for one model, per MILLION tokens. The invoice of record is the
+ * provider's; this table drives spend estimates, dashboards, and the
+ * per-session runaway brake.
+ */
+type ModelPrice$2 = {
+    input: number;
+    output: number;
+    cacheWrite: number;
+    cacheRead: number;
+};
+
 /** The result returned by every scorer function. */
 type ScoreResult$3 = {
     /** Normalized quality score between 0 and 1. */
@@ -506,18 +518,6 @@ declare function humanPollScorer(): Scorer$1;
 type Scorer$1 = Scorer$d;
 
 /**
- * USD price for one model, per MILLION tokens. The invoice of record is the
- * provider's; this table drives spend estimates, dashboards, and the
- * per-session runaway brake.
- */
-type ModelPrice$1 = {
-    input: number;
-    output: number;
-    cacheWrite: number;
-    cacheRead: number;
-};
-
-/**
  * Look up the per-million-token price for a model id. Matches the base id plus
  * any `-`/`_` date-stamp suffix or a bracketed context-window alias like
  * `claude-opus-4-8[1m]`, so a real model is never metered as free. Unknown ids
@@ -526,8 +526,8 @@ type ModelPrice$1 = {
  * @param {string} model
  * @returns {ModelPrice}
  */
-declare function modelTokenPrices(model: string): ModelPrice;
-type ModelPrice = ModelPrice$1;
+declare function modelTokenPrices(model: string): ModelPrice$1;
+type ModelPrice$1 = ModelPrice$2;
 
 /**
  * Price a token forecast into dollars. The `<Estimate>` component authors token
@@ -679,6 +679,7 @@ type DelegationRunComponent = DelegationRunComponent$1;
 type DelegationRunResults = DelegationRunResults$2;
 type DelegationRunScoreOptions = DelegationRunScoreOptions$2;
 type LlmJudgeConfig = LlmJudgeConfig$2;
+type ModelPrice = ModelPrice$2;
 type PlanSolidityOptions = PlanSolidityOptions$2;
 type PocJudgmentClassification = PocJudgmentClassification$1;
 type PocJudgmentOptions = PocJudgmentOptions$2;
@@ -692,4 +693,4 @@ type ScorerInput = ScorerInput$2;
 type ScoreRow = ScoreRow$1;
 type ScorersMap = ScorersMap$2;
 
-export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, type LlmJudgeConfig, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, extractDelegationEvents, faithfulnessScorer, humanPollScorer, latencyScorer, llmJudge, modelTokenPrices, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, tierFitScorer, toxicityScorer, weightedScore };
+export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, extractDelegationEvents, faithfulnessScorer, humanPollScorer, latencyScorer, llmJudge, modelTokenPrices, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, tierFitScorer, toxicityScorer, weightedScore };

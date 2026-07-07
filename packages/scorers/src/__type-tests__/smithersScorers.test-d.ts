@@ -1,4 +1,5 @@
 import { smithersScorers } from "../index.js";
+import type { ModelPrice } from "../index.js";
 
 type InsertScorer = typeof smithersScorers.$inferInsert;
 type SelectScorer = typeof smithersScorers.$inferSelect;
@@ -38,6 +39,14 @@ const selectRow: SelectScorer = {
 selectRow.score satisfies number;
 selectRow.runId satisfies string;
 selectRow.reason satisfies string | null;
+
+const modelPrice: ModelPrice = {
+    input: 3,
+    output: 15,
+    cacheWrite: 3.75,
+    cacheRead: 0.3,
+};
+modelPrice.input satisfies number;
 
 // @ts-expect-error score must remain typed as a number, not erased to any.
 insertRow.score = "0.95";

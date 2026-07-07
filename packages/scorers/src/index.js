@@ -12,6 +12,7 @@
 /** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunResults} DelegationRunResults */
 /** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunScoreOptions} DelegationRunScoreOptions */
 /** @typedef {import("./LlmJudgeConfig.js").LlmJudgeConfig} LlmJudgeConfig */
+/** @typedef {import("./ModelPrice.js").ModelPrice} ModelPrice */
 /** @typedef {import("./PlanSolidityOptions.js").PlanSolidityOptions} PlanSolidityOptions */
 /** @typedef {import("./PocJudgmentOptions.js").PocJudgmentClassification} PocJudgmentClassification */
 /** @typedef {import("./PocJudgmentOptions.js").PocJudgmentOptions} PocJudgmentOptions */
