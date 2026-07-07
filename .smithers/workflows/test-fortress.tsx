@@ -282,7 +282,6 @@ export default smithers((ctx) => {
         <Parallel>
           {tracks.includes("unit") ? (
             <TestFortressTrack
-              key="track-unit"
               ctx={ctx}
               outputs={outputs}
               track="unit"
@@ -297,7 +296,6 @@ export default smithers((ctx) => {
           ) : null}
           {tracks.includes("e2e") ? (
             <TestFortressTrack
-              key="track-e2e"
               ctx={ctx}
               outputs={outputs}
               track="e2e"
