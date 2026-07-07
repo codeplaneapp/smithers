@@ -559,6 +559,28 @@ function enforceFilesWriteSameOrigin(req, res) {
   return false;
 }
 
+// True only when the request's Host header names a loopback origin bound to
+// this server's port. Defeats DNS rebinding: a rebound hostname (e.g. an
+// attacker domain that now resolves to 127.0.0.1) still sends its own
+// non-loopback Host header even though the TCP socket is local.
+function requestHostIsLoopback(req) {
+  const requestHost = parseHttpHost(req.headers.host);
+  if (!requestHost || !isLoopbackHostname(requestHost.hostname)) return false;
+  const localPort = req.socket.localPort;
+  if (localPort && Number(requestHost.port || "80") !== localPort) return false;
+  return true;
+}
+
+// Guard for the local data endpoints (VCS snapshot, file tree/read, workspace
+// readiness). These serve local source and repo state to same-origin GETs (no
+// Origin header) and to the CLI, so we cannot require a matching Origin the way
+// the write endpoint does. Instead we reject any request whose Host is not a
+// loopback origin (DNS rebinding) and any request carrying a cross-origin
+// Origin header.
+function isLocalDataRequestAllowed(req) {
+  return requestHostIsLoopback(req) && !isCrossOriginProxyRequest(req);
+}
+
 function realpathOrResolve(path) {
   try {
     return realpathSync.native(path);
@@ -918,6 +940,20 @@ function writeWorkspaceFile(workspaceRoot, inputPath, content) {
 
 async function handleFilesApi(req, res, url, workspaceRoot) {
   try {
+    if (
+      req.method === "GET" &&
+      (url.pathname === "/api/files/tree" || url.pathname === "/api/files/read")
+    ) {
+      if (!isLocalDataRequestAllowed(req)) {
+        fileApiError(
+          res,
+          403,
+          "FORBIDDEN_ORIGIN",
+          "File requests must come from the same local Smithers UI origin.",
+        );
+        return true;
+      }
+    }
     if (url.pathname === "/api/files/tree" && req.method === "GET") {
       const result = listWorkspaceTree(
         workspaceRoot,
@@ -1134,6 +1170,11 @@ export function startLocalUiServer({
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${host}`);
     if (url.pathname === LOCAL_VCS_PATH) {
+      if (!isLocalDataRequestAllowed(req)) {
+        res.writeHead(403, { "content-type": "text/plain" });
+        res.end("Cross-origin requests are not allowed");
+        return;
+      }
       const workspacePath = process.env.SMITHERS_WORKSPACE_ROOT ?? workspaceRoot;
       const snapshot = readLocalVcsSnapshot(workspacePath);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
@@ -1145,6 +1186,11 @@ export function startLocalUiServer({
       return;
     }
     if (url.pathname === LOCAL_WORKSPACE_PREFIX && req.method === "GET") {
+      if (!isLocalDataRequestAllowed(req)) {
+        res.writeHead(403, { "content-type": "text/plain" });
+        res.end("Cross-origin requests are not allowed");
+        return;
+      }
       void checkLocalWorkspaceReadiness({
         workspaceRoot,
         serverWorkspaceRoot: workspaceRoot,
@@ -1169,6 +1215,11 @@ export function startLocalUiServer({
       url.pathname === `${LOCAL_WORKSPACE_PREFIX}/readiness` &&
       req.method === "POST"
     ) {
+      if (!isLocalDataRequestAllowed(req)) {
+        res.writeHead(403, { "content-type": "text/plain" });
+        res.end("Cross-origin requests are not allowed");
+        return;
+      }
       void readJsonBody(req)
         .then((body) =>
           checkLocalWorkspaceReadiness({

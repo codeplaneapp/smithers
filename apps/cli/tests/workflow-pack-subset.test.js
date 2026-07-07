@@ -4,7 +4,7 @@
  *
  * Invariants:
  *  - Infra files (agents.ts, package.json, .gitignore, etc.) are always emitted.
- *  - Only the selected workflows' .tsx files appear in .smithers/workflows/.
+ *  - Only the selected workflows plus required system workflows appear in .smithers/workflows/.
  *  - Only the components transitively needed by the selection appear in .smithers/components/.
  *  - Only the prompts transitively needed by the selection appear in .smithers/prompts/
  *    (plus always-emit utility prompts).
@@ -143,7 +143,7 @@ test("default selectedWorkflows (undefined) emits the same set as all-workflow s
         "hello", "create-workflow", "context-engineer", "route-task", "create-skill",
         "extract-skill", "triage-run", "context-doctor",
         "backpressure-plan", "eval-author", "report-slideshow", "smithering",
-        "delegation-chain", "make-workflow-tutorial", "init", "post-failure",
+        "delegation-chain", "make-workflow-tutorial", "init", "post-failure", "upgrade",
     ];
 
     const resultAll = initWorkflowPack({ rootDir: tmpAll, installSkill: false, skipInstall: true, env, selectedWorkflows: allIds });
@@ -171,10 +171,13 @@ test("system workflows install even for a tiny explicit subset", () => {
     const files = new Set(readdirSync(workflowDir).filter((f) => f.endsWith(".tsx")));
     expect(files.has("init.tsx")).toBe(true);
     expect(files.has("post-failure.tsx")).toBe(true);
+    expect(files.has("upgrade.tsx")).toBe(true);
     // And workflowManifestIds excludes them so the wizard never offers them.
     expect(workflowManifestIds()).not.toContain("init");
     expect(workflowManifestIds()).not.toContain("post-failure");
+    expect(workflowManifestIds()).not.toContain("upgrade");
     expect(workflowManifestIds({ includeSystem: true })).toContain("init");
+    expect(workflowManifestIds({ includeSystem: true })).toContain("upgrade");
 }, 30_000);
 
 test("à-la-carte workflow deselection persists across a non-interactive re-init", () => {
@@ -196,4 +199,5 @@ test("à-la-carte workflow deselection persists across a non-interactive re-init
     // System workflows are always present regardless of the marker.
     expect(after).toContain("init.tsx");
     expect(after).toContain("post-failure.tsx");
+    expect(after).toContain("upgrade.tsx");
 }, 30_000);

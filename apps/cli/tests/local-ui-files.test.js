@@ -61,6 +61,11 @@ async function postFileWrite(payload, origin = baseUrl) {
 }
 
 describe("local UI files API", () => {
+  async function getWithHost(path, host) {
+    const response = await fetch(`${baseUrl}${path}`, { headers: { host } });
+    return { response };
+  }
+
   test("loads a lazy directory tree rooted at the workspace", async () => {
     const { response, body } = await get("/api/files/tree?path=");
     expect(response.status).toBe(200);
@@ -75,6 +80,35 @@ describe("local UI files API", () => {
       previewable: true,
       editable: true,
     });
+  });
+
+  test("rejects file reads with a non-loopback (DNS-rebinding) Host header", async () => {
+    const { response } = await getWithHost(
+      "/api/files/read?path=README.md",
+      "attacker.example:80",
+    );
+    expect(response.status).toBe(403);
+  });
+
+  test("rejects file tree with a non-loopback Host header", async () => {
+    const { response } = await getWithHost(
+      "/api/files/tree?path=",
+      "attacker.example:80",
+    );
+    expect(response.status).toBe(403);
+  });
+
+  test("rejects file reads carrying a cross-origin Origin header", async () => {
+    const response = await fetch(`${baseUrl}/api/files/read?path=README.md`, {
+      headers: { origin: "http://evil.example" },
+    });
+    expect(response.status).toBe(403);
+  });
+
+  test("still serves same-origin reads (loopback Host, no Origin)", async () => {
+    const { response, body } = await get("/api/files/read?path=README.md");
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
   });
 
   test("rejects traversal, encoded traversal, and outside absolute paths", async () => {

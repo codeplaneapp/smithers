@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta http-equiv="refresh" content="30"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Test Fortress — test-fortress</title>
+<style>
+  :root{color-scheme:dark light}
+  *{box-sizing:border-box}
+  body{font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0;padding:24px;background:#0b0e14;color:#c9d1d9}
+  header{display:flex;flex-wrap:wrap;gap:16px;align-items:baseline;margin-bottom:20px}
+  h1{font-size:20px;margin:0}
+  .meta{color:#7d8590}
+  .bar{height:10px;border-radius:6px;background:#161b22;overflow:hidden;margin:10px 0 24px}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,#2ea043,#3fb950);width:0%}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+  .col h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid;padding-bottom:6px;margin:0 0 8px;display:flex;justify-content:space-between}
+  .count{background:#161b22;border-radius:10px;padding:0 8px;font-size:12px}
+  ul{list-style:none;margin:0;padding:0;max-height:60vh;overflow:auto}
+  li{display:flex;justify-content:space-between;gap:8px;padding:4px 6px;border-radius:6px}
+  li:nth-child(odd){background:#0f141c}
+  li.empty{color:#7d8590;justify-content:center}
+  code{color:#c9d1d9;word-break:break-all}
+  .state{border-radius:10px;padding:0 8px;font-size:11px;white-space:nowrap}
+  a{color:#58a6ff}
+</style></head>
+<body>
+  <header>
+    <h1>🏰 Test Fortress</h1>
+    <span class="meta">workflow <b>test-fortress</b></span>
+    <span class="meta">run <b>—</b></span>
+    <span class="meta">status <b>unknown</b></span>
+    <span class="meta">updated 2026-07-07T05:31:03.690Z</span>
+    <span class="meta">auto-refresh 30s</span>
+  </header>
+  <div class="meta">0/0 nodes complete — 0%</div>
+  <div class="bar"><i></i></div>
+  <div class="grid">
+    <section class="col">
+      <h2 style="border-color:#3fb950">✅ Done <span class="count">0</span></h2>
+      <ul><li class="empty">— none —</li></ul>
+    </section>
+    <section class="col">
+      <h2 style="border-color:#d29922">⚙️ In flight <span class="count">0</span></h2>
+      <ul><li class="empty">— none —</li></ul>
+    </section>
+    <section class="col">
+      <h2 style="border-color:#8957e5">🕒 Scheduled <span class="count">0</span></h2>
+      <ul><li class="empty">— none —</li></ul>
+    </section>
+  </div>
+</body></html>

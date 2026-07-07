@@ -3,7 +3,7 @@
 // smithers-description: Eval-driven-development loop — run haiku fluency evals, adversarially try to break smithers or produce a bad UX, author a new eval from what broke, fix the root cause, commit locally. Loops until a wall-clock deadline.
 // smithers-tags: quality, evals, edd
 /** @jsxImportSource smithers-orchestrator */
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createSmithers, UI } from "smithers-orchestrator";
@@ -49,6 +49,68 @@ const CURATED = join(ROOT, "evals/_inventory/curated-tasks.jsonl");
 // Opus-primary pool (Sonnet only as a failover so a single Opus hiccup can't
 // stall a multi-hour loop). "Use opus primarily."
 const opus = [providers.claudeOpus, providers.claudeSonnet];
+
+type SpawnResult = { status: number | null; stdout: string; stderr: string };
+
+/**
+ * Async, non-blocking replacement for `spawnSync`. A compute task that awaits
+ * this returns a Promise, so the engine's event loop / heartbeat keeps ticking
+ * while a multi-minute subprocess (the haiku eval suite) runs — instead of
+ * `spawnSync` freezing the loop and making `smithers ps` show a false `stale`.
+ * Mirrors the subset of the spawnSync result we consume (`status`, `stdout`,
+ * `stderr`) plus the same `timeout`/`maxBuffer`/`cwd` semantics.
+ */
+function spawnAsync(
+  cmd: string,
+  args: string[],
+  opts: { cwd: string; timeout?: number; maxBuffer?: number },
+): Promise<SpawnResult> {
+  const maxBuffer = opts.maxBuffer ?? 1024 * 1024;
+  return new Promise<SpawnResult>((resolve) => {
+    const child = spawn(cmd, args, { cwd: opts.cwd });
+    let stdout = "";
+    let stderr = "";
+    let overflowed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+
+    const append = (buf: string, chunk: Buffer) => {
+      if (overflowed) return buf;
+      const next = buf + chunk.toString("utf8");
+      if (next.length > maxBuffer) {
+        overflowed = true;
+        // Keep the tail (what callers slice), matching spawnSync's buffer cap intent.
+        return next.slice(next.length - maxBuffer);
+      }
+      return next;
+    };
+
+    child.stdout?.on("data", (c: Buffer) => {
+      stdout = append(stdout, c);
+    });
+    child.stderr?.on("data", (c: Buffer) => {
+      stderr = append(stderr, c);
+    });
+
+    const finish = (status: number | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ status, stdout, stderr });
+    };
+
+    if (opts.timeout && opts.timeout > 0) {
+      timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        // spawnSync reports status null when it kills on timeout.
+        finish(null);
+      }, opts.timeout);
+    }
+
+    child.on("error", () => finish(null));
+    child.on("close", (code) => finish(code));
+  });
+}
 
 function haikuSuites(): string[] {
   if (!existsSync(SUITES_DIR)) return [];
@@ -242,11 +304,11 @@ export default smithers((ctx) => {
 
           {/* 2. RUN-HAIKU — one rotating haiku fluency suite; weak model stresses the docs. */}
           <Task id="run-haiku" output={outputs.evalRun} continueOnFail>
-            {() => {
-              const res = spawnSync(
+            {async () => {
+              const res = await spawnAsync(
                 "bun",
                 [join(ROOT, "evals/harness/run-suite.ts"), suite, "--only-model", "haiku", "--max-cases", String(maxCases), "-j", "4"],
-                { cwd: ROOT, encoding: "utf8", timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024 },
+                { cwd: ROOT, timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024 },
               );
               const out = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;
               const reportPath = join(ROOT, "evals/harness/.report", `${suite}.json`);
@@ -275,7 +337,7 @@ export default smithers((ctx) => {
           {/* 4b. WIRE — append the case to the corpus + regenerate cases (deterministic). */}
           {authored ? (
             <Task id="wire" output={outputs.wired} continueOnFail>
-              {() => {
+              {async () => {
                 const task = {
                   id: authored.id,
                   feature: authored.feature,
@@ -305,7 +367,7 @@ export default smithers((ctx) => {
                   const { appendFileSync } = require("node:fs");
                   appendFileSync(CURATED, `${JSON.stringify(task)}\n`);
                 }
-                const gen = spawnSync("bun", [join(ROOT, "evals/harness/generate-cases.ts")], { cwd: ROOT, encoding: "utf8", timeout: 5 * 60_000 });
+                const gen = await spawnAsync("bun", [join(ROOT, "evals/harness/generate-cases.ts")], { cwd: ROOT, timeout: 5 * 60_000 });
                 return {
                   appended: !already,
                   suite: friction?.area ?? "real-usage",
@@ -327,7 +389,7 @@ export default smithers((ctx) => {
           {/* 6. COMMIT — scoped LOCAL commit (git commit <pathspec>, no add -A, no push/pull). */}
           {fixed ? (
             <Task id="commit" output={outputs.committed} continueOnFail>
-              {() => {
+              {async () => {
                 const paths = [
                   "evals/_inventory/curated-tasks.jsonl",
                   "evals/suites",
@@ -340,9 +402,8 @@ export default smithers((ctx) => {
                 const message = `✅ test(evals): break-smithers loop — ${title}\n\nEDD loop: new adversarial eval + root-cause fix for a friction surfaced against smithers.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`;
                 // Pathspec commit: stages+commits ONLY these paths, leaving other
                 // agents' unstaged work untouched. No push/pull on the shared tree.
-                const res = spawnSync("git", ["commit", "-m", message, "--", ...paths], {
+                const res = await spawnAsync("git", ["commit", "-m", message, "--", ...paths], {
                   cwd: ROOT,
-                  encoding: "utf8",
                   timeout: 3 * 60_000,
                 });
                 const combined = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;

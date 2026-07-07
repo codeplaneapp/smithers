@@ -56,6 +56,7 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "  export const Timer: any;",
         "  export const WaitForEvent: any;",
         "  export const Worktree: any;",
+        "  export const UI: any;",
         "  export const Gateway: any;",
         "  export const ClaudeCodeAgent: any;",
         "  export const CodexAgent: any;",
