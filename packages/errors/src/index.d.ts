@@ -455,6 +455,22 @@ declare namespace smithersErrorDefinitions {
         let details_25: string;
         export { details_25 as details };
     }
+    namespace TASK_EMPTY_PROMPT {
+        let category_98: string;
+        export { category_98 as category };
+        let when_98: string;
+        export { when_98 as when };
+        let details_98: string;
+        export { details_98 as details };
+    }
+    namespace WORKFLOW_RENDER_FAILED {
+        let category_99: string;
+        export { category_99 as category };
+        let when_99: string;
+        export { when_99 as when };
+        let details_99: string;
+        export { details_99 as details };
+    }
     namespace DUPLICATE_ID {
         let category_37: string;
         export { category_37 as category };
@@ -836,7 +852,7 @@ type ErrorWrapOptions$2 = {
     readonly details?: Record<string, unknown>;
 };
 
-type EngineErrorCode$2 = "TASK_HEARTBEAT_TIMEOUT" | "DUPLICATE_ID" | "NESTED_LOOP" | "INVALID_CONTINUATION_STATE" | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "WORKTREE_EMPTY_PATH" | "INVALID_INPUT" | "WORKFLOW_EXECUTION_FAILED" | "TASK_TIMEOUT" | "TASK_ABORTED" | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "RUN_CANCELLED" | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "STORAGE_ERROR" | "SCHEDULER_ERROR" | "SESSION_ERROR" | "INTERNAL_ERROR";
+type EngineErrorCode$2 = "TASK_HEARTBEAT_TIMEOUT" | "DUPLICATE_ID" | "NESTED_LOOP" | "INVALID_CONTINUATION_STATE" | "TASK_ID_REQUIRED" | "TASK_EMPTY_PROMPT" | "TASK_MISSING_OUTPUT" | "WORKTREE_EMPTY_PATH" | "INVALID_INPUT" | "WORKFLOW_EXECUTION_FAILED" | "TASK_TIMEOUT" | "TASK_ABORTED" | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "RUN_CANCELLED" | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "STORAGE_ERROR" | "SCHEDULER_ERROR" | "SESSION_ERROR" | "INTERNAL_ERROR";
 
 declare const EngineError_base: new (args: EngineErrorArgs) => effect_Cause.YieldableError & {
     readonly _tag: "EngineError";

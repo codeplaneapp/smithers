@@ -438,13 +438,36 @@ export class WorkflowDriver {
                 worktreePaths: this.worktreePathsById,
             },
         });
-        const graph = await this.renderer.render(this.workflow.build(ctx), {
-            ralphIterations: context.iterations ?? context.ralphIterations,
-            defaultIteration: iteration,
-            baseRootDir,
-            workflowPath,
-            trigger: context.trigger,
-        });
+        let graph;
+        try {
+            graph = await this.renderer.render(this.workflow.build(ctx), {
+                ralphIterations: context.iterations ?? context.ralphIterations,
+                defaultIteration: iteration,
+                baseRootDir,
+                workflowPath,
+                trigger: context.trigger,
+            });
+        }
+        catch (renderError) {
+            // Typed errors (CONTEXT_OUTSIDE_WORKFLOW, DUPLICATE_ID, ...) are
+            // already friendly — pass them through unchanged. Everything else
+            // is a raw exception from the user's workflow component (a plain
+            // TypeError with a React-internals stack), which is useless
+            // without the workflow it came from. Name the workflow and, for
+            // the classic null-dispatcher crash, say what it means.
+            if (renderError instanceof SmithersError) {
+                throw renderError;
+            }
+            const rawMessage = renderError instanceof Error
+                ? renderError.message
+                : String(renderError);
+            const hooksHint = /dispatcher\.useContext|Invalid hook call|null is not an object[\s\S]{0,80}useContext/i.test(rawMessage)
+                ? " This usually means a React hook (useSmithers/useContext/useCtx) was called outside a component render — call hooks at the top level of a component function, not at module scope or inside a callback."
+                : "";
+            throw new SmithersError("WORKFLOW_RENDER_FAILED", `Rendering workflow${workflowPath ? ` "${workflowPath}"` : ""} threw: ${rawMessage}.${hooksHint}`, {
+                workflowPath: workflowPath ?? null,
+            }, { cause: renderError });
+        }
         // Capture tasks that deferred on unresolved deps this render so the run
         // loop can fail loudly if any survive to a Finished decision instead of
         // silently skipping them.

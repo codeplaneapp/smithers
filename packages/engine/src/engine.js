@@ -3381,6 +3381,22 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     maybeCompleteHijack();
                 };
                 let effectivePrompt = desc.prompt ?? "";
+                // A blank prompt with no resume/fork context would reach the
+                // agent CLI as literally no input (claude: "Error: Input must be
+                // provided either through stdin or as a prompt argument when
+                // using --print"). Fail here with the task named instead;
+                // deterministic workflow bug, so retrying cannot help.
+                if (effectivePrompt.trim() === ""
+                    && !guidedResumeMessages?.length
+                    && !forkSeedMessages?.length
+                    && !resumeSession
+                    && !continueSession) {
+                    throw new SmithersError("TASK_EMPTY_PROMPT", `Task "${desc.nodeId}" rendered an empty prompt. Its children/prompt produced no text — usually a deps/needs interpolation that resolved to an empty string, or a prompt template that rendered nothing. Add prompt text or verify the upstream outputs referenced by the prompt.`, {
+                        nodeId: desc.nodeId,
+                        iteration: desc.iteration,
+                        failureRetryable: false,
+                    });
+                }
                 // Tasks running in an isolated worktree get an explicit isolation
                 // contract up front. Without it, agents finding no node_modules
                 // improvise symlink-sharing with the parent checkout and corrupt

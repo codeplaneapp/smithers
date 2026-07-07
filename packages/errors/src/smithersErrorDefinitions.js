@@ -203,6 +203,16 @@ export const smithersErrorDefinitions = {
         when: "<Task> is missing its output prop.",
         details: "{ nodeId }",
     },
+    TASK_EMPTY_PROMPT: {
+        category: "engine",
+        when: "A <Task> prompt renders to an empty string, so the agent would be invoked with no input.",
+        details: "{ nodeId, iteration }",
+    },
+    WORKFLOW_RENDER_FAILED: {
+        category: "engine",
+        when: "The workflow component throws while rendering the graph (e.g. a hook called outside a component render, or a bug in the workflow function).",
+        details: "{ workflowPath }",
+    },
     DUPLICATE_ID: {
         category: "components",
         when: "Two nodes with the same runtime id are mounted in one workflow graph.",

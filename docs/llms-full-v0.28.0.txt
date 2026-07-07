@@ -7763,7 +7763,7 @@ type KnownSmithersErrorCode =
   | "RUN_OWNER_ALIVE" | "RUN_STILL_RUNNING" | "RUN_RESUME_CLAIM_LOST" | "RUN_RESUME_CLAIM_FAILED"
   | "RUN_RESUME_ACTIVATION_FAILED" | "RUN_HIJACKED" | "CONTINUATION_STATE_TOO_LARGE"
   | "INVALID_CONTINUATION_STATE" | "RALPH_MAX_REACHED" | "SCHEDULER_ERROR" | "SESSION_ERROR"
-  | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "DUPLICATE_ID" | "NESTED_LOOP"
+  | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "TASK_EMPTY_PROMPT" | "WORKFLOW_RENDER_FAILED" | "DUPLICATE_ID" | "NESTED_LOOP"
   | "WORKTREE_EMPTY_PATH" | "MDX_PRELOAD_INACTIVE" | "CONTEXT_OUTSIDE_WORKFLOW"
   | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
   | "APPROVAL_OPTIONS_REQUIRED" | "WORKFLOW_MISSING_DEFAULT" | "WORKFLOW_NOT_BUILT"
@@ -8380,6 +8380,8 @@ try {
 | `VCS_NOT_FOUND` | No supported git or jj repository root can be found for the workflow. | `{ rootDir }` |
 | `SNAPSHOT_NOT_FOUND` | A requested time-travel snapshot or frame does not exist. | `{ runId, frameNo }` |
 | `VCS_WORKSPACE_CREATE_FAILED` | Smithers fails to materialize a jj workspace for time-travel or replay. | `{ runId, frameNo, vcsPointer, workspacePath }` |
+| `TASK_EMPTY_PROMPT` | A `<Task>` prompt renders to an empty string, so the agent would be invoked with no input. | `{ nodeId, iteration }` |
+| `WORKFLOW_RENDER_FAILED` | The workflow component throws while rendering the graph (e.g. a hook called outside a component render, or a bug in the workflow function). | `{ workflowPath }` |
 | `TASK_TIMEOUT` | A task compute callback exceeds its configured timeout. | `{ nodeId, attempt, timeoutMs }` |
 | `TASK_HIJACK_UNSUPPORTED` | A task requests auto-hijack but its agent cannot provide a resumable session or conversation. | `{ nodeId, agentId? }` |
 | `TASK_FORK_SOURCE_NOT_COMPLETE` | A forked task began executing but its fork source has not completed, so no session snapshot exists yet. | `{ nodeId, forkSource }` |

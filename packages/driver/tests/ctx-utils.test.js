@@ -7,6 +7,7 @@ import { filterRowsByNodeId } from "../src/filterRowsByNodeId.js";
 import { ignoreSyncError } from "../src/ignoreSyncError.js";
 import { normalizeInputRow } from "../src/normalizeInputRow.js";
 import { SmithersCtx } from "../src/SmithersCtx.js";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { WorkflowDriver } from "../src/WorkflowDriver.js";
 import {
   getTaskRuntime,
@@ -147,6 +148,67 @@ describe("normalizeInputRow", () => {
   test("non-string payload is returned directly", () => {
     const payload = { nested: true };
     expect(normalizeInputRow({ runId: "r1", payload })).toBe(payload);
+  });
+
+  test("renderAndSubmit wraps a raw render TypeError as WORKFLOW_RENDER_FAILED naming the workflow", async () => {
+    const driver = makeDriver({
+      renderer: {
+        render: async () => {
+          throw new TypeError("undefined is not an object (evaluating 'ranking.ranked')");
+        },
+      },
+    });
+    driver.workflowPath = "/repo/.smithers/workflows/rank.tsx";
+
+    let error;
+    try {
+      await driver.renderAndSubmit({ runId: "run-1", iteration: 0, outputs: {} });
+    } catch (err) {
+      error = err;
+    }
+    expect(error?.code).toBe("WORKFLOW_RENDER_FAILED");
+    expect(error?.message).toContain("/repo/.smithers/workflows/rank.tsx");
+    expect(error?.message).toContain("ranking.ranked");
+    expect(error?.details?.workflowPath).toBe("/repo/.smithers/workflows/rank.tsx");
+    expect(error?.cause).toBeInstanceOf(TypeError);
+  });
+
+  test("renderAndSubmit adds a hooks hint for the null-dispatcher useContext crash", async () => {
+    const driver = makeDriver({
+      renderer: {
+        render: async () => {
+          throw new TypeError("null is not an object (evaluating 'dispatcher.useContext')");
+        },
+      },
+    });
+
+    let error;
+    try {
+      await driver.renderAndSubmit({ runId: "run-1", iteration: 0, outputs: {} });
+    } catch (err) {
+      error = err;
+    }
+    expect(error?.code).toBe("WORKFLOW_RENDER_FAILED");
+    expect(error?.message).toContain("outside a component render");
+  });
+
+  test("renderAndSubmit passes an already-typed SmithersError through unchanged", async () => {
+    const typed = new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "useCtx() must be called inside a <Workflow> created by createSmithers()");
+    const driver = makeDriver({
+      renderer: {
+        render: async () => {
+          throw typed;
+        },
+      },
+    });
+
+    let error;
+    try {
+      await driver.renderAndSubmit({ runId: "run-1", iteration: 0, outputs: {} });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBe(typed);
   });
 });
 
