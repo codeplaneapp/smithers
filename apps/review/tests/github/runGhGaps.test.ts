@@ -33,4 +33,15 @@ describe("runGh failure branches", () => {
       await rm(tmp, { recursive: true, force: true });
     }
   });
+
+  test("falls back to the exit code when a non-zero exit produces no stderr", async () => {
+    // `false` exits 1 with no output → the detail is the "exited with code" fallback.
+    process.env.SMITHERS_GH_BIN = "false";
+    const tmp = await mkdtemp(join(tmpdir(), "smithers-runGh-silent-"));
+    try {
+      await expect(runGh(tmp, ["api", "quiet"])).rejects.toThrow("gh api quiet failed: exited with code 1");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
 });
