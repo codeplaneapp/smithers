@@ -486,6 +486,11 @@ describe("migrateSmithersStore", () => {
     const sqlite = new Database(dbPath);
     sqlite.exec("PRAGMA journal_mode = WAL; INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json) VALUES ('run-migrate-1', 2, 23, 'SidecarSeed', '{}');");
     sqlite.close();
+    // Some SQLite builds checkpoint and remove WAL/SHM sidecars when the last
+    // connection closes. The migration cleanup promise is filesystem-level:
+    // if sidecars exist after a successful copy, they must be removed.
+    writeFileSync(`${dbPath}-wal`, "sidecar", "utf8");
+    writeFileSync(`${dbPath}-shm`, "sidecar", "utf8");
     expect(existsSync(`${dbPath}-wal`)).toBe(true);
     expect(existsSync(`${dbPath}-shm`)).toBe(true);
 
