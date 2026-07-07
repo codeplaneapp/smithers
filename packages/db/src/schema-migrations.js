@@ -773,6 +773,27 @@ function buildMigrations(context) {
             },
         },
         {
+            id: "0020_run_pause_column",
+            name: "Add graceful-pause request column to runs",
+            checksum: "packages/db/migrations/0020_run_pause_column.sql",
+            isApplied: (sqlite) => tableColumnNames(sqlite, "_smithers_runs").has("pause_requested_at_ms"),
+            isAppliedPostgres: async (pgConn) => (await tableColumnNamesPostgres(pgConn, "_smithers_runs")).has("pause_requested_at_ms"),
+            up: (sqlite) => {
+                if (!tableExists(sqlite, "_smithers_runs")) {
+                    return { table: "_smithers_runs", addedColumns: [] };
+                }
+                const added = addColumnIfMissing(sqlite, "_smithers_runs", "pause_requested_at_ms", "pause_requested_at_ms INTEGER");
+                return { table: "_smithers_runs", addedColumns: added ? ["pause_requested_at_ms"] : [] };
+            },
+            upPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_runs"))) {
+                    return { table: "_smithers_runs", addedColumns: [] };
+                }
+                const added = await addColumnIfMissingPostgres(pgConn, "_smithers_runs", "pause_requested_at_ms", "pause_requested_at_ms INTEGER");
+                return { table: "_smithers_runs", addedColumns: added ? ["pause_requested_at_ms"] : [] };
+            },
+        },
+        {
             id: "0023_add_memory_notes",
             name: "Add append-only memory notes and supersession junction tables",
             checksum: "packages/db/migrations/0023_add_memory_notes.sql",
@@ -797,27 +818,6 @@ function buildMigrations(context) {
                 await pgConn.query({ text: translateDdl(POSTGRES, `CREATE INDEX IF NOT EXISTS _smithers_memory_note_supersessions_target_idx
     ON _smithers_memory_note_supersessions (supersedes_id)`) });
                 return { tables: ["_smithers_memory_notes", "_smithers_memory_note_supersessions"] };
-            },
-        },
-        {
-            id: "0020_run_pause_column",
-            name: "Add graceful-pause request column to runs",
-            checksum: "packages/db/migrations/0020_run_pause_column.sql",
-            isApplied: (sqlite) => tableColumnNames(sqlite, "_smithers_runs").has("pause_requested_at_ms"),
-            isAppliedPostgres: async (pgConn) => (await tableColumnNamesPostgres(pgConn, "_smithers_runs")).has("pause_requested_at_ms"),
-            up: (sqlite) => {
-                if (!tableExists(sqlite, "_smithers_runs")) {
-                    return { table: "_smithers_runs", addedColumns: [] };
-                }
-                const added = addColumnIfMissing(sqlite, "_smithers_runs", "pause_requested_at_ms", "pause_requested_at_ms INTEGER");
-                return { table: "_smithers_runs", addedColumns: added ? ["pause_requested_at_ms"] : [] };
-            },
-            upPostgres: async (pgConn) => {
-                if (!(await tableExistsPostgres(pgConn, "_smithers_runs"))) {
-                    return { table: "_smithers_runs", addedColumns: [] };
-                }
-                const added = await addColumnIfMissingPostgres(pgConn, "_smithers_runs", "pause_requested_at_ms", "pause_requested_at_ms INTEGER");
-                return { table: "_smithers_runs", addedColumns: added ? ["pause_requested_at_ms"] : [] };
             },
         },
     ];
