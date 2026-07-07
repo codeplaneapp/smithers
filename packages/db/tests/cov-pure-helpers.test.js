@@ -254,6 +254,11 @@ describe("output-schema-descriptor", () => {
                 optional: z.string().optional(),
                 nullable: z.string().nullable(),
                 withDefault: z.string().default("d"),
+                // Wrapper types exercised by unwrapSchema: readonly / nonoptional / catch / pipe.
+                readonlyField: z.string().readonly(),
+                nonoptionalField: z.nonoptional(z.string()),
+                caughtField: z.string().catch("x"),
+                pipedField: z.string().transform((s) => s),
             }),
             { onWarning: (w) => warnings.push(w) },
         );
@@ -298,7 +303,8 @@ describe("zodToCreateTableSQL.syncZodTableSchema (sqlite)", () => {
     test("adds missing columns via ALTER TABLE on an existing older table", () => {
         const sqlite = new Database(":memory:");
         sqlite.run(`CREATE TABLE t (run_id TEXT NOT NULL, node_id TEXT NOT NULL, iteration INTEGER NOT NULL DEFAULT 0, a TEXT, PRIMARY KEY (run_id, node_id, iteration))`);
-        syncZodTableSchema(sqlite, "t", z.object({ a: z.string(), b: z.number(), c: z.boolean() }));
+        // `d` is a json-kind column (array) so sqliteKindFor's json branch runs.
+        syncZodTableSchema(sqlite, "t", z.object({ a: z.string(), b: z.number(), c: z.boolean(), d: z.array(z.string()) }));
         const cols = new Set(sqlite.query(`PRAGMA table_info("t")`).all().map((r) => r.name));
         expect(cols.has("b")).toBe(true);
         expect(cols.has("c")).toBe(true);
