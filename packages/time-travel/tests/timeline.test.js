@@ -12,6 +12,114 @@ function createTestDb() {
     ensureSmithersTables(db);
     return { adapter: new SmithersDb(db), db, sqlite };
 }
+function createFakeTimelineAdapter(snapshots, branches) {
+    const snapshotBuildsByRun = new Map();
+    return {
+        snapshotBuildsByRun,
+        adapter: {
+            internalStorage: {
+                dialect: "postgres",
+                async queryAll(sql, params) {
+                    if (sql.includes("_smithers_snapshots")) {
+                        const runId = params[0];
+                        const count = (snapshotBuildsByRun.get(runId) ?? 0) + 1;
+                        snapshotBuildsByRun.set(runId, count);
+                        if (count > 1) {
+                            throw new Error(`adapter was asked to build ${runId} more than once`);
+                        }
+                        return snapshots.get(runId) ?? [];
+                    }
+                    if (sql.includes("_smithers_branches") && sql.includes("parent_run_id")) {
+                        const parentRunId = params[0];
+                        return branches.filter((branch) => branch.parentRunId === parentRunId);
+                    }
+                    throw new Error(`unexpected queryAll: ${sql}`);
+                },
+                async queryOne(sql, params) {
+                    if (sql.includes("_smithers_branches") && sql.includes("run_id")) {
+                        const runId = params[0];
+                        return branches.find((branch) => branch.runId === runId);
+                    }
+                    throw new Error(`unexpected queryOne: ${sql}`);
+                },
+            },
+        },
+    };
+}
+function createCyclicTimelineAdapter() {
+    const snapshots = new Map([
+        [
+            "root",
+            [
+                {
+                    runId: "root",
+                    frameNo: 0,
+                    contentHash: "root-hash",
+                    createdAtMs: 1,
+                    vcsPointer: null,
+                },
+            ],
+        ],
+        [
+            "child",
+            [
+                {
+                    runId: "child",
+                    frameNo: 0,
+                    contentHash: "child-hash",
+                    createdAtMs: 2,
+                    vcsPointer: null,
+                },
+            ],
+        ],
+    ]);
+    const branches = [
+        {
+            runId: "child",
+            parentRunId: "root",
+            parentFrameNo: 0,
+            branchLabel: "root-to-child",
+            forkDescription: null,
+            createdAtMs: 3,
+        },
+        {
+            runId: "root",
+            parentRunId: "child",
+            parentFrameNo: 0,
+            branchLabel: "child-to-root",
+            forkDescription: null,
+            createdAtMs: 4,
+        },
+    ];
+    return createFakeTimelineAdapter(snapshots, branches);
+}
+function createDeepTimelineAdapter(runCount) {
+    const snapshots = new Map();
+    const branches = [];
+    for (let i = 0; i < runCount; i++) {
+        const runId = `run-${i}`;
+        snapshots.set(runId, [
+            {
+                runId,
+                frameNo: 0,
+                contentHash: `${runId}-hash`,
+                createdAtMs: i,
+                vcsPointer: null,
+            },
+        ]);
+        if (i + 1 < runCount) {
+            branches.push({
+                runId: `run-${i + 1}`,
+                parentRunId: runId,
+                parentFrameNo: 0,
+                branchLabel: `to-run-${i + 1}`,
+                forkDescription: null,
+                createdAtMs: i,
+            });
+        }
+    }
+    return createFakeTimelineAdapter(snapshots, branches);
+}
 /**
  * @param {Partial<SnapshotData>} [overrides]
  * @returns {SnapshotData}
@@ -113,6 +221,16 @@ describe("buildTimelineTree", () => {
         expect(tree.children.length).toBe(1);
         expect(tree.children[0].children.length).toBe(1);
         expect(tree.children[0].children[0].timeline.runId).toBe(fork2.runId);
+    });
+    test("fails fast on cyclic fork ancestry without rebuilding the same run", async () => {
+        const { adapter, snapshotBuildsByRun } = createCyclicTimelineAdapter();
+        await expect(buildTimelineTree(adapter, "root")).rejects.toThrow("fork ancestry cycle: root -> child -> root");
+        expect(snapshotBuildsByRun.get("root")).toBe(1);
+        expect(snapshotBuildsByRun.get("child")).toBe(1);
+    });
+    test("rejects excessively deep fork ancestry with an explicit depth error", async () => {
+        const { adapter } = createDeepTimelineAdapter(102);
+        await expect(buildTimelineTree(adapter, "run-0")).rejects.toThrow("Timeline tree exceeds maximum depth of 100.");
     });
 });
 describe("formatTimelineForTui", () => {
