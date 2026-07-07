@@ -33,6 +33,14 @@ export type ValidationLoopProps = {
   synthesizeReview?: boolean;
   /** Moderator for the synthesized review panel; defaults to the shared synthesizer (usually Codex, with Opus fallback). An AgentLike[] is a failover chain. Only used when synthesizeReview is true. */
   reviewModerator?: AgentLike | AgentLike[];
+  /**
+   * Mount the review step only when true (default true = always review).
+   * Pass the current iteration's validation verdict to skip reviewing code
+   * that validation already rejected — each skipped round saves one agent
+   * session per reviewer. The loop re-renders when the validate output lands,
+   * so the review step mounts within the same iteration once it passes.
+   */
+  reviewWhen?: boolean;
   feedback?: string | null;
   done?: boolean;
   maxIterations?: number;
@@ -46,6 +54,7 @@ export function ValidationLoop({
   validateAgents,
   synthesizeReview = false,
   reviewModerator,
+  reviewWhen = true,
   feedback,
   done = false,
   maxIterations = 3,
@@ -64,9 +73,11 @@ export function ValidationLoop({
           : implementAgents} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
           <ValidatePrompt prompt={promptText} />
         </Task>
-        {synthesizeReview
-          ? <ReviewPanel idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} moderator={reviewModerator} />
-          : <Review idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} />}
+        {!reviewWhen
+          ? null
+          : synthesizeReview
+            ? <ReviewPanel idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} moderator={reviewModerator} />
+            : <Review idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} />}
       </Sequence>
     </Loop>
   );

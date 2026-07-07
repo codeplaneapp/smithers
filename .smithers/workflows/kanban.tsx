@@ -69,25 +69,37 @@ function discoverTickets(): Array<{ id: string; slug: string; content: string }>
 }
 
 /** Build feedback string from validation + review outputs for a ticket. */
-function buildFeedback(
+export function buildFeedback(
   ctx: any,
   slug: string,
-): { feedback: string | null; done: boolean } {
-  const validate = ctx.outputMaybe("validate", { nodeId: `${slug}:validate` });
-  const reviews = ctx.outputs.review ?? [];
+): { feedback: string | null; done: boolean; validationPassed: boolean } {
+  const iterationOf = (row: any) => (Number.isFinite(Number(row?.iteration)) ? Number(row.iteration) : 0);
+
+  // Raw output rows (ctx.outputs.*) keep the engine's nodeId/iteration columns;
+  // ctx.latest/outputMaybe strip them, and the gate needs the iteration to pair
+  // reviews with the validate round they reviewed.
+  const validates = (ctx.outputs.validate ?? []).filter((r: any) => r.nodeId === `${slug}:validate`);
+  const validate = validates.reduce(
+    (best: any, row: any) => (best === undefined || iterationOf(row) >= iterationOf(best) ? row : best),
+    undefined,
+  );
 
   // Review outputs share the same table across every ticket; scope by node id.
-  const ticketReviews = reviews.filter(
+  const ticketReviews = (ctx.outputs.review ?? []).filter(
     (r: any) => typeof r.nodeId === "string" && r.nodeId.startsWith(`${slug}:review:`),
   );
 
-  // done = false until validate has actually run AND passed, AND at least one reviewer approved
   const hasValidated = validate !== undefined;
   const validationPassed = hasValidated && validate.allPassed !== false;
-  const anyReviewApproved = ticketReviews.length > 0 && ticketReviews.some((r: any) => r.approved === true);
+
+  // Only reviews of the CURRENT iteration's code count: an approval of an
+  // earlier round must not green-light code that was re-implemented since.
+  const currentIteration = hasValidated ? iterationOf(validate) : 0;
+  const currentReviews = ticketReviews.filter((r: any) => iterationOf(r) === currentIteration);
+  const anyReviewApproved = currentReviews.some((r: any) => r.approved === true);
   const done = validationPassed && anyReviewApproved;
 
-  if (!hasValidated) return { feedback: null, done: false };
+  if (!hasValidated) return { feedback: null, done: false, validationPassed: false };
 
   const parts: string[] = [];
 
@@ -95,7 +107,7 @@ function buildFeedback(
     parts.push(`VALIDATION FAILED:\n${validate.failingSummary}`);
   }
 
-  for (const review of ticketReviews) {
+  for (const review of currentReviews) {
     if (review.approved === false) {
       parts.push(`REVIEWER REJECTED:\n${review.feedback}`);
       if (review.issues?.length) {
@@ -109,12 +121,15 @@ function buildFeedback(
   return {
     feedback: parts.length > 0 ? parts.join("\n\n") : null,
     done,
+    validationPassed,
   };
 }
 
 export default smithers((ctx) => {
   const tickets = discoverTickets();
-  const maxConcurrency = ctx.input.maxConcurrency;
+  // Coalesce: zod .default() never applies at runtime, and a null
+  // maxConcurrency makes the <Parallel> cap UNLIMITED (Number(null) -> 0).
+  const maxConcurrency = ctx.input.maxConcurrency ?? 3;
   const ticketResults = ctx.outputs.ticketResult ?? [];
 
   return (
@@ -124,7 +139,7 @@ export default smithers((ctx) => {
         {/* Implement each ticket in its own worktree branch, in parallel */}
         <Parallel maxConcurrency={maxConcurrency}>
           {tickets.map((ticket) => {
-            const { feedback, done } = buildFeedback(ctx, ticket.slug);
+            const { feedback, done, validationPassed } = buildFeedback(ctx, ticket.slug);
             return (
               <Worktree
                 key={ticket.slug}
@@ -138,6 +153,7 @@ export default smithers((ctx) => {
                     implementAgents={agents.implement}
                     validateAgents={agents.smart}
                     reviewAgents={agents.review}
+                    reviewWhen={validationPassed}
                     feedback={feedback}
                     done={done}
                     maxIterations={3}
