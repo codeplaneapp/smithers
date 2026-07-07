@@ -93,4 +93,43 @@ describe("llmJudge response parsing (regression: brace in reason)", () => {
         expect(arrayResult.score).toBe(0);
         expect(arrayResult.reason).toBeUndefined();
     });
+
+    test("valid JSON that is neither number nor object falls back to score 0", async () => {
+        // `true` parses cleanly but is neither a numeric score nor an object,
+        // so parseJudgeJson returns undefined and the judge scores 0.
+        const scorer = makeScorer("true");
+        const result = await scorer.score(input);
+        expect(result.score).toBe(0);
+        expect(result.reason).toBe("Failed to parse judge response as JSON");
+    });
+
+    test("prose-wrapped JSON with escaped quotes AND nested braces still parses", async () => {
+        // Prose around the JSON forces the balanced-brace walker (the fast
+        // JSON.parse fails). The walker must honor the backslash-escaped quote
+        // inside `reason` and the nested `d` object without truncating.
+        const scorer = makeScorer(
+            'My verdict:\n{"score": 0.5, "reason": "he said \\"go {x}\\"", "d": {"n": 1}}\nDone.',
+        );
+        const result = await scorer.score(input);
+        expect(result.score).toBe(0.5);
+        expect(result.reason).toBe('he said "go {x}"');
+    });
+
+    test("an unterminated brace runs the walker to exhaustion and falls back to 0", async () => {
+        // A `{` with no matching `}` never drops depth to 0, so the walker loop
+        // runs off the end of the string and returns undefined.
+        const scorer = makeScorer('Truncated: {"score": 0.5, "reason": "cut off');
+        const result = await scorer.score(input);
+        expect(result.score).toBe(0);
+        expect(result.reason).toBe("Failed to parse judge response as JSON");
+    });
+
+    test("prose-wrapped balanced braces that are not valid JSON fall back to 0", async () => {
+        // The walker finds a balanced `{...}` region but JSON.parse of it throws,
+        // so the inner catch yields undefined and the judge scores 0.
+        const scorer = makeScorer("Here: {this is not: valid json} end");
+        const result = await scorer.score(input);
+        expect(result.score).toBe(0);
+        expect(result.reason).toBe("Failed to parse judge response as JSON");
+    });
 });

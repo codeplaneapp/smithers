@@ -37,6 +37,11 @@ describe("extractDelegationEvents", () => {
         expect(extractDelegationEvents({ output: "text", context: 42 })).toBeNull();
         expect(extractDelegationEvents({ output: [] })).toBeNull();
     });
+    it("returns null for an object whose events field is not an array", () => {
+        expect(
+            extractDelegationEvents({ output: { events: "nope", notEvents: 1 } }),
+        ).toBeNull();
+    });
     it("filters non-event entries out of a bare array", () => {
         const payload = extractDelegationEvents({
             output: [{ t: "NODE_DONE", node: "c1" }, "junk", { notAnEvent: true }],
