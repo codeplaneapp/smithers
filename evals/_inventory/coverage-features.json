@@ -1129,16 +1129,16 @@
     "id": "buildEvalPlan",
     "name": "Build eval execution plan",
     "area": "evals",
-    "kind": "api",
-    "summary": "Transforms loaded cases into a planned execution with stable run IDs and suite/case metadata.",
+    "kind": "internal",
+    "summary": "Internal helper of the `smithers eval` command (apps/cli/src/eval-suite.js). Transforms loaded cases into a planned execution with stable run IDs and suite/case metadata. Not a published export.",
     "slice": "scorers-evals-optimize"
   },
   {
     "id": "evaluateEvalCaseResult",
     "name": "Evaluate case result assertions",
     "area": "evals",
-    "kind": "api",
-    "summary": "Checks run result against expected assertions (status, output, outputContains, errorContains) and returns pass/fail per assertion.",
+    "kind": "internal",
+    "summary": "Internal helper of the `smithers eval` command (apps/cli/src/eval-suite.js). Checks run result against expected assertions (status, output, outputContains, errorContains) and returns pass/fail per assertion. Not a published export.",
     "slice": "scorers-evals-optimize"
   },
   {
@@ -1154,8 +1154,8 @@
     "id": "buildEvalReport",
     "name": "Build and write eval report",
     "area": "evals",
-    "kind": "api",
-    "summary": "Constructs and writes a JSON report summarizing eval results with per-case status, assertions, and timing.",
+    "kind": "internal",
+    "summary": "Internal helper of the `smithers eval` command (apps/cli/src/eval-suite.js). Constructs and writes a JSON report summarizing eval results with per-case status, assertions, and timing. Not a published export; author-facing surface is the `smithers eval` CLI and the report file at .smithers/evals/<suiteId>.json.",
     "slice": "scorers-evals-optimize"
   },
   {

@@ -28,7 +28,7 @@
 | diagnostics | 1 | 1 | 1 | 0 | 0 | 0 | 1 | 0 |
 | docs | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | durability-model | 4 | 4 | 4 | 0 | 0 | 0 | 4 | 0 |
-| evals | 8 | 12 | 4 | 8 | 0 | 0 | 11 | 1 |
+| evals | 8 | 12 | 4 | 6 | 0 | 0 | 11 | 1 |
 | examples | 8 | 11 | 4 | 7 | 0 | 0 | 10 | 1 |
 | gateway | 15 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | gateway-http-api | 0 | 4 | 2 | 2 | 0 | 0 | 4 | 0 |
@@ -299,11 +299,11 @@ Immediate docs-gap candidates — an eval that fails here points straight at a d
 
 ### evals
 
-- **Build and write eval report** (`-`) — Constructs and writes a JSON report summarizing eval results with per-case status, assertions, and timing. · _?_
-- **Build eval execution plan** (`-`) — Transforms loaded cases into a planned execution with stable run IDs and suite/case metadata. · _?_
+- **Build and write eval report** (`-`) — Internal helper of the `smithers eval` command (apps/cli/src/eval-suite.js). Constructs and writes a JSON report summarizing eval results with per-case status, assertions, and timing. Not a published export; author-facing surface is the `smithers eval` CLI and the report file at .smithers/evals/<suiteId>.json. · _?_
+- **Build eval execution plan** (`-`) — Internal helper of the `smithers eval` command (apps/cli/src/eval-suite.js). Transforms loaded cases into a planned execution with stable run IDs and suite/case metadata. Not a published export. · _?_
 - **Eval case metadata for optimization hints** (`-`) — Per-case metadata object supporting promptPatches (explicit patches) and optimizationHints (guidance for GEPA). · _?_
 - **Eval cases JSONL format** (`-`) — Line-delimited JSON format for eval cases, each with id, input, expected (status/output/outputContains), annotations, metadata. · _?_
-- **Evaluate case result assertions** (`-`) — Checks run result against expected assertions (status, output, outputContains, errorContains) and returns pass/fail per assertion. · _?_
+- **Evaluate case result assertions** (`-`) — Internal helper of the `smithers eval` command (apps/cli/src/eval-suite.js). Checks run result against expected assertions (status, output, outputContains, errorContains) and returns pass/fail per assertion. Not a published export. · _?_
 - **Generate stable eval run IDs** (`-`) — Creates deterministic run IDs from suite and case IDs, capping at 64 characters with hash suffix for long names. · _?_
 - **Load eval cases from JSONL/JSON** (`-`) — Loads and normalizes eval cases from JSONL or JSON files, with per-case input, expected assertions, and metadata. · _?_
 - **eval-writer skill for bootstrapping suites** (`-`) — Workflow skill that turns plain-English acceptance criteria into executable JSONL eval fixtures with cases and rubrics. · _?_

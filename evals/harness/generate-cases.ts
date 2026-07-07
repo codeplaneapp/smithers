@@ -60,6 +60,10 @@ function routeSuite(t: Task): string | null {
   // regardless of kind, as long as they are verifiable (judge or have an answer).
   if (t.source === "real-usage" && t.verify !== "fixture") return "real-usage";
   if (kind === "ops" || kind === "db-query") return null; // needs live state — fixture wave
+  // Internal implementation helpers (e.g. exports of apps/cli/src/*.js used only by a
+  // CLI command's own internals) are NOT public authoring API — an author has no
+  // importable path to them, so any authoring/knowledge case is unsatisfiable. Defer.
+  if (kind === "internal") return null;
 
   if (kind === "knowledge") {
     if (t.verify !== "judge" && !((t.canonicalAnswer ?? "").trim())) return null; // nothing to assert on
