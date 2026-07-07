@@ -86,6 +86,9 @@ let activeRunId: string | undefined;
 let includeSmithersDocsNextTurn = false;
 let createMcpConnection: McpConnectionFactory = defaultCreateMcpConnection;
 let logMcpEvent: McpLogger = defaultLogMcpEvent;
+// Reads a docs bundle candidate off disk. Injectable so a test can exercise the
+// candidate-fallthrough and not-found branches without moving the real files.
+let readDocsFile: (path: string) => string = (path) => readFileSync(path, "utf8");
 
 const runs = new Map<string, TrackedRun>();
 
@@ -116,7 +119,7 @@ function loadSmithersDocs() {
   ];
   for (const candidate of candidates) {
     try {
-      smithersDocs = readFileSync(candidate, "utf8");
+      smithersDocs = readDocsFile(candidate);
       return smithersDocs;
     } catch {
       // try next
@@ -268,6 +271,14 @@ export function setMcpConnectionFactoryForTesting(factory: McpConnectionFactory 
 // without touching the real stderr sink.
 export function setMcpLoggerForTesting(logger: McpLogger | undefined) {
   logMcpEvent = logger ?? defaultLogMcpEvent;
+}
+
+// Test seam: swap the docs-file reader (and drop the cached bundle) so the
+// candidate-fallthrough / not-found branches of loadSmithersDocs are reachable
+// without touching the real docs files on disk.
+export function setDocsFileReaderForTesting(reader: ((path: string) => string) | undefined) {
+  readDocsFile = reader ?? ((path) => readFileSync(path, "utf8"));
+  smithersDocs = undefined;
 }
 
 export function resetMcpStateForTesting() {
