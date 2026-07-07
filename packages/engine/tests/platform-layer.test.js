@@ -39,4 +39,39 @@ describe("platform layer", () => {
         expect(result).toBe("done");
         expect(getPlatformLayer()).toBe(layer);
     });
+
+    test("keeps layers isolated across concurrent runs (no global bleed)", async () => {
+        const layerA = Layer.succeed(TestService, "A");
+        const layerB = Layer.succeed(TestService, "B");
+        let releaseA;
+        let releaseB;
+        const gateA = new Promise((resolve) => {
+            releaseA = resolve;
+        });
+        const gateB = new Promise((resolve) => {
+            releaseB = resolve;
+        });
+        const observed = {};
+
+        // Both runs enter (and establish their scoped layer) before either reads.
+        const a = withPlatformLayer(layerA, async () => {
+            await gateA;
+            return "a";
+        });
+        const b = withPlatformLayer(layerB, async () => {
+            await gateB;
+            observed.b = getPlatformLayer();
+            return "b";
+        });
+
+        // Let A finish first (its restore would clobber the global), THEN B reads.
+        // A mutable-global impl leaves B reading the default here; ALS reads layerB.
+        releaseA();
+        expect(await a).toBe("a");
+        releaseB();
+        expect(await b).toBe("b");
+
+        expect(observed.b).toBe(layerB);
+        expect(getPlatformLayer()).toBe(getDefaultPlatformLayer());
+    });
 });

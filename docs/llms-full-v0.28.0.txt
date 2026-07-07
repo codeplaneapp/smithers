@@ -6719,6 +6719,8 @@ type RunOptions = {
   annotations?: Record<string, string | number | boolean>;
   auth?: RunAuthContext | null;
   config?: Record<string, unknown>;
+  effectPlatformRuntime?: "bun" | "node" | "worker";     // swappable @effect/platform layer; "node"/"worker" require effectPlatformLayer
+  effectPlatformLayer?: Layer.Layer<any, never, never>;  // e.g. NodeContext.layer from a Node serverless entrypoint
   cliAgentToolsDefault?: "all" | "explicit-only";  // default "all"
   initialOutputs?: OutputSnapshot;  // seed prior outputs (resume/fork)
   initialIteration?: number;        // seed the starting loop iteration

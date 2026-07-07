@@ -173,14 +173,14 @@ const DEFAULT_TASKS: z.input<typeof taskSchema>[] = [
       "A Durable Object advances a small SDK-agent workflow (touching NO worktree/durability-snapshot features — those degrade in 2c) to completion on DO-SQLite under Miniflare (@cloudflare/vitest-pool-workers), no mocks. `pnpm typecheck` + `pnpm -C packages/cloudflare test` green.",
   },
   {
-    id: "2b-cf-sandbox-provider-fix",
-    title: "🐛 fix(cloudflare): sandbox provider result reconciliation + per-turn lifecycle",
+    id: "2b-cf-sandbox-provider-harness",
+    title: "✨ feat(cloudflare): ship the in-container harness + keepAlive lifecycle",
     goal:
-      "Make createCloudflareSandboxProvider actually usable: collect results in execution:'process' mode (currently fire-and-forget, returns a pid with no result bundle), ship a reference in-container harness (default cmd `node /workspace/run-smithers-sandbox.js` ships nowhere), and thread setSleepAfter/keepAlive so a container can spin up per boundary and be paused/stopped. Independent of 1b-1e (container-side) — safe as an early parallel lane.",
+      "Finish createCloudflareSandboxProvider. ALREADY LANDED (commit 32fc7400b): execution:'process' now waits (proc.waitForExit) and reconciles the result bundle, and sleepAfter is threaded. REMAINING: (a) ship the reference in-container harness — the default command `node /workspace/run-smithers-sandbox.js` still ships nowhere, so the container cannot run a real child workflow out of the box; (b) exercise keepAlive/setKeepAlive so a warm container can be reused/stopped across boundaries. Independent of 1b-1e (container-side) — safe as an early parallel lane.",
     files:
-      "packages/cloudflare/src/index.js:182-296 (createCloudflareSandboxProvider; execution 'process' ~:233-250; cleanup ~:288-296; keepAlive ~:202), packages/sandbox/src/SandboxProvider.ts.",
+      "packages/cloudflare/src/index.js (createCloudflareSandboxProvider; process branch ~:265-286, cleanup ~:302-311, sleepAfter ~:203), packages/sandbox/src/SandboxProvider.ts. Bundle the harness into the image/setupFiles and reconstruct the workflow from input/config.",
     done:
-      "process-mode round-trips a real result bundle; a shipped harness reconstructs+runs a child workflow from input/config; setSleepAfter/stop are exercised. No mocks: unit tests may use the local @cloudflare/sandbox dev container/workerd; add ONE integration lane against a real container (no fabricated responses). `pnpm typecheck` + tests green.",
+      "a shipped harness reconstructs+runs a child workflow from input/config to a result bundle; keepAlive reuse/stop is exercised. No mocks: unit tests may use the local @cloudflare/sandbox dev container/workerd; add ONE integration lane against a real container (no fabricated responses). `pnpm typecheck` + tests green.",
   },
   {
     id: "2c-graceful-degrade",
