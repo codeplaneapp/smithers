@@ -459,6 +459,81 @@ function makePostgresTimeTravelStorage({ snapshots = [], branches = [], upserts 
     };
 }
 
+function createCyclicSemanticTimelineStorage() {
+    const snapshots = [
+        {
+            runId: "root",
+            frameNo: 0,
+            nodesJson: "[]",
+            outputsJson: "{}",
+            ralphJson: "[]",
+            inputJson: "{}",
+            vcsPointer: "vcs-root",
+            workflowHash: "hash-root",
+            contentHash: "content-root",
+            createdAtMs: NOW - 2_000,
+        },
+        {
+            runId: "child",
+            frameNo: 0,
+            nodesJson: "[]",
+            outputsJson: "{}",
+            ralphJson: "[]",
+            inputJson: "{}",
+            vcsPointer: "vcs-child",
+            workflowHash: "hash-child",
+            contentHash: "content-child",
+            createdAtMs: NOW - 1_000,
+        },
+    ];
+    const branches = [
+        {
+            runId: "child",
+            parentRunId: "root",
+            parentFrameNo: 0,
+            branchLabel: "root-to-child",
+            forkDescription: null,
+            createdAtMs: NOW - 500,
+        },
+        {
+            runId: "root",
+            parentRunId: "child",
+            parentFrameNo: 0,
+            branchLabel: "child-to-root",
+            forkDescription: null,
+            createdAtMs: NOW,
+        },
+    ];
+    const snapshotReadsByRun = new Map();
+    const storage = {
+        dialect: "postgres",
+        queryAll: async (sql, params) => {
+            if (sql.includes("_smithers_snapshots")) {
+                const runId = params[0];
+                const reads = (snapshotReadsByRun.get(runId) ?? 0) + 1;
+                snapshotReadsByRun.set(runId, reads);
+                if (reads > 1) {
+                    throw new Error(`semantic get_timeline rebuilt ${runId}`);
+                }
+                return snapshots.filter((snapshot) => snapshot.runId === runId);
+            }
+            if (sql.includes("_smithers_branches")) {
+                const parentRunId = params[0];
+                return branches.filter((branch) => branch.parentRunId === parentRunId);
+            }
+            throw new Error(`unexpected queryAll: ${sql}`);
+        },
+        queryOne: async (sql, params) => {
+            if (sql.includes("_smithers_branches")) {
+                const runId = params[0];
+                return branches.find((branch) => branch.runId === runId) ?? null;
+            }
+            throw new Error(`unexpected queryOne: ${sql}`);
+        },
+    };
+    return { storage, snapshotReadsByRun };
+}
+
 function expectWorkflowSummaryMatchesSchema(workflow) {
     const declared = new Set(Object.keys(workflowSummarySchema.shape));
     for (const key of Object.keys(workflow)) {
@@ -1119,6 +1194,39 @@ describe("semantic tool definitions", () => {
         expect(blocked.isError).toBe(true);
         expect(blocked.structuredContent.error.code).toBe("RUN_STILL_RUNNING");
         expect(blocked.structuredContent.error.message).toContain("Pass force=true");
+    });
+
+    test("get_timeline tree reports cyclic fork graphs without revisiting runs", async () => {
+        const { storage, snapshotReadsByRun } = createCyclicSemanticTimelineStorage();
+        const harness = makeHarness({
+            internalStorage: storage,
+            runs: [
+                runRow({ runId: "root", status: "finished", finishedAtMs: NOW }),
+                runRow({ runId: "child", parentRunId: "root", status: "finished", finishedAtMs: NOW }),
+            ],
+            nodes: [],
+            approvals: [],
+            attempts: [],
+        });
+
+        const cyclicTimeline = await harness.call("get_timeline", { runId: "root", tree: true });
+
+        expect(cyclicTimeline.isError).toBe(true);
+        expect(cyclicTimeline.structuredContent).toMatchObject({
+            ok: false,
+            error: {
+                code: "INVALID_INPUT",
+                details: {
+                    runId: "root",
+                    cyclePath: ["root", "child", "root"],
+                },
+            },
+        });
+        expect(cyclicTimeline.structuredContent.error.message).toContain("fork ancestry cycle");
+        expect(JSON.parse(cyclicTimeline.content[0].text)).toEqual(cyclicTimeline.structuredContent);
+        expect(snapshotReadsByRun.get("root")).toBe(1);
+        expect(snapshotReadsByRun.get("child")).toBe(1);
+        expect([...snapshotReadsByRun.values()].every((reads) => reads <= 1)).toBe(true);
     });
 
     test("serves semantic durability snapshot and restore tools", async () => {
