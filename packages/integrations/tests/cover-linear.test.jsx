@@ -39,6 +39,12 @@ function startScriptServer() {
             if (!next) {
                 return Response.json({ errors: [{ message: `no script for ${operation}` }] });
             }
+            if (next.raw !== undefined) {
+                return new Response(next.raw, {
+                    status: next.status ?? 200,
+                    headers: { "content-type": "application/json", ...(next.headers ?? {}) },
+                });
+            }
             const payload = next.errors !== undefined ? { errors: next.errors } : { data: next.data };
             return new Response(JSON.stringify(payload), {
                 status: next.status ?? 200,
@@ -108,6 +114,17 @@ describe("query retry + HTTP error branches", () => {
         expect(s.requests.filter((r) => r.operation === "TeamByKey")).toHaveLength(2);
     }, 10_000);
 
+    test("falls back to exponential backoff when the reset header is non-positive", async () => {
+        const s = server();
+        // reset present but not a positive future ms → retryDelayFromHeaders
+        // returns undefined and the client uses its own backoff.
+        s.script("TeamByKey", { status: 500, headers: { "x-ratelimit-requests-reset": "0" } });
+        s.script("TeamByKey", { data: { teams: { nodes: [TEAM] } } });
+        const team = await Effect.runPromise(client(s.url).resolveTeam({ teamKey: "ENG" }));
+        expect(team.id).toBe("team-eng-id");
+        expect(s.requests.filter((r) => r.operation === "TeamByKey")).toHaveLength(2);
+    }, 10_000);
+
     test("gives up after MAX_ATTEMPTS on persistent 429s", async () => {
         const s = server();
         for (let i = 0; i < 6; i += 1) {
@@ -131,6 +148,20 @@ describe("query retry + HTTP error branches", () => {
         s.script("Issue", { data: null, errors: [{ message: "Entity not found" }] });
         const error = await Effect.runPromise(Effect.flip(client(s.url).getIssue("ENG-404")));
         expect(error.message).toContain("Entity not found");
+    });
+
+    test("a network error is wrapped as delivery-failed", async () => {
+        // Port 1 refuses connections → fetch rejects → the tryPromise catch runs.
+        const dead = makeLinearClient({ apiKey: API_KEY, apiBaseUrl: "http://127.0.0.1:1/graphql" });
+        const error = await Effect.runPromise(Effect.flip(dead.query("query Ping { viewer { id } }")));
+        expect(error.message).toMatch(/network error/);
+    });
+
+    test("a non-JSON response body surfaces as decode-failed", async () => {
+        const s = server();
+        s.script("TeamByKey", { status: 200, raw: "<html>not json</html>" });
+        const error = await Effect.runPromise(Effect.flip(client(s.url).resolveTeam({ teamKey: "ENG" })));
+        expect(error.message).toMatch(/non-JSON response/);
     });
 });
 
