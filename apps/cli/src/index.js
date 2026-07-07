@@ -971,6 +971,7 @@ async function* streamRunEventsCommand(c) {
 const DEFAULT_EVENTS_LIMIT = 1_000;
 const MAX_EVENTS_LIMIT = 100_000;
 const EVENTS_PAGE_SIZE = 1_000;
+const DOWN_ACTIVE_RUN_SCAN_LIMIT = 1_000;
 /**
  * @param {string} payloadJson
  * @returns {Record<string, unknown>}
@@ -6816,15 +6817,15 @@ const cli = Cli.create({
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
-                const activeRuns = await adapter.listRuns(100, "running");
-                const waitingApprovalRuns = await adapter.listRuns(100, "waiting-approval");
-                const waitingEventRuns = await adapter.listRuns(100, "waiting-event");
-                const waitingTimerRuns = await adapter.listRuns(100, "waiting-timer");
+                const activeRuns = await adapter.listRuns(DOWN_ACTIVE_RUN_SCAN_LIMIT, "running");
+                const waitingApprovalRuns = await adapter.listRuns(DOWN_ACTIVE_RUN_SCAN_LIMIT, "waiting-approval");
+                const waitingEventRuns = await adapter.listRuns(DOWN_ACTIVE_RUN_SCAN_LIMIT, "waiting-event");
+                const waitingTimerRuns = await adapter.listRuns(DOWN_ACTIVE_RUN_SCAN_LIMIT, "waiting-timer");
                 // A paused run is a durable, resumable state with no live engine;
                 // include it so `down` can terminate it. Its heartbeat is nulled
                 // (stale), so the fresh-heartbeat guard flips it to cancelled
                 // without --force via the direct-flip path below.
-                const pausedRuns = await adapter.listRuns(100, "paused");
+                const pausedRuns = await adapter.listRuns(DOWN_ACTIVE_RUN_SCAN_LIMIT, "paused");
                 const allActive = [
                     ...activeRuns,
                     ...waitingApprovalRuns,

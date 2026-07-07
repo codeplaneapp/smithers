@@ -134,6 +134,38 @@ describe("smithers down --force staleness check", () => {
             sqlite.close();
         }
     }, CLI_COMMAND_TIMEOUT_MS);
+
+    test("cancels 101 stale running rows in one json invocation", async () => {
+        const repo = createTempRepo();
+        const { sqlite, adapter } = openRepoDb(repo);
+        try {
+            const now = Date.now();
+            const runIds = Array.from({ length: 101 }, (_, index) => `stale-run-${String(index).padStart(3, "0")}`);
+            for (const [index, runId] of runIds.entries()) {
+                await insertRunningRun(adapter, runId, {
+                    createdAtMs: now - index,
+                    startedAtMs: now - 10_000 - index,
+                    heartbeatAtMs: now - 120_000 - index,
+                });
+            }
+
+            const result = runSmithers(["down"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
+
+            expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+            expect(result.json?.cancelled).toBe(101);
+            expect(result.json?.skipped).toBe(0);
+            expect(await adapter.listRuns(200, "running")).toEqual([]);
+            const rows = await Promise.all(runIds.map((runId) => adapter.getRun(runId)));
+            expect(rows.every((row) => row?.status === "cancelled")).toBe(true);
+        }
+        finally {
+            sqlite.close();
+        }
+    }, CLI_COMMAND_TIMEOUT_MS);
 });
 
 describe("smithers cancel live-run handling", () => {
