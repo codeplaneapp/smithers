@@ -63,13 +63,27 @@ function scoreFromChecks(checks: EvalVerdict["checks"]): number {
   return checks.filter((c) => c.passed).length / checks.length;
 }
 
+/** Match a `must`/`mustNot` token against the artifact. A JSX opening-tag token
+ * like "<Task" must also match the createSmithers factory-namespace form
+ * `<parent.Task` — both `<Task>` (bare import) and `<parent.Task>` (factory
+ * member access) are documented, idiomatic ways to reference a component (see
+ * docs/components/subflow.mdx), so a plain substring check unfairly fails the
+ * factory-namespace form. */
+function matchesToken(artifact: string, token: string): boolean {
+  const jsxTag = /^<([A-Za-z_$][\w$]*)$/.exec(token);
+  if (jsxTag) {
+    return new RegExp(`<(?:[A-Za-z_$][\\w$]*\\.)?${jsxTag[1]}\\b`).test(artifact);
+  }
+  return artifact.includes(token);
+}
+
 function containsVerify(artifact: string, v: VerifySpec): EvalVerdict {
   const checks: EvalVerdict["checks"] = [];
   for (const m of v.must) {
-    checks.push({ name: `must:${m}`, passed: artifact.includes(m), detail: m });
+    checks.push({ name: `must:${m}`, passed: matchesToken(artifact, m), detail: m });
   }
   for (const m of v.mustNot) {
-    checks.push({ name: `mustNot:${m}`, passed: !artifact.includes(m), detail: m });
+    checks.push({ name: `mustNot:${m}`, passed: !matchesToken(artifact, m), detail: m });
   }
   const passed = checks.every((c) => c.passed) && checks.length > 0;
   return {
@@ -138,8 +152,8 @@ function graphVerify(artifact: string, v: VerifySpec): EvalVerdict {
       passed: graphStatus === 0,
       detail: graphStatus === 0 ? "rendered" : `exit ${graphStatus}: ${graphOut.slice(0, 300)}`,
     },
-    ...v.must.map((m) => ({ name: `must:${m}`, passed: artifact.includes(m), detail: m })),
-    ...v.mustNot.map((m) => ({ name: `mustNot:${m}`, passed: !artifact.includes(m), detail: m })),
+    ...v.must.map((m) => ({ name: `must:${m}`, passed: matchesToken(artifact, m), detail: m })),
+    ...v.mustNot.map((m) => ({ name: `mustNot:${m}`, passed: !matchesToken(artifact, m), detail: m })),
   ];
   const passed = checks.every((c) => c.passed);
   return {
@@ -266,8 +280,8 @@ function buildVerify(artifact: string, v: VerifySpec): EvalVerdict {
   }
   const checks: EvalVerdict["checks"] = [
     { name: "transpiles", passed: transpiled, detail: transpiled ? "valid tsx" : err.slice(0, 200) },
-    ...v.must.map((m) => ({ name: `must:${m}`, passed: artifact.includes(m), detail: m })),
-    ...v.mustNot.map((m) => ({ name: `mustNot:${m}`, passed: !artifact.includes(m), detail: m })),
+    ...v.must.map((m) => ({ name: `must:${m}`, passed: matchesToken(artifact, m), detail: m })),
+    ...v.mustNot.map((m) => ({ name: `mustNot:${m}`, passed: !matchesToken(artifact, m), detail: m })),
   ];
   const passed = checks.every((c) => c.passed);
   return {

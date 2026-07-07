@@ -64,3 +64,42 @@ describe("query verifier whole-cell matching", () => {
     expect(verdict.passed).toBe(true);
   });
 });
+
+describe("must/mustNot JSX-tag tokens tolerate the createSmithers factory namespace", () => {
+  function containsSpec(over: Partial<VerifySpec>): VerifySpec {
+    return { kind: "contains", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], ...over };
+  }
+
+  // Bug: `must: ["<Task"]` false-failed the documented createSmithers factory
+  // form `<parent.Task>` because it was checked with a raw `artifact.includes`.
+  // Both `<Task>` (bare import) and `<parent.Task>` (factory member access) are
+  // valid, idiomatic ways to reference a component (docs/components/subflow.mdx).
+  test("a bare component `must` token matches `<parent.Component>` factory JSX", async () => {
+    const v = containsSpec({ must: ["<Workflow", "<Sequence", "<Subflow", "<Task"] });
+    const artifact = `
+      const parent = createSmithers();
+      export default (
+        <parent.Workflow>
+          <parent.Sequence>
+            <parent.Subflow child={child} />
+            <parent.Task name="a" run={() => {}} />
+          </parent.Sequence>
+        </parent.Workflow>
+      );
+    `;
+    const verdict = await computeVerdict(v, report(artifact));
+    expect(verdict.passed).toBe(true);
+  });
+
+  test("a bare component `must` token still matches a plain bare-imported tag", async () => {
+    const v = containsSpec({ must: ["<Task"] });
+    const verdict = await computeVerdict(v, report("<Task name=\"a\" run={() => {}} />"));
+    expect(verdict.passed).toBe(true);
+  });
+
+  test("a bare component `must` token does not false-match a substring of another name", async () => {
+    const v = containsSpec({ must: ["<Task"] });
+    const verdict = await computeVerdict(v, report("<TaskGroup name=\"a\" />"));
+    expect(verdict.passed).toBe(false);
+  });
+});
