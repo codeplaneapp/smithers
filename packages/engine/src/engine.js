@@ -2121,6 +2121,28 @@ function assertInputObject(input) {
     }
 }
 /**
+ * @param {unknown} inputSchema
+ * @param {Record<string, unknown>} input
+ * @returns {Record<string, unknown>}
+ */
+function parseInputWithSchema(inputSchema, input) {
+    if (!inputSchema || typeof inputSchema !== "object") {
+        return input;
+    }
+    const parser = /** @type {{ safeParse?: (input: unknown) => { success: boolean; data?: unknown; error?: { issues?: unknown } } }} */ (inputSchema);
+    if (typeof parser.safeParse !== "function") {
+        return input;
+    }
+    const result = parser.safeParse(input);
+    if (!result.success) {
+        throw new SmithersError("INVALID_INPUT", "Input does not match schema", {
+            issues: result.error?.issues,
+        });
+    }
+    assertInputObject(result.data);
+    return /** @type {Record<string, unknown>} */ (result.data);
+}
+/**
  * @param {RunOptions} opts
  */
 function validateRunOptions(opts) {
@@ -5713,7 +5735,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
             if ("runId" in opts.input && opts.input.runId !== runId) {
                 throw new SmithersError("INVALID_INPUT", "Input runId does not match provided runId");
             }
-            const inputRow = buildInputRow(inputTable, runId, opts.input);
+            const parsedInput = parseInputWithSchema(workflowRef.inputSchema, opts.input);
+            const inputRow = buildInputRow(inputTable, runId, parsedInput);
             const validation = validateInput(inputTable, inputRow);
             if (!validation.ok) {
                 throw new SmithersError("INVALID_INPUT", "Input does not match schema", {
