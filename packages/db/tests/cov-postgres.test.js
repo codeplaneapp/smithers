@@ -35,6 +35,17 @@ let dbDescriptor;
 
 const now = 1_700_000_000_000;
 
+async function openIsolatedPgClient() {
+    const isolated = PG_URL
+        ? new pg.Client({ connectionString: PG_URL })
+        : new pg.Client({ host: HOST, port: PORT, database: "postgres", user: "postgres", ssl: false });
+    await isolated.connect();
+    if (PG_URL && schema) {
+        await isolated.query(`SET search_path TO "${schema}"`);
+    }
+    return isolated;
+}
+
 describe.skipIf(process.platform === "win32" && !PG_URL)("SmithersDb + snapshot postgres dialect (PGlite)", () => {
     beforeAll(async () => {
         if (PG_URL) {
@@ -125,9 +136,17 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SmithersDb + snapshot 
 
     test("loadInput surfaces a postgres query error through the catch branch", async () => {
         const inputTable = zodToTable("pg_phantom_input", z.object({ topic: z.string() }), { isInput: true });
-        // Table never created → the postgres SELECT fails and maps to a SmithersError.
-        const exit = await Effect.runPromiseExit(loadInputEffect(dbDescriptor, inputTable, "pg-root"));
-        expect(exit._tag).toBe("Failure");
+        let isolatedClient;
+        try {
+            isolatedClient = await openIsolatedPgClient();
+            const errorDescriptor = { dialect: "postgres", connection: isolatedClient };
+            // Table never created → the postgres SELECT fails and maps to a SmithersError.
+            const exit = await Effect.runPromiseExit(loadInputEffect(errorDescriptor, inputTable, "pg-root"));
+            expect(exit._tag).toBe("Failure");
+        }
+        finally {
+            await isolatedClient?.end().catch(() => { });
+        }
     });
 
     test("input table: syncZodTableSchemaPostgres(isInput) + loadInput over postgres", async () => {
