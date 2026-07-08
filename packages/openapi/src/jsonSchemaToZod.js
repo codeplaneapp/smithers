@@ -39,13 +39,13 @@ export function jsonSchemaToZod(schema, spec, visited = new Set()) {
         // Build a combined object from all allOf entries
         const schemas = s.allOf.map((sub) => jsonSchemaToZod(sub, spec, visited));
         if (schemas.length === 1)
-            return maybeDescribe(schemas[0], s);
+            return applyMetadata(schemas[0], s);
         // For multiple schemas, try to intersect them
         let result = schemas[0];
         for (let i = 1; i < schemas.length; i++) {
             result = z.intersection(result, schemas[i]);
         }
-        return maybeDescribe(result, s);
+        return applyMetadata(result, s);
     }
     // oneOf / anyOf — union
     if (s.oneOf && s.oneOf.length > 0) {
@@ -62,22 +62,22 @@ export function jsonSchemaToZod(schema, spec, visited = new Set()) {
         return buildNumber(s);
     }
     if (type === "boolean") {
-        return maybeDescribe(z.boolean(), s);
+        return applyMetadata(z.boolean(), s);
     }
     if (type === "array") {
         const items = jsonSchemaToZod(s.items, spec, visited);
-        return maybeDescribe(z.array(items), s);
+        return applyMetadata(z.array(items), s);
     }
     if (type === "object" || s.properties) {
         return buildObject(s, spec, visited);
     }
     // null type
     if (type === "null") {
-        return maybeDescribe(z.null(), s);
+        return applyMetadata(z.null(), s);
     }
     // Fallback
     if (s.enum && s.enum.length > 0) {
-        return maybeDescribe(buildLiteralUnion(s.enum), s);
+        return applyMetadata(buildLiteralUnion(s.enum), s);
     }
     const desc = s.description ? `${s.description} (untyped)` : "untyped schema";
     return z.any().describe(desc);
@@ -109,7 +109,7 @@ function buildString(s) {
             str = str.url();
         schema = str;
     }
-    return maybeDescribe(maybeNullable(maybeDefault(schema, s), s), s);
+    return applyMetadata(schema, s);
 }
 /**
  * @param {SchemaObject} s
@@ -126,7 +126,7 @@ function buildNumber(s) {
     if (s.enum && s.enum.length > 0) {
         num = z.intersection(num, buildLiteralUnion(s.enum));
     }
-    return maybeDescribe(maybeNullable(maybeDefault(num, s), s), s);
+    return applyMetadata(num, s);
 }
 /**
  * @param {SchemaObject} s
@@ -156,7 +156,7 @@ function buildObject(s, spec, visited) {
         // ever reaches the upstream API. A catchall preserves unknown keys.
         obj = obj.catchall(z.unknown());
     }
-    return maybeDescribe(maybeNullable(obj, s), s);
+    return applyMetadata(obj, s);
 }
 /**
  * @param {Array<SchemaObject | RefObject>} variants
@@ -170,8 +170,8 @@ function buildUnion(variants, spec, visited, parent) {
     if (schemas.length === 0)
         return z.any();
     if (schemas.length === 1)
-        return maybeDescribe(schemas[0], parent);
-    return maybeDescribe(z.union(schemas), parent);
+        return applyMetadata(schemas[0], parent);
+    return applyMetadata(z.union(schemas), parent);
 }
 // ---------------------------------------------------------------------------
 // Helpers
@@ -195,6 +195,14 @@ function maybeDescribe(schema, s) {
     if (s.description)
         return schema.describe(s.description);
     return schema;
+}
+/**
+ * @param {z.ZodType} schema
+ * @param {SchemaObject} s
+ * @returns {z.ZodType}
+ */
+function applyMetadata(schema, s) {
+    return maybeDescribe(maybeNullable(maybeDefault(schema, s), s), s);
 }
 /**
  * @param {z.ZodType} schema

@@ -48,6 +48,40 @@ describe("OpenAPI tool execution", () => {
         expect(init.body).toBe(JSON.stringify({ name: "Fido", tag: "dog" }));
         expect(init.headers["Content-Type"]).toBe("application/json");
     });
+    test("POST request prefers application/json over earlier declared media types", async () => {
+        const tools = createOpenApiToolsSync({
+            openapi: "3.0.0",
+            info: { title: "Media Selection", version: "1.0.0" },
+            servers: [{ url: "https://api.example.com" }],
+            paths: {
+                "/pets": {
+                    post: {
+                        operationId: "createPet",
+                        requestBody: {
+                            required: true,
+                            content: {
+                                "text/plain": {
+                                    schema: { type: "string" },
+                                },
+                                "application/json": {
+                                    schema: {
+                                        type: "object",
+                                        required: ["name"],
+                                        properties: { name: { type: "string" } },
+                                    },
+                                },
+                            },
+                        },
+                        responses: { "201": { description: "created" } },
+                    },
+                },
+            },
+        });
+        await tools.createPet.execute({ body: { name: "Fido" } });
+        const [, init] = mockFetch.mock.calls[0];
+        expect(init.headers["Content-Type"]).toBe("application/json");
+        expect(init.body).toBe(JSON.stringify({ name: "Fido" }));
+    });
     test("POST request with multipart form body", async () => {
         const tools = createOpenApiToolsSync({
             openapi: "3.0.0",

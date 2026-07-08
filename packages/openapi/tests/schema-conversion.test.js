@@ -121,6 +121,38 @@ describe("jsonSchemaToZod", () => {
         expect(schema.parse(undefined)).toBe(10);
         expect(schema.parse(5)).toBe(5);
     });
+    test("applies nullable and default metadata across non-string schema branches", () => {
+        const nullableBoolean = jsonSchemaToZod({ type: "boolean", nullable: true }, emptySpec);
+        expect(nullableBoolean.parse(null)).toBe(null);
+        expect(nullableBoolean.parse(true)).toBe(true);
+
+        const defaultArray = jsonSchemaToZod({
+            type: "array",
+            items: { type: "string" },
+            default: ["new"],
+        }, emptySpec);
+        expect(defaultArray.parse(undefined)).toEqual(["new"]);
+
+        const defaultObject = jsonSchemaToZod({
+            type: "object",
+            properties: { enabled: { type: "boolean" } },
+            default: { enabled: true },
+        }, emptySpec);
+        expect(defaultObject.parse(undefined)).toEqual({ enabled: true });
+
+        const nullableUnion = jsonSchemaToZod({
+            anyOf: [{ type: "string" }, { type: "integer" }],
+            nullable: true,
+        }, emptySpec);
+        expect(nullableUnion.parse(null)).toBe(null);
+        expect(nullableUnion.parse(3)).toBe(3);
+
+        const defaultComposition = jsonSchemaToZod({
+            allOf: [{ type: "string" }],
+            default: "fallback",
+        }, emptySpec);
+        expect(defaultComposition.parse(undefined)).toBe("fallback");
+    });
     test("resolves $ref", () => {
         const spec = {
             openapi: "3.0.0",

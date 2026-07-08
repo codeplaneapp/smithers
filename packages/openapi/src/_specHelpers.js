@@ -25,10 +25,19 @@ export function parseSpecText(text) {
             throw new Error("Failed to parse OpenAPI spec as JSON or YAML");
         }
     }
+    // Swagger 2.0 has materially different shapes for parameters, request
+    // bodies, security, and host/basePath. Reject it before the looser shape
+    // check below can mistake it for OpenAPI 3.x.
+    if (typeof parsed === "object" &&
+        parsed !== null &&
+        "swagger" in parsed &&
+        !("openapi" in parsed)) {
+        throw new Error("Swagger 2.0 specs are not supported. Convert the spec to OpenAPI 3.x first.");
+    }
     // Validate it looks like an OpenAPI spec
     if (typeof parsed !== "object" ||
         parsed === null ||
-        !("openapi" in parsed || "swagger" in parsed) ||
+        !("openapi" in parsed) ||
         !("paths" in parsed || "info" in parsed)) {
         throw new Error("Parsed content does not appear to be a valid OpenAPI spec (missing openapi/paths/info fields)");
     }

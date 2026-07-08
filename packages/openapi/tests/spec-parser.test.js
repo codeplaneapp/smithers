@@ -9,6 +9,7 @@ import { Effect } from "effect";
 import { extractOperations, loadSpecSync } from "../src/spec-parser.js";
 import { loadSpecEffect } from "../src/loadSpecEffect.js";
 import { parseSpecText } from "../src/_specHelpers.js";
+import { SPEC_SOURCE_URL } from "../src/specSourceUrl.js";
 import { petStoreSpec, refSpec, noOperationIdSpec } from "./fixtures.js";
 
 const originalFetch = globalThis.fetch;
@@ -28,6 +29,34 @@ describe("loadSpecSync", () => {
         const spec = loadSpecSync(json);
         expect(spec.openapi).toBe("3.0.0");
         expect(spec.info.title).toBe("Pet Store");
+    });
+    test("loads spec from YAML string", () => {
+        const yaml = `
+openapi: 3.0.0
+info:
+  title: YAML Pets
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        "200":
+          description: ok
+`;
+        const spec = loadSpecSync(yaml);
+        expect(spec.openapi).toBe("3.0.0");
+        expect(spec.info.title).toBe("YAML Pets");
+        expect(spec.paths["/pets"].get.operationId).toBe("listPets");
+    });
+    test("rejects Swagger 2.0 raw JSON text instead of treating it as OpenAPI", () => {
+        expect(() =>
+            loadSpecSync(JSON.stringify({
+                swagger: "2.0",
+                info: { title: "Legacy", version: "1.0.0" },
+                paths: { "/pets": { get: { operationId: "listPets" } } },
+            })),
+        ).toThrow(/Swagger 2\.0 specs are not supported/);
     });
     test("throws on invalid input", () => {
         expect(() => loadSpecSync("not valid json or yaml")).toThrow();
@@ -55,6 +84,24 @@ describe("loadSpecEffect", () => {
         expect(fromUrl.paths["/pets"]).toBeDefined();
     });
 
+    test("tracks the response URL as spec source for URL-loaded specs", async () => {
+        globalThis.fetch = async (url) => {
+            expect(url).toBe("https://example.test/openapi.json");
+            return {
+                ok: true,
+                status: 200,
+                statusText: "OK",
+                url: "https://cdn.example.test/specs/openapi.json",
+                text: async () => JSON.stringify(petStoreSpec),
+            };
+        };
+
+        const spec = await Effect.runPromise(loadSpecEffect("https://example.test/openapi.json"));
+        expect(/** @type {Record<PropertyKey, unknown>} */ (spec)[SPEC_SOURCE_URL]).toBe(
+            "https://cdn.example.test/specs/openapi.json",
+        );
+    });
+
     test("wraps URL and raw text loading failures", async () => {
         globalThis.fetch = async () => new Response("missing", { status: 404, statusText: "Not Found" });
         await expect(
@@ -64,6 +111,21 @@ describe("loadSpecEffect", () => {
         await expect(
             Effect.runPromise(loadSpecEffect("not valid json or yaml")),
         ).rejects.toThrow("openapi load spec");
+    });
+
+    test("rejects Swagger 2.0 YAML text through the Effect loader", async () => {
+        await expect(
+            Effect.runPromise(loadSpecEffect(`
+swagger: "2.0"
+info:
+  title: Legacy
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+`)),
+        ).rejects.toThrow(/Swagger 2\.0 specs are not supported/);
     });
 
     test("parseSpecText reports YAML parser failures", () => {

@@ -87,6 +87,24 @@ describe("createOpenApiToolsSync", () => {
             },
         })).toThrow(/Duplicate OpenAPI tool name "managePets".*listPets.*createPet/);
     });
+    test("throws when generated fallback operationIds collide", () => {
+        const spec = {
+            openapi: "3.0.0",
+            info: { title: "Fallback Names", version: "1.0.0" },
+            servers: [{ url: "https://api.example.com" }],
+            paths: {
+                "/reports/{report-id}": {
+                    get: { responses: { "200": { description: "ok" } } },
+                },
+                "/reports/{report_id}": {
+                    get: { responses: { "200": { description: "ok" } } },
+                },
+            },
+        };
+        expect(() => createOpenApiToolsSync(spec)).toThrow(
+            /Duplicate OpenAPI tool name "get_reports_report_id"/,
+        );
+    });
     test("uses server URL from spec as default base URL", () => {
         // Tools are created — we just verify they exist and the spec server is used
         const tools = createOpenApiToolsSync(petStoreSpec);
