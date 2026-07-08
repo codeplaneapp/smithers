@@ -74,6 +74,14 @@ const COMPACT_WIDTH = 100;
 // pane render thousands of lines per frame.
 const NODE_LOG_TAIL = 500;
 
+export const TUI_OUTPUT_PREVIEW_CHARS = 20_000;
+export const TUI_OUTPUT_TRUNCATION_MARKER = "\n... [truncated]";
+
+function outputPreview(text: string): string {
+  if (text.length <= TUI_OUTPUT_PREVIEW_CHARS) return text;
+  return `${text.slice(0, TUI_OUTPUT_PREVIEW_CHARS)}${TUI_OUTPUT_TRUNCATION_MARKER}`;
+}
+
 // ─── Approval Banner ─────────────────────────────────────────────────────────
 
 const MAX_OPTION_ROWS = 6;
@@ -217,6 +225,7 @@ function rowOutputText(row: Record<string, unknown>): string | undefined {
  * string-field fallbacks for older/looser payloads. Exported for tests.
  */
 export function deriveOutputText(outputData: unknown, node: GatewayRunNode): string {
+  const preview = outputPreview;
   if (outputData && typeof outputData === "object") {
     const d = outputData as Record<string, unknown>;
     const status = d["status"];
@@ -224,23 +233,23 @@ export function deriveOutputText(outputData: unknown, node: GatewayRunNode): str
       const row = d["row"];
       if (row && typeof row === "object") {
         const text = rowOutputText(row as Record<string, unknown>);
-        return text ?? JSON.stringify(row, null, 2);
+        return preview(text ?? JSON.stringify(row, null, 2));
       }
       if (status === "pending") return "(no output yet)";
       if (status === "failed") {
         const partial = d["partial"];
         return partial === undefined || partial === null
           ? "(failed, no output)"
-          : `(failed) partial output:\n${JSON.stringify(partial, null, 2)}`;
+          : preview(`(failed) partial output:\n${JSON.stringify(partial, null, 2)}`);
       }
       return "(no output)";
     }
     // Defensive fallback for non-envelope payloads.
     const text = rowOutputText(d);
-    if (text !== undefined) return text;
-    return JSON.stringify(d, null, 2);
+    if (text !== undefined) return preview(text);
+    return preview(JSON.stringify(d, null, 2));
   }
-  if (node.output) return String(node.output);
+  if (node.output) return preview(String(node.output));
   return "(no output)";
 }
 

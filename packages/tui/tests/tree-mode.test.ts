@@ -14,7 +14,11 @@ import {
   type FlatNode,
 } from "../src/modes/treeUtils.ts";
 import { routeApprovalKey } from "../src/modes/approvalUtils.ts";
-import { deriveOutputText } from "../src/modes/TreeMode.tsx";
+import {
+  deriveOutputText,
+  TUI_OUTPUT_PREVIEW_CHARS,
+  TUI_OUTPUT_TRUNCATION_MARKER,
+} from "../src/modes/TreeMode.tsx";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 
 function node(id: string, overrides: Partial<GatewayRunNode> = {}): GatewayRunNode {
@@ -377,6 +381,39 @@ describe("deriveOutputText (getNodeOutput envelope unwrap)", () => {
     const text = deriveOutputText(envelope, outNode());
     expect(text).toBe("# the agent's markdown");
     expect(text).not.toContain("schema");
+  });
+
+  it("defensively truncates a produced envelope with a very large row output", () => {
+    const envelope = {
+      status: "produced",
+      row: { output: "x".repeat(1_000_000) },
+      schema: { fields: [{ name: "output", type: "string" }] },
+    };
+
+    const text = deriveOutputText(envelope, outNode());
+
+    expect(text.length).toBeLessThanOrEqual(20_020);
+    expect(text.length).toBeLessThanOrEqual(
+      TUI_OUTPUT_PREVIEW_CHARS + TUI_OUTPUT_TRUNCATION_MARKER.length,
+    );
+    expect(text.endsWith(TUI_OUTPUT_TRUNCATION_MARKER)).toBe(true);
+    expect(text).not.toBe(envelope.row.output);
+  });
+
+  it("keeps the output preview boundary inclusive and truncates one byte over", () => {
+    const exactLimit = "x".repeat(TUI_OUTPUT_PREVIEW_CHARS);
+    const oneOverLimit = `${exactLimit}y`;
+
+    expect(
+      deriveOutputText({ status: "produced", row: { output: exactLimit }, schema: null }, outNode()),
+    ).toBe(exactLimit);
+
+    const truncated = deriveOutputText(
+      { status: "produced", row: { output: oneOverLimit }, schema: null },
+      outNode(),
+    );
+
+    expect(truncated).toBe(`${exactLimit}${TUI_OUTPUT_TRUNCATION_MARKER}`);
   });
 
   it("renders a structured produced row as JSON of the ROW only (no envelope)", () => {
