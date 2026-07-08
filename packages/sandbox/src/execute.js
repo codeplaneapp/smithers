@@ -732,33 +732,67 @@ export async function executeSandbox(options) {
         });
     }
     catch (error) {
-        await adapter.upsertSandbox({
-            runId: runtime.runId,
-            sandboxId: options.sandboxId,
-            runtime: selectedRuntime,
-            remoteRunId: null,
-            workspaceId: handle?.workspaceId ?? null,
-            containerId: handle?.containerId ?? null,
-            configJson,
-            status: "failed",
-            shippedAtMs: createdAtMs,
-            completedAtMs: nowMs(),
-            bundlePath: handle?.resultPath ?? null,
-        });
-        await emitSandboxEvent(runtimeDb, {
-            type: "SandboxFailed",
-            runId: runtime.runId,
-            sandboxId: options.sandboxId,
-            runtime: selectedRuntime,
-            error: errorToJson(error),
-            timestampMs: nowMs(),
-        });
-        runtime.heartbeat({
-            sandboxId: options.sandboxId,
-            stage: "failed",
-            progress: 100,
-            error: error instanceof Error ? error.message : String(error),
-        });
+        // Best-effort failure bookkeeping: a secondary failure here (DB closed
+        // after a cancel, disk/connection loss) must never mask the primary
+        // sandbox error, so each write is caught and logged as a warning
+        // independently, mirroring the finally block's cleanup rationale below.
+        try {
+            await adapter.upsertSandbox({
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                runtime: selectedRuntime,
+                remoteRunId: null,
+                workspaceId: handle?.workspaceId ?? null,
+                containerId: handle?.containerId ?? null,
+                configJson,
+                status: "failed",
+                shippedAtMs: createdAtMs,
+                completedAtMs: nowMs(),
+                bundlePath: handle?.resultPath ?? null,
+            });
+        }
+        catch (bookkeepingError) {
+            logWarning("sandbox failure bookkeeping failed", {
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                runtime: selectedRuntime,
+                error: errorToJson(bookkeepingError),
+            });
+        }
+        try {
+            await emitSandboxEvent(runtimeDb, {
+                type: "SandboxFailed",
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                runtime: selectedRuntime,
+                error: errorToJson(error),
+                timestampMs: nowMs(),
+            });
+        }
+        catch (bookkeepingError) {
+            logWarning("sandbox failure bookkeeping failed", {
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                runtime: selectedRuntime,
+                error: errorToJson(bookkeepingError),
+            });
+        }
+        try {
+            runtime.heartbeat({
+                sandboxId: options.sandboxId,
+                stage: "failed",
+                progress: 100,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+        catch (bookkeepingError) {
+            logWarning("sandbox failure bookkeeping failed", {
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                runtime: selectedRuntime,
+                error: errorToJson(bookkeepingError),
+            });
+        }
         throw error;
     }
     finally {

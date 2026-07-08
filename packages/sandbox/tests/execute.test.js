@@ -697,6 +697,43 @@ describe("executeSandbox", () => {
         }
     });
 
+    test("failure-path bookkeeping does not mask the primary run failure and is surfaced", async () => {
+        const { db, sqlite } = createDb();
+        const runtime = createRuntime(db, { runId: "run-failure-bookkeeping" });
+        let loggedWarnings = 0;
+        const restoreLogger = setSmithersLogRunner({
+            runFork() {
+                loggedWarnings += 1;
+            },
+            async runPromise() { },
+        });
+        try {
+            // The provider closes the real DB mid-run before throwing the primary
+            // failure, so the catch block's own bookkeeping writes (upsert/event/
+            // heartbeat) hit a genuinely closed DB. The primary error must still
+            // surface, not a secondary "database is closed" error.
+            await expect(
+                runInRuntime(runtime, {
+                    sandboxId: "sandbox-failure-bookkeeping",
+                    provider: {
+                        id: "db-closed-failure-provider",
+                        run: async () => {
+                            sqlite.close();
+                            throw new Error("primary sandbox failure");
+                        },
+                    },
+                    runtime: undefined,
+                }),
+            ).rejects.toThrow("primary sandbox failure");
+
+            // The bookkeeping failure(s) must be surfaced (logged), not silently swallowed.
+            expect(loggedWarnings).toBeGreaterThanOrEqual(1);
+        }
+        finally {
+            restoreLogger();
+        }
+    });
+
     test("materializes provider bundle paths and rejects invalid provider results", async () => {
         const resultPath = tempDir("smithers-provider-materialized-");
         const materialized = await __executeSandboxInternals.materializeProviderResult(
