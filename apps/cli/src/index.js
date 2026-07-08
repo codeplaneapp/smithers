@@ -6398,6 +6398,14 @@ const cli = Cli.create({
                 exitCode: 4,
             });
         }
+        const requestedAlertId = c.args.alertId?.trim();
+        if (action !== "list" && !requestedAlertId) {
+            return fail({
+                code: "ALERT_ID_REQUIRED",
+                message: `smithers alerts ${action} requires <id>`,
+                exitCode: 4,
+            });
+        }
         try {
             const { adapter, cleanup } = await findAndOpenDb();
             try {
@@ -6436,7 +6444,7 @@ const cli = Cli.create({
                     }
                     return c.ok(renderAlertsHuman(alerts));
                 }
-                const alertId = c.args.alertId?.trim();
+                const alertId = requestedAlertId;
                 if (!alertId) {
                     return fail({
                         code: "ALERT_ID_REQUIRED",

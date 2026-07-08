@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cli } from "incur";
@@ -227,6 +227,8 @@ describe("CLI_SUBCOMMANDS command registry", () => {
         expect(leaf("claude node-wait").options.safeParse({ intervalMs: 99, runId: "run-1" }).success).toBe(false);
         expect(leaf("claude monitor").options.safeParse({ intervalMs: 249 }).success).toBe(false);
         expect(leaf("gateway").options.safeParse({ port: 65536 }).success).toBe(false);
+        expect(leaf("memory set").options.safeParse({ ttl: 0 }).success).toBe(false);
+        expect(leaf("memory set").options.safeParse({ ttl: -1 }).success).toBe(false);
     });
 
     test("parses supplementary MCP and skills wiring for agents incur does not own", () => {
@@ -240,6 +242,23 @@ describe("CLI_SUBCOMMANDS command registry", () => {
 });
 
 describe("CLI_SUBCOMMANDS handler error paths", () => {
+    test("workflow create rejects invalid workflow names before writing a scaffold", async () => {
+        const result = await runLeaf("workflow create", {
+            args: { name: "Bad_Name" },
+            options: parseOptions("workflow create"),
+            format: "json",
+        });
+
+        expect(result).toMatchObject({
+            ok: false,
+            error: {
+                code: "INVALID_WORKFLOW_NAME",
+                exitCode: 4,
+            },
+        });
+        expect(result.error.message).toContain("Use lowercase kebab-case");
+    });
+
     test("workflow run rejects a missing workflow id in non-interactive machine mode", async () => {
         const result = await runLeaf("workflow run", {
             args: {},
@@ -272,6 +291,61 @@ describe("CLI_SUBCOMMANDS handler error paths", () => {
             },
         });
         expect(result.error.message).toContain("delete");
+    });
+
+    test("alerts mutating actions require an alert id before touching the workspace DB", async () => {
+        for (const action of ["ack", "resolve", "silence"]) {
+            const result = await runLeaf("alerts", {
+                args: { action },
+                options: {},
+                format: "json",
+            });
+
+            expect(result).toMatchObject({
+                ok: false,
+                error: {
+                    code: "ALERT_ID_REQUIRED",
+                    exitCode: 4,
+                },
+            });
+            expect(result.error.message).toContain(`smithers alerts ${action} requires <id>`);
+        }
+    });
+
+    test("cron add rejects invalid patterns before opening the workspace DB", async () => {
+        const result = await runLeaf("cron add", {
+            args: { pattern: "not a cron", workflowPath: "workflow.tsx" },
+            options: {},
+            format: "json",
+        });
+
+        expect(result).toMatchObject({
+            ok: false,
+            error: {
+                code: "INVALID_CRON_PATTERN",
+                exitCode: 4,
+            },
+        });
+        expect(result.error.message).toContain("not a cron");
+    });
+
+    test("token issue rejects invalid ttl values before persisting a token store", async () => {
+        const dir = tempDir();
+        process.env.SMITHERS_TOKEN_STORE = join(dir, "tokens.json");
+
+        const result = await runLeaf("token issue", {
+            options: parseOptions("token issue", { ttl: "0ms" }),
+        });
+
+        expect(result).toMatchObject({
+            ok: false,
+            error: {
+                code: "INVALID_DURATION",
+                exitCode: 1,
+            },
+        });
+        expect(result.error.message).toContain('Invalid ttl: "0ms" must be > 0');
+        expect(existsSync(process.env.SMITHERS_TOKEN_STORE)).toBe(false);
     });
 
     test("token issue redacts by default and revoke accepts the revealed bearer", async () => {
@@ -309,5 +383,27 @@ describe("CLI_SUBCOMMANDS handler error paths", () => {
                 tokenId: revealed.data.grant.tokenId,
             },
         });
+    });
+
+    test("token exec rejects an unknown action handle before spawning a command", async () => {
+        const dir = tempDir();
+        process.env.SMITHERS_TOKEN_STORE = join(dir, "tokens.json");
+
+        const result = await runLeaf("token exec", {
+            options: parseOptions("token exec", {
+                handle: "smithers_action_missing",
+                command: "echo should-not-run",
+            }),
+        });
+
+        expect(result).toMatchObject({
+            ok: false,
+            error: {
+                code: "TOKEN_EXEC_FAILED",
+                exitCode: 1,
+            },
+        });
+        expect(result.error.message).toContain("Action token handle was not found");
+        expect(existsSync(process.env.SMITHERS_TOKEN_STORE)).toBe(false);
     });
 });
