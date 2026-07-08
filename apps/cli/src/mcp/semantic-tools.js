@@ -59,6 +59,7 @@ export const SEMANTIC_TOOL_NAMES = [
     "get_chat_transcript",
     "get_run_events",
 ];
+const WATCH_MAX_TIMEOUT_MS = 60 * 60 * 1000;
 export const workflowSummarySchema = z.object({
     id: z.string(),
     metadataVersion: z.number().int(),
@@ -550,6 +551,19 @@ function mcpAbortError() {
 function throwIfAborted(signal) {
     if (signal?.aborted) {
         throw mcpAbortError();
+    }
+}
+/**
+ * @param {number} timeoutMs
+ */
+function validateWatchRunTimeoutMs(timeoutMs) {
+    if (!Number.isSafeInteger(timeoutMs) ||
+        timeoutMs < 0 ||
+        timeoutMs > WATCH_MAX_TIMEOUT_MS) {
+        throw new SmithersError("INVALID_INPUT", `watch_run timeoutMs must be between 0 and ${WATCH_MAX_TIMEOUT_MS}ms.`, {
+            timeoutMs,
+            maxTimeoutMs: WATCH_MAX_TIMEOUT_MS,
+        });
     }
 }
 /**
@@ -1208,56 +1222,59 @@ export function createSemanticToolDefinitions(options = {}) {
             inputSchema: watchRunInputSchema,
             outputSchema: resultSchema(watchRunDataSchema),
             annotations: { readOnlyHint: true },
-            handler: (input, extra) => executeSemanticTool("watch_run", async () => withDb(context, async (adapter, dbPath) => {
-                const intervalMs = Math.max(WATCH_MIN_INTERVAL_MS, input.intervalMs);
-                const deadline = Date.now() + input.timeoutMs;
-                const snapshots = [];
-                let pollCount = 0;
-                while (true) {
-                    throwIfAborted(extra?.signal);
-                    const run = await adapter.getRun(input.runId);
-                    if (!run) {
-                        const dbHint = dbPath ? ` (db: ${dbPath})` : "";
-                        throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${input.runId}${dbHint}`, {
-                            runId: input.runId,
-                            dbPath,
+            handler: (input, extra) => executeSemanticTool("watch_run", async () => {
+                validateWatchRunTimeoutMs(input.timeoutMs);
+                return withDb(context, async (adapter, dbPath) => {
+                    const intervalMs = Math.max(WATCH_MIN_INTERVAL_MS, input.intervalMs);
+                    const deadline = Date.now() + input.timeoutMs;
+                    const snapshots = [];
+                    let pollCount = 0;
+                    while (true) {
+                        throwIfAborted(extra?.signal);
+                        const run = await adapter.getRun(input.runId);
+                        if (!run) {
+                            const dbHint = dbPath ? ` (db: ${dbPath})` : "";
+                            throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${input.runId}${dbHint}`, {
+                                runId: input.runId,
+                                dbPath,
+                            });
+                        }
+                        const summary = await buildRunSummary(adapter, run);
+                        snapshots.push({
+                            observedAtMs: Date.now(),
+                            run: summary,
                         });
+                        if (run.status !== "running" &&
+                            run.status !== "waiting-approval" &&
+                            run.status !== "waiting-event" &&
+                            run.status !== "waiting-timer" &&
+                            run.status !== "waiting-quota") {
+                            return {
+                                runId: input.runId,
+                                intervalMs,
+                                pollCount,
+                                reachedTerminal: true,
+                                timedOut: false,
+                                finalRun: summary,
+                                snapshots,
+                            };
+                        }
+                        if (Date.now() >= deadline) {
+                            return {
+                                runId: input.runId,
+                                intervalMs,
+                                pollCount,
+                                reachedTerminal: false,
+                                timedOut: true,
+                                finalRun: summary,
+                                snapshots,
+                            };
+                        }
+                        pollCount += 1;
+                        await sleep(intervalMs, extra?.signal);
                     }
-                    const summary = await buildRunSummary(adapter, run);
-                    snapshots.push({
-                        observedAtMs: Date.now(),
-                        run: summary,
-                    });
-                    if (run.status !== "running" &&
-                        run.status !== "waiting-approval" &&
-                        run.status !== "waiting-event" &&
-                        run.status !== "waiting-timer" &&
-                        run.status !== "waiting-quota") {
-                        return {
-                            runId: input.runId,
-                            intervalMs,
-                            pollCount,
-                            reachedTerminal: true,
-                            timedOut: false,
-                            finalRun: summary,
-                            snapshots,
-                        };
-                    }
-                    if (Date.now() >= deadline) {
-                        return {
-                            runId: input.runId,
-                            intervalMs,
-                            pollCount,
-                            reachedTerminal: false,
-                            timedOut: true,
-                            finalRun: summary,
-                            snapshots,
-                        };
-                    }
-                    pollCount += 1;
-                    await sleep(intervalMs, extra?.signal);
-                }
-            })),
+                });
+            }),
         },
         {
             name: "explain_run",

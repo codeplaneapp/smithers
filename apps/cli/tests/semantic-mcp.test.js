@@ -597,6 +597,74 @@ describe("semantic MCP surface", () => {
         }
     }, 30_000);
 
+    test("stdio watch_run rejects oversized timeouts before polling and stays responsive", async () => {
+        const cwd = tempCwd();
+        const home = tempCwd();
+        await seedSemanticDb(cwd);
+
+        const transport = new StdioClientTransport({
+            command: process.execPath,
+            args: [
+                join(import.meta.dir, "..", "src", "index.js"),
+                "--mcp",
+                "--surface",
+                "semantic",
+                "--allowed-tools",
+                "watch_run,list_runs",
+                "--read-only",
+            ],
+            cwd,
+            env: stringEnv({
+                HOME: home,
+                SMITHERS_BACKEND: "sqlite",
+                SMITHERS_NO_SKILL_REFRESH: "1",
+                SMITHERS_NO_UPDATE_CHECK: "1",
+                CI: "1",
+            }),
+            stderr: "pipe",
+        });
+        let stderr = "";
+        transport.stderr?.on("data", (chunk) => {
+            stderr += chunk.toString();
+        });
+        const client = new Client({
+            name: "smithers-stdio-semantic-watch-test-client",
+            version: "test",
+        });
+        try {
+            await client.connect(transport);
+            const startedAtMs = Date.now();
+            const rejected = await client.callTool({
+                name: "watch_run",
+                arguments: {
+                    runId: "running-run",
+                    timeoutMs: Number.MAX_SAFE_INTEGER,
+                    intervalMs: 1,
+                },
+            }, undefined, { timeout: 2_000 });
+            expect(Date.now() - startedAtMs).toBeLessThan(1_500);
+            const error = expectToolError(rejected, "INVALID_INPUT");
+            expect(error.message).toContain("timeoutMs");
+            expect(error.details).toMatchObject({
+                timeoutMs: Number.MAX_SAFE_INTEGER,
+                maxTimeoutMs: 3_600_000,
+            });
+
+            const listed = expectToolOk(await client.callTool({
+                name: "list_runs",
+                arguments: { limit: 1 },
+            }, undefined, { timeout: 2_000 }));
+            expect(listed.runs).toHaveLength(1);
+        }
+        catch (error) {
+            throw new Error(`${error?.message ?? String(error)}\nchild stderr:\n${stderr}`);
+        }
+        finally {
+            await client.close().catch(() => {});
+            await transport.close().catch(() => {});
+        }
+    }, 30_000);
+
     test("serves real sqlite run inspection, approval, artifact, chat, and event tools through MCP", async () => {
         const cwd = tempCwd();
         await seedSemanticDb(cwd);
