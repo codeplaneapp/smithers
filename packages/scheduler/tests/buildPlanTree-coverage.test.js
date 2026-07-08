@@ -72,3 +72,31 @@ describe("buildPlanTree stable id fallbacks", () => {
     expect(plan.finallyChildren).toEqual([]);
   });
 });
+
+describe("buildPlanTree try-catch-finally catchErrors normalization", () => {
+  test("a comma-separated catchErrors string is split, trimmed, and stripped of empties", () => {
+    const { plan } = buildPlanTree(
+      el("smithers:try-catch-finally", { catchErrors: " E_ONE , E_TWO ,, " }, [
+        el("smithers:task", { id: "t" }),
+      ]),
+    );
+    expect(plan.catchErrors).toEqual(["E_ONE", "E_TWO"]);
+  });
+
+  test("a catchErrors array keeps only string codes", () => {
+    const { plan } = buildPlanTree(
+      el("smithers:try-catch-finally", { catchErrors: ["E_ONE", 42, null, "E_TWO"] }, [
+        el("smithers:task", { id: "t" }),
+      ]),
+    );
+    expect(plan.catchErrors).toEqual(["E_ONE", "E_TWO"]);
+  });
+
+  test("a non-string non-array catchErrors value normalizes to no filter", () => {
+    const { plan } = buildPlanTree(
+      el("smithers:try-catch-finally", { catchErrors: 7 }, [el("smithers:task", { id: "t" })]),
+    );
+    // An empty normalized filter is omitted from the plan node entirely.
+    expect(plan.catchErrors).toBeUndefined();
+  });
+});
