@@ -26,6 +26,9 @@ export function ReviewLoop(props) {
     const latestReview = ctx?.latest?.(reviewOutput, reviewId);
     const approved = latestReview?.approved === true;
     const reviewerAgents = Array.isArray(reviewer) ? reviewer : [reviewer];
+    if (reviewerAgents.length === 0) {
+        throw new Error("ReviewLoop reviewer must include at least one reviewer.");
+    }
     return React.createElement(Loop, {
         id: prefix,
         until: approved,
