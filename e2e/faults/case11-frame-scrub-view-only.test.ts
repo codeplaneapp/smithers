@@ -1,5 +1,9 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { listRewindAuditRows } from "@smithers-orchestrator/time-travel/rewindAudit";
 
 type AnyRow = Record<string, unknown>;
 
@@ -17,121 +21,64 @@ const ALL_TABLES = [
   "_smithers_time_travel_audit",
 ] as const;
 
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-    CREATE TABLE _smithers_nodes (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      state TEXT NOT NULL,
-      last_attempt INTEGER,
-      updated_at_ms INTEGER NOT NULL,
-      output_table TEXT NOT NULL,
-      label TEXT,
-      PRIMARY KEY (run_id, node_id, iteration)
-    );
-    CREATE TABLE _smithers_events (
-      run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (run_id, seq)
-    );
-    CREATE TABLE _smithers_node_diffs (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL,
-      base_ref TEXT NOT NULL,
-      diff_json TEXT NOT NULL,
-      computed_at_ms INTEGER NOT NULL,
-      size_bytes INTEGER NOT NULL,
-      PRIMARY KEY (run_id, node_id, iteration, base_ref)
-    );
-    CREATE TABLE _smithers_time_travel_audit (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id TEXT NOT NULL,
-      from_frame_no INTEGER NOT NULL,
-      to_frame_no INTEGER NOT NULL,
-      caller TEXT NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      result TEXT NOT NULL,
-      duration_ms INTEGER
-    );
-  `);
-  return db;
+function buildDb(): { sqlite: Database; adapter: SmithersDb } {
+  const sqlite = new Database(":memory:");
+  const db = drizzle(sqlite);
+  ensureSmithersTables(db);
+  return { sqlite, adapter: new SmithersDb(db) };
 }
 
-function seedRun(db: Database, baseMs: number): void {
-  db.query(
-    `INSERT INTO _smithers_runs
-       (run_id, workflow_name, status, created_at_ms, started_at_ms,
-        heartbeat_at_ms, runtime_owner_id)
-     VALUES (?, 'case11-workflow', 'running', ?, ?, ?, ?)`,
-  ).run(RUN_ID, baseMs - 60_000, baseMs - 50_000, baseMs - 1_000, OWNER_ID);
+async function seedRun(adapter: SmithersDb, baseMs: number): Promise<void> {
+  await adapter.insertRun({
+    runId: RUN_ID,
+    workflowName: "case11-workflow",
+    status: "running",
+    createdAtMs: baseMs - 60_000,
+    startedAtMs: baseMs - 50_000,
+    heartbeatAtMs: baseMs - 1_000,
+    runtimeOwnerId: OWNER_ID,
+  });
 
   const nodeId = "node-A";
   for (let iteration = 0; iteration < EVENT_COUNT; iteration++) {
     const ts = baseMs - (EVENT_COUNT - iteration) * 1_000;
-    db.query(
-      `INSERT INTO _smithers_events
-         (run_id, seq, timestamp_ms, type, payload_json)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(
-      RUN_ID,
-      iteration,
-      ts,
-      iteration === 0 ? "NodeStarted" : "NodeProgressed",
-      JSON.stringify({ nodeId, iteration, value: iteration * 7 }),
-    );
+    // First event seq is 0, so seq 0..9 lines up with iteration 0..9.
+    await adapter.insertEventWithNextSeq({
+      runId: RUN_ID,
+      timestampMs: ts,
+      type: iteration === 0 ? "NodeStarted" : "NodeProgressed",
+      payloadJson: JSON.stringify({ nodeId, iteration, value: iteration * 7 }),
+    });
 
-    db.query(
-      `INSERT INTO _smithers_node_diffs
-         (run_id, node_id, iteration, base_ref, diff_json,
-          computed_at_ms, size_bytes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      RUN_ID,
+    await adapter.upsertNodeDiffCache({
+      runId: RUN_ID,
       nodeId,
       iteration,
-      iteration === 0 ? "genesis" : `iter-${iteration - 1}`,
-      JSON.stringify({ op: "set", path: "/value", value: iteration * 7 }),
-      ts,
-      48,
-    );
+      baseRef: iteration === 0 ? "genesis" : `iter-${iteration - 1}`,
+      diffJson: JSON.stringify({ op: "set", path: "/value", value: iteration * 7 }),
+      computedAtMs: ts,
+      sizeBytes: 48,
+    });
   }
 
-  db.query(
-    `INSERT INTO _smithers_nodes
-       (run_id, node_id, iteration, state, last_attempt,
-        updated_at_ms, output_table, label)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    RUN_ID,
+  await adapter.insertNode({
+    runId: RUN_ID,
     nodeId,
-    EVENT_COUNT - 1,
-    "running",
-    1,
-    baseMs - 1_000,
-    "outputs_node_a",
-    "Node A",
-  );
+    iteration: EVENT_COUNT - 1,
+    state: "running",
+    lastAttempt: 1,
+    updatedAtMs: baseMs - 1_000,
+    outputTable: "outputs_node_a",
+    label: "Node A",
+  });
 }
 
-function captureSnapshot(db: Database): DbSnapshot {
+function captureSnapshot(sqlite: Database): DbSnapshot {
   const snapshot: DbSnapshot = {};
   for (const table of ALL_TABLES) {
-    const rows = db.query(`SELECT * FROM ${table} ORDER BY rowid`).all() as AnyRow[];
+    const rows = sqlite
+      .query(`SELECT * FROM ${table} ORDER BY rowid`)
+      .all() as AnyRow[];
     snapshot[table] = rows;
   }
   return snapshot;
@@ -143,8 +90,8 @@ type ScrubView = {
   reconstructedNodeValue: number | null;
 };
 
-function scrubToFrame(db: Database, frameNo: number): ScrubView {
-  const events = db
+function scrubToFrame(sqlite: Database, frameNo: number): ScrubView {
+  const events = sqlite
     .query(
       `SELECT seq, type, payload_json, timestamp_ms
          FROM _smithers_events
@@ -153,7 +100,7 @@ function scrubToFrame(db: Database, frameNo: number): ScrubView {
     )
     .all(RUN_ID, frameNo) as AnyRow[];
 
-  const diffs = db
+  const diffs = sqlite
     .query(
       `SELECT iteration, diff_json
          FROM _smithers_node_diffs
@@ -178,13 +125,13 @@ function scrubToFrame(db: Database, frameNo: number): ScrubView {
 }
 
 describe("case 11: frame scrub for view-only time travel", () => {
-  test("scrubbing across all frames mutates zero rows", () => {
-    const db = buildDb();
+  test("scrubbing across all frames mutates zero rows", async () => {
+    const { sqlite, adapter } = buildDb();
     try {
       const baseMs = Date.now();
-      seedRun(db, baseMs);
+      await seedRun(adapter, baseMs);
 
-      const baseline = captureSnapshot(db);
+      const baseline = captureSnapshot(sqlite);
       expect(baseline._smithers_events).toHaveLength(EVENT_COUNT);
       expect(baseline._smithers_node_diffs).toHaveLength(EVENT_COUNT);
       expect(baseline._smithers_runs).toHaveLength(1);
@@ -193,13 +140,13 @@ describe("case 11: frame scrub for view-only time travel", () => {
 
       const views: ScrubView[] = [];
       for (let frame = 0; frame < EVENT_COUNT; frame++) {
-        views.push(scrubToFrame(db, frame));
+        views.push(scrubToFrame(sqlite, frame));
       }
-      views.push(scrubToFrame(db, 0));
-      views.push(scrubToFrame(db, EVENT_COUNT - 1));
-      views.push(scrubToFrame(db, 4));
+      views.push(scrubToFrame(sqlite, 0));
+      views.push(scrubToFrame(sqlite, EVENT_COUNT - 1));
+      views.push(scrubToFrame(sqlite, 4));
 
-      const after = captureSnapshot(db);
+      const after = captureSnapshot(sqlite);
 
       expect(JSON.stringify(after)).toBe(JSON.stringify(baseline));
       for (const table of ALL_TABLES) {
@@ -214,70 +161,58 @@ describe("case 11: frame scrub for view-only time travel", () => {
       );
       expect(views[4]?.reconstructedNodeValue).toBe(4 * 7);
     } finally {
-      db.close();
+      sqlite.close();
     }
   });
 
-  test("scrub never writes a time-travel audit row (audit is for mutators only)", () => {
-    const db = buildDb();
+  test("scrub never writes a time-travel audit row (audit is for mutators only)", async () => {
+    const { sqlite, adapter } = buildDb();
     try {
       const baseMs = Date.now();
-      seedRun(db, baseMs);
+      await seedRun(adapter, baseMs);
 
-      const beforeAudit = db
-        .query(
-          `SELECT COUNT(*) AS n FROM _smithers_time_travel_audit
-            WHERE run_id = ?`,
-        )
-        .get(RUN_ID) as { n: number };
-      expect(Number(beforeAudit.n)).toBe(0);
+      const beforeAudit = await listRewindAuditRows(adapter, { runId: RUN_ID });
+      expect(beforeAudit).toHaveLength(0);
 
       for (let frame = 0; frame < EVENT_COUNT; frame++) {
-        scrubToFrame(db, frame);
+        scrubToFrame(sqlite, frame);
       }
 
-      const afterAudit = db
-        .query(
-          `SELECT COUNT(*) AS n FROM _smithers_time_travel_audit
-            WHERE run_id = ?`,
-        )
-        .get(RUN_ID) as { n: number };
-      expect(Number(afterAudit.n)).toBe(0);
+      const afterAudit = await listRewindAuditRows(adapter, { runId: RUN_ID });
+      expect(afterAudit).toHaveLength(0);
 
-      const scrubbyAudit = db
-        .query(
-          `SELECT COUNT(*) AS n FROM _smithers_time_travel_audit
-            WHERE caller LIKE '%scrub%' OR caller LIKE '%view%'`,
-        )
-        .get() as { n: number };
-      expect(Number(scrubbyAudit.n)).toBe(0);
+      const scrubbyAudit = afterAudit.filter((row) => {
+        const caller = String(row.caller ?? "");
+        return caller.includes("scrub") || caller.includes("view");
+      });
+      expect(scrubbyAudit).toHaveLength(0);
     } finally {
-      db.close();
+      sqlite.close();
     }
   });
 
-  test("engine ownership and node row are untouched after scrub", () => {
-    const db = buildDb();
+  test("engine ownership and node row are untouched after scrub", async () => {
+    const { sqlite, adapter } = buildDb();
     try {
       const baseMs = Date.now();
-      seedRun(db, baseMs);
+      await seedRun(adapter, baseMs);
 
-      const runBefore = db
+      const runBefore = sqlite
         .query(`SELECT * FROM _smithers_runs WHERE run_id = ?`)
         .get(RUN_ID) as AnyRow;
-      const nodeBefore = db
+      const nodeBefore = sqlite
         .query(`SELECT * FROM _smithers_nodes WHERE run_id = ?`)
         .get(RUN_ID) as AnyRow;
       expect(runBefore.runtime_owner_id).toBe(OWNER_ID);
 
       for (let frame = EVENT_COUNT - 1; frame >= 0; frame--) {
-        scrubToFrame(db, frame);
+        scrubToFrame(sqlite, frame);
       }
 
-      const runAfter = db
+      const runAfter = sqlite
         .query(`SELECT * FROM _smithers_runs WHERE run_id = ?`)
         .get(RUN_ID) as AnyRow;
-      const nodeAfter = db
+      const nodeAfter = sqlite
         .query(`SELECT * FROM _smithers_nodes WHERE run_id = ?`)
         .get(RUN_ID) as AnyRow;
 
@@ -286,29 +221,37 @@ describe("case 11: frame scrub for view-only time travel", () => {
       expect(runAfter.runtime_owner_id).toBe(OWNER_ID);
       expect(runAfter.status).toBe("running");
     } finally {
-      db.close();
+      sqlite.close();
     }
   });
 
-  test("regression guard: a write masquerading as scrub fails the snapshot diff", () => {
-    const db = buildDb();
+  test("regression guard: a write masquerading as scrub fails the snapshot diff", async () => {
+    const { sqlite, adapter } = buildDb();
     try {
       const baseMs = Date.now();
-      seedRun(db, baseMs);
+      await seedRun(adapter, baseMs);
 
-      const baseline = captureSnapshot(db);
+      const baseline = captureSnapshot(sqlite);
 
-      db.query(
-        `INSERT INTO _smithers_time_travel_audit
-           (run_id, from_frame_no, to_frame_no, caller, timestamp_ms, result, duration_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(RUN_ID, 9, 4, "rewind", baseMs, "ok", 12);
+      // No public insert method for audit rows; a raw INSERT into the REAL
+      // _smithers_time_travel_audit table (real schema) proves the snapshot
+      // diff catches a mutation masquerading as a view-only scrub.
+      sqlite
+        .query(
+          `INSERT INTO _smithers_time_travel_audit
+             (run_id, from_frame_no, to_frame_no, caller, timestamp_ms, result, duration_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(RUN_ID, 9, 4, "rewind", baseMs, "ok", 12);
 
-      const after = captureSnapshot(db);
+      const after = captureSnapshot(sqlite);
       expect(JSON.stringify(after)).not.toBe(JSON.stringify(baseline));
       expect(after._smithers_time_travel_audit).toHaveLength(1);
+
+      const audits = await listRewindAuditRows(adapter, { runId: RUN_ID });
+      expect(audits).toHaveLength(1);
     } finally {
-      db.close();
+      sqlite.close();
     }
   });
 });

@@ -1,130 +1,97 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, onTestFinished, test } from "bun:test";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { corruptHeartbeat } from "../harness/corruptHeartbeat.ts";
 
 type RunRow = {
-  run_id: string;
+  runId: string;
   status: string;
-  heartbeat_at_ms: number | null;
-  runtime_owner_id: string | null;
+  heartbeatAtMs: number | null;
+  runtimeOwnerId: string | null;
 };
 
 type NodeRow = {
-  run_id: string;
-  node_id: string;
+  runId: string;
+  nodeId: string;
   iteration: number;
   state: string;
 };
 
 type AttemptRow = {
-  run_id: string;
-  node_id: string;
+  runId: string;
+  nodeId: string;
   iteration: number;
   attempt: number;
   state: string;
-  started_at_ms: number;
-  finished_at_ms: number | null;
-  meta_json: string | null;
+  startedAtMs: number;
+  finishedAtMs: number | null;
+  metaJson: string | null;
 };
 
 type SignalRow = {
-  run_id: string;
+  runId: string;
   seq: number;
-  signal_name: string;
-  correlation_id: string | null;
-  payload_json: string;
-  received_at_ms: number;
+  signalName: string;
+  correlationId: string | null;
+  payloadJson: string;
+  receivedAtMs: number;
 };
 
 type EventRow = {
-  run_id: string;
+  runId: string;
   seq: number;
   type: string;
-  payload_json: string;
+  payloadJson: string;
+};
+
+type CaseDb = {
+  sqlite: Database;
+  adapter: SmithersDb;
 };
 
 const RUN_ID = "run-case04";
 const TARGET_NODE_ID = "wait-webhook-deploy";
 const TARGET_ITERATION = 2;
 const TARGET_ATTEMPT = 1;
+const OUTPUT_TABLE = "out_node";
 const SIGNAL_NAME = "deploy.approved";
 const CORRELATION_ID = "deploy:abc123";
 const ORIGINAL_OWNER = "engine-pid-original";
 const SUPERVISOR_OWNER = "engine-pid-supervisor";
 
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-    CREATE TABLE _smithers_nodes (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      state TEXT NOT NULL,
-      updated_at_ms INTEGER NOT NULL,
-      output_table TEXT NOT NULL,
-      PRIMARY KEY (run_id, node_id, iteration)
-    );
-    CREATE TABLE _smithers_attempts (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      attempt INTEGER NOT NULL,
-      state TEXT NOT NULL,
-      started_at_ms INTEGER NOT NULL,
-      finished_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      heartbeat_data_json TEXT,
-      error_json TEXT,
-      jj_pointer TEXT,
-      response_text TEXT,
-      jj_cwd TEXT,
-      cached INTEGER DEFAULT 0,
-      meta_json TEXT,
-      PRIMARY KEY (run_id, node_id, iteration, attempt)
-    );
-    CREATE TABLE _smithers_signals (
-      run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      signal_name TEXT NOT NULL,
-      correlation_id TEXT,
-      payload_json TEXT NOT NULL,
-      received_at_ms INTEGER NOT NULL,
-      received_by TEXT,
-      PRIMARY KEY (run_id, seq)
-    );
-    CREATE TABLE _smithers_events (
-      run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (run_id, seq)
-    );
-  `);
-  return db;
+function buildDb(): CaseDb {
+  const sqlite = new Database(":memory:");
+  const db = drizzle(sqlite);
+  ensureSmithersTables(db);
+  return { sqlite, adapter: new SmithersDb(db) };
 }
 
-function seedWaitingEvent(db: Database, now: number): string {
-  db.query(
-    `INSERT INTO _smithers_runs
-       (run_id, workflow_name, status, created_at_ms, started_at_ms, heartbeat_at_ms, runtime_owner_id)
-     VALUES (?, 'case04-workflow', 'waiting-event', ?, ?, ?, ?)`,
-  ).run(RUN_ID, now - 5_000, now - 4_000, now - 1_000, ORIGINAL_OWNER);
+async function seedWaitingEvent(
+  adapter: SmithersDb,
+  now: number,
+): Promise<string> {
+  await adapter.insertRun({
+    runId: RUN_ID,
+    workflowName: "case04-workflow",
+    status: "waiting-event",
+    createdAtMs: now - 5_000,
+    startedAtMs: now - 4_000,
+    heartbeatAtMs: now - 1_000,
+    runtimeOwnerId: ORIGINAL_OWNER,
+  });
 
-  db.query(
-    `INSERT INTO _smithers_nodes
-       (run_id, node_id, iteration, state, updated_at_ms, output_table)
-     VALUES (?, ?, ?, 'waiting-event', ?, 'out_node')`,
-  ).run(RUN_ID, TARGET_NODE_ID, TARGET_ITERATION, now - 1_000);
+  await adapter.insertNode({
+    runId: RUN_ID,
+    nodeId: TARGET_NODE_ID,
+    iteration: TARGET_ITERATION,
+    state: "waiting-event",
+    lastAttempt: TARGET_ATTEMPT,
+    updatedAtMs: now - 1_000,
+    outputTable: OUTPUT_TABLE,
+    label: null,
+  });
 
   const metaJson = JSON.stringify({
     kind: "wait-for-event",
@@ -135,125 +102,91 @@ function seedWaitingEvent(db: Database, now: number): string {
     },
   });
 
-  db.query(
-    `INSERT INTO _smithers_attempts
-       (run_id, node_id, iteration, attempt, state, started_at_ms, meta_json)
-     VALUES (?, ?, ?, ?, 'waiting-event', ?, ?)`,
-  ).run(
-    RUN_ID,
-    TARGET_NODE_ID,
-    TARGET_ITERATION,
-    TARGET_ATTEMPT,
-    now - 1_500,
+  await adapter.insertAttempt({
+    runId: RUN_ID,
+    nodeId: TARGET_NODE_ID,
+    iteration: TARGET_ITERATION,
+    attempt: TARGET_ATTEMPT,
+    state: "waiting-event",
+    startedAtMs: now - 1_500,
+    finishedAtMs: null,
     metaJson,
-  );
+  });
 
   return metaJson;
 }
 
-function readRun(db: Database): RunRow {
-  return db
-    .query(
-      `SELECT run_id, status, heartbeat_at_ms, runtime_owner_id
-         FROM _smithers_runs WHERE run_id = ?`,
-    )
-    .get(RUN_ID) as RunRow;
+async function readRun(adapter: SmithersDb): Promise<RunRow> {
+  return (await adapter.getRun(RUN_ID)) as RunRow;
 }
 
-function readNode(db: Database): NodeRow {
-  return db
-    .query(
-      `SELECT run_id, node_id, iteration, state
-         FROM _smithers_nodes
-        WHERE run_id = ? AND node_id = ? AND iteration = ?`,
-    )
-    .get(RUN_ID, TARGET_NODE_ID, TARGET_ITERATION) as NodeRow;
-}
-
-function readAttempt(db: Database): AttemptRow {
-  return db
-    .query(
-      `SELECT run_id, node_id, iteration, attempt, state,
-              started_at_ms, finished_at_ms, meta_json
-         FROM _smithers_attempts
-        WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?`,
-    )
-    .get(
-      RUN_ID,
-      TARGET_NODE_ID,
-      TARGET_ITERATION,
-      TARGET_ATTEMPT,
-    ) as AttemptRow;
-}
-
-function readSignals(db: Database): SignalRow[] {
-  return db
-    .query(
-      `SELECT run_id, seq, signal_name, correlation_id, payload_json, received_at_ms
-         FROM _smithers_signals
-        WHERE run_id = ?
-        ORDER BY seq`,
-    )
-    .all(RUN_ID) as SignalRow[];
-}
-
-function supervisorTakeover(db: Database, now: number): void {
-  db.query(
-    `UPDATE _smithers_runs
-        SET runtime_owner_id = ?,
-            heartbeat_at_ms = ?,
-            status = 'waiting-event'
-      WHERE run_id = ?`,
-  ).run(SUPERVISOR_OWNER, now, RUN_ID);
-
-  const seq =
-    (
-      db
-        .query(
-          `SELECT COALESCE(MAX(seq), 0) AS max_seq FROM _smithers_events WHERE run_id = ?`,
-        )
-        .get(RUN_ID) as { max_seq: number }
-    ).max_seq + 1;
-
-  db.query(
-    `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
-     VALUES (?, ?, ?, 'RunStateChanged', ?)`,
-  ).run(
+async function readNode(adapter: SmithersDb): Promise<NodeRow> {
+  return (await adapter.getNode(
     RUN_ID,
-    seq,
-    now,
-    JSON.stringify({
+    TARGET_NODE_ID,
+    TARGET_ITERATION,
+  )) as NodeRow;
+}
+
+async function readAttempt(adapter: SmithersDb): Promise<AttemptRow> {
+  return (await adapter.getAttempt(
+    RUN_ID,
+    TARGET_NODE_ID,
+    TARGET_ITERATION,
+    TARGET_ATTEMPT,
+  )) as AttemptRow;
+}
+
+async function readSignals(adapter: SmithersDb): Promise<SignalRow[]> {
+  return (await adapter.listSignals(RUN_ID)) as SignalRow[];
+}
+
+async function supervisorTakeover(
+  adapter: SmithersDb,
+  now: number,
+): Promise<void> {
+  await adapter.updateRun(RUN_ID, {
+    runtimeOwnerId: SUPERVISOR_OWNER,
+    heartbeatAtMs: now,
+    status: "waiting-event",
+  });
+
+  await adapter.insertEventWithNextSeq({
+    runId: RUN_ID,
+    timestampMs: now,
+    type: "RunStateChanged",
+    payloadJson: JSON.stringify({
       runId: RUN_ID,
       from: "stale",
       to: "waiting-event",
       actor: SUPERVISOR_OWNER,
       reason: "supervisor-takeover",
     }),
-  );
+  });
 }
 
-function findWaitingAttempt(
-  db: Database,
+// Signal correlation (matching signalName + correlationId against a waiting
+// attempt, then consuming the waiter) is engine/interpretation logic — the
+// real engine drives it via packages/engine/src/signals.js. We keep that
+// decision here (test-side), but every storage read/write goes through the
+// real SmithersDb adapter, not fabricated tables or raw-SQL reimplementations.
+async function findWaitingAttempt(
+  adapter: SmithersDb,
   signalName: string,
   correlationId: string | null,
-): AttemptRow | null {
-  const rows = db
-    .query(
-      `SELECT a.run_id, a.node_id, a.iteration, a.attempt, a.state,
-              a.started_at_ms, a.finished_at_ms, a.meta_json
-         FROM _smithers_attempts a
-         JOIN _smithers_nodes n
-           ON n.run_id = a.run_id
-          AND n.node_id = a.node_id
-          AND n.iteration = a.iteration
-        WHERE a.run_id = ?
-          AND a.state = 'waiting-event'
-          AND n.state = 'waiting-event'`,
-    )
-    .all(RUN_ID) as AttemptRow[];
-  for (const row of rows) {
-    if (!row.meta_json) continue;
-    const parsed = JSON.parse(row.meta_json);
+): Promise<AttemptRow | null> {
+  const nodes = (await adapter.listNodes(RUN_ID)) as NodeRow[];
+  const waitingNodes = new Set(
+    nodes
+      .filter((n) => n.state === "waiting-event")
+      .map((n) => `${n.nodeId}#${n.iteration}`),
+  );
+  const attempts = (await adapter.listAttemptsForRun(RUN_ID)) as AttemptRow[];
+  for (const row of attempts) {
+    if (row.state !== "waiting-event") continue;
+    if (!waitingNodes.has(`${row.nodeId}#${row.iteration}`)) continue;
+    if (!row.metaJson) continue;
+    const parsed = JSON.parse(row.metaJson);
     const wfe = parsed?.waitForEvent;
     if (!wfe || typeof wfe !== "object") continue;
     if (wfe.signalName !== signalName) continue;
@@ -265,166 +198,139 @@ function findWaitingAttempt(
   return null;
 }
 
-function submitSignal(
-  db: Database,
+async function submitSignal(
+  adapter: SmithersDb,
   signalName: string,
   correlationId: string | null,
   payload: unknown,
   now: number,
-): { seq: number; correlated: boolean } {
-  return db.transaction(() => {
-    const next =
-      (
-        db
-          .query(
-            `SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_signals WHERE run_id = ?`,
-          )
-          .get(RUN_ID) as { seq: number }
-      ).seq;
+): Promise<{ seq: number; correlated: boolean }> {
+  const seq = (await adapter.insertSignalWithNextSeq({
+    runId: RUN_ID,
+    signalName,
+    correlationId,
+    payloadJson: JSON.stringify(payload ?? null),
+    receivedAtMs: now,
+    receivedBy: null,
+  })) as number;
 
-    db.query(
-      `INSERT INTO _smithers_signals
-         (run_id, seq, signal_name, correlation_id, payload_json, received_at_ms, received_by)
-       VALUES (?, ?, ?, ?, ?, ?, NULL)`,
-    ).run(
-      RUN_ID,
-      next,
+  const waiter = await findWaitingAttempt(adapter, signalName, correlationId);
+  if (!waiter) {
+    return { seq, correlated: false };
+  }
+
+  const meta = JSON.parse(waiter.metaJson!);
+  const resolvedMeta = {
+    ...meta,
+    kind: typeof meta.kind === "string" ? meta.kind : "wait-for-event",
+    waitForEvent: {
+      ...(meta.waitForEvent ?? {}),
       signalName,
       correlationId,
-      JSON.stringify(payload ?? null),
-      now,
-    );
+      resolvedSignalSeq: seq,
+      receivedAtMs: now,
+    },
+  };
 
-    const waiter = findWaitingAttempt(db, signalName, correlationId);
-    if (!waiter) {
-      return { seq: next, correlated: false };
-    }
+  await adapter.updateAttempt(
+    RUN_ID,
+    waiter.nodeId,
+    waiter.iteration,
+    waiter.attempt,
+    {
+      state: "finished",
+      finishedAtMs: now,
+      metaJson: JSON.stringify(resolvedMeta),
+    },
+  );
 
-    const meta = JSON.parse(waiter.meta_json!);
-    const resolvedMeta = {
-      ...meta,
-      kind: typeof meta.kind === "string" ? meta.kind : "wait-for-event",
-      waitForEvent: {
-        ...(meta.waitForEvent ?? {}),
-        signalName,
-        correlationId,
-        resolvedSignalSeq: next,
-        receivedAtMs: now,
-      },
-    };
+  await adapter.insertNode({
+    runId: RUN_ID,
+    nodeId: waiter.nodeId,
+    iteration: waiter.iteration,
+    state: "finished",
+    lastAttempt: waiter.attempt,
+    updatedAtMs: now,
+    outputTable: OUTPUT_TABLE,
+    label: null,
+  });
 
-    db.query(
-      `UPDATE _smithers_attempts
-          SET state = 'finished',
-              finished_at_ms = ?,
-              meta_json = ?
-        WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?`,
-    ).run(
-      now,
-      JSON.stringify(resolvedMeta),
-      RUN_ID,
-      waiter.node_id,
-      waiter.iteration,
-      waiter.attempt,
-    );
+  await adapter.updateRun(RUN_ID, { status: "running" });
 
-    db.query(
-      `UPDATE _smithers_nodes
-          SET state = 'finished', updated_at_ms = ?
-        WHERE run_id = ? AND node_id = ? AND iteration = ?`,
-    ).run(now, RUN_ID, waiter.node_id, waiter.iteration);
+  await adapter.insertEventWithNextSeq({
+    runId: RUN_ID,
+    timestampMs: now,
+    type: "WaitForEventResolved",
+    payloadJson: JSON.stringify({
+      runId: RUN_ID,
+      nodeId: waiter.nodeId,
+      iteration: waiter.iteration,
+      signalName,
+      correlationId,
+      seq,
+      receivedAtMs: now,
+    }),
+  });
 
-    db.query(
-      `UPDATE _smithers_runs SET status = 'running' WHERE run_id = ?`,
-    ).run(RUN_ID);
-
-    const eventSeq =
-      (
-        db
-          .query(
-            `SELECT COALESCE(MAX(seq), 0) AS max_seq FROM _smithers_events WHERE run_id = ?`,
-          )
-          .get(RUN_ID) as { max_seq: number }
-      ).max_seq + 1;
-
-    db.query(
-      `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
-       VALUES (?, ?, ?, 'WaitForEventResolved', ?)`,
-    ).run(
-      RUN_ID,
-      eventSeq,
-      now,
-      JSON.stringify({
-        runId: RUN_ID,
-        nodeId: waiter.node_id,
-        iteration: waiter.iteration,
-        signalName,
-        correlationId,
-        seq: next,
-        receivedAtMs: now,
-      }),
-    );
-
-    return { seq: next, correlated: true };
-  })();
+  return { seq, correlated: true };
 }
 
 describe("case04 restart during waiting-event", () => {
   test("waiter row persists across engine death and supervisor takeover", async () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
 
     const t0 = Date.now();
-    const seededMeta = seedWaitingEvent(db, t0);
+    const seededMeta = await seedWaitingEvent(adapter, t0);
 
-    const seeded = readAttempt(db);
+    const seeded = await readAttempt(adapter);
     expect(seeded.state).toBe("waiting-event");
-    expect(seeded.node_id).toBe(TARGET_NODE_ID);
+    expect(seeded.nodeId).toBe(TARGET_NODE_ID);
     expect(seeded.iteration).toBe(TARGET_ITERATION);
     expect(seeded.attempt).toBe(TARGET_ATTEMPT);
-    expect(seeded.finished_at_ms).toBeNull();
-    expect(seeded.meta_json).toBe(seededMeta);
+    expect(seeded.finishedAtMs).toBeNull();
+    expect(seeded.metaJson).toBe(seededMeta);
 
-    await corruptHeartbeat(db, RUN_ID, "stale");
+    await corruptHeartbeat(sqlite, RUN_ID, "stale");
 
-    const afterCrash = readAttempt(db);
+    const afterCrash = await readAttempt(adapter);
     expect(afterCrash.state).toBe("waiting-event");
-    expect(afterCrash.meta_json).toBe(seededMeta);
-    expect(afterCrash.finished_at_ms).toBeNull();
-    expect(afterCrash.started_at_ms).toBe(seeded.started_at_ms);
+    expect(afterCrash.metaJson).toBe(seededMeta);
+    expect(afterCrash.finishedAtMs).toBeNull();
+    expect(afterCrash.startedAtMs).toBe(seeded.startedAtMs);
 
-    const nodeAfterCrash = readNode(db);
+    const nodeAfterCrash = await readNode(adapter);
     expect(nodeAfterCrash.state).toBe("waiting-event");
-    expect(nodeAfterCrash.node_id).toBe(TARGET_NODE_ID);
+    expect(nodeAfterCrash.nodeId).toBe(TARGET_NODE_ID);
     expect(nodeAfterCrash.iteration).toBe(TARGET_ITERATION);
 
-    supervisorTakeover(db, t0 + 2_000);
+    await supervisorTakeover(adapter, t0 + 2_000);
 
-    const afterTakeover = readAttempt(db);
+    const afterTakeover = await readAttempt(adapter);
     expect(afterTakeover.state).toBe("waiting-event");
-    expect(afterTakeover.meta_json).toBe(seededMeta);
-    expect(afterTakeover.finished_at_ms).toBeNull();
+    expect(afterTakeover.metaJson).toBe(seededMeta);
+    expect(afterTakeover.finishedAtMs).toBeNull();
 
-    const run = readRun(db);
+    const run = await readRun(adapter);
     expect(run.status).toBe("waiting-event");
-    expect(run.runtime_owner_id).toBe(SUPERVISOR_OWNER);
-    expect(run.heartbeat_at_ms).not.toBeNull();
-    expect(run.heartbeat_at_ms!).toBeGreaterThanOrEqual(t0);
+    expect(run.runtimeOwnerId).toBe(SUPERVISOR_OWNER);
+    expect(run.heartbeatAtMs).not.toBeNull();
+    expect(run.heartbeatAtMs!).toBeGreaterThanOrEqual(t0);
 
-    expect(readSignals(db).length).toBe(0);
+    expect((await readSignals(adapter)).length).toBe(0);
   });
 
   test("signal arriving after restart correlates by signalName + correlationId", async () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
 
     const t0 = Date.now();
-    seedWaitingEvent(db, t0);
-    await corruptHeartbeat(db, RUN_ID, "stale");
-    supervisorTakeover(db, t0 + 2_000);
+    await seedWaitingEvent(adapter, t0);
+    await corruptHeartbeat(sqlite, RUN_ID, "stale");
+    await supervisorTakeover(adapter, t0 + 2_000);
 
-    const result = submitSignal(
-      db,
+    const result = await submitSignal(
+      adapter,
       SIGNAL_NAME,
       CORRELATION_ID,
       { revision: "deadbeef" },
@@ -433,19 +339,19 @@ describe("case04 restart during waiting-event", () => {
     expect(result.correlated).toBe(true);
     expect(result.seq).toBe(0);
 
-    const signals = readSignals(db);
+    const signals = await readSignals(adapter);
     expect(signals.length).toBe(1);
-    expect(signals[0]!.signal_name).toBe(SIGNAL_NAME);
-    expect(signals[0]!.correlation_id).toBe(CORRELATION_ID);
-    expect(signals[0]!.received_at_ms).toBe(t0 + 3_000);
-    expect(JSON.parse(signals[0]!.payload_json)).toEqual({
+    expect(signals[0]!.signalName).toBe(SIGNAL_NAME);
+    expect(signals[0]!.correlationId).toBe(CORRELATION_ID);
+    expect(signals[0]!.receivedAtMs).toBe(t0 + 3_000);
+    expect(JSON.parse(signals[0]!.payloadJson)).toEqual({
       revision: "deadbeef",
     });
 
-    const resolved = readAttempt(db);
+    const resolved = await readAttempt(adapter);
     expect(resolved.state).toBe("finished");
-    expect(resolved.finished_at_ms).toBe(t0 + 3_000);
-    const meta = JSON.parse(resolved.meta_json!) as {
+    expect(resolved.finishedAtMs).toBe(t0 + 3_000);
+    const meta = JSON.parse(resolved.metaJson!) as {
       waitForEvent: {
         signalName: string;
         correlationId: string | null;
@@ -458,23 +364,20 @@ describe("case04 restart during waiting-event", () => {
     expect(meta.waitForEvent.resolvedSignalSeq).toBe(0);
     expect(meta.waitForEvent.receivedAtMs).toBe(t0 + 3_000);
 
-    const node = readNode(db);
+    const node = await readNode(adapter);
     expect(node.state).toBe("finished");
-    expect(node.node_id).toBe(TARGET_NODE_ID);
+    expect(node.nodeId).toBe(TARGET_NODE_ID);
     expect(node.iteration).toBe(TARGET_ITERATION);
 
-    const run = readRun(db);
+    const run = await readRun(adapter);
     expect(run.status).toBe("running");
 
-    const events = db
-      .query(
-        `SELECT run_id, seq, type, payload_json
-           FROM _smithers_events
-          WHERE run_id = ? AND type = 'WaitForEventResolved'`,
-      )
-      .all(RUN_ID) as EventRow[];
+    const events = (await adapter.listEventsByType(
+      RUN_ID,
+      "WaitForEventResolved",
+    )) as EventRow[];
     expect(events.length).toBe(1);
-    const payload = JSON.parse(events[0]!.payload_json) as {
+    const payload = JSON.parse(events[0]!.payloadJson) as {
       runId: string;
       nodeId: string;
       iteration: number;
@@ -491,16 +394,16 @@ describe("case04 restart during waiting-event", () => {
   });
 
   test("signal with mismatched correlationId is recorded but does not consume the waiter", async () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
 
     const t0 = Date.now();
-    seedWaitingEvent(db, t0);
-    await corruptHeartbeat(db, RUN_ID, "stale");
-    supervisorTakeover(db, t0 + 2_000);
+    await seedWaitingEvent(adapter, t0);
+    await corruptHeartbeat(sqlite, RUN_ID, "stale");
+    await supervisorTakeover(adapter, t0 + 2_000);
 
-    const result = submitSignal(
-      db,
+    const result = await submitSignal(
+      adapter,
       SIGNAL_NAME,
       "deploy:other-id",
       { revision: "cafebabe" },
@@ -509,18 +412,18 @@ describe("case04 restart during waiting-event", () => {
     expect(result.correlated).toBe(false);
     expect(result.seq).toBe(0);
 
-    const signals = readSignals(db);
+    const signals = await readSignals(adapter);
     expect(signals.length).toBe(1);
-    expect(signals[0]!.correlation_id).toBe("deploy:other-id");
+    expect(signals[0]!.correlationId).toBe("deploy:other-id");
 
-    const stillWaiting = readAttempt(db);
+    const stillWaiting = await readAttempt(adapter);
     expect(stillWaiting.state).toBe("waiting-event");
-    expect(stillWaiting.finished_at_ms).toBeNull();
+    expect(stillWaiting.finishedAtMs).toBeNull();
 
-    const node = readNode(db);
+    const node = await readNode(adapter);
     expect(node.state).toBe("waiting-event");
 
-    const run = readRun(db);
+    const run = await readRun(adapter);
     expect(run.status).toBe("waiting-event");
   });
 

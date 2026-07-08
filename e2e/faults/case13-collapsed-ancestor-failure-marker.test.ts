@@ -1,5 +1,8 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, onTestFinished, test } from "bun:test";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 
 const RUN_ID = "case13-run";
 const ROOT_NODE_ID = "root";
@@ -14,181 +17,139 @@ type FrameTreeNode = {
 };
 
 type EventRow = {
-  run_id: string;
+  runId: string;
   seq: number;
   type: string;
-  payload_json: string;
+  payloadJson: string;
+};
+
+type CaseDb = {
+  sqlite: Database;
+  adapter: SmithersDb;
+};
+
+type NodeRow = {
+  nodeId: string;
+  state: string;
 };
 
 type FrameRow = {
-  run_id: string;
-  frame_no: number;
-  xml_json: string;
+  frameNo: number;
+  xmlJson: string;
 };
 
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-    CREATE TABLE _smithers_nodes (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      state TEXT NOT NULL,
-      last_attempt INTEGER,
-      updated_at_ms INTEGER NOT NULL,
-      output_table TEXT NOT NULL,
-      label TEXT,
-      PRIMARY KEY (run_id, node_id, iteration)
-    );
-    CREATE TABLE _smithers_events (
-      run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (run_id, seq)
-    );
-    CREATE TABLE _smithers_frames (
-      run_id TEXT NOT NULL,
-      frame_no INTEGER NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      xml_json TEXT NOT NULL,
-      xml_hash TEXT NOT NULL,
-      encoding TEXT NOT NULL DEFAULT 'full',
-      mounted_task_ids_json TEXT,
-      task_index_json TEXT,
-      note TEXT,
-      PRIMARY KEY (run_id, frame_no)
-    );
-  `);
-  return db;
+function buildDb(): CaseDb {
+  const sqlite = new Database(":memory:");
+  const db = drizzle(sqlite);
+  ensureSmithersTables(db);
+  return { sqlite, adapter: new SmithersDb(db) };
 }
 
-function seedRun(db: Database, now: number): void {
-  db.query(
-    `INSERT INTO _smithers_runs
-       (run_id, workflow_name, status, created_at_ms, started_at_ms, heartbeat_at_ms, runtime_owner_id)
-     VALUES (?, 'case13-workflow', 'running', ?, ?, ?, 'engine:case13')`,
-  ).run(RUN_ID, now - 5_000, now - 4_000, now - 500);
+async function seedRun(adapter: SmithersDb, now: number): Promise<void> {
+  await adapter.insertRun({
+    runId: RUN_ID,
+    workflowName: "case13-workflow",
+    status: "running",
+    createdAtMs: now - 5_000,
+    startedAtMs: now - 4_000,
+    heartbeatAtMs: now - 500,
+    runtimeOwnerId: "engine:case13",
+  });
 }
 
-function seedNode(
-  db: Database,
+async function upsertNode(
+  adapter: SmithersDb,
   nodeId: string,
   state: string,
   updatedAtMs: number,
   label: string,
-): void {
-  db.query(
-    `INSERT INTO _smithers_nodes
-       (run_id, node_id, iteration, state, last_attempt, updated_at_ms, output_table, label)
-     VALUES (?, ?, 0, ?, 1, ?, ?, ?)`,
-  ).run(RUN_ID, nodeId, state, updatedAtMs, `out_${nodeId}`, label);
+): Promise<void> {
+  await adapter.insertNode({
+    runId: RUN_ID,
+    nodeId,
+    iteration: 0,
+    state,
+    lastAttempt: 1,
+    updatedAtMs,
+    outputTable: `out_${nodeId}`,
+    label,
+  });
 }
 
-function commitFrameTree(
-  db: Database,
+async function commitFrameTree(
+  adapter: SmithersDb,
   frameNo: number,
   createdAtMs: number,
   tree: FrameTreeNode,
   mountedTaskIds: string[],
-): void {
-  db.query(
-    `INSERT INTO _smithers_frames
-       (run_id, frame_no, created_at_ms, xml_json, xml_hash, encoding, mounted_task_ids_json, task_index_json)
-     VALUES (?, ?, ?, ?, ?, 'full', ?, ?)`,
-  ).run(
-    RUN_ID,
+): Promise<void> {
+  await adapter.insertFrame({
+    runId: RUN_ID,
     frameNo,
     createdAtMs,
-    JSON.stringify(tree),
-    `hash:${frameNo}`,
-    JSON.stringify(mountedTaskIds),
-    JSON.stringify(mountedTaskIds.map((id, idx) => ({ nodeId: id, index: idx }))),
+    xmlJson: JSON.stringify(tree),
+    xmlHash: `hash:${frameNo}`,
+    mountedTaskIdsJson: JSON.stringify(mountedTaskIds),
+    taskIndexJson: JSON.stringify(
+      mountedTaskIds.map((id, idx) => ({ nodeId: id, index: idx })),
+    ),
+  });
+}
+
+function parseFrameTree(row: FrameRow | undefined): FrameTreeNode {
+  if (!row) throw new Error("frame missing");
+  return JSON.parse(row.xmlJson) as FrameTreeNode;
+}
+
+async function readLatestFrameTree(adapter: SmithersDb): Promise<FrameTreeNode> {
+  return parseFrameTree(
+    (await adapter.getLastFrame(RUN_ID)) as FrameRow | undefined,
   );
 }
 
-function readLatestFrameTree(db: Database): FrameTreeNode {
-  const row = db
-    .query(
-      `SELECT run_id, frame_no, xml_json
-         FROM _smithers_frames
-        WHERE run_id = ?
-        ORDER BY frame_no DESC
-        LIMIT 1`,
-    )
-    .get(RUN_ID) as FrameRow | null;
-  if (!row) throw new Error("frame missing");
-  return JSON.parse(row.xml_json) as FrameTreeNode;
+async function readFrameTree(
+  adapter: SmithersDb,
+  frameNo: number,
+): Promise<FrameTreeNode> {
+  const frames = (await adapter.listFrames(RUN_ID, 100)) as FrameRow[];
+  return parseFrameTree(frames.find((frame) => frame.frameNo === frameNo));
 }
 
-function readNodeState(db: Database, nodeId: string): string {
-  const row = db
-    .query(
-      `SELECT state FROM _smithers_nodes
-        WHERE run_id = ? AND node_id = ? AND iteration = 0`,
-    )
-    .get(RUN_ID, nodeId) as { state: string } | null;
+async function readNodeState(
+  adapter: SmithersDb,
+  nodeId: string,
+): Promise<string> {
+  const row = (await adapter.getNode(RUN_ID, nodeId, 0)) as NodeRow | undefined;
   if (!row) throw new Error(`node missing: ${nodeId}`);
   return row.state;
 }
 
-function nextSeq(db: Database): number {
-  return (
-    (
-      db
-        .query(
-          `SELECT COALESCE(MAX(seq), 0) AS max_seq FROM _smithers_events WHERE run_id = ?`,
-        )
-        .get(RUN_ID) as { max_seq: number }
-    ).max_seq + 1
-  );
-}
-
-function recordNodeFailedEvent(
-  db: Database,
+async function recordNodeFailedEvent(
+  adapter: SmithersDb,
   nodeId: string,
   attempt: number,
   errorMessage: string,
   timestampMs: number,
-): number {
-  const seq = nextSeq(db);
-  db.query(
-    `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
-     VALUES (?, ?, ?, 'NodeFailed', ?)`,
-  ).run(
-    RUN_ID,
-    seq,
+): Promise<number> {
+  return await adapter.insertEventWithNextSeq({
+    runId: RUN_ID,
     timestampMs,
-    JSON.stringify({
+    type: "NodeFailed",
+    payloadJson: JSON.stringify({
       runId: RUN_ID,
       nodeId,
       iteration: 0,
       attempt,
       error: { message: errorMessage, kind: "tool" },
     }),
-  );
-  return seq;
+  });
 }
 
-function readEventsByType(db: Database, type: string): EventRow[] {
-  return db
-    .query(
-      `SELECT run_id, seq, type, payload_json
-         FROM _smithers_events
-        WHERE run_id = ? AND type = ?
-        ORDER BY seq ASC`,
-    )
-    .all(RUN_ID, type) as EventRow[];
+async function readEventsByType(
+  adapter: SmithersDb,
+  type: string,
+): Promise<EventRow[]> {
+  return (await adapter.listEventsByType(RUN_ID, type)) as EventRow[];
 }
 
 function ancestorPath(tree: FrameTreeNode, target: string): FrameTreeNode[] {
@@ -220,27 +181,32 @@ function aggregatedFailureMarker(
   return false;
 }
 
-function liveStateMap(db: Database): Map<string, string> {
-  const rows = db
-    .query(
-      `SELECT node_id, state FROM _smithers_nodes WHERE run_id = ? AND iteration = 0`,
-    )
-    .all(RUN_ID) as Array<{ node_id: string; state: string }>;
+async function liveStateMap(adapter: SmithersDb): Promise<Map<string, string>> {
+  const rows = (await adapter.listNodes(RUN_ID)) as NodeRow[];
   const map = new Map<string, string>();
-  for (const row of rows) map.set(row.node_id, row.state);
+  for (const row of rows) map.set(row.nodeId, row.state);
+  return map;
+}
+
+async function nodeStateCounts(
+  adapter: SmithersDb,
+): Promise<Map<string, number>> {
+  const rows = await adapter.countNodesByState(RUN_ID);
+  const map = new Map<string, number>();
+  for (const row of rows) map.set(row.state, Number(row.count));
   return map;
 }
 
 describe("case 13: collapsed ancestor shows failure marker", () => {
-  test("DB-level bubble-up: failed leaf surfaces failure on every ancestor in frame tree", () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+  test("DB-level bubble-up: failed leaf surfaces failure on every ancestor in frame tree", async () => {
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
 
     const t0 = Date.now();
-    seedRun(db, t0);
-    seedNode(db, ROOT_NODE_ID, "running", t0 - 300, "Root");
-    seedNode(db, MID_NODE_ID, "running", t0 - 200, "Mid");
-    seedNode(db, LEAF_NODE_ID, "running", t0 - 100, "Leaf");
+    await seedRun(adapter, t0);
+    await upsertNode(adapter, ROOT_NODE_ID, "running", t0 - 300, "Root");
+    await upsertNode(adapter, MID_NODE_ID, "running", t0 - 200, "Mid");
+    await upsertNode(adapter, LEAF_NODE_ID, "running", t0 - 100, "Leaf");
 
     const initialTree: FrameTreeNode = {
       nodeId: ROOT_NODE_ID,
@@ -255,30 +221,26 @@ describe("case 13: collapsed ancestor shows failure marker", () => {
         },
       ],
     };
-    commitFrameTree(db, 1, t0 - 100, initialTree, [
+    await commitFrameTree(adapter, 1, t0 - 100, initialTree, [
       ROOT_NODE_ID,
       MID_NODE_ID,
       LEAF_NODE_ID,
     ]);
 
-    const live = liveStateMap(db);
+    const live = await liveStateMap(adapter);
     expect(aggregatedFailureMarker(initialTree, live)).toBe(false);
 
     const failedAt = t0 + 50;
-    db.query(
-      `UPDATE _smithers_nodes
-          SET state = 'failed', updated_at_ms = ?
-        WHERE run_id = ? AND node_id = ? AND iteration = 0`,
-    ).run(failedAt, RUN_ID, LEAF_NODE_ID);
+    await upsertNode(adapter, LEAF_NODE_ID, "failed", failedAt, "Leaf");
 
-    const failedSeq = recordNodeFailedEvent(
-      db,
+    const failedSeq = await recordNodeFailedEvent(
+      adapter,
       LEAF_NODE_ID,
       1,
       "tool blew up",
       failedAt,
     );
-    expect(failedSeq).toBe(1);
+    expect(failedSeq).toBe(0);
 
     const failedTree: FrameTreeNode = {
       nodeId: ROOT_NODE_ID,
@@ -293,18 +255,21 @@ describe("case 13: collapsed ancestor shows failure marker", () => {
         },
       ],
     };
-    commitFrameTree(db, 2, failedAt, failedTree, [
+    await commitFrameTree(adapter, 2, failedAt, failedTree, [
       ROOT_NODE_ID,
       MID_NODE_ID,
       LEAF_NODE_ID,
     ]);
 
-    expect(readNodeState(db, LEAF_NODE_ID)).toBe("failed");
-    expect(readNodeState(db, MID_NODE_ID)).toBe("running");
-    expect(readNodeState(db, ROOT_NODE_ID)).toBe("running");
+    expect(await readNodeState(adapter, LEAF_NODE_ID)).toBe("failed");
+    expect(await readNodeState(adapter, MID_NODE_ID)).toBe("running");
+    expect(await readNodeState(adapter, ROOT_NODE_ID)).toBe("running");
+    const counts = await nodeStateCounts(adapter);
+    expect(counts.get("failed")).toBe(1);
+    expect(counts.get("running")).toBe(2);
 
-    const latest = readLatestFrameTree(db);
-    const liveAfter = liveStateMap(db);
+    const latest = await readLatestFrameTree(adapter);
+    const liveAfter = await liveStateMap(adapter);
 
     const path = ancestorPath(latest, LEAF_NODE_ID);
     expect(path.map((n) => n.nodeId)).toEqual([
@@ -319,18 +284,20 @@ describe("case 13: collapsed ancestor shows failure marker", () => {
 
     expect(aggregatedFailureMarker(latest, liveAfter)).toBe(true);
     expect(aggregatedFailureMarker(latest.children[0], liveAfter)).toBe(true);
-    expect(aggregatedFailureMarker(latest.children[0].children[0], liveAfter)).toBe(true);
+    expect(
+      aggregatedFailureMarker(latest.children[0].children[0], liveAfter),
+    ).toBe(true);
   });
 
-  test("collapse-independence: NodeFailed event for buried leaf is queryable from run event log", () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+  test("collapse-independence: NodeFailed event for buried leaf is queryable from run event log", async () => {
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
 
     const t0 = Date.now();
-    seedRun(db, t0);
-    seedNode(db, ROOT_NODE_ID, "running", t0 - 300, "Root");
-    seedNode(db, MID_NODE_ID, "running", t0 - 200, "Mid");
-    seedNode(db, LEAF_NODE_ID, "failed", t0, "Leaf");
+    await seedRun(adapter, t0);
+    await upsertNode(adapter, ROOT_NODE_ID, "running", t0 - 300, "Root");
+    await upsertNode(adapter, MID_NODE_ID, "running", t0 - 200, "Mid");
+    await upsertNode(adapter, LEAF_NODE_ID, "failed", t0, "Leaf");
 
     const tree: FrameTreeNode = {
       nodeId: ROOT_NODE_ID,
@@ -345,12 +312,16 @@ describe("case 13: collapsed ancestor shows failure marker", () => {
         },
       ],
     };
-    commitFrameTree(db, 1, t0, tree, [ROOT_NODE_ID, MID_NODE_ID, LEAF_NODE_ID]);
-    recordNodeFailedEvent(db, LEAF_NODE_ID, 2, "boom", t0);
+    await commitFrameTree(adapter, 1, t0, tree, [
+      ROOT_NODE_ID,
+      MID_NODE_ID,
+      LEAF_NODE_ID,
+    ]);
+    await recordNodeFailedEvent(adapter, LEAF_NODE_ID, 2, "boom", t0);
 
-    const failedEvents = readEventsByType(db, "NodeFailed");
+    const failedEvents = await readEventsByType(adapter, "NodeFailed");
     expect(failedEvents).toHaveLength(1);
-    const payload = JSON.parse(failedEvents[0].payload_json) as {
+    const payload = JSON.parse(failedEvents[0].payloadJson) as {
       runId: string;
       nodeId: string;
       iteration: number;
@@ -374,15 +345,15 @@ describe("case 13: collapsed ancestor shows failure marker", () => {
     }
   });
 
-  test("schema invariant: frame tree provides stable ancestor linkage; aggregator can be re-run on any frame_no", () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+  test("schema invariant: frame tree provides stable ancestor linkage; aggregator can be re-run on any frame_no", async () => {
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
 
     const t0 = Date.now();
-    seedRun(db, t0);
-    seedNode(db, ROOT_NODE_ID, "running", t0 - 300, "Root");
-    seedNode(db, MID_NODE_ID, "running", t0 - 200, "Mid");
-    seedNode(db, LEAF_NODE_ID, "running", t0 - 100, "Leaf");
+    await seedRun(adapter, t0);
+    await upsertNode(adapter, ROOT_NODE_ID, "running", t0 - 300, "Root");
+    await upsertNode(adapter, MID_NODE_ID, "running", t0 - 200, "Mid");
+    await upsertNode(adapter, LEAF_NODE_ID, "running", t0 - 100, "Leaf");
 
     const f1Tree: FrameTreeNode = {
       nodeId: ROOT_NODE_ID,
@@ -397,7 +368,7 @@ describe("case 13: collapsed ancestor shows failure marker", () => {
         },
       ],
     };
-    commitFrameTree(db, 1, t0 - 100, f1Tree, [
+    await commitFrameTree(adapter, 1, t0 - 100, f1Tree, [
       ROOT_NODE_ID,
       MID_NODE_ID,
       LEAF_NODE_ID,
@@ -416,38 +387,18 @@ describe("case 13: collapsed ancestor shows failure marker", () => {
         },
       ],
     };
-    db.query(
-      `UPDATE _smithers_nodes SET state = 'failed', updated_at_ms = ?
-        WHERE run_id = ? AND node_id = ? AND iteration = 0`,
-    ).run(t0 + 25, RUN_ID, LEAF_NODE_ID);
-    commitFrameTree(db, 2, t0 + 25, f2Tree, [
+    await upsertNode(adapter, LEAF_NODE_ID, "failed", t0 + 25, "Leaf");
+    await commitFrameTree(adapter, 2, t0 + 25, f2Tree, [
       ROOT_NODE_ID,
       MID_NODE_ID,
       LEAF_NODE_ID,
     ]);
-    recordNodeFailedEvent(db, LEAF_NODE_ID, 1, "boom", t0 + 25);
+    await recordNodeFailedEvent(adapter, LEAF_NODE_ID, 1, "boom", t0 + 25);
 
-    const frame1Tree = JSON.parse(
-      (
-        db
-          .query(
-            `SELECT xml_json FROM _smithers_frames WHERE run_id = ? AND frame_no = 1`,
-          )
-          .get(RUN_ID) as { xml_json: string }
-      ).xml_json,
-    ) as FrameTreeNode;
+    const frame1Tree = await readFrameTree(adapter, 1);
+    const frame2Tree = await readFrameTree(adapter, 2);
 
-    const frame2Tree = JSON.parse(
-      (
-        db
-          .query(
-            `SELECT xml_json FROM _smithers_frames WHERE run_id = ? AND frame_no = 2`,
-          )
-          .get(RUN_ID) as { xml_json: string }
-      ).xml_json,
-    ) as FrameTreeNode;
-
-    const live = liveStateMap(db);
+    const live = await liveStateMap(adapter);
 
     expect(aggregatedFailureMarker(frame1Tree, new Map())).toBe(false);
     expect(aggregatedFailureMarker(frame2Tree, new Map())).toBe(true);

@@ -1,293 +1,255 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, onTestFinished, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 
 const RUN_ID = "case10-run";
 const SELECTED_NODE_ID = "n2";
 const SELECTED_ITERATION = 0;
 
 type NodeSnapshot = {
-  run_id: string;
-  node_id: string;
+  runId: string;
+  nodeId: string;
   iteration: number;
   state: string;
-  updated_at_ms: number;
-  output_table: string;
+  updatedAtMs: number;
+  outputTable: string;
   label: string | null;
 };
 
 type EventRow = {
-  run_id: string;
+  runId: string;
   seq: number;
   type: string;
-  payload_json: string;
+  payloadJson: string;
 };
 
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-    CREATE TABLE _smithers_nodes (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      state TEXT NOT NULL,
-      last_attempt INTEGER,
-      updated_at_ms INTEGER NOT NULL,
-      output_table TEXT NOT NULL,
-      label TEXT,
-      PRIMARY KEY (run_id, node_id, iteration)
-    );
-    CREATE TABLE _smithers_events (
-      run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (run_id, seq)
-    );
-  `);
-  return db;
+function buildDb(): { sqlite: Database; adapter: SmithersDb } {
+  const sqlite = new Database(":memory:");
+  const db = drizzle(sqlite);
+  ensureSmithersTables(db);
+  return { sqlite, adapter: new SmithersDb(db) };
 }
 
-function seedRun(db: Database, now: number): void {
-  db.query(
-    `INSERT INTO _smithers_runs
-       (run_id, workflow_name, status, created_at_ms, started_at_ms, heartbeat_at_ms, runtime_owner_id)
-     VALUES (?, 'case10-workflow', 'running', ?, ?, ?, 'engine:case10')`,
-  ).run(RUN_ID, now - 5_000, now - 4_000, now - 500);
+async function seedRun(adapter: SmithersDb, now: number): Promise<void> {
+  await adapter.insertRun({
+    runId: RUN_ID,
+    workflowName: "case10-workflow",
+    status: "running",
+    createdAtMs: now - 5_000,
+    startedAtMs: now - 4_000,
+    heartbeatAtMs: now - 500,
+    runtimeOwnerId: "engine:case10",
+  });
 }
 
-function seedNode(
-  db: Database,
+async function seedNode(
+  adapter: SmithersDb,
   nodeId: string,
   state: string,
   updatedAtMs: number,
   label: string | null,
-): void {
-  db.query(
-    `INSERT INTO _smithers_nodes
-       (run_id, node_id, iteration, state, last_attempt, updated_at_ms, output_table, label)
-     VALUES (?, ?, 0, ?, 1, ?, ?, ?)`,
-  ).run(RUN_ID, nodeId, state, updatedAtMs, `out_${nodeId}`, label);
+): Promise<void> {
+  await adapter.insertNode({
+    runId: RUN_ID,
+    nodeId,
+    iteration: SELECTED_ITERATION,
+    state,
+    lastAttempt: 1,
+    updatedAtMs,
+    outputTable: `out_${nodeId}`,
+    label,
+  });
 }
 
-function readNode(db: Database, nodeId: string): NodeSnapshot | null {
+async function seedGraph(adapter: SmithersDb, now: number): Promise<void> {
+  await seedRun(adapter, now);
+  await seedNode(adapter, "n1", "running", now - 200, "Plan");
+  await seedNode(adapter, "n2", "running", now - 100, "Build");
+  await seedNode(adapter, "n3", "waiting-approval", now - 50, "Approve");
+}
+
+async function readNode(
+  adapter: SmithersDb,
+  nodeId: string,
+): Promise<NodeSnapshot | null> {
   return (
-    (db
-      .query(
-        `SELECT run_id, node_id, iteration, state, updated_at_ms, output_table, label
-           FROM _smithers_nodes
-          WHERE run_id = ? AND node_id = ? AND iteration = ?`,
-      )
-      .get(RUN_ID, nodeId, SELECTED_ITERATION) as NodeSnapshot | null) ?? null
+    ((await adapter.getNode(
+      RUN_ID,
+      nodeId,
+      SELECTED_ITERATION,
+    )) as NodeSnapshot | undefined) ?? null
   );
 }
 
-function readNodeIds(db: Database): string[] {
-  const rows = db
-    .query(
-      `SELECT node_id FROM _smithers_nodes WHERE run_id = ? ORDER BY node_id ASC`,
-    )
-    .all(RUN_ID) as Array<{ node_id: string }>;
-  return rows.map((r) => r.node_id);
+async function readNodeIds(adapter: SmithersDb): Promise<string[]> {
+  const rows = await adapter.listNodes(RUN_ID);
+  return rows.map((row) => String(row.nodeId)).sort();
 }
 
-function nextSeq(db: Database): number {
-  return (
-    (
-      db
-        .query(
-          `SELECT COALESCE(MAX(seq), 0) AS max_seq FROM _smithers_events WHERE run_id = ?`,
-        )
-        .get(RUN_ID) as { max_seq: number }
-    ).max_seq + 1
-  );
-}
-
-function recordUnmountEvent(
-  db: Database,
+async function recordUnmountEvent(
+  adapter: SmithersDb,
   nodeId: string,
   lastSnapshot: NodeSnapshot,
   timestampMs: number,
-): number {
-  const seq = nextSeq(db);
-  db.query(
-    `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
-     VALUES (?, ?, ?, 'NodeUnmounted', ?)`,
-  ).run(
-    RUN_ID,
-    seq,
+): Promise<number> {
+  return await adapter.insertEventWithNextSeq({
+    runId: RUN_ID,
     timestampMs,
-    JSON.stringify({
+    type: "NodeUnmounted",
+    payloadJson: JSON.stringify({
       runId: RUN_ID,
       nodeId,
       iteration: lastSnapshot.iteration,
       lastSeen: {
         state: lastSnapshot.state,
-        updatedAtMs: lastSnapshot.updated_at_ms,
-        outputTable: lastSnapshot.output_table,
+        updatedAtMs: lastSnapshot.updatedAtMs,
+        outputTable: lastSnapshot.outputTable,
         label: lastSnapshot.label,
       },
     }),
-  );
-  return seq;
+  });
 }
 
-function readEventsForNode(db: Database, nodeId: string): EventRow[] {
-  const rows = db
-    .query(
-      `SELECT run_id, seq, type, payload_json
-         FROM _smithers_events
-        WHERE run_id = ?
-        ORDER BY seq ASC`,
-    )
-    .all(RUN_ID) as EventRow[];
-  return rows.filter((row) => {
-    try {
-      const payload = JSON.parse(row.payload_json) as { nodeId?: string };
-      return payload.nodeId === nodeId;
-    } catch {
-      return false;
-    }
-  });
+async function readEventsForNode(
+  adapter: SmithersDb,
+  nodeId: string,
+): Promise<EventRow[]> {
+  return (await adapter.listEventHistory(RUN_ID, {
+    nodeId,
+    limit: 100,
+  })) as EventRow[];
 }
 
 describe("case 10: node unmount after selection; ghost state preserved", () => {
-  test("DB-level ghost contract: _smithers_nodes row survives unmount and inspector sees last-known state", () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+  test("DB-level ghost contract: node row survives unmount and inspector sees last-known state", async () => {
+    const { sqlite, adapter } = buildDb();
 
-    const t0 = Date.now();
-    seedRun(db, t0);
-    seedNode(db, "n1", "running", t0 - 200, "Plan");
-    seedNode(db, "n2", "running", t0 - 100, "Build");
-    seedNode(db, "n3", "waiting-approval", t0 - 50, "Approve");
+    try {
+      const t0 = Date.now();
+      await seedGraph(adapter, t0);
 
-    const beforeIds = readNodeIds(db);
-    expect(beforeIds).toEqual(["n1", "n2", "n3"]);
+      const beforeIds = await readNodeIds(adapter);
+      expect(beforeIds).toEqual(["n1", "n2", "n3"]);
 
-    const inspectorSnapshot = readNode(db, SELECTED_NODE_ID);
-    expect(inspectorSnapshot).not.toBeNull();
-    if (!inspectorSnapshot) return;
-    expect(inspectorSnapshot.state).toBe("running");
-    expect(inspectorSnapshot.label).toBe("Build");
-    expect(inspectorSnapshot.output_table).toBe("out_n2");
+      const inspectorSnapshot = await readNode(adapter, SELECTED_NODE_ID);
+      expect(inspectorSnapshot).not.toBeNull();
+      if (!inspectorSnapshot) return;
+      expect(inspectorSnapshot.state).toBe("running");
+      expect(inspectorSnapshot.label).toBe("Build");
+      expect(inspectorSnapshot.outputTable).toBe("out_n2");
 
-    const unmountTs = t0 + 50;
-    const unmountSeq = recordUnmountEvent(
-      db,
-      SELECTED_NODE_ID,
-      inspectorSnapshot,
-      unmountTs,
-    );
-    expect(unmountSeq).toBe(1);
+      const unmountTs = t0 + 50;
+      const unmountSeq = await recordUnmountEvent(
+        adapter,
+        SELECTED_NODE_ID,
+        inspectorSnapshot,
+        unmountTs,
+      );
+      expect(unmountSeq).toBe(0);
 
-    const afterIds = readNodeIds(db);
-    expect(afterIds).toEqual(["n1", "n2", "n3"]);
+      const afterIds = await readNodeIds(adapter);
+      expect(afterIds).toEqual(["n1", "n2", "n3"]);
 
-    const ghost = readNode(db, SELECTED_NODE_ID);
-    expect(ghost).not.toBeNull();
-    if (!ghost) return;
-    expect(ghost.node_id).toBe(SELECTED_NODE_ID);
-    expect(ghost.state).toBe(inspectorSnapshot.state);
-    expect(ghost.updated_at_ms).toBe(inspectorSnapshot.updated_at_ms);
-    expect(ghost.output_table).toBe(inspectorSnapshot.output_table);
-    expect(ghost.label).toBe(inspectorSnapshot.label);
+      const ghost = await readNode(adapter, SELECTED_NODE_ID);
+      expect(ghost).not.toBeNull();
+      if (!ghost) return;
+      expect(ghost.nodeId).toBe(SELECTED_NODE_ID);
+      expect(ghost.state).toBe(inspectorSnapshot.state);
+      expect(ghost.updatedAtMs).toBe(inspectorSnapshot.updatedAtMs);
+      expect(ghost.outputTable).toBe(inspectorSnapshot.outputTable);
+      expect(ghost.label).toBe(inspectorSnapshot.label);
 
-    const events = readEventsForNode(db, SELECTED_NODE_ID);
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("NodeUnmounted");
-    const payload = JSON.parse(events[0].payload_json) as {
-      nodeId: string;
-      iteration: number;
-      lastSeen: {
-        state: string;
-        updatedAtMs: number;
-        outputTable: string;
-        label: string | null;
+      const events = await readEventsForNode(adapter, SELECTED_NODE_ID);
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe("NodeUnmounted");
+      const payload = JSON.parse(events[0].payloadJson) as {
+        nodeId: string;
+        iteration: number;
+        lastSeen: {
+          state: string;
+          updatedAtMs: number;
+          outputTable: string;
+          label: string | null;
+        };
       };
-    };
-    expect(payload.nodeId).toBe(SELECTED_NODE_ID);
-    expect(payload.iteration).toBe(SELECTED_ITERATION);
-    expect(payload.lastSeen.state).toBe(inspectorSnapshot.state);
-    expect(payload.lastSeen.updatedAtMs).toBe(inspectorSnapshot.updated_at_ms);
-    expect(payload.lastSeen.outputTable).toBe(inspectorSnapshot.output_table);
-    expect(payload.lastSeen.label).toBe(inspectorSnapshot.label);
+      expect(payload.nodeId).toBe(SELECTED_NODE_ID);
+      expect(payload.iteration).toBe(SELECTED_ITERATION);
+      expect(payload.lastSeen.state).toBe(inspectorSnapshot.state);
+      expect(payload.lastSeen.updatedAtMs).toBe(inspectorSnapshot.updatedAtMs);
+      expect(payload.lastSeen.outputTable).toBe(inspectorSnapshot.outputTable);
+      expect(payload.lastSeen.label).toBe(inspectorSnapshot.label);
+    } finally {
+      sqlite.close();
+    }
   });
 
-  test("ghost rows do not move forward after the live engine advances peers", () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+  test("ghost rows do not move forward after the live engine advances peers", async () => {
+    const { sqlite, adapter } = buildDb();
 
-    const t0 = Date.now();
-    seedRun(db, t0);
-    seedNode(db, "n1", "running", t0 - 200, "Plan");
-    seedNode(db, "n2", "running", t0 - 100, "Build");
-    seedNode(db, "n3", "waiting-approval", t0 - 50, "Approve");
+    try {
+      const t0 = Date.now();
+      await seedGraph(adapter, t0);
 
-    const captured = readNode(db, SELECTED_NODE_ID);
-    expect(captured).not.toBeNull();
-    if (!captured) return;
+      const captured = await readNode(adapter, SELECTED_NODE_ID);
+      expect(captured).not.toBeNull();
+      if (!captured) return;
 
-    recordUnmountEvent(db, SELECTED_NODE_ID, captured, t0 + 10);
+      await recordUnmountEvent(adapter, SELECTED_NODE_ID, captured, t0 + 10);
 
-    db.query(
-      `UPDATE _smithers_nodes
-          SET state = 'finished', updated_at_ms = ?
-        WHERE run_id = ? AND node_id = 'n1'`,
-    ).run(t0 + 100, RUN_ID);
-    db.query(
-      `UPDATE _smithers_nodes
-          SET state = 'running', updated_at_ms = ?
-        WHERE run_id = ? AND node_id = 'n3'`,
-    ).run(t0 + 100, RUN_ID);
+      await seedNode(adapter, "n1", "finished", t0 + 100, "Plan");
+      await seedNode(adapter, "n3", "running", t0 + 100, "Approve");
 
-    const ghost = readNode(db, SELECTED_NODE_ID);
-    expect(ghost).not.toBeNull();
-    if (!ghost) return;
-    expect(ghost.state).toBe(captured.state);
-    expect(ghost.updated_at_ms).toBe(captured.updated_at_ms);
-    expect(ghost.label).toBe(captured.label);
+      const stateCounts = await adapter.countNodesByState(RUN_ID);
+      expect(
+        Object.fromEntries(
+          stateCounts.map((row) => [row.state, Number(row.count)]),
+        ),
+      ).toEqual({ finished: 1, running: 2 });
+
+      const ghost = await readNode(adapter, SELECTED_NODE_ID);
+      expect(ghost).not.toBeNull();
+      if (!ghost) return;
+      expect(ghost.state).toBe(captured.state);
+      expect(ghost.updatedAtMs).toBe(captured.updatedAtMs);
+      expect(ghost.label).toBe(captured.label);
+    } finally {
+      sqlite.close();
+    }
   });
 
-  test("audit trail: NodeUnmounted event persists even if the node row is later evicted", () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+  test("audit trail: NodeUnmounted event stays queryable without a current node row", async () => {
+    const { sqlite, adapter } = buildDb();
 
-    const t0 = Date.now();
-    seedRun(db, t0);
-    seedNode(db, "n1", "running", t0 - 200, "Plan");
-    seedNode(db, "n2", "running", t0 - 100, "Build");
-    seedNode(db, "n3", "waiting-approval", t0 - 50, "Approve");
+    try {
+      const t0 = Date.now();
+      await seedRun(adapter, t0);
+      const captured: NodeSnapshot = {
+        runId: RUN_ID,
+        nodeId: SELECTED_NODE_ID,
+        iteration: SELECTED_ITERATION,
+        state: "running",
+        updatedAtMs: t0 - 100,
+        outputTable: "out_n2",
+        label: "Build",
+      };
 
-    const captured = readNode(db, SELECTED_NODE_ID);
-    expect(captured).not.toBeNull();
-    if (!captured) return;
+      await recordUnmountEvent(adapter, SELECTED_NODE_ID, captured, t0 + 25);
 
-    recordUnmountEvent(db, SELECTED_NODE_ID, captured, t0 + 25);
+      expect(await readNode(adapter, SELECTED_NODE_ID)).toBeNull();
 
-    db.query(
-      `DELETE FROM _smithers_nodes WHERE run_id = ? AND node_id = ?`,
-    ).run(RUN_ID, SELECTED_NODE_ID);
-
-    expect(readNode(db, SELECTED_NODE_ID)).toBeNull();
-
-    const events = readEventsForNode(db, SELECTED_NODE_ID);
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("NodeUnmounted");
-    const payload = JSON.parse(events[0].payload_json) as {
-      lastSeen: { state: string; updatedAtMs: number };
-    };
-    expect(payload.lastSeen.state).toBe(captured.state);
-    expect(payload.lastSeen.updatedAtMs).toBe(captured.updated_at_ms);
+      const events = await readEventsForNode(adapter, SELECTED_NODE_ID);
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe("NodeUnmounted");
+      const payload = JSON.parse(events[0].payloadJson) as {
+        lastSeen: { state: string; updatedAtMs: number };
+      };
+      expect(payload.lastSeen.state).toBe(captured.state);
+      expect(payload.lastSeen.updatedAtMs).toBe(captured.updatedAtMs);
+    } finally {
+      sqlite.close();
+    }
   });
 
   test.skip("client-side: DevToolsStore.ghostNodes preserves selected node after live tree drops it (gui/0001, pi-plugin/runtime/DevToolsStore.ts)", () => {

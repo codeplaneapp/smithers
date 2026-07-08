@@ -1,184 +1,215 @@
-import { describe, expect, test } from "bun:test";
+/**
+ * Case 6 (ticket 0022): concurrent resume vs supervisor takeover of a stale
+ * running run must resolve to exactly one winner, and post-takeover writes from
+ * the loser (and the deposed original owner) must be fenced out.
+ *
+ * REAL product path (no-mocks):
+ *   - Build a real in-memory DB via `ensureSmithersTables` and drive it through
+ *     the real `@smithers-orchestrator/db/adapter` `SmithersDb`.
+ *   - The takeover is the REAL `adapter.claimRunForResume` compare-and-swap
+ *     (owner + heartbeat expectation, stale-before gate) — the same primitive
+ *     the resume path and the supervisor use in production.
+ *   - The post-takeover fence is the REAL `adapter.heartbeatRun`, whose
+ *     `WHERE run_id = ? AND runtime_owner_id = ?` clause is what actually
+ *     rejects writes from a non-owner.
+ *
+ * This case previously fabricated its own `_smithers_runs` table and
+ * reimplemented the CAS in the `takeoverRun` test harness plus a local
+ * `fencedHeartbeatBump`,
+ * so it validated a mock of the fencing contract rather than the product. The
+ * conversion below exercises the shipping adapter methods directly.
+ */
+
+import { describe, expect, onTestFinished, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { corruptHeartbeat } from "../harness/corruptHeartbeat.ts";
-import { takeoverRun } from "../harness/takeoverRun.ts";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 
 const STALE_THRESHOLD_MS = 30_000;
 
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-  `);
-  return db;
+function buildAdapter(): { sqlite: Database; adapter: SmithersDb } {
+  const sqlite = new Database(":memory:");
+  const db = drizzle(sqlite);
+  ensureSmithersTables(db);
+  return { sqlite, adapter: new SmithersDb(db) };
 }
 
-function seedRunningRun(
-  db: Database,
+async function seedStaleRunningRun(
+  adapter: SmithersDb,
   runId: string,
   ownerId: string,
-  heartbeatAtMs: number,
-): void {
-  db.query(
-    `INSERT INTO _smithers_runs
-       (run_id, workflow_name, status, created_at_ms, started_at_ms, heartbeat_at_ms, runtime_owner_id)
-     VALUES (?, 'case06-workflow', 'running', ?, ?, ?, ?)`,
-  ).run(runId, heartbeatAtMs - 5_000, heartbeatAtMs - 5_000, heartbeatAtMs, ownerId);
+  now: number,
+): Promise<void> {
+  // Heartbeat well past the stale threshold: the victim engine looks dead.
+  const heartbeatAtMs = now - 10 * STALE_THRESHOLD_MS;
+  await adapter.insertRun({
+    runId,
+    workflowName: "case06-workflow",
+    status: "running",
+    createdAtMs: heartbeatAtMs - 5_000,
+    startedAtMs: heartbeatAtMs - 5_000,
+    heartbeatAtMs,
+    runtimeOwnerId: ownerId,
+  });
 }
 
-function fencedHeartbeatBump(
-  db: Database,
+/**
+ * Attempt a stale-run takeover against the REAL adapter CAS. Both the resume
+ * path and the supervisor observe the same pre-race snapshot (owner +
+ * heartbeat) and try to claim it; only one swap can succeed.
+ */
+function claimStale(
+  adapter: SmithersDb,
   runId: string,
-  callerOwnerId: string,
-  newHeartbeatAtMs: number,
-): boolean {
-  db.query(
-    `UPDATE _smithers_runs
-       SET heartbeat_at_ms = ?
-     WHERE run_id = ?
-       AND runtime_owner_id = ?`,
-  ).run(newHeartbeatAtMs, runId, callerOwnerId);
-  const { count } = db.query("SELECT changes() AS count").get() as {
-    count: number;
-  };
-  return Number(count) > 0;
+  snapshot: { owner: string | null; heartbeat: number | null },
+  claimOwnerId: string,
+  claimHeartbeatAtMs: number,
+  now: number,
+): Promise<boolean> {
+  return Promise.resolve(
+    adapter.claimRunForResume({
+    runId,
+    expectedStatus: "running",
+    expectedRuntimeOwnerId: snapshot.owner,
+    expectedHeartbeatAtMs: snapshot.heartbeat,
+    staleBeforeMs: now - STALE_THRESHOLD_MS,
+    claimOwnerId,
+    claimHeartbeatAtMs,
+    requireStale: true,
+    }),
+  );
 }
 
 describe("case 06: concurrent resume vs supervisor takeover", () => {
-  test("CAS-on-runtime_owner_id: exactly one of (resume, supervisor) wins", () => {
-    const db = buildDb();
+  test("CAS-on-runtime_owner_id: exactly one of (resume, supervisor) wins", async () => {
+    const { sqlite, adapter } = buildAdapter();
+    onTestFinished(() => sqlite.close());
+
     const runId = "case06-run";
     const originalOwnerId = "pid:11111:engine-victim";
+    const now = Date.now();
+    await seedStaleRunningRun(adapter, runId, originalOwnerId, now);
 
-    try {
-      seedRunningRun(db, runId, originalOwnerId, Date.now());
-      corruptHeartbeat(db, runId, "stale");
+    // Both contenders read the same stale snapshot before either swaps.
+    const seen = await adapter.getRun(runId);
+    const snapshot = {
+      owner: seen?.runtimeOwnerId ?? null,
+      heartbeat: seen?.heartbeatAtMs ?? null,
+    };
 
-      const resumerOwnerId = "resume-cli:case06";
-      const supervisorOwnerId = "supervisor:case06";
+    const resumeClaimed = await claimStale(
+      adapter,
+      runId,
+      snapshot,
+      "resume-cli:case06",
+      now,
+      now,
+    );
+    const supervisorClaimed = await claimStale(
+      adapter,
+      runId,
+      snapshot,
+      "supervisor:case06",
+      now + 1,
+      now,
+    );
 
-      const resumeResult = takeoverRun(db, runId, resumerOwnerId, {
-        staleThresholdMs: STALE_THRESHOLD_MS,
-      });
-      const supervisorResult = takeoverRun(db, runId, supervisorOwnerId, {
-        staleThresholdMs: STALE_THRESHOLD_MS,
-      });
+    expect([resumeClaimed, supervisorClaimed].filter(Boolean).length).toBe(1);
+    expect(resumeClaimed).toBe(true);
+    expect(supervisorClaimed).toBe(false);
 
-      const winners = [resumeResult.claimed, supervisorResult.claimed].filter(
-        (claimed) => claimed,
-      );
-      expect(winners.length).toBe(1);
-      expect(resumeResult.claimed).toBe(true);
-      expect(supervisorResult.claimed).toBe(false);
-
-      const row = db
-        .query(
-          "SELECT runtime_owner_id FROM _smithers_runs WHERE run_id = ?",
-        )
-        .get(runId) as { runtime_owner_id: string };
-      expect(row.runtime_owner_id).toBe(resumerOwnerId);
-    } finally {
-      db.close();
-    }
+    const row = await adapter.getRun(runId);
+    expect(row?.runtimeOwnerId).toBe("resume-cli:case06");
   });
 
-  test("supervisor wins when called first; resume is fenced out", () => {
-    const db = buildDb();
+  test("supervisor wins when it swaps first; resume is fenced out", async () => {
+    const { sqlite, adapter } = buildAdapter();
+    onTestFinished(() => sqlite.close());
+
     const runId = "case06-supervisor-first";
     const originalOwnerId = "pid:22222:engine-victim";
+    const now = Date.now();
+    await seedStaleRunningRun(adapter, runId, originalOwnerId, now);
 
-    try {
-      seedRunningRun(db, runId, originalOwnerId, Date.now());
-      corruptHeartbeat(db, runId, "stale");
+    const seen = await adapter.getRun(runId);
+    const snapshot = {
+      owner: seen?.runtimeOwnerId ?? null,
+      heartbeat: seen?.heartbeatAtMs ?? null,
+    };
 
-      const resumerOwnerId = "resume-cli:case06b";
-      const supervisorOwnerId = "supervisor:case06b";
+    const supervisorClaimed = await claimStale(
+      adapter,
+      runId,
+      snapshot,
+      "supervisor:case06b",
+      now,
+      now,
+    );
+    const resumeClaimed = await claimStale(
+      adapter,
+      runId,
+      snapshot,
+      "resume-cli:case06b",
+      now + 1,
+      now,
+    );
 
-      const supervisorResult = takeoverRun(db, runId, supervisorOwnerId, {
-        staleThresholdMs: STALE_THRESHOLD_MS,
-      });
-      const resumeResult = takeoverRun(db, runId, resumerOwnerId, {
-        staleThresholdMs: STALE_THRESHOLD_MS,
-      });
+    expect(supervisorClaimed).toBe(true);
+    expect(resumeClaimed).toBe(false);
 
-      expect(supervisorResult.claimed).toBe(true);
-      expect(resumeResult.claimed).toBe(false);
-
-      const row = db
-        .query(
-          "SELECT runtime_owner_id FROM _smithers_runs WHERE run_id = ?",
-        )
-        .get(runId) as { runtime_owner_id: string };
-      expect(row.runtime_owner_id).toBe(supervisorOwnerId);
-    } finally {
-      db.close();
-    }
+    const row = await adapter.getRun(runId);
+    expect(row?.runtimeOwnerId).toBe("supervisor:case06b");
   });
 
-  test("post-takeover writes are fenced: only the winner can mutate run state", () => {
-    const db = buildDb();
+  test("post-takeover writes are fenced: only the winning owner can heartbeat", async () => {
+    const { sqlite, adapter } = buildAdapter();
+    onTestFinished(() => sqlite.close());
+
     const runId = "case06-fence";
     const originalOwnerId = "pid:33333:engine-victim";
+    const now = Date.now();
+    await seedStaleRunningRun(adapter, runId, originalOwnerId, now);
 
-    try {
-      seedRunningRun(db, runId, originalOwnerId, Date.now());
-      corruptHeartbeat(db, runId, "stale");
+    const seen = await adapter.getRun(runId);
+    const snapshot = {
+      owner: seen?.runtimeOwnerId ?? null,
+      heartbeat: seen?.heartbeatAtMs ?? null,
+    };
 
-      const resumerOwnerId = "resume-cli:case06c";
-      const supervisorOwnerId = "supervisor:case06c";
+    const resumerOwnerId = "resume-cli:case06c";
+    const supervisorOwnerId = "supervisor:case06c";
 
-      const resumeResult = takeoverRun(db, runId, resumerOwnerId, {
-        staleThresholdMs: STALE_THRESHOLD_MS,
-      });
-      const supervisorResult = takeoverRun(db, runId, supervisorOwnerId, {
-        staleThresholdMs: STALE_THRESHOLD_MS,
-      });
+    const resumeClaimed = await claimStale(adapter, runId, snapshot, resumerOwnerId, now, now);
+    const supervisorClaimed = await claimStale(
+      adapter,
+      runId,
+      snapshot,
+      supervisorOwnerId,
+      now + 1,
+      now,
+    );
+    expect(resumeClaimed).toBe(true);
+    expect(supervisorClaimed).toBe(false);
 
-      expect(resumeResult.claimed).toBe(true);
-      expect(supervisorResult.claimed).toBe(false);
+    const afterClaim = await adapter.getRun(runId);
+    expect(afterClaim?.runtimeOwnerId).toBe(resumerOwnerId);
+    const heartbeatAfterClaim = afterClaim?.heartbeatAtMs ?? null;
 
-      const loserBumped = fencedHeartbeatBump(
-        db,
-        runId,
-        supervisorOwnerId,
-        Date.now() + 1_000,
-      );
-      expect(loserBumped).toBe(false);
+    // The fenced-out supervisor cannot advance the heartbeat: heartbeatRun is
+    // scoped to the current owner, so a non-owner write matches zero rows.
+    await adapter.heartbeatRun(runId, supervisorOwnerId, now + 1_000);
+    expect((await adapter.getRun(runId))?.heartbeatAtMs).toBe(heartbeatAfterClaim);
 
-      const stillStaleOwner = fencedHeartbeatBump(
-        db,
-        runId,
-        originalOwnerId,
-        Date.now() + 2_000,
-      );
-      expect(stillStaleOwner).toBe(false);
+    // Neither can the deposed original owner.
+    await adapter.heartbeatRun(runId, originalOwnerId, now + 2_000);
+    expect((await adapter.getRun(runId))?.heartbeatAtMs).toBe(heartbeatAfterClaim);
 
-      const winnerBumpAtMs = Date.now() + 3_000;
-      const winnerBumped = fencedHeartbeatBump(
-        db,
-        runId,
-        resumerOwnerId,
-        winnerBumpAtMs,
-      );
-      expect(winnerBumped).toBe(true);
-
-      const row = db
-        .query(
-          "SELECT runtime_owner_id, heartbeat_at_ms FROM _smithers_runs WHERE run_id = ?",
-        )
-        .get(runId) as { runtime_owner_id: string; heartbeat_at_ms: number };
-      expect(row.runtime_owner_id).toBe(resumerOwnerId);
-      expect(row.heartbeat_at_ms).toBe(winnerBumpAtMs);
-    } finally {
-      db.close();
-    }
+    // The winner can.
+    const winnerBumpAtMs = now + 3_000;
+    await adapter.heartbeatRun(runId, resumerOwnerId, winnerBumpAtMs);
+    const finalRow = await adapter.getRun(runId);
+    expect(finalRow?.runtimeOwnerId).toBe(resumerOwnerId);
+    expect(finalRow?.heartbeatAtMs).toBe(winnerBumpAtMs);
   });
 });

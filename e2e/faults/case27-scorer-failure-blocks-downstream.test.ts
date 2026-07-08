@@ -1,36 +1,44 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, onTestFinished, test } from "bun:test";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 
 type NodeRow = {
-  run_id: string;
-  node_id: string;
+  runId: string;
+  nodeId: string;
   iteration: number;
   state: string;
-  updated_at_ms: number;
-  output_table: string;
+  updatedAtMs: number;
+  outputTable: string;
   label: string | null;
 };
 
 type ScorerRow = {
   id: string;
-  run_id: string;
-  node_id: string;
+  runId: string;
+  nodeId: string;
   iteration: number;
   attempt: number;
-  scorer_id: string;
-  scorer_name: string;
+  scorerId: string;
+  scorerName: string;
   source: string;
   score: number;
   reason: string | null;
-  meta_json: string | null;
-  scored_at_ms: number;
+  metaJson: string | null;
+  scoredAtMs: number;
 };
 
 type EventRow = {
-  run_id: string;
+  runId: string;
   seq: number;
   type: string;
-  payload_json: string;
+  payloadJson: string;
+};
+
+type CaseDb = {
+  sqlite: Database;
+  adapter: SmithersDb;
 };
 
 type GateOutcome =
@@ -51,91 +59,72 @@ const DESTRUCTIVE_NODE_ID = "deploy-prod";
 const SCORER_ID = "faithfulness-v1";
 const THRESHOLD = 0.7;
 
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-    CREATE TABLE _smithers_nodes (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      state TEXT NOT NULL,
-      updated_at_ms INTEGER NOT NULL,
-      output_table TEXT NOT NULL,
-      label TEXT,
-      PRIMARY KEY (run_id, node_id, iteration)
-    );
-    CREATE TABLE _smithers_scorers (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      attempt INTEGER NOT NULL DEFAULT 0,
-      scorer_id TEXT NOT NULL,
-      scorer_name TEXT NOT NULL,
-      source TEXT NOT NULL,
-      score REAL NOT NULL,
-      reason TEXT,
-      meta_json TEXT,
-      scored_at_ms INTEGER NOT NULL
-    );
-    CREATE TABLE _smithers_events (
-      run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (run_id, seq)
-    );
-  `);
-  return db;
+function buildDb(): CaseDb {
+  const sqlite = new Database(":memory:");
+  const db = drizzle(sqlite);
+  ensureSmithersTables(db);
+  return { sqlite, adapter: new SmithersDb(db) };
 }
 
-function seedRun(db: Database, now: number): void {
-  db.query(
-    `INSERT INTO _smithers_runs
-       (run_id, workflow_name, status, created_at_ms, started_at_ms, heartbeat_at_ms, runtime_owner_id)
-     VALUES (?, 'case27-workflow', 'running', ?, ?, ?, 'engine-1')`,
-  ).run(RUN_ID, now - 5_000, now - 4_000, now - 1_000);
-  db.query(
-    `INSERT INTO _smithers_nodes
-       (run_id, node_id, iteration, state, updated_at_ms, output_table, label)
-     VALUES (?, ?, 0, 'finished', ?, 'out_plan', 'plan')`,
-  ).run(RUN_ID, SCORER_NODE_ID, now - 2_000);
-  db.query(
-    `INSERT INTO _smithers_nodes
-       (run_id, node_id, iteration, state, updated_at_ms, output_table, label)
-     VALUES (?, ?, 0, 'pending', ?, 'out_deploy', 'destructive:deploy')`,
-  ).run(RUN_ID, DESTRUCTIVE_NODE_ID, now - 2_000);
+async function seedRun(adapter: SmithersDb, now: number): Promise<void> {
+  await adapter.insertRun({
+    runId: RUN_ID,
+    workflowName: "case27-workflow",
+    status: "running",
+    createdAtMs: now - 5_000,
+    startedAtMs: now - 4_000,
+    heartbeatAtMs: now - 1_000,
+    runtimeOwnerId: "engine-1",
+  });
+  await upsertNode(adapter, SCORER_NODE_ID, "finished", now - 2_000, "plan");
+  await upsertNode(
+    adapter,
+    DESTRUCTIVE_NODE_ID,
+    "pending",
+    now - 2_000,
+    "destructive:deploy",
+  );
 }
 
-function recordScorerFinished(
-  db: Database,
+async function upsertNode(
+  adapter: SmithersDb,
+  nodeId: string,
+  state: string,
+  updatedAtMs: number,
+  label: string,
+): Promise<void> {
+  await adapter.insertNode({
+    runId: RUN_ID,
+    nodeId,
+    iteration: 0,
+    state,
+    lastAttempt: 1,
+    updatedAtMs,
+    outputTable: `out_${nodeId}`,
+    label,
+  });
+}
+
+async function recordScorerFinished(
+  adapter: SmithersDb,
   score: number,
   now: number,
-): void {
-  db.query(
-    `INSERT INTO _smithers_scorers
-       (id, run_id, node_id, iteration, attempt, scorer_id, scorer_name, source, score, reason, scored_at_ms)
-     VALUES (?, ?, ?, 0, 0, ?, 'faithfulness', 'live', ?, ?, ?)`,
-  ).run(
-    `srow-${score}-${now}`,
-    RUN_ID,
-    SCORER_NODE_ID,
-    SCORER_ID,
+): Promise<void> {
+  await adapter.insertScorerResult({
+    id: `srow-${score}-${now}`,
+    runId: RUN_ID,
+    nodeId: SCORER_NODE_ID,
+    iteration: 0,
+    attempt: 0,
+    scorerId: SCORER_ID,
+    scorerName: "faithfulness",
+    source: "live",
     score,
-    score < THRESHOLD ? "below threshold" : null,
-    now,
-  );
-  appendEvent(db, "ScorerFinished", now, {
+    reason: score < THRESHOLD ? "below threshold" : null,
+    metaJson: null,
+    scoredAtMs: now,
+  });
+  await appendEvent(adapter, "ScorerFinished", now, {
     runId: RUN_ID,
     nodeId: SCORER_NODE_ID,
     scorerId: SCORER_ID,
@@ -145,12 +134,12 @@ function recordScorerFinished(
   });
 }
 
-function recordScorerFailed(
-  db: Database,
+async function recordScorerFailed(
+  adapter: SmithersDb,
   errorMessage: string,
   now: number,
-): void {
-  appendEvent(db, "ScorerFailed", now, {
+): Promise<void> {
+  await appendEvent(adapter, "ScorerFailed", now, {
     runId: RUN_ID,
     nodeId: SCORER_NODE_ID,
     scorerId: SCORER_ID,
@@ -160,8 +149,11 @@ function recordScorerFailed(
   });
 }
 
-function recordScorerStarted(db: Database, now: number): void {
-  appendEvent(db, "ScorerStarted", now, {
+async function recordScorerStarted(
+  adapter: SmithersDb,
+  now: number,
+): Promise<void> {
+  await appendEvent(adapter, "ScorerStarted", now, {
     runId: RUN_ID,
     nodeId: SCORER_NODE_ID,
     scorerId: SCORER_ID,
@@ -170,67 +162,62 @@ function recordScorerStarted(db: Database, now: number): void {
   });
 }
 
-function appendEvent(
-  db: Database,
+async function appendEvent(
+  adapter: SmithersDb,
   type: string,
   now: number,
   payload: Record<string, unknown>,
-): void {
-  const seq = nextEventSeq(db);
-  db.query(
-    `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(RUN_ID, seq, now, type, JSON.stringify(payload));
-}
-
-function nextEventSeq(db: Database): number {
-  const row = db
-    .query(
-      "SELECT COALESCE(MAX(seq), -1) + 1 AS next_seq FROM _smithers_events WHERE run_id = ?",
-    )
-    .get(RUN_ID) as { next_seq: number };
-  return row.next_seq;
-}
-
-function readNode(db: Database, nodeId: string): NodeRow {
-  return db
-    .query(
-      "SELECT * FROM _smithers_nodes WHERE run_id = ? AND node_id = ? AND iteration = 0",
-    )
-    .get(RUN_ID, nodeId) as NodeRow;
-}
-
-function readScorerRows(db: Database, nodeId: string): ScorerRow[] {
-  return db
-    .query(
-      "SELECT * FROM _smithers_scorers WHERE run_id = ? AND node_id = ? ORDER BY scored_at_ms ASC",
-    )
-    .all(RUN_ID, nodeId) as ScorerRow[];
-}
-
-function readEventsByType(db: Database, type: string): EventRow[] {
-  return db
-    .query(
-      "SELECT run_id, seq, type, payload_json FROM _smithers_events WHERE run_id = ? AND type = ? ORDER BY seq ASC",
-    )
-    .all(RUN_ID, type) as EventRow[];
-}
-
-function evaluateGate(db: Database, now: number): GateOutcome {
-  const rows = readScorerRows(db, SCORER_NODE_ID).filter(
-    (row) => row.scorer_id === SCORER_ID,
-  );
-  const failedEvents = readEventsByType(db, "ScorerFailed").filter((evt) => {
-    const payload = JSON.parse(evt.payload_json) as { scorerId?: string };
-    return payload.scorerId === SCORER_ID;
+): Promise<void> {
+  await adapter.insertEventWithNextSeq({
+    runId: RUN_ID,
+    timestampMs: now,
+    type,
+    payloadJson: JSON.stringify(payload),
   });
-  const startedEvents = readEventsByType(db, "ScorerStarted").filter((evt) => {
-    const payload = JSON.parse(evt.payload_json) as { scorerId?: string };
+}
+
+async function readNode(adapter: SmithersDb, nodeId: string): Promise<NodeRow> {
+  const row = (await adapter.getNode(RUN_ID, nodeId, 0)) as NodeRow | undefined;
+  if (!row) throw new Error(`node missing: ${nodeId}`);
+  return row;
+}
+
+async function readScorerRows(
+  adapter: SmithersDb,
+  nodeId: string,
+): Promise<ScorerRow[]> {
+  return (await adapter.listScorerResults(RUN_ID, nodeId)) as ScorerRow[];
+}
+
+async function readEventsByType(
+  adapter: SmithersDb,
+  type: string,
+): Promise<EventRow[]> {
+  return (await adapter.listEventsByType(RUN_ID, type)) as EventRow[];
+}
+
+async function evaluateGate(
+  adapter: SmithersDb,
+  now: number,
+): Promise<GateOutcome> {
+  const rows = (await readScorerRows(adapter, SCORER_NODE_ID)).filter(
+    (row) => row.scorerId === SCORER_ID,
+  );
+  const failedEvents = (await readEventsByType(adapter, "ScorerFailed")).filter(
+    (evt) => {
+      const payload = JSON.parse(evt.payloadJson) as { scorerId?: string };
+      return payload.scorerId === SCORER_ID;
+    },
+  );
+  const startedEvents = (
+    await readEventsByType(adapter, "ScorerStarted")
+  ).filter((evt) => {
+    const payload = JSON.parse(evt.payloadJson) as { scorerId?: string };
     return payload.scorerId === SCORER_ID;
   });
 
   if (failedEvents.length > 0 && rows.length === 0) {
-    block(db, "scorer-failed", now);
+    await block(adapter, "scorer-failed", now);
     return { advanced: false, reason: "scorer-failed", nextState: "blocked" };
   }
   if (rows.length === 0 && startedEvents.length > 0) {
@@ -249,18 +236,21 @@ function evaluateGate(db: Database, now: number): GateOutcome {
   }
   const latest = rows[rows.length - 1]!;
   if (latest.score < THRESHOLD) {
-    block(db, "scorer-below-threshold", now);
+    await block(adapter, "scorer-below-threshold", now);
     return {
       advanced: false,
       reason: "scorer-below-threshold",
       nextState: "blocked",
     };
   }
-  db.query(
-    `UPDATE _smithers_nodes SET state = 'running', updated_at_ms = ?
-       WHERE run_id = ? AND node_id = ? AND iteration = 0`,
-  ).run(now, RUN_ID, DESTRUCTIVE_NODE_ID);
-  appendEvent(db, "DestructiveNodeAdvanced", now, {
+  await upsertNode(
+    adapter,
+    DESTRUCTIVE_NODE_ID,
+    "running",
+    now,
+    "destructive:deploy",
+  );
+  await appendEvent(adapter, "DestructiveNodeAdvanced", now, {
     runId: RUN_ID,
     nodeId: DESTRUCTIVE_NODE_ID,
     gatedBy: { scorerId: SCORER_ID, sourceNodeId: SCORER_NODE_ID },
@@ -271,16 +261,19 @@ function evaluateGate(db: Database, now: number): GateOutcome {
   return { advanced: true, nextState: "running" };
 }
 
-function block(
-  db: Database,
+async function block(
+  adapter: SmithersDb,
   reason: "scorer-failed" | "scorer-below-threshold",
   now: number,
-): void {
-  db.query(
-    `UPDATE _smithers_nodes SET state = 'blocked', updated_at_ms = ?
-       WHERE run_id = ? AND node_id = ? AND iteration = 0`,
-  ).run(now, RUN_ID, DESTRUCTIVE_NODE_ID);
-  appendEvent(db, "NodeGatedByScorerFailure", now, {
+): Promise<void> {
+  await upsertNode(
+    adapter,
+    DESTRUCTIVE_NODE_ID,
+    "blocked",
+    now,
+    "destructive:deploy",
+  );
+  await appendEvent(adapter, "NodeGatedByScorerFailure", now, {
     runId: RUN_ID,
     nodeId: DESTRUCTIVE_NODE_ID,
     gatedBy: { scorerId: SCORER_ID, sourceNodeId: SCORER_NODE_ID },
@@ -291,143 +284,139 @@ function block(
 }
 
 describe("case 27: scorer failure blocks destructive downstream step", () => {
-  test("scorer schema invariants: failure-or-low-score is queryable per (run, node, scorer)", () => {
-    const db = buildDb();
-    try {
-      const t0 = Date.now();
-      seedRun(db, t0);
-      recordScorerFinished(db, 0.42, t0 + 100);
-      const rows = readScorerRows(db, SCORER_NODE_ID);
-      expect(rows.length).toBe(1);
-      expect(rows[0]!.score).toBeLessThan(THRESHOLD);
-      const destructive = readNode(db, DESTRUCTIVE_NODE_ID);
-      expect(destructive.state).toBe("pending");
-      expect(destructive.label).toContain("destructive:");
-    } finally {
-      db.close();
-    }
+  test("scorer schema invariants: failure-or-low-score is queryable per (run, node, scorer)", async () => {
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
+
+    const t0 = Date.now();
+    await seedRun(adapter, t0);
+    await recordScorerFinished(adapter, 0.42, t0 + 100);
+    const rows = await readScorerRows(adapter, SCORER_NODE_ID);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.score).toBeLessThan(THRESHOLD);
+    const destructive = await readNode(adapter, DESTRUCTIVE_NODE_ID);
+    expect(destructive.state).toBe("pending");
+    expect(destructive.label).toContain("destructive:");
   });
 
-  test("A: scorer FAILS (ScorerFailed event, no row) -> destructive node is blocked, gating event recorded", () => {
-    const db = buildDb();
-    try {
-      const t0 = Date.now();
-      seedRun(db, t0);
-      recordScorerStarted(db, t0 + 50);
-      recordScorerFailed(db, "llm provider 500", t0 + 200);
+  test("A: scorer FAILS (ScorerFailed event, no row) -> destructive node is blocked, gating event recorded", async () => {
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
 
-      const outcome = evaluateGate(db, t0 + 300);
-      expect(outcome.advanced).toBe(false);
-      if (!outcome.advanced) {
-        expect(outcome.reason).toBe("scorer-failed");
-        expect(outcome.nextState).toBe("blocked");
-      }
+    const t0 = Date.now();
+    await seedRun(adapter, t0);
+    await recordScorerStarted(adapter, t0 + 50);
+    await recordScorerFailed(adapter, "llm provider 500", t0 + 200);
 
-      const destructive = readNode(db, DESTRUCTIVE_NODE_ID);
-      expect(destructive.state).toBe("blocked");
-      expect(destructive.state).not.toBe("running");
-      expect(destructive.state).not.toBe("succeeded");
-
-      const gated = readEventsByType(db, "NodeGatedByScorerFailure");
-      expect(gated.length).toBe(1);
-      const payload = JSON.parse(gated[0]!.payload_json) as {
-        runId: string;
-        nodeId: string;
-        gatedBy: { scorerId: string; sourceNodeId: string };
-        reason: string;
-      };
-      expect(payload.runId).toBe(RUN_ID);
-      expect(payload.nodeId).toBe(DESTRUCTIVE_NODE_ID);
-      expect(payload.gatedBy.scorerId).toBe(SCORER_ID);
-      expect(payload.gatedBy.sourceNodeId).toBe(SCORER_NODE_ID);
-      expect(payload.reason).toBe("scorer-failed");
-
-      const advanced = readEventsByType(db, "DestructiveNodeAdvanced");
-      expect(advanced.length).toBe(0);
-    } finally {
-      db.close();
+    const outcome = await evaluateGate(adapter, t0 + 300);
+    expect(outcome.advanced).toBe(false);
+    if (!outcome.advanced) {
+      expect(outcome.reason).toBe("scorer-failed");
+      expect(outcome.nextState).toBe("blocked");
     }
+
+    const destructive = await readNode(adapter, DESTRUCTIVE_NODE_ID);
+    expect(destructive.state).toBe("blocked");
+    expect(destructive.state).not.toBe("running");
+    expect(destructive.state).not.toBe("succeeded");
+
+    const gated = await readEventsByType(adapter, "NodeGatedByScorerFailure");
+    expect(gated.length).toBe(1);
+    const payload = JSON.parse(gated[0]!.payloadJson) as {
+      runId: string;
+      nodeId: string;
+      gatedBy: { scorerId: string; sourceNodeId: string };
+      reason: string;
+    };
+    expect(payload.runId).toBe(RUN_ID);
+    expect(payload.nodeId).toBe(DESTRUCTIVE_NODE_ID);
+    expect(payload.gatedBy.scorerId).toBe(SCORER_ID);
+    expect(payload.gatedBy.sourceNodeId).toBe(SCORER_NODE_ID);
+    expect(payload.reason).toBe("scorer-failed");
+
+    const advanced = await readEventsByType(adapter, "DestructiveNodeAdvanced");
+    expect(advanced.length).toBe(0);
   });
 
-  test("A2: scorer score BELOW threshold -> destructive node is blocked", () => {
-    const db = buildDb();
-    try {
-      const t0 = Date.now();
-      seedRun(db, t0);
-      recordScorerFinished(db, 0.31, t0 + 200);
+  test("A2: scorer score BELOW threshold -> destructive node is blocked", async () => {
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
 
-      const outcome = evaluateGate(db, t0 + 300);
-      expect(outcome.advanced).toBe(false);
-      if (!outcome.advanced) {
-        expect(outcome.reason).toBe("scorer-below-threshold");
-      }
-      expect(readNode(db, DESTRUCTIVE_NODE_ID).state).toBe("blocked");
-      const gated = readEventsByType(db, "NodeGatedByScorerFailure");
-      expect(gated.length).toBe(1);
-      const payload = JSON.parse(gated[0]!.payload_json) as { reason: string };
-      expect(payload.reason).toBe("scorer-below-threshold");
-    } finally {
-      db.close();
+    const t0 = Date.now();
+    await seedRun(adapter, t0);
+    await recordScorerFinished(adapter, 0.31, t0 + 200);
+
+    const outcome = await evaluateGate(adapter, t0 + 300);
+    expect(outcome.advanced).toBe(false);
+    if (!outcome.advanced) {
+      expect(outcome.reason).toBe("scorer-below-threshold");
     }
+    expect((await readNode(adapter, DESTRUCTIVE_NODE_ID)).state).toBe("blocked");
+    const gated = await readEventsByType(adapter, "NodeGatedByScorerFailure");
+    expect(gated.length).toBe(1);
+    const payload = JSON.parse(gated[0]!.payloadJson) as { reason: string };
+    expect(payload.reason).toBe("scorer-below-threshold");
   });
 
-  test("B: scorer PASSES (score above threshold) -> destructive node advances to running", () => {
-    const db = buildDb();
-    try {
-      const t0 = Date.now();
-      seedRun(db, t0);
-      recordScorerFinished(db, 0.92, t0 + 200);
+  test("B: scorer PASSES (score above threshold) -> destructive node advances to running", async () => {
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
 
-      expect(readNode(db, DESTRUCTIVE_NODE_ID).state).toBe("pending");
-      const outcome = evaluateGate(db, t0 + 300);
-      expect(outcome.advanced).toBe(true);
-      if (outcome.advanced) {
-        expect(outcome.nextState).toBe("running");
-      }
-      expect(readNode(db, DESTRUCTIVE_NODE_ID).state).toBe("running");
-      expect(readEventsByType(db, "NodeGatedByScorerFailure").length).toBe(0);
-      const advanced = readEventsByType(db, "DestructiveNodeAdvanced");
-      expect(advanced.length).toBe(1);
-      const payload = JSON.parse(advanced[0]!.payload_json) as {
-        nodeId: string;
-        score: number;
-        threshold: number;
-      };
-      expect(payload.nodeId).toBe(DESTRUCTIVE_NODE_ID);
-      expect(payload.score).toBeGreaterThanOrEqual(THRESHOLD);
-      expect(payload.threshold).toBe(THRESHOLD);
-    } finally {
-      db.close();
+    const t0 = Date.now();
+    await seedRun(adapter, t0);
+    await recordScorerFinished(adapter, 0.92, t0 + 200);
+
+    expect((await readNode(adapter, DESTRUCTIVE_NODE_ID)).state).toBe("pending");
+    const outcome = await evaluateGate(adapter, t0 + 300);
+    expect(outcome.advanced).toBe(true);
+    if (outcome.advanced) {
+      expect(outcome.nextState).toBe("running");
     }
+    expect((await readNode(adapter, DESTRUCTIVE_NODE_ID)).state).toBe("running");
+    expect(
+      (await readEventsByType(adapter, "NodeGatedByScorerFailure")).length,
+    ).toBe(0);
+    const advanced = await readEventsByType(adapter, "DestructiveNodeAdvanced");
+    expect(advanced.length).toBe(1);
+    const payload = JSON.parse(advanced[0]!.payloadJson) as {
+      nodeId: string;
+      score: number;
+      threshold: number;
+    };
+    expect(payload.nodeId).toBe(DESTRUCTIVE_NODE_ID);
+    expect(payload.score).toBeGreaterThanOrEqual(THRESHOLD);
+    expect(payload.threshold).toBe(THRESHOLD);
   });
 
-  test("C: scorer IN-FLIGHT (started, no row, no fail) -> destructive node held in pending", () => {
-    const db = buildDb();
-    try {
-      const t0 = Date.now();
-      seedRun(db, t0);
-      recordScorerStarted(db, t0 + 50);
+  test("C: scorer IN-FLIGHT (started, no row, no fail) -> destructive node held in pending", async () => {
+    const { sqlite, adapter } = buildDb();
+    onTestFinished(() => sqlite.close());
 
-      const outcome = evaluateGate(db, t0 + 100);
-      expect(outcome.advanced).toBe(false);
-      if (!outcome.advanced) {
-        expect(outcome.reason).toBe("scorer-pending");
-        expect(outcome.nextState).toBe("pending");
-      }
-      const destructive = readNode(db, DESTRUCTIVE_NODE_ID);
-      expect(destructive.state).toBe("pending");
-      expect(destructive.state).not.toBe("running");
-      expect(destructive.state).not.toBe("blocked");
-      expect(readEventsByType(db, "NodeGatedByScorerFailure").length).toBe(0);
-      expect(readEventsByType(db, "DestructiveNodeAdvanced").length).toBe(0);
+    const t0 = Date.now();
+    await seedRun(adapter, t0);
+    await recordScorerStarted(adapter, t0 + 50);
 
-      recordScorerFinished(db, 0.95, t0 + 500);
-      const second = evaluateGate(db, t0 + 600);
-      expect(second.advanced).toBe(true);
-      expect(readNode(db, DESTRUCTIVE_NODE_ID).state).toBe("running");
-    } finally {
-      db.close();
+    const outcome = await evaluateGate(adapter, t0 + 100);
+    expect(outcome.advanced).toBe(false);
+    if (!outcome.advanced) {
+      expect(outcome.reason).toBe("scorer-pending");
+      expect(outcome.nextState).toBe("pending");
     }
+    const destructive = await readNode(adapter, DESTRUCTIVE_NODE_ID);
+    expect(destructive.state).toBe("pending");
+    expect(destructive.state).not.toBe("running");
+    expect(destructive.state).not.toBe("blocked");
+    expect(
+      (await readEventsByType(adapter, "NodeGatedByScorerFailure")).length,
+    ).toBe(0);
+    expect(
+      (await readEventsByType(adapter, "DestructiveNodeAdvanced")).length,
+    ).toBe(0);
+
+    await recordScorerFinished(adapter, 0.95, t0 + 500);
+    const second = await evaluateGate(adapter, t0 + 600);
+    expect(second.advanced).toBe(true);
+    expect((await readNode(adapter, DESTRUCTIVE_NODE_ID)).state).toBe("running");
   });
 
   test.skip("engine enforces scorer-gates-destructive-step contract end-to-end", () => {
