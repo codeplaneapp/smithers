@@ -3,6 +3,7 @@
 // @smithers-type-exports-end
 
 import React from "react";
+import { renderPromptToText } from "./Task.js";
 /**
  * SuperSmithers — a workflow wrapper that reads and modifies source code
  * to intervene via hot reload. Takes a markdown strategy doc and an agent
@@ -42,8 +43,11 @@ export function SuperSmithers(props) {
     const readPrompt = strategyText
         ? `You are a code intervention agent.\n\n## Strategy\n\n${strategyText}\n\n## Target Files\n\n${targetFiles?.length ? targetFiles.join(", ") : "All files in the project"}\n\nRead the target files and understand the codebase. Identify what changes are needed according to the strategy.`
         : undefined;
+    // An element strategy must be flattened to text here: the raw
+    // "smithers:task" host takes its prompt from String(children), so a live
+    // React element would reach the agent as "[object Object]".
     const readChildren = strategyElement
-        ? React.createElement(React.Fragment, null, strategyElement, React.createElement("p", null, `Target files: ${targetFiles?.length ? targetFiles.join(", ") : "All files in the project"}`))
+        ? renderPromptToText(React.createElement(React.Fragment, null, strategyElement, React.createElement("p", null, `Target files: ${targetFiles?.length ? targetFiles.join(", ") : "All files in the project"}`)))
         : readPrompt;
     const readTask = React.createElement("smithers:task", {
         id: readTaskId,
