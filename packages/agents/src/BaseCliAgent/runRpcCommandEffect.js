@@ -294,6 +294,10 @@ export function runRpcCommandEffect(command, args, options) {
         };
         let lineQueue = Promise.resolve();
         rl.on("line", (line) => {
+            // Once the effect has settled its timers are cleared; a late line
+            // must not re-arm the inactivity timer (handleLine calls reset()).
+            if (settled)
+                return;
             lineQueue = lineQueue.then(() => handleLine(line)).catch((err) => {
                 handleError(err instanceof SmithersError
                     ? err
@@ -301,9 +305,15 @@ export function runRpcCommandEffect(command, args, options) {
             });
         });
         child.stdout?.on("data", () => {
+            // A data event that arrives after settlement would otherwise re-arm
+            // (and leak) the inactivity timer past the cleared() settle path.
+            if (settled)
+                return;
             inactivity.reset();
         });
         child.stderr?.on("data", (chunk) => {
+            if (settled)
+                return;
             inactivity.reset();
             const text = chunk.toString("utf8");
             const nextStderr = stderr + text;
