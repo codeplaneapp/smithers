@@ -4,7 +4,7 @@ import React from "react";
 import { z } from "zod";
 import { CheckSuite, ScanFixVerify, Supervisor } from "../src/components/index.js";
 import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext, SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
 import { renderFrame } from "smithers-orchestrator";
 import { createTestSmithers } from "./helpers.js";
 import { Effect } from "effect";
@@ -20,9 +20,19 @@ async function render(el) {
 	return renderer.render(el);
 }
 
+async function renderWithOutputs(el, outputs) {
+	const ctx = new SmithersCtx({
+		runId: "test-run",
+		iteration: 0,
+		input: {},
+		outputs,
+	});
+	return render(<SmithersContext.Provider value={ctx}>{el}</SmithersContext.Provider>);
+}
+
 describe("Supervisor final summary task (finding 1)", () => {
 	test("final summary runs on the boss agent, not as a static task", async () => {
-		const result = await render(
+		const result = await renderWithOutputs(
 			<Supervisor
 				id="boss"
 				boss={boss}
@@ -34,6 +44,7 @@ describe("Supervisor final summary task (finding 1)", () => {
 			>
 				plan work
 			</Supervisor>,
+			{ plan_out: [{ nodeId: "boss-plan", iteration: 0, plan: "PLAN" }] },
 		);
 		const final = result.tasks.find((task) => task.nodeId === "boss-final");
 		expect(final).toBeDefined();

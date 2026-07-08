@@ -131,7 +131,11 @@ describe("Supervisor structural defaults and worktree wiring", () => {
         expect(workers[1].props.agent).toBe(otherAgent);
 
         expect(review.props.id).toBe("supervisor-review");
-        expect(review.props.needs).toEqual({ plan: "supervisor-plan" });
+        expect(review.props.needs).toEqual({
+            plan: "supervisor-plan",
+            "supervisor-worker-docs": "supervisor-worker-docs",
+            "supervisor-worker-tests": "supervisor-worker-tests",
+        });
 
         expect(final.props.id).toBe("supervisor-final");
         expect(final.props.needs).toEqual({
@@ -169,6 +173,7 @@ describe("Supervisor structural defaults and worktree wiring", () => {
     test("worker tasks carry worktree metadata through the renderer only when useWorktrees is set", async () => {
         const withWorktrees = await render(
             <Supervisor {...baseProps} id="boss" useWorktrees />,
+            { plan_out: [outputRow("boss-plan", { plan: "PLAN" })] },
         );
         const docsWorker = withWorktrees.graph.tasks.find(
             (task) => task.nodeId === "boss-worker-docs",
@@ -178,7 +183,10 @@ describe("Supervisor structural defaults and worktree wiring", () => {
         expect(docsWorker.worktreePath.split(sep).join("/")).toContain(".worktrees/boss-worker-docs");
         expect(docsWorker.worktreeBranch).toBe("worker/boss-worker-docs");
 
-        const without = await render(<Supervisor {...baseProps} id="plain" />);
+        const without = await render(
+            <Supervisor {...baseProps} id="plain" />,
+            { plan_out: [outputRow("plain-plan", { plan: "PLAN" })] },
+        );
         const plainWorker = without.graph.tasks.find(
             (task) => task.nodeId === "plain-worker-docs",
         );
@@ -461,7 +469,11 @@ describe("GatherAndSynthesize prompt precedence", () => {
         const gather = graph.tasks.find((t) => t.nodeId === "g-gather-web");
         expect(gather.prompt).toBe('Gather data from source "web".');
         const synth = graph.tasks.find((t) => t.nodeId === "g-synthesize");
-        expect(synth.prompt).toBe("Synthesize the gathered data from sources: web, code.");
+        expect(synth.prompt).toContain("Synthesize the gathered data from sources: web, code.");
+        // Neither gather task has produced output yet, so both sources are
+        // reported as unresolved rather than injecting empty/fabricated data.
+        expect(synth.prompt).toContain("## web\n(no data — this source failed)");
+        expect(synth.prompt).toContain("## code\n(no data — this source failed)");
     });
 
     test("synthesisPrompt overrides the default and children override synthesisPrompt", async () => {

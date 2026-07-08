@@ -828,6 +828,10 @@ describe("devops automation composite components", () => {
             >
                 write the release announcement
             </ContentPipeline>,
+            {
+                outline_out: [{ nodeId: "outline", iteration: 0, outline: "OUTLINE TEXT" }],
+                draft_out: [{ nodeId: "draft", iteration: 0, draft: "DRAFT TEXT" }],
+            },
         );
 
         expect(graph.tasks.map((entry) => entry.nodeId)).toEqual([
@@ -845,13 +849,19 @@ describe("devops automation composite components", () => {
             agent: otherAgent,
             outputTableName: "draft_out",
             needs: { previous: "outline" },
-            prompt: "Continue from the previous stage's output. Perform: Draft copy",
         });
+        expect(byId(graph, "draft").prompt).toContain(
+            "Continue from the previous stage's output. Perform: Draft copy",
+        );
+        expect(byId(graph, "draft").prompt).toContain("OUTLINE TEXT");
         expect(byId(graph, "publish")).toMatchObject({
             agent: overrideAgent,
             outputTableName: "publish_out",
             needs: { previous: "draft" },
-            prompt: "Continue from the previous stage's output. Perform: publish",
         });
+        expect(byId(graph, "publish").prompt).toContain(
+            "Continue from the previous stage's output. Perform: publish",
+        );
+        expect(byId(graph, "publish").prompt).toContain("DRAFT TEXT");
     });
 });

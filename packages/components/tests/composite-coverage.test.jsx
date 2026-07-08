@@ -213,7 +213,7 @@ describe("composite component expansion coverage", () => {
     test("GatherAndSynthesize builds gather tasks and synthesis needs", async () => {
         expect(GatherAndSynthesize({ skipIf: true })).toBeNull();
 
-        const result = await render(
+        const result = await renderWithOutputs(
             <GatherAndSynthesize
                 id="research"
                 sources={{
@@ -226,6 +226,7 @@ describe("composite component expansion coverage", () => {
                 gatheredResults={{ web: { hits: 2 }, code: { files: 3 } }}
                 maxConcurrency={2}
             />,
+            {},
         );
 
         expect(result.tasks.map((task) => task.nodeId)).toEqual([
@@ -461,7 +462,7 @@ describe("composite component expansion coverage", () => {
             "debate-opponent": "debate-opponent",
         });
 
-        const review = await render(
+        const review = await renderWithOutputs(
             <ReviewLoop
                 id="review"
                 producer={agent}
@@ -471,10 +472,11 @@ describe("composite component expansion coverage", () => {
             >
                 produce
             </ReviewLoop>,
+            { produce_out: [{ nodeId: "review-produce", iteration: 0, draft: "DRAFT" }] },
         );
         expect(review.tasks[1].agent).toEqual([agent, otherAgent]);
 
-        const optimizerWithAgent = await render(
+        const optimizerWithAgent = await renderWithOutputs(
             <Optimizer
                 id="opt"
                 generator={agent}
@@ -484,6 +486,7 @@ describe("composite component expansion coverage", () => {
             >
                 generate
             </Optimizer>,
+            { gen_out: [{ nodeId: "opt-generate", iteration: 0, candidate: "CANDIDATE" }] },
         );
         expect(optimizerWithAgent.tasks[1].agent).toBe(otherAgent);
 
@@ -585,7 +588,7 @@ describe("composite component expansion coverage", () => {
         );
         expect(driftSuppressedByAlertIf.tasks.map((task) => task.nodeId)).not.toContain("alert");
 
-        const pipeline = await render(
+        const pipeline = await renderWithOutputs(
             <ContentPipeline
                 stages={[
                     { id: "outline", output: "outline_out", agent, label: "Outline" },
@@ -594,6 +597,7 @@ describe("composite component expansion coverage", () => {
             >
                 write article
             </ContentPipeline>,
+            { outline_out: [{ nodeId: "outline", iteration: 0, outline: "OUTLINE" }] },
         );
         expect(pipeline.tasks.map((task) => task.nodeId)).toEqual(["outline", "draft"]);
         expect(pipeline.tasks[1].needs).toEqual({ previous: "outline" });

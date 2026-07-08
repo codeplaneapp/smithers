@@ -23,6 +23,14 @@ export function ScanFixVerify(props) {
     });
     const scanComplete = scanRow !== undefined;
     const issues = Array.isArray(scanRow?.issues) ? scanRow.issues : [];
+    // Exit the loop once verification reports the issues resolved, instead of
+    // always running every retry. Read the verify row for this iteration like
+    // Poller reads its check output.
+    const verifyRow = ctx?.outputMaybe(props.verifyOutput, {
+        nodeId: `${prefix}-verify`,
+        iteration,
+    });
+    const resolved = verifyRow?.resolved === true;
     if (Array.isArray(props.fixer) && props.fixer.length === 0) {
         throw new TypeError("ScanFixVerify fixer array must contain at least one agent.");
     }
@@ -79,7 +87,7 @@ export function ScanFixVerify(props) {
     const innerSequence = React.createElement(Sequence, null, scanTask, fixParallel, verifyTask);
     const loop = React.createElement(Loop, {
         id: loopId,
-        until: false, // Re-evaluated at render time via reactive context
+        until: resolved,
         maxIterations: maxRetries,
         onMaxReached: "return-last",
     }, innerSequence);
