@@ -4173,6 +4173,14 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             options: undefined,
                             abortSignal: taskSignal,
                             prompt: jsonPrompt,
+                            rootDir: taskRoot,
+                            taskContext: {
+                                runId,
+                                nodeId: desc.nodeId,
+                                iteration: desc.iteration,
+                                attempt: attemptNo,
+                            },
+                            maxOutputBytes: toolConfig.maxOutputBytes,
                             timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                             onStdout: (text) => {
                                 recordInternalHeartbeat();
@@ -4419,6 +4427,12 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 abortSignal: taskSignal,
                 messages: retryMessages,
                 rootDir: taskRoot,
+                taskContext: {
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                },
                 maxOutputBytes: toolConfig.maxOutputBytes,
                 timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                 onStdout: (text) => {
