@@ -112,7 +112,28 @@ async function markWaitForEventResolved(adapter, runId, nodeId, iteration, signa
         await decrementAsyncEventWaitPending();
     }
 }
+/**
+ * Upper bound on stored-but-not-yet-consumed deferred resolutions. A run that
+ * is cancelled or abandoned after its resolution is stored but before the
+ * scheduler's next pass consumes it (see `awaitBridgeDeferred`) would
+ * otherwise leak its entry for the life of the process; this cap is a
+ * backstop that bounds the module-level map across the many runs handled by
+ * a long-running gateway. Exported for tests.
+ * @type {number}
+ */
+export const DEFERRED_RESOLUTIONS_MAX = 4096;
+/**
+ * Insertion-ordered LRU map of stored deferred resolutions keyed by
+ * execution id. A plain `Map` preserves insertion order, so the
+ * least-recently-used entry is always the first key.
+ * @type {Map<string, Exit.Exit<any, any>>}
+ */
 const deferredResolutions = new Map();
+/**
+ * Current number of stored deferred resolutions. Exported for tests.
+ * @returns {number}
+ */
+export const deferredResolutionsSize = () => deferredResolutions.size;
 /**
  * @template Success, Error
  * @param {string} executionId
@@ -134,7 +155,15 @@ const awaitBridgeDeferred = async (executionId, _deferred) => {
  * @param {Exit.Exit<Success["Type"], Error["Type"]>} exit
  */
 const resolveBridgeDeferred = async (executionId, _deferred, exit) => {
+    deferredResolutions.delete(executionId);
     deferredResolutions.set(executionId, exit);
+    while (deferredResolutions.size > DEFERRED_RESOLUTIONS_MAX) {
+        const oldest = deferredResolutions.keys().next().value;
+        if (oldest === undefined) {
+            break;
+        }
+        deferredResolutions.delete(oldest);
+    }
 };
 /**
  * @param {_SmithersDb} adapter
