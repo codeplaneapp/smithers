@@ -348,7 +348,7 @@ export function LiveTab(props: LiveTabProps) {
                 </div>
               ) : null}
               <div className="nodetree">
-                {runTree.root ? <ul><Node node={runTree.root as unknown as RunNode} onSelect={setSelectedNode} /></ul> : <p className="empty">{runTree.isLoading ? "Loading tree…" : "No node tree for this run yet."}</p>}
+                {runTree.root ? <ul><Node node={runTree.root as unknown as RunNode} onSelect={setSelectedNode} /></ul> : <p className="empty">{runTree.isLoading ? "Loading tree..." : "No node tree for this run yet."}</p>}
               </div>
             </section>
 

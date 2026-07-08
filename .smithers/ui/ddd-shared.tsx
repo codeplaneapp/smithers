@@ -307,9 +307,9 @@ export function fmtTime(ms: number | undefined): string {
   }
 }
 
-/** Compact a long runId to `head…tail` for chips; short ids pass through. */
+/** Compact a long runId to `head...tail` for chips; short ids pass through. */
 export function shortRunId(runId: string): string {
-  return runId.length <= 24 ? runId : `${runId.slice(0, 12)}…${runId.slice(-8)}`;
+  return runId.length <= 24 ? runId : `${runId.slice(0, 12)}...${runId.slice(-8)}`;
 }
 
 export function errorMessage(error: unknown): string {
@@ -1785,6 +1785,8 @@ export function FeatureDetail({
                 key={section.key}
                 type="button"
                 role="tab"
+                id={`ddd-feature-tab-${section.key}`}
+                aria-controls="ddd-feature-detail-panel"
                 aria-selected={current?.key === section.key}
                 className={current?.key === section.key ? "segmented is-active" : "segmented"}
                 data-testid={`ddd-feature-section-${section.key}`}
@@ -1796,7 +1798,13 @@ export function FeatureDetail({
           </div>
         ) : null}
 
-        <div className="detail-panel" data-testid="ddd-feature-detail-panel">
+        <div
+          className="detail-panel"
+          id="ddd-feature-detail-panel"
+          data-testid="ddd-feature-detail-panel"
+          role={sections.length > 1 ? "tabpanel" : undefined}
+          aria-labelledby={sections.length > 1 && current ? `ddd-feature-tab-${current.key}` : undefined}
+        >
           {current ? current.render() : <p className="empty">No detail recorded for this feature yet.</p>}
         </div>
       </section>
