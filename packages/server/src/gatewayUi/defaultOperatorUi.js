@@ -3,7 +3,7 @@ import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
 export const DEFAULT_OPERATOR_UI_ENTRY = "smithers:default-operator-ui";
 const WORKFLOW_UI_THEME_PLACEHOLDER = "/*__SMITHERS_WORKFLOW_UI_THEME_CSS__*/";
 
-function defaultOperatorUiClient() {
+export function defaultOperatorUiClient() {
 const boot = globalThis.__SMITHERS_GATEWAY_UI__ ?? {};
 const root = document.getElementById("root");
 const storageKey = "smithers.gateway.console.token";
