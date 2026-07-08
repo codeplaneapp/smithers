@@ -2493,6 +2493,26 @@ export class SmithersDb {
 	                            catch: (cause) => toSmithersError(cause, "begin fallback event transaction"),
 	                        });
 	                    }
+	                    const existingInTurn = yield* Effect.tryPromise({
+	                        try: () => self.internalStorage.queryOne(`SELECT seq
+                           FROM _smithers_events
+                           WHERE run_id = ?
+                             AND timestamp_ms = ?
+                             AND type = ?
+                             AND payload_json = ?
+                           ORDER BY seq DESC
+                           LIMIT 1`, [row.runId, row.timestampMs, row.type, row.payloadJson]),
+	                        catch: (cause) => toSmithersError(cause, "dedupe fallback event row"),
+	                    });
+	                    if (existingInTurn?.seq !== undefined) {
+	                        if (captureTxidForWrite) {
+	                            yield* Effect.tryPromise({
+	                                try: () => self.internalStorage.execute("COMMIT"),
+	                                catch: (cause) => toSmithersError(cause, "commit fallback event dedupe transaction"),
+	                            });
+	                        }
+	                        return Number(existingInTurn.seq);
+	                    }
 	                    const lastSeq = (yield* Effect.tryPromise({
 	                        try: () => self.internalStorage.getLastEventSeq(row.runId),
 	                        catch: (cause) => toSmithersError(cause, "get fallback last event seq"),
@@ -2528,6 +2548,20 @@ export class SmithersDb {
                 try: () => {
                     client.run("BEGIN IMMEDIATE");
                     try {
+                        const existingInTurn = client
+                            .query(`SELECT seq
+                               FROM _smithers_events
+                               WHERE run_id = ?
+                                 AND timestamp_ms = ?
+                                 AND type = ?
+                                 AND payload_json = ?
+                               ORDER BY seq DESC
+                               LIMIT 1`)
+                            .get(row.runId, row.timestampMs, row.type, row.payloadJson);
+                        if (existingInTurn?.seq !== undefined) {
+                            client.run("COMMIT");
+                            return Number(existingInTurn.seq);
+                        }
                         const res = client
                             .query("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_events WHERE run_id = ?")
                             .get(row.runId);

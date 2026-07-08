@@ -86,6 +86,26 @@ describe("event seq allocation under concurrency (bun:sqlite)", () => {
     const history = await adapter.listEventHistory(RUN, { limit: 100 });
     expect(history.length).toBe(1);
   });
+
+  test("20 concurrent identical insertEventWithNextSeq calls dedupe to seq 0", async () => {
+    const adapter = createAdapter();
+    await seedRun(adapter);
+    const row = {
+      runId: RUN,
+      timestampMs: 1234,
+      type: "dup.concurrent",
+      payloadJson: JSON.stringify({ x: 1 }),
+    };
+
+    const seqs = await Promise.all(
+      Array.from({ length: 20 }, () => adapter.insertEventWithNextSeq(row)),
+    );
+
+    expect(seqs).toEqual(Array.from({ length: 20 }, () => 0));
+    const history = await adapter.listEventHistory(RUN, { limit: 50 });
+    expect(history.length).toBe(1);
+    expect(await adapter.getLastEventSeq(RUN)).toBe(0);
+  });
 });
 
 describe("signal seq allocation under concurrency (bun:sqlite)", () => {
