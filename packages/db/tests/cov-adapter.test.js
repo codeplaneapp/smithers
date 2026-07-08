@@ -48,6 +48,20 @@ describe("adapter: hijack + ancestry", () => {
         expect(chain[0].depth).toBe(0);
         expect(chain[2].depth).toBe(2);
     });
+
+    test("listRunAncestry stops at parent cycles and returns each run once", async () => {
+        const { adapter } = createDb();
+        await adapter.insertRun(runRow("a", "running", { parentRunId: "b" }));
+        await adapter.insertRun(runRow("b", "running", { parentRunId: "a" }));
+
+        const chain = await adapter.listRunAncestry("a", 5);
+        expect(chain.map((r) => r.runId)).toEqual(["a", "b"]);
+        expect(new Set(chain.map((r) => r.runId)).size).toBe(chain.length);
+        expect(chain.map((r) => r.depth)).toEqual([0, 1]);
+
+        const limited = await adapter.listRunAncestry("a", 1);
+        expect(limited.map((r) => r.runId)).toEqual(["a"]);
+    });
 });
 
 describe("adapter: claim / update-claimed / release", () => {

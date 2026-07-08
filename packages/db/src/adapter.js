@@ -1163,15 +1163,23 @@ export class SmithersDb {
    * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
    */
     listRunAncestry(runId, limit = 1000) {
-        return this.read(`list run ancestry ${runId}`, () => this.internalStorage.queryAll(`WITH RECURSIVE ancestry(run_id, parent_run_id, depth) AS (
+        const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 1000;
+        const visitedCheck = this.internalStorage.dialect === POSTGRES
+            ? "POSITION(',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',' IN ancestry.path) = 0"
+            : "instr(ancestry.path, ',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',') = 0";
+        return this.read(`list run ancestry ${runId}`, () => this.internalStorage.queryAll(`WITH RECURSIVE ancestry(run_id, parent_run_id, depth, path) AS (
            SELECT run_id, parent_run_id, 0
+                , ',' || CAST(length(run_id) AS TEXT) || ':' || run_id || ','
            FROM _smithers_runs
-           WHERE run_id = ?
+           WHERE run_id = ? AND ? > 0
            UNION ALL
            SELECT child.run_id, child.parent_run_id, ancestry.depth + 1
+                , ancestry.path || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ','
            FROM _smithers_runs child
            JOIN ancestry ON child.run_id = ancestry.parent_run_id
            WHERE ancestry.parent_run_id IS NOT NULL
+             AND ancestry.depth + 1 < ?
+             AND ${visitedCheck}
          )
          SELECT
            run_id,
@@ -1179,7 +1187,7 @@ export class SmithersDb {
            depth
          FROM ancestry
          ORDER BY depth ASC
-         LIMIT ?`, [runId, limit]));
+         LIMIT ?`, [runId, normalizedLimit, normalizedLimit, normalizedLimit]));
     }
     /**
    * @param {string} parentRunId
