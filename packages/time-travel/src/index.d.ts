@@ -309,8 +309,6 @@ type SmithersDb$a = _smithers_orchestrator_db_adapter.SmithersDb;
 type ReplayParams$1 = ReplayParams$2;
 type ReplayResult$1 = ReplayResult$2;
 
-/** @typedef {import("../ParsedSnapshot.ts").ParsedSnapshot} ParsedSnapshot */
-/** @typedef {import("./Snapshot.ts").Snapshot} Snapshot */
 /**
  * @param {Snapshot} snapshot
  * @returns {ParsedSnapshot}
@@ -488,15 +486,14 @@ declare function rerunAtRevision(adapter: SmithersDb$7, runId: string, frameNo: 
 type SmithersDb$7 = _smithers_orchestrator_db_adapter.SmithersDb;
 type VcsTag$1 = VcsTag$2;
 
-/** @typedef {import("../TimelineTree.ts").TimelineTree} TimelineTree */
 /**
  * @param {TimelineTree} tree
+ * @param {number} [indent] - recursion depth used when rendering forked child runs
  * @returns {string}
  */
 declare function formatTimelineForTui(tree: TimelineTree$3, indent?: number): string;
 type TimelineTree$3 = TimelineTree$4;
 
-/** @typedef {import("../TimelineTree.ts").TimelineTree} TimelineTree */
 /**
  * @param {TimelineTree} tree
  * @returns {object}

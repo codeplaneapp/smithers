@@ -2,7 +2,6 @@ import { Effect } from "effect";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { buildTimeline } from "./buildTimelineEffect.js";
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
 /** @typedef {import("../TimelineTree.ts").TimelineTree} TimelineTree */
 
 const TIMELINE_TREE_MAX_DEPTH = 100;
