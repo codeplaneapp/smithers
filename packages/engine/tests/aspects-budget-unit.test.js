@@ -101,4 +101,42 @@ describe("setupBudgetTracker resume seeding", () => {
         eventBus.emit("event", { type: "TokenUsageReported", inputTokens: 10, outputTokens: 0 });
         expect(tracker.tokens).toBe(360);
     });
+
+    test("skips persisted rows with missing, scalar, or unparseable payloads", async () => {
+        // Best-effort seeding: garbled history rows must be ignored, not crash
+        // the run or corrupt the accumulator.
+        const rows = [
+            { payloadJson: 123 },
+            { payloadJson: "{broken" },
+            { payloadJson: "null" },
+            { payloadJson: '"scalar"' },
+            { payloadJson: JSON.stringify({ type: "TokenUsageReported", inputTokens: 7, outputTokens: 3 }) },
+        ];
+        const adapter = { listEventsByType: async () => rows };
+        const eventBus = new EventEmitter();
+        const tracker = await setupBudgetTracker({ adapter, runId: "r", eventBus, runStartMs: 0 });
+        expect(tracker.tokens).toBe(10);
+    });
+
+    test("starts from zero when the adapter returns no rows or fails", async () => {
+        const eventBus = new EventEmitter();
+        const emptyTracker = await setupBudgetTracker({
+            adapter: { listEventsByType: async () => null },
+            runId: "r",
+            eventBus,
+            runStartMs: 0,
+        });
+        expect(emptyTracker.tokens).toBe(0);
+
+        const failingTracker = await setupBudgetTracker({
+            adapter: { listEventsByType: async () => { throw new Error("db gone"); } },
+            runId: "r",
+            eventBus,
+            runStartMs: 0,
+        });
+        expect(failingTracker.tokens).toBe(0);
+        // The live subscription still works after a failed seed.
+        eventBus.emit("event", { type: "TokenUsageReported", inputTokens: 5, outputTokens: 0 });
+        expect(failingTracker.tokens).toBe(5);
+    });
 });
