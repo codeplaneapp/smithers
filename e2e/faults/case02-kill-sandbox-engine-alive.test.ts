@@ -3,83 +3,45 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { deriveRunState } from "@smithers-orchestrator/db/runState/deriveRunState";
 import { RUN_STATE_HEARTBEAT_STALE_MS } from "@smithers-orchestrator/db/runState/RUN_STATE_HEARTBEAT_STALE_MS";
-import type { RunRow } from "@smithers-orchestrator/db/adapter/RunRow";
 import type { SandboxHandle } from "@smithers-orchestrator/sandbox/SandboxHandle";
 import { stallSandbox } from "../harness/stallSandbox.ts";
 import { corruptHeartbeat } from "../harness/corruptHeartbeat.ts";
 
 const ENGINE_OWNER_ID = "pid:11111:engine-alive";
 
-type RawRunRow = {
-  run_id: string;
-  workflow_name: string;
-  status: string;
-  created_at_ms: number;
-  started_at_ms: number | null;
-  heartbeat_at_ms: number | null;
-  runtime_owner_id: string | null;
-};
-
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-  `);
-  return db;
+function createDb(): { adapter: SmithersDb; sqlite: Database } {
+  const sqlite = new Database(":memory:");
+  const db = drizzle(sqlite);
+  ensureSmithersTables(db);
+  const adapter = new SmithersDb(db);
+  return { adapter, sqlite };
 }
 
-function seedRunningRun(db: Database, runId: string, heartbeatAtMs: number): void {
-  db.query(
-    `INSERT INTO _smithers_runs
-       (run_id, workflow_name, status, created_at_ms, started_at_ms, heartbeat_at_ms, runtime_owner_id)
-     VALUES (?, 'case02-fault', 'running', ?, ?, ?, ?)`,
-  ).run(
+async function seedRunningRun(
+  adapter: SmithersDb,
+  runId: string,
+  heartbeatAtMs: number,
+): Promise<void> {
+  await adapter.insertRun({
     runId,
-    heartbeatAtMs - 60_000,
-    heartbeatAtMs - 60_000,
+    workflowName: "case02-fault",
+    status: "running",
+    createdAtMs: heartbeatAtMs - 60_000,
+    startedAtMs: heartbeatAtMs - 60_000,
     heartbeatAtMs,
-    ENGINE_OWNER_ID,
-  );
+    runtimeOwnerId: ENGINE_OWNER_ID,
+  });
 }
 
-function readRunRow(db: Database, runId: string): RunRow {
-  const raw = db
-    .query(
-      "SELECT run_id, workflow_name, status, created_at_ms, started_at_ms, heartbeat_at_ms, runtime_owner_id FROM _smithers_runs WHERE run_id = ?",
-    )
-    .get(runId) as RawRunRow | null;
-  if (!raw) throw new Error(`run ${runId} not found`);
-  return {
-    runId: raw.run_id,
-    parentRunId: null,
-    workflowName: raw.workflow_name,
-    workflowPath: null,
-    workflowHash: null,
-    status: raw.status,
-    createdAtMs: raw.created_at_ms,
-    startedAtMs: raw.started_at_ms,
-    finishedAtMs: null,
-    heartbeatAtMs: raw.heartbeat_at_ms,
-    runtimeOwnerId: raw.runtime_owner_id,
-    cancelRequestedAtMs: null,
-    hijackRequestedAtMs: null,
-    hijackTarget: null,
-    vcsType: null,
-    vcsRoot: null,
-    vcsRevision: null,
-    errorJson: null,
-    configJson: null,
-  };
+async function readRunRow(adapter: SmithersDb, runId: string) {
+  const run = await adapter.getRun(runId);
+  if (!run) throw new Error(`run ${runId} not found`);
+  return run;
 }
 
 type Sandbox = {
@@ -111,18 +73,18 @@ function createSandbox(runId: string): Sandbox {
 describe("case02 kill-sandbox-engine-alive", () => {
   test("sandbox stalled (request path missing) — fault is observable on the filesystem while engine row stays fresh", async () => {
     const runId = "case02-stall-fault";
-    const db = buildDb();
+    const { adapter, sqlite } = createDb();
     const { handle, cleanup: sbxCleanup } = createSandbox(runId);
     try {
       const now = Date.now();
-      seedRunningRun(db, runId, now);
+      await seedRunningRun(adapter, runId, now);
 
       const stall = await stallSandbox(handle, 5_000);
       try {
         expect(existsSync(handle.requestPath)).toBe(false);
         expect(existsSync(`${handle.requestPath}.stalled`)).toBe(true);
 
-        const view = deriveRunState({ run: readRunRow(db, runId), now });
+        const view = deriveRunState({ run: await readRunRow(adapter, runId), now });
         expect(view.state).toBe("running");
         expect(view.unhealthy).toBeUndefined();
       } finally {
@@ -130,59 +92,59 @@ describe("case02 kill-sandbox-engine-alive", () => {
       }
     } finally {
       sbxCleanup();
-      db.close();
+      sqlite.close();
     }
   });
 
   test("heartbeat past stale threshold with live owner → run classified stale + unhealthy", async () => {
     const runId = "case02-stale";
-    const db = buildDb();
+    const { adapter, sqlite } = createDb();
     try {
       const now = Date.now();
-      seedRunningRun(db, runId, now);
+      await seedRunningRun(adapter, runId, now);
 
-      await corruptHeartbeat(db, runId, "stale");
+      await corruptHeartbeat(sqlite, runId, "stale");
 
-      const view = deriveRunState({ run: readRunRow(db, runId) });
+      const view = deriveRunState({ run: await readRunRow(adapter, runId) });
       expect(view.runId).toBe(runId);
       expect(view.state).toBe("stale");
       expect(view.unhealthy).toBeDefined();
       expect(view.unhealthy?.kind).toBe("engine-heartbeat-stale");
     } finally {
-      db.close();
+      sqlite.close();
     }
   });
 
   test("heartbeat past orphan threshold with no owner → orphaned (recovery state-machine entry per ticket 0018)", async () => {
     const runId = "case02-orphaned";
-    const db = buildDb();
+    const { adapter, sqlite } = createDb();
     try {
       const now = Date.now();
-      seedRunningRun(db, runId, now);
-      await corruptHeartbeat(db, runId, "stale");
-      db.query("UPDATE _smithers_runs SET runtime_owner_id = NULL WHERE run_id = ?").run(runId);
+      await seedRunningRun(adapter, runId, now);
+      await corruptHeartbeat(sqlite, runId, "stale");
+      await adapter.updateRun(runId, { runtimeOwnerId: null });
 
-      const view = deriveRunState({ run: readRunRow(db, runId) });
+      const view = deriveRunState({ run: await readRunRow(adapter, runId) });
       expect(view.state).toBe("orphaned");
       expect(view.unhealthy?.kind).toBe("engine-heartbeat-stale");
     } finally {
-      db.close();
+      sqlite.close();
     }
   });
 
   test("just-inside the SLO window, run remains running (red on regression of threshold)", async () => {
     const runId = "case02-edge";
-    const db = buildDb();
+    const { adapter, sqlite } = createDb();
     try {
       const now = Date.now();
       const heartbeat = now - (RUN_STATE_HEARTBEAT_STALE_MS - 1_000);
-      seedRunningRun(db, runId, heartbeat);
+      await seedRunningRun(adapter, runId, heartbeat);
 
-      const view = deriveRunState({ run: readRunRow(db, runId), now });
+      const view = deriveRunState({ run: await readRunRow(adapter, runId), now });
       expect(view.state).toBe("running");
       expect(view.unhealthy).toBeUndefined();
     } finally {
-      db.close();
+      sqlite.close();
     }
   });
 
