@@ -541,6 +541,180 @@ describe("DecisionTable first-match fallback boundaries", () => {
     });
 });
 
+describe("Optimizer falsy-but-valid targetScore boundary", () => {
+    const baseProps = {
+        generator: agent,
+        evaluator: otherAgent,
+        generateOutput: "gen_out",
+        evaluateOutput: "eval_out",
+        children: "generate",
+    };
+
+    test("targetScore 0 is a real target: score 0 converges, a negative score does not", async () => {
+        const atZero = await render(<Optimizer {...baseProps} id="opt" targetScore={0} />, {
+            eval_out: [outputRow("opt-evaluate", { score: 0 })],
+        });
+        expect(findHost(atZero.root, "smithers:ralph").rawProps.until).toBe(true);
+
+        const belowZero = await render(<Optimizer {...baseProps} id="opt" targetScore={0} />, {
+            eval_out: [outputRow("opt-evaluate", { score: -0.5 })],
+        });
+        expect(findHost(belowZero.root, "smithers:ralph").rawProps.until).toBe(false);
+    });
+});
+
+describe("Supervisor and GatherAndSynthesize with empty collections", () => {
+    test("Supervisor with zero workers still renders plan, review, and final", async () => {
+        const { graph } = await render(
+            <Supervisor
+                id="boss"
+                boss={agent}
+                workers={{}}
+                planOutput="plan_out"
+                workerOutput="worker_out"
+                reviewOutput="review_out"
+                finalOutput="final_out"
+            >
+                plan work
+            </Supervisor>,
+        );
+        expect(graph.tasks.map((t) => t.nodeId)).toEqual([
+            "boss-plan",
+            "boss-review",
+            "boss-final",
+        ]);
+    });
+
+    test("GatherAndSynthesize with zero sources renders only the synthesis task with no needs", async () => {
+        const { graph } = await render(
+            <GatherAndSynthesize
+                id="g"
+                sources={{}}
+                synthesizer={judgeAgent}
+                gatherOutput="gather_out"
+                synthesisOutput="synthesis_out"
+            />,
+        );
+        expect(graph.tasks.map((t) => t.nodeId)).toEqual(["g-synthesize"]);
+        // The empty needs map normalizes away: the synthesis task waits on nothing.
+        expect(graph.tasks[0].needs).toBeUndefined();
+    });
+});
+
+describe("GatherAndSynthesize per-source content precedence", () => {
+    test("source children beat source prompt when both are set", async () => {
+        const { graph } = await render(
+            <GatherAndSynthesize
+                id="g"
+                sources={{
+                    web: { agent, children: "use the children", prompt: "not this prompt" },
+                }}
+                synthesizer={judgeAgent}
+                gatherOutput="gather_out"
+                synthesisOutput="synthesis_out"
+            />,
+        );
+        const gather = graph.tasks.find((t) => t.nodeId === "g-gather-web");
+        expect(gather.prompt).toBe("use the children");
+    });
+});
+
+describe("ClassifyAndRoute per-category config fallbacks", () => {
+    test("a config with only an agent falls back to routeOutput and the default route prompt", async () => {
+        const { graph } = await render(
+            <ClassifyAndRoute
+                id="router"
+                items={[{ id: "one" }]}
+                classifierAgent={agent}
+                classifierOutput="class_out"
+                routeOutput="route_out"
+                categories={{ bug: { agent: otherAgent } }}
+                classificationResult={{
+                    classifications: [{ itemId: "A", category: "bug" }],
+                }}
+            />,
+        );
+        const route = graph.tasks.find((t) => t.nodeId === "router-route-A");
+        expect(route).toBeDefined();
+        expect(route.outputTableName).toBe("route_out");
+        expect(route.prompt).toContain('Handle item classified as "bug"');
+        expect(route.agent).toBe(otherAgent);
+        expect(route.continueOnFail).toBe(true);
+    });
+});
+
+describe("Panel panelist identity, concurrency, and input guard", () => {
+    const baseProps = {
+        moderator: judgeAgent,
+        panelistOutput: "panel_out",
+        moderatorOutput: "moderator_out",
+        children: "review this",
+    };
+
+    test("when a panelist has both label and role, label names the task id and role names the display label", async () => {
+        const { graph } = await render(
+            <Panel
+                {...baseProps}
+                id="p"
+                panelists={[{ agent, label: "lbl", role: "security" }]}
+            />,
+        );
+        const panelist = graph.tasks.find((t) => t.nodeId === "p-lbl");
+        expect(panelist).toBeDefined();
+        expect(panelist.label).toBe("security");
+    });
+
+    test("maxConcurrency reaches the panelist parallel block", async () => {
+        const { graph } = await render(
+            <Panel
+                {...baseProps}
+                id="p"
+                maxConcurrency={1}
+                panelists={[
+                    { agent, role: "security" },
+                    { agent: otherAgent, role: "perf" },
+                ]}
+            />,
+        );
+        const panelist = graph.tasks.find((t) => t.nodeId === "p-security");
+        expect(panelist.parallelMaxConcurrency).toBe(1);
+    });
+
+    test("a non-array panelists value is rejected with the same loud error as an empty list", () => {
+        expect(() => Panel({ ...baseProps, id: "p", panelists: agent })).toThrow(
+            /at least one panelist/i,
+        );
+    });
+});
+
+describe("Debate side prompts and output tables", () => {
+    test("proposer argues FOR and opponent argues AGAINST the same topic into the shared argument table", async () => {
+        const { graph } = await render(
+            <Debate
+                id="d"
+                proposer={agent}
+                opponent={otherAgent}
+                judge={judgeAgent}
+                argumentOutput="argument_out"
+                verdictOutput="verdict_out"
+                topic="typed workflows"
+            />,
+        );
+        const proposer = graph.tasks.find((t) => t.nodeId === "d-proposer");
+        const opponent = graph.tasks.find((t) => t.nodeId === "d-opponent");
+        const judge = graph.tasks.find((t) => t.nodeId === "d-judge");
+
+        expect(proposer.prompt).toContain("Argue FOR");
+        expect(proposer.prompt).toContain("typed workflows");
+        expect(opponent.prompt).toContain("Argue AGAINST");
+        expect(opponent.prompt).toContain("typed workflows");
+        expect(proposer.outputTableName).toBe("argument_out");
+        expect(opponent.outputTableName).toBe("argument_out");
+        expect(judge.outputTableName).toBe("verdict_out");
+        expect(judge.prompt).toContain("render a verdict");
+    });
+});
+
 describe("SuperSmithers prompts and dependency chains", () => {
     test("the read prompt embeds the strategy text and the target globs, defaulting to all files", () => {
         const withGlobs = SuperSmithers({
