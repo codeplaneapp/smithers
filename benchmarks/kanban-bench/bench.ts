@@ -9,7 +9,7 @@
 // real kanban workflow with deterministic in-process bench agents, then
 // decomposes where the wall-clock went. Reports land in --out (default:
 // benchmarks/kanban-bench/results/<label>/).
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createKanbanBenchSandbox } from "./sandbox.ts";
@@ -29,6 +29,12 @@ const tickets = Number(arg("tickets", "12"));
 // --no-input runs the workflow with NO --input at all (the bare `smithers up`
 // path: the workflow must supply its own cap default).
 const noInput = process.argv.includes("--no-input");
+// --no-global-cap omits --max-concurrency entirely (the stock `smithers up`
+// path: the engine may auto-raise the cap on demand).
+const noGlobalCap = process.argv.includes("--no-global-cap");
+// --subtree swaps the sandbox kanban's outer Parallel from leaf-task
+// maxConcurrency to the subtreeConcurrency (N tickets in flight) semantic.
+const subtree = process.argv.includes("--subtree");
 const workflowConcurrency = Number(arg("concurrency", "4"));
 const globalConcurrency = Number(arg("global-concurrency", "4"));
 const delays = JSON.parse(arg("delays", "{}"));
@@ -46,6 +52,14 @@ console.log(`[bench] building sandbox at ${sandboxRoot} (${tickets} tickets)`);
 const sandbox = createKanbanBenchSandbox({ root: sandboxRoot, tickets });
 const benchLog = join(sandbox.root, "bench-agent-log.ndjson");
 
+if (subtree) {
+  const wfPath = join(sandbox.root, ".smithers/workflows/kanban.tsx");
+  const src = readFileSync(wfPath, "utf8");
+  const swapped = src.replace("<Parallel maxConcurrency={maxConcurrency}>", "<Parallel subtreeConcurrency={maxConcurrency}>");
+  if (swapped === src) throw new Error("--subtree: could not find the outer Parallel maxConcurrency prop to swap");
+  writeFileSync(wfPath, swapped);
+}
+
 const cliArgs = [
   cliBin,
   "up",
@@ -53,8 +67,7 @@ const cliArgs = [
   "--run-id",
   runId,
   ...(noInput ? [] : ["--input", JSON.stringify({ maxConcurrency: workflowConcurrency })]),
-  "--max-concurrency",
-  String(globalConcurrency),
+  ...(noGlobalCap ? [] : ["--max-concurrency", String(globalConcurrency)]),
 ];
 
 console.log(`[bench] running: bun ${cliArgs.join(" ")}`);
