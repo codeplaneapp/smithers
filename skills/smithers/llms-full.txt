@@ -9083,10 +9083,11 @@ Defined in the root `package.json` for development:
 | `generate:init-pack` | `bun scripts/generate-workflow-pack.ts` | Regenerate the local workflow pack used by `bunx smithers-orchestrator init` |
 | `sota:gen` | `bun scripts/generate-sota.ts` | Render the SOTA model registry (`docs/data/sota-models.json`) into its docs page and CLI module |
 | `sota:research` | `bun scripts/sota-research.ts` | Research whether new SOTA models shipped and rewrite the registry if so (used by the daily cron) |
-| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && pnpm -r --no-bail test` | Run docs/config guards, dependency guards, llms guards, SOTA registry guard, per-file declaration freshness, and each package test script (no-bail so every failing package is reported) |
+| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-no-direct-db-access.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && pnpm -r --no-bail test` | Run docs/config guards, dependency guards, direct DB access guard, llms guards, SOTA registry guard, per-file declaration freshness, and each package test script (no-bail so every failing package is reported) |
 | `coverage` | `node scripts/coverage.mjs` | Generate a test coverage report across the workspace |
 | `check:effect` | `node scripts/check-single-effect-version.mjs` | Verify the workspace resolves a single Effect version |
 | `check:deps` | `node scripts/check-dependency-boundaries.mjs` | Verify package dependency boundaries |
+| `check:db-access` | `node scripts/check-no-direct-db-access.mjs` | Verify direct run/store DB access remains confined to the tracked issue #470 baseline |
 | `check:docs` | `node scripts/check-docs.mjs` | Verify documentation style and API drift guards |
 | `check:llms` | `node scripts/check-llms.mjs` | Verify generated llms docs are current |
 | `check:sota` | `node scripts/check-sota.mjs` | Verify the SOTA registry's generated docs page and CLI module match `docs/data/sota-models.json` |

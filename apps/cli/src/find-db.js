@@ -1,7 +1,5 @@
 import { resolve, dirname } from "node:path";
 import { existsSync } from "node:fs";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { findSmithersAnchorDir } from "smithers-orchestrator/findSmithersAnchorDir";
 import { openSmithersStore } from "smithers-orchestrator/openSmithersStore";
@@ -103,28 +101,6 @@ export async function waitForSmithersDb(from, opts = {}) {
             await sleep(Math.min(intervalMs, timeoutMs - elapsedMs));
         }
     }
-}
-/**
- * Open a smithers.db file and return a SmithersDb adapter with cleanup function.
- *
- * @param {string} dbPath
- * @returns {Promise<{ adapter: SmithersDb; cleanup: () => void }>}
- */
-export async function openSmithersDb(dbPath) {
-    const { Database } = await import("bun:sqlite");
-    const { drizzle } = await import("drizzle-orm/bun-sqlite");
-    const sqlite = new Database(dbPath);
-    const db = drizzle(sqlite);
-    ensureSmithersTables(db);
-    return {
-        adapter: new SmithersDb(db),
-        cleanup: () => {
-            try {
-                sqlite.close();
-            }
-            catch { }
-        },
-    };
 }
 /**
  * Find and open the resolved Smithers store.

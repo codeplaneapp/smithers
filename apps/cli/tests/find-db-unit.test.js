@@ -6,7 +6,6 @@ import { openSmithersBackend } from "smithers-orchestrator/openSmithersBackend";
 import {
     findAndOpenDb,
     findSmithersDb,
-    openSmithersDb,
     waitForSmithersDb,
 } from "../src/find-db.js";
 
@@ -126,27 +125,6 @@ describe("find db helpers", () => {
                 writeFileSync(join(root, "smithers.db"), "");
             }, 5);
             expect(await waitForSmithersDb(root, { timeoutMs: 100, intervalMs: 1 })).toBe(join(root, "smithers.db"));
-        }
-        finally {
-            rmSync(root, { recursive: true, force: true });
-        }
-    });
-
-    test("opens a sqlite database and returns cleanup handles", async () => {
-        const root = tempDir("open-db");
-        const dbPath = join(root, "smithers.db");
-        try {
-            const opened = await openSmithersDb(dbPath);
-            expect(opened.adapter).toBeTruthy();
-            opened.cleanup();
-            opened.cleanup();
-            expect(existsSync(dbPath)).toBe(true);
-
-            const found = await findAndOpenDb(root, { timeoutMs: 0 });
-            expect(found.dbPath).toBe(dbPath);
-            expect(found.choice.backend).toBe("sqlite");
-            expect(found.adapter).toBeTruthy();
-            found.cleanup();
         }
         finally {
             rmSync(root, { recursive: true, force: true });

@@ -191,6 +191,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expect(scripts["sota:research"]).toBe("bun scripts/sota-research.ts");
     expect(scripts["check:effect"]).toBe("node scripts/check-single-effect-version.mjs");
     expect(scripts["check:deps"]).toBe("node scripts/check-dependency-boundaries.mjs");
+    expect(scripts["check:db-access"]).toBe("node scripts/check-no-direct-db-access.mjs");
     expect(scripts["check:docs"]).toBe("node scripts/check-docs.mjs");
     expect(scripts["check:llms"]).toBe("node scripts/check-llms.mjs");
     expect(scripts["check:sota"]).toBe("node scripts/check-sota.mjs");
@@ -200,6 +201,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expect(scripts.test).toBe([
       "node scripts/check-single-effect-version.mjs",
       "node scripts/check-dependency-boundaries.mjs",
+      "node scripts/check-no-direct-db-access.mjs",
       "node scripts/check-docs.mjs",
       "node scripts/check-llms.mjs",
       "node scripts/check-sota.mjs",
@@ -215,6 +217,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "scripts/optimize-llms-full.ts",
       "scripts/generate-component-source.mjs",
       "scripts/generate-workflow-pack.ts",
+      "scripts/check-no-direct-db-access.mjs",
       "scripts/check-smithers-test-script.mjs",
       "scripts/verify-observability.sh",
     ]) expectFile(path);
