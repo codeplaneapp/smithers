@@ -22,7 +22,7 @@ export function removeAccount(label, options = {}) {
             if (options.silent) return false;
             throw new SmithersError("ACCOUNT_NOT_FOUND", `No account with label "${label}" is registered.`);
         }
-        writeAccounts({ version: 1, accounts: next }, env);
+        writeAccounts({ version: 1, accounts: next, unknownAccounts: existing.unknownAccounts }, env);
         return true;
     });
 }

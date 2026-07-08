@@ -173,6 +173,26 @@ describe("parseAccountsFile", () => {
             ],
         }))).toThrow(/configDir/);
     });
+    test("surfaces unknown-provider entries via unknownAccounts, still excluded from accounts", () => {
+        const realWarn = console.warn;
+        console.warn = () => {};
+        let parsed;
+        try {
+            parsed = parseAccountsFile(JSON.stringify({
+                version: 1,
+                accounts: [
+                    { label: "kimi-main", provider: "kimi", configDir: "/p/kimi" },
+                    { label: "gem-legacy", provider: "gemini", configDir: "/p/gem" },
+                ],
+            }));
+        } finally {
+            console.warn = realWarn;
+        }
+        expect(parsed.accounts.map((a) => a.label)).toEqual(["kimi-main"]);
+        expect(parsed.unknownAccounts).toEqual([
+            { label: "gem-legacy", provider: "gemini", configDir: "/p/gem" },
+        ]);
+    });
 });
 
 describe("readAccounts / writeAccounts / addAccount / removeAccount", () => {
@@ -311,6 +331,37 @@ describe("readAccounts / writeAccounts / addAccount / removeAccount", () => {
         const path = accountsFilePath(env);
         writeFileSync(path, "{not json", { encoding: "utf8", mode: 0o600 });
         expect(() => readAccounts(env)).toThrow(/ACCOUNTS_FILE_INVALID|valid JSON/);
+    });
+    test("addAccount preserves an unknown-provider passthrough entry across rewrites", () => {
+        const env = newSmithersHome();
+        const path = accountsFilePath(env);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, JSON.stringify({
+            version: 1,
+            accounts: [
+                { label: "kimi-main", provider: "kimi", configDir: "/p/kimi" },
+                { label: "gem-legacy", provider: "gemini", configDir: "/p/gem" },
+            ],
+        }), { encoding: "utf8", mode: 0o600 });
+        addAccount({ label: "new-codex", provider: "codex", configDir: "/x" }, { env });
+        const raw = JSON.parse(readFileSync(path, "utf8"));
+        expect(raw.accounts).toContainEqual({ label: "gem-legacy", provider: "gemini", configDir: "/p/gem" });
+    });
+    test("removeAccount preserves an unknown-provider passthrough entry", () => {
+        const env = newSmithersHome();
+        const path = accountsFilePath(env);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, JSON.stringify({
+            version: 1,
+            accounts: [
+                { label: "kimi-main", provider: "kimi", configDir: "/p/kimi" },
+                { label: "gem-legacy", provider: "gemini", configDir: "/p/gem" },
+            ],
+        }), { encoding: "utf8", mode: 0o600 });
+        removeAccount("kimi-main", { env });
+        const raw = JSON.parse(readFileSync(path, "utf8"));
+        expect(raw.accounts).toContainEqual({ label: "gem-legacy", provider: "gemini", configDir: "/p/gem" });
+        expect(raw.accounts.some((a) => a.label === "kimi-main")).toBe(false);
     });
 });
 

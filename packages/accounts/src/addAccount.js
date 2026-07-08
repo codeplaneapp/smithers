@@ -54,7 +54,7 @@ export function addAccount(account, options = {}) {
         const next = conflict >= 0
             ? existing.accounts.map((entry, i) => (i === conflict ? persisted : entry))
             : [...existing.accounts, persisted];
-        writeAccounts({ version: 1, accounts: next }, env);
+        writeAccounts({ version: 1, accounts: next, unknownAccounts: existing.unknownAccounts }, env);
         return persisted;
     });
 }
