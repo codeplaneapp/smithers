@@ -58,12 +58,12 @@ function completeWorkflow(api: any) {
         React.createElement(
           api.Task,
           { id: "prepare-real", output: api.outputs.result },
-          { approved: true, note: "prepared", decidedBy: null, decidedAt: null },
+          { approved: true, note: "prepared", decidedBy: null, decidedAt: null } as any,
         ),
         React.createElement(
           api.Task,
           { id: "ship-real", output: api.outputs.result },
-          { approved: true, note: "shipped", decidedBy: null, decidedAt: null },
+          { approved: true, note: "shipped", decidedBy: null, decidedAt: null } as any,
         ),
       ),
     ),
@@ -82,7 +82,7 @@ function approvalWorkflow(api: any) {
         React.createElement(
           api.Task,
           { id: "prepare-approval", output: api.outputs.result },
-          { approved: true, note: "prepared", decidedBy: null, decidedAt: null },
+          { approved: true, note: "prepared", decidedBy: null, decidedAt: null } as any,
         ),
         React.createElement(api.Approval, {
           id: "pick-plan",
@@ -103,7 +103,7 @@ function approvalWorkflow(api: any) {
           ? React.createElement(
               api.Task,
               { id: "record-selection", output: api.outputs.result },
-              { approved: selection.selected === "balanced", note: selection.selected, decidedBy: null, decidedAt: null },
+              { approved: selection.selected === "balanced", note: selection.selected, decidedBy: null, decidedAt: null } as any,
             )
           : null,
       ),
