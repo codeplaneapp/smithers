@@ -1,5 +1,8 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createMemoryStore } from "../src/store/index.js";
@@ -125,5 +128,134 @@ describe("Memory E2E", () => {
         expect(t2MessagesAfter).toHaveLength(2);
         const t1MessagesAfter = await store.listMessages(thread1.threadId);
         expect(t1MessagesAfter).toHaveLength(0);
+    });
+    test("file-backed store preserves facts, namespaces, threads, and messages across reopen", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-memory-e2e-"));
+        const dbPath = join(dir, "smithers.db");
+        const workflowNs = { kind: "workflow", id: "flow:alpha%25" };
+        const userNs = { kind: "user", id: "will:local%user" };
+        let threadId;
+
+        try {
+            {
+                const sqlite = new Database(dbPath);
+                const db = drizzle(sqlite);
+                ensureSmithersTables(db);
+                const firstStore = createMemoryStore(db);
+
+                await firstStore.setFact(workflowNs, "decision", {
+                    accepted: true,
+                    reason: "persist across process boundaries",
+                });
+                await firstStore.setFact(userNs, "preference", "compact-json");
+                const thread = await firstStore.createThread(workflowNs, "Persisted Thread");
+                threadId = thread.threadId;
+                await firstStore.saveMessage({
+                    id: "persist-msg-1",
+                    threadId,
+                    role: "user",
+                    contentJson: JSON.stringify({ text: "remember this" }),
+                    runId: "run-persist",
+                    nodeId: "node-persist",
+                    createdAtMs: 1,
+                });
+                await firstStore.saveMessage({
+                    id: "persist-msg-2",
+                    threadId,
+                    role: "assistant",
+                    contentJson: JSON.stringify({ text: "stored" }),
+                    createdAtMs: 2,
+                });
+                sqlite.close();
+            }
+
+            const sqlite = new Database(dbPath);
+            const db = drizzle(sqlite);
+            ensureSmithersTables(db);
+            const reopenedStore = createMemoryStore(db);
+
+            const workflowFact = await reopenedStore.getFact(workflowNs, "decision");
+            const userFact = await reopenedStore.getFact(userNs, "preference");
+            expect(JSON.parse(workflowFact.valueJson)).toEqual({
+                accepted: true,
+                reason: "persist across process boundaries",
+            });
+            expect(JSON.parse(userFact.valueJson)).toBe("compact-json");
+
+            const allFacts = await reopenedStore.listAllFacts();
+            expect(allFacts.map((fact) => fact.namespace)).toEqual([
+                "user:will%3Alocal%25user",
+                "workflow:flow%3Aalpha%2525",
+            ]);
+            expect(allFacts.map((fact) => fact.key)).toEqual(["preference", "decision"]);
+
+            const threads = await reopenedStore.listThreads();
+            expect(threads).toHaveLength(1);
+            expect(threads[0]).toMatchObject({
+                threadId,
+                namespace: "workflow:flow%3Aalpha%2525",
+                title: "Persisted Thread",
+            });
+
+            const messages = await reopenedStore.listMessages(threadId);
+            expect(messages.map((message) => message.id)).toEqual([
+                "persist-msg-1",
+                "persist-msg-2",
+            ]);
+            expect(messages[0]).toMatchObject({
+                role: "user",
+                runId: "run-persist",
+                nodeId: "node-persist",
+            });
+            expect(await reopenedStore.countMessages(threadId)).toBe(2);
+            sqlite.close();
+        }
+        finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+    test("deleteMessages prunes large real SQLite id sets without crossing thread boundaries", async () => {
+        const target = await store.createThread(WF_NS, "Large Delete Target");
+        const other = await store.createThread(WF_NS, "Other Thread");
+        const targetIds = Array.from({ length: 950 }, (_, i) => `bulk-${String(i).padStart(4, "0")}`);
+
+        for (const [index, id] of targetIds.entries()) {
+            await store.saveMessage({
+                id,
+                threadId: target.threadId,
+                role: "user",
+                contentJson: JSON.stringify({ index }),
+                createdAtMs: index,
+            });
+        }
+        await store.saveMessage({
+            id: "bulk-keep",
+            threadId: target.threadId,
+            role: "assistant",
+            contentJson: JSON.stringify({ keep: true }),
+            createdAtMs: 2_000,
+        });
+        await store.saveMessage({
+            id: "foreign-msg",
+            threadId: other.threadId,
+            role: "user",
+            contentJson: JSON.stringify({ thread: "other" }),
+            createdAtMs: 1,
+        });
+
+        const deleted = await store.deleteMessages(target.threadId, [
+            ...targetIds,
+            "foreign-msg",
+            "missing-msg",
+        ]);
+
+        expect(deleted).toBe(950);
+        expect(await store.countMessages(target.threadId)).toBe(1);
+        expect((await store.listMessages(target.threadId)).map((message) => message.id)).toEqual([
+            "bulk-keep",
+        ]);
+        expect((await store.listMessages(other.threadId)).map((message) => message.id)).toEqual([
+            "foreign-msg",
+        ]);
     });
 });

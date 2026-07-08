@@ -51,6 +51,7 @@ function instrumentedDbEffect(code) {
 }
 const readEffect = instrumentedDbEffect("DB_QUERY_FAILED");
 const writeEffect = instrumentedDbEffect("DB_WRITE_FAILED");
+const DELETE_MESSAGES_CHUNK_SIZE = 900;
 /**
  * Project a fact row onto the declared MemoryFact shape so extra drizzle
  * columns can never leak through the public type.
@@ -360,9 +361,17 @@ function makeMemoryStore(db) {
         if (messageIds.length === 0) {
             return Effect.succeed(0);
         }
-        return writeEffect("memory deleteMessages", () => db
-            .delete(smithersMemoryMessages)
-            .where(and(eq(smithersMemoryMessages.threadId, threadId), inArray(smithersMemoryMessages.id, messageIds)))).pipe(Effect.map((result) => result?.changes ?? result?.rowsAffected ?? 0));
+        return writeEffect("memory deleteMessages", async () => {
+            let deleted = 0;
+            for (let offset = 0; offset < messageIds.length; offset += DELETE_MESSAGES_CHUNK_SIZE) {
+                const chunk = messageIds.slice(offset, offset + DELETE_MESSAGES_CHUNK_SIZE);
+                const result = await db
+                    .delete(smithersMemoryMessages)
+                    .where(and(eq(smithersMemoryMessages.threadId, threadId), inArray(smithersMemoryMessages.id, chunk)));
+                deleted += result?.changes ?? result?.rowsAffected ?? 0;
+            }
+            return deleted;
+        });
     }
     // --- Note Effects (P2/P3: append-only knowledge) ---
     /**

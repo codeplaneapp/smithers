@@ -27,6 +27,19 @@ async function readCounter(metric) {
     return state.count;
 }
 
+function countSqlParams(sqlNode) {
+    if (!sqlNode || typeof sqlNode !== "object") {
+        return 0;
+    }
+    if (sqlNode.constructor?.name === "Param") {
+        return 1;
+    }
+    if (!Array.isArray(sqlNode.queryChunks)) {
+        return 0;
+    }
+    return sqlNode.queryChunks.reduce((count, chunk) => count + countSqlParams(chunk), 0);
+}
+
 describe("package barrels re-export the public surface", () => {
     test("src/index.js exposes the documented named exports", () => {
         for (const name of [
@@ -142,6 +155,31 @@ describe("MemoryStore promise wrappers: listThreads and deleteMessages", () => {
         const store = createMemoryStore(createTestDb());
         const thread = await store.createThread(WF_NS);
         expect(await store.deleteMessages(thread.threadId, [])).toBe(0);
+    });
+
+    test("deleteMessages handles very large id sets with bounded predicates", async () => {
+        const paramCounts = [];
+        const store = createMemoryStore({
+            delete(table) {
+                expect(table).toBe(barrel.smithersMemoryMessages);
+                return {
+                    where(predicate) {
+                        const paramCount = countSqlParams(predicate);
+                        paramCounts.push(paramCount);
+                        if (paramCount > 1_000) {
+                            throw new Error(`too many SQL variables: ${paramCount}`);
+                        }
+                        return Promise.resolve({ changes: 0 });
+                    },
+                };
+            },
+        });
+        const messageIds = Array.from({ length: 50_000 }, (_, i) => `m-${i}`);
+
+        await expect(store.deleteMessages("thread-1", messageIds)).resolves.toBe(0);
+
+        expect(paramCounts.length).toBeGreaterThan(1);
+        expect(Math.max(...paramCounts)).toBeLessThanOrEqual(1_000);
     });
 });
 
