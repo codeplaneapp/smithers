@@ -23,6 +23,18 @@ export function jsonSchemaToZod(rootSchema) {
     return z.object({}).catchall(z.unknown());
 }
 /**
+ * Convert a JSON Schema to a Zod schema without coercing the root to an
+ * object. Non-object roots (e.g. the string-enum schema a select-kind human
+ * request stores) keep their real validator instead of the catchall-object
+ * fallback, which would reject every non-object value.
+ *
+ * @param {JsonSchema} rootSchema
+ * @returns {z.ZodType}
+ */
+export function jsonSchemaToZodType(rootSchema) {
+    return convertNode(rootSchema, rootSchema, new Set());
+}
+/**
  * @param {JsonSchema | undefined} node
  * @param {JsonSchema} root
  * @param {Set<string>} visited

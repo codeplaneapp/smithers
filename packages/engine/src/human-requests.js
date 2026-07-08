@@ -3,7 +3,7 @@
 /** @typedef {import("./HumanRequestStatus.ts").HumanRequestStatus} HumanRequestStatus */
 // @smithers-type-exports-end
 
-import { jsonSchemaToZod } from "./external/json-schema-to-zod.js";
+import { jsonSchemaToZodType } from "./external/json-schema-to-zod.js";
 /**
  * @typedef {{ ok: true; } | { ok: false; code: "HUMAN_REQUEST_SCHEMA_INVALID" | "HUMAN_REQUEST_VALIDATION_FAILED"; message: string; }} HumanRequestSchemaValidation
  */
@@ -99,7 +99,7 @@ export function validateHumanRequestValue(request, value) {
     }
     let validator;
     try {
-        validator = jsonSchemaToZod(schema);
+        validator = jsonSchemaToZodType(schema);
     }
     catch (err) {
         return {

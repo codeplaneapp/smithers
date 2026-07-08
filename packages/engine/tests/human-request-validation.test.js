@@ -207,6 +207,24 @@ describe("human request validation and expiry", () => {
             sqlite.close();
         }
     });
+    test("a non-object root schema validates the raw value: select-kind enums accept a choice and reject strangers", () => {
+        // Regression: the object-coercing converter used to turn a top-level
+        // string-enum schema (what `smithers ask-human --choices` stores) into a
+        // catchall OBJECT validator, so no valid string choice could ever be
+        // answered ("expected object, received string").
+        const request = {
+            requestId: "human:run-select:agent-ask:0:x",
+            schemaJson: JSON.stringify({ type: "string", enum: ["red", "blue"] }),
+        };
+        expect(validateHumanRequestValue(request, "blue")).toEqual({ ok: true });
+        const rejected = validateHumanRequestValue(request, "green");
+        expect(rejected.ok).toBe(false);
+        if (!rejected.ok) {
+            expect(rejected.code).toBe("HUMAN_REQUEST_VALIDATION_FAILED");
+        }
+        const wrongShape = validateHumanRequestValue(request, { choice: "blue" });
+        expect(wrongShape.ok).toBe(false);
+    });
     test("stale requests expire and drop out of pending queries", async () => {
         const reviewSchema = z.object({ approved: z.boolean() });
         const { sqlite, adapter } = createRepoDb(reviewSchema);
