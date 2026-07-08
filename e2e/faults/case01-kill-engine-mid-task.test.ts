@@ -1,233 +1,216 @@
-import { describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
-import { deriveRunState } from "@smithers-orchestrator/db/runState/deriveRunState";
+import { afterEach, describe, expect, test } from "bun:test";
+import type { Database } from "bun:sqlite";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { z } from "zod";
+import { createSmithers } from "smithers-orchestrator";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import type { RunRow } from "@smithers-orchestrator/db/adapter/RunRow";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { deriveRunState } from "@smithers-orchestrator/db/runState/deriveRunState";
 import { corruptHeartbeat } from "../harness/corruptHeartbeat.ts";
 
+// case01 - stale heartbeat and exclusive supervisor claim against the REAL DB.
+//
+// The run row is written through SmithersDb on a createSmithers sqlite database,
+// then the heartbeat is corrupted through the sanctioned fault injector. Stale
+// discovery, claim CAS, and run-state classification all use product code.
+
 const STALE_THRESHOLD_MS = 30_000;
+const WORKFLOW_NAME = "case01-workflow";
 
-type RawRunRow = {
-  run_id: string;
-  workflow_name: string;
-  status: string;
-  created_at_ms: number;
-  started_at_ms: number | null;
-  heartbeat_at_ms: number | null;
-  runtime_owner_id: string | null;
-};
+const dbPaths: string[] = [];
+const dbClients: Database[] = [];
 
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-  `);
-  return db;
+function makeDbPath(): string {
+  return join(
+    tmpdir(),
+    `smithers-case01-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+  );
 }
 
-function seedRunningRun(
-  db: Database,
+function queryClient(db: unknown): Database {
+  const client = (db as { $client?: unknown; session?: { client?: unknown } }).$client
+    ?? (db as { session?: { client?: unknown } }).session?.client;
+  if (!client || typeof (client as { query?: unknown }).query !== "function") {
+    throw new Error("Expected createSmithers to expose a Bun SQLite client");
+  }
+  return client as Database;
+}
+
+function createRealDb(): { adapter: SmithersDb; sqlite: Database } {
+  const dbPath = makeDbPath();
+  dbPaths.push(dbPath);
+  const { db } = createSmithers(
+    {
+      input: z.object({}),
+      result: z.object({ value: z.number() }),
+    },
+    { dbPath },
+  );
+  ensureSmithersTables(db);
+  const sqlite = queryClient(db);
+  dbClients.push(sqlite);
+  return { adapter: new SmithersDb(db), sqlite };
+}
+
+async function getRun(adapter: SmithersDb, runId: string): Promise<RunRow> {
+  const run = await adapter.getRun(runId);
+  if (!run) throw new Error(`row missing for ${runId}`);
+  return run;
+}
+
+async function seedRunningRun(
+  adapter: SmithersDb,
   runId: string,
   ownerId: string,
   heartbeatAtMs: number,
   startedAtMs: number = heartbeatAtMs - 5_000,
-): void {
-  db.query(
-    `INSERT INTO _smithers_runs
-       (run_id, workflow_name, status, created_at_ms, started_at_ms, heartbeat_at_ms, runtime_owner_id)
-     VALUES (?, 'case01-workflow', 'running', ?, ?, ?, ?)`,
-  ).run(runId, startedAtMs, startedAtMs, heartbeatAtMs, ownerId);
-}
-
-function readRow(db: Database, runId: string): RawRunRow {
-  const row = db
-    .query("SELECT * FROM _smithers_runs WHERE run_id = ?")
-    .get(runId) as RawRunRow | null;
-  if (!row) throw new Error(`row missing for ${runId}`);
-  return row;
-}
-
-function toRunRow(raw: RawRunRow): RunRow {
-  return {
-    runId: raw.run_id,
-    parentRunId: null,
-    workflowName: raw.workflow_name,
-    workflowPath: null,
-    workflowHash: null,
-    status: raw.status,
-    createdAtMs: raw.created_at_ms,
-    startedAtMs: raw.started_at_ms,
-    finishedAtMs: null,
-    heartbeatAtMs: raw.heartbeat_at_ms,
-    runtimeOwnerId: raw.runtime_owner_id,
-    cancelRequestedAtMs: null,
-    hijackRequestedAtMs: null,
-    hijackTarget: null,
-    vcsType: null,
-    vcsRoot: null,
-    vcsRevision: null,
-    errorJson: null,
-    configJson: null,
-  };
-}
-
-function takeoverByClaim(
-  db: Database,
-  runId: string,
-  expectedOwnerId: string | null,
-  expectedHeartbeatAtMs: number | null,
-  staleBeforeMs: number,
-  newOwnerId: string,
-  newHeartbeatAtMs: number,
-): boolean {
-  db.query(
-    `UPDATE _smithers_runs
-       SET runtime_owner_id = ?, heartbeat_at_ms = ?
-       WHERE run_id = ?
-         AND status = 'running'
-         AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
-         AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
-         AND (heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)`,
-  ).run(
-    newOwnerId,
-    newHeartbeatAtMs,
+): Promise<void> {
+  await adapter.insertRun({
     runId,
-    expectedOwnerId,
-    expectedHeartbeatAtMs,
-    staleBeforeMs,
-  );
-  const changed = db.query("SELECT changes() AS count").get() as {
-    count: number;
-  };
-  return Number(changed.count) > 0;
+    workflowName: WORKFLOW_NAME,
+    status: "running",
+    createdAtMs: startedAtMs,
+    startedAtMs,
+    heartbeatAtMs: null,
+    runtimeOwnerId: ownerId,
+  });
+  await adapter.heartbeatRun(runId, ownerId, heartbeatAtMs);
 }
 
 describe("case 01: kill engine mid-task", () => {
+  afterEach(() => {
+    for (const client of dbClients) {
+      try {
+        client.close();
+      } catch {
+        // already closed
+      }
+    }
+    dbClients.length = 0;
+    for (const dbPath of dbPaths) {
+      rmSync(dbPath, { force: true });
+      rmSync(`${dbPath}-shm`, { force: true });
+      rmSync(`${dbPath}-wal`, { force: true });
+    }
+    dbPaths.length = 0;
+  });
+
   test("killed engine -> stale within SLO; supervisor takeover is exclusive", async () => {
-    const db = buildDb();
+    const { adapter, sqlite } = createRealDb();
     const runId = "case01-run";
     const originalOwnerId = "pid:99999:engine-victim";
     const seedHeartbeatAtMs = Date.now() - 1_000;
     const seedStartedAtMs = Date.now() - 10 * STALE_THRESHOLD_MS;
 
-    try {
-      seedRunningRun(
-        db,
+    await seedRunningRun(
+      adapter,
+      runId,
+      originalOwnerId,
+      seedHeartbeatAtMs,
+      seedStartedAtMs,
+    );
+
+    const fresh = deriveRunState({
+      run: await getRun(adapter, runId),
+      staleThresholdMs: STALE_THRESHOLD_MS,
+    });
+    expect(fresh.state).toBe("running");
+
+    await corruptHeartbeat(sqlite, runId, "stale");
+
+    const staleRun = await getRun(adapter, runId);
+    const stale = deriveRunState({
+      run: staleRun,
+      staleThresholdMs: STALE_THRESHOLD_MS,
+    });
+    expect(stale.state).toBe("stale");
+    expect(stale.unhealthy?.kind).toBe("engine-heartbeat-stale");
+
+    const claimHeartbeatAtMs = Date.now();
+    const staleBeforeMs = claimHeartbeatAtMs - STALE_THRESHOLD_MS;
+    const staleRows = await adapter.listStaleRunningRuns(staleBeforeMs);
+    expect(staleRows).toEqual([
+      expect.objectContaining({
         runId,
-        originalOwnerId,
-        seedHeartbeatAtMs,
-        seedStartedAtMs,
-      );
+        runtimeOwnerId: originalOwnerId,
+        status: "running",
+      }),
+    ]);
 
-      const fresh = deriveRunState({
-        run: toRunRow(readRow(db, runId)),
-        staleThresholdMs: STALE_THRESHOLD_MS,
-      });
-      expect(fresh.state).toBe("running");
+    const supervisorOwnerId = "supervisor:case01-takeover";
+    const firstClaim = await adapter.claimRunForResume({
+      runId,
+      expectedRuntimeOwnerId: staleRun.runtimeOwnerId,
+      expectedHeartbeatAtMs: staleRun.heartbeatAtMs,
+      staleBeforeMs,
+      claimOwnerId: supervisorOwnerId,
+      claimHeartbeatAtMs,
+    });
+    expect(firstClaim).toBe(true);
 
-      await corruptHeartbeat(db, runId, "stale");
+    const secondClaim = await adapter.claimRunForResume({
+      runId,
+      expectedRuntimeOwnerId: staleRun.runtimeOwnerId,
+      expectedHeartbeatAtMs: staleRun.heartbeatAtMs,
+      staleBeforeMs,
+      claimOwnerId: "supervisor:would-be-double-resume",
+      claimHeartbeatAtMs,
+    });
+    expect(secondClaim).toBe(false);
 
-      const stale = deriveRunState({
-        run: toRunRow(readRow(db, runId)),
-        staleThresholdMs: STALE_THRESHOLD_MS,
-      });
-      expect(stale.state).toBe("stale");
-      expect(stale.unhealthy?.kind).toBe("engine-heartbeat-stale");
+    const afterClaim = await getRun(adapter, runId);
+    expect(afterClaim.runtimeOwnerId).toBe(supervisorOwnerId);
+    expect(afterClaim.heartbeatAtMs).toBe(claimHeartbeatAtMs);
 
-      const supervisorOwnerId = "supervisor:case01-takeover";
-      const claimHeartbeatAtMs = Date.now();
-      const staleBeforeMs = claimHeartbeatAtMs - STALE_THRESHOLD_MS;
-      const beforeClaim = readRow(db, runId);
-
-      const firstClaim = takeoverByClaim(
-        db,
-        runId,
-        beforeClaim.runtime_owner_id,
-        beforeClaim.heartbeat_at_ms,
-        staleBeforeMs,
-        supervisorOwnerId,
-        claimHeartbeatAtMs,
-      );
-      expect(firstClaim).toBe(true);
-
-      const secondClaim = takeoverByClaim(
-        db,
-        runId,
-        beforeClaim.runtime_owner_id,
-        beforeClaim.heartbeat_at_ms,
-        staleBeforeMs,
-        "supervisor:would-be-double-resume",
-        claimHeartbeatAtMs,
-      );
-      expect(secondClaim).toBe(false);
-
-      const afterClaim = readRow(db, runId);
-      expect(afterClaim.runtime_owner_id).toBe(supervisorOwnerId);
-      expect(afterClaim.heartbeat_at_ms).toBe(claimHeartbeatAtMs);
-
-      const recovered = deriveRunState({
-        run: toRunRow(afterClaim),
-        staleThresholdMs: STALE_THRESHOLD_MS,
-        now: claimHeartbeatAtMs,
-      });
-      expect(recovered.state).toBe("running");
-    } finally {
-      db.close();
-    }
+    const recovered = deriveRunState({
+      run: afterClaim,
+      staleThresholdMs: STALE_THRESHOLD_MS,
+      now: claimHeartbeatAtMs,
+    });
+    expect(recovered.state).toBe("running");
   });
 
   test("contract regression guard: missing-heartbeat path still flips state to stale", async () => {
-    const db = buildDb();
+    const { adapter, sqlite } = createRealDb();
     const runId = "case01-missing-heartbeat";
     const longAgoMs = Date.now() - 10 * STALE_THRESHOLD_MS;
 
-    try {
-      seedRunningRun(db, runId, "pid:88888:engine-missing", longAgoMs);
-      db.query(
-        "UPDATE _smithers_runs SET started_at_ms = ? WHERE run_id = ?",
-      ).run(longAgoMs, runId);
+    await seedRunningRun(adapter, runId, "pid:88888:engine-missing", longAgoMs, longAgoMs);
 
-      await corruptHeartbeat(db, runId, "missing");
+    await corruptHeartbeat(sqlite, runId, "missing");
 
-      const view = deriveRunState({
-        run: toRunRow(readRow(db, runId)),
-        staleThresholdMs: STALE_THRESHOLD_MS,
-      });
-      expect(view.state).toBe("stale");
-    } finally {
-      db.close();
-    }
+    const view = deriveRunState({
+      run: await getRun(adapter, runId),
+      staleThresholdMs: STALE_THRESHOLD_MS,
+    });
+    expect(view.state).toBe("stale");
   });
 
   test("contract regression guard: orphaned (no owner) is distinct from stale", async () => {
-    const db = buildDb();
+    const { adapter, sqlite } = createRealDb();
     const runId = "case01-orphan";
     const longAgoMs = Date.now() - 10 * STALE_THRESHOLD_MS;
 
-    try {
-      db.query(
-        `INSERT INTO _smithers_runs
-           (run_id, workflow_name, status, created_at_ms, started_at_ms, heartbeat_at_ms, runtime_owner_id)
-         VALUES (?, 'case01-workflow', 'running', ?, ?, ?, NULL)`,
-      ).run(runId, longAgoMs, longAgoMs, longAgoMs);
+    await adapter.insertRun({
+      runId,
+      workflowName: WORKFLOW_NAME,
+      status: "running",
+      createdAtMs: longAgoMs,
+      startedAtMs: longAgoMs,
+      heartbeatAtMs: longAgoMs,
+      runtimeOwnerId: null,
+    });
 
-      await corruptHeartbeat(db, runId, "stale");
+    await corruptHeartbeat(sqlite, runId, "stale");
 
-      const view = deriveRunState({
-        run: toRunRow(readRow(db, runId)),
-        staleThresholdMs: STALE_THRESHOLD_MS,
-      });
-      expect(view.state).toBe("orphaned");
-    } finally {
-      db.close();
-    }
+    const view = deriveRunState({
+      run: await getRun(adapter, runId),
+      staleThresholdMs: STALE_THRESHOLD_MS,
+    });
+    expect(view.state).toBe("orphaned");
   });
 
   test.skip("resume completes with exactly-one delivery via 0019 dedupe keys", () => {
