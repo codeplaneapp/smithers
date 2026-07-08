@@ -1,8 +1,9 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { isSmithersError } from "@smithers-orchestrator/errors";
 import { createMemoryStore } from "../src/store/index.js";
 import { TtlGarbageCollector, TokenLimiter, Summarizer, } from "../src/processors.js";
 const WF_NS = { kind: "workflow", id: "test-proc" };
@@ -336,5 +337,43 @@ describe("Summarizer", () => {
         // Converges to exactly one summary followed by the two recent messages.
         expect(final.filter((m) => m.role === "system")).toHaveLength(1);
         expect(final.map((m) => m.id).filter((id) => id.startsWith("msg-"))).toEqual(["msg-3", "msg-4"]);
+    });
+    test("agent.run rejection surfaces as a typed SmithersError, not UnknownException", async () => {
+        const sqlite = new Database(":memory:");
+        const db = drizzle(sqlite);
+        ensureSmithersTables(db);
+        const store = createMemoryStore(db);
+        const thread = await store.createThread(WF_NS);
+        for (const [index, role, content] of [
+            [1, "user", "Can you check the rollout?"],
+            [2, "assistant", "I will check it."],
+            [3, "user", "Any update?"],
+            [4, "assistant", "The rollout is healthy."],
+        ]) {
+            await store.saveMessage({
+                id: `msg-${index}`,
+                threadId: thread.threadId,
+                role,
+                contentJson: JSON.stringify(content),
+                createdAtMs: index,
+            });
+        }
+
+        const summarizer = Summarizer({
+            run: async () => {
+                throw new Error("agent boom");
+            },
+        });
+
+        const exit = await Effect.runPromiseExit(summarizer.processEffect(store));
+
+        expect(Exit.isFailure(exit)).toBe(true);
+        const failure = Exit.isFailure(exit)
+            ? Cause.failureOption(exit.cause)
+            : undefined;
+        expect(failure?._tag).toBe("Some");
+        const error = failure?._tag === "Some" ? failure.value : undefined;
+        expect(isSmithersError(error)).toBe(true);
+        expect(error?.code).toBe("AGENT_CLI_ERROR");
     });
 });
