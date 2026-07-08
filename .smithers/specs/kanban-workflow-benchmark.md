@@ -1,6 +1,6 @@
 # Kanban workflow speed benchmark
 
-Date: 2026-07-07 (round 2 same day: fixes S1/S5/S6/S7 landed, re-measured below). Harness: `benchmarks/kanban-bench/` (run with
+Date: 2026-07-07 (rounds 2-3 same day: S1/S5/S6/S7 then S1-auto/S2/S3/S4 landed, re-measured below). Harness: `benchmarks/kanban-bench/` (run with
 `bun benchmarks/kanban-bench/bench.ts --label <name> --tickets 12 --concurrency 4 [--global-concurrency N] [--delays JSON]`).
 
 Motivation: users complain smithers is slow. This benchmark runs the REAL
@@ -216,21 +216,52 @@ Per-completion orchestrator dead time is flat to 24 tickets, then doubles by
 accumulated nodes/outputs and are on the superlinear path. At 48 tickets the
 pure-orchestrator run spends 68% of its wall fully idle.
 
-## Remaining engine work (recommended order)
+## Round 3 (same day): S1-auto, S2, S3, S4 landed in parallel and re-measured
 
-1. **S2** — nested `<Parallel>` should count against ancestor caps (or add a
-   subtree-level concurrency semantic). Until then "maxConcurrency 4" neither
-   means 4 tickets nor bounds reviews, and users cannot reason about caps.
-2. **S3** — cache/TTL the per-task worktree `git fetch origin` + rebase
-   (~49 remote fetches per 12-ticket run against real remotes; 25-75s hidden).
-3. **S4** — incremental frame snapshots (skip unchanged tables, reuse the
-   previous frame's XML hash when the tree is unchanged) to flatten the 131ms
-   per-completion cost at 48+ tickets.
-4. **S1 (auto form)** — beyond the warning: default the cap to
-   `max(4, sum of declared Parallel caps)` so stock runs stop starving.
+All four remaining items shipped via a 12-agent parallel workflow (4 isolated
+implementation worktrees, adversarial per-fix review, fix rounds where
+blocked): `84ae787c` S3 worktree-sync TTL cache, `4ec5eff5` S1 demand-driven
+auto-raise, `436ce77c` S4 incremental frame snapshots, `db867fbb` S2
+`subtreeConcurrency`. Re-benchmarked from that exact tree:
+
+| run (12 tickets, realistic delays) | engine | notes |
+|------------------------------------|-------:|-------|
+| stock, ZERO flags (round 2)        | 90.4s  | starved at the default cap |
+| stock, ZERO flags (round 3)        | 56.6s  | auto-raise stepped 4 -> 16 on demand, 1.05x ideal |
+| pinned `--max-concurrency 4`       | 83.4s  | pin respected (peak 4); S3+S4 trim ~3s vs 86.4s |
+| `subtreeConcurrency={4}` variant   | 61.2s  | max 4 ACTIVE ticket subtrees, reviews peak 12, impl+validate 4 |
+
+- **S1-auto**: with no flags at all, the engine raises the cap incrementally
+  (logged: "auto-raising maxConcurrency from 4 to 5 ... to 16", ceiling env
+  `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING`, default 16). Explicit caps never
+  raise, and the pin persists in run configJson across every resume path.
+- **S2**: swapping the kanban outer Parallel to `subtreeConcurrency` (bench
+  `--subtree`) gives the semantic users expect: at most 4 tickets in flight
+  as whole subtrees. Measured ceilings: 4 active subtrees, 12 reviews,
+  4 implement+validate.
+- **S3**: fetch at most once per repo per `SMITHERS_WORKTREE_FETCH_TTL_MS`
+  (default 60s) and skip rebases when the base tip is unchanged. Review-task
+  pre-agent overhead (worktree-reuse heavy) dropped 145ms -> 61ms mean even
+  against a LOCAL origin; against network remotes this removes ~48 round
+  trips per 12-ticket run.
+- **S4**: 48-ticket zero-delay run: engine 55.6s -> 34.5s (-38%), idle per
+  completion 131ms -> 91ms. Kill switch
+  `SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS=0`.
+
+## Remaining (round 4 candidates)
+
+- Idle per completion still grows past 24 tickets (67ms -> 91ms at 48): the
+  per-frame XML canonicalize+hash and node-state persistence remain O(nodes).
+- Migrate the seeded kanban workflow's outer `<Parallel>` to
+  `subtreeConcurrency` once it has soaked (semantic change for users).
+- Docs follow-up: document `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING`,
+  `SMITHERS_WORKTREE_FETCH_TTL_MS`, `SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS`
+  and the persisted `maxConcurrencyPinned` config field in the CLI/env docs.
+- Legacy in-flight runs started before the pin change resume as auto
+  (migration gap, new runs unaffected).
 
 ## Follow-ups
 
 - The retry-round re-review gap (finding 4) is FIXED (S7, `7af334cf`).
-- The 48-ticket superlinear frame persist is CONFIRMED (table above); S4 is
-  the fix.
+- The 48-ticket superlinear frame persist is CONFIRMED and now MITIGATED
+  (S4, `436ce77c`); full flatness is a round-4 item.
