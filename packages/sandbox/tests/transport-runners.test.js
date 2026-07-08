@@ -297,6 +297,52 @@ describe("sandbox transport runners", () => {
         );
     });
 
+    test("sandbox-exec re-points the caCertPem NODE_EXTRA_CA_CERTS at the real on-disk requestPath CA", () => {
+        const handle = {
+            runtime: "bubblewrap",
+            runId: "run",
+            sandboxId: "sandbox",
+            sandboxRoot: "/tmp/sandbox",
+            requestPath: "/tmp/sandbox/request",
+            resultPath: "/tmp/sandbox/result",
+            allowNetwork: true,
+            egress: {
+                caCertPem: "-----BEGIN CERTIFICATE-----\nproxy-ca\n-----END CERTIFICATE-----\n",
+            },
+            env: {
+                HTTPS_PROXY: "http://127.0.0.1:8080",
+                NODE_EXTRA_CA_CERTS: "/workspace/.smithers/egress/ca.crt",
+            },
+        };
+
+        const args = sandboxExecArgs("npm test", handle);
+        expect(args).toContain("NODE_EXTRA_CA_CERTS=/tmp/sandbox/request/.smithers/egress/ca.crt");
+        expect(args).not.toContain("NODE_EXTRA_CA_CERTS=/workspace/.smithers/egress/ca.crt");
+        expect(args).toContain("HTTPS_PROXY=http://127.0.0.1:8080");
+        expect(args[1]).toContain('(subpath "/tmp/sandbox/request")');
+    });
+
+    test("sandbox-exec preserves a user-supplied caCertPath under egress unchanged", () => {
+        const handle = {
+            runtime: "bubblewrap",
+            runId: "run",
+            sandboxId: "sandbox",
+            sandboxRoot: "/tmp/sandbox",
+            requestPath: "/tmp/sandbox/request",
+            resultPath: "/tmp/sandbox/result",
+            allowNetwork: true,
+            egress: {
+                caCertPath: "/etc/ssl/custom-ca.crt",
+            },
+            env: {
+                NODE_EXTRA_CA_CERTS: "/etc/ssl/custom-ca.crt",
+            },
+        };
+
+        const args = sandboxExecArgs("npm test", handle);
+        expect(args).toContain("NODE_EXTRA_CA_CERTS=/etc/ssl/custom-ca.crt");
+    });
+
     test("sandbox controls fail closed when a runtime cannot enforce them", () => {
         expect(() =>
             dockerArgs("run", {
