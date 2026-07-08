@@ -1,0 +1,125 @@
+/** @jsxImportSource smithers-orchestrator */
+import { describe, expect, test } from "bun:test";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { createTestSmithers } from "../../smithers/tests/helpers.js";
+import { outputSchemas } from "../../smithers/tests/schema.js";
+import { Effect } from "effect";
+
+const TIMEOUT_MS = 30_000;
+
+describe("quota-aware park lifecycle e2e", () => {
+    test("quota failure parks the run as waiting-quota with reset metadata and preserves the retry budget", async () => {
+        const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        const resetAtMs = Date.now() + 60_000;
+        try {
+            let calls = 0;
+            const agent = {
+                id: "quota-agent",
+                tools: {},
+                async generate() {
+                    calls += 1;
+                    if (calls === 1) {
+                        throw new SmithersError(
+                            "AGENT_QUOTA_EXCEEDED",
+                            "You've hit your usage limit.",
+                            { failureQuota: true, quotaResetAtMs: resetAtMs },
+                        );
+                    }
+                    return { output: { value: calls } };
+                },
+            };
+            // retries={0}: if the quota attempt consumed retry budget, the
+            // resumed run could never re-execute the task.
+            const workflow = smithers(() => (
+                <Workflow name="quota-park">
+                    <Task id="q" output={outputs.outputA} agent={agent} retries={0}>
+                        hit quota once
+                    </Task>
+                </Workflow>
+            ));
+            const runId = "quota-park-run";
+            const parked = await Effect.runPromise(
+                runWorkflow(workflow, { input: {}, runId }),
+            );
+            expect(parked.status).toBe("waiting-quota");
+
+            const run = await Effect.runPromise(adapter.getRun(runId));
+            expect(run?.status).toBe("waiting-quota");
+            expect(run?.runtimeOwnerId).toBeNull();
+            expect(run?.heartbeatAtMs).toBeNull();
+            const quotaMeta = JSON.parse(run?.errorJson ?? "null");
+            expect(quotaMeta?.quotaBlockedCount).toBe(1);
+            expect(quotaMeta?.resetAtMs).toBe(resetAtMs);
+
+            const events = await adapter.listEvents(runId, -1, 200);
+            const statusChanges = events
+                .filter((event) => event.type === "RunStatusChanged")
+                .map((event) => JSON.parse(event.payloadJson));
+            expect(
+                statusChanges.some((payload) => payload.status === "waiting-quota"),
+            ).toBe(true);
+
+            const resumed = await Effect.runPromise(
+                runWorkflow(workflow, { input: {}, runId, resume: true }),
+            );
+            expect(resumed.status).toBe("finished");
+            expect(calls).toBe(2);
+            const attempts = await adapter.listAttempts(runId, "q", 0);
+            expect(attempts).toHaveLength(2);
+
+            const finalRun = await Effect.runPromise(adapter.getRun(runId));
+            expect(finalRun?.status).toBe("finished");
+        } finally {
+            cleanup();
+        }
+    }, TIMEOUT_MS);
+
+    test("failureQuota detail flag on a non-quota code also parks instead of failing", async () => {
+        const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        try {
+            let calls = 0;
+            const agent = {
+                id: "quota-flag-agent",
+                tools: {},
+                async generate() {
+                    calls += 1;
+                    if (calls === 1) {
+                        throw new SmithersError("AGENT_CLI_ERROR", "rate limit exceeded", {
+                            failureQuota: true,
+                        });
+                    }
+                    return { output: { value: calls } };
+                },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="quota-flag-park">
+                    <Task id="q" output={outputs.outputA} agent={agent} noRetry>
+                        quota via detail flag
+                    </Task>
+                </Workflow>
+            ));
+            const runId = "quota-flag-park-run";
+            const parked = await Effect.runPromise(
+                runWorkflow(workflow, { input: {}, runId }),
+            );
+            expect(parked.status).toBe("waiting-quota");
+            const run = await Effect.runPromise(adapter.getRun(runId));
+            const quotaMeta = JSON.parse(run?.errorJson ?? "null");
+            expect(quotaMeta?.quotaBlockedCount).toBe(1);
+            // No reset time provided — the metadata must omit it, not invent one.
+            expect(quotaMeta?.resetAtMs).toBeUndefined();
+
+            const resumed = await Effect.runPromise(
+                runWorkflow(workflow, { input: {}, runId, resume: true }),
+            );
+            expect(resumed.status).toBe("finished");
+            expect(calls).toBe(2);
+        } finally {
+            cleanup();
+        }
+    }, TIMEOUT_MS);
+});
