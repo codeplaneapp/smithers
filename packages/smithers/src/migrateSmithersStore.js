@@ -834,20 +834,27 @@ function inferSqliteSourceDbPath(primaryDbPath, workspaceRoot, hasExplicitDbPath
     return primaryDbPath;
 }
 
+// Read-only: opens a raw PGlite instance (no PGLiteSocketServer, no
+// ensureSchema) so probing a candidate store for --from inference never
+// provisions the `_smithers_*` schema into a dataDir it is only meant to
+// inspect. Mirrors inspectPgliteStore's read-only pattern.
 async function pgliteRunCountAt(cwd, workspaceRoot, opts) {
     const dataDir = resolve(cwd, opts.pgliteDataDir ?? join(workspaceRoot, ".smithers", "pg"));
-    if (!existsSync(dataDir)) return 0;
-    let api;
+    if (!existsSync(join(dataDir, "PG_VERSION"))) return 0;
+    let pglite;
     try {
-        api = await createSmithersPostgres({}, { provider: "pglite", dataDir });
-        const pgConn = api.db.connection;
-        return (await pgTableExists(pgConn, "_smithers_runs")) ? await countPgRows(pgConn, "_smithers_runs") : 0;
+        const { PGlite } = await import("@electric-sql/pglite");
+        pglite = await PGlite.create(dataDir);
+        const runsTable = await pglite.query("SELECT to_regclass('_smithers_runs') AS table_name");
+        if (!runsTable.rows?.[0]?.table_name) return 0;
+        const countResult = await pglite.query("SELECT COUNT(*)::int AS count FROM _smithers_runs");
+        return Number(countResult.rows?.[0]?.count ?? 0);
     }
     catch {
         return 0;
     }
     finally {
-        await api?.close?.();
+        try { await pglite?.close?.(); } catch { /* best-effort read-only probe cleanup */ }
     }
 }
 
@@ -955,6 +962,13 @@ async function migratePgToSqlite(opts, context) {
     let sqlite;
     let published = false;
     try {
+        // A pglite source is only ever read here; refuse an uninitialized
+        // dataDir up front instead of booting createSmithersPostgres (which
+        // would provision the `_smithers_*` schema into a store being used
+        // only as a migration source).
+        if (sourceBackend === "pglite" && !existsSync(join(dataDir, "PG_VERSION"))) {
+            throw new SmithersError("CLI_DB_NOT_FOUND", `No ${sourceBackend} Smithers run store found.`, { sourceBackend });
+        }
         sourceApi = await createSmithersPostgres({}, sourceBackend === "postgres"
             ? { provider: "postgres", connectionString: opts.url ?? context.env.SMITHERS_POSTGRES_URL ?? context.env.DATABASE_URL }
             : { provider: "pglite", dataDir });
