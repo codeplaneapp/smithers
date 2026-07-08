@@ -286,4 +286,39 @@ describe("formatTimelineAsJson", () => {
         expect(json.frames.length).toBe(1);
         expect(json.children).toEqual([]);
     });
+    test("fails explicitly for a self-referential tree instead of overflowing the stack", () => {
+        const tree = {
+            timeline: {
+                runId: "run-cycle",
+                branch: null,
+                frames: [],
+            },
+            children: [],
+        };
+        tree.children = [tree];
+
+        expect(() => formatTimelineAsJson(tree)).toThrow(/cycle|maximum depth/i);
+    });
+    test("fails explicitly when formatter recursion exceeds the maximum depth", () => {
+        let tree = {
+            timeline: {
+                runId: "run-101",
+                branch: null,
+                frames: [],
+            },
+            children: [],
+        };
+        for (let i = 100; i >= 0; i--) {
+            tree = {
+                timeline: {
+                    runId: `run-${i}`,
+                    branch: null,
+                    frames: [],
+                },
+                children: [tree],
+            };
+        }
+
+        expect(() => formatTimelineAsJson(tree)).toThrow(/maximum depth/i);
+    });
 });
