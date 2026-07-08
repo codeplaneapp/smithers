@@ -3191,8 +3191,24 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         }, "engine:task-cache");
                     }
                     else {
-                        const parsed = JSON.parse(cachedRow.payloadJson);
-                        const valid = validateOutput(desc.outputTable, parsed);
+                        // A cache row that fails to parse must degrade to a miss:
+                        // throwing here would fail the attempt before the agent
+                        // runs and, under infinite retries, poison the task forever.
+                        let valid = /** @type {ReturnType<typeof validateOutput>} */ ({ ok: false });
+                        try {
+                            const parsed = JSON.parse(cachedRow.payloadJson);
+                            valid = validateOutput(desc.outputTable, parsed);
+                        }
+                        catch (err) {
+                            logWarning("cached task output is not valid JSON; treating as cache miss", {
+                                runId,
+                                nodeId: desc.nodeId,
+                                iteration: desc.iteration,
+                                attempt: attemptNo,
+                                cacheKey,
+                                error: err instanceof Error ? err.message : String(err),
+                            }, "engine:task-cache");
+                        }
                         if (valid.ok) {
                             payload = valid.data;
                             cached = true;
