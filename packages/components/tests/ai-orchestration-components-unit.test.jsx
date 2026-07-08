@@ -791,12 +791,13 @@ describe("SuperSmithers prompts and dependency chains", () => {
             targetFiles: ["src/a.ts"],
             dryRun: true,
         });
+        // An element strategy is flattened to prompt text at render time — the
+        // raw smithers:task host stringifies its children, so leaving a live
+        // React element here used to crash the run with "[object Object]".
         const read = childArray(jsxStrategy)[0];
-        const fragmentChildren = React.Children.toArray(read.props.children.props.children);
-        const paragraph = fragmentChildren.find(
-            (child) => child.type === "p" && String(child.props.children).includes("Target files"),
-        );
-        expect(paragraph).toBeDefined();
-        expect(paragraph.props.children).toContain("src/a.ts");
+        expect(typeof read.props.children).toBe("string");
+        expect(read.props.children).toContain("Strategy doc");
+        expect(read.props.children).toContain("Target files");
+        expect(read.props.children).toContain("src/a.ts");
     });
 });
