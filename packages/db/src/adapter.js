@@ -2175,23 +2175,25 @@ export class SmithersDb {
         const label = `insert signal ${row.signalName}`;
         const self = this;
         return runnableEffect(withSqliteWriteRetryEffect(() => Effect.gen(function* () {
-            const existing = yield* self.read(label, () => self.internalStorage.queryOne(`SELECT seq
-               FROM _smithers_signals
-               WHERE run_id = ?
+            const dedupeWhereSql = `run_id = ?
                  AND signal_name = ?
                  AND ${row.correlationId === null ? "correlation_id IS NULL" : "correlation_id = ?"}
                  AND payload_json = ?
                  AND received_at_ms = ?
-                 AND ${row.receivedBy == null ? "received_by IS NULL" : "received_by = ?"}
-               ORDER BY seq DESC
-               LIMIT 1`, [
+                 AND ${row.receivedBy == null ? "received_by IS NULL" : "received_by = ?"}`;
+            const dedupeParams = [
                 row.runId,
                 row.signalName,
                 ...(row.correlationId === null ? [] : [row.correlationId]),
                 row.payloadJson,
                 row.receivedAtMs,
                 ...(row.receivedBy == null ? [] : [row.receivedBy]),
-            ]));
+            ];
+            const existing = yield* self.read(label, () => self.internalStorage.queryOne(`SELECT seq
+               FROM _smithers_signals
+               WHERE ${dedupeWhereSql}
+               ORDER BY seq DESC
+               LIMIT 1`, dedupeParams));
             if (existing?.seq !== undefined) {
                 return existing.seq;
             }
@@ -2200,10 +2202,9 @@ export class SmithersDb {
 	                typeof client.query !== "function" ||
 	                typeof client.run !== "function") {
 	                // Non-bun:sqlite (Postgres/pglite) fallback. Serialize the
-	                // read-MAX-then-insert under the shared transaction turn so two
-	                // concurrent allocations can't both read the same lastSeq and
-	                // collide on the (run_id, seq) primary key — insertIgnore would
-	                // otherwise silently drop the loser, losing a signal.
+	                // dedupe/read-MAX/insert sequence under the shared transaction
+	                // turn so concurrent identical redeliveries return the first
+	                // seq instead of allocating duplicate signal rows.
 	                return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.gen(function* () {
 	                const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
 	                return yield* Effect.gen(function* () {
@@ -2212,6 +2213,23 @@ export class SmithersDb {
 	                            try: () => self.internalStorage.execute(beginTransactionSql(self.internalStorage.dialect)),
 	                            catch: (cause) => toSmithersError(cause, "begin fallback signal transaction"),
 	                        });
+	                    }
+	                    const existingInTurn = yield* Effect.tryPromise({
+	                        try: () => self.internalStorage.queryOne(`SELECT seq
+                           FROM _smithers_signals
+                           WHERE ${dedupeWhereSql}
+                           ORDER BY seq DESC
+                           LIMIT 1`, dedupeParams),
+	                        catch: (cause) => toSmithersError(cause, "dedupe fallback signal row"),
+	                    });
+	                    if (existingInTurn?.seq !== undefined) {
+	                        if (captureTxidForWrite) {
+	                            yield* Effect.tryPromise({
+	                                try: () => self.internalStorage.execute("COMMIT"),
+	                                catch: (cause) => toSmithersError(cause, "commit fallback signal dedupe transaction"),
+	                            });
+	                        }
+	                        return Number(existingInTurn.seq);
 	                    }
 	                    const lastSeq = (yield* Effect.tryPromise({
 	                        try: () => self.internalStorage.getLastSignalSeq(row.runId),
@@ -2252,6 +2270,17 @@ export class SmithersDb {
                 try: () => {
                     client.run("BEGIN IMMEDIATE");
                     try {
+                        const existingInTurn = client
+                            .query(`SELECT seq
+                               FROM _smithers_signals
+                               WHERE ${dedupeWhereSql}
+                               ORDER BY seq DESC
+                               LIMIT 1`)
+                            .get(...dedupeParams);
+                        if (existingInTurn?.seq !== undefined) {
+                            client.run("COMMIT");
+                            return Number(existingInTurn.seq);
+                        }
                         const res = client
                             .query("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_signals WHERE run_id = ?")
                             .get(row.runId);

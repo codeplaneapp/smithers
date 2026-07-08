@@ -144,6 +144,30 @@ describe("signal seq allocation under concurrency (bun:sqlite)", () => {
     const second = await adapter.insertSignalWithNextSeq(row);
     expect(second).toBe(first);
   });
+
+  test("20 concurrent identical insertSignalWithNextSeq calls dedupe to seq 0", async () => {
+    const adapter = createAdapter();
+    await seedRun(adapter);
+    const row = {
+      runId: RUN,
+      signalName: "sig",
+      correlationId: null,
+      payloadJson: JSON.stringify({ x: 1 }),
+      receivedAtMs: 9,
+      receivedBy: undefined,
+    };
+
+    const seqs = await Promise.all(
+      Array.from({ length: 20 }, () => adapter.insertSignalWithNextSeq(row)),
+    );
+
+    expect(seqs).toEqual(Array.from({ length: 20 }, () => 0));
+    const signals = await adapter.listSignals(RUN, { limit: 50 });
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.seq).toBe(0);
+    expect(signals[0]?.receivedBy).toBeNull();
+    expect(await adapter.getLastSignalSeq(RUN)).toBe(0);
+  });
 });
 
 // Regression guard for the transaction-turn interrupt/deadlock fix. The turn is
