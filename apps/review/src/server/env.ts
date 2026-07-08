@@ -9,6 +9,7 @@ export interface WalkthroughBucket {
     options?: { httpMetadata?: { contentType?: string } },
   ): Promise<unknown>;
   get(key: string): Promise<R2ObjectBody>;
+  delete(key: string): Promise<unknown>;
 }
 
 /**

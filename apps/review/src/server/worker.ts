@@ -26,6 +26,20 @@ export interface ReviewWorkerCtx {
 
 const DEFAULT_JWKS_URL = "https://token.actions.githubusercontent.com/.well-known/jwks";
 const DEFAULT_ANTHROPIC = "https://api.anthropic.com";
+const WALKTHROUGH_NOT_FOUND_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Walkthrough not found</title>
+  </head>
+  <body>
+    <main>
+      <h1>Walkthrough not found</h1>
+      <p>This smithers review walkthrough is no longer available.</p>
+    </main>
+  </body>
+</html>`;
 
 function defaultDeps(ctx?: ReviewWorkerCtx): ReviewWorkerDeps {
   return {
@@ -67,12 +81,18 @@ export function createReviewWorker(overrides?: Partial<ReviewWorkerDeps>) {
       if (request.method === "GET" && /^\/w\/[a-z0-9]{8,32}$/.test(url.pathname)) {
         const id = url.pathname.slice("/w/".length);
         const object = await env.WALKTHROUGHS.get(`walkthroughs/${id}.html`);
-        if (!object) return new Response("Not found", { status: 404 });
+        if (!object) {
+          return new Response(WALKTHROUGH_NOT_FOUND_HTML, {
+            status: 404,
+            headers: { "content-type": "text/html; charset=utf-8" },
+          });
+        }
         return new Response(object.body, {
           headers: {
             "content-type": "text/html; charset=utf-8",
             "cache-control": "public, max-age=31536000, immutable",
             "x-robots-tag": "noindex",
+            "content-security-policy": "sandbox allow-scripts",
           },
         });
       }
@@ -104,7 +124,10 @@ export function createReviewWorker(overrides?: Partial<ReviewWorkerDeps>) {
         return handleAdminUsage(request, env);
       }
 
-      if (request.method === "POST" && url.pathname === "/api/walkthroughs") {
+      if (
+        (url.pathname === "/api/walkthroughs" && (request.method === "POST" || request.method === "GET")) ||
+        (request.method === "DELETE" && url.pathname.startsWith("/api/walkthroughs/"))
+      ) {
         return handleWalkthroughs(request, env, url, deps.now());
       }
 

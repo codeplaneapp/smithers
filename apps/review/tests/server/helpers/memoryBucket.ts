@@ -27,5 +27,8 @@ export function memoryBucket(): WalkthroughBucket & { _store: Map<string, Uint8A
         }),
       };
     },
+    async delete(key) {
+      store.delete(key);
+    },
   };
 }

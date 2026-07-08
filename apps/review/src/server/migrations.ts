@@ -47,6 +47,15 @@ const SCHEMA_STATEMENTS = [
     PRIMARY KEY (repo, pr, month)
   )`,
   `CREATE INDEX IF NOT EXISTS reviewed_prs_month_idx ON reviewed_prs(repo, month)`,
+  `CREATE TABLE IF NOT EXISTS walkthroughs (
+    id TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    pr INTEGER NOT NULL,
+    bytes INTEGER NOT NULL,
+    session_hash TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS walkthroughs_repo_idx ON walkthroughs(repo, created_at)`,
 ];
 
 const ensured = new WeakSet<D1Database>();
