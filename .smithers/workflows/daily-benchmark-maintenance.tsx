@@ -78,7 +78,7 @@ const smartResearcher = new CodexAgent({
   sandbox: "workspace-write",
   fullAuto: true,
   skipGitRepoCheck: true,
-  extraArgs: ["--search"],
+  extraArgs: ["-c", "tools.web_search=true"],
   timeoutMs: 45 * 60_000,
 });
 

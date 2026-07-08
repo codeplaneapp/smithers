@@ -103,7 +103,7 @@ const smartBugHunter = new CodexAgent({
   cwd: ROOT,
   sandbox: "read-only",
   skipGitRepoCheck: true,
-  extraArgs: ["--search"],
+  extraArgs: ["-c", "tools.web_search=true"],
   timeoutMs: 35 * 60_000,
 });
 

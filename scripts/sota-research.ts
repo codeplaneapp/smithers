@@ -106,7 +106,7 @@ export function extractJson(stdout: string): Record<string, unknown> | null {
 function runResearchAgent(prompt: string): string {
   // Codex with web search does the research; the repo's CI auth (~/.codex/
   // auth.json from the CODEX_AUTH_JSON secret) or a local login covers it.
-  const result = spawnSync("codex", ["exec", "--sandbox", "read-only", "--search", "-m", "gpt-5.5", prompt], {
+  const result = spawnSync("codex", ["exec", "--sandbox", "read-only", "-c", "tools.web_search=true", "-m", "gpt-5.5", prompt], {
     cwd: ROOT,
     encoding: "utf8",
     timeout: 30 * 60 * 1000,
