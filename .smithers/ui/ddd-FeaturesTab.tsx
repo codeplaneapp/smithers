@@ -128,7 +128,7 @@ export function FeaturesTab(props: FeaturesTabProps) {
           ) : null}
         </div>
         <div className="status-counts">
-          {(Object.keys(counts) as FeatureStatus[]).map((status) => (
+          {(Object.keys(counts) as FeatureStatus[]).filter((status) => counts[status] > 0).map((status) => (
             <span key={status} className={`badge ${statusClass(status)}`}>{counts[status]} {statusLabels[status]}</span>
           ))}
         </div>
@@ -176,9 +176,11 @@ export function FeaturesTab(props: FeaturesTabProps) {
         );
       })}
       {filteredFeatures.length === 0 ? (
-        <section className="card empty-state">
-          <h2>No matching features</h2>
-          <p>Adjust the search or filters to see more of the product spec.</p>
+        <section className="card">
+          <div className="empty">
+            <h2>No matching features</h2>
+            <p>Adjust the search or filters to see more of the product spec.</p>
+          </div>
         </section>
       ) : null}
     </div>

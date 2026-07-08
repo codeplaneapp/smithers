@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useRef, useState } from "react";
-import { useDialogFocusTrap } from "./ddd-shared";
+import { formatStatus, statusClass, statusLabels, useDialogFocusTrap, type FeatureStatus } from "./ddd-shared";
 
 /**
  * First-launch guided tutorial, told over a canned hello-world app so the user
@@ -109,6 +109,55 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   },
 ];
 
+/**
+ * The hello-world feature record rendered the way the Features tab renders it —
+ * a card with a status badge, priority/owner pills, a tests chip, and a
+ * missing-gap warning — so step 1 teaches with UI, not a raw-JSON <pre>. The
+ * raw record stays available behind "View source".
+ */
+function SampleFeatureCard({ json }: { json: string }) {
+  let record: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(json);
+    if (parsed && typeof parsed === "object") record = parsed as Record<string, unknown>;
+  } catch {
+    return <pre className="code tutorial-sample">{json}</pre>;
+  }
+  const status = String(record.status ?? "");
+  const title = String(record.title ?? record.id ?? "Feature");
+  const summary = String(record.summary ?? "");
+  const priority = String(record.priority ?? "");
+  const owner = String(record.owner ?? "");
+  const tests = Array.isArray(record.tests) ? record.tests.map(String) : [];
+  const missing = Array.isArray(record.missing) ? record.missing.map(String) : [];
+  return (
+    <div className="tutorial-sample-card" data-testid="ddd-tutorial-sample-card">
+      <div className="feature-card">
+        <div className="feature-card-head">
+          <strong>{title}</strong>
+          {status ? <span className={`badge ${statusClass(status)}`}>{statusLabels[status as FeatureStatus] ?? formatStatus(status)}</span> : null}
+        </div>
+        {summary ? <p className="feature-card-summary">{summary}</p> : null}
+        <div className="feature-card-foot">
+          {priority ? <span className="pill muted">P{priority.replace(/^p/i, "")}</span> : null}
+          {owner ? <span className="pill">Owner {owner}</span> : null}
+          {tests.length ? <span className="pill">{tests.length === 1 ? "1 test" : `${tests.length} tests`}</span> : null}
+        </div>
+        {missing.length ? (
+          <div className="tutorial-sample-gap">
+            <span className="badge warn">Open gap</span>
+            <span>{missing[0]}</span>
+          </div>
+        ) : null}
+      </div>
+      <details className="tutorial-sample-source">
+        <summary>View source</summary>
+        <pre className="code tutorial-sample">{json}</pre>
+      </details>
+    </div>
+  );
+}
+
 export function Tutorial({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [step, setStep] = useState(0);
   const cardRef = useRef<HTMLElement | null>(null);
@@ -153,7 +202,7 @@ export function Tutorial({ open, onClose }: { open: boolean; onClose: () => void
         </div>
         <h2 id="ddd-tutorial-title" className="tutorial-title">{current.title}</h2>
         <p className="tutorial-body">{current.body}</p>
-        {current.sample ? <pre className="code tutorial-sample">{current.sample}</pre> : null}
+        {current.sample ? <SampleFeatureCard json={current.sample} /> : null}
         <p className="tutorial-hint">{current.hint}</p>
         <div className="tutorial-actions">
           <button type="button" className="button" data-testid="ddd-tutorial-skip" onClick={finish}>
