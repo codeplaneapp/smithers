@@ -1460,6 +1460,42 @@ type MemoryFact    = { namespace: string; key: string; valueJson: string; schema
 type MemoryMessage = { id: string; threadId: string; role: string; contentJson: string; runId?: string | null; nodeId?: string | null; createdAtMs: number };
 type MemoryThread  = { threadId: string; namespace: string; title?: string | null; metadataJson?: string | null; createdAtMs: number; updatedAtMs: number };
 
+type MemoryProvenance = { runId?: string | null; nodeId?: string | null; iteration?: number | null };
+
+type MemoryNote = {
+  id: string;
+  namespace: string;
+  body: string;
+  kind?: string | null;
+  tagsJson?: string | null; // JSON-encoded string array; null when the note has no tags
+  author?: string | null;
+  status: string; // free-form; conventionally pending | accepted | rejected
+  statusChangedAtMs?: number | null;
+  createdAtMs: number;
+  runId?: string | null;
+  nodeId?: string | null;
+  iteration?: number | null;
+};
+
+type SaveNoteInput = {
+  namespace: MemoryNamespace;
+  body: string;
+  kind?: string;
+  tags?: string[];
+  author?: string;
+  status?: string; // defaults to "accepted"
+  provenance?: MemoryProvenance;
+  supersedes?: string[]; // note ids this note replaces
+  id?: string; // provide to make retries idempotent
+};
+
+type NoteReadFilter = {
+  status?: string | string[] | "any";
+  includeSuperseded?: boolean;
+  kind?: string;
+  namespace?: MemoryNamespace; // scope searchNotes to one namespace of the kind
+};
+
 type WorkingMemoryConfig<
   T extends import("zod").ZodObject<import("zod").ZodRawShape> = import("zod").ZodObject<import("zod").ZodRawShape>,
 > = {
@@ -1492,6 +1528,12 @@ type MemoryStore = {
   listMessages(threadId: string, limit?: number): Promise<MemoryMessage[]>;
   countMessages(threadId: string): Promise<number>;
   deleteExpiredFacts(): Promise<number>;
+  saveNote(input: SaveNoteInput): Promise<MemoryNote>;
+  getNote(id: string): Promise<MemoryNote | undefined>;
+  listNotes(ns: MemoryNamespace, filter?: NoteReadFilter): Promise<MemoryNote[]>;
+  setNoteStatus(id: string, status: string): Promise<void>;
+  enableNoteSearch(kind: string): Promise<void>;
+  searchNotes(kind: string, query: string, limit?: number, filter?: NoteReadFilter): Promise<MemoryNote[]>;
   getFactEffect(ns: MemoryNamespace, key: string): Effect.Effect<MemoryFact | undefined, SmithersError>;
   setFactEffect(ns: MemoryNamespace, key: string, value: unknown, ttlMs?: number): Effect.Effect<void, SmithersError>;
   deleteFactEffect(ns: MemoryNamespace, key: string): Effect.Effect<void, SmithersError>;
@@ -1504,6 +1546,12 @@ type MemoryStore = {
   listMessagesEffect(threadId: string, limit?: number): Effect.Effect<MemoryMessage[], SmithersError>;
   countMessagesEffect(threadId: string): Effect.Effect<number, SmithersError>;
   deleteExpiredFactsEffect(): Effect.Effect<number, SmithersError>;
+  saveNoteEffect(input: SaveNoteInput): Effect.Effect<MemoryNote, SmithersError>;
+  getNoteEffect(id: string): Effect.Effect<MemoryNote | undefined, SmithersError>;
+  listNotesEffect(ns: MemoryNamespace, filter?: NoteReadFilter): Effect.Effect<MemoryNote[], SmithersError>;
+  setNoteStatusEffect(id: string, status: string): Effect.Effect<void, SmithersError>;
+  enableNoteSearchEffect(kind: string): Effect.Effect<void, SmithersError>;
+  searchNotesEffect(kind: string, query: string, limit?: number, filter?: NoteReadFilter): Effect.Effect<MemoryNote[], SmithersError>;
 };
 
 type MemoryServiceApi = {
@@ -1518,6 +1566,12 @@ type MemoryServiceApi = {
   readonly listMessages: (threadId: string, limit?: number) => Effect.Effect<MemoryMessage[], SmithersError>;
   readonly countMessages: (threadId: string) => Effect.Effect<number, SmithersError>;
   readonly deleteExpiredFacts: () => Effect.Effect<number, SmithersError>;
+  readonly saveNote: (input: SaveNoteInput) => Effect.Effect<MemoryNote, SmithersError>;
+  readonly getNote: (id: string) => Effect.Effect<MemoryNote | undefined, SmithersError>;
+  readonly listNotes: (ns: MemoryNamespace, filter?: NoteReadFilter) => Effect.Effect<MemoryNote[], SmithersError>;
+  readonly setNoteStatus: (id: string, status: string) => Effect.Effect<void, SmithersError>;
+  readonly enableNoteSearch: (kind: string) => Effect.Effect<void, SmithersError>;
+  readonly searchNotes: (kind: string, query: string, limit?: number, filter?: NoteReadFilter) => Effect.Effect<MemoryNote[], SmithersError>;
   readonly store: MemoryStore;
 };
 
