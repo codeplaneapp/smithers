@@ -38,12 +38,12 @@ const HYPHENATED: Array<[RegExp, string]> = [
 
 // A shell line that is really a path or URL template, where <runId>/<id> is a
 // legitimate angle-bracket placeholder we must leave alone.
-function isPathOrUrlContext(line: string): boolean {
+export function isPathOrUrlContext(line: string): boolean {
   return /executions\/|\/logs\/|hmr\/|skills\/|\.ndjson|\?runId=|\/gw\/|artifactId/.test(line);
 }
 
 // Map a bare <id> to the right token based on the surrounding command on the line.
-function mapBareId(line: string): string {
+export function mapBareId(line: string): string {
   if (/--template\s+<id>/.test(line)) return "TEMPLATE_ID";
   if (/workflow\s+(run|inspect)\s+<id>|workflow\s+<id>/.test(line)) return "WORKFLOW_ID";
   if (/--node\s+<id>/.test(line)) return "NODE_ID";
@@ -52,7 +52,7 @@ function mapBareId(line: string): string {
 
 // Map every id placeholder in a command string to its uppercase token. Leaves
 // path/URL templates (which legitimately use <runId>/<id>) untouched.
-function normalizeCommand(text: string): string {
+export function normalizeCommand(text: string): string {
   let out = text;
   for (const [re, tok] of HYPHENATED) out = out.replace(re, tok);
   if (isPathOrUrlContext(out)) return out;
@@ -69,7 +69,7 @@ function normalizeCommand(text: string): string {
 // code spans that are clearly a smithers command, map the camelCase / <id>
 // tokens too. Non-command spans (flag tables, other tools, path/URL templates)
 // are left alone.
-function normalizeProseLine(line: string): string {
+export function normalizeProseLine(line: string): string {
   let out = line;
   for (const [re, tok] of HYPHENATED) out = out.replace(re, tok);
   return out.replace(/`([^`]+)`/g, (whole, inner) => {
@@ -89,7 +89,7 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-function rewrite(original: string): string {
+export function rewrite(original: string): string {
   const lines = original.split("\n");
   const out: string[] = [];
   let inCode = false;
@@ -117,34 +117,36 @@ function rewrite(original: string): string {
   return out.join("\n");
 }
 
-// The root README follows the same house style; gate it alongside docs/.
-const files = [...walk(DOCS_ROOT), join(REPO_ROOT, "README.md")];
-const offenders: string[] = [];
-let changed = 0;
-for (const f of files) {
-  const original = readFileSync(f, "utf8");
-  const next = rewrite(original);
-  if (next === original) continue;
-  const rel = relative(REPO_ROOT, f);
-  if (CHECK) offenders.push(rel);
-  else {
-    writeFileSync(f, next);
-    changed++;
-    console.log(`  ✓ ${rel}`);
+if (import.meta.main) {
+  // The root README follows the same house style; gate it alongside docs/.
+  const files = [...walk(DOCS_ROOT), join(REPO_ROOT, "README.md")];
+  const offenders: string[] = [];
+  let changed = 0;
+  for (const f of files) {
+    const original = readFileSync(f, "utf8");
+    const next = rewrite(original);
+    if (next === original) continue;
+    const rel = relative(REPO_ROOT, f);
+    if (CHECK) offenders.push(rel);
+    else {
+      writeFileSync(f, next);
+      changed++;
+      console.log(`  ✓ ${rel}`);
+    }
   }
-}
 
-if (CHECK) {
-  if (offenders.length) {
-    console.error(
-      `\n✗ ${offenders.length} doc file(s) use hyphenated angle-bracket CLI placeholders.\n` +
-        `  Use uppercase tokens (RUN_ID, NODE_ID, WORKFLOW_ID) instead.\n` +
-        `  Run \`bun scripts/normalize-placeholders.ts\` to fix:\n` +
-        offenders.map((o) => `    ${o}`).join("\n"),
-    );
-    process.exit(1);
+  if (CHECK) {
+    if (offenders.length) {
+      console.error(
+        `\n✗ ${offenders.length} doc file(s) use hyphenated angle-bracket CLI placeholders.\n` +
+          `  Use uppercase tokens (RUN_ID, NODE_ID, WORKFLOW_ID) instead.\n` +
+          `  Run \`bun scripts/normalize-placeholders.ts\` to fix:\n` +
+          offenders.map((o) => `    ${o}`).join("\n"),
+      );
+      process.exit(1);
+    }
+    console.log("✓ no hyphenated angle-bracket CLI placeholders in docs");
+  } else {
+    console.log(`\nUpdated ${changed} file(s).`);
   }
-  console.log("✓ no hyphenated angle-bracket CLI placeholders in docs");
-} else {
-  console.log(`\nUpdated ${changed} file(s).`);
 }
