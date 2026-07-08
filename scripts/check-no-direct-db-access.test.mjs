@@ -15,7 +15,6 @@ const expectedBaseline = new Map([
   ["packages/smithers/src/create.js", 3],
   ["packages/smithers/src/external/create-external-smithers.js", 1],
   ["apps/cli/src/index.js", 1],
-  ["apps/cli/src/find-db.js", 1],
 ]);
 
 /** @param {(root: string) => void} fn */
