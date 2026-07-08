@@ -1152,4 +1152,50 @@ describe("executeSandbox", () => {
             sqlite.close();
         }
     });
+
+    test("records real totalDiffLines for reviewed sandbox diffs", async () => {
+        const { adapter, db, sqlite } = createDb();
+        const rootDir = tempDir("smithers-sandbox-execute-");
+        const runtime = createRuntime(db, { runId: "run-diff-lines" });
+        try {
+            await withCodeplaneEnv(() =>
+                runInRuntime(runtime, {
+                    sandboxId: "sandbox-diff-lines",
+                    rootDir,
+                    reviewDiffs: true,
+                    autoAcceptDiffs: true,
+                    executeChildWorkflow: async () => {
+                        const patchDir = join(resultPath(rootDir, "run-diff-lines", "sandbox-diff-lines"), "patches");
+                        mkdirSync(patchDir, { recursive: true });
+                        // 2 churn lines (-old / +new)
+                        writeFileSync(
+                            join(patchDir, "0001-change.patch"),
+                            "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n",
+                            "utf8",
+                        );
+                        // 2 churn lines (two added lines)
+                        writeFileSync(
+                            join(patchDir, "0002-add.patch"),
+                            "diff --git a/other.txt b/other.txt\n--- a/other.txt\n+++ b/other.txt\n@@ -0,0 +1,2 @@\n+line one\n+line two\n",
+                            "utf8",
+                        );
+                        return {
+                            runId: "child-diff-lines",
+                            status: "finished",
+                            output: { changed: true },
+                        };
+                    },
+                }),
+            );
+
+            const events = await adapter.listEvents("run-diff-lines", -1);
+            const reviewRequested = events.find((row) => row.type === "SandboxDiffReviewRequested");
+            const payload = JSON.parse(String(reviewRequested?.payloadJson));
+            expect(payload.patchCount).toBe(2);
+            expect(payload.totalDiffLines).toBe(4);
+        }
+        finally {
+            sqlite.close();
+        }
+    });
 });

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Metric } from "effect";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
@@ -175,6 +175,22 @@ function diffBundlePatchCount(value) {
     return patches.length;
 }
 /**
+ * @param {string} diff
+ * @returns {number}
+ */
+function unifiedDiffLineCount(diff) {
+    let count = 0;
+    for (const line of diff.split("\n")) {
+        if (line.startsWith("+++") || line.startsWith("---")) {
+            continue;
+        }
+        if (line.startsWith("+") || line.startsWith("-")) {
+            count += 1;
+        }
+    }
+    return count;
+}
+/**
  * @param {unknown} status
  * @returns {status is "finished" | "failed" | "cancelled"}
  */
@@ -268,6 +284,26 @@ function isDiffBundleLike(bundle) {
         typeof source.seq === "number" &&
         typeof source.baseRef === "string" &&
         Array.isArray(source.patches));
+}
+/**
+ * @param {import("./ValidatedSandboxBundle.ts").ValidatedSandboxBundle} validated
+ * @returns {Promise<number>}
+ */
+async function sandboxDiffLineCount(validated) {
+    let total = 0;
+    for (const patchPath of validated.patchFiles) {
+        const content = await readFile(resolveSandboxPath(validated.bundlePath, patchPath), "utf8").catch(() => "");
+        total += unifiedDiffLineCount(content);
+    }
+    const diffBundle = validated.manifest.diffBundle;
+    if (isDiffBundleLike(diffBundle)) {
+        for (const patch of diffBundle.patches) {
+            if (typeof patch?.diff === "string") {
+                total += unifiedDiffLineCount(patch.diff);
+            }
+        }
+    }
+    return total;
 }
 /**
  * @param {import("./ValidatedSandboxBundle.ts").ValidatedSandboxBundle} validated
@@ -382,12 +418,13 @@ async function finalizeSandboxBundle(params) {
     });
     const reviewDiffs = options.reviewDiffs ?? true;
     if (reviewDiffs && totalPatchCount > 0) {
+        const totalDiffLines = await sandboxDiffLineCount(validated);
         await emitSandboxEvent(runtimeDb, {
             type: "SandboxDiffReviewRequested",
             runId: runtime.runId,
             sandboxId: options.sandboxId,
             patchCount: totalPatchCount,
-            totalDiffLines: 0,
+            totalDiffLines,
             timestampMs: nowMs(),
         });
         if (!options.autoAcceptDiffs) {
