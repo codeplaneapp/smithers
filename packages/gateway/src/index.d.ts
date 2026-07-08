@@ -2,19 +2,19 @@
  * @param {string} scope
  * @returns {scope is GatewayScope}
  */
-declare function isGatewayScope(scope: string): scope is GatewayScope$3;
+declare function isGatewayScope(scope: string): scope is GatewayScope$2;
 /**
  * @param {readonly string[]} grantedScopes
  * @param {GatewayScope} requiredScope
  * @param {string} [methodName]
  * @returns {boolean}
  */
-declare function hasGatewayScope(grantedScopes: readonly string[], requiredScope: GatewayScope$3, methodName?: string): boolean;
+declare function hasGatewayScope(grantedScopes: readonly string[], requiredScope: GatewayScope$2, methodName?: string): boolean;
 /** @typedef {(typeof GATEWAY_SCOPE_VALUES)[number]} GatewayScope */
-declare const GATEWAY_SCOPE_VALUES$1: readonly ["run:read", "run:write", "run:admin", "approval:submit", "signal:submit", "cron:read", "cron:write", "account:read", "memory:read", "prompt:read", "score:read", "ticket:read", "ticket:write", "observability:read"];
+declare const GATEWAY_SCOPE_VALUES: readonly ["run:read", "run:write", "run:admin", "approval:submit", "signal:submit", "cron:read", "cron:write", "account:read", "memory:read", "prompt:read", "score:read", "ticket:read", "ticket:write", "observability:read"];
 /** @type {Record<GatewayScope, string>} */
-declare const GATEWAY_SCOPE_DESCRIPTIONS: Record<GatewayScope$3, string>;
-type GatewayScope$3 = (typeof GATEWAY_SCOPE_VALUES$1)[number];
+declare const GATEWAY_SCOPE_DESCRIPTIONS: Record<GatewayScope$2, string>;
+type GatewayScope$2 = (typeof GATEWAY_SCOPE_VALUES)[number];
 
 /**
  * Type-only declarations for the stable v1 Gateway RPC contract. The runtime
@@ -26,8 +26,8 @@ type GatewayScope$3 = (typeof GATEWAY_SCOPE_VALUES$1)[number];
  * twin silently drops every value export from the `.js`.
  */
 
-type SmithersApiVersion$3 = "v1";
-type JsonSchema$3 = {
+type SmithersApiVersion$2 = "v1";
+type JsonSchema$2 = {
     readonly type?: string | readonly string[];
     readonly description?: string;
     readonly enum?: readonly unknown[];
@@ -37,35 +37,35 @@ type JsonSchema$3 = {
     readonly maximum?: number;
     readonly default?: unknown;
     readonly nullable?: boolean;
-    readonly items?: JsonSchema$3;
-    readonly properties?: Record<string, JsonSchema$3>;
+    readonly items?: JsonSchema$2;
+    readonly properties?: Record<string, JsonSchema$2>;
     readonly required?: readonly string[];
-    readonly additionalProperties?: boolean | JsonSchema$3;
-    readonly oneOf?: readonly JsonSchema$3[];
-    readonly anyOf?: readonly JsonSchema$3[];
+    readonly additionalProperties?: boolean | JsonSchema$2;
+    readonly oneOf?: readonly JsonSchema$2[];
+    readonly anyOf?: readonly JsonSchema$2[];
 };
-type GatewayRpcErrorCode$3 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "Internal";
-type GatewayRpcErrorDefinition$3 = {
-    readonly version: SmithersApiVersion$3;
-    readonly code: GatewayRpcErrorCode$3;
+type GatewayRpcErrorCode$2 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "Internal";
+type GatewayRpcErrorDefinition$2 = {
+    readonly version: SmithersApiVersion$2;
+    readonly code: GatewayRpcErrorCode$2;
     readonly httpStatus: number;
     readonly description: string;
 };
-type GatewayRpcDefinition$3 = {
-    readonly version: SmithersApiVersion$3;
-    readonly method: GatewayRpcMethod$3;
+type GatewayRpcDefinition$2 = {
+    readonly version: SmithersApiVersion$2;
+    readonly method: GatewayRpcMethod$2;
     readonly title: string;
     readonly description: string;
     readonly maturity: "stable";
     readonly transport: "http" | "websocket" | "http+websocket";
-    readonly requiredScope: GatewayScope$3;
-    readonly requestSchema: JsonSchema$3;
-    readonly responseSchema: JsonSchema$3;
-    readonly errors: readonly GatewayRpcErrorCode$3[];
+    readonly requiredScope: GatewayScope$2;
+    readonly requestSchema: JsonSchema$2;
+    readonly responseSchema: JsonSchema$2;
+    readonly errors: readonly GatewayRpcErrorCode$2[];
     readonly exampleRequest: unknown;
     readonly exampleResponse: unknown;
 };
-type GatewayRpcMethod$3 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket";
+type GatewayRpcMethod$2 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket";
 type LaunchRunRequest$1 = {
     workflow: string;
     input?: Record<string, unknown>;
@@ -394,106 +394,51 @@ type DeleteTicketRequest$1 = {
     path: string;
 };
 
-/** @typedef {(typeof GATEWAY_SCOPE_VALUES)[number]} GatewayScope */
-declare const GATEWAY_SCOPE_VALUES: readonly ["run:read", "run:write", "run:admin", "approval:submit", "signal:submit", "cron:read", "cron:write", "account:read", "memory:read", "prompt:read", "score:read", "ticket:read", "ticket:write", "observability:read"];
-type GatewayScope$1 = (typeof GATEWAY_SCOPE_VALUES)[number];
-
-/**
- * Type-only declarations for the stable v1 Gateway RPC contract. The runtime
- * catalog (schemas, error definitions, lookup helpers) lives in `index.js`,
- * which re-exports every type here via its `@smithers-type-exports` block.
- *
- * This file deliberately does NOT share a basename with `index.js`: a
- * same-basename `.js`/`.ts` pair both compile to one `.d.ts` and the type-only
- * twin silently drops every value export from the `.js`.
- */
-
-type SmithersApiVersion$1 = "v1";
-type JsonSchema$1 = {
-    readonly type?: string | readonly string[];
-    readonly description?: string;
-    readonly enum?: readonly unknown[];
-    readonly const?: unknown;
-    readonly format?: string;
-    readonly minimum?: number;
-    readonly maximum?: number;
-    readonly default?: unknown;
-    readonly nullable?: boolean;
-    readonly items?: JsonSchema$1;
-    readonly properties?: Record<string, JsonSchema$1>;
-    readonly required?: readonly string[];
-    readonly additionalProperties?: boolean | JsonSchema$1;
-    readonly oneOf?: readonly JsonSchema$1[];
-    readonly anyOf?: readonly JsonSchema$1[];
-};
-type GatewayRpcErrorCode$1 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "Internal";
-type GatewayRpcErrorDefinition$1 = {
-    readonly version: SmithersApiVersion$1;
-    readonly code: GatewayRpcErrorCode$1;
-    readonly httpStatus: number;
-    readonly description: string;
-};
-type GatewayRpcDefinition$1 = {
-    readonly version: SmithersApiVersion$1;
-    readonly method: GatewayRpcMethod$1;
-    readonly title: string;
-    readonly description: string;
-    readonly maturity: "stable";
-    readonly transport: "http" | "websocket" | "http+websocket";
-    readonly requiredScope: GatewayScope$1;
-    readonly requestSchema: JsonSchema$1;
-    readonly responseSchema: JsonSchema$1;
-    readonly errors: readonly GatewayRpcErrorCode$1[];
-    readonly exampleRequest: unknown;
-    readonly exampleResponse: unknown;
-};
-type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket";
-
 /**
  * @param {string} method
  * @returns {GatewayRpcMethod | undefined}
  */
-declare function canonicalGatewayRpcMethod(method: string): GatewayRpcMethod$2 | undefined;
+declare function canonicalGatewayRpcMethod(method: string): GatewayRpcMethod$1 | undefined;
 /**
  * @param {string} method
  * @returns {GatewayRpcDefinition | undefined}
  */
-declare function getGatewayRpcDefinition(method: string): GatewayRpcDefinition$2 | undefined;
+declare function getGatewayRpcDefinition(method: string): GatewayRpcDefinition$1 | undefined;
 /**
  * @param {string} method
  * @returns {GatewayScope | undefined}
  */
-declare function getRequiredScopeForGatewayMethod(method: string): GatewayScope$2 | undefined;
+declare function getRequiredScopeForGatewayMethod(method: string): GatewayScope$1 | undefined;
 /**
  * @returns {readonly GatewayRpcMethod[]}
  */
-declare function listGatewayRpcMethods(): readonly GatewayRpcMethod$2[];
+declare function listGatewayRpcMethods(): readonly GatewayRpcMethod$1[];
 /**
  * @param {string} method
  * @returns {method is GatewayRpcMethod}
  */
-declare function isGatewayRpcMethod(method: string): method is GatewayRpcMethod$2;
+declare function isGatewayRpcMethod(method: string): method is GatewayRpcMethod$1;
 /**
  * @returns {readonly GatewayScope[]}
  */
-declare function getGatewayScopeValues(): readonly GatewayScope$2[];
-declare const SMITHERS_API_VERSION: SmithersApiVersion$2;
+declare function getGatewayScopeValues(): readonly GatewayScope$1[];
+declare const SMITHERS_API_VERSION: SmithersApiVersion$1;
 declare const GATEWAY_EVENT_WINDOW_DEFAULT: 10000;
 /** @type {JsonSchema} */
-declare const anyJsonSchema: JsonSchema$2;
+declare const anyJsonSchema: JsonSchema$1;
 /** @type {Record<GatewayRpcErrorCode, GatewayRpcErrorDefinition>} */
-declare const GATEWAY_RPC_ERRORS: Record<GatewayRpcErrorCode$2, GatewayRpcErrorDefinition$2>;
+declare const GATEWAY_RPC_ERRORS: Record<GatewayRpcErrorCode$1, GatewayRpcErrorDefinition$1>;
 /** @type {Record<string, GatewayRpcMethod>} */
-declare const GATEWAY_RPC_LEGACY_METHOD_ALIASES: Record<string, GatewayRpcMethod$2>;
+declare const GATEWAY_RPC_LEGACY_METHOD_ALIASES: Record<string, GatewayRpcMethod$1>;
 /** @type {readonly GatewayRpcDefinition[]} */
-declare const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition$2[];
-type SmithersApiVersion$2 = SmithersApiVersion$1;
-type JsonSchema$2 = JsonSchema$1;
-type GatewayRpcErrorCode$2 = GatewayRpcErrorCode$1;
-type GatewayRpcErrorDefinition$2 = GatewayRpcErrorDefinition$1;
-type GatewayRpcDefinition$2 = GatewayRpcDefinition$1;
-type GatewayRpcMethod$2 = GatewayRpcMethod$1;
-type GatewayScope$2 = GatewayScope$1;
+declare const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition$1[];
+type SmithersApiVersion$1 = SmithersApiVersion$2;
+type JsonSchema$1 = JsonSchema$2;
+type GatewayRpcErrorCode$1 = GatewayRpcErrorCode$2;
+type GatewayRpcErrorDefinition$1 = GatewayRpcErrorDefinition$2;
+type GatewayRpcDefinition$1 = GatewayRpcDefinition$2;
+type GatewayRpcMethod$1 = GatewayRpcMethod$2;
+type GatewayScope$1 = GatewayScope$2;
 
 /**
  * @template {Record<string, unknown>} Row
@@ -505,11 +450,36 @@ declare function serializeAccountRow<Row extends Record<string, unknown>>(row: R
 declare const apiCollectionNames: readonly ["runs", "run_events", "nodes", "node_outputs", "approvals", "crons", "tickets", "docs"];
 
 /**
- * @template {Record<string, unknown>} Row
- * @param {Row} row
- * @returns {Row}
+ * @param {Record<string, unknown>} row
+ * @returns {{
+ *   runId: unknown,
+ *   workflowKey?: unknown,
+ *   nodeId: unknown,
+ *   iteration: unknown,
+ *   requestTitle: unknown,
+ *   requestSummary: unknown,
+ *   requestedAtMs: unknown,
+ *   approvalMode: unknown,
+ *   options: unknown,
+ *   allowedScopes: unknown,
+ *   allowedUsers: unknown,
+ *   autoApprove: unknown,
+ * }}
  */
-declare function serializeApprovalRow<Row extends Record<string, unknown>>(row: Row): Row;
+declare function serializeApprovalRow(row: Record<string, unknown>): {
+    runId: unknown;
+    workflowKey?: unknown;
+    nodeId: unknown;
+    iteration: unknown;
+    requestTitle: unknown;
+    requestSummary: unknown;
+    requestedAtMs: unknown;
+    approvalMode: unknown;
+    options: unknown;
+    allowedScopes: unknown;
+    allowedUsers: unknown;
+    autoApprove: unknown;
+};
 
 /**
  * @template {Record<string, unknown>} Row
@@ -574,13 +544,13 @@ declare function serializeTicketRow<Row extends Record<string, unknown>>(row: Ro
  */
 declare function serializeWorkflowRow<Row extends Record<string, unknown>>(row: Row): Row;
 
-type GatewayScope = GatewayScope$3;
-type SmithersApiVersion = SmithersApiVersion$3;
-type JsonSchema = JsonSchema$3;
-type GatewayRpcErrorCode = GatewayRpcErrorCode$3;
-type GatewayRpcErrorDefinition = GatewayRpcErrorDefinition$3;
-type GatewayRpcDefinition = GatewayRpcDefinition$3;
-type GatewayRpcMethod = GatewayRpcMethod$3;
+type GatewayScope = GatewayScope$2;
+type SmithersApiVersion = SmithersApiVersion$2;
+type JsonSchema = JsonSchema$2;
+type GatewayRpcErrorCode = GatewayRpcErrorCode$2;
+type GatewayRpcErrorDefinition = GatewayRpcErrorDefinition$2;
+type GatewayRpcDefinition = GatewayRpcDefinition$2;
+type GatewayRpcMethod = GatewayRpcMethod$2;
 type LaunchRunRequest = LaunchRunRequest$1;
 type LaunchRunResponse = LaunchRunResponse$1;
 type ResumeRunRequest = ResumeRunRequest$1;
@@ -638,4 +608,4 @@ type CreateTicketRequest = CreateTicketRequest$1;
 type UpdateTicketRequest = UpdateTicketRequest$1;
 type DeleteTicketRequest = DeleteTicketRequest$1;
 
-export { type CancelRunRequest, type CancelRunResponse, type CreateTicketRequest, type CronCreateRequest, type CronDeleteRequest, type CronListRequest, type CronRunRequest, type DeleteTicketRequest, GATEWAY_EVENT_WINDOW_DEFAULT, GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, GATEWAY_RPC_LEGACY_METHOD_ALIASES, GATEWAY_SCOPE_DESCRIPTIONS, GATEWAY_SCOPE_VALUES$1 as GATEWAY_SCOPE_VALUES, type GatewayAccount, type GatewayApprovalSummary, type GatewayDocKind, type GatewayDocRow, type GatewayMemoryFact, type GatewayPrompt, type GatewayRpcDefinition, type GatewayRpcErrorCode, type GatewayRpcErrorDefinition, type GatewayRpcMethod, type GatewayScope, type GatewayScoreRow, type GatewayTicketRow, type GatewayWorkflowSummary, type GetDevToolsSnapshotRequest, type GetDevToolsSnapshotResponse, type GetRunRequest, type GetSchemaSignatureRequest, type GetSchemaSignatureResponse, type HijackRunRequest, type HijackRunResponse, type JsonSchema, type LaunchRunRequest, type LaunchRunResponse, type ListAccountsRequest, type ListAccountsResponse, type ListApprovalsRequest, type ListApprovalsResponse, type ListDocsRequest, type ListDocsResponse, type ListMemoryFactsRequest, type ListMemoryFactsResponse, type ListPromptsRequest, type ListPromptsResponse, type ListRunsRequest, type ListScoresRequest, type ListScoresResponse, type ListTicketsRequest, type ListTicketsResponse, type ListWorkflowsRequest, type ListWorkflowsResponse, type NodeRequest, type PauseRunRequest, type PauseRunResponse, type ResumeRunRequest, type ResumeRunResponse, type RewindRunRequest, SMITHERS_API_VERSION, type SmithersApiVersion, type StreamDevToolsRequest, type StreamRunEventsRequest, type StreamRunEventsResponse, type SubmitApprovalRequest, type SubmitApprovalResponse, type SubmitSignalRequest, type UpdateTicketRequest, anyJsonSchema, apiCollectionNames, canonicalGatewayRpcMethod, getGatewayRpcDefinition, getGatewayScopeValues, getRequiredScopeForGatewayMethod, hasGatewayScope, isGatewayRpcMethod, isGatewayScope, listGatewayRpcMethods, serializeAccountRow, serializeApprovalRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow };
+export { type CancelRunRequest, type CancelRunResponse, type CreateTicketRequest, type CronCreateRequest, type CronDeleteRequest, type CronListRequest, type CronRunRequest, type DeleteTicketRequest, GATEWAY_EVENT_WINDOW_DEFAULT, GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, GATEWAY_RPC_LEGACY_METHOD_ALIASES, GATEWAY_SCOPE_DESCRIPTIONS, GATEWAY_SCOPE_VALUES, type GatewayAccount, type GatewayApprovalSummary, type GatewayDocKind, type GatewayDocRow, type GatewayMemoryFact, type GatewayPrompt, type GatewayRpcDefinition, type GatewayRpcErrorCode, type GatewayRpcErrorDefinition, type GatewayRpcMethod, type GatewayScope, type GatewayScoreRow, type GatewayTicketRow, type GatewayWorkflowSummary, type GetDevToolsSnapshotRequest, type GetDevToolsSnapshotResponse, type GetRunRequest, type GetSchemaSignatureRequest, type GetSchemaSignatureResponse, type HijackRunRequest, type HijackRunResponse, type JsonSchema, type LaunchRunRequest, type LaunchRunResponse, type ListAccountsRequest, type ListAccountsResponse, type ListApprovalsRequest, type ListApprovalsResponse, type ListDocsRequest, type ListDocsResponse, type ListMemoryFactsRequest, type ListMemoryFactsResponse, type ListPromptsRequest, type ListPromptsResponse, type ListRunsRequest, type ListScoresRequest, type ListScoresResponse, type ListTicketsRequest, type ListTicketsResponse, type ListWorkflowsRequest, type ListWorkflowsResponse, type NodeRequest, type PauseRunRequest, type PauseRunResponse, type ResumeRunRequest, type ResumeRunResponse, type RewindRunRequest, SMITHERS_API_VERSION, type SmithersApiVersion, type StreamDevToolsRequest, type StreamRunEventsRequest, type StreamRunEventsResponse, type SubmitApprovalRequest, type SubmitApprovalResponse, type SubmitSignalRequest, type UpdateTicketRequest, anyJsonSchema, apiCollectionNames, canonicalGatewayRpcMethod, getGatewayRpcDefinition, getGatewayScopeValues, getRequiredScopeForGatewayMethod, hasGatewayScope, isGatewayRpcMethod, isGatewayScope, listGatewayRpcMethods, serializeAccountRow, serializeApprovalRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow };

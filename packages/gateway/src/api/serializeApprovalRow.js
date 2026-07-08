@@ -15,14 +15,26 @@ function parseJson(value) {
 }
 
 /**
- * @template {Record<string, unknown>} Row
- * @param {Row} row
- * @returns {Row}
+ * @param {Record<string, unknown>} row
+ * @returns {{
+ *   runId: unknown,
+ *   workflowKey?: unknown,
+ *   nodeId: unknown,
+ *   iteration: unknown,
+ *   requestTitle: unknown,
+ *   requestSummary: unknown,
+ *   requestedAtMs: unknown,
+ *   approvalMode: unknown,
+ *   options: unknown,
+ *   allowedScopes: unknown,
+ *   allowedUsers: unknown,
+ *   autoApprove: unknown,
+ * }}
  */
 export function serializeApprovalRow(row) {
   const normalized = normalizeApiRow(row);
   const request = parseJson(normalized.requestJson);
-  return /** @type {Row} */ (/** @type {unknown} */ ({
+  return ({
     runId: normalized.runId,
     ...(normalized.workflowKey === undefined ? {} : { workflowKey: normalized.workflowKey }),
     nodeId: normalized.nodeId,
@@ -35,5 +47,5 @@ export function serializeApprovalRow(row) {
     allowedScopes: normalized.allowedScopes ?? request.allowedScopes,
     allowedUsers: normalized.allowedUsers ?? request.allowedUsers,
     autoApprove: normalized.autoApprove ?? request.autoApprove,
-  }));
+  });
 }
