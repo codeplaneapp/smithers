@@ -243,6 +243,17 @@ describe("service digest", () => {
     expect(result.id).toBeNull();
   });
 
+  test("windows undated messages by created_at_ms so a stale message is not re-summarized", async () => {
+    const env = buildEnv();
+    await seedNoDateMessages(env, 2); // ingested (created_at_ms) at nowMs=1782931300000
+    // Default digest window is 24h; run it 25h after ingestion so the undated
+    // messages' created_at_ms falls before the window start.
+    const result = await runDailyDigest(env, 1782931300000 + 25 * 60 * 60 * 1000);
+    expect(result.status).toBe("empty");
+    expect(result.messageCount).toBe(0);
+    expect(result.id).toBeNull();
+  });
+
   test("creates, renders, and posts a full digest", async () => {
     const env = buildEnv({ DIGEST_WINDOW_HOURS: "48", DIGEST_TOPIC_HINT: "roadmap", TELEGRAM_OUTPUT_THREAD_ID: "12" });
     await seedNoDateMessages(env, 3, 0); // index 0 is the huge message -> transcript truncation
