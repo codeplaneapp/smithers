@@ -25,7 +25,7 @@ import { EventBus } from "./events.js";
 import { AgentTraceCollector } from "./AgentTraceCollector.js";
 import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj";
 import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
-import { createSlotStarvationHint } from "./slotStarvationHint.js";
+import { createSlotGovernor } from "./slotGovernor.js";
 import { createWorktreeSyncCache } from "./worktreeSyncCache.js";
 import { startDurability } from "./startDurability.js";
 import { startDocFileSync } from "./startDocFileSync.js";
@@ -2156,6 +2156,28 @@ function parseRunConfigJson(value) {
     catch {
         return {};
     }
+}
+/**
+ * Read an explicit `--max-concurrency` pin back out of a run's persisted
+ * config. Resume paths (supervisor auto-resume, gateway resume, `up --resume`
+ * without re-passing flags) re-enter the engine with `opts.maxConcurrency`
+ * undefined, so without this the slot governor would treat a pinned run as
+ * auto after a crash/resume and raise the cap past the user's pin.
+ *
+ * @param {Record<string, unknown>} config
+ * @returns {number | null} the pinned cap, or null when the run never pinned
+ *   one. A pinned run whose stored cap does not round-trip as a positive
+ *   integer stays pinned at the engine default rather than falling open to
+ *   auto-raise.
+ */
+function readPinnedMaxConcurrency(config) {
+    if (!config.maxConcurrencyPinned) {
+        return null;
+    }
+    const cap = config.maxConcurrency;
+    return typeof cap === "number" && Number.isInteger(cap) && cap > 0
+        ? cap
+        : DEFAULT_MAX_CONCURRENCY;
 }
 /**
  * @param {unknown} value
@@ -5096,7 +5118,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
         : null;
     const rootDir = resolveRootDir(opts, resolvedWorkflowPath);
     const logDir = resolveLogDir(rootDir, runId, opts.logDir);
-    const maxConcurrency = coercePositiveInt("maxConcurrency", opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY);
+    // `let`: the slot governor may auto-raise the cap mid-run when the user did
+    // not pin it; every read (withTaskSlot admission included) sees the raise.
+    let maxConcurrency = coercePositiveInt("maxConcurrency", opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY);
     const maxOutputBytes = coercePositiveInt("maxOutputBytes", opts.maxOutputBytes, DEFAULT_MAX_OUTPUT_BYTES);
     const toolTimeoutMs = coercePositiveInt("toolTimeoutMs", opts.toolTimeoutMs, DEFAULT_TOOL_TIMEOUT_MS);
     const allowNetwork = Boolean(opts.allowNetwork);
@@ -5171,15 +5195,40 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const budgetSkippedKeys = new Set();
     let activeTaskCount = 0;
     const taskWaiters = [];
-    const slotStarvationHint = createSlotStarvationHint(maxConcurrency);
+    // `let`: replaced before tasks start when a resumed run restores a
+    // persisted `--max-concurrency` pin that this invocation's opts lack.
+    let slotGovernor = createSlotGovernor(maxConcurrency, {
+        explicit: opts.maxConcurrency !== undefined,
+    });
     const acquireTaskSlot = async () => {
         if (activeTaskCount < maxConcurrency) {
             activeTaskCount += 1;
             return;
         }
-        const starvationHint = slotStarvationHint.onSlotWait(activeTaskCount, taskWaiters.length + 1);
-        if (starvationHint) {
-            logWarning(starvationHint, { runId, maxConcurrency, waiting: taskWaiters.length + 1 }, "engine:concurrency");
+        const decision = slotGovernor.onSlotWait(activeTaskCount, taskWaiters.length + 1);
+        if (decision.warn) {
+            logWarning(decision.warn, { runId, maxConcurrency, waiting: taskWaiters.length + 1 }, "engine:concurrency");
+        }
+        if (decision.raiseTo !== null) {
+            const previousCap = maxConcurrency;
+            const demand = activeTaskCount + taskWaiters.length + 1;
+            maxConcurrency = decision.raiseTo;
+            logInfo(`auto-raising maxConcurrency from ${previousCap} to ${maxConcurrency}: ` +
+                `${demand} tasks want to run concurrently (pass --max-concurrency to pin the cap)`, { runId, previousMaxConcurrency: previousCap, maxConcurrency, demand }, "engine:concurrency");
+            // Hand freed capacity to the tasks that queued first; each resolved
+            // waiter increments activeTaskCount when it resumes (the same
+            // handoff releaseTaskSlot uses), so count them against capacity
+            // here rather than re-reading activeTaskCount.
+            let capacity = maxConcurrency - activeTaskCount;
+            while (capacity > 0 && taskWaiters.length > 0) {
+                const next = taskWaiters.shift();
+                next?.();
+                capacity -= 1;
+            }
+            if (capacity > 0) {
+                activeTaskCount += 1;
+                return;
+            }
         }
         await new Promise((resolveWaiter) => {
             taskWaiters.push(resolveWaiter);
@@ -5806,6 +5855,19 @@ async function runWorkflowBodyDriver(workflow, opts) {
             parentRunId: opts.parentRunId ?? existingRun?.parentRunId ?? undefined,
             workflowName: existingRun?.workflowName ?? "workflow",
         });
+        const existingConfig = parseRunConfigJson(existingRun?.configJson);
+        // An explicit --max-concurrency pin must survive resume: no resume path
+        // (supervisor auto-resume, gateway resume, manual `up --resume`)
+        // re-sends the flag, so restore the persisted pin before the run
+        // starts or the governor would treat the run as auto and raise the
+        // cap past the user's pin.
+        const pinnedMaxConcurrency = opts.maxConcurrency === undefined
+            ? readPinnedMaxConcurrency(existingConfig)
+            : null;
+        if (pinnedMaxConcurrency !== null) {
+            maxConcurrency = pinnedMaxConcurrency;
+            slotGovernor = createSlotGovernor(maxConcurrency, { explicit: true });
+        }
         logInfo("starting workflow run", {
             runId,
             workflowPath: resolvedWorkflowPath ?? null,
@@ -5821,13 +5883,15 @@ async function runWorkflowBodyDriver(workflow, opts) {
             workflowPath: resolvedWorkflowPath ?? null,
             engine: "react-driver",
         });
-        const existingConfig = parseRunConfigJson(existingRun?.configJson);
         const runAuth = opts.auth ?? parseRunAuthContext(existingConfig.auth);
         const effectiveAlertPolicy = workflowRef.opts.alertPolicy ?? existingConfig.alertPolicy ?? undefined;
         const runConfig = buildDurabilityConfig({
             ...existingConfig,
             ...opts.config,
             maxConcurrency,
+            ...(opts.maxConcurrency !== undefined || pinnedMaxConcurrency !== null
+                ? { maxConcurrencyPinned: true }
+                : {}),
             rootDir,
             allowNetwork,
             maxOutputBytes,
