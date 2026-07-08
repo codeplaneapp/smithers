@@ -657,12 +657,10 @@ export function extractGraph(root, opts) {
             if (kind === "human" &&
                 typeof raw.retries === "number" &&
                 !Number.isFinite(raw.retries)) {
-                const maxAttempts = raw.meta &&
-                    typeof raw.meta === "object" &&
-                    !Array.isArray(raw.meta) &&
-                    typeof raw.meta.maxAttempts === "number"
-                    ? raw.meta.maxAttempts
-                    : raw.retries;
+                const meta = raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
+                    ? /** @type {Record<string, unknown>} */ (raw.meta)
+                    : undefined;
+                const maxAttempts = typeof meta?.maxAttempts === "number" ? meta.maxAttempts : raw.retries;
                 throw new SmithersError("INVALID_INPUT", `<HumanTask id="${logicalNodeId}"> maxAttempts must be finite.`, {
                     nodeId: logicalNodeId,
                     maxAttempts: String(maxAttempts),
