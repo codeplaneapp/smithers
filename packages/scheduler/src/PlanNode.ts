@@ -26,6 +26,8 @@ export type PlanNode =
   | {
       readonly kind: "try-catch-finally";
       readonly id: string;
+      /** Error codes that arm the catch block; absent means catch everything. */
+      readonly catchErrors?: readonly string[];
       readonly tryChildren: readonly PlanNode[];
       readonly catchChildren: readonly PlanNode[];
       readonly finallyChildren: readonly PlanNode[];

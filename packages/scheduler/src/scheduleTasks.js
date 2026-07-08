@@ -82,9 +82,12 @@ function forkSourceTerminal(forkSource, states, descriptors) {
  * @param {RalphStateMap} ralphState
  * @param {RetryWaitMap} retryWait
  * @param {number} nowMs
+ * @param {ReadonlyMap<string, unknown>} [taskFailures] recorded failure payloads
+ *   keyed by task state key; consulted by the <TryCatchFinally catchErrors>
+ *   gate to match failed try tasks against the filtered error codes
  * @returns {ScheduleResult}
  */
-export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, nowMs) {
+export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, nowMs, taskFailures) {
     const runnable = [];
     let pendingExists = false;
     let waitingApprovalExists = false;
@@ -149,6 +152,77 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
             }
             active.add(stats.childKey);
         }
+    }
+    /**
+   * Error codes carried by every failed task inside a plan region.
+   * @param {readonly PlanNode[]} children
+   * @returns {string[]}
+   */
+    function collectFailureCodes(children) {
+        /** @type {string[]} */
+        const codes = [];
+        /** @param {PlanNode} node */
+        const visit = (node) => {
+            switch (node.kind) {
+                case "task": {
+                    const descriptor = descriptors.get(node.nodeId);
+                    if (!descriptor)
+                        return;
+                    const key = buildStateKey(descriptor.nodeId, descriptor.iteration);
+                    if ((states.get(key) ?? "pending") !== "failed")
+                        return;
+                    const failure = taskFailures?.get(key);
+                    const code = failure &&
+                        typeof failure === "object" &&
+                        typeof (/** @type {{ code?: unknown }} */ (failure).code) === "string"
+                        ? /** @type {{ code: string }} */ (failure).code
+                        : undefined;
+                    if (code)
+                        codes.push(code);
+                    return;
+                }
+                case "sequence":
+                case "group":
+                case "parallel":
+                case "ralph":
+                    for (const child of node.children)
+                        visit(child);
+                    return;
+                case "saga":
+                    for (const child of node.actionChildren)
+                        visit(child);
+                    for (const child of node.compensationChildren)
+                        visit(child);
+                    return;
+                case "try-catch-finally":
+                    for (const child of node.tryChildren)
+                        visit(child);
+                    for (const child of node.catchChildren)
+                        visit(child);
+                    for (const child of node.finallyChildren)
+                        visit(child);
+                    return;
+            }
+        };
+        for (const child of children)
+            visit(child);
+        return codes;
+    }
+    /**
+   * Whether a try-catch-finally node's catch block handles the current try
+   * failure. Without a catchErrors filter every failure is handled; with one,
+   * at least one failed try task must carry a matching error code — an
+   * unmatched failure propagates as if the boundary had no catch block.
+   * @param {Extract<PlanNode, { kind: "try-catch-finally" }>} node
+   * @returns {boolean}
+   */
+    function catchArmed(node) {
+        if (node.catchChildren.length === 0)
+            return false;
+        if (!node.catchErrors || node.catchErrors.length === 0)
+            return true;
+        const codes = collectFailureCodes(node.tryChildren);
+        return codes.some((code) => node.catchErrors?.includes(code));
     }
     /**
    * @param {PlanNode} node
@@ -251,8 +325,9 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                         children: node.finallyChildren,
                     }, options);
                 }
-                let catchFailed = node.catchChildren.length === 0;
-                if (node.catchChildren.length > 0) {
+                const armed = catchArmed(node);
+                let catchFailed = !armed;
+                if (armed) {
                     const catchStatus = inspect({
                         kind: "sequence",
                         children: node.catchChildren,
@@ -558,7 +633,8 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                         break;
                     }
                 }
-                if (tryFailed && node.catchChildren.length > 0) {
+                const armed = tryFailed && catchArmed(node);
+                if (armed) {
                     const collectTryFailureKeys = () => collectChildFailureKeys(node.tryChildren, {
                         includeContinuedFailures: true,
                     });
@@ -609,7 +685,7 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                 }
                 const finallyResult = walkSequence(node.finallyChildren);
                 if (!finallyResult.terminal) {
-                    if (tryFailed && node.catchChildren.length === 0) {
+                    if (tryFailed && !armed) {
                         collectChildFailureKeys(node.tryChildren, {
                             includeContinuedFailures: true,
                         });
@@ -617,7 +693,7 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                     }
                     return finallyResult;
                 }
-                if (tryFailed && node.catchChildren.length === 0) {
+                if (tryFailed && !armed) {
                     fatalError ??= `TryCatchFinally ${node.id} failed`;
                 }
                 return { terminal: true };

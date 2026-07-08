@@ -23,6 +23,12 @@ export function TryCatchFinally(props) {
     const catchBlock = catchHandler && typeof catchHandler !== "function" ? catchHandler : null;
     const hostProps = {
         id,
+        // Serialized copy for the plan tree: the reconciler's XML snapshot only
+        // keeps scalar, non-dunder props, so the scheduler's catchErrors gate
+        // reads this comma-joined string rather than __tcfCatchErrors.
+        catchErrors: Array.isArray(catchErrors) && catchErrors.length > 0
+            ? catchErrors.join(",")
+            : undefined,
         __tcfCatchErrors: catchErrors,
         __tcfCatchHandler: catchHandler,
         __tcfFinallyHandler: finallyHandler,

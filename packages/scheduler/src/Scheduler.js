@@ -15,6 +15,7 @@ import { Context } from "effect";
  *     ralphState: RalphStateMap,
  *     retryWait: RetryWaitMap,
  *     nowMs: number,
+ *     taskFailures?: ReadonlyMap<string, unknown>,
  *   ) => import("effect").Effect.Effect<ScheduleResult>
  * }} SchedulerService
  */

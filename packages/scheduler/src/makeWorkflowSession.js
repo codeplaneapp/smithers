@@ -438,7 +438,7 @@ export function makeWorkflowSession(options = {}) {
    * @returns {ScheduleResult}
    */
     function computeSchedule() {
-        const result = scheduleTasks(state.plan, state.states, state.descriptors, state.ralphState, state.retryWait, nowMs());
+        const result = scheduleTasks(state.plan, state.states, state.descriptors, state.ralphState, state.retryWait, nowMs(), state.failures);
         state.schedule = {
             plan: state.plan,
             result,

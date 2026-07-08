@@ -143,6 +143,15 @@ export function buildPlanTree(xml, ralphState) {
         }
         if (tag === "smithers:try-catch-finally") {
             const id = resolveStableId(node.props.id, "tcf", ctx.path);
+            const rawCatchErrors = node.props.catchErrors ?? node.props.__tcfCatchErrors;
+            const catchErrors = Array.isArray(rawCatchErrors)
+                ? rawCatchErrors.filter((code) => typeof code === "string")
+                : typeof rawCatchErrors === "string"
+                    ? rawCatchErrors
+                        .split(",")
+                        .map((code) => code.trim())
+                        .filter(Boolean)
+                    : [];
             const tryChildren = [];
             const catchChildren = [];
             const finallyChildren = [];
@@ -173,6 +182,7 @@ export function buildPlanTree(xml, ralphState) {
             return {
                 kind: "try-catch-finally",
                 id,
+                ...(catchErrors.length > 0 ? { catchErrors } : {}),
                 tryChildren,
                 catchChildren,
                 finallyChildren,

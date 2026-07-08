@@ -48,6 +48,8 @@ type PlanNode$4 = {
 } | {
     readonly kind: "try-catch-finally";
     readonly id: string;
+    /** Error codes that arm the catch block; absent means catch everything. */
+    readonly catchErrors?: readonly string[];
     readonly tryChildren: readonly PlanNode$4[];
     readonly catchChildren: readonly PlanNode$4[];
     readonly finallyChildren: readonly PlanNode$4[];
@@ -395,7 +397,7 @@ type RalphStateMap$3 = RalphStateMap$4;
 type RetryWaitMap$2 = RetryWaitMap$3;
 type ScheduleResult$2 = ScheduleResult$3;
 type SchedulerService = {
-    readonly schedule: (plan: PlanNode$3 | null, states: TaskStateMap$2, descriptors: Map<string, TaskDescriptor$1>, ralphState: RalphStateMap$3, retryWait: RetryWaitMap$2, nowMs: number) => effect.Effect.Effect<ScheduleResult$2>;
+    readonly schedule: (plan: PlanNode$3 | null, states: TaskStateMap$2, descriptors: Map<string, TaskDescriptor$1>, ralphState: RalphStateMap$3, retryWait: RetryWaitMap$2, nowMs: number, taskFailures?: ReadonlyMap<string, unknown>) => effect.Effect.Effect<ScheduleResult$2>;
 };
 
 /** @type {Layer.Layer<Scheduler, never, never>} */
@@ -422,9 +424,12 @@ type XmlNode = _smithers_orchestrator_graph.XmlNode;
  * @param {RalphStateMap} ralphState
  * @param {RetryWaitMap} retryWait
  * @param {number} nowMs
+ * @param {ReadonlyMap<string, unknown>} [taskFailures] recorded failure payloads
+ *   keyed by task state key; consulted by the <TryCatchFinally catchErrors>
+ *   gate to match failed try tasks against the filtered error codes
  * @returns {ScheduleResult}
  */
-declare function scheduleTasks(plan: PlanNode$1 | null, states: TaskStateMap$1, descriptors: Map<string, TaskDescriptor>, ralphState: RalphStateMap$1, retryWait: RetryWaitMap$1, nowMs: number): ScheduleResult$1;
+declare function scheduleTasks(plan: PlanNode$1 | null, states: TaskStateMap$1, descriptors: Map<string, TaskDescriptor>, ralphState: RalphStateMap$1, retryWait: RetryWaitMap$1, nowMs: number, taskFailures?: ReadonlyMap<string, unknown>): ScheduleResult$1;
 type PlanNode$1 = PlanNode$4;
 type RalphStateMap$1 = RalphStateMap$4;
 type RetryWaitMap$1 = RetryWaitMap$3;
