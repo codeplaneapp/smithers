@@ -272,6 +272,41 @@ describe("the Electric proxy emits structured events + OTLP spans", () => {
     expect(spans.some((span) => span.name === "smithers.electric.shape.rejected")).toBe(true);
   });
 
+  test("each shape stream's forwarded event reports its own byte count, not the shared process total", async () => {
+    const events: SmithersElectricProxyEvent[] = [];
+    const streamOf = (bytes: number): ReadableStream<Uint8Array> =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(bytes));
+          controller.close();
+        },
+      });
+
+    let opened = 0;
+    const proxy = createSmithersElectricProxy({
+      electricUrl: "http://electric.local/v1/shape",
+      authenticate: () => auth(),
+      observer: { event: (event) => events.push(event), span: () => {} },
+      fetchClient: async () => {
+        opened += 1;
+        return new Response(streamOf(opened === 1 ? 40 : 80));
+      },
+    });
+
+    const [a, b] = await Promise.all([
+      proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs")),
+      proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs")),
+    ]);
+    await a.text();
+    await b.text();
+
+    const forwarded = events.filter((event) => event.type === "electric.shape.forwarded");
+    expect(forwarded.length).toBe(2);
+    // Each stream's own byte count, not the summed/global total (120) that
+    // metrics.snapshot().forwardedBytes tracks across the whole process.
+    expect(forwarded.map((event) => event.forwardedBytes).sort((x, y) => (x ?? 0) - (y ?? 0))).toEqual([40, 80]);
+  });
+
   test("an upstream outage emits a structured error event + span with the reason and bumps the metric", async () => {
     const events: SmithersElectricProxyEvent[] = [];
     const spans: SmithersElectricProxySpan[] = [];

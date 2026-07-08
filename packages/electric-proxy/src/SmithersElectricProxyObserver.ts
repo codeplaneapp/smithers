@@ -25,6 +25,7 @@ export type SmithersElectricProxyEvent = {
   requiredScope?: string;
   status?: number;
   durationMs?: number;
+  /** Bytes forwarded by this single closing shape stream, not a process-wide total. */
   forwardedBytes?: number;
   lagMs?: number;
   txid?: number | null;

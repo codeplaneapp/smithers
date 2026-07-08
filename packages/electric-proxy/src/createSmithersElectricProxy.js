@@ -499,21 +499,22 @@ function createFrameBoundScanner(maxFrameBytes) {
  * @param {number} maxFrameBytes
  * @param {{
  *   onStart: () => void;
- *   release: () => void;
+ *   release: (streamBytes: number) => void;
  *   registerCancel?: (cancel: () => void) => void;
  * }} hooks
  * @returns {ReadableStream<Uint8Array> | null}
  */
 function wrapBody(body, metrics, maxFrameBytes, hooks) {
   if (!body) {
-    hooks.release();
+    hooks.release(0);
     return null;
   }
   let released = false;
+  let streamBytes = 0;
   const done = () => {
     if (released) return;
     released = true;
-    hooks.release();
+    hooks.release(streamBytes);
   };
   const reader = body.getReader();
   hooks.registerCancel?.(() => {
@@ -541,6 +542,7 @@ function wrapBody(body, metrics, maxFrameBytes, hooks) {
           hooks.onStart();
         }
         metrics.addForwardedBytes(value.byteLength);
+        streamBytes += value.byteLength;
         if (scanner.push(value) === "exceeded") {
           metrics.incLargeFrame();
           await reader.cancel("smithers electric frame exceeded proxy limit").catch(() => undefined);
@@ -739,7 +741,7 @@ export function createSmithersElectricProxy(options) {
         registerCancel: (cancel) => {
           slot.cancelUpstream = cancel;
         },
-        release: () => {
+        release: (streamBytes) => {
           release();
           emitSmithersElectricEvent(observer, {
             type: "electric.shape.forwarded",
@@ -748,7 +750,7 @@ export function createSmithersElectricProxy(options) {
             shape: shape.name,
             status: response.status,
             durationMs: now() - startedAtMs,
-            forwardedBytes: metrics.snapshot().forwardedBytes,
+            forwardedBytes: streamBytes,
             lagMs: Number.isFinite(lag) ? lag : undefined,
           });
         },
