@@ -218,6 +218,67 @@ describe("remaining component branch coverage", () => {
         }
     });
 
+    test("Approval rank compute degrades to [] when persisted ranked is not an array", async () => {
+        const options = [
+            { key: "canary", label: "Canary" },
+            { key: "regional", label: "Regional" },
+        ];
+        const { db, cleanup } = createTestSmithers({});
+        ensureSmithersTables(db);
+        const adapter = new SmithersDb(db);
+        try {
+            await adapter.insertOrUpdateApproval({
+                runId: "run",
+                nodeId: "rank-corrupt",
+                iteration: 0,
+                status: "approved",
+                requestedAtMs: 1,
+                decidedAtMs: 2,
+                note: "pick canary",
+                decidedBy: "alice",
+                requestJson: null,
+                decisionJson: JSON.stringify({ ranked: "not-an-array", notes: null }),
+                autoApproved: false,
+            });
+            await adapter.insertOrUpdateApproval({
+                runId: "run",
+                nodeId: "rank-absent",
+                iteration: 0,
+                status: "approved",
+                requestedAtMs: 1,
+                decidedAtMs: 2,
+                note: "absent decision note",
+                decidedBy: "bob",
+                requestJson: null,
+                decisionJson: null,
+                autoApproved: false,
+            });
+
+            const corrupt = await render(
+                <Approval id="rank-corrupt" output="out" mode="rank" request={{ title: "Rank" }} options={options} />,
+            );
+            const absent = await render(
+                <Approval id="rank-absent" output="out" mode="rank" request={{ title: "Rank" }} options={options} />,
+            );
+            const missingRow = await render(
+                <Approval id="rank-missing" output="out" mode="rank" request={{ title: "Rank" }} options={options} />,
+            );
+
+            await expect(
+                withTaskRuntime(runtimeFor(db, "run", "rank-corrupt"), () => corrupt.tasks[0].computeFn()),
+            ).resolves.toEqual({ ranked: [], notes: "pick canary" });
+            await expect(
+                withTaskRuntime(runtimeFor(db, "run", "rank-absent"), () => absent.tasks[0].computeFn()),
+            ).resolves.toEqual({ ranked: [], notes: "absent decision note" });
+            await expect(
+                withTaskRuntime(runtimeFor(db, "run", "rank-missing"), () => missingRow.tasks[0].computeFn()),
+            ).resolves.toEqual({ ranked: [], notes: null });
+        }
+        finally {
+            cleanup();
+        }
+    });
+
     test("HumanTask compute handles runtime, request, approval fallback, and validation paths", async () => {
         const output = z.object({ answer: z.string() });
         const ok = HumanTask({ id: "human-ok", output, prompt: "Answer" });
