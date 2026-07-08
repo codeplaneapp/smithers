@@ -1,7 +1,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { afterEach, beforeAll, afterAll, describe, expect, test } from "bun:test";
 import { createServer } from "node:http";
-import { WebSocketServer } from "ws";
+import { WebSocket as NodeWebSocket, WebSocketServer } from "ws";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { defaultOperatorUiClient } from "../src/gatewayUi/defaultOperatorUi.js";
 
@@ -59,6 +59,7 @@ function startFixture() {
   wss.on("connection", (socket) => {
     state.sockets.add(socket);
     socket.on("close", () => state.sockets.delete(socket));
+    socket.on("error", () => {});
     const push = (frame) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
     };
@@ -143,8 +144,15 @@ function makeRuntime() {
   globalThis.clearInterval = (id) => { intervals.delete(id); return nClearInterval(id); };
   globalThis.setTimeout = (...a) => { const id = nSetTimeout(...a); timeouts.add(id); return id; };
   globalThis.clearTimeout = (id) => { timeouts.delete(id); return nClearTimeout(id); };
-  globalThis.WebSocket = class TrackedWebSocket extends NativeWebSocket {
-    constructor(...a) { super(...a); sockets.add(this); this.addEventListener("close", () => sockets.delete(this)); }
+  globalThis.WebSocket = class TrackedWebSocket extends NodeWebSocket {
+    constructor(...a) {
+      super(...a);
+      sockets.add(this);
+      this.on("error", () => {});
+      this.addEventListener("close", () => sockets.delete(this));
+      this.addEventListener("error", () => {});
+      this.onerror = () => {};
+    }
   };
   return {
     sockets,
@@ -456,6 +464,12 @@ describe("defaultOperatorUiClient (instrumented source)", () => {
     // Open a run so the DevTools stream + cloneValue path (requestId fallback) runs.
     document.querySelectorAll("[data-run-id]")[0].dispatchEvent(new Event("click", { bubbles: true }));
     await waitFor(() => document.querySelectorAll("[data-node-id]").length > 0);
+    fixture.state.rpc = (method) => {
+      if (method === "listRuns") return { ok: true, payload: [] };
+      return { ok: true, payload: defaultRpcPayload(method) };
+    };
+    fire("#refresh", "click");
+    await waitFor(() => document.body.textContent.includes("No runs found."));
     expect(document.querySelector(".brand")).toBeTruthy();
   }, 20000);
 
