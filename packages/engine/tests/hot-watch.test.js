@@ -41,12 +41,53 @@ describe("WatchTree", () => {
         cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
         const tree = new WatchTree(dir);
         const fiber = Effect.runFork(tree.waitEffect());
-        for (let i = 0; i < 10 && tree.waitResolve === null; i += 1) {
+        for (let i = 0; i < 10 && tree.waitResolvers.size === 0; i += 1) {
             await Bun.sleep(0);
         }
-        expect(tree.waitResolve).toBeFunction();
+        expect(tree.waitResolvers.size).toBe(1);
         await Effect.runPromise(Fiber.interrupt(fiber));
-        expect(tree.waitResolve).toBeNull();
+        expect(tree.waitResolvers.size).toBe(0);
+    });
+    test("two concurrent waiters both resume on flush", async () => {
+        const dir = makeTempDir();
+        cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+        const tree = new WatchTree(dir, { debounceMs: 50 });
+        cleanups.push(() => tree.close());
+        await tree.start();
+        const waitA = tree.wait();
+        const waitB = tree.wait();
+        for (let i = 0; i < 10 && tree.waitResolvers.size < 2; i += 1) {
+            await Bun.sleep(0);
+        }
+        expect(tree.waitResolvers.size).toBe(2);
+        setTimeout(() => {
+            writeFileSync(join(dir, "concurrent.ts"), "export const c = 1;");
+        }, 50);
+        const [changedA, changedB] = await Promise.all([waitA, waitB]);
+        expect(changedA.length).toBeGreaterThan(0);
+        expect(changedB.length).toBeGreaterThan(0);
+        tree.close();
+    });
+    test("interrupting one waiter leaves another waiter's resolver intact", async () => {
+        const dir = makeTempDir();
+        cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+        const tree = new WatchTree(dir, { debounceMs: 50 });
+        cleanups.push(() => tree.close());
+        await tree.start();
+        const fiberA = Effect.runFork(tree.waitEffect());
+        const waitB = tree.wait();
+        for (let i = 0; i < 10 && tree.waitResolvers.size < 2; i += 1) {
+            await Bun.sleep(0);
+        }
+        expect(tree.waitResolvers.size).toBe(2);
+        await Effect.runPromise(Fiber.interrupt(fiberA));
+        expect(tree.waitResolvers.size).toBe(1);
+        setTimeout(() => {
+            writeFileSync(join(dir, "b-only.ts"), "export const b = 1;");
+        }, 50);
+        const changedB = await waitB;
+        expect(changedB.length).toBeGreaterThan(0);
+        tree.close();
     });
     test("detects file changes", async () => {
         const dir = makeTempDir();

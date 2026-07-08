@@ -734,7 +734,7 @@ declare class WatchTree {
     polling: boolean;
     pollingDisabled: boolean;
     currentPollIntervalMs: number;
-    waitResolve: null;
+    waitResolvers: Set<any>;
     closed: boolean;
     /** Start watching. Call once. */
     start(): Promise<void>;

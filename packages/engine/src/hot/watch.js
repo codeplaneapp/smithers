@@ -38,7 +38,7 @@ export class WatchTree {
     polling = false;
     pollingDisabled = false;
     currentPollIntervalMs = MIN_POLL_MS;
-    waitResolve = null;
+    waitResolvers = new Set();
     closed = false;
     /**
    * @param {string} rootDir
@@ -81,10 +81,11 @@ export class WatchTree {
             catch { }
         }
         this.watchers = [];
-        // Resolve any pending wait with empty array
-        if (this.waitResolve) {
-            this.waitResolve([]);
-            this.waitResolve = null;
+        // Resolve any pending waits with empty array
+        const resolvers = [...this.waitResolvers];
+        this.waitResolvers.clear();
+        for (const resolveWait of resolvers) {
+            resolveWait([]);
         }
         logInfo("closed hot watch tree", {
             rootDir: this.rootDir,
@@ -131,13 +132,12 @@ export class WatchTree {
                 resume(Effect.succeed(files));
                 return;
             }
-            this.waitResolve = (files) => {
+            const resolver = (files) => {
                 resume(Effect.succeed(files));
             };
+            this.waitResolvers.add(resolver);
             return Effect.sync(() => {
-                if (this.waitResolve) {
-                    this.waitResolve = null;
-                }
+                this.waitResolvers.delete(resolver);
             });
         }).pipe(Effect.annotateLogs({
             rootDir: this.rootDir,
@@ -329,9 +329,10 @@ export class WatchTree {
             changedFileCount: files.length,
             changedFiles: files.join(","),
         }, "hot:watch");
-        if (this.waitResolve) {
-            this.waitResolve(files);
-            this.waitResolve = null;
+        const resolvers = [...this.waitResolvers];
+        this.waitResolvers.clear();
+        for (const resolveWait of resolvers) {
+            resolveWait(files);
         }
     }
 }
