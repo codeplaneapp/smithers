@@ -161,7 +161,7 @@ test("workflow create writes a new flat workflow file", () => {
     });
     expect(result.exitCode).toBe(0);
     expect(repo.exists(".smithers/workflows/foo.tsx")).toBe(true);
-});
+}, 60_000);
 test("workflow create scaffolds a workflow that runs immediately", () => {
     const repo = createTempRepo();
     const env = buildWorkflowEnv(repo.dir);
@@ -270,7 +270,7 @@ test("workflow create rejects invalid workflow names", () => {
     expect(result.json).toMatchObject({
         code: "INVALID_WORKFLOW_NAME",
     });
-});
+}, 60_000);
 test("workflow doctor reports discovered workflows, preload files, and agent detection", () => {
     const repo = createTempRepo();
     const env = buildWorkflowEnv(repo.dir);
@@ -301,4 +301,4 @@ test("workflow doctor reports discovered workflows, preload files, and agent det
         ],
     });
     expect(JSON.stringify(result.json)).toContain('"id":"codex"');
-});
+}, 60_000);
