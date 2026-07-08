@@ -11,6 +11,7 @@ export default defineConfig({
     renderWorkflow: "src/renderWorkflow.ts",
     renderPrompt: "src/renderPrompt.ts",
     runTask: "src/runTask.ts",
+    simulate: "src/simulate.ts",
   },
   format: ["esm"],
   dts: { resolve: false },

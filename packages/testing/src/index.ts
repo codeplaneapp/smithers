@@ -14,3 +14,10 @@ export type { RenderedWorkflow, RenderWorkflowOptions } from "./renderWorkflow.t
 export { renderPrompt } from "./renderPrompt.ts";
 export { runTask } from "./runTask.ts";
 export type { RunTaskOptions } from "./runTask.ts";
+export { simulate } from "./simulate.ts";
+export type {
+  Sim,
+  SimTaskRecord,
+  SimulateMockFunction,
+  SimulateOptions,
+} from "./simulate.ts";

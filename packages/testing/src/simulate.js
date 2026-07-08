@@ -1,3 +1,10 @@
+// src/simulate.ts
+import { zodSchemaToJsonExample as zodSchemaToJsonExample2 } from "@smithers-orchestrator/components/zod-to-example";
+import { WorkflowDriver } from "@smithers-orchestrator/driver";
+import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
+import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
+import { Effect } from "effect";
+
 // src/fakeAgent.ts
 import { mkdir, writeFile } from "fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "path";
@@ -130,115 +137,7 @@ var fakeAgent = Object.assign(buildFakeAgent, {
   sequence: buildSequenceAgent
 });
 
-// src/renderWorkflow.ts
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
-function buildRuntimeConfig(options) {
-  return {
-    ...options.runtimeConfig,
-    ...options.baseRootDir !== void 0 ? { baseRootDir: options.baseRootDir } : {},
-    ...options.workflowPath !== void 0 ? { workflowPath: options.workflowPath } : {}
-  };
-}
-function buildExtractOptions(options) {
-  return {
-    defaultIteration: options.iteration ?? 0,
-    ralphIterations: options.iterations,
-    baseRootDir: options.baseRootDir ?? options.runtimeConfig?.baseRootDir,
-    workflowPath: options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null
-  };
-}
-async function renderWorkflow(workflow, options = {}) {
-  const ctx = new SmithersCtx({
-    runId: options.runId ?? "test-run",
-    iteration: options.iteration ?? 0,
-    iterations: options.iterations,
-    input: options.input ?? {},
-    auth: options.auth ?? null,
-    outputs: options.outputs ?? {},
-    zodToKeyName: workflow.zodToKeyName,
-    runtimeConfig: buildRuntimeConfig(options)
-  });
-  const renderer = options.renderer ?? new SmithersRenderer();
-  const graph = await renderer.render(
-    workflow.build(ctx),
-    buildExtractOptions(options)
-  );
-  const baseRootDir = options.baseRootDir ?? options.runtimeConfig?.baseRootDir;
-  const workflowPath = options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null;
-  const engineHelpers = await import("@smithers-orchestrator/engine/engine");
-  const computeHelpers = await import("@smithers-orchestrator/engine/task-compute-fns");
-  engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
-  computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
-    rootDir: baseRootDir,
-    workflowPath
-  });
-  computeHelpers.attachSandboxComputeFns(graph.tasks, workflow, {
-    rootDir: baseRootDir,
-    workflowPath
-  });
-  return {
-    ...graph,
-    runId: ctx.runId,
-    frameNo: options.frameNo ?? 0,
-    graph,
-    ctx,
-    toXml() {
-      return canonicalizeXml(graph.xml);
-    }
-  };
-}
-
-// src/renderPrompt.ts
-import { renderPromptToText } from "@smithers-orchestrator/components/components/Task";
-
-// src/runTask.ts
-async function runTask(task, options = {}) {
-  if (task.kind === "static" || task.staticPayload !== void 0) {
-    return validateOutput(task, task.staticPayload);
-  }
-  if (task.kind === "compute" || task.computeFn) {
-    if (!task.computeFn) {
-      throw new TypeError(`Task ${task.nodeId} is marked compute but has no compute function`);
-    }
-    return validateOutput(task, await task.computeFn());
-  }
-  const agent = Array.isArray(task.agent) ? task.agent[Math.min((options.attempt ?? 1) - 1, task.agent.length - 1)] : task.agent;
-  if (!agent?.generate) {
-    throw new TypeError(`Task ${task.nodeId} has no runnable agent, compute function, or static payload`);
-  }
-  const result = await agent.generate({
-    prompt: task.prompt,
-    outputSchema: task.outputSchema,
-    rootDir: options.rootDir,
-    taskContext: {
-      runId: options.runId,
-      nodeId: task.nodeId,
-      iteration: task.iteration,
-      attempt: options.attempt ?? 1
-    }
-  });
-  if (result && typeof result === "object" && "output" in result) {
-    return validateOutput(task, result.output);
-  }
-  if (task.outputSchema) return validateOutput(task, result);
-  return result;
-}
-function validateOutput(task, value) {
-  if (!task.outputSchema) return value;
-  const parsed = task.outputSchema.safeParse(value);
-  if (parsed.success) return parsed.data;
-  const message = parsed.error.issues.map((issue) => issue.message).join("; ");
-  throw new TypeError(`Task ${task.nodeId} output failed validation: ${message}`);
-}
-
 // src/simulate.ts
-import { zodSchemaToJsonExample as zodSchemaToJsonExample2 } from "@smithers-orchestrator/components/zod-to-example";
-import { WorkflowDriver } from "@smithers-orchestrator/driver";
-import { SmithersRenderer as SmithersRenderer2 } from "@smithers-orchestrator/react-reconciler";
-import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
-import { Effect } from "effect";
 function createRunId() {
   return `sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -389,7 +288,7 @@ function simulate(workflow, options = {}) {
       return copyTaskRecord(taskRecords.get(id));
     }
   };
-  const smithersRenderer = new SmithersRenderer2();
+  const smithersRenderer = new SmithersRenderer();
   const renderer = {
     async render(element, extractOptions) {
       const graph = await smithersRenderer.render(element, extractOptions);
@@ -493,11 +392,5 @@ function simulate(workflow, options = {}) {
   return handle;
 }
 export {
-  auto,
-  fakeAgent,
-  isAuto,
-  renderPromptToText as renderPrompt,
-  renderWorkflow,
-  runTask,
   simulate
 };

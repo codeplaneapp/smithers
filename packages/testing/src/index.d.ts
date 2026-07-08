@@ -2,6 +2,7 @@ export { AutoMock, FakeAgent, FakeAgentCall, FakeAgentFiles, FakeAgentOptions, F
 export { RenderWorkflowOptions, RenderedWorkflow, renderWorkflow } from './renderWorkflow.js';
 export { renderPromptToText as renderPrompt } from '@smithers-orchestrator/components/components/Task';
 export { RunTaskOptions, runTask } from './runTask.js';
+export { Sim, SimTaskRecord, SimulateMockFunction, SimulateOptions, simulate } from './simulate.js';
 import '@smithers-orchestrator/driver/SmithersCtx';
 import '@smithers-orchestrator/react-reconciler';
 import '@smithers-orchestrator/driver/WorkflowDefinition';
