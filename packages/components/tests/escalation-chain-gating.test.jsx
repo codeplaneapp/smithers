@@ -205,6 +205,24 @@ describe("EscalationChain gates levels on the real escalation decision", () => {
             });
         }
     });
+    test("an empty levels array with humanFallback=true mounts no tasks at all, not even the fallback", async () => {
+        // `levels.length > 0` guards the fallback mount, so a chain with zero
+        // levels has no "all levels escalated" baseline to gate on — it must
+        // render an empty sequence rather than an unconditional fallback.
+        const result = await renderWithOutputs(
+            <EscalationChain
+                id="incident"
+                levels={[]}
+                escalationOutput="escalation_out"
+                humanFallback
+                humanRequest={{ title: "Human review", summary: "Escalate" }}
+            >
+                triage incident
+            </EscalationChain>,
+            {},
+        );
+        expect(result.tasks).toEqual([]);
+    });
     test("human fallback uses the default request when no humanRequest is provided", async () => {
         const result = await renderWithOutputs(
             <EscalationChain
