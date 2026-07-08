@@ -1,68 +1,84 @@
 // smithers-source: bespoke
-// smithers-display-name: Issue 491 — review cloud /api/plan
+// smithers-display-name: Issue 491 — review cloud landing onboarding
 /** @jsxImportSource smithers-orchestrator */
 import { UI } from "smithers-orchestrator";
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { agents } from "../agents";
-import { implementer, panelists } from "../components/roles";
+import { providers } from "../agents";
+import { implementer } from "../components/roles";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
-import { reviewSynthesisSchema, reviewGate } from "../components/Review";
+import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
 
-// The hosted walkthrough lifecycle (#491) is already mostly on main: D1
-// metadata rows, per-repo history, DELETE, per-session publish limits, the CSP
-// sandbox + branded 404, and a landing page. The one deliverable the issue
-// names that does NOT exist yet is `GET /api/plan` — plan/quota visibility for
-// the authenticated repo. This workflow implements exactly that, TDD-first.
+// This account pool has no live Anthropic/Claude quota (only codex/kimi/gemini
+// are registered), so the seeded claude-led `agents.planning`/`panelists` pools
+// park the run on `waiting-quota` forever. Route every stage through Codex
+// (gpt-5.5) — the reliably-available CLI here. `implementer` already leads with
+// Codex; this pool keeps planning/validate/review on it too.
+const codexPool = [providers.codex1, providers.codex];
+
+// The hosted walkthrough lifecycle (#491) is almost entirely on main already:
+// D1 metadata rows on publish, per-repo history (GET /api/walkthroughs?repo=),
+// DELETE /api/walkthroughs/<id>, per-session publish limits, and the serving
+// hardening (CSP `sandbox allow-scripts` + branded 404). The `GET /api/plan`
+// plan/quota endpoint has also landed (handlePlan.ts + handlePlan.test.ts). The
+// one deliverable the issue still names that is NOT done is the "Landing page"
+// bullet: `landingPage.ts` is a bare stub that does not onboard. This workflow
+// finishes #491 by making the landing page onboard — TDD-first.
 
 const inputSchema = z.object({
   spec: z.string().default(
-    `Add a \`GET /api/plan\` endpoint to the smithers review cloud worker (apps/review) that gives the
-authenticated caller plan and quota visibility for a repo. This is the last un-done item of issue #491.
+    `Finish issue #491 by making the smithers review cloud landing page (apps/review) actually onboard a
+new user. Today apps/review/src/server/landingPage.ts is a bare stub: it names the product and shows one
+publish command, but it does NOT explain how a repo gets registered, does NOT point at plan/quota
+visibility (the \`GET /api/plan\` endpoint that now exists), and shows no example of what a published
+walkthrough looks like. The issue's "Landing page" bullet asks it to onboard: what the product is, a real
+walkthrough example, registration instructions, and plan/quota visibility (GET /api/plan).
 
 TDD — write the failing test FIRST, watch it go red, then implement until green.
 
-TEST (new file apps/review/tests/server/handlePlan.test.ts, mirror the style of
-apps/review/tests/server/handleWalkthroughs.test.ts — use createReviewWorker, buildTestEnv, sha256Hex,
-seed rows directly via env.DB.prepare). Cover:
-  - A session-authenticated GET /api/plan (Authorization: Bearer <session token>) for a REGISTERED repo
-    returns 200 with a JSON body exposing the plan (mode, quiz, prsPerMonth, spendCapUsd) and the
-    month-to-date quota (month, prsUsed, prsPerMonth, monthlyCapUsd, monthlySpendUsd). Seed a repos row,
-    some reviewed_prs rows in the current month, and a usage_events row so prsUsed and monthlySpendUsd
-    are non-zero and assertable. monthlyCapUsd must equal prsPerMonth * spendCapUsd.
-  - No credential -> 401.
-  - A session whose repo is NOT registered (no repos row) -> 404.
-  - An srk_ api-key requesting ?repo=<a repo it does NOT own> -> 403.
+TEST (new file apps/review/tests/server/landingPage.test.ts, mirror the style of
+apps/review/tests/server/workerMissingDb.test.ts — use createReviewWorker with fixture deps and
+buildTestEnv for the env). Cover, by asserting on the GET / response body text:
+  - GET / returns 200 with content-type text/html; charset=utf-8 (it already does — keep this assertion).
+  - The body onboards on registration: it must reference the repo registration / access path so a new
+    user knows how to get set up (assert it mentions the GitHub Action / OIDC onboarding, e.g. contains
+    the substring "/api/sessions" or a "register"/"onboard" instruction — pick wording that matches the
+    implementation).
+  - The body surfaces plan/quota visibility: assert it contains the substring "/api/plan".
+  - The body shows a real walkthrough example: assert it references the published walkthrough link shape,
+    i.e. contains the substring "/w/".
+  - Keep the existing product description and publish command visible (assert it still contains
+    "--publish" or the publish command).
+Every asserted substring MUST be absent from the current landingPage.ts so the test genuinely goes red
+before the change — confirm that by running the test before editing landingPage.ts.
 
 IMPLEMENTATION:
-  - New file apps/review/src/server/plan/handlePlan.ts exporting \`handlePlan(request, env, url, now)\`.
-    Authenticate with authenticateProxyRequest (../proxy/authenticateProxyRequest.ts) -> 401 when null.
-    Resolve the target repo from url.searchParams.get("repo"); when absent and the credential is a
-    session, default to the session's repo. Reuse the canAccessRepo shape from handleWalkthroughs
-    (session: repo === credential.repo; api-key: credential.repos.includes(repo)) -> 403 when denied.
-    Look the repo up with lookupRepo (../sessions/lookupRepo.ts) -> 404 "repo not registered" when null.
-    Compute quota: prsUsed = COUNT(*) of reviewed_prs for (repo, monthKey(now)); monthlySpendUsd via
-    repoMonthlySpendUsd(../repoMonthlySpendUsd.ts); monthlyCapUsd via repoMonthlyCapUsd(../repoMonthlyCapUsd.ts).
-    Return Response.json({ repo, plan: { mode, quiz, prsPerMonth, spendCapUsd }, quota: { month, prsUsed,
-    prsPerMonth, monthlyCapUsd, monthlySpendUsd } }). Reuse jsonError for the error responses.
-  - Wire the route into apps/review/src/server/worker.ts (after the admin routes, before the
-    walkthroughs block): GET /api/plan -> handlePlan(request, env, url, deps.now()). It must sit BELOW
-    the ensureSchema / env.DB guard since it reads D1.
+  - Edit ONLY apps/review/src/server/landingPage.ts. It exports \`const landingPage\` (a full HTML string
+    that already imports workflowUiThemeCss and has a <style> block). Extend the <main> content so it
+    onboards: (1) a one-line "what it is", (2) a short "publish" example (keep the existing
+    \`smithers-review ... --publish\` command) and show the resulting unlisted link shape (\`/w/<id>\`),
+    (3) "get access / register" instructions describing the GitHub Action + OIDC session flow (the
+    action mints a session at POST /api/sessions; an operator registers the repo), and (4) a
+    "check your plan & quota" note pointing at \`GET /api/plan\`. Keep it a single static HTML string —
+    no new imports, no new dependencies, no server logic. Reuse the existing CSS classes / theme vars.
+  - Do NOT change worker.ts routing or any other file.
 
-CONSTRAINTS: minimal, idiomatic, no new dependencies, no unrelated refactors, follow existing file
-conventions exactly (one export per file, explicit interfaces for row shapes, .ts import extensions).
-VERIFY by running: pnpm -C apps/review test handlePlan (and the full apps/review suite must stay green).`,
+CONSTRAINTS: minimal, idiomatic, no new dependencies, no unrelated refactors, one export per file,
+keep the landing page a pure static string so it still serves without a DB (workerMissingDb.test.ts must
+stay green). VERIFY by running: pnpm -C apps/review test landingPage (and the full apps/review suite must
+stay green).`,
   ),
 });
 
 const { Workflow, smithers, outputs } = createSmithers({
   input: inputSchema,
   plan: z.object({
-    plan: z.string().describe("the concrete implementation plan for GET /api/plan"),
-    testPath: z.string().default("apps/review/tests/server/handlePlan.test.ts"),
+    plan: z.string().describe("the concrete implementation plan for the landing-page onboarding"),
+    testPath: z.string().default("apps/review/tests/server/landingPage.test.ts"),
   }),
   implement: implementOutputSchema,
   validate: validateOutputSchema,
+  review: reviewOutputSchema,
   reviewSynthesis: reviewSynthesisSchema,
 });
 
@@ -91,13 +107,13 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="issue-491-review-cloud-hosted-walkthrough-lifecycl">
-      <UI entry="../ui/implement.tsx" title={"Issue 491 — /api/plan"} />
+      <UI entry="../ui/implement.tsx" title={"Issue 491 — landing onboarding"} />
       <Sequence>
-        <Task id="p491:plan" output={outputs.plan} agent={agents.planning}>
+        <Task id="p491:plan" output={outputs.plan} agent={codexPool}>
           {`You are planning a small, well-scoped fix. Read the spec, then read the referenced files in
-apps/review/src/server (worker.ts, walkthroughs/handleWalkthroughs.ts, proxy/authenticateProxyRequest.ts,
-sessions/lookupRepo.ts, repoMonthlySpendUsd.ts, repoMonthlyCapUsd.ts, monthKey.ts) and the existing test
-tests/server/handleWalkthroughs.test.ts. Produce a concrete, minimal implementation plan and the test path.
+apps/review/src/server (landingPage.ts, worker.ts, plan/handlePlan.ts, sessions/handleSessions.ts) and the
+existing test tests/server/workerMissingDb.test.ts. Produce a concrete, minimal implementation plan and
+the test path.
 
 SPEC:
 ${spec}`}
@@ -108,8 +124,8 @@ ${spec}`}
             idPrefix="p491:impl"
             prompt={implementPrompt}
             implementAgents={implementer}
-            validateAgents={agents.cheapFast}
-            reviewAgents={panelists}
+            validateAgents={codexPool}
+            reviewAgents={codexPool}
             synthesizeReview
             feedback={feedback}
             done={done}

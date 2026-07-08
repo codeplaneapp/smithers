@@ -6,6 +6,7 @@ import { jsonError } from "./jsonError.ts";
 import { landingPage } from "./landingPage.ts";
 import { ensureSchema } from "./migrations.ts";
 import { handleMetrics } from "./metrics/handleMetrics.ts";
+import { handlePlan } from "./plan/handlePlan.ts";
 import { handleAnthropic } from "./proxy/handleAnthropic.ts";
 import { handleSessions } from "./sessions/handleSessions.ts";
 import { handleWalkthroughs } from "./walkthroughs/handleWalkthroughs.ts";
@@ -122,6 +123,10 @@ export function createReviewWorker(overrides?: Partial<ReviewWorkerDeps>) {
       }
       if (url.pathname === "/api/admin/usage") {
         return handleAdminUsage(request, env);
+      }
+
+      if (url.pathname === "/api/plan" && request.method === "GET") {
+        return handlePlan(request, env, url, deps.now());
       }
 
       if (
