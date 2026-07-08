@@ -442,6 +442,24 @@ describe("deriveOutputText (getNodeOutput envelope unwrap)", () => {
     expect(withPartial).toContain("halfway");
   });
 
+  it("defensively truncates a failed envelope with very large partial output", () => {
+    const text = deriveOutputText(
+      {
+        status: "failed",
+        row: null,
+        schema: null,
+        partial: { output: "x".repeat(1_000_000) },
+      },
+      outNode(),
+    );
+
+    expect(text).toContain("(failed) partial output:");
+    expect(text.length).toBeLessThanOrEqual(
+      TUI_OUTPUT_PREVIEW_CHARS + TUI_OUTPUT_TRUNCATION_MARKER.length,
+    );
+    expect(text.endsWith(TUI_OUTPUT_TRUNCATION_MARKER)).toBe(true);
+  });
+
   it("keeps the plain string-field fallbacks for non-envelope payloads", () => {
     expect(deriveOutputText({ output: "plain" }, outNode())).toBe("plain");
     expect(deriveOutputText({ text: "txt" }, outNode())).toBe("txt");
