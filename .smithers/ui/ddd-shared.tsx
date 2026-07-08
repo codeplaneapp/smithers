@@ -930,7 +930,19 @@ function summarizeEventValue(value: unknown): string {
  * Generic one-line view of any run event for the live log (the `smithers up
  * --interactive` style feed). Renders every public event, not just agent text.
  */
-export function logLineFromFrame(frame: EventFrame): { seq: number; event: string; node: string; detail: string } | null {
+/** Event tone for the live feed: failures read red, waits/retries amber. */
+function logToneFor(event: string, status: string): "ok" | "warn" | "bad" | "" {
+  const verb = event.split(".").at(-1) ?? "";
+  if (/fail|error|reject|crash|abort/i.test(verb)) return "bad";
+  const statusTone = status ? statusClass(status) : "";
+  if (statusTone === "bad") return "bad";
+  if (/retry|retrying|timeout|stall|degrad/i.test(verb)) return "warn";
+  if (/complete|finish|success|done|resolved/i.test(verb) || statusTone === "ok") return "ok";
+  if (statusTone === "warn") return "warn";
+  return "";
+}
+
+export function logLineFromFrame(frame: EventFrame): { seq: number; event: string; node: string; detail: string; tone: "ok" | "warn" | "bad" | "" } | null {
   const env = frameEnvelope(frame);
   if (!env) return null;
   const { event, payload } = env;
@@ -968,7 +980,8 @@ export function logLineFromFrame(frame: EventFrame): { seq: number; event: strin
     detail = [formatStatus(asString(payload.status)), shortText(asString(payload.message), 180)].filter(Boolean).join(" · ") || summarizeStructured(payload);
   }
 
-  return { seq: finiteSeq(frame.seq), event, node, detail: shortText(detail, 260) };
+  const tone = logToneFor(event, asString(payload.status));
+  return { seq: finiteSeq(frame.seq), event, node, detail: shortText(detail, 260), tone };
 }
 
 export function ListBlock({ title, items }: { title: string; items: string[] }) {
@@ -1562,14 +1575,20 @@ export function MarkdownPreview({ markdown, onLinkClick }: { markdown: string; o
 export function WorkflowSource({ workflowKey = "docs-driven-development" }: { workflowKey?: string }) {
   const entry = workflowSources[workflowKey] ?? (workflowKey === "docs-driven-development" ? { path: workflowSourcePath, source: workflowSource } : undefined);
   if (!entry?.source) return null;
+  const lineCount = entry.source.split("\n").length;
+  // Collapsed by default: the full script is a tall wall that used to split the
+  // two live surfaces. The card-head is the <summary> disclosure.
   return (
-    <section className="card" data-testid="ddd-workflow-source">
-      <div className="card-head">
+    <details className="card source-card" data-testid="ddd-workflow-source">
+      <summary className="card-head source-summary">
         <h2>Smithers script</h2>
-        <span className="pill">{entry.path}</span>
-      </div>
+        <span className="source-summary-meta">
+          <span className="pill">{entry.path}</span>
+          <span className="pill muted">{formatCount(lineCount, "line")}</span>
+        </span>
+      </summary>
       <pre className="source">{entry.source}</pre>
-    </section>
+    </details>
   );
 }
 
@@ -1655,6 +1674,75 @@ export function FeatureDetail({
   const modalRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   useDialogFocusTrap({ containerRef: modalRef, initialFocusRef: closeRef, onClose });
+
+  const tests = strings(feature.tests);
+  const observability = strings(feature.observability);
+  const debug = strings(feature.debug);
+  const architecture = strings(feature.architecture);
+  const evidence = strings(feature.evidence);
+  const fixes = [...strings(feature.changes), ...strings(feature.diffHints)];
+  const gaps = strings(feature.missing);
+  const capabilities = feature.capabilities ?? [];
+  const endpoints = feature.endpoints ?? [];
+  const links = feature.links ?? [];
+  const brokenCaps = capabilities.filter((cap) => cap.status === "broken" || cap.status === "partial").length;
+
+  // Group the ~10 detail blocks into panels so the modal is navigable instead of
+  // one long always-expanded scroll. Only non-empty panels get a tab.
+  const sections: Array<{ key: string; label: string; count: number; render: () => ReactNode }> = [
+    {
+      key: "overview",
+      label: "Overview",
+      count: capabilities.length,
+      render: () => (
+        <>
+          {feature.userValue ? <p className="user-value"><strong>What you can do:</strong> {feature.userValue}</p> : null}
+          {feature.summary ? <p>{feature.summary}</p> : null}
+          <CapabilityBlock capabilities={feature.capabilities} />
+        </>
+      ),
+    },
+    {
+      key: "verification",
+      label: "Verification",
+      count: tests.length + observability.length + debug.length + evidence.length,
+      render: () => (
+        <>
+          <DetailList title="Test Cases" items={tests} mono />
+          <DetailList title="Evidence" items={evidence} />
+          <DetailList title="Observability" items={observability} />
+          <DetailList title="Debugging" items={debug} />
+        </>
+      ),
+    },
+    {
+      key: "docs-api",
+      label: "Docs & API",
+      count: endpoints.length + links.length + architecture.length,
+      render: () => (
+        <>
+          <EndpointBlock endpoints={feature.endpoints} onOpenDoc={onOpenDoc} />
+          <LinkBlock links={feature.links} onOpenDoc={onOpenDoc} />
+          <DetailList title="Architecture" items={architecture} />
+        </>
+      ),
+    },
+    {
+      key: "gaps",
+      label: "Gaps & Fixes",
+      count: gaps.length + fixes.length,
+      render: () => (
+        <>
+          <DetailList title="Open Gaps" items={gaps} tone="warn" />
+          <DetailList title="Fixes & Diffs" items={fixes} mono />
+        </>
+      ),
+    },
+  ].filter((section) => section.count > 0);
+
+  const [activeSection, setActiveSection] = useState(sections[0]?.key ?? "overview");
+  const current = sections.find((section) => section.key === activeSection) ?? sections[0];
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <section
@@ -1682,34 +1770,108 @@ export function FeatureDetail({
         </div>
         {note ? <p className="audit-note">Audit note: {note}</p> : null}
         {media ? <img className="feature-media" src={media} alt="" /> : null}
-        {feature.userValue ? <p className="user-value"><strong>What you can do:</strong> {feature.userValue}</p> : null}
-        <p>{feature.summary}</p>
-        <CapabilityBlock capabilities={feature.capabilities} />
-        <EndpointBlock endpoints={feature.endpoints} onOpenDoc={onOpenDoc} />
-        <LinkBlock links={feature.links} onOpenDoc={onOpenDoc} />
-        <ListBlock title="Test Cases" items={strings(feature.tests)} />
-        <ListBlock title="Observability" items={strings(feature.observability)} />
-        <ListBlock title="Debugging" items={strings(feature.debug)} />
-        <ListBlock title="Architecture" items={strings(feature.architecture)} />
-        <ListBlock title="Evidence" items={strings(feature.evidence)} />
-        <ListBlock title="Fixes & Diffs" items={[...strings(feature.changes), ...strings(feature.diffHints)]} />
-        <ListBlock title="Open Gaps" items={strings(feature.missing)} />
+
+        <div className="stats detail-kpis" data-testid="ddd-feature-kpis">
+          <div className="stat"><strong>{capabilities.length}</strong><span>{brokenCaps ? `Capabilities · ${brokenCaps} at risk` : "Capabilities"}</span></div>
+          <div className="stat"><strong>{endpoints.length}</strong><span>Endpoints</span></div>
+          <div className="stat"><strong>{tests.length}</strong><span>Tests</span></div>
+          <div className={`stat${gaps.length ? " stat-warn" : ""}`}><strong>{gaps.length}</strong><span>Open gaps</span></div>
+        </div>
+
+        {sections.length > 1 ? (
+          <div className="preview-toolbar detail-toolbar" role="tablist" aria-label="Feature detail sections">
+            {sections.map((section) => (
+              <button
+                key={section.key}
+                type="button"
+                role="tab"
+                aria-selected={current?.key === section.key}
+                className={current?.key === section.key ? "segmented is-active" : "segmented"}
+                data-testid={`ddd-feature-section-${section.key}`}
+                onClick={() => setActiveSection(section.key)}
+              >
+                {section.label}<span className="count">{section.count}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="detail-panel" data-testid="ddd-feature-detail-panel">
+          {current ? current.render() : <p className="empty">No detail recorded for this feature yet.</p>}
+        </div>
       </section>
     </div>
   );
 }
 
+/**
+ * A titled section whose items render as bordered rows (not muted bullets), so
+ * long prose/paths read as scannable cards. `mono` formats items as code
+ * (test commands, file paths); `tone` tints the left rail (open gaps → warn).
+ */
+export function DetailList({ title, items, mono = false, tone }: { title: string; items: string[]; mono?: boolean; tone?: "warn" | "bad" }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="list-block">
+      <div className="list-block-head">
+        <strong>{title}</strong>
+        <span className="pill muted">{items.length}</span>
+      </div>
+      <div className="detail-rows">
+        {items.map((item, index) => (
+          <div className={`detail-row${tone ? ` is-${tone}` : ""}`} key={`${title}:${index}`}>
+            {mono ? <code className="detail-mono">{item}</code> : <span>{item}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Structured count/flag chips for a node-output row (changed files, fixed, etc.). */
+export function outputCardChips(row: Record<string, unknown> | null): Array<{ key: string; label: string; tone: "" | "ok" | "warn" | "bad" }> {
+  if (!row) return [];
+  const chips: Array<{ key: string; label: string; tone: "" | "ok" | "warn" | "bad" }> = [];
+  const countFields: Array<[string, string, string]> = [
+    ["changedFiles", "file changed", "files changed"],
+    ["updatedFiles", "doc updated", "docs updated"],
+    ["updatedDocs", "doc updated", "docs updated"],
+    ["featuresUpdated", "feature updated", "features updated"],
+    ["fixed", "fixed", "fixed"],
+    ["remaining", "remaining", "remaining"],
+    ["tickets", "ticket", "tickets"],
+    ["findings", "finding", "findings"],
+    ["commandsRun", "command", "commands"],
+    ["commands", "command", "commands"],
+  ];
+  for (const [key, singular, plural] of countFields) {
+    const count = asArray(row[key]).length;
+    if (count > 0) chips.push({ key, label: formatCount(count, singular, plural), tone: key === "remaining" ? "warn" : "" });
+  }
+  if (typeof row.buildPassed === "boolean") chips.push({ key: "build", label: row.buildPassed ? "build passed" : "build failed", tone: row.buildPassed ? "ok" : "bad" });
+  if (typeof row.docsBuildPassed === "boolean") chips.push({ key: "docsBuild", label: row.docsBuildPassed ? "docs build passed" : "docs build failed", tone: row.docsBuildPassed ? "ok" : "bad" });
+  return chips;
+}
+
 export function OutputCard({ label, row, pending = "waiting" }: { label: string; row: Record<string, unknown> | null; pending?: string }) {
-  const summary = asString(row?.summary) || pending;
+  const summary = asString(row?.summary);
   const status = asString(row?.status) || (row ? "ready" : "waiting");
+  const chips = outputCardChips(row);
   const testId = `ddd-output-${label.toLowerCase().replaceAll(" ", "-")}`;
   return (
-    <section className="card" data-testid={testId}>
+    <section className="card output-card" data-testid={testId}>
       <div className="card-head">
         <h2>{label}</h2>
         <span className={`badge ${statusClass(status)}`}>{formatStatus(status)}</span>
       </div>
-      <p>{summary}</p>
+      {chips.length ? (
+        <div className="meta-row">
+          {chips.map((chip) => (
+            <span key={chip.key} className={chip.tone ? `badge ${chip.tone}` : "pill"}>{chip.label}</span>
+          ))}
+        </div>
+      ) : null}
+      {summary ? <MarkdownPreview markdown={summary} /> : <p className="output-pending">{pending}</p>}
     </section>
   );
 }
@@ -1767,6 +1929,9 @@ export const styles = [
   ".button:hover { background:var(--hover); }",
   ".button.primary { border-color:color-mix(in srgb,var(--brand) 40%,transparent); background:color-mix(in srgb,var(--brand) 10%,var(--surface)); color:var(--brand); font-weight:650; }",
   ".button.primary:hover { background:color-mix(in srgb,var(--brand) 16%,var(--surface)); }",
+  ".button.danger { border-color:color-mix(in srgb,var(--danger) 45%,transparent); color:var(--danger); }",
+  ".button.danger:hover { background:color-mix(in srgb,var(--danger) 12%,var(--surface)); }",
+  ".button.danger.is-armed { background:color-mix(in srgb,var(--danger) 14%,var(--surface)); font-weight:650; }",
   ".button:focus-visible,.icon-button:focus-visible,.tab:focus-visible,.tree-file:focus-visible,.run-row:focus-visible,.finding:focus-visible,.feature-card.is-clickable:focus-visible,.ticket-row:focus-visible,.doc-link:focus-visible,.tree-dir-name:focus-visible,.tree-section-toggle:focus-visible,.segmented:focus-visible { outline:none; border-color:color-mix(in srgb,var(--brand) 50%,transparent); box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent); }",
   ".button:disabled { cursor:not-allowed; opacity:.45; }",
   ".icon-button { width:32px; min-height:32px; padding:0; border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:6px; cursor:pointer; }",
@@ -1835,6 +2000,18 @@ export const styles = [
   ".stat strong { display:block; font-size:18px; }",
   ".stat span { color:var(--muted); font-size:11px; }",
   ".grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:start; }",
+  // OutputCard: render its summary as compact markdown (not an article) and keep
+  // the pending placeholder visibly muted so it never reads as real output.
+  ".output-card .markdown-preview { padding:0; background:transparent; overflow:visible; }",
+  ".output-card .markdown-preview > *:first-child { margin-top:0; }",
+  ".output-card .markdown-preview > *:last-child { margin-bottom:0; }",
+  ".output-card .markdown-preview p,.output-card .markdown-preview li { font-size:12px; line-height:1.5; color:var(--text); }",
+  ".output-card .markdown-preview p { margin:0 0 6px; max-width:none; }",
+  ".output-card .markdown-preview h1 { font-size:13px; margin:8px 0 4px; line-height:1.3; }",
+  ".output-card .markdown-preview h2 { font-size:12px; margin:8px 0 4px; }",
+  ".output-card .markdown-preview h3 { font-size:12px; margin:6px 0 3px; }",
+  ".output-card .markdown-preview ul,.output-card .markdown-preview ol { margin:0 0 6px; padding-left:18px; }",
+  ".output-pending { color:var(--text-muted); font-style:italic; }",
   // audit findings
   ".finding { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid var(--border); border-radius:8px; padding:9px 11px; background:var(--surface); cursor:pointer; text-align:left; color:var(--text); width:100%; transition:border-color .12s ease, background .12s ease; }",
   ".finding:hover { background:var(--hover); border-color:var(--border-strong); }",
@@ -1878,8 +2055,31 @@ export const styles = [
   ".audit-note { color:var(--warn); }",
   ".code { display:block; min-width:0; overflow:auto; white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:11px; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:9px; }",
   ".source { display:block; min-width:0; max-width:100%; max-height:480px; overflow:auto; white-space:pre; font-family:ui-monospace,monospace; font-size:11px; line-height:1.5; color:var(--code-text); background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:12px; }",
+  ".source-card { padding:0; }",
+  ".source-card > .source { margin:0 14px 14px; }",
+  ".source-summary { cursor:pointer; padding:14px; list-style:none; user-select:none; }",
+  ".source-summary::-webkit-details-marker { display:none; }",
+  ".source-summary::before { content:'▸'; color:var(--text-faint); font-size:11px; margin-right:2px; transition:transform .12s ease; }",
+  ".source-card[open] .source-summary::before { transform:rotate(90deg); }",
+  ".source-summary-meta { display:flex; align-items:center; gap:6px; min-width:0; }",
+  ".source-summary:hover h2 { color:var(--brand); }",
   ".list-block { display:grid; gap:6px; }",
   ".list-block strong { color:var(--text); font-size:12px; }",
+  ".list-block-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }",
+  // FeatureDetail: KPI header, segmented section tabs, and bordered detail rows
+  ".detail-kpis { grid-template-columns:repeat(4,minmax(0,1fr)); }",
+  ".detail-kpis .stat strong { font-size:20px; }",
+  ".detail-kpis .stat.stat-warn { border-color:color-mix(in srgb,var(--warning) 45%,var(--border)); background:color-mix(in srgb,var(--warning) 7%,var(--surface)); }",
+  ".detail-kpis .stat.stat-warn strong { color:var(--warn); }",
+  ".detail-toolbar { justify-content:flex-start; flex-wrap:wrap; border-bottom:1px solid var(--border); padding:0 0 10px; }",
+  ".detail-toolbar .segmented { display:inline-flex; align-items:center; gap:6px; }",
+  ".detail-toolbar .segmented .count { font-family:ui-monospace,monospace; font-size:10px; opacity:.75; }",
+  ".detail-panel { display:grid; gap:12px; }",
+  ".detail-rows { display:grid; gap:5px; }",
+  ".detail-row { min-width:0; border:1px solid var(--border); border-left:3px solid var(--border-strong); border-radius:6px; padding:7px 10px; background:var(--surface); font-size:12px; line-height:1.5; color:var(--text); overflow-wrap:anywhere; }",
+  ".detail-row.is-warn { border-left-color:var(--warn); background:color-mix(in srgb,var(--warning) 6%,var(--surface)); }",
+  ".detail-row.is-bad { border-left-color:var(--bad); background:color-mix(in srgb,var(--danger) 6%,var(--surface)); }",
+  ".detail-mono { font-family:ui-monospace,monospace; font-size:11px; color:var(--text); background:transparent; border:0; padding:0; }",
   "ul { margin:0; padding-left:18px; color:var(--text); line-height:1.5; }",
   ".user-value { color:var(--text); }",
   ".user-value strong { color:var(--blue); }",
@@ -1908,10 +2108,29 @@ export const styles = [
   ".livelog-event { color:var(--blue); flex:none; }",
   ".livelog-node { color:var(--warn); flex:none; }",
   ".livelog-detail { color:var(--code-text); min-width:0; }",
+  // tone accents so failures/waits stand out in the streaming feed
+  ".livelog-line.is-bad { border-left:2px solid var(--bad); padding-left:6px; margin-left:-8px; }",
+  ".livelog-line.is-bad .livelog-event { color:var(--bad); }",
+  ".livelog-line.is-warn { border-left:2px solid var(--warn); padding-left:6px; margin-left:-8px; }",
+  ".livelog-line.is-warn .livelog-event { color:var(--warn); }",
+  ".livelog-line.is-ok .livelog-event { color:var(--ok); }",
   ".chat { display:grid; gap:8px; }",
   ".chat-line { min-width:0; border:1px solid var(--border); border-left:3px solid var(--border-strong); border-radius:8px; padding:8px 10px; background:var(--surface); }",
   ".chat-line .who { color:var(--blue); font-family:ui-monospace,monospace; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }",
   ".chat-line pre { margin:4px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; font-family:ui-monospace,monospace; font-size:11px; color:var(--text); }",
+  // Assistant/user prose renders through MarkdownPreview, not an 11px monospace
+  // slab. Neutralize the preview's article padding and compact its type scale so
+  // a chat turn reads like prose but stays dense inside the bubble.
+  ".chat-line .markdown-preview { margin:4px 0 0; padding:0; background:transparent; overflow:visible; }",
+  ".chat-line .markdown-preview > *:first-child { margin-top:0; }",
+  ".chat-line .markdown-preview > *:last-child { margin-bottom:0; }",
+  ".chat-line .markdown-preview p,.chat-line .markdown-preview li,.chat-line .markdown-preview blockquote { font-size:13px; line-height:1.55; color:var(--text); }",
+  ".chat-line .markdown-preview p { margin:0 0 8px; max-width:none; }",
+  ".chat-line .markdown-preview h1 { font-size:15px; margin:10px 0 6px; line-height:1.3; }",
+  ".chat-line .markdown-preview h2 { font-size:14px; margin:10px 0 5px; }",
+  ".chat-line .markdown-preview h3 { font-size:13px; margin:8px 0 4px; }",
+  ".chat-line .markdown-preview ul,.chat-line .markdown-preview ol { margin:0 0 8px; padding-left:20px; }",
+  ".chat-line .markdown-preview pre.markdown-code { margin:6px 0; font-size:11px; }",
   // Tint the accent + who-label by role/kind so assistant turns read distinctly
   // from the user, raw node output, and reasoning. Tokens keep light/dark safe.
   ".chat-line.chat-role-assistant { border-left-color:var(--brand); }",
@@ -1926,13 +2145,29 @@ export const styles = [
   ".chat-line.chat-kind-tool { border-left-color:var(--text-faint); }",
   ".chat-line.chat-kind-tool .who { color:var(--text-faint); }",
   ".nodetree ul { list-style:none; padding-left:14px; }",
-  ".nodetree li { margin:4px 0; }",
-  ".nodetree .node-row { display:flex; align-items:center; gap:8px; }",
-  ".nodetree .node-name { color:var(--text); }",
+  ".nodetree > ul { padding-left:0; }",
+  ".nodetree ul ul { border-left:1px solid var(--border); margin-left:4px; padding-left:12px; }",
+  ".nodetree li { margin:3px 0; }",
+  ".nodetree .node-row { display:flex; align-items:center; gap:8px; width:100%; text-align:left; border:1px solid transparent; border-radius:6px; padding:4px 6px; background:transparent; color:var(--text); cursor:pointer; font:inherit; transition:border-color .12s ease, background .12s ease; }",
+  ".nodetree button.node-row:hover { background:var(--hover); border-color:var(--border-strong); }",
+  ".nodetree .node-name { color:var(--text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
+  ".nodetree .node-drill { margin-left:auto; color:var(--text-faint); flex:none; }",
+  // node-tree health tally
+  ".tree-tally { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }",
   ".ticket-detail-body { min-width:0; max-width:100%; display:grid; gap:10px; overflow-x:hidden; }",
   ".ticket-section { display:grid; gap:6px; }",
   ".ticket-section h3 { margin:0; font-size:12px; }",
   ".ticket-section p { color:var(--text); overflow-wrap:anywhere; }",
+  ".ticket-body .markdown-preview { padding:0; background:transparent; overflow:visible; }",
+  ".ticket-body .markdown-preview > *:first-child { margin-top:0; }",
+  ".ticket-body .markdown-preview h1 { font-size:16px; }",
+  ".ticket-body .markdown-preview h2 { font-size:14px; margin:14px 0 6px; }",
+  ".ticket-body .markdown-preview h3 { font-size:13px; }",
+  ".ticket-body .markdown-preview p,.ticket-body .markdown-preview li { font-size:13px; }",
+  // clickable backlog severity tally
+  ".ticket-tally { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }",
+  ".ticket-tally .tally-chip { cursor:pointer; background:transparent; font:inherit; }",
+  ".ticket-tally .tally-chip.is-active { box-shadow:0 0 0 2px color-mix(in srgb,var(--brand) 30%,transparent); }",
   ".ticket-meta-grid { min-width:0; max-width:100%; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; }",
   ".ticket-meta { min-width:0; border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--hover-subtle); display:grid; gap:3px; }",
   ".ticket-meta span { color:var(--text-muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; font-weight:650; }",
@@ -1995,6 +2230,12 @@ export const styles = [
   ".tutorial-title { font-size:16px; }",
   ".tutorial-body { color:var(--text); line-height:1.55; }",
   ".tutorial-sample { max-height:220px; }",
+  ".tutorial-sample-card { display:grid; gap:8px; }",
+  ".tutorial-sample-card .feature-card { background:var(--hover-subtle); }",
+  ".tutorial-sample-gap { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text); }",
+  ".tutorial-sample-source summary { cursor:pointer; color:var(--text-muted); font-size:11px; font-weight:650; }",
+  ".tutorial-sample-source[open] summary { margin-bottom:6px; }",
+  ".tutorial-sample-source .tutorial-sample { margin:0; }",
   ".tutorial-hint { font-size:12px; color:var(--text-muted); border-left:3px solid color-mix(in srgb,var(--brand) 45%,transparent); padding-left:10px; }",
   ".tutorial-actions { display:flex; align-items:center; justify-content:space-between; gap:10px; }",
   ".tutorial-steps-nav { display:flex; align-items:center; gap:8px; }",

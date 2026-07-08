@@ -40,6 +40,10 @@ function findingsOf(audit: AuditRow | null): AuditFinding[] {
 export function AuditTab(props: AuditTabProps) {
   const { audit, triage } = props;
   const findings = findingsOf(audit);
+  const findingKindCounts = findings.reduce<Record<AuditFinding["kind"], number>>(
+    (acc, finding) => { acc[finding.kind] = (acc[finding.kind] ?? 0) + 1; return acc; },
+    { broken: 0, partial: 0, missingE2E: 0, missingDocs: 0 },
+  );
   const notes = strings(audit?.notes);
   const bootstrapRow =
     props.bootstrap && props.bootstrap.docsBuildPassed === false && !props.bootstrap.status
@@ -65,6 +69,13 @@ export function AuditTab(props: AuditTabProps) {
           <h2>Audit findings</h2>
           <span className={`badge ${audit ? "ok" : "muted"}`}>{formatStatus(audit ? "ready" : "waiting")}</span>
         </div>
+        {findings.length ? (
+          <div className="status-counts">
+            {(Object.keys(findingKindCounts) as AuditFinding["kind"][]).filter((kind) => findingKindCounts[kind] > 0).map((kind) => (
+              <span key={kind} className={`badge ${statusClass(kind === "broken" ? "broken" : "partial")}`}>{findingKindCounts[kind]} {findingLabels[kind]}</span>
+            ))}
+          </div>
+        ) : null}
         {findings.length ? (
           findings.map((finding) => {
             const feature = features.find((item) => item.id === finding.featureId);
@@ -104,7 +115,7 @@ export function AuditTab(props: AuditTabProps) {
             );
           })
         ) : (
-          <p>No findings yet. Run the workflow (or dispatch from Specs) to populate the audit.</p>
+          <p className="empty">No findings yet. Run the workflow (or dispatch from Specs) to populate the audit.</p>
         )}
       </section>
 
@@ -132,7 +143,7 @@ export function AuditTab(props: AuditTabProps) {
             </article>
           ))
         ) : (
-          <p>Start a run to populate the next implementation wave.</p>
+          <p className="empty">Start a run to populate the next implementation wave.</p>
         )}
       </section>
 
@@ -142,7 +153,7 @@ export function AuditTab(props: AuditTabProps) {
           <span className="pill">{features.length}</span>
         </div>
         <div className="status-counts">
-          {(Object.keys(counts) as FeatureStatus[]).map((status) => (
+          {(Object.keys(counts) as FeatureStatus[]).filter((status) => counts[status] > 0).map((status) => (
             <span key={status} className={`badge ${statusClass(status)}`}>{counts[status]} {statusLabels[status]}</span>
           ))}
         </div>
