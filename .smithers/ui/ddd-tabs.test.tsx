@@ -366,7 +366,7 @@ describe("DDD tabs and components", () => {
   test("App mounts cleanly with no URL runId", async () => {
     const app = await mountAppWithGateway("/workflows/docs-driven-development?tutorial=off");
     await waitFor(() => expect(app.container.querySelector('[data-testid="docs-driven-development-ui"]')).toBeTruthy());
-    expect(text(app.container.querySelector('[data-testid="ddd-run-id"]') as HTMLElement)).toContain("workflow");
+    expect(text(app.container.querySelector('[data-testid="ddd-run-id"]') as HTMLElement)).toContain("No run");
     expect(app.container.querySelector('[data-testid="ddd-features-tab"]')).toBeTruthy();
     await act(async () => (app.container.querySelector('[data-testid="ddd-open-start"]') as HTMLButtonElement).click());
     expect(app.container.querySelector('[data-testid="ddd-new-menu"]')).toBeTruthy();
@@ -389,7 +389,7 @@ describe("DDD tabs and components", () => {
     await waitFor(() => expect(app.container.querySelector('[data-testid="docs-driven-development-ui"]')).toBeTruthy());
     expect(app.container.querySelector('[data-testid="ddd-start-pane"]')).toBeTruthy();
     expect(app.container.querySelector('[data-testid="ddd-tutorial"]')).toBeFalsy();
-    expect(app.container.querySelector('[data-testid="ddd-tabbar"]')?.hasAttribute("hidden")).toBe(true);
+    expect(app.container.querySelector('[data-testid="ddd-subhead"]')?.hasAttribute("hidden")).toBe(true);
     expect(app.container.querySelector('[data-testid="ddd-start-pane"] button[aria-label="Close"]')).toBeFalsy();
 
     const createButton = app.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement;
@@ -402,7 +402,7 @@ describe("DDD tabs and components", () => {
     await act(async () => (app.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).click());
     await waitFor(() => expect(text(app.container.querySelector('[data-testid="ddd-start-generate-run"]') as HTMLElement)).toContain("ddd-generate-docs"), 10_000);
     expect(app.container.querySelector('[data-testid="ddd-start-pane"]')).toBeTruthy();
-    expect(app.container.querySelector('[data-testid="ddd-tabbar"]')?.hasAttribute("hidden")).toBe(true);
+    expect(app.container.querySelector('[data-testid="ddd-subhead"]')?.hasAttribute("hidden")).toBe(true);
   }, 60_000);
 
   test("App mounts with real gateway-react state, navigates tabs, handles drafts, and suppresses duplicate launches", async () => {

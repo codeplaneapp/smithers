@@ -307,6 +307,11 @@ export function fmtTime(ms: number | undefined): string {
   }
 }
 
+/** Compact a long runId to `head…tail` for chips; short ids pass through. */
+export function shortRunId(runId: string): string {
+  return runId.length <= 24 ? runId : `${runId.slice(0, 12)}…${runId.slice(-8)}`;
+}
+
 export function errorMessage(error: unknown): string {
   if (!error) return "";
   if (error instanceof Error) return error.message;
@@ -1765,11 +1770,23 @@ export const styles = [
   ".button:focus-visible,.icon-button:focus-visible,.tab:focus-visible,.tree-file:focus-visible,.run-row:focus-visible,.finding:focus-visible,.feature-card.is-clickable:focus-visible,.ticket-row:focus-visible,.doc-link:focus-visible,.tree-dir-name:focus-visible,.tree-section-toggle:focus-visible,.segmented:focus-visible { outline:none; border-color:color-mix(in srgb,var(--brand) 50%,transparent); box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent); }",
   ".button:disabled { cursor:not-allowed; opacity:.45; }",
   ".icon-button { width:32px; min-height:32px; padding:0; border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:6px; cursor:pointer; }",
+  ".subhead { min-width:0; }",
+  ".subhead[hidden] { display:none; }",
   ".tabbar { min-width:0; display:flex; align-items:center; gap:6px; padding:8px 14px; border-bottom:1px solid var(--border); background:var(--surface); overflow-x:auto; scrollbar-width:thin; }",
   ".tab { flex:0 0 auto; border:1px solid transparent; background:transparent; color:var(--muted); border-radius:6px; min-height:30px; padding:0 12px; cursor:pointer; font-weight:650; display:inline-flex; align-items:center; gap:7px; }",
   ".tab:hover { color:var(--text); }",
   ".tab.is-active { background:color-mix(in srgb,var(--brand) 12%,transparent); border-color:color-mix(in srgb,var(--brand) 30%,transparent); color:var(--brand); }",
   ".tab .count { font-family:ui-monospace,monospace; font-size:10px; color:var(--muted); }",
+  // phase-progress stepper: the multi-phase run pipeline (audit>docs>triage>work>summary) made visible in the shell
+  ".phasebar { min-width:0; display:flex; align-items:center; list-style:none; margin:0; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--surface); overflow-x:auto; scrollbar-width:thin; }",
+  ".phase { flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; color:var(--text-muted); font-size:11px; font-weight:650; white-space:nowrap; }",
+  ".phase:not(:last-child)::after { content:''; flex:none; width:22px; height:1px; margin:0 10px; background:var(--border-strong); }",
+  ".phase-dot { flex:none; width:9px; height:9px; border-radius:999px; border:1.5px solid var(--border-strong); background:var(--surface); }",
+  ".phase.is-done { color:var(--ok); }",
+  ".phase.is-done .phase-dot { background:var(--ok); border-color:var(--ok); }",
+  ".phase.is-done:not(:last-child)::after { background:color-mix(in srgb,var(--ok) 55%,var(--border-strong)); }",
+  ".phase.is-active { color:var(--brand); }",
+  ".phase.is-active .phase-dot { border-color:var(--brand); box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 20%,transparent); }",
   ".content { position:relative; min-width:0; min-height:0; overflow:hidden; }",
   ".content > .error-banner { position:absolute; top:10px; left:50%; transform:translateX(-50%); width:min(720px,calc(100% - 24px)); z-index:50; }",
   ".content > [hidden] { display:none; }",

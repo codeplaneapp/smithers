@@ -23,6 +23,9 @@ import {
   changedFilesFromMetaTicket,
   errorMessage,
   features,
+  formatStatus,
+  shortRunId,
+  statusClass,
   isRecord,
   isFailedTerminalRunStatus,
   makeAssetUrl,
@@ -705,6 +708,19 @@ export function App({
     });
   }
 
+  // Phase-progress stepper: the docs-driven run pipeline made visible in the
+  // shell so you don't have to open Live to see where a run is. Readiness comes
+  // from node outputs already in scope; only shown for a live DDD run.
+  const runPhases = [
+    { key: "audit", label: "Audit", done: Boolean(audit) },
+    { key: "docs", label: "Docs", done: Boolean(spec) },
+    { key: "triage", label: "Triage", done: triage.length > 0 },
+    { key: "work", label: "Work", done: materializedTickets.length > 0 },
+    { key: "summary", label: "Summary", done: roundSummaryReady },
+  ];
+  const activePhaseIndex = runPhases.findIndex((phase) => !phase.done);
+  const showPhasebar = Boolean(liveRunId) && expectsDddNodeOutputs && !showStart;
+
   return (
     <main className="shell" data-testid="docs-driven-development-ui">
       <style>{crepeThemeCss}</style>
@@ -713,8 +729,16 @@ export function App({
       <header className="top">
         <div className="title">
           <h1>Docs Driven Development</h1>
-          <span className="pill" data-testid="ddd-run-id">{runId ?? "workflow"}</span>
-          <span className="badge ok">Milkdown</span>
+          {liveRunId ? (
+            <>
+              <span className={`badge ${statusClass(runStatus)}`} data-testid="ddd-run-status">
+                {formatStatus(runStatus) || "Run"}
+              </span>
+              <span className="pill" data-testid="ddd-run-id" title={liveRunId}>{shortRunId(liveRunId)}</span>
+            </>
+          ) : (
+            <span className="pill muted" data-testid="ddd-run-id">No run</span>
+          )}
         </div>
         <div className="actions">
           {/* v1 ships no asset server; the Assets link only appears with ?assetBaseUrl. */}
@@ -751,30 +775,53 @@ export function App({
         </div>
       </header>
 
-      <nav className="tabbar" role="tablist" data-testid="ddd-tabbar" hidden={showStart}>
-        {TABS.map((tab) => {
-          const count =
-            tab.key === "specs" ? changedPaths.length :
-            tab.key === "live" ? runs.length :
-            tab.key === "tickets" ? tickets.length : 0;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={activeTab === tab.key}
-              tabIndex={activeTab === tab.key ? 0 : -1}
-              className={activeTab === tab.key ? "tab is-active" : "tab"}
-              data-testid={`ddd-tab-${tab.key}`}
-              onClick={() => setActiveTab(tab.key)}
-              onKeyDown={(event) => onTabKeyDown(event, TABS.findIndex((item) => item.key === tab.key))}
-            >
-              {tab.label}
-              {count ? <span className="count">{count}</span> : null}
-            </button>
-          );
-        })}
-      </nav>
+      <div className="subhead" data-testid="ddd-subhead" hidden={showStart}>
+        <nav className="tabbar" role="tablist" aria-label="Docs-driven development sections" data-testid="ddd-tabbar">
+          {TABS.map((tab) => {
+            const count =
+              tab.key === "specs" ? changedPaths.length :
+              tab.key === "live" ? runs.length :
+              tab.key === "tickets" ? tickets.length : 0;
+            const countTitle =
+              tab.key === "specs" ? `${count} unsaved doc${count === 1 ? "" : "s"}` :
+              tab.key === "live" ? `${count} run${count === 1 ? "" : "s"}` :
+              tab.key === "tickets" ? `${count} ticket${count === 1 ? "" : "s"}` : "";
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                id={`ddd-tabbtn-${tab.key}`}
+                aria-controls={`ddd-tabpanel-${tab.key}`}
+                aria-selected={activeTab === tab.key}
+                tabIndex={activeTab === tab.key ? 0 : -1}
+                className={activeTab === tab.key ? "tab is-active" : "tab"}
+                data-testid={`ddd-tab-${tab.key}`}
+                onClick={() => setActiveTab(tab.key)}
+                onKeyDown={(event) => onTabKeyDown(event, TABS.findIndex((item) => item.key === tab.key))}
+              >
+                {tab.label}
+                {count ? <span className="count" title={countTitle} aria-label={countTitle}>{count}</span> : null}
+              </button>
+            );
+          })}
+        </nav>
+        {showPhasebar ? (
+          <ol className="phasebar" data-testid="ddd-phasebar" aria-label="Run progress">
+            {runPhases.map((phase, index) => (
+              <li
+                key={phase.key}
+                className={`phase ${phase.done ? "is-done" : index === activePhaseIndex ? "is-active" : ""}`}
+                data-testid={`ddd-phase-${phase.key}`}
+                aria-current={index === activePhaseIndex ? "step" : undefined}
+              >
+                <span className="phase-dot" aria-hidden="true" />
+                <span className="phase-label">{phase.label}</span>
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </div>
 
       <div className="content">
         <ErrorBanner
@@ -802,12 +849,27 @@ export function App({
           />
         ) : null}
 
-        <div hidden={showStart || activeTab !== "features"} className="pane">
+        <div
+          className="pane"
+          role="tabpanel"
+          id="ddd-tabpanel-features"
+          aria-labelledby="ddd-tabbtn-features"
+          tabIndex={0}
+          hidden={showStart || activeTab !== "features"}
+        >
           <FeaturesTab onOpenFeature={(feature) => setActiveFeature({ feature })} />
         </div>
 
         {/* Specs owns layout-measuring components (Crepe); mount only when active. */}
-        {!showStart && activeTab === "specs" ? (
+        <div
+          className="pane"
+          role="tabpanel"
+          id="ddd-tabpanel-specs"
+          aria-labelledby="ddd-tabbtn-specs"
+          tabIndex={0}
+          hidden={showStart || activeTab !== "specs"}
+        >
+          {!showStart && activeTab === "specs" ? (
           <SpecsTab
             docs={specDocs}
             drafts={drafts}
@@ -826,9 +888,17 @@ export function App({
             onDispatch={dispatchAgents}
             onReload={reloadDocsUi}
           />
-        ) : null}
+          ) : null}
+        </div>
 
-        <div hidden={showStart || activeTab !== "audit"} className="pane">
+        <div
+          className="pane"
+          role="tabpanel"
+          id="ddd-tabpanel-audit"
+          aria-labelledby="ddd-tabbtn-audit"
+          tabIndex={0}
+          hidden={showStart || activeTab !== "audit"}
+        >
           <AuditTab
             audit={audit}
             bootstrap={bootstrap}
@@ -840,7 +910,14 @@ export function App({
           />
         </div>
 
-        <div hidden={showStart || activeTab !== "live"} className="pane">
+        <div
+          className="pane"
+          role="tabpanel"
+          id="ddd-tabpanel-live"
+          aria-labelledby="ddd-tabbtn-live"
+          tabIndex={0}
+          hidden={showStart || activeTab !== "live"}
+        >
           <LiveTab
             runs={runs}
             runsLoading={runsState.loading}
@@ -856,7 +933,14 @@ export function App({
           />
         </div>
 
-        <div hidden={showStart || activeTab !== "tickets"} className="pane">
+        <div
+          className="pane"
+          role="tabpanel"
+          id="ddd-tabpanel-tickets"
+          aria-labelledby="ddd-tabbtn-tickets"
+          tabIndex={0}
+          hidden={showStart || activeTab !== "tickets"}
+        >
           <TicketsTab tickets={tickets} loading={ticketsState.loading} />
         </div>
       </div>
