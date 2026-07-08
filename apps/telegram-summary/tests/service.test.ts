@@ -36,7 +36,7 @@ type FetchLike = typeof globalThis.fetch;
 // A router that returns a stubbed object whose .json() resolves to `body`.
 // This mirrors the pattern the existing worker.test.ts already uses.
 function routeFetch(route: (url: string) => { ok?: boolean; status?: number; body: unknown }): FetchLike {
-  return (async (input: RequestInfo | URL) => {
+  return (async (input: Request | string | URL) => {
     const url = String(input);
     const { ok = true, status = 200, body } = route(url);
     return { ok, status, json: async () => body } as unknown as Response;
@@ -272,7 +272,7 @@ describe("service digest", () => {
     expect(result.id).not.toBeNull();
 
     const latest = await latestDigest(env.DB);
-    expect(latest?.id).toBe(result.id);
+    expect(latest?.id ?? null).toBe(result.id);
     expect(latest?.posted_at_ms).not.toBeNull();
     const parsed = digestJsonFromRow(latest as NonNullable<typeof latest>);
     expect(parsed.headline).toBe("Daily Recap");
