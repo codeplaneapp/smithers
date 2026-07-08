@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import { useMemo, useRef, useState } from "react";
 import {
+  MarkdownPreview,
   asString,
   fmtTime,
   formatCount,
@@ -132,11 +133,37 @@ function ticketFileLabel(metadata: Record<string, string>): string {
   return metadata.File ?? "";
 }
 
-function TicketDetailBody({ ticket }: { ticket: TicketRow }) {
+/**
+ * The ticket's markdown body with the leading `# Title` and the metadata line
+ * removed (both are already shown in the modal head + Details grid). What's left
+ * is real markdown — nested lists, code fences, blockquotes, links — that the
+ * old line-by-line `<p>`/`<li>` parser flattened into a wall of text.
+ */
+function ticketBodyMarkdown(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const kept: string[] = [];
+  let sawHeading = false;
+  let droppedTitle = false;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!sawHeading) {
+      if (!droppedTitle && line.startsWith("# ")) { droppedTitle = true; continue; }
+      if (line.startsWith("## ")) { sawHeading = true; kept.push(rawLine); continue; }
+      // A pure metadata line (every `·`-separated part is a single `Key: value`).
+      if (line && parseMetadataLine(line).length > 0 && line.split(/\s+·\s+/).every((part) => parseMetadataLine(part).length === 1)) continue;
+      if (line || kept.length) kept.push(rawLine);
+    } else {
+      kept.push(rawLine);
+    }
+  }
+  return kept.join("\n").trim();
+}
+
+function TicketDetailBody({ ticket, onOpenLink }: { ticket: TicketRow; onOpenLink?: (href: string) => void }) {
   const content = asString(ticket.content);
-  const detail = ticketDetail(content);
+  const body = ticketBodyMarkdown(content);
   const entries = metadataEntries(metadataForTicket(ticket));
-  if (detail.sections.length === 0 && detail.plainBody.length === 0 && entries.length === 0) return <p>No detail recorded for this ticket.</p>;
+  if (!body && entries.length === 0) return <p className="empty">No detail recorded for this ticket.</p>;
   return (
     <div className="ticket-detail-body">
       {entries.length ? (
@@ -162,23 +189,11 @@ function TicketDetailBody({ ticket }: { ticket: TicketRow }) {
           </div>
         </section>
       ) : null}
-      {detail.plainBody.length ? (
-        <section className="ticket-section">
-          <h3>Description</h3>
-          {detail.plainBody.map((line, index) => <p key={`plain:${index}`}>{line}</p>)}
+      {body ? (
+        <section className="ticket-section ticket-body">
+          <MarkdownPreview markdown={body} onLinkClick={onOpenLink} />
         </section>
       ) : null}
-      {detail.sections.map((section) => (
-        <section className="ticket-section" key={section.title}>
-          <h3>{section.title}</h3>
-          {section.body.map((line, index) => <p key={`${section.title}:body:${index}`}>{line}</p>)}
-          {section.items.length ? (
-            <ul>
-              {section.items.map((item, index) => <li key={`${section.title}:item:${index}`}>{item}</li>)}
-            </ul>
-          ) : null}
-        </section>
-      ))}
     </div>
   );
 }
@@ -262,6 +277,17 @@ export function TicketsTab(props: TicketsTabProps) {
     }).map(({ ticket }) => ticket);
   }, [tickets, query, statusFilter, kindFilter, severityFilter, sortMode]);
   const filtersActive = query.trim().length > 0 || statusFilter !== "all" || kindFilter !== "all" || severityFilter !== "all";
+  // At-a-glance backlog health: count tickets by severity (highest-risk first),
+  // each chip a one-click facet toggle for that severity.
+  const severityCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const ticket of tickets) {
+      const severity = metadataForTicket(ticket).Severity;
+      if (!severity) continue;
+      counts.set(severity, (counts.get(severity) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort(([left], [right]) => severityRank(left) - severityRank(right) || left.localeCompare(right));
+  }, [tickets]);
 
   return (
     <div className="scroll pane" data-testid="ddd-tickets-tab">
@@ -317,6 +343,21 @@ export function TicketsTab(props: TicketsTabProps) {
             </button>
           ) : null}
         </div>
+        {severityCounts.length ? (
+          <div className="status-counts ticket-tally" data-testid="ddd-ticket-tally" role="group" aria-label="Filter by severity">
+            {severityCounts.map(([severity, count]) => (
+              <button
+                key={severity}
+                type="button"
+                className={`badge ${severityClass(severity)} tally-chip${severityFilter === severity ? " is-active" : ""}`}
+                aria-pressed={severityFilter === severity}
+                onClick={() => setSeverityFilter((current) => (current === severity ? "all" : severity))}
+              >
+                {count} {formatSeverity(severity)}
+              </button>
+            ))}
+          </div>
+        ) : null}
         {filteredTickets.length ? (
           filteredTickets.map((ticket, index) => (
             (() => {
