@@ -21,14 +21,18 @@ const multiplayerMode = {
  * multiplayer load-failure client-cleanup path.
  */
 
-// MUST be the first electric-touching test in the process: the "must preload"
-// guard only throws while the module-level Electric-options cache is unset, and
-// bun shares module state across files. This file sorts alphabetically ahead of
-// every other electric-touching test, so no successful load() has run yet here.
+// The "must preload" guard only throws while the module-level Electric-options
+// cache is unset, and bun shares module state across files with no guaranteed
+// file ordering. Import a fresh module instance (query-string cache bust) so
+// the cache is provably unset here no matter which other electric-touching
+// tests already ran a successful load() on the shared instance.
 describe("smithersElectricCollectionOptions preload guard", () => {
-  test("building an Electric collection before preload throws", () => {
+  test("building an Electric collection before preload throws", async () => {
+    const fresh = (await import(
+      "../../src/data/smithersElectricCollectionOptions.ts?preload-guard"
+    )) as typeof import("../../src/data/smithersElectricCollectionOptions.ts");
     expect(() =>
-      smithersElectricCollectionOptions<{ cronId: string }>({
+      fresh.smithersElectricCollectionOptions<{ cronId: string }>({
         id: "before-preload",
         mode: {
           kind: "multiplayer",
