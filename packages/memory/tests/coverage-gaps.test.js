@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { getTableName } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { Effect } from "effect";
+import { Effect, Metric } from "effect";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createMemoryStore } from "../src/store/index.js";
 import { MemoryService, createMemoryLayer } from "../src/service.js";
@@ -19,6 +20,11 @@ function createTestDb() {
     const db = drizzle(sqlite);
     ensureSmithersTables(db);
     return db;
+}
+
+async function readCounter(metric) {
+    const state = await Effect.runPromise(Metric.value(metric));
+    return state.count;
 }
 
 describe("package barrels re-export the public surface", () => {
@@ -63,6 +69,45 @@ describe("package barrels re-export the public surface", () => {
         expect(Object.keys(memoryServiceApi)).toEqual([]);
         expect(Object.keys(memoryProcessor)).toEqual([]);
         expect(Object.keys(memoryStoreType)).toEqual([]);
+    });
+});
+
+describe("memory schema and metrics contracts", () => {
+    test("schema tables expose the persistent memory table and column names", () => {
+        expect(getTableName(barrel.smithersMemoryFacts)).toBe("_smithers_memory_facts");
+        expect(barrel.smithersMemoryFacts.namespace.name).toBe("namespace");
+        expect(barrel.smithersMemoryFacts.key.name).toBe("key");
+        expect(barrel.smithersMemoryFacts.valueJson.name).toBe("value_json");
+        expect(barrel.smithersMemoryFacts.ttlMs.name).toBe("ttl_ms");
+
+        expect(getTableName(barrel.smithersMemoryThreads)).toBe("_smithers_memory_threads");
+        expect(barrel.smithersMemoryThreads.threadId.name).toBe("thread_id");
+        expect(barrel.smithersMemoryThreads.namespace.name).toBe("namespace");
+
+        expect(getTableName(barrel.smithersMemoryMessages)).toBe("_smithers_memory_messages");
+        expect(barrel.smithersMemoryMessages.threadId.name).toBe("thread_id");
+        expect(barrel.smithersMemoryMessages.contentJson.name).toBe("content_json");
+    });
+
+    test("store operations increment fact read/write and message save counters", async () => {
+        const store = createMemoryStore(createTestDb());
+        const beforeWrites = await readCounter(metrics.memoryFactWrites);
+        const beforeReads = await readCounter(metrics.memoryFactReads);
+        const beforeMessageSaves = await readCounter(metrics.memoryMessageSaves);
+
+        await store.setFact(WF_NS, "metric-key", { ok: true });
+        await store.getFact(WF_NS, "metric-key");
+        const thread = await store.createThread(WF_NS);
+        await store.saveMessage({
+            id: "metric-message",
+            threadId: thread.threadId,
+            role: "user",
+            contentJson: JSON.stringify("hello"),
+        });
+
+        expect((await readCounter(metrics.memoryFactWrites)) - beforeWrites).toBe(1);
+        expect((await readCounter(metrics.memoryFactReads)) - beforeReads).toBe(1);
+        expect((await readCounter(metrics.memoryMessageSaves)) - beforeMessageSaves).toBe(1);
     });
 });
 

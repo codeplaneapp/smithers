@@ -52,6 +52,51 @@ describe("TokenLimiter", () => {
         // Should not throw
         await limiter.process(store);
     });
+    test("rejects negative and non-finite budgets", () => {
+        expect(() => TokenLimiter(-1)).toThrow(/non-negative finite/);
+        expect(() => TokenLimiter(Number.NaN)).toThrow(/non-negative finite/);
+    });
+    test("does not trim a thread exactly at the token budget", async () => {
+        const sqlite = new Database(":memory:");
+        const db = drizzle(sqlite);
+        ensureSmithersTables(db);
+        const store = createMemoryStore(db);
+        const thread = await store.createThread(WF_NS);
+
+        for (const [index, content] of ["abcd", "wxyz"].entries()) {
+            await store.saveMessage({
+                id: `msg-${index}`,
+                threadId: thread.threadId,
+                role: "user",
+                contentJson: JSON.stringify(content),
+                createdAtMs: index,
+            });
+        }
+
+        await TokenLimiter(3).process(store);
+
+        expect((await store.listMessages(thread.threadId)).map((message) => message.id)).toEqual(["msg-0", "msg-1"]);
+    });
+    test("zero budget prunes all messages in a thread", async () => {
+        const sqlite = new Database(":memory:");
+        const db = drizzle(sqlite);
+        ensureSmithersTables(db);
+        const store = createMemoryStore(db);
+        const thread = await store.createThread(WF_NS);
+
+        for (const id of ["msg-1", "msg-2"]) {
+            await store.saveMessage({
+                id,
+                threadId: thread.threadId,
+                role: "user",
+                contentJson: JSON.stringify("x"),
+            });
+        }
+
+        await TokenLimiter(0).process(store);
+
+        expect(await store.listMessages(thread.threadId)).toEqual([]);
+    });
     test("trims oldest messages in each thread to stay under budget", async () => {
         const sqlite = new Database(":memory:");
         const db = drizzle(sqlite);
@@ -147,6 +192,47 @@ describe("Summarizer", () => {
             text: "The user asked for a status update.",
         });
         expect(messages.slice(1).map((message) => message.id)).toEqual(["msg-3", "msg-4"]);
+    });
+    test("includes raw non-JSON message content in the summary prompt", async () => {
+        const sqlite = new Database(":memory:");
+        const db = drizzle(sqlite);
+        ensureSmithersTables(db);
+        const store = createMemoryStore(db);
+        const thread = await store.createThread(WF_NS);
+        const prompts = [];
+        const mockAgent = {
+            run: async (prompt) => {
+                prompts.push(prompt);
+                return { text: "summary" };
+            },
+        };
+
+        await store.saveMessage({
+            id: "raw-old",
+            threadId: thread.threadId,
+            role: "user",
+            contentJson: "raw-not-json",
+            createdAtMs: 1,
+        });
+        await store.saveMessage({
+            id: "recent-1",
+            threadId: thread.threadId,
+            role: "assistant",
+            contentJson: JSON.stringify("recent one"),
+            createdAtMs: 2,
+        });
+        await store.saveMessage({
+            id: "recent-2",
+            threadId: thread.threadId,
+            role: "user",
+            contentJson: JSON.stringify("recent two"),
+            createdAtMs: 3,
+        });
+
+        await Summarizer(mockAgent).process(store);
+
+        expect(prompts).toHaveLength(1);
+        expect(prompts[0]).toContain("user: raw-not-json");
     });
     test("no data-loss window: if the summary save fails the original messages survive", async () => {
         // Failure-injection against the real store: wrap it and make the summary

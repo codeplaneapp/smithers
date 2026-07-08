@@ -1,5 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Effect, Layer, Metric } from "effect";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { dbQueryDuration } from "@smithers-orchestrator/observability/metrics";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
@@ -316,12 +317,15 @@ function makeMemoryStore(db) {
    * @returns {Effect.Effect<MemoryMessage[], SmithersError>}
    */
     function listMessagesEffect(threadId, limit) {
+        if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
+            return Effect.fail(new SmithersError("INVALID_INPUT", "memory listMessages limit must be a non-negative integer.", { limit }));
+        }
         return readEffect("memory listMessages", () => {
             let query = db
                 .select()
                 .from(smithersMemoryMessages)
                 .where(eq(smithersMemoryMessages.threadId, threadId))
-                .orderBy(smithersMemoryMessages.createdAtMs);
+                .orderBy(smithersMemoryMessages.createdAtMs, smithersMemoryMessages.id);
             if (limit !== undefined) {
                 query = query.limit(limit);
             }

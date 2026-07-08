@@ -94,6 +94,14 @@ describe("MemoryStore - Working Memory", () => {
         const fact = await store.getFact(WF_NS, "ephemeral");
         expect(fact.ttlMs).toBe(5000);
     });
+    test("upserting a fact without ttl clears an earlier ttl", async () => {
+        await store.setFact(WF_NS, "session", "temporary", 5000);
+        await store.setFact(WF_NS, "session", "permanent");
+
+        const fact = await store.getFact(WF_NS, "session");
+        expect(fact.ttlMs).toBeNull();
+        expect(JSON.parse(fact.valueJson)).toBe("permanent");
+    });
     test("setFact with ttlMs=0 stores and expires the fact", async () => {
         await store.setFact(WF_NS, "immediate", "temp", 0);
         const stored = await store.getFact(WF_NS, "immediate");
@@ -278,6 +286,30 @@ describe("MemoryStore - Messages", () => {
 
         const messages = await store.listMessages(thread.threadId, 0);
         expect(messages).toEqual([]);
+    });
+    test("listMessages rejects negative and fractional limits", async () => {
+        const thread = await store.createThread(WF_NS);
+
+        await expect(store.listMessages(thread.threadId, -1)).rejects.toThrow(/memory listMessages limit|INVALID_INPUT/);
+        await expect(store.listMessages(thread.threadId, 1.5)).rejects.toThrow(/memory listMessages limit|INVALID_INPUT/);
+    });
+    test("listMessages orders timestamp ties by id for deterministic history", async () => {
+        const thread = await store.createThread(WF_NS);
+        for (const id of ["msg-b", "msg-a", "msg-c"]) {
+            await store.saveMessage({
+                id,
+                threadId: thread.threadId,
+                role: "user",
+                contentJson: JSON.stringify(id),
+                createdAtMs: 100,
+            });
+        }
+
+        expect((await store.listMessages(thread.threadId)).map((m) => m.id)).toEqual([
+            "msg-a",
+            "msg-b",
+            "msg-c",
+        ]);
     });
     test("countMessages", async () => {
         const thread = await store.createThread(WF_NS);
