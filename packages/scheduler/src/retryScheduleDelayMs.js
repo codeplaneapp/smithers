@@ -5,7 +5,11 @@ import { Effect, ScheduleDecision, ScheduleIntervals } from "effect";
  * @returns {number}
  */
 export function retryScheduleDelayMs(schedule, attempt) {
-    const safeAttempt = Math.max(1, Math.floor(attempt));
+    // Bound the schedule walk: every supported backoff is monotonic and
+    // capped, so past this many steps the delay cannot change — and a
+    // non-finite attempt (Infinity) would otherwise loop forever.
+    const MAX_SCHEDULE_STEPS = 10_000;
+    const safeAttempt = Math.max(1, Math.floor(Math.min(attempt, MAX_SCHEDULE_STEPS)));
     let state = schedule.initial;
     let now = 0;
     let delayMs = 0;
