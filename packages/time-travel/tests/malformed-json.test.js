@@ -77,6 +77,34 @@ describe("parseSnapshot with malformed JSON", () => {
             expect(caught).toBeInstanceOf(SmithersError);
         }
     });
+
+    test("throws SmithersError for valid JSON with invalid snapshot column shapes", async () => {
+        const { adapter } = createTestDb();
+        const cases = [
+            { runId: "run-nodes-object", overrides: { nodesJson: "{}" }, message: "nodesJson must be an array" },
+            { runId: "run-node-entry", overrides: { nodesJson: "[null]" }, message: "nodesJson entry 0 must be an object" },
+            { runId: "run-node-key", overrides: { nodesJson: JSON.stringify([{ iteration: 0 }]) }, message: "nodeId" },
+            { runId: "run-ralph-entry", overrides: { ralphJson: "[{}]" }, message: "ralphId" },
+            { runId: "run-outputs-array", overrides: { outputsJson: "[]" }, message: "outputsJson must be an object" },
+            { runId: "run-input-null", overrides: { inputJson: "null" }, message: "inputJson must be an object" },
+        ];
+
+        for (const { runId, overrides, message } of cases) {
+            await insertSnapshotRow(adapter, runId, 0, overrides);
+            const snap = await adapter.db
+                .select()
+                .from(smithersSnapshots)
+                .then((rows) => rows.find((r) => r.runId === runId));
+            let caught;
+            try {
+                parseSnapshot(snap);
+            } catch (err) {
+                caught = err;
+            }
+            expect(caught).toBeInstanceOf(SmithersError);
+            expect(caught.summary).toContain(message);
+        }
+    });
 });
 
 describe("forkRun with malformed JSON", () => {
