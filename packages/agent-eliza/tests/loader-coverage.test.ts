@@ -13,11 +13,34 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { loadWorkflows, loadWorkflowsFromDir } from "../src/conventions/loader.js";
+
+describe("loadWorkflowsFromDir — dangling symlink", () => {
+  test("skips a dangling symlink with an error diagnostic and still loads sibling workflows", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-loader-cov-"));
+    writeFileSync(
+      join(dir, "valid-wf.js"),
+      `export default { workflow: {}, name: "valid-wf", description: "Valid" };`,
+      "utf8"
+    );
+    const brokenPath = join(dir, "broken.js");
+    symlinkSync(join(dir, "missing-target"), brokenPath);
+
+    const result = await loadWorkflowsFromDir({ dir, source: "test" });
+
+    expect(result.workflows).toHaveLength(1);
+    expect(result.workflows[0]!.name).toBe("valid-wf");
+
+    const errors = result.diagnostics.filter((d) => d.type === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.path).toBe(brokenPath);
+    expect(errors[0]!.message).toMatch(/stat/i);
+  });
+});
 
 describe("loadWorkflowsFromDir — non-object export", () => {
   test("emits 'no recognizable export' error when the module default is not an object", async () => {

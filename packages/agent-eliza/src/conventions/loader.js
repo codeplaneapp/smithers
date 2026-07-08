@@ -166,7 +166,18 @@ export async function loadWorkflowsFromDir({ dir, source = "unknown" }) {
   const entries = readdirSync(dir);
   for (const entry of entries) {
     const filePath = join(dir, entry);
-    if (!statSync(filePath).isFile()) continue;
+    let stats;
+    try {
+      stats = statSync(filePath);
+    } catch (err) {
+      diagnostics.push({
+        type: "error",
+        message: `Could not stat directory entry (${source}): ${filePath} (${err instanceof Error ? err.message : String(err)})`,
+        path: filePath,
+      });
+      continue;
+    }
+    if (!stats.isFile()) continue;
     if (!WORKFLOW_EXTENSIONS.has(extname(entry))) continue;
 
     // Read source text and parse frontmatter BEFORE dynamic import. The
