@@ -606,6 +606,68 @@ describe("withAccountsLock in-process contention (EEXIST retry paths)", () => {
         }
     });
 
+    test("does not delete a fresh lock that replaced the stale one it observed (no double holder)", () => {
+        const env = newSmithersHome();
+        const lockPath = lockPathFor(env);
+        const freshContent = "222\nsuccessor\n";
+        // A leftover lock from a crashed holder, aged past STALE_LOCK_MS (30s).
+        writeFileSync(lockPath, "111\n0\n", { mode: 0o600 });
+        const stale = new Date(Date.now() - 60_000);
+        utimesSync(lockPath, stale, stale);
+
+        const realNow = Date.now;
+        const base = realNow();
+        let n = 0;
+        Date.now = () => {
+            n += 1;
+            if (n === 1) return base; // deadline = base + LOCK_TIMEOUT_MS
+            if (n === 2) return base; // EEXIST deadline check -> not timed out
+            if (n === 3) {
+                // Simulate the reported interleave: a concurrent waiter (A)
+                // breaks the same stale lock we just observed and a
+                // concurrent holder (B) acquires a brand-new lock, both in
+                // the gap between our statSync and our staleness verdict.
+                rmSync(lockPath, { force: true });
+                writeFileSync(lockPath, freshContent, { mode: 0o600 });
+                return base; // stale check: base - (base-60000) > 30000 -> true
+            }
+            if (n === 4) return base; // spinUntil = base + 5
+            // n>=5: exit the spin immediately, then time out on the very
+            // next deadline check instead of admitting a second holder.
+            return base + 10_000;
+        };
+        let ran = false;
+        try {
+            expect(() => withAccountsLock(env, () => { ran = true; }))
+                .toThrow(/Timed out acquiring accounts lock/);
+        } finally {
+            Date.now = realNow;
+        }
+        // The fresh lock B acquired must never be admitted a second holder,
+        // and must survive untouched.
+        expect(ran).toBe(false);
+        expect(existsSync(lockPath)).toBe(true);
+        expect(readFileSync(lockPath, "utf8")).toBe(freshContent);
+    });
+
+    test("release does not delete a successor lock after its own lock was broken mid-critical-section", () => {
+        const env = newSmithersHome();
+        const lockPath = lockPathFor(env);
+        const successorContent = "333\nsuccessor\n";
+
+        withAccountsLock(env, () => {
+            // Simulate a concurrent waiter mistakenly judging our still-held
+            // lock stale, breaking it, and a successor acquiring a brand-new
+            // lock — all while we are still inside our own critical section.
+            rmSync(lockPath, { force: true });
+            writeFileSync(lockPath, successorContent, { mode: 0o600 });
+        });
+
+        // Our release must not clobber the successor's fresh lock.
+        expect(existsSync(lockPath)).toBe(true);
+        expect(readFileSync(lockPath, "utf8")).toBe(successorContent);
+    });
+
     test("rethrows a non-EEXIST openSync error (permission denied)", () => {
         if (process.platform === "win32") return;
         // Root bypasses filesystem permission bits, so EACCES won't fire there.
