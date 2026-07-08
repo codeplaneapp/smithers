@@ -23,7 +23,6 @@
       "bun-types",
       "mdx"
     ],
-    "baseUrl": ".",
     "paths": {
       "~/*": [
         "./*"
