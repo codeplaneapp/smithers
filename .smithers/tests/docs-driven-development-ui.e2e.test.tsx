@@ -531,11 +531,15 @@ test("DDD UI no-browser smoke covers Gateway data contracts and the browser skip
 
     const materialized = await nodeOutput(localGateway, connection, "ddd-ui-no-browser-run", "materialize-tickets");
     expect(materialized.row.tickets[0]).toMatchObject({
-      path: "docs-driven-development--ddd-ui-no-browser-run--01-docs-driven-development",
       kind: "ticket",
       status: "todo",
       featureId: "docs-driven-development",
     });
+    // ticketPathFor appends a deterministic 8-hex identity hash (see the sibling
+    // docs-driven-development-run e2e); assert the shape, not a stale literal.
+    expect(materialized.row.tickets[0].path).toMatch(
+      /^docs-driven-development--ddd-ui-no-browser-run--01-docs-driven-development-[0-9a-f]{8}$/,
+    );
 
     const created = await gatewayRequest(localGateway, connection, "createTicket", {
       path: "tickets/no-browser-live.md",

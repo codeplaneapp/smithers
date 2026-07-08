@@ -102,6 +102,11 @@ export const agents = {
 } as const satisfies Record<string, AgentLike[]>;
 `);
   writeFileSync(join(root, ".smithers/agents/index.ts"), 'export { agents, providers } from "../agents.ts";\n');
+  // The DDD workflows import providers from ../lib/ddd/dddAgents.ts (which builds
+  // real ClaudeCodeAgent/CodexAgent that spawn CLIs and preflight-check for a
+  // real binary on PATH — impossible on CI). Point that import at the in-process
+  // fixture agents so the e2e run stays deterministic and CLI-free.
+  writeFileSync(join(root, ".smithers/lib/ddd/dddAgents.ts"), 'export { agents, providers } from "../../agents.ts";\n');
 }
 
 function writeFakeCodex(binDir: string, payload: unknown) {

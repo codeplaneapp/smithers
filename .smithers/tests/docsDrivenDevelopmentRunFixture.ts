@@ -90,10 +90,16 @@ export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFi
   writeFileSync(join(root, ".smithers/spec/features.json"), `${JSON.stringify(options.features ?? [dddFixtureFeature()], null, 2)}\n`);
   writeFileSync(join(root, ".smithers/spec/content/overview.md"), "# Overview\n\nInitial DDD overview.\n");
   writeFileSync(join(root, ".smithers/specs/docs-driven-development.md"), "# Docs Driven Development\n");
-  const workflowSource = readFileSync(workflowPath, "utf8").replace(
-    `import { providers } from "../agents";`,
-    fixtureAgentsModuleSource(),
-  );
+  const providersImport = `import { providers } from "../lib/ddd/dddAgents.ts";`;
+  const rawWorkflowSource = readFileSync(workflowPath, "utf8");
+  if (!rawWorkflowSource.includes(providersImport)) {
+    throw new Error(
+      `DDD fixture could not find the providers import to stub (${providersImport}). ` +
+        `The workflow's agents import changed — update this fixture so the in-process ` +
+        `FixtureAgent is injected instead of falling back to spawning real agent CLIs.`,
+    );
+  }
+  const workflowSource = rawWorkflowSource.replace(providersImport, fixtureAgentsModuleSource());
   writeFileSync(join(root, ".smithers/workflows/docs-driven-development.tsx"), workflowSource);
   symlinkSync(resolve(repoRoot, "node_modules"), join(root, "node_modules"), "dir");
   writeFileSync(join(root, "package.json"), JSON.stringify({ name: "ddd-run-e2e", type: "module" }) + "\n");
