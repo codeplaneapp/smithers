@@ -1,12 +1,13 @@
 // smithers-display-name: Route Issues → Strategy Agents → Merge Queue to main
 // smithers-source: one-off — walk every open GitHub issue, read the maintainers' ROUTING
 // COMMENT on each issue (via gh), and dispatch each issue to the strategy the comment asks
-// for. Three strategies:
-//   • self-workflow  — a Fable/Opus agent authors a bespoke smithers workflow for the issue
-//                      in its own worktree, verifies `smithers graph` renders, runs it to
-//                      completion, then hand-verifies the result.
-//   • fable-sandwich — Fable plans → Sonnet implements → Fable reviews (loop until LGTM).
-//   • opus-sandwich  — Opus plans → Sonnet implements → Opus reviews (loop until LGTM).
+// for. OPUS-ONLY: every agent runs on claude-opus-4-8; the strategy selects the pipeline
+// SHAPE, not the model. Three strategies:
+//   • self-workflow  — an agent authors a bespoke smithers workflow for the issue in its own
+//                      worktree, verifies `smithers graph` renders, runs it to completion,
+//                      then hand-verifies the result.
+//   • fable-sandwich — plan → implement → review, loop until LGTM (all on Opus).
+//   • opus-sandwich  — plan → implement → review, loop until LGTM (all on Opus).
 // Each issue runs in its own <Worktree>. Once approved, the fix is NOT turned into a PR —
 // instead it goes through a SERIAL LOCAL MERGE QUEUE (<MergeQueue maxConcurrency={1}>) that,
 // one item at a time: rebases the item's worktree onto the LATEST origin/main, runs the full
@@ -31,14 +32,13 @@
 //   • jj-colocated worktrees may be jj workspaces — prompts carry both the jj and plain-git
 //     recipes behind a `jj workspace root` detection.
 //
-// LAUNCH (defaultStrategy "skip" → only comment-routed issues run; SMITHERS_NO_FABLE=1 drops
-// Fable from the chains when it is rate-limited):
-//   SMITHERS_NO_FABLE=1 smithers up .smithers/workflows/route-and-merge-issues.tsx -d \
+// LAUNCH (defaultStrategy "skip" → only comment-routed issues run):
+//   smithers up .smithers/workflows/route-and-merge-issues.tsx -d \
 //     --max-concurrency 24 --run-id issue-merge --input '{"maxConcurrency":24}'
 // Validate on a couple of issues first:
 //   ... --input '{"numbers":[611,612],"defaultStrategy":"fable-sandwich"}'
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -194,35 +194,21 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, MergeQueue, smithers
 });
 
 // ── Agents ───────────────────────────────────────────────────────────────────
+// OPUS-ONLY: every role — routing, planning, implementing, reviewing, and the merge
+// queue — runs on claude-opus-4-8. No Codex, Sonnet, or Fable. Single-agent chains mean
+// no failover: if Opus itself is unavailable a task parks (the health cron auto-resumes
+// when quota returns), but Opus is the one pool we are told is not rate limited.
 // NO `cwd` on agents used INSIDE a <Worktree> (a pinned cwd overrides the worktree). The
-// merge agents are the exception: they run OUTSIDE any <Worktree> in the serial MergeQueue
-// and MUST be pointed at their item's already-on-disk worktree via cwd.
-// SMITHERS_NO_FABLE=1 drops Fable from every chain (Fable rate-limited): a Fable rate-limit
-// is a RETRYABLE quota error, so a Fable-primary task PARKS the whole run on waiting-quota
-// rather than failing over — keeping Fable out of the chains keeps the run moving.
-const NO_FABLE = process.env.SMITHERS_NO_FABLE === "1";
-const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
+// merge agent is the exception: it runs OUTSIDE any <Worktree> in the serial MergeQueue
+// and MUST be pointed at its item's already-on-disk worktree via cwd.
 const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
-const codex = new CodexAgent({
-  model: "gpt-5.5",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-});
-const fableChain = NO_FABLE ? [opus, sonnet] : [fable, opus, sonnet];
-const opusChain = NO_FABLE ? [opus, sonnet] : [opus, fable, sonnet];
-const implementChain = [sonnet, codex];
-const routerChain = [sonnet, codex];
+const fableChain = [opus];
+const opusChain = [opus];
+const implementChain = [opus];
+const routerChain = [opus];
 // One merge agent per item, bound to that item's worktree directory (runs OUTSIDE <Worktree>).
 function makeMergeAgent(worktreePath: string) {
-  return new CodexAgent({
-    model: "gpt-5.5",
-    sandbox: "danger-full-access",
-    dangerouslyBypassApprovalsAndSandbox: true,
-    skipGitRepoCheck: true,
-    cwd: worktreePath,
-  });
+  return new ClaudeCodeAgent({ model: "claude-opus-4-8", cwd: worktreePath });
 }
 
 const AGENT_RETRIES = 2;
@@ -411,7 +397,7 @@ function planPrompt(item: WorkItem, tier: "Fable" | "Opus") {
 
 function implementPrompt(item: WorkItem, plan: Plan | undefined, feedback: string) {
   return [
-    `You are the IMPLEMENTER (Sonnet) for one GitHub issue in the smithersai/smithers monorepo.`,
+    `You are the IMPLEMENTER (Opus) for one GitHub issue in the smithersai/smithers monorepo.`,
     "Your current working directory IS an isolated worktree checked out from main. Make ALL edits here.",
     "",
     issueRef(item),
@@ -616,8 +602,10 @@ export default smithers((ctx) => {
               const feedback = itemFeedback(ctx, n);
               const fix = latestForIssue<Fix>(ctx.outputs.fix, n);
               const plan = latestForIssue<Plan>(ctx.outputs.plan, n);
-              const tier = item.strategy === "opus-sandwich" ? ("Opus" as const) : ("Fable" as const);
-              const planReviewChain = item.strategy === "opus-sandwich" ? opusChain : fableChain;
+              // Opus-only: both the fable-sandwich and opus-sandwich strategies now run on
+              // Opus; the strategy still selects the pipeline shape, not the model.
+              const tier = "Opus" as const;
+              const planReviewChain = opusChain;
               return (
                 <Worktree key={`i${n}`} path={item.worktreePath} branch={item.branch} baseBranch="main">
                   <Sequence>
