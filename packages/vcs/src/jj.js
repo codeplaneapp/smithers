@@ -275,6 +275,9 @@ export function workspaceAdd(name, path, opts = {}) {
 }
 /**
  * List existing workspaces using a JJ template for structured output.
+ * `selected` reflects the current workspace via jj's `current_working_copy`
+ * template keyword. `path` is not populated in this path (no template
+ * keyword exposes the workspace filesystem path).
  * Falls back to parsing human output if `-T` is unavailable.
  *
  * @param {string} [cwd]
@@ -282,7 +285,7 @@ export function workspaceAdd(name, path, opts = {}) {
  */
 export function workspaceList(cwd) {
     return Effect.gen(function* () {
-        let res = yield* runJj(["workspace", "list", "-T", 'name ++ "\\n"'], {
+        let res = yield* runJj(["workspace", "list", "-T", 'name ++ "\\t" ++ if(target.current_working_copy(), "1", "0") ++ "\\n"'], {
             cwd,
         });
         if (res.code === 0) {
@@ -290,7 +293,14 @@ export function workspaceList(cwd) {
                 .split(/\r?\n/)
                 .map((line) => line.trim())
                 .filter(Boolean);
-            return lines.map((name) => ({ name, path: /** @type {string | null} */ (null), selected: false }));
+            return lines
+                .map((line) => {
+                const idx = line.lastIndexOf("\t");
+                const name = idx === -1 ? line : line.slice(0, idx);
+                const flag = idx === -1 ? "" : line.slice(idx + 1);
+                return { name, path: /** @type {string | null} */ (null), selected: flag === "1" };
+            })
+                .filter((row) => row.name.length > 0);
         }
         res = yield* runJj(["workspace", "list"], { cwd });
         if (res.code !== 0)

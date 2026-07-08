@@ -9305,7 +9305,7 @@ type WorkspaceInfo = {
 function workspaceList(cwd?: string): VcsEffect<WorkspaceInfo[]>;
 ```
 
-Prefers template output when supported, falls back to parsing the human-readable `jj workspace list` output.
+Prefers template output when supported, falls back to parsing the human-readable `jj workspace list` output. `selected` reflects the current workspace (populated via jj's `current_working_copy` template keyword on modern jj, or the `*` marker on the legacy fallback). `path` is not currently populated and is always `null`.
 
 ## `workspaceClose(name, opts?)`
 
