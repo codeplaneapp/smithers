@@ -186,7 +186,8 @@ const inputSchema = z.object({
   // Cap on issues taken into the run after filtering (lowest issue number first).
   maxIssues: z.number().int().min(1).max(300).default(50),
   // Max concurrent issue pipelines (also pass the runner --max-concurrency flag).
-  maxConcurrency: z.number().int().min(1).max(8).default(6),
+  // Higher = faster wall-clock but burns the shared model quota window much faster.
+  maxConcurrency: z.number().int().min(1).max(32).default(6),
   // Implement→review iterations per issue before giving up (no PR if never LGTM).
   reviewIterations: z.number().int().min(1).max(4).default(3),
   // CI-fixer attempts on main before the run proceeds without stacking.
