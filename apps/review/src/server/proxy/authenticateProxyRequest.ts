@@ -17,6 +17,7 @@ export interface AuthedApiKey {
   kind: "api-key";
   owner: string;
   repos: string[];
+  spendCapUsd: number | null;
 }
 
 export type ProxyAuth = AuthedSession | AuthedApiKey;
@@ -71,7 +72,7 @@ export async function authenticateProxyRequest(
   if (credential.startsWith("srk_")) {
     const apiKey = await lookupApiKey(env.DB as D1Database, credential);
     if (!apiKey) return null;
-    return { kind: "api-key", owner: apiKey.owner, repos: apiKey.repos };
+    return { kind: "api-key", owner: apiKey.owner, repos: apiKey.repos, spendCapUsd: apiKey.spendCapUsd };
   }
   return null;
 }

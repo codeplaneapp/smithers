@@ -618,6 +618,37 @@ describe("anthropic proxy", () => {
     expect(fixture.requests.length).toBe(0);
   });
 
+  test("402s an srk_ key once its own per-key spend cap is reached (below the repo monthly cap)", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
+    teardowns.push(() => fixture.stop());
+    await registerRepo(env, REPO, 100, 1);
+    await seedUsage(env, REPO, 0.02);
+    const apiKey = "srk_spentkey";
+    await env.DB
+      .prepare("INSERT INTO api_keys (hash, owner, repos_json, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(await sha256Hex(apiKey), "octo", JSON.stringify([REPO]), 0.01, Date.now())
+      .run();
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "content-type": "application/json" },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(res.status).toBe(402);
+    expect(((await res.json()) as { error: string }).error).toContain("api key spend cap");
+    expect(fixture.requests.length).toBe(0);
+  });
+
   test("402s a re-minted session once the repo's monthly spend cap is reached", async () => {
     const env = await buildTestEnv();
     const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });

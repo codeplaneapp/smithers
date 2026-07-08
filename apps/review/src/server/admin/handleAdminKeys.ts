@@ -7,6 +7,7 @@ import { timingSafeStringEqual } from "../timingSafeStringEqual.ts";
 interface MintBody {
   owner?: unknown;
   repos?: unknown;
+  spendCapUsd?: unknown;
 }
 
 /**
@@ -37,13 +38,17 @@ export async function handleAdminKeys(
   if (!Array.isArray(body.repos) || repos.length !== body.repos.length) {
     return jsonError(400, "repos must be a string array");
   }
+  const spendCapUsd = body.spendCapUsd === undefined ? null : body.spendCapUsd;
+  if (spendCapUsd !== null && (typeof spendCapUsd !== "number" || !Number.isFinite(spendCapUsd) || spendCapUsd <= 0)) {
+    return jsonError(400, "spendCapUsd must be > 0");
+  }
   const key = `srk_${randomTokenHex(24)}`;
   const hash = await sha256Hex(key);
   await env.DB
     .prepare(
-      "INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)",
+      "INSERT INTO api_keys (hash, owner, repos_json, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
     )
-    .bind(hash, body.owner, JSON.stringify(repos), now)
+    .bind(hash, body.owner, JSON.stringify(repos), spendCapUsd, now)
     .run();
-  return Response.json({ key, owner: body.owner, repos }, { status: 201 });
+  return Response.json({ key, owner: body.owner, repos, spendCapUsd }, { status: 201 });
 }

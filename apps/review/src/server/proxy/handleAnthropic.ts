@@ -154,6 +154,13 @@ export async function handleAnthropic(
         spentUsd: monthSpendUsd,
       });
     }
+    if (auth.spendCapUsd != null && monthSpendUsd >= auth.spendCapUsd) {
+      return jsonError(402, "api key spend cap exhausted", {
+        repo,
+        keyCapUsd: auth.spendCapUsd,
+        spentUsd: monthSpendUsd,
+      });
+    }
   }
 
   const upstreamUrl = `${deps.anthropicBaseUrl.replace(/\/$/, "")}${proxiedPath}${url.search}`;

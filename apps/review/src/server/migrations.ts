@@ -13,6 +13,7 @@ const SCHEMA_STATEMENTS = [
     hash TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
     repos_json TEXT NOT NULL,
+    spend_cap_usd REAL,
     created_at INTEGER NOT NULL,
     revoked_at INTEGER
   )`,
@@ -78,6 +79,7 @@ export async function ensureSchema(db: D1Database): Promise<void> {
   // column fail far from the cause, and ensured.add() below would make the
   // half-applied schema sticky for the life of this worker instance.
   await addColumnIfMissing(db, `ALTER TABLE repos ADD COLUMN quiz TEXT NOT NULL DEFAULT 'auto'`);
+  await addColumnIfMissing(db, `ALTER TABLE api_keys ADD COLUMN spend_cap_usd REAL`);
   await addColumnIfMissing(db, `ALTER TABLE usage_events ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0`);
   await addColumnIfMissing(db, `ALTER TABLE usage_events ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0`);
   ensured.add(db);

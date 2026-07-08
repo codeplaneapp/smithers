@@ -98,6 +98,33 @@ describe("admin endpoints", () => {
     expect(body.mode).toBe("comment");
   });
 
+  test("mints an api key with spendCapUsd and rejects non-positive values", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker();
+    const mint = await worker.fetch(
+      new Request("https://review.test/api/admin/keys", {
+        method: "POST",
+        headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
+        body: JSON.stringify({ owner: "octo", repos: ["octo/widgets"], spendCapUsd: 3.25 }),
+      }),
+      env,
+    );
+    expect(mint.status).toBe(201);
+    const body = (await mint.json()) as { key: string; spendCapUsd: number };
+    expect(body.key.startsWith("srk_")).toBe(true);
+    expect(body.spendCapUsd).toBe(3.25);
+
+    const bad = await worker.fetch(
+      new Request("https://review.test/api/admin/keys", {
+        method: "POST",
+        headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
+        body: JSON.stringify({ owner: "octo", repos: ["octo/widgets"], spendCapUsd: 0 }),
+      }),
+      env,
+    );
+    expect(bad.status).toBe(400);
+  });
+
   test("rejects an unscoped (empty-repos) api key on session mint", async () => {
     const env = await buildTestEnv();
     const worker = makeWorker();

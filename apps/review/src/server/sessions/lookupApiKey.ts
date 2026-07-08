@@ -5,6 +5,7 @@ export interface ApiKeyRecord {
   hash: string;
   owner: string;
   repos: string[];
+  spendCapUsd: number | null;
   created_at: number;
   revoked_at: number | null;
 }
@@ -13,6 +14,7 @@ interface ApiKeyRow {
   hash: string;
   owner: string;
   repos_json: string;
+  spendCapUsd?: number | null;
   created_at: number;
   revoked_at: number | null;
 }
@@ -26,7 +28,7 @@ export async function lookupApiKey(db: D1Database, key: string): Promise<ApiKeyR
   const hash = await sha256Hex(key);
   const row = await db
     .prepare(
-      "SELECT hash, owner, repos_json, created_at, revoked_at FROM api_keys WHERE hash = ? AND revoked_at IS NULL",
+      "SELECT hash, owner, repos_json, spend_cap_usd AS spendCapUsd, created_at, revoked_at FROM api_keys WHERE hash = ? AND revoked_at IS NULL",
     )
     .bind(hash)
     .first<ApiKeyRow>();
@@ -42,6 +44,7 @@ export async function lookupApiKey(db: D1Database, key: string): Promise<ApiKeyR
     hash: row.hash,
     owner: row.owner,
     repos,
+    spendCapUsd: row.spendCapUsd ?? null,
     created_at: row.created_at,
     revoked_at: row.revoked_at,
   };
