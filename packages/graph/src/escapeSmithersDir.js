@@ -22,5 +22,9 @@ export function escapeSmithersDir(dir) {
   if (idx <= 0) {
     return resolved;
   }
-  return parts.slice(0, idx).join(sep) || sep;
+  const escaped = parts.slice(0, idx).join(sep);
+  // When `.smithers` sits directly under the root, the joined prefix is "" on
+  // POSIX and a drive-relative "C:" on Windows; re-resolve with a trailing
+  // separator so both land on the absolute filesystem root.
+  return escaped ? resolve(escaped + sep) : sep;
 }
