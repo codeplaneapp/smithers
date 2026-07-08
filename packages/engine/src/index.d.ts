@@ -900,6 +900,13 @@ type TaskBridgeToolConfig$1 = {
     allowNetwork: boolean;
     maxOutputBytes: number;
     toolTimeoutMs: number;
+    agentPreflightCache?: WeakMap<object, Promise<void>>;
+    traceContext?: {
+        workflowPath: string | null;
+        workflowHash: string | null;
+        logDir?: string | undefined;
+        annotations?: Record<string, string | number | boolean> | undefined;
+    };
 };
 
 type HijackCompletion = {

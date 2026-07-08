@@ -66,6 +66,7 @@ import { setupBudgetTracker } from "./aspects/setupBudgetTracker.js";
 import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
 /** @typedef {import("@smithers-orchestrator/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
+/** @typedef {import("./effect/TaskBridgeToolConfig.ts").TaskBridgeToolConfig} TaskBridgeToolConfig */
 /** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
 /** @typedef {import("@smithers-orchestrator/driver/RunResult").RunResult} RunResult */
 /** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
@@ -2771,7 +2772,7 @@ async function cancelStaleAttempts(adapter, runId) {
  * @param {Map<string, TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
- * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; agentPreflightCache?: WeakMap<object, Promise<void>>; }} toolConfig
+ * @param {TaskBridgeToolConfig} toolConfig
  * @param {string} workflowName
  * @param {boolean} cacheEnabled
  * @param {AbortSignal} [signal]
