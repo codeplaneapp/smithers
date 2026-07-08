@@ -26,6 +26,7 @@ import { AgentTraceCollector } from "./AgentTraceCollector.js";
 import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj";
 import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
 import { createSlotStarvationHint } from "./slotStarvationHint.js";
+import { createWorktreeSyncCache } from "./worktreeSyncCache.js";
 import { startDurability } from "./startDurability.js";
 import { startDocFileSync } from "./startDocFileSync.js";
 import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
@@ -743,6 +744,73 @@ async function ensureJjWorkspaceGitRoot(gitRoot, worktreePath, branch, baseBranc
         throw error;
     }
 }
+const DEFAULT_WORKTREE_FETCH_TTL_MS = 60_000;
+/**
+ * TTL for skipping the per-task worktree fetch/rebase, from
+ * `SMITHERS_WORKTREE_FETCH_TTL_MS`. Zero or negative disables all caching
+ * (fetch + rebase before every task); unset or unparsable uses the default.
+ *
+ * @returns {number}
+ */
+function resolveWorktreeFetchTtlMs() {
+    const raw = process.env.SMITHERS_WORKTREE_FETCH_TTL_MS;
+    if (raw === undefined || raw.trim() === "") {
+        return DEFAULT_WORKTREE_FETCH_TTL_MS;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : DEFAULT_WORKTREE_FETCH_TTL_MS;
+}
+/** @type {import("./worktreeSyncCache.js").WorktreeSyncCache | null} */
+let worktreeSyncCacheSingleton = null;
+/** Test hook: drop the singleton so the next use re-reads the env TTL. */
+function resetWorktreeSyncCache() {
+    worktreeSyncCacheSingleton = null;
+}
+/**
+ * Process-wide sync cache shared by every run: worktree reuse across tasks is
+ * exactly the hot path the TTL is meant to cover. Created lazily so the env
+ * override is read on first use, not at module load.
+ *
+ * @returns {import("./worktreeSyncCache.js").WorktreeSyncCache}
+ */
+function getWorktreeSyncCache() {
+    if (!worktreeSyncCacheSingleton) {
+        worktreeSyncCacheSingleton = createWorktreeSyncCache({ ttlMs: resolveWorktreeFetchTtlMs() });
+    }
+    return worktreeSyncCacheSingleton;
+}
+/**
+ * Resolve the commit the base branch currently points at, cheaply and without
+ * touching the network, so an unchanged base lets the per-task rebase be
+ * skipped. Returns null when resolution fails; callers then rebase (fail open).
+ *
+ * @param {{ type: "jj" | "git"; root: string }} vcs
+ * @param {string} base
+ * @returns {Promise<string | null>}
+ */
+async function resolveWorktreeBaseTip(vcs, base) {
+    try {
+        if (vcs.type === "jj") {
+            // --ignore-working-copy keeps the probe read-only: no root
+            // working-copy snapshot and no workspace lock per task.
+            const res = await Effect.runPromise(runJj(["log", "-r", base, "--no-graph", "--template", "commit_id", "--ignore-working-copy"], { cwd: vcs.root }).pipe(Effect.provide(getPlatformLayer())));
+            return (res.code === 0 && res.stdout.trim()) || null;
+        }
+        // Prefer origin/<base>: it is what the exists-path rebases onto, and a
+        // fetch moves it without moving the local <base> branch.
+        for (const ref of [`origin/${base}`, base]) {
+            const res = await runGitCommand(vcs.root, ["rev-parse", "--verify", "--quiet", ref]);
+            const tip = res.code === 0 ? res.stdout.trim() : "";
+            if (tip) {
+                return tip;
+            }
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
 /**
  * Ensure a worktree exists at `worktreePath`, creating it from `rootDir`
  * if necessary. When `branch` is provided, a jj bookmark or git branch is
@@ -751,22 +819,48 @@ async function ensureJjWorkspaceGitRoot(gitRoot, worktreePath, branch, baseBranc
  */
 async function ensureWorktree(rootDir, worktreePath, branch, baseBranch) {
     if (existsSync(worktreePath)) {
-        // Worktree exists — rebase onto the configured base branch so work starts from tip.
+        // Worktree exists — rebase onto the configured base branch so work
+        // starts from tip. The sync cache bounds how often that costs a
+        // network fetch (TTL per repo) and a rebase (only when the base tip
+        // moved since this worktree last rebased onto it).
         const vcs = findVcsRoot(rootDir);
         const base = baseBranch || "main";
+        const syncCache = getWorktreeSyncCache();
         if (vcs?.type === "jj") {
-            await Effect.runPromise(runJj(["git", "fetch"], { cwd: worktreePath }).pipe(Effect.provide(getPlatformLayer())));
-            const rebaseRes = await Effect.runPromise(runJj(["rebase", "-d", base], { cwd: worktreePath }).pipe(Effect.provide(getPlatformLayer())));
-            if (rebaseRes.code !== 0) {
-                console.warn(`[smithers] worktree sync: jj rebase -d ${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`);
+            if (syncCache.shouldFetch(vcs.root)) {
+                const fetchRes = await Effect.runPromise(runJj(["git", "fetch"], { cwd: worktreePath }).pipe(Effect.provide(getPlatformLayer())));
+                if (fetchRes.code === 0) {
+                    syncCache.recordFetch(vcs.root);
+                }
+            }
+            const baseTip = await resolveWorktreeBaseTip(vcs, base);
+            if (syncCache.shouldRebase(worktreePath, baseTip)) {
+                const rebaseRes = await Effect.runPromise(runJj(["rebase", "-d", base], { cwd: worktreePath }).pipe(Effect.provide(getPlatformLayer())));
+                if (rebaseRes.code !== 0) {
+                    console.warn(`[smithers] worktree sync: jj rebase -d ${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`);
+                }
+                else {
+                    syncCache.recordRebase(worktreePath, baseTip);
+                }
             }
             await ensureJjWorkspaceGitRoot(vcs.root, worktreePath, branch, baseBranch);
         }
         else if (vcs?.type === "git") {
-            await runGitCommand(worktreePath, ["fetch", "origin"]);
-            const rebaseRes = await runGitCommand(worktreePath, ["rebase", `origin/${base}`]);
-            if (rebaseRes.code !== 0) {
-                console.warn(`[smithers] worktree sync: git rebase origin/${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`);
+            if (syncCache.shouldFetch(vcs.root)) {
+                const fetchRes = await runGitCommand(worktreePath, ["fetch", "origin"]);
+                if (fetchRes.code === 0) {
+                    syncCache.recordFetch(vcs.root);
+                }
+            }
+            const baseTip = await resolveWorktreeBaseTip(vcs, base);
+            if (syncCache.shouldRebase(worktreePath, baseTip)) {
+                const rebaseRes = await runGitCommand(worktreePath, ["rebase", `origin/${base}`]);
+                if (rebaseRes.code !== 0) {
+                    console.warn(`[smithers] worktree sync: git rebase origin/${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`);
+                }
+                else {
+                    syncCache.recordRebase(worktreePath, baseTip);
+                }
             }
         }
         createdWorktrees.add(worktreePath);
@@ -6336,4 +6430,8 @@ export const __engineInternals = {
     isQuotaTaskFailure,
     cancelInProgress,
     cancelStaleAttempts,
+    ensureWorktree,
+    resolveWorktreeBaseTip,
+    resolveWorktreeFetchTtlMs,
+    resetWorktreeSyncCache,
 };
