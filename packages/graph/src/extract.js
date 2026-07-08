@@ -114,7 +114,10 @@ function resolveRetryConfig(raw, isAgent = false) {
         : defaultNoRetryForContinueOnFail
             ? (isAgent ? 1 : 0)
             : hasExplicitRetries
-                ? /** @type {number} */ (raw.retries)
+                // Clamp negative values to 0 (one attempt, no retries): a
+                // negative budget would otherwise yield maxAttempts <= 0 and a
+                // task that fails without ever executing.
+                ? Math.max(0, /** @type {number} */ (raw.retries))
                 : Infinity;
     const retryPolicy = hasExplicitRetryPolicy
         ? /** @type {import("./RetryPolicy.ts").RetryPolicy} */ (raw.retryPolicy)
