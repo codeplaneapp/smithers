@@ -212,8 +212,16 @@ describe("Memory E2E", () => {
         }
         finally {
             // Windows releases sqlite file handles asynchronously after
-            // close(), so a bare rm races EBUSY; let node retry it.
-            rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+            // close(), so a bare rm races EBUSY even with retries. The
+            // persistence assertions above have already run; a residual temp-dir
+            // cleanup race must not fail the test, so retry generously and treat
+            // a leftover lock as best-effort (the OS reclaims the temp dir).
+            try {
+                rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+            }
+            catch (error) {
+                if (process.platform !== "win32" || (error?.code !== "EBUSY" && error?.code !== "EPERM" && error?.code !== "ENOTEMPTY")) throw error;
+            }
         }
     });
     test("deleteMessages prunes large real SQLite id sets without crossing thread boundaries", async () => {
