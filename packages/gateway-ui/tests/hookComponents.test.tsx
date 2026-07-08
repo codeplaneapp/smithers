@@ -17,7 +17,7 @@ try {
 }
 globalThis.fetch = nativeFetch;
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { SmithersCollectionsProvider } from "@smithers-orchestrator/gateway-react";
@@ -536,6 +536,41 @@ describe("RunEventLog", () => {
     const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a" }));
     await harness.flush(80);
     expect(harness.container.textContent).toContain("Run event stream failed.");
+  });
+
+  test("keeps following the tail once the event buffer hits maxEvents", async () => {
+    const seed = Array.from({ length: 5 }, (_, i) => ({
+      runId: "run-a",
+      seq: i + 1,
+      event: `node.step-${i + 1}`,
+      payload: { i },
+    }));
+    const gw = boot({ events: { "run-a": seed } });
+    const scrollSpy = spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+    try {
+      const harness = await mount(
+        gw,
+        createElement(RunEventLog, { runId: "run-a", maxEvents: 5, follow: true }),
+      );
+      await harness.flush(60);
+      const callsBeforePush = scrollSpy.mock.calls.length;
+      expect(callsBeforePush).toBeGreaterThan(0);
+
+      gw.pushEvents("run-a", [
+        { runId: "run-a", seq: 6, event: "node.step-6", payload: { i: 5 } },
+        { runId: "run-a", seq: 7, event: "node.step-7", payload: { i: 6 } },
+        { runId: "run-a", seq: 8, event: "node.step-8", payload: { i: 7 } },
+      ]);
+      await harness.flush(60);
+
+      // The buffer stays capped at maxEvents, so events.length never changes,
+      // yet the newest frame keeps replacing the oldest — follow must still fire.
+      expect(harness.container.textContent).toContain("node.step-8");
+      expect(harness.container.textContent).not.toContain("node.step-1");
+      expect(scrollSpy.mock.calls.length).toBeGreaterThan(callsBeforePush);
+    } finally {
+      scrollSpy.mockRestore();
+    }
   });
 });
 
