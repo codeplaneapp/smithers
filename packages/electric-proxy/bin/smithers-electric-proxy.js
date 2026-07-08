@@ -12,6 +12,7 @@
  *   node bin/smithers-electric-proxy.js
  */
 import { createSmithersElectricProxy } from "../src/createSmithersElectricProxy.js";
+import { deriveGrantsFromGateway } from "../src/deriveGrantsFromGateway.js";
 import { serveSmithersElectricProxy } from "../src/serveSmithersElectricProxy.js";
 
 /**
@@ -24,33 +25,6 @@ function requireEnv(name) {
     throw new Error(`${name} is required`);
   }
   return value;
-}
-
-/**
- * @param {string} gatewayUrl
- * @param {string} authorization
- * @returns {Promise<import("../src/SmithersElectricProxyOptions.ts").SmithersElectricAuthContext | null>}
- */
-async function deriveGrantsFromGateway(gatewayUrl, authorization) {
-  // listRuns returns exactly the runs the token is authorized to read, so its
-  // result is the authoritative grant set. A 401/403 means no access.
-  const response = await fetch(`${gatewayUrl.replace(/\/+$/, "")}/v1/rpc/listRuns`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization },
-    body: JSON.stringify({}),
-  }).catch(() => null);
-  if (!response || !response.ok) return null;
-  const body = /** @type {{ payload?: unknown } | null} */ (await response.json().catch(() => null));
-  const payload = body?.payload;
-  const rows = Array.isArray(payload) ? payload : [];
-  const grantedRunIds = rows
-    .map((row) => (row && typeof row === "object" ? (/** @type {{ runId?: unknown }} */ (row)).runId : undefined))
-    .filter((id) => typeof id === "string");
-  return {
-    principalId: authorization.slice(-12),
-    scopes: ["run:read"],
-    grantedRunIds,
-  };
 }
 
 /**
