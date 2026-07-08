@@ -12,6 +12,7 @@ export default defineConfig({
     renderPrompt: "src/renderPrompt.ts",
     runTask: "src/runTask.ts",
     simulate: "src/simulate.ts",
+    matchers: "src/matchers.ts",
   },
   format: ["esm"],
   dts: { resolve: false },

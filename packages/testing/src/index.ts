@@ -21,3 +21,4 @@ export type {
   SimulateMockFunction,
   SimulateOptions,
 } from "./simulate.ts";
+export { simMatchers, toHaveExecuted, toHaveExecutedInOrder, toHaveFinished } from "./matchers.ts";
