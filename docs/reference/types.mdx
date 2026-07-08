@@ -277,6 +277,9 @@ type TaskDescriptor = {
   outputSchema?: import("zod").ZodObject<any>;
   parallelGroupId?: string;
   parallelMaxConcurrency?: number;
+  subtreeGroupId?: string;          // nearest ancestor <Parallel subtreeConcurrency> group
+  subtreeChildKey?: string;         // direct child of that parallel this task descends from
+  subtreeMax?: number;              // its cap on in-flight direct children
   needsApproval: boolean;
   waitAsync?: boolean;
   approvalMode?: "gate" | "decision" | "select" | "rank";
@@ -588,7 +591,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
 };
 
 type SequenceProps  = { key?: string; skipIf?: boolean; children?: React.ReactNode };
-type ParallelProps  = { id?: string; maxConcurrency?: number; skipIf?: boolean; children?: React.ReactNode };
+type ParallelProps  = { id?: string; maxConcurrency?: number; subtreeConcurrency?: number; skipIf?: boolean; children?: React.ReactNode };
 type BranchProps    = { if: boolean; then: React.ReactElement; else?: React.ReactElement | null; skipIf?: boolean };
 type LoopProps      = {
   key?: string;

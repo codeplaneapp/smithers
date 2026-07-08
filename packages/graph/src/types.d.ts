@@ -148,6 +148,12 @@ type TaskDescriptor = {
     outputSchema?: z.ZodObject;
     parallelGroupId?: string;
     parallelMaxConcurrency?: number;
+    /** Stable id of the nearest ancestor `<Parallel subtreeConcurrency>` group this task belongs to. */
+    subtreeGroupId?: string;
+    /** Stable key of that parallel's direct child this task descends from (explicit key/id, else child ordinal). */
+    subtreeChildKey?: string;
+    /** Max direct-child subtrees of the subtree group allowed in flight at once. */
+    subtreeMax?: number;
     needsApproval: boolean;
     waitAsync?: boolean;
     approvalMode?: "gate" | "decision" | "select" | "rank";
