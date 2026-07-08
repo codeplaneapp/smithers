@@ -2,25 +2,6 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "smithers-orchestrator": [
-        "../packages/smithers/src/examples-entry.js"
-      ],
-      "smithers-orchestrator/jsx-runtime": [
-        "../packages/smithers/src/jsx-runtime.js"
-      ],
-      "smithers-orchestrator/jsx-dev-runtime": [
-        "../packages/smithers/src/jsx-runtime.js"
-      ],
-      "smithers-orchestrator/tools": [
-        "../packages/smithers/src/tools.js"
-      ],
-      "smithers-orchestrator/*": [
-        "../packages/smithers/src/*.js",
-        "../packages/smithers/src/*/index.js"
-      ],
-      "smithers-orchestrator/scorers": [
-        "../packages/scorers/src/index.js"
-      ],
       "@smithers-orchestrator/agents": [
         "../packages/agents/src/index.js"
       ],
@@ -182,9 +163,7 @@
     "allowJs": true
   },
   "include": [
-    "**/*",
-    "../packages/smithers/src/examples-entry.ts",
-    "../packages/smithers/src/**/*"
+    "**/*"
   ],
   "exclude": [
     "../packages/smithers/tests/**/*",
