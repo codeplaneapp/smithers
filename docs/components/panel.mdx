@@ -195,6 +195,7 @@ export function Parallel(props) {
     // the phase group in run views (graph, the Claude /workflows mirror).
     const next = {
         maxConcurrency: props.maxConcurrency,
+        subtreeConcurrency: props.subtreeConcurrency,
         id: props.id,
         ...(props.label === undefined ? {} : { label: props.label }),
     };

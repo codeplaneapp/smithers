@@ -110,6 +110,46 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
             groupUsage.set(groupId, (groupUsage.get(groupId) ?? 0) + 1);
         }
     }
+    // Subtree-concurrency admission (<Parallel subtreeConcurrency>): per
+    // subtree group, the set of direct-child keys already ACTIVE. A child is
+    // active once any of its tasks has started (any state beyond
+    // pending/cancelled) while at least one of its tasks is not yet terminal;
+    // a fully terminal child frees its slot. Computed in descriptor order so a
+    // resumed run replays the same activation decisions from a restored state
+    // map.
+    /** @type {Map<string, Set<string>>} */
+    const subtreeActiveChildren = new Map();
+    {
+        /** @type {Map<string, { groupId: string; childKey: string; started: boolean; allTerminal: boolean }>} */
+        const childStats = new Map();
+        for (const descriptor of descriptors.values()) {
+            const groupId = descriptor.subtreeGroupId;
+            if (!groupId || descriptor.subtreeMax == null)
+                continue;
+            const childKey = descriptor.subtreeChildKey ?? "";
+            const statsKey = `${groupId}\u0000${childKey}`;
+            let stats = childStats.get(statsKey);
+            if (!stats) {
+                stats = { groupId, childKey, started: false, allTerminal: true };
+                childStats.set(statsKey, stats);
+            }
+            const state = states.get(buildStateKey(descriptor.nodeId, descriptor.iteration)) ?? "pending";
+            if (state !== "pending" && state !== "cancelled")
+                stats.started = true;
+            if (!isTraversalTerminal(state, descriptor))
+                stats.allTerminal = false;
+        }
+        for (const stats of childStats.values()) {
+            if (!stats.started || stats.allTerminal)
+                continue;
+            let active = subtreeActiveChildren.get(stats.groupId);
+            if (!active) {
+                active = new Set();
+                subtreeActiveChildren.set(stats.groupId, active);
+            }
+            active.add(stats.childKey);
+        }
+    }
     /**
    * @param {PlanNode} node
    * @param {{ includeContinuedFailures?: boolean }} [options]
@@ -359,7 +399,37 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                         if (used >= cap) {
                             return { terminal };
                         }
-                        groupUsage.set(groupId, used + 1);
+                    }
+                    // Subtree cap: a task whose direct-child subtree is already
+                    // active runs freely (an in-flight child may finish its
+                    // remaining tasks even while over-cap siblings wait); a task
+                    // from an inactive child is admitted only while the group has
+                    // activation headroom, counted in plan-walk (descriptor)
+                    // order. Composes with the leaf-group cap above and the
+                    // engine's global cap — all must pass before dispatch.
+                    const subtreeGroupId = descriptor.subtreeGroupId;
+                    const subtreeMax = descriptor.subtreeMax;
+                    /** @type {Set<string> | undefined} */
+                    let subtreeChildren;
+                    /** @type {string | undefined} */
+                    let subtreeChildKey;
+                    if (subtreeGroupId && subtreeMax != null) {
+                        subtreeChildKey = descriptor.subtreeChildKey ?? "";
+                        subtreeChildren = subtreeActiveChildren.get(subtreeGroupId);
+                        if (!subtreeChildren) {
+                            subtreeChildren = new Set();
+                            subtreeActiveChildren.set(subtreeGroupId, subtreeChildren);
+                        }
+                        if (!subtreeChildren.has(subtreeChildKey) &&
+                            subtreeChildren.size >= subtreeMax) {
+                            return { terminal };
+                        }
+                    }
+                    if (groupId && cap != null) {
+                        groupUsage.set(groupId, (groupUsage.get(groupId) ?? 0) + 1);
+                    }
+                    if (subtreeChildren && subtreeChildKey !== undefined) {
+                        subtreeChildren.add(subtreeChildKey);
                     }
                     runnable.push(descriptor);
                 }

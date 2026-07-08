@@ -2,7 +2,8 @@ import { makeWorkflowSession, } from "@smithers-orchestrator/scheduler";
 import { ReactWorkflowDriver } from "@smithers-orchestrator/react-reconciler/driver";
 import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
 import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { loadInput, loadOutputs, loadRunOutputRowsEffect } from "@smithers-orchestrator/db/snapshot";
+import { coerceOutputRowForSnapshot, loadInput, loadOutputs, loadRunOutputRowsEffect } from "@smithers-orchestrator/db/snapshot";
+import { FRAME_KEYFRAME_INTERVAL } from "@smithers-orchestrator/db/frame-codec";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { selectOutputRow, validateOutput, describeSchemaShape, buildOutputRow, stripAutoColumns, } from "@smithers-orchestrator/db/output";
@@ -25,7 +26,8 @@ import { EventBus } from "./events.js";
 import { AgentTraceCollector } from "./AgentTraceCollector.js";
 import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj";
 import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
-import { createSlotStarvationHint } from "./slotStarvationHint.js";
+import { createSlotGovernor } from "./slotGovernor.js";
+import { createWorktreeSyncCache } from "./worktreeSyncCache.js";
 import { startDurability } from "./startDurability.js";
 import { startDocFileSync } from "./startDocFileSync.js";
 import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
@@ -743,6 +745,73 @@ async function ensureJjWorkspaceGitRoot(gitRoot, worktreePath, branch, baseBranc
         throw error;
     }
 }
+const DEFAULT_WORKTREE_FETCH_TTL_MS = 60_000;
+/**
+ * TTL for skipping the per-task worktree fetch/rebase, from
+ * `SMITHERS_WORKTREE_FETCH_TTL_MS`. Zero or negative disables all caching
+ * (fetch + rebase before every task); unset or unparsable uses the default.
+ *
+ * @returns {number}
+ */
+function resolveWorktreeFetchTtlMs() {
+    const raw = process.env.SMITHERS_WORKTREE_FETCH_TTL_MS;
+    if (raw === undefined || raw.trim() === "") {
+        return DEFAULT_WORKTREE_FETCH_TTL_MS;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : DEFAULT_WORKTREE_FETCH_TTL_MS;
+}
+/** @type {import("./worktreeSyncCache.js").WorktreeSyncCache | null} */
+let worktreeSyncCacheSingleton = null;
+/** Test hook: drop the singleton so the next use re-reads the env TTL. */
+function resetWorktreeSyncCache() {
+    worktreeSyncCacheSingleton = null;
+}
+/**
+ * Process-wide sync cache shared by every run: worktree reuse across tasks is
+ * exactly the hot path the TTL is meant to cover. Created lazily so the env
+ * override is read on first use, not at module load.
+ *
+ * @returns {import("./worktreeSyncCache.js").WorktreeSyncCache}
+ */
+function getWorktreeSyncCache() {
+    if (!worktreeSyncCacheSingleton) {
+        worktreeSyncCacheSingleton = createWorktreeSyncCache({ ttlMs: resolveWorktreeFetchTtlMs() });
+    }
+    return worktreeSyncCacheSingleton;
+}
+/**
+ * Resolve the commit the base branch currently points at, cheaply and without
+ * touching the network, so an unchanged base lets the per-task rebase be
+ * skipped. Returns null when resolution fails; callers then rebase (fail open).
+ *
+ * @param {{ type: "jj" | "git"; root: string }} vcs
+ * @param {string} base
+ * @returns {Promise<string | null>}
+ */
+async function resolveWorktreeBaseTip(vcs, base) {
+    try {
+        if (vcs.type === "jj") {
+            // --ignore-working-copy keeps the probe read-only: no root
+            // working-copy snapshot and no workspace lock per task.
+            const res = await Effect.runPromise(runJj(["log", "-r", base, "--no-graph", "--template", "commit_id", "--ignore-working-copy"], { cwd: vcs.root }).pipe(Effect.provide(getPlatformLayer())));
+            return (res.code === 0 && res.stdout.trim()) || null;
+        }
+        // Prefer origin/<base>: it is what the exists-path rebases onto, and a
+        // fetch moves it without moving the local <base> branch.
+        for (const ref of [`origin/${base}`, base]) {
+            const res = await runGitCommand(vcs.root, ["rev-parse", "--verify", "--quiet", ref]);
+            const tip = res.code === 0 ? res.stdout.trim() : "";
+            if (tip) {
+                return tip;
+            }
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
 /**
  * Ensure a worktree exists at `worktreePath`, creating it from `rootDir`
  * if necessary. When `branch` is provided, a jj bookmark or git branch is
@@ -751,22 +820,48 @@ async function ensureJjWorkspaceGitRoot(gitRoot, worktreePath, branch, baseBranc
  */
 async function ensureWorktree(rootDir, worktreePath, branch, baseBranch) {
     if (existsSync(worktreePath)) {
-        // Worktree exists — rebase onto the configured base branch so work starts from tip.
+        // Worktree exists — rebase onto the configured base branch so work
+        // starts from tip. The sync cache bounds how often that costs a
+        // network fetch (TTL per repo) and a rebase (only when the base tip
+        // moved since this worktree last rebased onto it).
         const vcs = findVcsRoot(rootDir);
         const base = baseBranch || "main";
+        const syncCache = getWorktreeSyncCache();
         if (vcs?.type === "jj") {
-            await Effect.runPromise(runJj(["git", "fetch"], { cwd: worktreePath }).pipe(Effect.provide(getPlatformLayer())));
-            const rebaseRes = await Effect.runPromise(runJj(["rebase", "-d", base], { cwd: worktreePath }).pipe(Effect.provide(getPlatformLayer())));
-            if (rebaseRes.code !== 0) {
-                console.warn(`[smithers] worktree sync: jj rebase -d ${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`);
+            if (syncCache.shouldFetch(vcs.root)) {
+                const fetchRes = await Effect.runPromise(runJj(["git", "fetch"], { cwd: worktreePath }).pipe(Effect.provide(getPlatformLayer())));
+                if (fetchRes.code === 0) {
+                    syncCache.recordFetch(vcs.root);
+                }
+            }
+            const baseTip = await resolveWorktreeBaseTip(vcs, base);
+            if (syncCache.shouldRebase(worktreePath, baseTip)) {
+                const rebaseRes = await Effect.runPromise(runJj(["rebase", "-d", base], { cwd: worktreePath }).pipe(Effect.provide(getPlatformLayer())));
+                if (rebaseRes.code !== 0) {
+                    console.warn(`[smithers] worktree sync: jj rebase -d ${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`);
+                }
+                else {
+                    syncCache.recordRebase(worktreePath, baseTip);
+                }
             }
             await ensureJjWorkspaceGitRoot(vcs.root, worktreePath, branch, baseBranch);
         }
         else if (vcs?.type === "git") {
-            await runGitCommand(worktreePath, ["fetch", "origin"]);
-            const rebaseRes = await runGitCommand(worktreePath, ["rebase", `origin/${base}`]);
-            if (rebaseRes.code !== 0) {
-                console.warn(`[smithers] worktree sync: git rebase origin/${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`);
+            if (syncCache.shouldFetch(vcs.root)) {
+                const fetchRes = await runGitCommand(worktreePath, ["fetch", "origin"]);
+                if (fetchRes.code === 0) {
+                    syncCache.recordFetch(vcs.root);
+                }
+            }
+            const baseTip = await resolveWorktreeBaseTip(vcs, base);
+            if (syncCache.shouldRebase(worktreePath, baseTip)) {
+                const rebaseRes = await runGitCommand(worktreePath, ["rebase", `origin/${base}`]);
+                if (rebaseRes.code !== 0) {
+                    console.warn(`[smithers] worktree sync: git rebase origin/${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`);
+                }
+                else {
+                    syncCache.recordRebase(worktreePath, baseTip);
+                }
             }
         }
         createdWorktrees.add(worktreePath);
@@ -2062,6 +2157,28 @@ function parseRunConfigJson(value) {
     catch {
         return {};
     }
+}
+/**
+ * Read an explicit `--max-concurrency` pin back out of a run's persisted
+ * config. Resume paths (supervisor auto-resume, gateway resume, `up --resume`
+ * without re-passing flags) re-enter the engine with `opts.maxConcurrency`
+ * undefined, so without this the slot governor would treat a pinned run as
+ * auto after a crash/resume and raise the cap past the user's pin.
+ *
+ * @param {Record<string, unknown>} config
+ * @returns {number | null} the pinned cap, or null when the run never pinned
+ *   one. A pinned run whose stored cap does not round-trip as a positive
+ *   integer stays pinned at the engine default rather than falling open to
+ *   auto-raise.
+ */
+function readPinnedMaxConcurrency(config) {
+    if (!config.maxConcurrencyPinned) {
+        return null;
+    }
+    const cap = config.maxConcurrency;
+    return typeof cap === "number" && Number.isInteger(cap) && cap > 0
+        ? cap
+        : DEFAULT_MAX_CONCURRENCY;
 }
 /**
  * @param {unknown} value
@@ -5002,7 +5119,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
         : null;
     const rootDir = resolveRootDir(opts, resolvedWorkflowPath);
     const logDir = resolveLogDir(rootDir, runId, opts.logDir);
-    const maxConcurrency = coercePositiveInt("maxConcurrency", opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY);
+    // `let`: the slot governor may auto-raise the cap mid-run when the user did
+    // not pin it; every read (withTaskSlot admission included) sees the raise.
+    let maxConcurrency = coercePositiveInt("maxConcurrency", opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY);
     const maxOutputBytes = coercePositiveInt("maxOutputBytes", opts.maxOutputBytes, DEFAULT_MAX_OUTPUT_BYTES);
     const toolTimeoutMs = coercePositiveInt("toolTimeoutMs", opts.toolTimeoutMs, DEFAULT_TOOL_TIMEOUT_MS);
     const allowNetwork = Boolean(opts.allowNetwork);
@@ -5077,15 +5196,40 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const budgetSkippedKeys = new Set();
     let activeTaskCount = 0;
     const taskWaiters = [];
-    const slotStarvationHint = createSlotStarvationHint(maxConcurrency);
+    // `let`: replaced before tasks start when a resumed run restores a
+    // persisted `--max-concurrency` pin that this invocation's opts lack.
+    let slotGovernor = createSlotGovernor(maxConcurrency, {
+        explicit: opts.maxConcurrency !== undefined,
+    });
     const acquireTaskSlot = async () => {
         if (activeTaskCount < maxConcurrency) {
             activeTaskCount += 1;
             return;
         }
-        const starvationHint = slotStarvationHint.onSlotWait(activeTaskCount, taskWaiters.length + 1);
-        if (starvationHint) {
-            logWarning(starvationHint, { runId, maxConcurrency, waiting: taskWaiters.length + 1 }, "engine:concurrency");
+        const decision = slotGovernor.onSlotWait(activeTaskCount, taskWaiters.length + 1);
+        if (decision.warn) {
+            logWarning(decision.warn, { runId, maxConcurrency, waiting: taskWaiters.length + 1 }, "engine:concurrency");
+        }
+        if (decision.raiseTo !== null) {
+            const previousCap = maxConcurrency;
+            const demand = activeTaskCount + taskWaiters.length + 1;
+            maxConcurrency = decision.raiseTo;
+            logInfo(`auto-raising maxConcurrency from ${previousCap} to ${maxConcurrency}: ` +
+                `${demand} tasks want to run concurrently (pass --max-concurrency to pin the cap)`, { runId, previousMaxConcurrency: previousCap, maxConcurrency, demand }, "engine:concurrency");
+            // Hand freed capacity to the tasks that queued first; each resolved
+            // waiter increments activeTaskCount when it resumes (the same
+            // handoff releaseTaskSlot uses), so count them against capacity
+            // here rather than re-reading activeTaskCount.
+            let capacity = maxConcurrency - activeTaskCount;
+            while (capacity > 0 && taskWaiters.length > 0) {
+                const next = taskWaiters.shift();
+                next?.();
+                capacity -= 1;
+            }
+            if (capacity > 0) {
+                activeTaskCount += 1;
+                return;
+            }
         }
         await new Promise((resolveWaiter) => {
             taskWaiters.push(resolveWaiter);
@@ -5129,6 +5273,158 @@ async function runWorkflowBodyDriver(workflow, opts) {
             await sleep(RUN_ABORT_SETTLE_POLL_MS);
         }
     };
+    // Incremental frame snapshots: persistDriverFrame runs on every task
+    // completion, and its full listNodes/loadInput/loadOutputs scans grow with
+    // the run's accumulated rows, so per-completion frame cost goes superlinear
+    // over long runs. Instead, the first frame seeds this cache from the full
+    // loads and later frames reuse it: the input row is immutable for the life
+    // of a run, output rows are patched in place as each completed task's row
+    // is read back (readTaskOutput), and node rows are shared from the listing
+    // persistDriverGraphTaskStates already takes each frame. Safety valves: a
+    // full reload every FRAME_KEYFRAME_INTERVAL frames, a full reload on any
+    // cache-maintenance doubt (invalidateFrameSnapshotCache), and the
+    // SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS=0 kill switch restoring the
+    // full-load path entirely. The switch is sampled once per run-body
+    // invocation — flipping the env mid-run takes effect on the next
+    // resume/continue-as-new, not the next frame.
+    const incrementalFrameSnapshotsEnabled = process.env.SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS !== "0";
+    /**
+   * @type {{ inputRow: Record<string, unknown> | undefined; outputs: import("@smithers-orchestrator/db/snapshot").OutputSnapshot; framesSinceFullLoad: number } | null}
+   */
+    let frameSnapshotCache = null;
+    // Monotonic count of output-row read-backs (noteTaskOutputRowForFrameCache
+    // calls). Task completions commit on their own fibers, concurrently with a
+    // frame's full loads — a row committed after loadOutputs already scanned
+    // its table would be missing from those loads, while its cache patch lands
+    // in the stale cache being replaced (or no-ops while the cache is null).
+    // The full-load path records this counter before its scans and refuses to
+    // seed the cache when it moved, so such a row can never be silently absent
+    // from up to FRAME_KEYFRAME_INTERVAL incremental frames.
+    let frameSnapshotCacheGeneration = 0;
+    /**
+   * Copy an outputs snapshot one level deep (arrays of row references, no DB
+   * scans) so the copy and the source can no longer mutate each other's rows
+   * lists. loadOutputs registers each table's rows under BOTH the sql table
+   * name and the schema key as the SAME array, and patches rely on that
+   * aliasing — so aliased entries stay aliased in the copy.
+   * @param {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} outputs
+   * @returns {import("@smithers-orchestrator/db/snapshot").OutputSnapshot}
+   */
+    const copyOutputSnapshot = (outputs) => {
+        /** @type {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} */
+        const copy = {};
+        /** @type {Map<Array<unknown>, Array<unknown>>} */
+        const copiedRows = new Map();
+        for (const [outputKey, rows] of Object.entries(outputs)) {
+            let copied = copiedRows.get(rows);
+            if (!copied) {
+                copied = rows.slice();
+                copiedRows.set(rows, copied);
+            }
+            copy[outputKey] = copied;
+        }
+        return copy;
+    };
+    /**
+   * Safety invariant carried over from the full-load path: an output row and
+   * its node's "finished" state commit in one transaction, and the full loads
+   * read nodes before outputs — so a persisted snapshot could never record a
+   * finished node whose in-schema output row is absent (resume would then
+   * resolve deps against a missing row or re-run a finished task). Cross-check
+   * the cached outputs against this frame's fresh node listing; a miss means a
+   * completion's cache patch was lost (e.g. it raced a cache reseed), and the
+   * caller must fall back to a full load. Node rows naming tables outside the
+   * outputs snapshot are skipped — loadOutputs never scans those, so the
+   * full-load path would not include them either.
+   * @param {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]} frameNodeRows
+   * @param {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} outputs
+   * @returns {Record<string, unknown> | null} details of the first finished node missing its cached output row, or null when the invariant holds
+   */
+    const findFinishedNodeMissingCachedOutput = (frameNodeRows, outputs) => {
+        /** @type {Map<Array<unknown>, Set<string>>} */
+        const rowKeysByTable = new Map();
+        for (const node of frameNodeRows) {
+            if (node.state !== "finished" || !node.outputTable)
+                continue;
+            const rows = outputs[node.outputTable];
+            if (!rows)
+                continue;
+            let keys = rowKeysByTable.get(rows);
+            if (!keys) {
+                keys = new Set();
+                for (const row of rows) {
+                    const outputRow = /** @type {Record<string, unknown>} */ (row);
+                    keys.add(buildStateKey(String(outputRow.nodeId), Number(outputRow.iteration ?? 0)));
+                }
+                rowKeysByTable.set(rows, keys);
+            }
+            if (!keys.has(buildStateKey(node.nodeId, node.iteration ?? 0))) {
+                return {
+                    nodeId: node.nodeId,
+                    iteration: node.iteration ?? 0,
+                    tableName: node.outputTable,
+                };
+            }
+        }
+        return null;
+    };
+    /**
+   * @param {string} reason
+   * @param {Record<string, unknown>} [details]
+   */
+    const invalidateFrameSnapshotCache = (reason, details) => {
+        if (frameSnapshotCache == null)
+            return;
+        frameSnapshotCache = null;
+        logDebug(`frame snapshot cache invalidated: ${reason}`, { runId, ...details }, "engine:snapshot");
+    };
+    /**
+   * Patch the cached outputs snapshot with a freshly read-back output row so
+   * the next frame matches what a full loadOutputs would return. Mirrors
+   * upsertOutputRow semantics: replace the existing (nodeId, iteration) row in
+   * place (sqlite keeps the rowid on conflict, so a re-listed table keeps the
+   * row's position) or append a new row at the end.
+   * @param {TaskDescriptor} task
+   * @param {Record<string, unknown>} outputRow
+   */
+    const noteTaskOutputRowForFrameCache = (task, outputRow) => {
+        // Advance the generation before any early return — a read-back with a
+        // null cache still marks "an output row committed around now", which a
+        // concurrently-running full load must see to know its scans may be
+        // stale (see the seed guard in persistDriverFrame).
+        frameSnapshotCacheGeneration += 1;
+        if (!incrementalFrameSnapshotsEnabled ||
+            frameSnapshotCache == null ||
+            !task.outputTable) {
+            return;
+        }
+        try {
+            const tableName = getTableName(/** @type {SQLiteTable} */ (task.outputTable));
+            const rows = /** @type {Array<Record<string, unknown>> | undefined} */ (frameSnapshotCache.outputs[tableName]);
+            if (!rows) {
+                // The task's output table was absent from the seeded snapshot, so
+                // loadOutputs does not scan it for this run's schema — reload
+                // fully on the next frame rather than guess.
+                invalidateFrameSnapshotCache("unknown output table", { tableName });
+                return;
+            }
+            const row = coerceOutputRowForSnapshot(/** @type {SQLiteTable} */ (task.outputTable), outputRow);
+            const index = rows.findIndex((existing) => existing.nodeId === row.nodeId && existing.iteration === row.iteration);
+            if (index >= 0) {
+                rows[index] = row;
+            }
+            else {
+                rows.push(row);
+            }
+        }
+        catch (cacheErr) {
+            invalidateFrameSnapshotCache("output row patch failed", {
+                nodeId: task.nodeId,
+                iteration: task.iteration,
+                error: cacheErr instanceof Error ? cacheErr.message : String(cacheErr),
+            });
+        }
+    };
     /**
    * @param {TaskDescriptor} task
    * @returns {Promise<unknown>}
@@ -5141,6 +5437,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
             nodeId: task.nodeId,
             iteration: task.iteration,
         });
+        if (outputRow) {
+            noteTaskOutputRowForFrameCache(task, /** @type {Record<string, unknown>} */ (outputRow));
+        }
         return outputRow ? stripAutoColumns(outputRow) : undefined;
     };
     /**
@@ -5439,8 +5738,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
     /**
    * @param {WorkflowGraph} graph
    * @param {RenderContext["trigger"]} [trigger]
+   * @param {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]} [frameNodeRows] this frame's node rows, shared from the listing persistDriverGraphTaskStates just took (plus the rows it wrote) so the incremental snapshot path can skip a second listNodes scan
    */
-    const persistDriverFrame = async (graph, trigger) => {
+    const persistDriverFrame = async (graph, trigger, frameNodeRows) => {
         const xmlJson = canonicalizeXml(graph.xml);
         const xmlHash = sha256Hex(xmlJson);
         frameNo += 1;
@@ -5466,10 +5766,72 @@ async function runWorkflowBodyDriver(workflow, opts) {
             }))),
             note: "react-driver",
         };
-        const snapNodes = await Effect.runPromise(adapter.listNodes(runId));
-        const snapRalph = await Effect.runPromise(adapter.listRalph(runId));
-        const snapInputRow = await loadInput(db, inputTable, runId);
-        const snapOutputs = await loadOutputs(db, schema, runId);
+        let snapshotCache = incrementalFrameSnapshotsEnabled &&
+            frameNodeRows != null &&
+            frameSnapshotCache != null &&
+            frameSnapshotCache.framesSinceFullLoad < FRAME_KEYFRAME_INTERVAL
+            ? frameSnapshotCache
+            : null;
+        if (snapshotCache && frameNodeRows) {
+            const missingOutput = findFinishedNodeMissingCachedOutput(frameNodeRows, snapshotCache.outputs);
+            if (missingOutput) {
+                invalidateFrameSnapshotCache("finished node missing cached output row", missingOutput);
+                snapshotCache = null;
+            }
+        }
+        /** @type {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]} */
+        let snapNodes;
+        /** @type {Array<Record<string, unknown>>} */
+        let snapRalph;
+        /** @type {Record<string, unknown> | undefined} */
+        let snapInputRow;
+        /** @type {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} */
+        let snapOutputs;
+        if (snapshotCache && frameNodeRows) {
+            // Incremental path: reuse the cache seeded by the last full load.
+            // Ralph rows stay a per-frame query — the table is tiny (one row per
+            // loop) and is written from several bridge paths. The outputs
+            // object is copied per table (array-of-references, no DB scans) so a
+            // task completing while the frame commits cannot mutate the
+            // snapshot being serialized.
+            snapNodes = frameNodeRows;
+            snapRalph = await Effect.runPromise(adapter.listRalph(runId));
+            snapInputRow = snapshotCache.inputRow;
+            snapOutputs = copyOutputSnapshot(snapshotCache.outputs);
+            snapshotCache.framesSinceFullLoad += 1;
+        }
+        else {
+            // Task completions commit on their own fibers while these loads
+            // run. A row committed after loadOutputs already scanned its table
+            // is absent from snapOutputs, and its cache patch either landed in
+            // the stale cache replaced below or no-oped while the cache was
+            // null — so record the read-back generation up front and refuse to
+            // seed when it moved. The racing completion triggers its own
+            // frame, which reloads fully from a point after its commit.
+            const cacheGenerationBeforeLoads = frameSnapshotCacheGeneration;
+            snapNodes = await Effect.runPromise(adapter.listNodes(runId));
+            snapRalph = await Effect.runPromise(adapter.listRalph(runId));
+            snapInputRow = await loadInput(db, inputTable, runId);
+            snapOutputs = await loadOutputs(db, schema, runId);
+            if (incrementalFrameSnapshotsEnabled) {
+                if (frameSnapshotCacheGeneration === cacheGenerationBeforeLoads) {
+                    // Seed (or re-seed, after an invalidation or the
+                    // keyframe-aligned reload) the incremental cache from this
+                    // full load. The cache gets its own rows arrays so
+                    // completion patches cannot mutate this frame's snapshot
+                    // while it commits.
+                    frameSnapshotCache = {
+                        inputRow: snapInputRow,
+                        outputs: copyOutputSnapshot(snapOutputs),
+                        framesSinceFullLoad: 0,
+                    };
+                }
+                else {
+                    frameSnapshotCache = null;
+                    logDebug("frame snapshot cache seed skipped: output row committed during full load", { runId, frameNo }, "engine:snapshot");
+                }
+            }
+        }
         const snapshotData = {
             nodes: snapNodes.map((node) => ({
                 nodeId: node.nodeId,
@@ -5521,9 +5883,24 @@ async function runWorkflowBodyDriver(workflow, opts) {
     };
     /**
    * @param {WorkflowGraph} graph
+   * @returns {Promise<import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]>} the run's node rows as of this frame — the listing taken above plus every row written below, mirrored the way insertNode upserts them (replace by (nodeId, iteration) in place, append when new) so persistDriverFrame can snapshot nodes without a second listNodes scan
    */
     const persistDriverGraphTaskStates = async (graph) => {
         const existingRows = await Effect.runPromise(adapter.listNodes(runId));
+        const frameNodeRows = existingRows.slice();
+        /**
+     * @param {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow} row
+     */
+        const applyFrameNodeRow = (row) => {
+            const index = frameNodeRows.findIndex((existing) => existing.nodeId === row.nodeId &&
+                (existing.iteration ?? 0) === (row.iteration ?? 0));
+            if (index >= 0) {
+                frameNodeRows[index] = row;
+            }
+            else {
+                frameNodeRows.push(row);
+            }
+        };
         const existingState = new Map();
         for (const node of existingRows) {
             existingState.set(buildStateKey(node.nodeId, node.iteration ?? 0), node.state);
@@ -5537,7 +5914,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             if (task.skipIf || budgetSkippedKeys.has(key)) {
                 if (previous === "skipped")
                     continue;
-                await Effect.runPromise(adapter.insertNode({
+                const skippedRow = {
                     runId,
                     nodeId: task.nodeId,
                     iteration: task.iteration,
@@ -5546,7 +5923,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
                     updatedAtMs: nowMs(),
                     outputTable: task.outputTableName,
                     label: task.label ?? null,
-                }));
+                };
+                await Effect.runPromise(adapter.insertNode(skippedRow));
+                applyFrameNodeRow(skippedRow);
                 await Effect.runPromise(eventBus.emitEventWithPersist({
                     type: "NodeSkipped",
                     runId,
@@ -5559,7 +5938,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             }
             if (previous != null)
                 continue;
-            await Effect.runPromise(adapter.insertNode({
+            const pendingRow = {
                 runId,
                 nodeId: task.nodeId,
                 iteration: task.iteration,
@@ -5568,7 +5947,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 updatedAtMs: nowMs(),
                 outputTable: task.outputTableName,
                 label: task.label ?? null,
-            }));
+            };
+            await Effect.runPromise(adapter.insertNode(pendingRow));
+            applyFrameNodeRow(pendingRow);
             await Effect.runPromise(eventBus.emitEventWithPersist({
                 type: "NodePending",
                 runId,
@@ -5578,6 +5959,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             }));
             existingState.set(key, "pending");
         }
+        return frameNodeRows;
     };
     /**
    * @param {RunResult} result
@@ -5712,6 +6094,19 @@ async function runWorkflowBodyDriver(workflow, opts) {
             parentRunId: opts.parentRunId ?? existingRun?.parentRunId ?? undefined,
             workflowName: existingRun?.workflowName ?? "workflow",
         });
+        const existingConfig = parseRunConfigJson(existingRun?.configJson);
+        // An explicit --max-concurrency pin must survive resume: no resume path
+        // (supervisor auto-resume, gateway resume, manual `up --resume`)
+        // re-sends the flag, so restore the persisted pin before the run
+        // starts or the governor would treat the run as auto and raise the
+        // cap past the user's pin.
+        const pinnedMaxConcurrency = opts.maxConcurrency === undefined
+            ? readPinnedMaxConcurrency(existingConfig)
+            : null;
+        if (pinnedMaxConcurrency !== null) {
+            maxConcurrency = pinnedMaxConcurrency;
+            slotGovernor = createSlotGovernor(maxConcurrency, { explicit: true });
+        }
         logInfo("starting workflow run", {
             runId,
             workflowPath: resolvedWorkflowPath ?? null,
@@ -5727,13 +6122,15 @@ async function runWorkflowBodyDriver(workflow, opts) {
             workflowPath: resolvedWorkflowPath ?? null,
             engine: "react-driver",
         });
-        const existingConfig = parseRunConfigJson(existingRun?.configJson);
         const runAuth = opts.auth ?? parseRunAuthContext(existingConfig.auth);
         const effectiveAlertPolicy = workflowRef.opts.alertPolicy ?? existingConfig.alertPolicy ?? undefined;
         const runConfig = buildDurabilityConfig({
             ...existingConfig,
             ...opts.config,
             maxConcurrency,
+            ...(opts.maxConcurrency !== undefined || pinnedMaxConcurrency !== null
+                ? { maxConcurrencyPinned: true }
+                : {}),
             rootDir,
             allowNetwork,
             maxOutputBytes,
@@ -6052,8 +6449,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 else if (ralphs.length === 0) {
                     defaultIteration = 0;
                 }
-                await persistDriverGraphTaskStates(lastGraph);
-                await persistDriverFrame(lastGraph, renderOpts?.trigger);
+                const frameNodeRows = await persistDriverGraphTaskStates(lastGraph);
+                await persistDriverFrame(lastGraph, renderOpts?.trigger, frameNodeRows);
                 return lastGraph;
             },
         };
@@ -6336,4 +6733,8 @@ export const __engineInternals = {
     isQuotaTaskFailure,
     cancelInProgress,
     cancelStaleAttempts,
+    ensureWorktree,
+    resolveWorktreeBaseTip,
+    resolveWorktreeFetchTtlMs,
+    resetWorktreeSyncCache,
 };

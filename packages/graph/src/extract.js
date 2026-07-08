@@ -297,6 +297,37 @@ function pushGroup(tag, raw, path, stack) {
     return [...stack, { id, max }];
 }
 /**
+ * Parse the opt-in `subtreeConcurrency` prop on a parallel element: a cap on
+ * how many DIRECT CHILD SUBTREES may be in flight at once (numeric strings
+ * coerced, fractional floored; undefined or < 1 disables the cap).
+ * @param {Record<string, unknown>} raw
+ * @returns {number | undefined}
+ */
+function parseSubtreeConcurrency(raw) {
+    const parsed = Number(raw.subtreeConcurrency);
+    if (!Number.isFinite(parsed))
+        return undefined;
+    const max = Math.floor(parsed);
+    return max >= 1 ? max : undefined;
+}
+/**
+ * Stable key identifying a direct child of a subtree-capped parallel. Prefers
+ * an explicit key/id on the child element so resume stays stable across
+ * sibling insertions; falls back to the child's element ordinal.
+ * @param {Record<string, unknown>} raw
+ * @param {number} ordinal
+ * @returns {string}
+ */
+function resolveSubtreeChildKey(raw, ordinal) {
+    if (typeof raw.key === "string" && raw.key.trim().length > 0) {
+        return raw.key;
+    }
+    if (typeof raw.id === "string" && raw.id.trim().length > 0) {
+        return raw.id;
+    }
+    return `child:${ordinal}`;
+}
+/**
  * @param {Record<string, unknown>} raw
  * @param {string} kind
  * @returns {string}
@@ -351,7 +382,7 @@ export function extractGraph(root, opts) {
     }
     /**
    * @param {HostNode} node
-   * @param {{ readonly path: readonly number[]; readonly iteration: number; readonly ralphId?: string; readonly parentIsRalph: boolean; readonly parallelStack: readonly { readonly id: string; readonly max?: number }[]; readonly worktreeStack: readonly { readonly id: string; readonly path: string; readonly branch?: string; readonly baseBranch?: string; }[]; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; }} ctx
+   * @param {{ readonly path: readonly number[]; readonly iteration: number; readonly ralphId?: string; readonly parentIsRalph: boolean; readonly parallelStack: readonly { readonly id: string; readonly max?: number }[]; readonly worktreeStack: readonly { readonly id: string; readonly path: string; readonly branch?: string; readonly baseBranch?: string; }[]; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; readonly subtree?: { readonly groupId: string; readonly max: number; readonly childKey: string }; }} ctx
    */
     function walk(node, ctx) {
         if (node.kind === "text")
@@ -376,8 +407,20 @@ export function extractGraph(root, opts) {
             iteration = getRalphIteration(opts, id);
             loopStack = [...loopStack, { ralphId: logicalId, iteration }];
         }
+        // A parallel may also opt into subtree-level concurrency: every
+        // descendant leaf task (not just innermost-group members) records the
+        // NEAREST such ancestor so the scheduler can cap in-flight direct
+        // children (whole subtrees) instead of leaf tasks.
+        let subtreePending;
         if (node.tag === "smithers:parallel") {
             nextParallelStack = pushGroup("parallel", raw, ctx.path, ctx.parallelStack);
+            const subtreeMax = parseSubtreeConcurrency(raw);
+            if (subtreeMax != null) {
+                subtreePending = {
+                    groupId: nextParallelStack[nextParallelStack.length - 1].id,
+                    max: subtreeMax,
+                };
+            }
         }
         if (node.tag === "smithers:merge-queue") {
             nextParallelStack = pushGroup("merge-queue", raw, ctx.path, nextParallelStack);
@@ -416,6 +459,9 @@ export function extractGraph(root, opts) {
             needs: needs(raw.needs),
             parallelGroupId: parallelGroup?.id,
             parallelMaxConcurrency: parallelGroup?.max,
+            subtreeGroupId: ctx.subtree?.groupId,
+            subtreeChildKey: ctx.subtree?.childKey,
+            subtreeMax: ctx.subtree?.max,
         };
         if (node.tag === "smithers:subflow") {
             const logicalNodeId = requireTaskId(raw, "Subflow");
@@ -665,6 +711,7 @@ export function extractGraph(root, opts) {
         }
         let elementIndex = 0;
         for (const child of node.children) {
+            const childOrdinal = elementIndex;
             const nextPath = child.kind === "element" ? [...ctx.path, elementIndex++] : ctx.path;
             walk(child, {
                 path: nextPath,
@@ -674,6 +721,13 @@ export function extractGraph(root, opts) {
                 parallelStack: nextParallelStack,
                 worktreeStack: nextWorktreeStack,
                 loopStack,
+                subtree: subtreePending && child.kind === "element"
+                    ? {
+                        groupId: subtreePending.groupId,
+                        max: subtreePending.max,
+                        childKey: resolveSubtreeChildKey(child.rawProps ?? {}, childOrdinal),
+                    }
+                    : ctx.subtree,
             });
         }
     }
