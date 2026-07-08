@@ -617,19 +617,30 @@ describe("DDD tabs and components", () => {
       />,
     );
 
+    // Header + KPIs + audit note are always visible; the ~10 detail blocks are
+    // grouped into segmented section tabs (one panel shown at a time).
     const body = text(harness.container);
     expect(body).toContain("DDD Test Feature");
-    expect(body).toContain("Capabilities");
-    expect(body).toContain("POST /runs");
-    expect(body).toContain("Related docs");
-    expect(body).toContain("Evidence");
-    expect(body).toContain("Open Gaps");
     expect(body).toContain("Audit note for ddd-test-feature");
+    expect(harness.container.querySelector('[data-testid="ddd-feature-kpis"]')).toBeTruthy();
+    // Overview is the default panel.
+    expect(text(harness.container)).toContain("Capabilities");
 
+    // Docs & API panel holds endpoints + related-doc links.
+    await act(async () => (harness.container.querySelector('[data-testid="ddd-feature-section-docs-api"]') as HTMLButtonElement).click());
+    const docsPanel = text(harness.container);
+    expect(docsPanel).toContain("POST /runs");
+    expect(docsPanel).toContain("Related docs");
     const docButton = [...harness.container.querySelectorAll("button.doc-link")]
       .find((button) => text(button).includes("docs")) as HTMLButtonElement;
     await act(async () => docButton.click());
     expect(openedDocs).toContain("reference/api.md#runs");
+
+    // Verification panel holds evidence/tests; Gaps & Fixes holds open gaps.
+    await act(async () => (harness.container.querySelector('[data-testid="ddd-feature-section-verification"]') as HTMLButtonElement).click());
+    expect(text(harness.container)).toContain("Evidence");
+    await act(async () => (harness.container.querySelector('[data-testid="ddd-feature-section-gaps"]') as HTMLButtonElement).click());
+    expect(text(harness.container)).toContain("Open Gaps");
 
     const close = harness.container.querySelector('button[aria-label="Close"]') as HTMLButtonElement;
     await act(async () => close.click());
@@ -917,6 +928,9 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain("restored from this browser");
 
     await act(async () => (harness.container.querySelector('[data-testid="ddd-discard-file"]') as HTMLButtonElement).click());
+    // "Discard all" is destructive: first click only arms it, second confirms.
+    await act(async () => (harness.container.querySelector('[data-testid="ddd-discard-all"]') as HTMLButtonElement).click());
+    expect(text(harness.container.querySelector('[data-testid="ddd-discard-all"]') as HTMLElement)).toContain("Confirm discard");
     await act(async () => (harness.container.querySelector('[data-testid="ddd-discard-all"]') as HTMLButtonElement).click());
     await act(async () => buttonByText(harness.container, "Discard recovered").click());
     expect(discarded).toEqual([[productDoc.path], [productDoc.path], [productDoc.path]]);
@@ -1636,7 +1650,8 @@ describe("DDD tabs and components", () => {
     expect(harness.container.querySelector('[data-testid="ddd-ticket-detail"]')).toBeFalsy();
 
     await act(async () => (harness.container.querySelectorAll('[data-testid="ddd-ticket"]')[1] as HTMLButtonElement).click());
-    expect(text(harness.container)).toContain("Description");
+    // The ticket body renders as markdown directly (no synthesized "Description"
+    // heading); plain-text bodies still show, and it is not the empty state.
     expect(text(harness.container)).toContain("No heading");
     expect(text(harness.container)).not.toContain("No detail recorded");
 
@@ -1935,9 +1950,10 @@ describe("DDD tabs and components", () => {
     expect(generateLink.getAttribute("href")).toBe("/workflows/ddd-generate-docs?runId=generate-run-1");
     const bugScanLink = harness.container.querySelector('[data-testid="ddd-start-bug-scan"] a') as HTMLAnchorElement;
     expect(bugScanLink.getAttribute("href")).toBe("/workflows/ddd-bug-scan?runId=bug-run-1");
-    expect(text(harness.container.querySelector('[data-testid="ddd-start-reload-path"]') as HTMLElement)).toContain("reload this UI");
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-start-reload"]') as HTMLButtonElement).click());
-    expect(reloads).toBe(1);
+    // The generate run has no terminal status yet: reload is gated behind a
+    // "working" note rather than offered prematurely.
+    expect(harness.container.querySelector('[data-testid="ddd-start-reload-path"]')).toBeFalsy();
+    expect(text(harness.container.querySelector('[data-testid="ddd-start-reload-pending"]') as HTMLElement)).toContain("Reload will be available");
 
     await harness.render(
       <StartPane
@@ -1961,6 +1977,10 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain("Ready for another launch");
     expect(text(harness.container)).toContain("Create another app + builder workflow");
     expect(text(harness.container)).toContain("Generate docs again");
+    // The generate run is now terminal ("failed"), so reload is offered and works.
+    expect(text(harness.container.querySelector('[data-testid="ddd-start-reload-path"]') as HTMLElement)).toContain("Reload this UI");
+    await act(async () => (harness.container.querySelector('[data-testid="ddd-start-reload"]') as HTMLButtonElement).click());
+    expect(reloads).toBe(1);
 
     await harness.render(
       <StartPane
