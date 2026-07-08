@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownEditor, MarkdownPreview, SpecFileTree, formatStatus, resolveDocLink, type DocsContentEntry, type DraftRunNotice } from "./ddd-shared";
 
 export type SpecsTabProps = {
@@ -33,6 +33,11 @@ export function SpecsTab(props: SpecsTabProps) {
   const { docs, drafts, selectedPath, assetBase, changedPaths, launchPending = false, launchedRunId, launchError, recoveredPaths = [], editorResetKey = 0, draftRunNotice } = props;
   const [query, setQuery] = useState("");
   const [technicalView, setTechnicalView] = useState<"preview" | "source">("preview");
+  // "Discard all" wipes every local draft, so require a second confirming click
+  // (auto-disarms after 4s) instead of firing destructively on one misclick.
+  const [discardAllArmed, setDiscardAllArmed] = useState(false);
+  const discardArmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (discardArmTimer.current) clearTimeout(discardArmTimer.current); }, []);
   const needle = query.trim().toLowerCase();
   const productDocsAll = docs.filter((doc) => !docIsTechnical(doc));
   const technicalDocsAll = docs.filter(docIsTechnical);
@@ -153,13 +158,23 @@ export function SpecsTab(props: SpecsTabProps) {
               Revert file
             </button>
             <button
-              className="button"
+              className={`button danger${discardAllArmed ? " is-armed" : ""}`}
               type="button"
               data-testid="ddd-discard-all"
               disabled={dispatchableChangedPaths.length === 0}
-              onClick={() => props.onDiscardDrafts?.(dispatchableChangedPaths)}
+              aria-label={discardAllArmed ? "Confirm discarding all local drafts" : "Discard all local drafts"}
+              onClick={() => {
+                if (discardArmTimer.current) clearTimeout(discardArmTimer.current);
+                if (!discardAllArmed) {
+                  setDiscardAllArmed(true);
+                  discardArmTimer.current = setTimeout(() => setDiscardAllArmed(false), 4000);
+                  return;
+                }
+                setDiscardAllArmed(false);
+                props.onDiscardDrafts?.(dispatchableChangedPaths);
+              }}
             >
-              Discard all
+              {discardAllArmed ? `Confirm discard ${dispatchableChangedPaths.length}?` : "Discard all"}
             </button>
           </div>
         </div>

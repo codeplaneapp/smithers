@@ -317,12 +317,18 @@ export function StartPane(props: StartPaneProps) {
           />
           <BugScanStatus runId={props.bugScanRunId} summary={props.bugScanSummary} href={bugScanRunHref} />
           {props.generateState.runId ? (
-            <div className="start-reload" data-testid="ddd-start-reload-path">
-              <p>After the generate-docs run finishes, reload this UI to load the generated spec modules.</p>
-              <button type="button" className="button" data-testid="ddd-start-reload" onClick={reloadGeneratedDocs}>
-                Reload docs
-              </button>
-            </div>
+            isTerminalRunStatus(props.generateState.status) ? (
+              <div className="start-reload" data-testid="ddd-start-reload-path">
+                <p>The generate-docs run finished. Reload this UI to load the generated spec modules.</p>
+                <button type="button" className="button primary" data-testid="ddd-start-reload" onClick={reloadGeneratedDocs}>
+                  Reload docs
+                </button>
+              </div>
+            ) : (
+              <p className="start-status" data-testid="ddd-start-reload-pending">
+                <span className="badge warn">Working</span> Reload will be available once the generate-docs run finishes.
+              </p>
+            )
           ) : null}
         </section>
       </div>
