@@ -456,6 +456,25 @@ describe("SmithersGatewayClient WebSocket helpers", () => {
     expect(ws.closeCalls).toBe(1);
   });
 
+  test("aborts streamRunEvents while the subscribe request is pending post-handshake", async () => {
+    const WebSocket = fakeWebSocketCtor();
+    const client = new SmithersGatewayClient({ WebSocket });
+    const controller = new AbortController();
+
+    const iterator = client.streamRunEvents({ runId: "run-1" }, { signal: controller.signal });
+    const next = iterator.next();
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+    await waitForSent(ws, 1);
+    ws.receive({ type: "res", id: ws.lastRequest().id, ok: true, payload: {} });
+    await waitForSent(ws, 2);
+
+    controller.abort();
+
+    await expect(next).rejects.toThrow("Gateway stream subscribe aborted.");
+    expect(ws.closeCalls).toBe(1);
+  });
+
   test("filters run stream events by stream id and closes after iterator return", async () => {
     const WebSocket = fakeWebSocketCtor();
     const client = new SmithersGatewayClient({ WebSocket });
