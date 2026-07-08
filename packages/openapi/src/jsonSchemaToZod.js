@@ -4,6 +4,8 @@
 import { z } from "zod";
 import { isRef, resolveRef } from "./ref-resolver.js";
 
+const MAX_SCHEMA_CONVERSION_DEPTH = 1000;
+
 /** @typedef {import("./OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
 /** @typedef {import("./RefObject.ts").RefObject} RefObject */
 /** @typedef {import("./SchemaObject.ts").SchemaObject} SchemaObject */
@@ -15,9 +17,13 @@ import { isRef, resolveRef } from "./ref-resolver.js";
  * @param {SchemaObject | RefObject | undefined} schema
  * @param {OpenApiSpec} spec
  * @param {Set<string>} [visited]
+ * @param {number} [depth]
  * @returns {z.ZodType}
  */
-export function jsonSchemaToZod(schema, spec, visited = new Set()) {
+export function jsonSchemaToZod(schema, spec, visited = new Set(), depth = 0) {
+    if (depth > MAX_SCHEMA_CONVERSION_DEPTH) {
+        throw new Error(`OpenAPI schema-depth limit exceeded (max ${MAX_SCHEMA_CONVERSION_DEPTH})`);
+    }
     if (!schema)
         return z.any();
     // Resolve $ref
@@ -28,16 +34,19 @@ export function jsonSchemaToZod(schema, spec, visited = new Set()) {
             return z.any().describe(`Circular reference: ${ref}`);
         }
         visited.add(ref);
-        const resolved = resolveRef(spec, ref);
-        const result = jsonSchemaToZod(resolved, spec, visited);
-        visited.delete(ref);
-        return result;
+        try {
+            const resolved = resolveRef(spec, ref);
+            return jsonSchemaToZod(resolved, spec, visited, depth + 1);
+        }
+        finally {
+            visited.delete(ref);
+        }
     }
     const s = schema;
     // allOf — merge into a single object
     if (s.allOf && s.allOf.length > 0) {
         // Build a combined object from all allOf entries
-        const schemas = s.allOf.map((sub) => jsonSchemaToZod(sub, spec, visited));
+        const schemas = s.allOf.map((sub) => jsonSchemaToZod(sub, spec, visited, depth + 1));
         if (schemas.length === 1)
             return applyMetadata(schemas[0], s);
         // For multiple schemas, try to intersect them
@@ -49,10 +58,10 @@ export function jsonSchemaToZod(schema, spec, visited = new Set()) {
     }
     // oneOf / anyOf — union
     if (s.oneOf && s.oneOf.length > 0) {
-        return buildUnion(s.oneOf, spec, visited, s);
+        return buildUnion(s.oneOf, spec, visited, s, depth);
     }
     if (s.anyOf && s.anyOf.length > 0) {
-        return buildUnion(s.anyOf, spec, visited, s);
+        return buildUnion(s.anyOf, spec, visited, s, depth);
     }
     const type = s.type;
     if (type === "string") {
@@ -65,11 +74,11 @@ export function jsonSchemaToZod(schema, spec, visited = new Set()) {
         return applyMetadata(z.boolean(), s);
     }
     if (type === "array") {
-        const items = jsonSchemaToZod(s.items, spec, visited);
+        const items = jsonSchemaToZod(s.items, spec, visited, depth + 1);
         return applyMetadata(z.array(items), s);
     }
     if (type === "object" || s.properties) {
-        return buildObject(s, spec, visited);
+        return buildObject(s, spec, visited, depth);
     }
     // null type
     if (type === "null") {
@@ -132,13 +141,14 @@ function buildNumber(s) {
  * @param {SchemaObject} s
  * @param {OpenApiSpec} spec
  * @param {Set<string>} visited
+ * @param {number} depth
  * @returns {z.ZodType}
  */
-function buildObject(s, spec, visited) {
+function buildObject(s, spec, visited, depth) {
     const props = {};
     const required = new Set(s.required ?? []);
     for (const [key, propSchema] of Object.entries(s.properties ?? {})) {
-        let zodProp = jsonSchemaToZod(propSchema, spec, visited);
+        let zodProp = jsonSchemaToZod(propSchema, spec, visited, depth + 1);
         if (!required.has(key)) {
             zodProp = zodProp.optional();
         }
@@ -146,7 +156,7 @@ function buildObject(s, spec, visited) {
     }
     let obj = z.object(props);
     if (typeof s.additionalProperties === "object" && s.additionalProperties !== null) {
-        obj = obj.catchall(jsonSchemaToZod(s.additionalProperties, spec, visited));
+        obj = obj.catchall(jsonSchemaToZod(s.additionalProperties, spec, visited, depth + 1));
     }
     else if (s.additionalProperties === true || s.additionalProperties === undefined) {
         // Allow additional properties. This MUST apply even when the schema
@@ -163,10 +173,11 @@ function buildObject(s, spec, visited) {
  * @param {OpenApiSpec} spec
  * @param {Set<string>} visited
  * @param {SchemaObject} parent
+ * @param {number} depth
  * @returns {z.ZodType}
  */
-function buildUnion(variants, spec, visited, parent) {
-    const schemas = variants.map((v) => jsonSchemaToZod(v, spec, visited));
+function buildUnion(variants, spec, visited, parent, depth) {
+    const schemas = variants.map((v) => jsonSchemaToZod(v, spec, visited, depth + 1));
     if (schemas.length === 0)
         return z.any();
     if (schemas.length === 1)

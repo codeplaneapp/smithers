@@ -34,6 +34,24 @@ function deepNestedValue(depth) {
     return value;
 }
 
+/**
+ * Build S0 -> S1 -> ... -> S{length} -> string.
+ * @param {number} length
+ */
+function refChainSpec(length) {
+    const schemas = {};
+    for (let i = 0; i < length; i += 1) {
+        schemas[`S${i}`] = { $ref: `#/components/schemas/S${i + 1}` };
+    }
+    schemas[`S${length}`] = { type: "string" };
+    return {
+        openapi: "3.0.0",
+        info: { title: "LongRefChain", version: "1.0.0" },
+        paths: {},
+        components: { schemas },
+    };
+}
+
 describe("schema converter — deep nesting", () => {
     test("converts an OpenAPI schema nested 32 levels and parses a matching value", () => {
         const schema = deepNestedSchema(32);
@@ -52,6 +70,21 @@ describe("schema converter — deep nesting", () => {
 });
 
 describe("schema converter — circular $ref", () => {
+    test("long acyclic $ref chains fail with a deterministic schema-depth error", () => {
+        const spec = refChainSpec(10_000);
+        let thrown;
+        try {
+            jsonSchemaToZod({ $ref: "#/components/schemas/S0" }, spec);
+        }
+        catch (error) {
+            thrown = error;
+        }
+
+        expect(thrown).toBeInstanceOf(Error);
+        expect(thrown).not.toBeInstanceOf(RangeError);
+        expect(thrown?.message).toBe("OpenAPI schema-depth limit exceeded (max 1000)");
+    });
+
     test("self-referential $ref is unfolded once and then bails to z.any() (no infinite recursion)", () => {
         const spec = {
             openapi: "3.0.0",
