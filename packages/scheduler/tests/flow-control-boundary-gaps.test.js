@@ -100,6 +100,22 @@ describe("ralph maxIterations attribute parsing boundaries", () => {
 		);
 		expect(plan.maxIterations).toBe(-3);
 	});
+
+	test('a fractional cap "2.5" is preserved un-floored, unlike continueAsNewEvery', () => {
+		// parseNum(maxIterations) has no Math.floor, while continueAsNewEvery
+		// is deliberately floored — pin both halves of that asymmetry.
+		const { plan, ralphs } = buildPlanTree(
+			el(
+				"smithers:ralph",
+				{ id: "loop", maxIterations: "2.5", continueAsNewEvery: "2.5" },
+				[el("smithers:task", { id: "body" })],
+			),
+		);
+		expect(plan.maxIterations).toBe(2.5);
+		expect(ralphs[0].maxIterations).toBe(2.5);
+		expect(plan.continueAsNewEvery).toBe(2);
+		expect(ralphs[0].continueAsNewEvery).toBe(2);
+	});
 });
 
 describe("ralph maxIterations=0 session behavior", () => {
@@ -128,5 +144,57 @@ describe("ralph maxIterations=0 session behavior", () => {
 		const decision = run(session.taskCompleted({ nodeId: "body", iteration: 0, output: 1 }));
 		expect(decision._tag).toBe("ReRender");
 		expect(decision.context.trigger.reason).toBe("loop-advanced");
+	});
+});
+
+describe("ralph fractional maxIterations session behavior", () => {
+	const ralphXml = (attrs) =>
+		el("smithers:workflow", {}, [
+			el("smithers:ralph", { id: "loop", ...attrs }, [el("smithers:task", { id: "body" })]),
+		]);
+	const bodyAt = (iteration, attrs) =>
+		graph([descriptor("body", { iteration })], ralphXml(attrs));
+
+	test("a cap of 2.5 with onMaxReached=fail runs 3 body iterations before failing", () => {
+		// The advancement check is `nextIteration >= maxIterations`, so a
+		// fractional cap rounds the effective limit UP (ceil-like): 1 < 2.5
+		// and 2 < 2.5 both advance, and only nextIteration=3 trips the max.
+		// Iterations 0, 1 and 2 all run — not the 2 a floor would allow.
+		const attrs = { maxIterations: "2.5", onMaxReached: "fail" };
+		const session = makeWorkflowSession();
+		for (const iteration of [0, 1]) {
+			const submitted = run(session.submitGraph(bodyAt(iteration, attrs)));
+			expect(submitted._tag).toBe("Execute");
+			expect(submitted.tasks.map((task) => task.iteration)).toEqual([iteration]);
+			const advanced = run(session.taskCompleted({ nodeId: "body", iteration, output: 1 }));
+			expect(advanced._tag).toBe("ReRender");
+			expect(advanced.context.trigger.reason).toBe("loop-advanced");
+		}
+		const third = run(session.submitGraph(bodyAt(2, attrs)));
+		expect(third._tag).toBe("Execute");
+		expect(third.tasks.map((task) => task.iteration)).toEqual([2]);
+		const decision = run(session.taskCompleted({ nodeId: "body", iteration: 2, output: 1 }));
+		expect(decision._tag).toBe("Failed");
+		expect(decision.error.code).toBe("RALPH_MAX_REACHED");
+		expect(decision.error.message).toContain("maxIterations 2.5");
+	});
+
+	test("a cap of 2.5 with the default return-last finishes after 3 body iterations", () => {
+		const attrs = { maxIterations: "2.5" };
+		const session = makeWorkflowSession();
+		for (const iteration of [0, 1]) {
+			run(session.submitGraph(bodyAt(iteration, attrs)));
+			const advanced = run(session.taskCompleted({ nodeId: "body", iteration, output: 1 }));
+			expect(advanced._tag).toBe("ReRender");
+			expect(advanced.context.trigger.reason).toBe("loop-advanced");
+		}
+		run(session.submitGraph(bodyAt(2, attrs)));
+		const capped = run(session.taskCompleted({ nodeId: "body", iteration: 2, output: 1 }));
+		expect(capped._tag).toBe("ReRender");
+		expect(capped.context.trigger.reason).toBe("loop-advanced");
+		// The loop is now done: re-rendering the same graph finishes the run
+		// instead of mounting a fourth iteration.
+		const finished = run(session.submitGraph(bodyAt(2, attrs)));
+		expect(finished._tag).toBe("Finished");
 	});
 });
