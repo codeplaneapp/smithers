@@ -122,8 +122,16 @@ function buildDefinition(filePath, baseDir, exported, source, frontmatter) {
       raw.description ??
       (typeof frontmatter.description === "string" ? frontmatter.description : undefined) ??
       "",
-    tags: raw.tags ?? /** @type {string[] | undefined} */ (frontmatter.tags),
-    aliases: raw.aliases ?? /** @type {string[] | undefined} */ (frontmatter.aliases),
+    tags:
+      raw.tags ??
+      (Array.isArray(frontmatter.tags)
+        ? frontmatter.tags.filter((t) => typeof t === "string")
+        : undefined),
+    aliases:
+      raw.aliases ??
+      (Array.isArray(frontmatter.aliases)
+        ? frontmatter.aliases.filter((a) => typeof a === "string")
+        : undefined),
     disableModelInvocation:
       raw.disableModelInvocation ??
       (typeof frontmatter["disable-model-invocation"] === "boolean"

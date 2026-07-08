@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { loadWorkflows, loadWorkflowsFromDir } from "../src/conventions/loader.js";
+import { formatWorkflowsForPrompt } from "../src/conventions/formatter.js";
 
 describe("loadWorkflowsFromDir — non-object export", () => {
   test("emits 'no recognizable export' error when the module default is not an object", async () => {
@@ -68,6 +69,37 @@ describe("loadWorkflows — explicit workflowPaths edge cases", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]!.message).toMatch(/no recognizable export/);
     expect(errors[0]!.path).toBe(filePath);
+  });
+});
+
+describe("buildDefinition — scalar frontmatter tags/aliases", () => {
+  test("scalar frontmatter tags/aliases are coerced to undefined, not a raw string", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-loader-cov-"));
+    writeFileSync(
+      join(dir, "scalar-fm.js"),
+      `/* ---\ntags: foo\naliases: bar\n--- */\nexport default { name: "scalar-fm" };\n`,
+      "utf8"
+    );
+
+    const result = await loadWorkflowsFromDir({ dir, source: "test" });
+    expect(result.workflows).toHaveLength(1);
+    expect(result.workflows[0]!.tags).toBeUndefined();
+    expect(result.workflows[0]!.aliases).toBeUndefined();
+
+    expect(() => formatWorkflowsForPrompt(result.workflows)).not.toThrow();
+  });
+
+  test("non-string entries in array frontmatter tags are filtered out", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-loader-cov-"));
+    writeFileSync(
+      join(dir, "mixed-fm.js"),
+      `/* ---\ntags: [1, "ok"]\n--- */\nexport default { name: "mixed-fm" };\n`,
+      "utf8"
+    );
+
+    const result = await loadWorkflowsFromDir({ dir, source: "test" });
+    expect(result.workflows).toHaveLength(1);
+    expect(result.workflows[0]!.tags).toEqual(["ok"]);
   });
 });
 
