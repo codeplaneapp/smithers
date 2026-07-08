@@ -15,9 +15,9 @@ This committed scorecard documents the report shape for the opt-in review seeded
 
 | Metric | Value |
 | --- | ---: |
-| Fixtures | 9 |
-| Planted bugs | 7 |
-| Clean controls | 2 |
+| Fixtures | 16 |
+| Planted bugs | 12 |
+| Clean controls | 4 |
 | Recall | 71.4% |
 | Precision | 62.5% |
 | Mean absolute anchor offset | 1.2 lines |
@@ -30,11 +30,18 @@ This committed scorecard documents the report shape for the opt-in review seeded
 | Fixture | Label | Expected review behavior |
 | --- | --- | --- |
 | `missing-await` | correctness / major | Flag the dropped `await` near `src/order.ts`. |
+| `missing-await-flush` | correctness / major | Flag the dropped await before the buffer save completes. |
 | `off-by-one-boundary` | correctness / major | Flag the excluded boundary page near `src/window.ts`. |
+| `off-by-one-slice` | correctness / major | Flag the decremented slice end that drops the final page item. |
 | `sql-injection` | security / critical | Flag string interpolation in the SQL query. |
+| `sql-injection-like` | security / critical | Flag interpolation of the search term into the LIKE query. |
 | `resource-leak` | performance / major | Flag the removed file-handle close. |
+| `resource-leak-timer` | performance / major | Flag the shutdown callback that no longer clears the interval. |
 | `deleted-null-check` | correctness / major | Flag the removed null fallback. |
+| `deleted-null-check-config` | correctness / major | Flag the removed log-level default fallback. |
 | `tautological-test` | tests / minor | Flag the assertion that can never fail. |
 | `cross-file-signature-mismatch` | correctness / major | Flag the caller still passing seconds after the helper changed to absolute milliseconds. |
 | `clean-error-message` | clean control | Produce no findings. |
 | `clean-refactor` | clean control | Produce no findings. |
+| `clean-rename` | clean control | Produce no findings. |
+| `clean-jsdoc` | clean control | Produce no findings. |
