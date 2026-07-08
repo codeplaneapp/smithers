@@ -115,29 +115,31 @@ function seedWindowGap(gateway, runId) {
 }
 
 describe("streamRunEvents gap resync", () => {
+  async function launchAndFinish(client) {
+    const launched = await client.request("launchRun", { workflow: "gap", input: {} });
+    expect(launched.ok).toBe(true);
+    const runId = launched.payload.runId;
+    for (let i = 0; i < 200; i += 1) {
+      const got = await client.request("getRun", { runId });
+      if (got.ok && ["finished", "failed"].includes(got.payload?.status)) break;
+      await sleep(25);
+    }
+    return runId;
+  }
+
   test("rebuilds a run snapshot and emits run.gap_resync", async () => {
-    const { gateway, workflow } = bootGateway("ok");
+    const { gateway } = bootGateway("ok");
     const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     cleanups.push(() => gateway.close());
     const port = getPort(server);
 
-    // A real finished run so buildRunSnapshot resolves and its node-state summary
-    // reduce runs over the persisted task node.
-    const launched = await gateway.launchRun({
-      workflow: "gap",
-      input: {},
-      auth: { triggeredBy: "test", scopes: ["*"], role: "operator", tokenId: null },
-    });
-    const runId = launched.runId;
-    for (let i = 0; i < 200; i += 1) {
-      const run = await new (await import("@smithers-orchestrator/db/adapter")).SmithersDb(workflow.db).getRun(runId);
-      if (run && ["finished", "failed"].includes(run.status)) break;
-      await sleep(25);
-    }
-    seedWindowGap(gateway, runId);
-
     const client = await connect(port);
     cleanups.push(() => client.close());
+    // A real finished run so buildRunSnapshot resolves and its node-state summary
+    // reduce runs over the persisted task node.
+    const runId = await launchAndFinish(client);
+    seedWindowGap(gateway, runId);
+
     const res = await client.request("streamRunEvents", { runId, afterSeq: 0 });
     expect(res.ok).toBe(true);
     const gap = await client.waitFor((m) => m.type === "event" && m.event === "run.gap_resync");
@@ -147,32 +149,44 @@ describe("streamRunEvents gap resync", () => {
     expect(gap.payload.snapshot.summary).toBeDefined();
   });
 
+  test("broadcasts run.completed failed when a launched run rejects", async () => {
+    const { gateway } = bootGateway("fail");
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    cleanups.push(() => gateway.close());
+    const port = getPort(server);
+
+    const client = await connect(port);
+    cleanups.push(() => client.close());
+    // A negative maxOutputBytes passes the gateway frame/RPC checks (which do not
+    // range-check it) but fails the engine's validateRunOptions, so runWorkflow
+    // REJECTS -> startRun's `.catch` runs (failure metrics + run.completed
+    // {status:"failed"} broadcast to subscribers).
+    const launched = await client.request("launchRun", { workflow: "gap", input: {}, options: { maxOutputBytes: -1 } });
+    expect(launched.ok).toBe(true);
+    const runId = launched.payload.runId;
+    const completed = await client.waitFor(
+      (m) => m.type === "event" && m.event === "run.completed" && m.payload?.runId === runId,
+      10000,
+    );
+    expect(completed.payload.status).toBe("failed");
+    expect(completed.payload.error).toBeDefined();
+  });
+
   test("emits run.error when the replay snapshot rebuild throws", async () => {
     const { gateway, workflow } = bootGateway("throw");
     const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     cleanups.push(() => gateway.close());
     const port = getPort(server);
 
-    const launched = await gateway.launchRun({
-      workflow: "gap",
-      input: {},
-      auth: { triggeredBy: "test", scopes: ["*"], role: "operator", tokenId: null },
-    });
-    const runId = launched.runId;
-    const { SmithersDb } = await import("@smithers-orchestrator/db/adapter");
-    for (let i = 0; i < 200; i += 1) {
-      const run = await new SmithersDb(workflow.db).getRun(runId);
-      if (run && ["finished", "failed"].includes(run.status)) break;
-      await sleep(25);
-    }
+    const client = await connect(port);
+    cleanups.push(() => client.close());
+    const runId = await launchAndFinish(client);
     seedWindowGap(gateway, runId);
 
     // Close the workflow DB so the gap-resync's buildRunSnapshot read throws,
     // driving the replay `.catch` that emits run.error.
     workflow.db.$client.close();
 
-    const client = await connect(port);
-    cleanups.push(() => client.close());
     const res = await client.request("streamRunEvents", { runId, afterSeq: 0 });
     expect(res.ok).toBe(true);
     const err = await client.waitFor((m) => m.type === "event" && m.event === "run.error");
