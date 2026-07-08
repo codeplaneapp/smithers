@@ -5,6 +5,7 @@ import { buildPlanTree } from "./buildPlanTree.js";
 import { buildStateKey } from "./buildStateKey.js";
 import { cloneTaskStateMap } from "./cloneTaskStateMap.js";
 import { computeRetryDelayMs } from "./computeRetryDelayMs.js";
+import { findDescriptor } from "./findDescriptor.js";
 import { parseStateKey } from "./parseStateKey.js";
 import { scheduleTasks } from "./scheduleTasks.js";
 /** @typedef {import("@smithers-orchestrator/graph").TaskDescriptor} TaskDescriptor */
@@ -41,20 +42,6 @@ function descriptorMap(tasks) {
         map.set(task.nodeId, task);
     }
     return map;
-}
-/**
- * @param {SessionState} state
- * @param {string} nodeId
- * @param {number} [iteration]
- * @returns {TaskDescriptor | undefined}
- */
-function findDescriptor(state, nodeId, iteration) {
-    const descriptor = state.descriptors.get(nodeId);
-    if (descriptor && (iteration == null || descriptor.iteration === iteration)) {
-        return descriptor;
-    }
-    return [...state.descriptors.values()].find((candidate) => candidate.nodeId === nodeId &&
-        (iteration == null || candidate.iteration === iteration));
 }
 /**
  * @param {{ readonly nodeId: string; readonly iteration: number }} descriptor
@@ -623,7 +610,7 @@ export function makeWorkflowSession(options = {}) {
     function unhandledFailureDecision(recoveryKeys = new Set()) {
         for (const [key, taskState] of state.states) {
             const parsed = parseStateKey(key);
-            const descriptor = findDescriptor(state, parsed.nodeId, parsed.iteration) ??
+            const descriptor = findDescriptor(state.descriptors, parsed.nodeId, parsed.iteration) ??
                 state.failureDescriptors.get(key);
             if (taskState === "failed" && !descriptor?.continueOnFail) {
                 if (recoveryKeys.has(key)) {
@@ -941,7 +928,7 @@ export function makeWorkflowSession(options = {}) {
             });
         }),
         taskFailed: (failure) => Effect.sync(() => {
-            const descriptor = findDescriptor(state, failure.nodeId, failure.iteration);
+            const descriptor = findDescriptor(state.descriptors, failure.nodeId, failure.iteration);
             if (!descriptor) {
                 // Stale failure for a task that already left the graph (see taskCompleted) —
                 // the task is gone, so its failure is moot. Re-decide on the current graph
@@ -951,7 +938,7 @@ export function makeWorkflowSession(options = {}) {
             return applyFailure(descriptor, failure.error);
         }),
         approvalResolved: (nodeId, resolution) => Effect.sync(() => {
-            const descriptor = findDescriptor(state, nodeId);
+            const descriptor = findDescriptor(state.descriptors, nodeId);
             if (!descriptor) {
                 return failedDecision(new SmithersError("NODE_NOT_FOUND", `Unknown approval task ${nodeId}`), "approvalResolved");
             }
@@ -959,7 +946,7 @@ export function makeWorkflowSession(options = {}) {
             return decide();
         }),
         approvalTimedOut: (nodeId) => Effect.sync(() => {
-            const descriptor = findDescriptor(state, nodeId);
+            const descriptor = findDescriptor(state.descriptors, nodeId);
             if (!descriptor) {
                 return failedDecision(new SmithersError("NODE_NOT_FOUND", `Unknown approval task ${nodeId}`), "approvalTimedOut");
             }
@@ -985,7 +972,7 @@ export function makeWorkflowSession(options = {}) {
             return decide();
         }),
         timerFired: (nodeId, firedAtMs = nowMs()) => Effect.sync(() => {
-            const descriptor = findDescriptor(state, nodeId);
+            const descriptor = findDescriptor(state.descriptors, nodeId);
             if (!descriptor) {
                 return failedDecision(new SmithersError("NODE_NOT_FOUND", `Unknown timer task ${nodeId}`), "timerFired");
             }
@@ -1015,7 +1002,7 @@ export function makeWorkflowSession(options = {}) {
             }
         }),
         heartbeatTimedOut: (nodeId, iteration, details = {}) => Effect.sync(() => {
-            const descriptor = findDescriptor(state, nodeId, iteration);
+            const descriptor = findDescriptor(state.descriptors, nodeId, iteration);
             if (!descriptor) {
                 return failedDecision(new SmithersError("NODE_NOT_FOUND", `Unknown task ${nodeId}`), "heartbeatTimedOut");
             }
@@ -1027,7 +1014,7 @@ export function makeWorkflowSession(options = {}) {
             }));
         }),
         cacheResolved: (output, _cached) => Effect.sync(() => {
-            const descriptor = findDescriptor(state, output.nodeId, output.iteration);
+            const descriptor = findDescriptor(state.descriptors, output.nodeId, output.iteration);
             if (!descriptor) {
                 return failedDecision(new SmithersError("NODE_NOT_FOUND", `Unknown cached task ${output.nodeId}`), "cacheResolved");
             }
@@ -1042,7 +1029,7 @@ export function makeWorkflowSession(options = {}) {
             });
         }),
         cacheMissed: (nodeId, iteration) => Effect.sync(() => {
-            const descriptor = findDescriptor(state, nodeId, iteration);
+            const descriptor = findDescriptor(state.descriptors, nodeId, iteration);
             if (!descriptor) {
                 return failedDecision(new SmithersError("NODE_NOT_FOUND", `Unknown cached task ${nodeId}`), "cacheMissed");
             }
