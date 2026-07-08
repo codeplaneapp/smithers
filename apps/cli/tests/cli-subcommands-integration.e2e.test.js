@@ -264,27 +264,27 @@ test("openapi list/generate handles empty and single-operation specs through the
 test("openapi list/generate reject invalid specs without writing generated output", () => {
     const repo = createTempRepo();
     repo.write(
-        "swagger-openapi.json",
-        `${JSON.stringify({ swagger: "2.0", info: { title: "Old", version: "1.0.0" }, paths: {} }, null, 2)}\n`,
+        "invalid-openapi.json",
+        `${JSON.stringify({ info: { title: "Missing Version" }, paths: {} }, null, 2)}\n`,
     );
 
-    const listed = runSmithers(["openapi", "list", "swagger-openapi.json"], {
+    const listed = runSmithers(["openapi", "list", "invalid-openapi.json"], {
         cwd: repo.dir,
         format: "json",
         env: quietEnv(),
     });
     expect(listed.exitCode).not.toBe(0);
     expect(listed.json?.code).toBe("OPENAPI_LIST_FAILED");
-    expect(`${listed.stdout}\n${listed.stderr}`).toContain("missing an 'openapi' field");
+    expect(`${listed.stdout}\n${listed.stderr}`).toContain("does not appear to be a valid OpenAPI spec");
 
-    const generated = runSmithers(["openapi", "generate", "swagger-openapi.json", "generated/tools.js"], {
+    const generated = runSmithers(["openapi", "generate", "invalid-openapi.json", "generated/tools.js"], {
         cwd: repo.dir,
         format: "json",
         env: quietEnv(),
     });
     expect(generated.exitCode).not.toBe(0);
     expect(generated.json?.code).toBe("OPENAPI_GENERATE_FAILED");
-    expect(`${generated.stdout}\n${generated.stderr}`).toContain("missing an 'openapi' field");
+    expect(`${generated.stdout}\n${generated.stderr}`).toContain("does not appear to be a valid OpenAPI spec");
     expect(existsSync(repo.path("generated/tools.js"))).toBe(false);
 }, 30_000);
 
