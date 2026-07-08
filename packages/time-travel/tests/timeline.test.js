@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
+import { Effect } from "effect";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { captureSnapshot } from "../src/snapshot/index.js";
 import { forkRun } from "../src/fork/index.js";
-import { buildTimeline, buildTimelineTree, formatTimelineForTui, formatTimelineAsJson, } from "../src/timeline/index.js";
+import { buildTimeline, buildTimelineTree, buildTimelineTreeEffect, formatTimelineForTui, formatTimelineAsJson, } from "../src/timeline/index.js";
 function createTestDb() {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);
@@ -227,6 +228,35 @@ describe("buildTimelineTree", () => {
         await expect(buildTimelineTree(adapter, "root")).rejects.toThrow("fork ancestry cycle: root -> child -> root");
         expect(snapshotBuildsByRun.get("root")).toBe(1);
         expect(snapshotBuildsByRun.get("child")).toBe(1);
+    });
+    test("fails fast on self-referential fork ancestry through the effect API", async () => {
+        const snapshots = new Map([
+            [
+                "root",
+                [
+                    {
+                        runId: "root",
+                        frameNo: 0,
+                        contentHash: "root-hash",
+                        createdAtMs: 1,
+                        vcsPointer: null,
+                    },
+                ],
+            ],
+        ]);
+        const { adapter, snapshotBuildsByRun } = createFakeTimelineAdapter(snapshots, [
+            {
+                runId: "root",
+                parentRunId: "root",
+                parentFrameNo: 0,
+                branchLabel: "self-loop",
+                forkDescription: null,
+                createdAtMs: 2,
+            },
+        ]);
+
+        await expect(Effect.runPromise(buildTimelineTreeEffect(adapter, "root"))).rejects.toThrow("fork ancestry cycle: root -> root");
+        expect(snapshotBuildsByRun.get("root")).toBe(1);
     });
     test("rejects excessively deep fork ancestry with an explicit depth error", async () => {
         const { adapter } = createDeepTimelineAdapter(102);

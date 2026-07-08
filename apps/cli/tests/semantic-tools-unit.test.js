@@ -534,6 +534,64 @@ function createCyclicSemanticTimelineStorage() {
     return { storage, snapshotReadsByRun };
 }
 
+function createDeepSemanticTimelineStorage(runCount) {
+    const snapshots = [];
+    const branches = [];
+    for (let i = 0; i < runCount; i += 1) {
+        const runId = `run-${i}`;
+        snapshots.push({
+            runId,
+            frameNo: 0,
+            nodesJson: "[]",
+            outputsJson: "{}",
+            ralphJson: "[]",
+            inputJson: "{}",
+            vcsPointer: `vcs-${i}`,
+            workflowHash: `hash-${i}`,
+            contentHash: `content-${i}`,
+            createdAtMs: NOW + i,
+        });
+        if (i + 1 < runCount) {
+            branches.push({
+                runId: `run-${i + 1}`,
+                parentRunId: runId,
+                parentFrameNo: 0,
+                branchLabel: `to-run-${i + 1}`,
+                forkDescription: null,
+                createdAtMs: NOW + i,
+            });
+        }
+    }
+    const snapshotReadsByRun = new Map();
+    const storage = {
+        dialect: "postgres",
+        queryAll: async (sql, params) => {
+            if (sql.includes("_smithers_snapshots")) {
+                const runId = params[0];
+                const reads = (snapshotReadsByRun.get(runId) ?? 0) + 1;
+                snapshotReadsByRun.set(runId, reads);
+                if (reads > 1) {
+                    throw new Error(`semantic get_timeline rebuilt ${runId}`);
+                }
+                return snapshots.filter((snapshot) => snapshot.runId === runId);
+            }
+            if (sql.includes("_smithers_branches")) {
+                const parentRunId = params[0];
+                return branches.filter((branch) => branch.parentRunId === parentRunId);
+            }
+            throw new Error(`unexpected queryAll: ${sql}`);
+        },
+        queryOne: async (sql, params) => {
+            if (sql.includes("_smithers_branches")) {
+                const runId = params[0];
+                return branches.find((branch) => branch.runId === runId) ?? null;
+            }
+            throw new Error(`unexpected queryOne: ${sql}`);
+        },
+    };
+    return { storage, snapshotReadsByRun };
+}
+
 function expectWorkflowSummaryMatchesSchema(workflow) {
     const declared = new Set(Object.keys(workflowSummarySchema.shape));
     for (const key of Object.keys(workflow)) {
@@ -1226,6 +1284,37 @@ describe("semantic tool definitions", () => {
         expect(JSON.parse(cyclicTimeline.content[0].text)).toEqual(cyclicTimeline.structuredContent);
         expect(snapshotReadsByRun.get("root")).toBe(1);
         expect(snapshotReadsByRun.get("child")).toBe(1);
+        expect([...snapshotReadsByRun.values()].every((reads) => reads <= 1)).toBe(true);
+    });
+
+    test("get_timeline tree reports excessive fork depth without traversing past the limit", async () => {
+        const { storage, snapshotReadsByRun } = createDeepSemanticTimelineStorage(102);
+        const harness = makeHarness({
+            internalStorage: storage,
+            runs: [],
+            nodes: [],
+            approvals: [],
+            attempts: [],
+        });
+
+        const deepTimeline = await harness.call("get_timeline", { runId: "run-0", tree: true });
+
+        expect(deepTimeline.isError).toBe(true);
+        expect(deepTimeline.structuredContent).toMatchObject({
+            ok: false,
+            error: {
+                code: "INVALID_INPUT",
+                details: {
+                    runId: "run-101",
+                    depth: 101,
+                    maxDepth: 100,
+                },
+            },
+        });
+        expect(deepTimeline.structuredContent.error.message).toContain("maximum depth");
+        expect(JSON.parse(deepTimeline.content[0].text)).toEqual(deepTimeline.structuredContent);
+        expect(snapshotReadsByRun.size).toBe(101);
+        expect(snapshotReadsByRun.has("run-101")).toBe(false);
         expect([...snapshotReadsByRun.values()].every((reads) => reads <= 1)).toBe(true);
     });
 
