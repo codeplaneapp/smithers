@@ -8,4 +8,9 @@
  *   preload = ["./src/devtools/preload.js"]
  */
 import { installRDTHook } from "bippy";
-installRDTHook();
+// Reinstalling over a live hook orphans renderers that already injected into
+// it (react-reconciler dispatches commits to the hook captured at inject
+// time), so a mid-process import must be a no-op.
+if (!("__REACT_DEVTOOLS_GLOBAL_HOOK__" in globalThis)) {
+    installRDTHook();
+}
