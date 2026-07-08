@@ -140,6 +140,10 @@ describe("deferred state bridge pure helpers", () => {
         expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: { revertOnMet: true } })).toBe(false);
         expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: { conditionMet: false } })).toBe(false);
         expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: { after: -1 } })).toBe(false);
+        // Non-finite thresholds are clamped to "never auto-approve" rather than
+        // falling through to the after=0 immediate-approve path or looping.
+        expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: { after: Number.NaN } })).toBe(false);
+        expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: { after: Number.POSITIVE_INFINITY } })).toBe(false);
         expect(await I.shouldAutoApprove(fakeAdapter, "run", { approvalAutoApprove: { after: 0 } })).toBe(true);
         expect(await I.shouldAutoApprove({
             getRun: () => Effect.succeed(null),
