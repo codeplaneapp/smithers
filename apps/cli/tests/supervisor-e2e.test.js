@@ -249,6 +249,43 @@ function readSupervisorEventTypes(dbPath) {
     }
 }
 /**
+ * @param {string} dbPath
+ * @param {string} runId
+ */
+function readEventRows(dbPath, runId) {
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+        return sqlite
+            .query("SELECT type, payload_json AS payloadJson FROM _smithers_events WHERE run_id = ? ORDER BY seq ASC")
+            .all(runId)
+            .map((row) => ({
+                type: String(row.type),
+                payload: JSON.parse(String(row.payloadJson)),
+            }));
+    }
+    finally {
+        sqlite.close();
+    }
+}
+/**
+ * @param {string} dbPath
+ * @param {string[]} runIds
+ */
+function readRunRows(dbPath, runIds) {
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+        return new Map(runIds.map((runId) => {
+            const row = sqlite
+                .query("SELECT run_id AS runId, heartbeat_at_ms AS heartbeatAtMs, runtime_owner_id AS runtimeOwnerId FROM _smithers_runs WHERE run_id = ?")
+                .get(runId);
+            return [runId, row];
+        }));
+    }
+    finally {
+        sqlite.close();
+    }
+}
+/**
  * @param {string} stdout
  */
 function parseJsonStdout(stdout) {
@@ -319,6 +356,98 @@ describe("supervisor e2e", () => {
                 supervisor.child.kill("SIGKILL");
                 await Promise.race([supervisor.closePromise, sleep(1_000)]);
             }
+        }
+    }, 20_000);
+
+    test("standalone supervise dry-run polls real stale rows without claiming them", async () => {
+        const repo = createTempRepo();
+        const workflows = createWorkflowDir();
+        const { adapter, sqlite } = createRepoDb(repo);
+        const dbPath = repo.path("smithers.db");
+        const runs = [
+            {
+                runId: "run-cli-dry-stalest",
+                heartbeatAtMs: now - 120_000,
+                workflowPath: workflows.workflowPath("run-cli-dry-stalest"),
+            },
+            {
+                runId: "run-cli-dry-stale",
+                heartbeatAtMs: now - 90_000,
+                workflowPath: workflows.workflowPath("run-cli-dry-stale"),
+            },
+        ];
+        try {
+            for (const run of runs) {
+                await adapter.insertRun(runRow(run.runId, {
+                    workflowPath: run.workflowPath,
+                    heartbeatAtMs: run.heartbeatAtMs,
+                    runtimeOwnerId: null,
+                }));
+            }
+            sqlite.close();
+            const supervisor = spawnCli([
+                "supervise",
+                "--dry-run",
+                "--interval",
+                "100ms",
+                "--stale-threshold",
+                "1s",
+                "--max-concurrent",
+                "1",
+                "--format",
+                "json",
+            ], { cwd: repo.dir });
+            try {
+                let pollPayload;
+                await waitForCondition("supervisor startup stderr", () => supervisor.stderr().includes("Supervisor started"));
+                await waitForCondition("dry-run stale poll event", () => {
+                    const pollEvents = readEventRows(dbPath, SUPERVISOR_EVENT_RUN_ID)
+                        .filter((event) => event.type === "SupervisorPollCompleted")
+                        .map((event) => event.payload);
+                    pollPayload = pollEvents.find((payload) => payload.staleCount === 2 &&
+                        payload.resumedCount === 0 &&
+                        payload.skippedCount === 2);
+                    return Boolean(pollPayload);
+                });
+                expect(pollPayload).toMatchObject({
+                    type: "SupervisorPollCompleted",
+                    runId: SUPERVISOR_EVENT_RUN_ID,
+                    staleCount: 2,
+                    resumedCount: 0,
+                    skippedCount: 2,
+                });
+                const runEvents = runs.flatMap((run) => readEventRows(dbPath, run.runId));
+                expect(runEvents.some((event) => event.type === "RunAutoResumeSkipped" &&
+                    event.payload.reason === "rate-limited")).toBe(true);
+                supervisor.child.kill("SIGTERM");
+                const exit = await Promise.race([
+                    supervisor.closePromise,
+                    sleep(3_000).then(() => ({ timedOut: true })),
+                ]);
+                expect(exit, `${supervisor.stdout()}\n${supervisor.stderr()}`).not.toMatchObject({ timedOut: true });
+                expect(exit, `${supervisor.stdout()}\n${supervisor.stderr()}`).toMatchObject({ code: 0 });
+                expect(stoppedStatus(parseJsonStdout(supervisor.stdout()))).toBe("stopped");
+                const rows = readRunRows(dbPath, runs.map((run) => run.runId));
+                for (const run of runs) {
+                    expect(rows.get(run.runId)).toMatchObject({
+                        runId: run.runId,
+                        heartbeatAtMs: run.heartbeatAtMs,
+                        runtimeOwnerId: null,
+                    });
+                }
+            }
+            finally {
+                if (supervisor.child.exitCode === null && supervisor.child.signalCode === null) {
+                    supervisor.child.kill("SIGKILL");
+                    await Promise.race([supervisor.closePromise, sleep(1_000)]);
+                }
+            }
+        }
+        finally {
+            if (sqlite.open) {
+                sqlite.close();
+            }
+            workflows.cleanup();
         }
     }, 20_000);
 
