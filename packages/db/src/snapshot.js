@@ -206,6 +206,19 @@ export function loadOutputs(db, schema, runId) {
     return Effect.runPromise(loadOutputsEffect(db, schema, runId));
 }
 /**
+ * Coerce one freshly-selected output row into the exact shape loadOutputs
+ * returns for that table (boolean-mode columns coerced to JS booleans; json
+ * columns are already decoded by the select paths). Lets callers that maintain
+ * an incremental outputs snapshot keep patched rows byte-equivalent to a full
+ * loadOutputs reload.
+ * @param {_Table} table
+ * @param {Record<string, unknown>} row
+ * @returns {Record<string, unknown>}
+ */
+export function coerceOutputRowForSnapshot(table, row) {
+    return coerceBooleanColumns([row], getBooleanColumnKeys(table))[0];
+}
+/**
  * Read every row of a single output table for a run, returning Drizzle-shaped
  * rows (camelCase keys, boolean columns coerced to JS booleans). Dialect-aware:
  * Drizzle for bun:sqlite, a raw `$n` query for the Postgres descriptor.
