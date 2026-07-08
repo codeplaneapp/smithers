@@ -319,6 +319,43 @@ describe("executeSandbox", () => {
         }
     });
 
+    test("preserves the real shipped timestamp through completion instead of the creation timestamp", async () => {
+        const { adapter, db, sqlite } = createDb();
+        const rootDir = tempDir("smithers-sandbox-execute-shipped-");
+        const runtime = createRuntime(db);
+        const upsertCalls = [];
+        const originalUpsertSandbox = SmithersDb.prototype.upsertSandbox;
+        SmithersDb.prototype.upsertSandbox = function upsertSandboxSpy(row) {
+            upsertCalls.push({ status: row.status, shippedAtMs: row.shippedAtMs });
+            return originalUpsertSandbox.call(this, row);
+        };
+        try {
+            await withCodeplaneEnv(() =>
+                runInRuntime(runtime, {
+                    sandboxId: "sandbox-shipped-time",
+                    rootDir,
+                    executeChildWorkflow: async () => {
+                        writeChildLog(rootDir, "child-shipped-time");
+                        return { runId: "child-shipped-time", status: "finished", output: {} };
+                    },
+                }),
+            );
+
+            const shippedCall = upsertCalls.find((call) => call.status === "shipped");
+            const finishedCall = upsertCalls.find((call) => call.status === "finished");
+            expect(shippedCall.shippedAtMs).toEqual(expect.any(Number));
+            expect(finishedCall.shippedAtMs).toBe(shippedCall.shippedAtMs);
+
+            const sandbox = await adapter.getSandbox("parent-run", "sandbox-shipped-time");
+            expect(sandbox.shippedAtMs).toBe(shippedCall.shippedAtMs);
+            expect(Number(sandbox.completedAtMs)).toBeGreaterThanOrEqual(Number(sandbox.shippedAtMs));
+        }
+        finally {
+            SmithersDb.prototype.upsertSandbox = originalUpsertSandbox;
+            sqlite.close();
+        }
+    });
+
     test("rejects sandbox execution when no runtime database is available", async () => {
         const runtime = createRuntime(undefined);
 
@@ -1024,6 +1061,7 @@ describe("executeSandbox", () => {
                 status: "failed",
                 bundlePath: null,
                 workspaceId: null,
+                shippedAtMs: null,
             });
             expect(await eventTypes(adapter, "run-at-capacity")).toEqual(["SandboxFailed"]);
         }

@@ -351,7 +351,7 @@ function isSandboxActive(status) {
  *   options: ExecuteSandboxOptions;
  *   selectedRuntime: string;
  *   configJson: string;
- *   createdAtMs: number;
+ *   shippedAtMs: number | null;
  *   childStartedMs: number;
  *   validated: import("./ValidatedSandboxBundle.ts").ValidatedSandboxBundle;
  *   remoteRunId: string | undefined;
@@ -423,7 +423,7 @@ async function finalizeSandboxBundle(params) {
         containerId: params.containerId,
         configJson,
         status: validated.manifest.status,
-        shippedAtMs: params.createdAtMs,
+        shippedAtMs: params.shippedAtMs,
         completedAtMs: nowMs(),
         bundlePath: validated.bundlePath,
     });
@@ -501,6 +501,7 @@ export async function executeSandbox(options) {
     const requestBundlePath = join(sandboxRoot, "request-bundle");
     let handle = null;
     let providerRequest = null;
+    let shippedAtMs = null;
     try {
         const existingSandboxes = await adapter.listSandboxes(runtime.runId);
         const activeSandboxCount = existingSandboxes.filter((row) => isSandboxActive(row?.status)).length;
@@ -562,6 +563,7 @@ export async function executeSandbox(options) {
                 stage: "shipped",
                 progress: 25,
             });
+            shippedAtMs = nowMs();
             await adapter.upsertSandbox({
                 runId: runtime.runId,
                 sandboxId: options.sandboxId,
@@ -571,7 +573,7 @@ export async function executeSandbox(options) {
                 containerId: null,
                 configJson,
                 status: "shipped",
-                shippedAtMs: nowMs(),
+                shippedAtMs,
                 completedAtMs: null,
                 bundlePath: null,
             });
@@ -609,7 +611,7 @@ export async function executeSandbox(options) {
                 options,
                 selectedRuntime,
                 configJson,
-                createdAtMs,
+                shippedAtMs,
                 childStartedMs,
                 validated,
                 remoteRunId: materialized.remoteRunId ?? validated.manifest.runId,
@@ -650,6 +652,7 @@ export async function executeSandbox(options) {
             stage: "shipped",
             progress: 25,
         });
+        shippedAtMs = nowMs();
         await adapter.upsertSandbox({
             runId: runtime.runId,
             sandboxId: options.sandboxId,
@@ -659,7 +662,7 @@ export async function executeSandbox(options) {
             containerId: sandboxHandle.containerId ?? null,
             configJson,
             status: "shipped",
-            shippedAtMs: nowMs(),
+            shippedAtMs,
             completedAtMs: null,
             bundlePath: null,
         });
@@ -722,7 +725,7 @@ export async function executeSandbox(options) {
             options,
             selectedRuntime,
             configJson,
-            createdAtMs,
+            shippedAtMs,
             childStartedMs,
             validated,
             remoteRunId: child.runId,
@@ -741,7 +744,7 @@ export async function executeSandbox(options) {
             containerId: handle?.containerId ?? null,
             configJson,
             status: "failed",
-            shippedAtMs: createdAtMs,
+            shippedAtMs,
             completedAtMs: nowMs(),
             bundlePath: handle?.resultPath ?? null,
         });
