@@ -155,4 +155,32 @@ declare function removeAccount(label: string, options?: {
  */
 declare function accountToProviderEnv(account: Account$1): Record<string, string>;
 
-export { API_KEY_PROVIDERS, type Account$1 as Account, type AccountProvider, type AccountsFile, SUBSCRIPTION_PROVIDERS, VALID_PROVIDERS, accountToProviderEnv, accountsFilePath, accountsRoot, addAccount, defaultConfigDir, getAccount, listAccounts, parseAccountsFile, readAccounts, removeAccount, writeAccounts };
+/**
+ * Creates an RFC 7636 PKCE code_verifier using high-entropy random bytes.
+ *
+ * @param {number} [byteLength]
+ * @returns {string}
+ */
+declare function createCodeVerifier(byteLength?: number): string;
+
+/**
+ * Derives an RFC 7636 S256 code_challenge for a code_verifier.
+ *
+ * @param {string} codeVerifier
+ * @returns {string}
+ */
+declare function deriveCodeChallenge(codeVerifier: string): string;
+
+/**
+ * Creates a full RFC 7636 S256 PKCE parameter set.
+ *
+ * @param {number} [byteLength]
+ * @returns {{ codeVerifier: string; codeChallenge: string; codeChallengeMethod: "S256" }}
+ */
+declare function createPkcePair(byteLength?: number): {
+    codeVerifier: string;
+    codeChallenge: string;
+    codeChallengeMethod: "S256";
+};
+
+export { API_KEY_PROVIDERS, type Account$1 as Account, type AccountProvider, type AccountsFile, SUBSCRIPTION_PROVIDERS, VALID_PROVIDERS, accountToProviderEnv, accountsFilePath, accountsRoot, addAccount, createCodeVerifier, createPkcePair, defaultConfigDir, deriveCodeChallenge, getAccount, listAccounts, parseAccountsFile, readAccounts, removeAccount, writeAccounts };
