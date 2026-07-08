@@ -16,4 +16,5 @@ export { getAccount } from "./getAccount.js";
 export { addAccount } from "./addAccount.js";
 export { removeAccount } from "./removeAccount.js";
 export { accountToProviderEnv } from "./accountToProviderEnv.js";
+export { buildAuthorizationUrl } from "./buildAuthorizationUrl.js";
 export { createCodeVerifier, deriveCodeChallenge, createPkcePair } from "./pkce.js";
