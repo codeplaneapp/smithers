@@ -4,6 +4,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { buildHumanRequestId } from "@smithers-orchestrator/db/buildHumanRequestId";
 import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
 import { HumanTask } from "../src/components/index.js";
 import { createTestSmithers } from "./helpers.js";
 
@@ -55,6 +56,24 @@ describe("HumanTask attempt bounds", () => {
         const el = HumanTask({ id: "human-default", output: "out", prompt: "Answer" });
         expect(el.props.retries).toBe(9);
         expect(el.props.meta.maxAttempts).toBe(10);
+    });
+
+    test("maxAttempts=0 degrades to a single attempt: extraction clamps the negative retry budget to 0", async () => {
+        // The element carries retries = maxAttempts - 1 = -1; graph extraction
+        // must clamp that to 0 (one attempt, no retries) instead of producing a
+        // task that fails without ever executing.
+        const el = HumanTask({ id: "human-zero", output: "out", prompt: "Answer", maxAttempts: 0 });
+        expect(el.props.retries).toBe(-1);
+        const rendered = await new SmithersRenderer().render(el);
+        expect(rendered.tasks[0].retries).toBe(0);
+        expect(rendered.tasks[0].meta.maxAttempts).toBe(0);
+    });
+
+    test("a negative maxAttempts also clamps to a single attempt instead of blowing up", async () => {
+        const rendered = await new SmithersRenderer().render(
+            HumanTask({ id: "human-negative", output: "out", prompt: "Answer", maxAttempts: -3 }),
+        );
+        expect(rendered.tasks[0].retries).toBe(0);
     });
 });
 
