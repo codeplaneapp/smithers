@@ -109,6 +109,27 @@ describe("smithers cron commands", () => {
         expect(afterRm.json).toMatchObject({ crons: [] });
     }, 30_000);
 
+    test("cron add rejects a malformed pattern and persists nothing", async () => {
+        const repo = createTempRepo();
+        mkdirSync(repo.path(".smithers"));
+        const { close } = openAdapter(repo.path("smithers.db"));
+        close();
+
+        const add = runSmithers(["cron", "add", "not a cron pattern", "workflow.tsx"], {
+            cwd: repo.dir,
+            format: "json",
+        });
+        expect(add.exitCode).toBe(4);
+        expect(add.json?.code).toBe("INVALID_CRON_PATTERN");
+
+        const list = runSmithers(["cron", "list"], {
+            cwd: repo.dir,
+            format: "json",
+        });
+        expect(list.exitCode).toBe(0);
+        expect(list.json?.crons).toHaveLength(0);
+    }, 30_000);
+
     test("start delegates to the scheduler entrypoint", async () => {
         const repo = createTempRepo();
         mkdirSync(repo.path(".smithers"));
