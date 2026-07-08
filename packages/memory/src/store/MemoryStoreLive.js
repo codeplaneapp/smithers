@@ -286,6 +286,11 @@ function makeMemoryStore(db) {
             // crash-resume, deterministic replay, or fork/restore where ids are
             // derived deterministically) must be a safe no-op upsert rather than
             // a UNIQUE-constraint crash. Mirrors setFact's onConflictDoUpdate.
+            // The conflict update deliberately excludes createdAtMs: the ORIGINAL
+            // insert timestamp must survive a re-save so ordering in
+            // listMessages (and downstream oldest-first summarization) stays
+            // stable, even when the re-save omits createdAtMs and would
+            // otherwise fall back to a fresh nowMs().
             yield* writeEffect("memory saveMessage", () => db
                 .insert(smithersMemoryMessages)
                 .values({
@@ -307,7 +312,6 @@ function makeMemoryStore(db) {
                     runId: msg.runId ?? null,
                     nodeId: msg.nodeId ?? null,
                     iteration: msg.iteration ?? null,
-                    createdAtMs,
                 },
             }));
         });

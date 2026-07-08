@@ -353,6 +353,37 @@ describe("MemoryStore - Messages", () => {
         // Upsert semantics: the latest content wins (replay-safe overwrite).
         expect(JSON.parse(messages[0].contentJson)).toEqual({ text: "second" });
     });
+    test("saveMessage re-save preserves original createdAtMs and message ordering", async () => {
+        // A re-save that omits createdAtMs (e.g. a replay/crash-resume caller
+        // that only has the original id + content) must not stamp a fresh
+        // nowMs() onto the existing row - that would reorder listMessages
+        // (ordered by createdAtMs) and corrupt conversation/summarization order.
+        const thread = await store.createThread(WF_NS);
+        await store.saveMessage({
+            id: "msg-old",
+            threadId: thread.threadId,
+            role: "user",
+            contentJson: JSON.stringify({ text: "old" }),
+            createdAtMs: 1,
+        });
+        await store.saveMessage({
+            id: "msg-new",
+            threadId: thread.threadId,
+            role: "user",
+            contentJson: JSON.stringify({ text: "new" }),
+            createdAtMs: 2,
+        });
+        await store.saveMessage({
+            id: "msg-old",
+            threadId: thread.threadId,
+            role: "user",
+            contentJson: JSON.stringify({ text: "old-resaved" }),
+        });
+        const messages = await store.listMessages(thread.threadId);
+        expect(messages.map((m) => m.id)).toEqual(["msg-old", "msg-new"]);
+        expect(messages[0].createdAtMs).toBe(1);
+        expect(JSON.parse(messages[0].contentJson)).toEqual({ text: "old-resaved" });
+    });
 });
 describe("Memory namespace codec", () => {
     test("roundtrips percent-encoded ids for enumerated namespace kinds", () => {
