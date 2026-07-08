@@ -1,5 +1,6 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, test } from "bun:test";
+import { sep } from "node:path";
 import React from "react";
 import {
     ClassifyAndRoute,
@@ -173,7 +174,8 @@ describe("Supervisor structural defaults and worktree wiring", () => {
             (task) => task.nodeId === "boss-worker-docs",
         );
         expect(docsWorker).toBeDefined();
-        expect(docsWorker.worktreePath).toContain(".worktrees/boss-worker-docs");
+        // worktreePath is an absolute path with platform separators.
+        expect(docsWorker.worktreePath.split(sep).join("/")).toContain(".worktrees/boss-worker-docs");
         expect(docsWorker.worktreeBranch).toBe("worker/boss-worker-docs");
 
         const without = await render(<Supervisor {...baseProps} id="plain" />);

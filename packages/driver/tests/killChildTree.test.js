@@ -53,7 +53,11 @@ describe("killChildTree — defensive pid-less guard", () => {
   });
 });
 
-describe("killChildTree — win32 taskkill branch", () => {
+// On real Windows, spawn("taskkill") resolves the actual taskkill.exe (PATHEXT
+// lookup ignores the extension-less sh shim), so the shim harness only works
+// from POSIX — which is exactly the box this branch can never be reached from
+// via the public path. Real win32 coverage comes from the engine e2e suites.
+describe.skipIf(process.platform === "win32")("killChildTree — win32 taskkill branch", () => {
   /** @type {string} */
   let binDir;
   /** @type {(() => void) | undefined} */

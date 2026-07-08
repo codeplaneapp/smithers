@@ -211,7 +211,9 @@ describe("Memory E2E", () => {
             sqlite.close();
         }
         finally {
-            rmSync(dir, { recursive: true, force: true });
+            // Windows releases sqlite file handles asynchronously after
+            // close(), so a bare rm races EBUSY; let node retry it.
+            rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         }
     });
     test("deleteMessages prunes large real SQLite id sets without crossing thread boundaries", async () => {

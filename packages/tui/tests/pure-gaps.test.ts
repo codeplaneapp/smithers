@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { spawn as nodeSpawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { resolveCliEntry } from "../src/cliEntry.ts";
 import { DEFAULT_GATEWAY_PORT, resolveGatewayConfig } from "../src/gatewayConfig.ts";
 import {
@@ -40,8 +40,9 @@ describe("resolveCliEntry", () => {
     delete process.env.SMITHERS_CLI;
     const entry = resolveCliEntry();
     expect(entry).not.toBeNull();
-    // fileURLToPath output: an absolute path, no file:// scheme.
-    expect(entry).toContain("apps/cli/src/index.js");
+    // fileURLToPath output: an absolute path (platform separators), no
+    // file:// scheme.
+    expect(entry!.split(sep).join("/")).toContain("apps/cli/src/index.js");
     expect(entry!.startsWith("file:")).toBe(false);
   });
 
@@ -86,7 +87,8 @@ describe("gatewayRuntimeState edge branches", () => {
     const a = workspaceGatewayStatePath(missing, { SMITHERS_GATEWAY_STATE_DIR: "/state" });
     const b = workspaceGatewayStatePath(resolve(missing), { SMITHERS_GATEWAY_STATE_DIR: "/state" });
     expect(a.stateFile).toBe(b.stateFile);
-    expect(a.stateFile.startsWith("/state/")).toBe(true);
+    // join() renders the pinned "/state" dir with platform separators.
+    expect(dirname(a.stateFile)).toBe(join("/state"));
   });
 
   test("resolveMonitorWorkspaceRoot returns the start dir when no marker exists anywhere up the tree", () => {
@@ -99,7 +101,9 @@ describe("gatewayRuntimeState edge branches", () => {
     expect(resolveMonitorWorkspaceRoot(nested, {})).toBe(resolve(nested));
   });
 
-  test("defaultGatewayRuntimeDir uses XDG_RUNTIME_DIR on Linux, else a uid-scoped tmp dir", () => {
+  // The Linux branch additionally requires process.getuid, which does not
+  // exist on Windows, so faking process.platform cannot reach it there.
+  test.skipIf(process.platform === "win32")("defaultGatewayRuntimeDir uses XDG_RUNTIME_DIR on Linux, else a uid-scoped tmp dir", () => {
     const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
     try {
       Object.defineProperty(process, "platform", { value: "linux", configurable: true });
