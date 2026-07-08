@@ -1,5 +1,5 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync, } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync, statSync, } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildOverlay, cleanupGenerations, resolveOverlayEntry, __overlayInternals, } from "../src/hot/overlay.js";
@@ -117,6 +117,33 @@ describe("buildOverlay", () => {
         writeFileSync(join(outDir, "gen-1", "workflow.ts"), "stale");
         const genDir = await buildOverlay(root, outDir, 1);
         expect(readFileSync(join(genDir, "workflow.ts"), "utf8")).toBe("fresh");
+    });
+    test("non-module files are hardlinked into the overlay, module files get their own inode", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        writeFileSync(join(root, "notes.txt"), "asset");
+        writeFileSync(join(root, "workflow.ts"), "export default {}");
+        const genDir = await buildOverlay(root, outDir, 1);
+        const srcStat = statSync(join(root, "notes.txt"));
+        const overlayStat = statSync(join(genDir, "notes.txt"));
+        expect(overlayStat.ino).toBe(srcStat.ino);
+        expect(overlayStat.nlink).toBe(2);
+        // Module files must NOT share an inode or in-place edits would leak
+        // into already-built generations.
+        expect(statSync(join(genDir, "workflow.ts")).ino).not.toBe(statSync(join(root, "workflow.ts")).ino);
+    });
+    test("a failed hardlink for a non-module file falls back to an independent copy", async () => {
+        const root = makeTempDir();
+        const outDir = makeTempDir();
+        dirs.push(root, outDir);
+        writeFileSync(join(root, "notes.txt"), "fresh");
+        // Pre-existing destination makes link() fail with EEXIST.
+        mkdirSync(join(outDir, "gen-1"));
+        writeFileSync(join(outDir, "gen-1", "notes.txt"), "stale");
+        const genDir = await buildOverlay(root, outDir, 1);
+        expect(readFileSync(join(genDir, "notes.txt"), "utf8")).toBe("fresh");
+        expect(statSync(join(genDir, "notes.txt")).ino).not.toBe(statSync(join(root, "notes.txt")).ino);
     });
 });
 describe("cleanupGenerations", () => {
