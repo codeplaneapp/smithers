@@ -227,14 +227,20 @@ const codex = new CodexAgent({
   dangerouslyBypassApprovalsAndSandbox: true,
   skipGitRepoCheck: true,
 });
+// SMITHERS_NO_FABLE=1 drops Fable from every chain (e.g. when Fable is rate-limited): the
+// smart roles run on Opus instead. Because a Fable rate-limit is classified as a RETRYABLE
+// quota error, a Fable-primary task PARKS the whole run on waiting-quota rather than failing
+// over — so when Fable is down, keeping it out of the chains (not just later in them) is what
+// actually keeps the run moving.
+const NO_FABLE = process.env.SMITHERS_NO_FABLE === "1";
 // Failover keeps the run alive if the primary's quota is out; primary first preserves the
 // strategy's intent in the common case.
-const fableChain = [fable, opus, sonnet];
-const opusChain = [opus, fable, sonnet];
+const fableChain = NO_FABLE ? [opus, sonnet] : [fable, opus, sonnet];
+const opusChain = NO_FABLE ? [opus, sonnet] : [opus, fable, sonnet];
 const implementChain = [sonnet, codex];
 const routerChain = [sonnet, codex];
 function makeStackAgent(worktreePath: string) {
-  return new ClaudeCodeAgent({ model: "claude-fable-5", cwd: worktreePath });
+  return new ClaudeCodeAgent({ model: NO_FABLE ? "claude-opus-4-8" : "claude-fable-5", cwd: worktreePath });
 }
 
 const AGENT_RETRIES = 2;
