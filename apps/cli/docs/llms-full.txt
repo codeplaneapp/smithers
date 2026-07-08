@@ -8208,6 +8208,42 @@ type MemoryFact    = { namespace: string; key: string; valueJson: string; schema
 type MemoryMessage = { id: string; threadId: string; role: string; contentJson: string; runId?: string | null; nodeId?: string | null; createdAtMs: number };
 type MemoryThread  = { threadId: string; namespace: string; title?: string | null; metadataJson?: string | null; createdAtMs: number; updatedAtMs: number };
 
+type MemoryProvenance = { runId?: string | null; nodeId?: string | null; iteration?: number | null };
+
+type MemoryNote = {
+  id: string;
+  namespace: string;
+  body: string;
+  kind?: string | null;
+  tagsJson?: string | null; // JSON-encoded string array; null when the note has no tags
+  author?: string | null;
+  status: string; // free-form; conventionally pending | accepted | rejected
+  statusChangedAtMs?: number | null;
+  createdAtMs: number;
+  runId?: string | null;
+  nodeId?: string | null;
+  iteration?: number | null;
+};
+
+type SaveNoteInput = {
+  namespace: MemoryNamespace;
+  body: string;
+  kind?: string;
+  tags?: string[];
+  author?: string;
+  status?: string; // defaults to "accepted"
+  provenance?: MemoryProvenance;
+  supersedes?: string[]; // note ids this note replaces
+  id?: string; // provide to make retries idempotent
+};
+
+type NoteReadFilter = {
+  status?: string | string[] | "any";
+  includeSuperseded?: boolean;
+  kind?: string;
+  namespace?: MemoryNamespace; // scope searchNotes to one namespace of the kind
+};
+
 type WorkingMemoryConfig<
   T extends import("zod").ZodObject<import("zod").ZodRawShape> = import("zod").ZodObject<import("zod").ZodRawShape>,
 > = {
@@ -8240,6 +8276,12 @@ type MemoryStore = {
   listMessages(threadId: string, limit?: number): Promise<MemoryMessage[]>;
   countMessages(threadId: string): Promise<number>;
   deleteExpiredFacts(): Promise<number>;
+  saveNote(input: SaveNoteInput): Promise<MemoryNote>;
+  getNote(id: string): Promise<MemoryNote | undefined>;
+  listNotes(ns: MemoryNamespace, filter?: NoteReadFilter): Promise<MemoryNote[]>;
+  setNoteStatus(id: string, status: string): Promise<void>;
+  enableNoteSearch(kind: string): Promise<void>;
+  searchNotes(kind: string, query: string, limit?: number, filter?: NoteReadFilter): Promise<MemoryNote[]>;
   getFactEffect(ns: MemoryNamespace, key: string): Effect.Effect<MemoryFact | undefined, SmithersError>;
   setFactEffect(ns: MemoryNamespace, key: string, value: unknown, ttlMs?: number): Effect.Effect<void, SmithersError>;
   deleteFactEffect(ns: MemoryNamespace, key: string): Effect.Effect<void, SmithersError>;
@@ -8252,6 +8294,12 @@ type MemoryStore = {
   listMessagesEffect(threadId: string, limit?: number): Effect.Effect<MemoryMessage[], SmithersError>;
   countMessagesEffect(threadId: string): Effect.Effect<number, SmithersError>;
   deleteExpiredFactsEffect(): Effect.Effect<number, SmithersError>;
+  saveNoteEffect(input: SaveNoteInput): Effect.Effect<MemoryNote, SmithersError>;
+  getNoteEffect(id: string): Effect.Effect<MemoryNote | undefined, SmithersError>;
+  listNotesEffect(ns: MemoryNamespace, filter?: NoteReadFilter): Effect.Effect<MemoryNote[], SmithersError>;
+  setNoteStatusEffect(id: string, status: string): Effect.Effect<void, SmithersError>;
+  enableNoteSearchEffect(kind: string): Effect.Effect<void, SmithersError>;
+  searchNotesEffect(kind: string, query: string, limit?: number, filter?: NoteReadFilter): Effect.Effect<MemoryNote[], SmithersError>;
 };
 
 type MemoryServiceApi = {
@@ -8266,6 +8314,12 @@ type MemoryServiceApi = {
   readonly listMessages: (threadId: string, limit?: number) => Effect.Effect<MemoryMessage[], SmithersError>;
   readonly countMessages: (threadId: string) => Effect.Effect<number, SmithersError>;
   readonly deleteExpiredFacts: () => Effect.Effect<number, SmithersError>;
+  readonly saveNote: (input: SaveNoteInput) => Effect.Effect<MemoryNote, SmithersError>;
+  readonly getNote: (id: string) => Effect.Effect<MemoryNote | undefined, SmithersError>;
+  readonly listNotes: (ns: MemoryNamespace, filter?: NoteReadFilter) => Effect.Effect<MemoryNote[], SmithersError>;
+  readonly setNoteStatus: (id: string, status: string) => Effect.Effect<void, SmithersError>;
+  readonly enableNoteSearch: (kind: string) => Effect.Effect<void, SmithersError>;
+  readonly searchNotes: (kind: string, query: string, limit?: number, filter?: NoteReadFilter) => Effect.Effect<MemoryNote[], SmithersError>;
   readonly store: MemoryStore;
 };
 
@@ -10868,10 +10922,11 @@ flowchart LR
   GL[global] --> ST
   ST[(Memory store<br/>one SQLite db)] --> F[Facts · namespaced JSON, optional TTL]
   ST --> H[Message history · ordered threads]
+  ST --> N[Notes · append-only knowledge, supersession + status gate]
   style ST fill:#def,stroke:#36c
 ```
 
-## Three layers
+## Four layers
 
 ```ts
 import { createMemoryStore } from "smithers-orchestrator/memory";
@@ -10888,6 +10943,7 @@ const ns = { kind: "workflow" as const, id: "code-review" };
 |---|---|---|
 | Facts | `store.setFact(ns, key, value, ttlMs?)` / `store.getFact(ns, key)` / `store.listFacts(ns)` / `store.listAllFacts()` | Namespaced JSON facts. Optional TTL. Last-write-wins. `listAllFacts()` returns every fact across all namespaces (what `memory list` prints with no namespace). |
 | Message history | `store.createThread(ns, title?)`, `store.listThreads()`, `store.saveMessage(msg)`, `store.listMessages(threadId, limit)`, `store.deleteMessages(threadId, messageIds)` | Ordered chat threads per agent or user; list/delete to compact history. |
+| Notes | `store.saveNote(input)` / `store.getNote(id)` / `store.listNotes(ns, filter?)` / `store.setNoteStatus(id, status)` / `store.enableNoteSearch(kind)` / `store.searchNotes(kind, query, limit?, filter?)` | Append-only knowledge (lessons, decisions, runbook rules). Notes never mutate; they die by supersession or rejection, not TTL. SQLite backend only. |
 | Maintenance | `store.deleteExpiredFacts()` plus processors | TTL cleanup and history compaction. |
 
 Every method has an Effect-returning twin (`store.listThreadsEffect`, `store.deleteMessagesEffect`, etc.) for use inside an Effect pipeline.
@@ -10943,6 +10999,56 @@ const ns = { kind: "workflow" as const, id: "code-review" };
 
 Create the store once at module scope (outside the workflow) and reuse it across tasks rather than re-opening the SQLite handle in every task body. Under Effect, the same operations are available as `store.setFactEffect(ns, key, value, ttlMs?)`, `store.getFactEffect(ns, key)`, etc., or via `MemoryService` (`MemoryServiceApi`), which also exposes the underlying `.store`.
 
+
+## Durable notes
+
+Facts are a mutable scratch lane; **notes** are the durable knowledge lane.
+A note's body, labels, and provenance never change after insert. Knowledge
+evolves by **supersession**: a new note lists the ids it replaces, and the
+superseded notes drop out of default reads only once the superseder is
+**accepted**. `status` is the one mutable field: a human or workflow gate
+flips it with `setNoteStatus`, so propose-then-reject leaves the original
+knowledge untouched.
+
+The **default read contract** (no filter) is a stability contract: reads
+return notes that are accepted and not superseded by an accepted note.
+Filters (`status`, `includeSuperseded`, `kind`, `namespace`) widen or narrow.
+
+```ts
+const ops = { kind: "user" as const, id: "ops-team" };
+
+// Bank a lesson (append-only; provenance records which run learned it).
+const lesson = await store.saveNote({
+  namespace: ops,
+  body: "Warm the cache tier before scaling deploys back up.",
+  kind: "lesson",
+  provenance: { runId: ctx.runId, nodeId: "bank" },
+});
+
+// Propose ONE rule that replaces piled-up lessons; pending hides nothing.
+const rule = await store.saveNote({
+  namespace: ops,
+  body: "Always pre-warm caches after scale-down.",
+  kind: "runbook-rule",
+  status: "pending",
+  supersedes: [lesson.id],
+});
+
+// The human gate: accepting the rule hides the lessons it replaces.
+await store.setNoteStatus(rule.id, "accepted");
+
+// Recall live knowledge only (accepted, not superseded).
+const live = await store.listNotes(ops);
+```
+
+Full-text search is **lazy and opt-in per namespace kind**: nothing is
+indexed (and note writes pay nothing) until `enableNoteSearch(kind)`, which
+creates the FTS index and backfills. `searchNotes(kind, query)` spans every
+namespace of the kind; pass `{ namespace }` in the filter to stay
+namespace-local on a shared database. Notes require the SQLite backend and
+fail loud on Postgres/PGlite. See
+[`examples/incident-runbook-memory.jsx`](https://github.com/smithersai/smithers/blob/main/examples/incident-runbook-memory.jsx)
+for the full recall → triage → bank → distill → ratify loop.
 
 ## Processors
 

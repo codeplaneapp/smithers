@@ -2,6 +2,10 @@ import type { Effect } from "effect";
 import type { SmithersError } from "@smithers-orchestrator/errors";
 import type { MemoryNamespace } from "./MemoryNamespace";
 import type { MemoryFact } from "./MemoryFact";
+import type { MemoryNote } from "./MemoryNote";
+import type { SaveNoteInput } from "./SaveNoteInput";
+import type { NoteReadFilter } from "./NoteReadFilter";
+import type { MemoryProvenance } from "./MemoryProvenance";
 import type { MemoryThread } from "./MemoryThread";
 import type { MemoryMessage } from "./MemoryMessage";
 import type { MemoryStore } from "./store/MemoryStore";
@@ -16,6 +20,7 @@ export type MemoryServiceApi = {
     key: string,
     value: unknown,
     ttlMs?: number,
+    provenance?: MemoryProvenance,
   ) => Effect.Effect<void, SmithersError>;
   readonly deleteFact: (
     ns: MemoryNamespace,
@@ -45,5 +50,28 @@ export type MemoryServiceApi = {
     threadId: string,
   ) => Effect.Effect<number, SmithersError>;
   readonly deleteExpiredFacts: () => Effect.Effect<number, SmithersError>;
+  readonly saveNote: (
+    input: SaveNoteInput,
+  ) => Effect.Effect<MemoryNote, SmithersError>;
+  readonly getNote: (
+    id: string,
+  ) => Effect.Effect<MemoryNote | undefined, SmithersError>;
+  readonly listNotes: (
+    ns: MemoryNamespace,
+    filter?: NoteReadFilter,
+  ) => Effect.Effect<MemoryNote[], SmithersError>;
+  readonly setNoteStatus: (
+    id: string,
+    status: string,
+  ) => Effect.Effect<void, SmithersError>;
+  readonly enableNoteSearch: (
+    kind: string,
+  ) => Effect.Effect<void, SmithersError>;
+  readonly searchNotes: (
+    kind: string,
+    query: string,
+    limit?: number,
+    filter?: NoteReadFilter,
+  ) => Effect.Effect<MemoryNote[], SmithersError>;
   readonly store: MemoryStore;
 };

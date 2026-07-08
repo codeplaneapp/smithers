@@ -17,6 +17,8 @@ export { smithersScorers } from "./smithersScorers.js";
 export { smithersMemoryFacts } from "./smithersMemoryFacts.js";
 export { smithersMemoryThreads } from "./smithersMemoryThreads.js";
 export { smithersMemoryMessages } from "./smithersMemoryMessages.js";
+export { smithersMemoryNotes } from "./smithersMemoryNotes.js";
+export { smithersMemoryNoteSupersessions } from "./smithersMemoryNoteSupersessions.js";
 export { smithersVectors } from "./smithersVectors.js";
 export { smithersCron } from "./smithersCron.js";
 export { smithersDocs } from "./smithersDocs.js";

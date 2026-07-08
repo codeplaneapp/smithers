@@ -5,9 +5,10 @@ icon: "brain"
 ---
 
 Memory persists state **across runs**. Task outputs are per-run; memory is
-per-namespace and survives every workflow execution. The store keeps two kinds
-of state: namespaced **facts** (JSON values with optional TTL) and ordered
-**message threads**.
+per-namespace and survives every workflow execution. The store keeps three
+kinds of state: namespaced **facts** (JSON values with optional TTL), ordered
+**message threads**, and append-only **notes** (durable knowledge with
+supersession and a status gate).
 
 All memory values and non-generic types are re-exported from the
 `smithers-orchestrator` facade, which is canonical. The
@@ -42,7 +43,9 @@ import type {
 ```
 
 <Note>
-`WorkingMemoryConfig<T>` is generic over a Zod schema and is documented inline
+The note types (`MemoryNote`, `SaveNoteInput`, `NoteReadFilter`, and
+`MemoryProvenance`) are exported from the `smithers-orchestrator/memory`
+subpath. `WorkingMemoryConfig<T>` is generic over a Zod schema and is documented inline
 below rather than imported. The `memory` prop on `Task` is **returned by the
 factory**, not imported; see [Memory](/concepts/memory) for the declarative
 `<Task memory={...}>` metadata.
@@ -144,6 +147,83 @@ A **thread** groups ordered **messages**.
   </Expandable>
 </ResponseField>
 
+A **note** is append-only knowledge. Facts are mutable KV (upsert semantics);
+notes are immutable rows: body, labels, and provenance never change after
+insert. `status` is the one deliberate exception: `setNoteStatus` lets a
+human or workflow gate write an answer about an existing note without churning
+its id. Notes carry no TTL: knowledge dies by supersession or rejection, not
+by clock.
+
+<ResponseField name="MemoryNote" type="object">
+  <Expandable title="MemoryNote">
+    <ResponseField name="id" type="string" required>
+      Note identifier. Pass your own on `saveNote` to make retries idempotent.
+    </ResponseField>
+    <ResponseField name="namespace" type="string" required>
+      Owning namespace, serialized via `namespaceToString`.
+    </ResponseField>
+    <ResponseField name="body" type="string" required>
+      The knowledge itself. Immutable after insert.
+    </ResponseField>
+    <ResponseField name="kind" type="string | null">
+      Optional, policy-free label (e.g. `"lesson"`, `"runbook-rule"`). The
+      engine never interprets it.
+    </ResponseField>
+    <ResponseField name="tagsJson" type="string | null">
+      JSON-encoded string array; null when the note has no tags.
+    </ResponseField>
+    <ResponseField name="author" type="string | null">
+      Optional, policy-free author label.
+    </ResponseField>
+    <ResponseField name="status" type="string" required>
+      Free-form; defaults to `"accepted"`. Conventionally
+      `pending | accepted | rejected`. The one mutable field.
+    </ResponseField>
+    <ResponseField name="statusChangedAtMs" type="number | null">
+      When `setNoteStatus` last flipped the status; null until then.
+    </ResponseField>
+    <ResponseField name="createdAtMs" type="number" required>
+      Creation time, epoch milliseconds.
+    </ResponseField>
+    <ResponseField name="runId / nodeId / iteration" type="string | string | number | null">
+      Provenance: the run coordinate that wrote the note (see
+      `MemoryProvenance`).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+`MemoryProvenance` is the run coordinate a memory write was made from. It is
+passed **explicitly** by the caller on `setFact` and `saveNote`, never
+inferred from ambient context, which does not survive agent/tool boundaries.
+
+```ts
+type MemoryProvenance = {
+  runId?: string | null;
+  nodeId?: string | null;
+  iteration?: number | null;
+};
+```
+
+`SaveNoteInput` is the `saveNote` argument: the namespace as the structured
+object, tags as an array, plus optional `kind`, `author`, `status`,
+`provenance`, `supersedes` (note ids this note replaces; junction rows are
+written atomically with the note), and `id` (pass one to make retries
+idempotent).
+
+`NoteReadFilter` shapes `listNotes`/`searchNotes` reads. The **default read
+contract** (no filter) is a stability contract: it returns notes that are
+(a) not superseded by an **accepted** note and (b) `status = "accepted"`.
+A pending or rejected superseder hides nothing. Filters widen or narrow:
+
+```ts
+type NoteReadFilter = {
+  status?: string | string[] | "any";
+  includeSuperseded?: boolean;
+  kind?: string;
+  namespace?: MemoryNamespace; // scope searchNotes to one namespace of the kind
+};
+```
+
 ## createMemoryStore
 
 Build a `MemoryStore` over a Drizzle SQLite handle. Synchronous. Create one at
@@ -193,6 +273,47 @@ and so on) with the same arguments, for use inside an Effect pipeline.
   </Expandable>
 </ResponseField>
 
+<ResponseField name="Notes" type="methods">
+  <Expandable title="note methods">
+    <ResponseField name="saveNote" type="(input: SaveNoteInput) => Promise<MemoryNote>">
+      Appends a note and its supersession edges atomically. Idempotent on
+      `id`: a re-save with the same id is a no-op (never an upsert, so history
+      cannot be destroyed), and the returned note is the row the database
+      holds, not the ignored input.
+    </ResponseField>
+    <ResponseField name="getNote" type="(id) => Promise<MemoryNote | undefined>" />
+    <ResponseField name="listNotes" type="(ns, filter?) => Promise<MemoryNote[]>">
+      Notes in one namespace, oldest first, under the default read contract
+      (accepted, not superseded by an accepted note) unless `filter` widens.
+    </ResponseField>
+    <ResponseField name="setNoteStatus" type="(id, status) => Promise<void>">
+      The one mutable write: flips `status` and stamps `statusChangedAtMs`.
+      Fails loud when the note does not exist.
+    </ResponseField>
+    <ResponseField name="enableNoteSearch" type="(kind) => Promise<void>">
+      Opts a namespace **kind** into FTS note search. Creates the FTS5
+      artifacts lazily on first call and backfills existing notes of that
+      kind; until then note writes pay nothing per write. Idempotent.
+    </ResponseField>
+    <ResponseField name="searchNotes" type="(kind, query, limit?, filter?) => Promise<MemoryNote[]>">
+      Full-text search over note bodies, rank order, honoring the same read
+      contract as `listNotes`. Fails loud, not silently empty, when the
+      kind was never enabled. The index spans **every namespace of the
+      kind**; pass `filter.namespace` to keep results namespace-local on a
+      shared database. The read contract is applied to the top `limit * 5`
+      FTS matches, so a heavily superseded corpus can return fewer than
+      `limit` even when more live matches exist further down the rank order.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<Note>
+Notes require the SQLite backend: note writes and search ride the synchronous
+sqlite driver (transactions for note+edge atomicity, FTS5 for search). On a
+Postgres/PGlite-backed workspace `saveNote`, `enableNoteSearch`, and
+`searchNotes` fail loud with an explicit error.
+</Note>
+
 <ResponseField name="Threads & messages" type="methods">
   <Expandable title="thread and message methods">
     <ResponseField name="createThread" type="(ns, title?) => Promise<MemoryThread>" />
@@ -229,6 +350,10 @@ is reachable via `.store`.
     </ResponseField>
     <ResponseField name="saveMessage / listMessages / countMessages" type="Effect">
       Message operations, Effect-returning.
+    </ResponseField>
+    <ResponseField name="saveNote / getNote / listNotes / setNoteStatus / enableNoteSearch / searchNotes" type="Effect">
+      Note operations, Effect-returning, with the same semantics as the store
+      methods above.
     </ResponseField>
     <ResponseField name="deleteExpiredFacts" type="() => Effect<number, SmithersError>" />
     <ResponseField name="store" type="MemoryStore">
@@ -411,4 +536,4 @@ Cross-run facts are also viewable from the CLI:
 bunx smithers-orchestrator memory
 ```
 
-**Source** [`store/MemoryStore.ts`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/store/MemoryStore.ts) · [`MemoryServiceApi.ts`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/MemoryServiceApi.ts) · [`createMemoryLayer.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/createMemoryLayer.js) · [`processors.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/processors.js) · **Tests** [`store.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/store.test.js) · [`service.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/service.test.js) · [`processors.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/processors.test.js) · **See also** [Memory](/concepts/memory), [Types reference](/reference/types)
+**Source** [`store/MemoryStore.ts`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/store/MemoryStore.ts) · [`MemoryServiceApi.ts`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/MemoryServiceApi.ts) · [`MemoryNote.ts`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/MemoryNote.ts) · [`createMemoryLayer.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/createMemoryLayer.js) · [`processors.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/processors.js) · **Tests** [`store.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/store.test.js) · [`notes.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/notes.test.js) · [`service.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/service.test.js) · [`processors.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/processors.test.js) · **See also** [Memory](/concepts/memory), [Types reference](/reference/types)

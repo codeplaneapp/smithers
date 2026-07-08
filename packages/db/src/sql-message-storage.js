@@ -378,6 +378,9 @@ const CREATE_TABLE_STATEMENTS = [
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL,
     ttl_ms INTEGER,
+    run_id TEXT,
+    node_id TEXT,
+    iteration INTEGER,
     PRIMARY KEY (namespace, key)
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_memory_threads (
@@ -395,7 +398,28 @@ const CREATE_TABLE_STATEMENTS = [
     content_json TEXT NOT NULL,
     run_id TEXT,
     node_id TEXT,
+    iteration INTEGER,
     created_at_ms INTEGER NOT NULL
+  )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_memory_notes (
+    id TEXT PRIMARY KEY,
+    namespace TEXT NOT NULL,
+    body TEXT NOT NULL,
+    kind TEXT,
+    tags_json TEXT,
+    author TEXT,
+    status TEXT NOT NULL DEFAULT 'accepted',
+    status_changed_at_ms INTEGER,
+    created_at_ms INTEGER NOT NULL,
+    run_id TEXT,
+    node_id TEXT,
+    iteration INTEGER
+  )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_memory_note_supersessions (
+    note_id TEXT NOT NULL,
+    supersedes_id TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (note_id, supersedes_id)
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_docs (
     path TEXT PRIMARY KEY,
@@ -428,6 +452,10 @@ const CREATE_INDEX_STATEMENTS = [
     ON _smithers_time_travel_audit (run_id, caller, timestamp_ms)`,
     `CREATE INDEX IF NOT EXISTS _smithers_docs_kind_live_idx
     ON _smithers_docs (kind, deleted_at_ms, updated_at_ms)`,
+    `CREATE INDEX IF NOT EXISTS _smithers_memory_notes_namespace_idx
+    ON _smithers_memory_notes (namespace, status, created_at_ms)`,
+    `CREATE INDEX IF NOT EXISTS _smithers_memory_note_supersessions_target_idx
+    ON _smithers_memory_note_supersessions (supersedes_id)`,
 ];
 /**
  * @param {string} identifier

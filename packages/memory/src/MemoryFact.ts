@@ -6,4 +6,8 @@ export type MemoryFact = {
   createdAtMs: number;
   updatedAtMs: number;
   ttlMs?: number | null;
+  /** Provenance: the run coordinate of the LAST write (facts are upserts). */
+  runId?: string | null;
+  nodeId?: string | null;
+  iteration?: number | null;
 };
