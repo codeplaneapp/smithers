@@ -5609,9 +5609,23 @@ async function runWorkflowBodyDriver(workflow, opts) {
    * @param {string} eventName
    */
     const reconcileEventWait = async (eventName) => {
-        const tasks = lastGraph?.tasks.filter((candidate) => candidate.meta?.__waitForEvent &&
-            (eventName.length === 0 ||
-                candidate.meta?.__eventName === eventName)) ?? [];
+        // Skip waiters the session already considers terminal: re-completing a
+        // finished waiter would short-circuit this loop on the same task every
+        // pass, so a second waiter whose signal is already persisted would never
+        // be reconciled and the resume would spin forever.
+        const sessionStates = await Effect.runPromise(workflowSession.getTaskStates());
+        const tasks = lastGraph?.tasks.filter((candidate) => {
+            if (!candidate.meta?.__waitForEvent)
+                return false;
+            if (eventName.length !== 0 &&
+                candidate.meta?.__eventName !== eventName)
+                return false;
+            const state = sessionStates.get(buildStateKey(candidate.nodeId, candidate.iteration));
+            return (state !== "finished" &&
+                state !== "skipped" &&
+                state !== "failed" &&
+                state !== "cancelled");
+        }) ?? [];
         for (const task of tasks) {
             const resolved = await resolveDeferredTaskStateBridge(adapter, db, runId, task, eventBus);
             if (!resolved.handled)
