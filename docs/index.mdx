@@ -1,297 +1,309 @@
 ---
 title: Smithers
-description: The durable runtime for agentic workflows. Any model, any harness, survives a crash.
+description: Durable orchestration for agentic workflows. Any model, any harness, survives a crash.
 mode: "custom"
 ---
 
-<div className="relative w-full overflow-hidden min-h-screen bg-slate-50 text-slate-800 dark:bg-[#030712] dark:text-slate-300 selection:bg-[#00D2A0]/30 selection:text-slate-900 dark:selection:text-white pb-32 font-sans font-medium">
+<div className="landing-root">
 
-  {/* Ambient Background Grid & Subtle Glows */}
-  <div className="absolute inset-0 pointer-events-none overflow-hidden">
-    <div className="hidden dark:block absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:32px_32px] [mask-image:radial-gradient(ellipse_80%_60%_at_50%_0%,#000_100%,transparent_100%)]"></div>
-    <div className="block dark:hidden absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.02)_1px,transparent_1px)] bg-[size:32px_32px] [mask-image:radial-gradient(ellipse_80%_60%_at_50%_0%,#000_100%,transparent_100%)]"></div>
-    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-[1200px] h-[600px] bg-[radial-gradient(ellipse_at_top,rgba(0,210,160,0.04)_0%,transparent_70%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(0,210,160,0.06)_0%,transparent_70%)]" />
+<div className="landing-grain" aria-hidden="true" />
+
+{/* ─────────────────────────── Hero ─────────────────────────── */}
+<section className="max-w-6xl mx-auto px-6 pt-16 pb-12 md:pt-24">
+  <div className="grid lg:grid-cols-2 gap-14 items-center">
+
+    <div>
+      <span className="landing-eyebrow">
+        <span className="landing-dot" aria-hidden="true" />
+        Open source · durable runtime for AI agents
+      </span>
+
+      <h1 className="landing-display mt-6" style={{ fontSize: "clamp(2.4rem, 5vw, 3.9rem)" }}>
+        Durable orchestration for <span className="landing-brass">agentic workflows.</span>
+      </h1>
+
+      <p className="mt-6 text-lg leading-relaxed" style={{ maxWidth: "34rem" }}>
+        Smithers runs any recipe in the background (loops, gates, retries) and
+        saves every finished step. Close your laptop. Kill the process. Pick up
+        where it left off. Any model, any harness.
+      </p>
+
+      <div className="flex flex-wrap gap-3 mt-9">
+        <a href="/guide/get-started" className="landing-btn">Read the docs</a>
+        <a href="/introduction" className="landing-btn-ghost">Docs for agents →</a>
+        <a href="https://ui-preview.smithers.sh" target="_blank" rel="noopener noreferrer" className="landing-btn-preview">
+          <span>Sign up for UI preview <span className="landing-brass">→</span></span>
+        </a>
+      </div>
+
+      {/* Install command - the primary CTA */}
+      <div className="mt-12">
+        <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>
+          <span style={{ width: "0.25rem", height: "0.25rem", borderRadius: "999px", background: "var(--l-brass)" }} aria-hidden="true" />
+          Run this in your project
+        </div>
+        <div
+          className="landing-cmd flex items-center justify-between gap-4"
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            navigator.clipboard.writeText("bunx smithers-orchestrator init");
+            const c = document.getElementById("cmd-check");
+            if (c) { c.style.opacity = "1"; setTimeout(() => { c.style.opacity = "0"; }, 1800); }
+          }}
+          style={{ cursor: "pointer" }}
+        >
+          <span>
+            <span className="landing-brass" style={{ fontWeight: 700 }}>$ </span>
+            bunx smithers-orchestrator init
+          </span>
+          <span id="cmd-check" className="landing-brass" style={{ opacity: 0, transition: "opacity 0.2s", fontSize: "0.8rem" }}>copied ✓</span>
+        </div>
+        <p className="mt-3" style={{ fontSize: "0.85rem" }}>
+          Creates an editable <code>hello.mdx</code> workflow you can run
+          immediately, then installs the <code>smithers</code> skill into your agents.
+        </p>
+      </div>
+    </div>
+
+    {/* Demo terminal - a live durable run across multiple harnesses */}
+    <div className="landing-card overflow-hidden" style={{ borderRadius: "6px" }}>
+      <div
+        className="flex items-center justify-between px-4 py-3"
+        style={{ borderBottom: "1px solid var(--l-line)", background: "color-mix(in oklch, var(--l-surface) 60%, transparent)" }}
+      >
+        <div className="flex items-center gap-2">
+          <span className="landing-chrome-dot" aria-hidden="true" />
+          <span className="landing-chrome-dot" aria-hidden="true" />
+          <span className="landing-chrome-dot" aria-hidden="true" />
+        </div>
+        <span style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.75rem", color: "var(--l-ink-muted)" }}>
+          ship-it · a7b93f2
+        </span>
+        <span className="flex items-center gap-1.5" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.65rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--l-brass)" }}>
+          <span className="landing-running" aria-hidden="true" /> running
+        </span>
+      </div>
+
+      <div className="p-5" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.8rem", lineHeight: 1.7 }}>
+        <div style={{ color: "var(--l-ink-muted)", marginBottom: "1rem" }}>
+          <span className="landing-brass">you</span> &gt; Research, plan, then implement. Pause for my approval before you ship.
+        </div>
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-center gap-3">
+            <span className="landing-brass">✓</span>
+            <span style={{ flex: 1, color: "var(--l-ink)" }}>research</span>
+            <span className="landing-agent-tag">claude</span>
+            <span style={{ fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--l-ink-muted)" }}>persisted</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="landing-brass">✓</span>
+            <span style={{ flex: 1, color: "var(--l-ink)" }}>plan</span>
+            <span className="landing-agent-tag">codex</span>
+            <span style={{ fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--l-ink-muted)" }}>persisted</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="landing-brass">↻</span>
+            <span style={{ flex: 1, color: "var(--l-ink)" }}>implement <span style={{ color: "var(--l-ink-muted)" }}>(resumed)</span></span>
+            <span className="landing-agent-tag">codex</span>
+            <span className="landing-brass" style={{ fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>running</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="landing-brass">✓</span>
+            <span style={{ flex: 1, color: "var(--l-ink)" }}>review</span>
+            <span className="landing-agent-tag">pi</span>
+            <span style={{ fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--l-ink-muted)" }}>persisted</span>
+          </div>
+          <div className="flex items-center gap-3" style={{ opacity: 0.7 }}>
+            <span style={{ color: "var(--l-ink-muted)" }}>⏸</span>
+            <span style={{ flex: 1, color: "var(--l-ink)" }}>approval to ship</span>
+            <span className="landing-agent-tag">you</span>
+            <span style={{ fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--l-ink-muted)" }}>waiting</span>
+          </div>
+        </div>
+        <div className="mt-5 pt-4" style={{ borderTop: "1px solid var(--l-line)", fontSize: "0.7rem", color: "var(--l-ink-muted)" }}>
+          crash-safe · resumes from the last persisted step · rewind to any step
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{/* ──────────────────── Every harness (incl. subscriptions) ──────────────────── */}
+<section className="max-w-4xl mx-auto px-6 py-10 text-center">
+  <span className="landing-eyebrow">Model and harness agnostic</span>
+  <div className="flex flex-wrap items-center justify-center gap-2.5 mt-5">
+    <span className="landing-pill">Claude Code</span>
+    <span className="landing-pill">Codex</span>
+    <span className="landing-pill">Cursor</span>
+    <span className="landing-pill">Gemini</span>
+    <span className="landing-pill">Pi</span>
+    <span className="landing-pill">+ any AI SDK model</span>
+  </div>
+  <p className="mt-5" style={{ maxWidth: "36rem", marginInline: "auto" }}>
+    Works with the harnesses you already pay for: <strong style={{ color: "var(--l-ink)" }}>your
+    Codex and Claude subscriptions, not just API keys</strong>. Point each task at
+    whichever agent and model is best for the job, and swap the harness without
+    rewriting the workflow.
+  </p>
+</section>
+
+{/* ─────────────────────────── Why ─────────────────────────── */}
+<section className="max-w-4xl mx-auto px-6 py-16">
+  <div className="text-center mb-12">
+    <span className="landing-eyebrow">Why Smithers</span>
+    <h2 className="landing-display mt-5" style={{ fontSize: "clamp(1.9rem, 4vw, 2.8rem)" }}>
+      The right way to build an agent<br className="hidden sm:block" /> changes every six months.
+    </h2>
+    <p className="mt-6" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+      Chains. ReAct. Crews. Swarms. Background agents. Subagent fan-out. Couple
+      your infrastructure to any one of them and you've already rebuilt twice.
+      One layer underneath never changes: durable orchestration. Smithers is that layer.
+    </p>
   </div>
 
-  {/* ── Hero ── */}
-  <section className="relative pt-24 pb-16 px-6 max-w-7xl mx-auto">
-    <div className="flex flex-col lg:flex-row gap-16 items-center">
-
-      <div className="relative z-10 flex-1 flex flex-col items-start">
-
-        {/* Badge */}
-        <div className="inline-flex items-center gap-2.5 px-3 py-1.5 rounded-full border border-slate-200/50 dark:border-white/5 bg-slate-100 dark:bg-white/5 shadow-sm text-slate-700 dark:text-slate-300 text-xs font-bold uppercase tracking-[0.1em] mb-8">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00D2A0] opacity-50"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00D2A0]"></span>
-          </span>
-          <span className="opacity-90">Durable runtime for AI agents</span>
-        </div>
-
-        {/* Headline */}
-        <h1 className="m-0 text-5xl sm:text-6xl md:text-7xl font-extrabold tracking-[-0.02em] leading-[1.05] text-slate-900 dark:text-white drop-shadow-sm">
-          Durable orchestration for{" "}
-          <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#00D2A0] to-[#047857]">agentic workflows.</span>
-        </h1>
-
-        {/* Subtitle */}
-        <p className="mt-8 text-lg sm:text-xl leading-relaxed text-slate-600 dark:text-slate-400 max-w-xl font-medium">
-          The topology you build changes every quarter. The runtime underneath doesn't. Smithers persists every step, so a crash is a resume point, not lost work, and a long job is something you walk away from. Any model, any harness, open source.
-        </p>
-
-        {/* CTA Buttons */}
-        <div className="flex flex-wrap gap-4 mt-10">
-          <a href="/guide/get-started" className="inline-flex items-center justify-center px-8 py-3.5 text-base font-bold text-white dark:text-[#030712] bg-[#000] dark:bg-[#00D2A0] rounded-xl transition-all hover:scale-[1.02] shadow-[0_10px_30px_-10px_rgba(0,0,0,0.5)] dark:shadow-[0_10px_30px_-10px_rgba(0,210,160,0.3)]">
-            Read the docs
-          </a>
-          <a href="/introduction" className="inline-flex items-center justify-center px-8 py-3.5 text-base font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-white/5 border border-transparent dark:border-white/5 rounded-xl transition-all hover:bg-slate-200 dark:hover:bg-white/10">
-            Docs for agents →
-          </a>
-
-          {/* Rainbow CTA: UI preview early access. Everything is inline style because
-              this MDX renderer strips raw <style> blocks and Mintlify's Tailwind does
-              not JIT arbitrary bg-[conic-gradient]/animate-[…] values from className. */}
-          <a
-            href="https://ui-preview.smithers.sh"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="transition-transform hover:scale-[1.02]"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "2.5px",
-              borderRadius: "14px",
-              textDecoration: "none",
-              boxShadow: "0 10px 30px -10px rgba(0,0,0,0.35)",
-              backgroundImage:
-                "linear-gradient(90deg,#ff5f6d,#ffc371,#47e891,#1f9bff,#a35bff,#ff5f6d)",
-            }}
-          >
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "11px 26px",
-                borderRadius: "11.5px",
-                fontWeight: 700,
-                fontSize: "1rem",
-                color: "#ffffff",
-                background: "#0A0D15",
-              }}
-            >
-              Sign up for UI preview
-              <span style={{ color: "#94a3b8" }}>→</span>
-            </span>
-          </a>
-        </div>
-
-        {/* Quick Install Command */}
-        <div className="mt-14 relative group">
-          <div className="mb-3 flex items-center gap-2 ml-1">
-            <div className="w-1 h-1 rounded-full bg-[#00D2A0]"></div>
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-              Run this in your project
-            </span>
-          </div>
-          <div className="absolute -inset-0.5 bg-gradient-to-r from-[#00D2A0] to-[#047857] rounded-xl blur opacity-0 group-hover:opacity-20 transition duration-500"></div>
-          <div
-            className="relative flex items-center justify-between gap-4 px-5 py-3 bg-white dark:bg-[#0A0D15] border border-slate-200 dark:border-white/10 rounded-xl cursor-pointer transition-all duration-300 active:scale-[0.98]"
-            onClick={() => {
-              navigator.clipboard.writeText('bunx smithers-orchestrator init');
-              const t = document.getElementById('copy-text');
-              const check = document.getElementById('copy-check');
-              if (t && check) {
-                t.classList.add('text-[#00D2A0]');
-                check.classList.remove('hidden');
-                setTimeout(() => {
-                  t.classList.remove('text-[#00D2A0]');
-                  check.classList.add('hidden');
-                }, 2000);
-              }
-            }}
-          >
-            <div className="flex items-center gap-3">
-              <span className="text-[#00D2A0] font-mono text-sm font-bold">$</span>
-              <code id="copy-text" className="text-sm sm:text-base font-mono font-medium text-slate-700 dark:text-slate-300 transition-colors">
-                bunx smithers-orchestrator init
-              </code>
-            </div>
-            <div id="copy-check" className="hidden text-[#00D2A0]">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-          </div>
-          <div className="mt-3 ml-1 text-xs text-slate-400 dark:text-slate-500">
-            Creates an editable <code className="text-[11px] bg-slate-100 dark:bg-white/10 rounded px-1">hello.mdx</code> workflow you can run immediately, then installs the <code className="text-[11px] bg-slate-100 dark:bg-white/10 rounded px-1">smithers</code> skill into your agents.
-          </div>
-        </div>
+  {/* Layer stack */}
+  <div className="flex flex-col gap-2.5" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+    <div className="landing-card flex items-center justify-between gap-4 px-5 py-4">
+      <div>
+        <strong style={{ display: "block", color: "var(--l-ink)" }}>Model</strong>
+        <span style={{ fontSize: "0.85rem", color: "var(--l-ink-muted)" }}>Claude, GPT, Gemini, Kimi</span>
       </div>
-
-      {/* Hero Visual: a live durable run */}
-      <div className="relative group flex-1 w-full min-w-0 lg:max-w-[50%] perspective-1000 mt-12 lg:mt-0">
-        <div className="absolute -inset-1 bg-[#00D2A0]/10 rounded-[2rem] blur-xl opacity-0 group-hover:opacity-40 transition duration-1000"></div>
-
-        <div className="relative rounded-2xl border border-slate-200/50 dark:border-white/10 bg-[#F8FAFC] dark:bg-[#0A0D15] shadow-2xl dark:shadow-[0_40px_80px_-20px_rgba(0,0,0,0.6)] overflow-hidden transition-all duration-500 transform-gpu lg:rotate-y-[-2deg] lg:rotate-x-[1deg] group-hover:rotate-0">
-
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/50 dark:border-white/5 bg-slate-100/50 dark:bg-white/5">
-            <div className="flex items-center gap-2 px-1">
-              <div className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></div>
-              <div className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></div>
-              <div className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></div>
-            </div>
-            <div className="absolute left-1/2 -translate-x-1/2 text-slate-500 dark:text-slate-500 text-xs font-mono font-medium">
-              ship-it · a7b93f2
-            </div>
-            <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-[#00D2A0]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#00D2A0] animate-pulse"></span> running
-            </span>
-          </div>
-
-          <div className="p-6 font-mono text-[13px] leading-[1.7]">
-            <div className="text-slate-500 dark:text-slate-500 mb-4">
-              <span className="text-[#00D2A0]">you</span> &gt; Research, plan, then implement. Pause for my approval before you ship.
-            </div>
-            <div className="flex flex-col gap-2.5">
-              <div className="flex items-center gap-3">
-                <span className="text-[#00D2A0]">✓</span>
-                <span className="text-slate-700 dark:text-slate-300 flex-1">research</span>
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-600">persisted</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[#00D2A0]">✓</span>
-                <span className="text-slate-700 dark:text-slate-300 flex-1">plan</span>
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-600">persisted</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[#1F6FEB] animate-pulse">↻</span>
-                <span className="text-slate-900 dark:text-white flex-1">implement <span className="text-slate-400 dark:text-slate-500">(resumed)</span></span>
-                <span className="text-[10px] uppercase tracking-wider text-[#1F6FEB]">running</span>
-              </div>
-              <div className="flex items-center gap-3 opacity-70">
-                <span className="text-[#FFBD2E]">⏸</span>
-                <span className="text-slate-700 dark:text-slate-300 flex-1">approval to ship</span>
-                <span className="text-[10px] uppercase tracking-wider text-[#FFBD2E]">waiting</span>
-              </div>
-            </div>
-            <div className="mt-6 pt-4 border-t border-slate-100 dark:border-white/10 text-[11px] text-slate-400 dark:text-slate-600">
-              crash-safe · resumes from the last persisted step
-            </div>
-          </div>
-        </div>
+      <span style={{ fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#c98b6b" }}>Volatile · weekly</span>
+    </div>
+    <div className="landing-card flex items-center justify-between gap-4 px-5 py-4">
+      <div>
+        <strong style={{ display: "block", color: "var(--l-ink)" }}>Topology</strong>
+        <span style={{ fontSize: "0.85rem", color: "var(--l-ink-muted)" }}>ReAct, crew, swarm, background agents</span>
       </div>
+      <span style={{ fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#c9a86b" }}>Fluid · monthly</span>
     </div>
-  </section>
+    <div className="landing-card flex items-center justify-between gap-4 px-5 py-4">
+      <div>
+        <strong style={{ display: "block", color: "var(--l-ink)" }}>How you build</strong>
+        <span style={{ fontSize: "0.85rem", color: "var(--l-ink-muted)" }}>Prompting → loops → skills → recipes</span>
+      </div>
+      <span style={{ fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#c9a86b" }}>Shifts · every 6 months</span>
+    </div>
+    <div className="landing-card landing-card-accent flex items-center justify-between gap-4 px-5 py-5">
+      <div>
+        <strong style={{ display: "block", color: "var(--l-ink)" }}>Orchestration <span className="landing-brass">· this is Smithers</span></strong>
+        <span style={{ fontSize: "0.85rem", color: "var(--l-ink-muted)" }}>Durable steps, retries, state, approvals, observability</span>
+      </div>
+      <span className="landing-brass" style={{ fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase" }}>Stable · doesn't change</span>
+    </div>
+  </div>
 
-  {/* ── Any agent, any model ── */}
-  <section className="relative py-8 px-6 max-w-5xl mx-auto z-10 w-full text-center">
-    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-      Model and harness agnostic
-    </span>
-    <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
-      {["Claude Code", "Codex", "Cursor", "Gemini", "Pi", "Antigravity", "Kimi", "+ any AI SDK model"].map((name) => (
-        <span key={name} className="px-3.5 py-1.5 rounded-full border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-sm font-semibold text-slate-700 dark:text-slate-300">
-          {name}
-        </span>
-      ))}
-    </div>
-    <p className="mt-5 text-slate-500 dark:text-slate-400 max-w-xl mx-auto font-medium">
-      Point each task at whichever agent and model is best for the job. Swap the harness without rewriting the workflow.
+  {/* Killer feature: time travel + observability */}
+  <div className="landing-killer p-6 mt-8" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+    <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>Time travel · the killer feature</div>
+    <p style={{ color: "var(--l-ink)", margin: 0 }}>
+      Every transition, attempt, and approval is a SQLite row, so you can watch a
+      run live, rewind to any step, fork an alternate branch, and replay from a
+      checkpoint. Full observability with Prometheus metrics and traces, no setup.
     </p>
-  </section>
+  </div>
 
-  {/* ── Why: the layer that doesn't change ── */}
-  <section className="relative py-24 px-6 max-w-4xl mx-auto">
-    <div className="text-center mb-12">
-      <div className="inline-flex items-center px-4 py-1.5 rounded-full border border-slate-200 dark:border-white/5 bg-slate-100/50 dark:bg-white/5 text-slate-700 dark:text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-6">Why Smithers</div>
-      <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-6 leading-[1.1]">
-        The right way to build an agent <br className="hidden sm:block" /> changes every six months.
-      </h2>
-      <p className="text-lg text-slate-600 dark:text-slate-400 font-medium leading-relaxed max-w-2xl mx-auto">
-        Chains. ReAct. Crews. Swarms. Background agents. Subagent fan-out. Couple your infrastructure to any one of them and you've already rebuilt twice. One layer underneath never changes: durable orchestration. Smithers is that layer.
+  {/* Three guarantees */}
+  <div className="grid sm:grid-cols-3 gap-4 mt-8">
+    <div className="landing-card p-5">
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Durable</strong>
+      <span style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>Every step is checkpointed the moment it finishes. A crash, a closed laptop, a flaky tool: all resume points.</span>
+    </div>
+    <div className="landing-card p-5">
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Composable</strong>
+      <span style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>Review loops, panels, debates, sagas. Named patterns are small TSX components on the substrate. Read them, fork them.</span>
+    </div>
+    <div className="landing-card p-5">
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Self-improving</strong>
+      <span style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>Score every run, then let Smithers optimize its own prompts (GEPA) against your eval suite. The system gets better, not just the answer.</span>
+    </div>
+  </div>
+</section>
+
+{/* ─────────────────────── Just say this ─────────────────────── */}
+<section className="max-w-4xl mx-auto px-6 py-16">
+  <div className="text-center mb-10">
+    <span className="landing-eyebrow">Just say this</span>
+    <h2 className="landing-display mt-5" style={{ fontSize: "clamp(1.8rem, 4vw, 2.6rem)" }}>
+      Built-in recipes for everyday agent work.
+    </h2>
+    <p className="mt-6" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+      Smithers ships dozens of recipes. Say what you want in chat; your coding
+      agent picks and runs the right one. You never name the recipe.
+    </p>
+  </div>
+
+  {/* Clickable recipe chips - the nerdsnipe. Each opens the real workflow on GitHub. */}
+  <div className="flex flex-wrap justify-center gap-2 mb-8" style={{ maxWidth: "42rem", marginInline: "auto" }}>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/hello.tsx" target="_blank" rel="noopener noreferrer">hello</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/implement.tsx" target="_blank" rel="noopener noreferrer">implement</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/mission.tsx" target="_blank" rel="noopener noreferrer">mission</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/debug.tsx" target="_blank" rel="noopener noreferrer">debug</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/audit.tsx" target="_blank" rel="noopener noreferrer">audit</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/review.tsx" target="_blank" rel="noopener noreferrer">review</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/research-plan-implement.tsx" target="_blank" rel="noopener noreferrer">research-plan-implement</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/kanban.tsx" target="_blank" rel="noopener noreferrer">kanban</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/ralph.tsx" target="_blank" rel="noopener noreferrer">ralph</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/improve-test-coverage.tsx" target="_blank" rel="noopener noreferrer">improve-test-coverage</a>
+  </div>
+
+  <div className="flex flex-col gap-3" style={{ maxWidth: "40rem", marginInline: "auto" }}>
+    <div className="landing-card p-5">
+      <p style={{ color: "var(--l-ink)", margin: 0 }}>
+        “Migrate the dashboard to the new gateway APIs. Show me the plan before you start.”
       </p>
+      <span style={{ fontSize: "0.72rem", fontFamily: "ui-monospace, monospace", color: "var(--l-ink-muted)" }}>
+        → runs <span className="landing-brass">mission</span>: milestone plan · your approval · focused workers
+      </span>
     </div>
-
-    {/* Three layers */}
-    <div className="flex flex-col gap-3 max-w-2xl mx-auto">
-      <div className="flex items-center justify-between gap-4 px-6 py-4 rounded-2xl border border-slate-200/60 dark:border-white/5 bg-slate-100/40 dark:bg-[#0B1221]/40">
-        <div>
-          <strong className="block text-slate-900 dark:text-white font-bold">Model</strong>
-          <span className="text-sm text-slate-500 dark:text-slate-400">Claude, GPT, Gemini, Kimi</span>
-        </div>
-        <span className="text-[10px] font-bold uppercase tracking-widest text-[#F87171]">Volatile · weekly</span>
-      </div>
-      <div className="flex items-center justify-between gap-4 px-6 py-4 rounded-2xl border border-slate-200/60 dark:border-white/5 bg-slate-100/40 dark:bg-[#0B1221]/40">
-        <div>
-          <strong className="block text-slate-900 dark:text-white font-bold">Topology</strong>
-          <span className="text-sm text-slate-500 dark:text-slate-400">ReAct, crew, swarm, background agents</span>
-        </div>
-        <span className="text-[10px] font-bold uppercase tracking-widest text-[#FFBD2E]">Fluid · quarterly</span>
-      </div>
-      <div className="flex items-center justify-between gap-4 px-6 py-5 rounded-2xl border border-[#00D2A0]/30 bg-[#00D2A0]/[0.06] dark:bg-[#00D2A0]/[0.04]">
-        <div>
-          <strong className="block text-slate-900 dark:text-white font-bold">Orchestration <span className="text-[#00D2A0]">· this is Smithers</span></strong>
-          <span className="text-sm text-slate-600 dark:text-slate-300">Durable steps, retries, state, approvals, observability</span>
-        </div>
-        <span className="text-[10px] font-bold uppercase tracking-widest text-[#00D2A0]">Stable · doesn't change</span>
-      </div>
+    <div className="landing-card p-5">
+      <p style={{ color: "var(--l-ink)", margin: 0 }}>
+        “Add rate limiting. Don't stop until tests pass and a reviewer signs off.”
+      </p>
+      <span style={{ fontSize: "0.72rem", fontFamily: "ui-monospace, monospace", color: "var(--l-ink-muted)" }}>
+        → runs <span className="landing-brass">implement</span>: write · validate · review loop until approved
+      </span>
     </div>
+  </div>
 
-    {/* Three guarantees */}
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-12">
-      <div className="p-6 rounded-2xl bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/5">
-        <strong className="block text-slate-900 dark:text-white font-bold mb-1.5">Durable</strong>
-        <span className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Every step is checkpointed the moment it finishes. A crash, a closed laptop, a flaky tool: all resume points.</span>
-      </div>
-      <div className="p-6 rounded-2xl bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/5">
-        <strong className="block text-slate-900 dark:text-white font-bold mb-1.5">Composable</strong>
-        <span className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Review loops, panels, debates, sagas. Named patterns are small TSX components on the substrate. Read them, fork them.</span>
-      </div>
-      <div className="p-6 rounded-2xl bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/5">
-        <strong className="block text-slate-900 dark:text-white font-bold mb-1.5">Observable</strong>
-        <span className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Every transition, attempt, and approval is a SQLite row. Prometheus metrics and traces with no setup.</span>
-      </div>
-    </div>
-  </section>
+  <p className="text-center mt-8">
+    <a href="/guide/what-you-can-do" className="landing-brass" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
+      See what you can do →
+    </a>
+  </p>
+</section>
 
-  {/* ── Two doors: human docs + agent docs ── */}
-  <section className="relative py-16 px-6 max-w-5xl mx-auto border-t border-slate-200 dark:border-white/5">
-    <div className="text-center mb-12">
-      <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.1]">
-        Two ways in.
-      </h2>
-    </div>
+{/* ─────────────────────── Two doors ─────────────────────── */}
+<section className="max-w-5xl mx-auto px-6 py-16" style={{ borderTop: "1px solid var(--l-line)" }}>
+  <div className="text-center mb-10">
+    <h2 className="landing-display" style={{ fontSize: "clamp(1.7rem, 3.5vw, 2.4rem)" }}>Two ways in.</h2>
+  </div>
+  <div className="grid md:grid-cols-2 gap-5">
+    <a href="/guide/get-started" className="landing-card p-7 block" style={{ transition: "border-color 0.15s" }}>
+      <div className="landing-eyebrow" style={{ marginBottom: "0.75rem" }}>For humans</div>
+      <strong className="landing-display" style={{ fontSize: "1.5rem", display: "block", marginBottom: "0.6rem" }}>Get started</strong>
+      <p style={{ marginBottom: "1rem" }}>
+        Run one command and ask the agent you already use for an outcome. Learn
+        what Smithers is, then drive it without writing a workflow by hand.
+      </p>
+      <span className="landing-brass" style={{ fontWeight: 600 }}>Read the guide →</span>
+    </a>
+    <a href="/introduction" className="landing-card p-7 block" style={{ transition: "border-color 0.15s" }}>
+      <div className="landing-eyebrow" style={{ marginBottom: "0.75rem" }}>For agents</div>
+      <strong className="landing-display" style={{ fontSize: "1.5rem", display: "block", marginBottom: "0.6rem" }}>Docs for agents</strong>
+      <p style={{ marginBottom: "1rem" }}>
+        The full API, components, and patterns, written for the coding agent that
+        authors and runs your workflows. Or feed it <code>/llms-full.txt</code> directly.
+      </p>
+      <span className="landing-brass" style={{ fontWeight: 600 }}>Read the agent docs →</span>
+    </a>
+  </div>
 
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-      {/* For humans */}
-      <a href="/guide/get-started" className="group block p-8 rounded-[2rem] bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-[#0B1221]/80 transition-colors">
-        <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-3">For humans</div>
-        <strong className="block text-2xl font-bold tracking-tight text-slate-900 dark:text-white mb-3">Get started</strong>
-        <p className="text-slate-600 dark:text-slate-400 leading-relaxed mb-5">
-          Run one command and ask the agent you already use for an outcome. Learn what Smithers is, then drive it without writing a workflow by hand.
-        </p>
-        <span className="text-[#00D2A0] font-semibold group-hover:underline">Read the guide →</span>
-      </a>
-
-      {/* For agents */}
-      <a href="/introduction" className="group block p-8 rounded-[2rem] bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-[#0B1221]/80 transition-colors">
-        <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-3">For agents</div>
-        <strong className="block text-2xl font-bold tracking-tight text-slate-900 dark:text-white mb-3">Docs for agents</strong>
-        <p className="text-slate-600 dark:text-slate-400 leading-relaxed mb-5">
-          The full API, components, and patterns, written for the coding agent that authors and runs your workflows. Or feed it{" "}
-          <code className="text-[13px] bg-white dark:bg-white/10 rounded px-1">/llms-full.txt</code> directly.
-        </p>
-        <span className="text-[#00D2A0] font-semibold group-hover:underline">Read the agent docs →</span>
-      </a>
-    </div>
-
-    <p className="text-center mt-10 text-slate-500 dark:text-slate-400 font-medium">
-      MIT-licensed and open source on{" "}
-      <a href="https://github.com/smithersai/smithers" className="text-[#00D2A0] font-semibold hover:underline">GitHub</a>.
-    </p>
-  </section>
+  <p className="text-center mt-10">
+    MIT-licensed and open source on{" "}
+    <a href="https://github.com/smithersai/smithers" className="landing-brass" style={{ fontWeight: 600 }}>GitHub</a>.
+  </p>
+</section>
 
 </div>

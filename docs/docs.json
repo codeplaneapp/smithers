@@ -2,13 +2,40 @@
   "$schema": "https://mintlify.com/docs.json",
   "name": "Smithers",
   "description": "Durable control plane for long-running coding agents",
-  "theme": "mint",
+  "theme": "sequoia",
   "colors": {
-    "primary": "#00D2A0",
-    "light": "#5BE9C9",
-    "dark": "#00A07A"
+    "primary": "#7c6a3c",
+    "light": "#cab16a",
+    "dark": "#b89f5f"
   },
   "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/smithers-light.svg",
+    "dark": "/logo/smithers-dark.svg",
+    "href": "/"
+  },
+  "appearance": {
+    "default": "dark"
+  },
+  "background": {
+    "color": {
+      "light": "#faf8f4",
+      "dark": "#0c0a09"
+    }
+  },
+  "fonts": {
+    "heading": { "family": "Newsreader" },
+    "body": { "family": "DM Sans" }
+  },
+  "styling": {
+    "eyebrows": "section",
+    "codeblocks": {
+      "theme": {
+        "light": "github-light",
+        "dark": "github-dark"
+      }
+    }
+  },
   "banner": {
     "content": "🌈 The Smithers UI preview is live — [sign up for early access →](https://ui-preview.smithers.sh)",
     "dismissible": true
