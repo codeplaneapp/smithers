@@ -493,6 +493,45 @@ describe("ApprovalPanel", () => {
     await harness.flush(40);
     expect(harness.container.textContent).toContain("No approvals waiting.");
   });
+
+  test("surfaces the submitApproval failure and re-enables the buttons", async () => {
+    const gw = boot({
+      approvals: [{ runId: "run-c", nodeId: "gate", iteration: 0 }],
+      failApprovalSubmit: true,
+    });
+    const harness = await mount(gw, createElement(ApprovalPanel, { pollMs: 0 }));
+    await harness.flush(50);
+    const approveButtons = [...harness.container.querySelectorAll("button")].filter(
+      (b) => b.textContent === "Approve",
+    );
+    click(approveButtons[0]);
+    await harness.flush(60);
+    expect(harness.container.textContent).toMatch(/Forced failure|failed|error/i);
+    const stillApprove = [...harness.container.querySelectorAll("button")].filter(
+      (b) => b.textContent === "Approve",
+    );
+    expect((stillApprove[0] as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  test("calls onError when submitApproval rejects", async () => {
+    const gw = boot({
+      approvals: [{ runId: "run-c", nodeId: "gate", iteration: 0 }],
+      failApprovalSubmit: true,
+    });
+    const errors: Error[] = [];
+    const harness = await mount(
+      gw,
+      createElement(ApprovalPanel, { pollMs: 0, onError: (e: Error) => errors.push(e) }),
+    );
+    await harness.flush(50);
+    const approveButtons = [...harness.container.querySelectorAll("button")].filter(
+      (b) => b.textContent === "Approve",
+    );
+    click(approveButtons[0]);
+    await harness.flush(60);
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+  });
 });
 
 describe("RunEventLog", () => {
