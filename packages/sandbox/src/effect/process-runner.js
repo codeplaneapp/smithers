@@ -3,7 +3,7 @@ import { isAbsolute, join } from "node:path";
 import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { Effect } from "effect";
-import { normalizeSandboxEgressConfig, sandboxEgressEnv } from "../egress.js";
+import { normalizeSandboxEgressConfig, sandboxEgressEnv, SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH } from "../egress.js";
 
 const DEFAULT_SANDBOX_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_SANDBOX_OUTPUT_BYTES = 5 * 1024 * 1024;
@@ -403,6 +403,10 @@ export function sandboxExecArgs(command, handle) {
     const tempPath = join(handle.sandboxRoot, "tmp");
     const sandboxEnv = {
         ...normalizeSandboxEnv(handle.env, { includeDefaultPath: true }),
+        // sandbox-exec has no /workspace remap (unlike docker/bwrap), so the
+        // caCertPem default of /workspace/.smithers/egress/ca.crt dangles;
+        // re-point it at the real on-disk CA under handle.requestPath.
+        ...sandboxEgressEnv(handle.egress, { caCertPath: join(handle.requestPath, SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH) }),
         HOME: tempPath,
         TMPDIR: tempPath,
     };
