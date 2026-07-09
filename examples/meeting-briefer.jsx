@@ -128,8 +128,6 @@ export default smithers((ctx) => {
     const event = ctx.outputMaybe("meetingEvent", { nodeId: "trigger" });
     const classification = ctx.outputMaybe("classification", { nodeId: "classify" });
     const crm = ctx.outputMaybe("crmContext", { nodeId: "crm-context" });
-    const attendees = ctx.outputMaybe("attendeeContext", { nodeId: "attendee-context" });
-    const history = ctx.outputMaybe("historyContext", { nodeId: "history-context" });
     return (<Workflow name="meeting-briefer">
       <Sequence>
         {/* Stage 1: Ingest the calendar/booking trigger */}
@@ -158,8 +156,8 @@ export default smithers((ctx) => {
         </Parallel>
 
         {/* Stage 4: Synthesize the prep brief */}
-        <Task id="brief" output={outputs.brief} agent={briefingAgent}>
-          <BriefPrompt meetingId={event?.meetingId ?? ""} title={event?.title ?? ""} scheduledAt={event?.scheduledAt ?? ""} intent={classification?.intent ?? "other"} priority={classification?.priority ?? "medium"} flags={classification?.flags ?? []} crmContext={crm ?? {}} attendeeProfiles={attendees?.profiles ?? []} previousMeetings={history?.previousMeetings ?? []} openActionItems={history?.openActionItems ?? []}/>
+        <Task id="brief" output={outputs.brief} agent={briefingAgent} needs={{ attendees: "attendee-context", history: "history-context" }} deps={{ attendees: outputs.attendeeContext, history: outputs.historyContext }}>
+          {(deps) => (<BriefPrompt meetingId={event?.meetingId ?? ""} title={event?.title ?? ""} scheduledAt={event?.scheduledAt ?? ""} intent={classification?.intent ?? "other"} priority={classification?.priority ?? "medium"} flags={classification?.flags ?? []} crmContext={crm ?? {}} attendeeProfiles={deps.attendees.profiles} previousMeetings={deps.history.previousMeetings} openActionItems={deps.history.openActionItems}/>)}
         </Task>
       </Sequence>
     </Workflow>);

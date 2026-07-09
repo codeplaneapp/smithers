@@ -74,7 +74,6 @@ leave a blocking comment, or request updates from the author.`,
 export default smithers((ctx) => {
     const patch = ctx.outputMaybe("patch", { nodeId: "patch" });
     const verifyResults = ctx.outputs.verify ?? [];
-    const gateResult = ctx.outputMaybe("gate", { nodeId: "gate" });
     return (<Workflow name="patch-plausibility-gate">
       <Sequence>
         {/* Step 1: Analyze the proposed patch */}
@@ -103,8 +102,8 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Step 4: Finalize — comment, merge, or request update */}
-        <Task id="finalize" output={outputs.finalize} agent={finalizer}>
-          <FinalizePrompt promoted={gateResult?.promoted ?? false} reasoning={gateResult?.reasoning ?? ""} failedChecks={gateResult?.failedChecks ?? []} pr={ctx.input.pr} repo={ctx.input.repo}/>
+        <Task id="finalize" output={outputs.finalize} agent={finalizer} deps={{ gate: outputs.gate }}>
+          {(deps) => <FinalizePrompt promoted={deps.gate.promoted} reasoning={deps.gate.reasoning} failedChecks={deps.gate.failedChecks} pr={ctx.input.pr} repo={ctx.input.repo}/>}
         </Task>
       </Sequence>
     </Workflow>);

@@ -209,7 +209,6 @@ export default smithers((ctx) => {
   const prepare = ctx.outputMaybe(outputs.prepare, { nodeId: "prepare" });
   const canary = ctx.outputMaybe(outputs.canary, { nodeId: "run-canary" });
   const memory = ctx.outputMaybe(outputs.memory, { nodeId: "read-test-memory" });
-  const history = ctx.outputMaybe(outputs.gitHistory, { nodeId: "git-history" });
   const bugHunt = ctx.outputMaybe(outputs.bugHunt, { nodeId: "smart-bug-hunt" });
   const memoryUpdate = ctx.outputMaybe(outputs.memoryUpdate, { nodeId: "write-test-memory" });
 
@@ -330,22 +329,27 @@ export default smithers((ctx) => {
           }}
         </Task>
 
-        {prepare && canary && memory && history ? (
-          <Task id="smart-bug-hunt" output={outputs.bugHunt} agent={smartBugHunter}>
-            {`You are the smart daily Smithers canary reviewer.
+        <Task
+          id="smart-bug-hunt"
+          output={outputs.bugHunt}
+          agent={smartBugHunter}
+          deps={{ prepare: outputs.prepare, canary: outputs.canary, memory: outputs.memory, history: outputs.gitHistory }}
+          needs={{ canary: "run-canary", memory: "read-test-memory", history: "git-history" }}
+        >
+          {(deps) => `You are the smart daily Smithers canary reviewer.
 
 Inputs:
-- Canary mode: ${prepare.mode}
-- Canary workspace: ${prepare.workspaceDir}
+- Canary mode: ${deps.prepare.mode}
+- Canary workspace: ${deps.prepare.workspaceDir}
 - Prior test-memory LRU from Smithers memory (${MEMORY_NAMESPACE}/${MEMORY_KEY}):
-${JSON.stringify(memory.entries, null, 2)}
+${JSON.stringify(deps.memory.entries, null, 2)}
 - Current canary run:
-${JSON.stringify(canary, null, 2)}
+${JSON.stringify(deps.canary, null, 2)}
 - Git history from the last week:
-${history.log}
+${deps.history.log}
 
 Recent diff stat:
-${history.diffStat}
+${deps.history.diffStat}
 
 Task:
 Look for likely Smithers bugs or regressions. Use read-only shell inspection if needed. Focus on failures in this canary, repeated/flaky failures visible in the LRU, and changes from the past week that could plausibly explain them.
@@ -371,8 +375,7 @@ Return JSON:
   "confidence": "low|medium|high",
   "shouldOpenIssue": true|false
 }`}
-          </Task>
-        ) : null}
+        </Task>
 
         {prepare && canary && memory && bugHunt ? (
           <Task id="write-test-memory" output={outputs.memoryUpdate} retries={0}>

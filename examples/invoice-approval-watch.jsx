@@ -105,9 +105,6 @@ thresholds, department, and vendor tier. Auto-approve clean invoices below
 threshold. Prioritize by due date urgency and risk score.`,
 });
 export default smithers((ctx) => {
-    const extracted = ctx.outputMaybe("invoiceData", { nodeId: "extract" });
-    const validated = ctx.outputMaybe("validation", { nodeId: "validate" });
-    const flagged = validated?.results?.filter((r) => r.needsApproval) ?? [];
     return (<Workflow name="invoice-approval-watch">
       <Sequence>
         {/* Stage 1: Extract structured invoice data from emails/files */}
@@ -116,13 +113,16 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Stage 2: Validate invoices against approval rules */}
-        <Task id="validate" output={outputs.validation} agent={ruleChecker}>
-          <ValidatePrompt invoices={extracted?.invoices ?? []} approvalThreshold={ctx.input.approvalThreshold ?? 5000} vendorAllowlist={ctx.input.vendorAllowlist ?? null} duplicateWindow={ctx.input.duplicateWindow ?? "30d"}/>
+        <Task id="validate" output={outputs.validation} agent={ruleChecker} deps={{ extract: outputs.invoiceData }}>
+          {(deps) => <ValidatePrompt invoices={deps.extract.invoices} approvalThreshold={ctx.input.approvalThreshold ?? 5000} vendorAllowlist={ctx.input.vendorAllowlist ?? null} duplicateWindow={ctx.input.duplicateWindow ?? "30d"}/>}
         </Task>
 
         {/* Stage 3: Route suspicious/high-value items to approval queue */}
-        <Task id="route" output={outputs.approvalQueue} agent={approvalRouter}>
-          <RoutePrompt flaggedInvoices={flagged} totalProcessed={validated?.results?.length ?? 0} approverMapping={ctx.input.approverMapping ?? null} escalationRules={ctx.input.escalationRules ?? null}/>
+        <Task id="route" output={outputs.approvalQueue} agent={approvalRouter} deps={{ validate: outputs.validation }}>
+          {(deps) => {
+            const flagged = deps.validate.results.filter((r) => r.needsApproval);
+            return <RoutePrompt flaggedInvoices={flagged} totalProcessed={deps.validate.results.length} approverMapping={ctx.input.approverMapping ?? null} escalationRules={ctx.input.escalationRules ?? null}/>;
+          }}
         </Task>
       </Sequence>
     </Workflow>);

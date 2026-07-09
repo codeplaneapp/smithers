@@ -76,9 +76,9 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2. Analyze: find bottlenecks, hot paths, token hogs */}
-        {ingest && (<Task id="analyze" output={outputs.analysis} agent={analyzer}>
-            <AnalyzePrompt spans={ingest.spans} totalDurationMs={ingest.totalDurationMs} totalTokens={ingest.totalTokens} failedSpanCount={ingest.failedSpanCount}/>
-          </Task>)}
+        <Task id="analyze" output={outputs.analysis} agent={analyzer} deps={{ ingest: outputs.ingest }}>
+          {(deps) => (<AnalyzePrompt spans={deps.ingest.spans} totalDurationMs={deps.ingest.totalDurationMs} totalTokens={deps.ingest.totalTokens} failedSpanCount={deps.ingest.failedSpanCount}/>)}
+        </Task>
 
         {/* 3. Report: produce actionable optimization report */}
         {analysis && ingest && (<Task id="report" output={outputs.report}>

@@ -127,6 +127,8 @@ The runtime injects a JSON-schema description of `outputs.analysis` into the pro
 
 Tasks see each other's outputs through `ctx.outputMaybe(...)`. An incomplete upstream returns `undefined`; on the next render frame the upstream output appears and the downstream Task mounts.
 
+For the common case of one Task consuming exactly one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback is the more ergonomic form; reach for `ctx.outputMaybe` when the guard needs to inspect content or gate more than one sibling.
+
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Sequence, Task, AnthropicAgent } from "smithers-orchestrator";

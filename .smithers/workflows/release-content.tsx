@@ -186,7 +186,6 @@ export default smithers((rawCtx) => {
   const brief = rawCtx.outputMaybe(outputs.contentBrief, { nodeId: "draft-content-brief" });
   const changelog = rawCtx.outputMaybe(outputs.changelogDraft, { nodeId: "draft-changelog" });
   const thread = rawCtx.outputMaybe(outputs.threadDraft, { nodeId: "draft-thread" });
-  const outline = rawCtx.outputMaybe(outputs.blogOutline, { nodeId: "draft-blog-outline" });
   const blog = rawCtx.outputMaybe(outputs.blogDraft, { nodeId: "draft-blog" });
   const latestEdited = rawCtx.outputs.editedContent?.at(-1);
   const latestCheck = rawCtx.outputs.deterministicCheck?.at(-1);
@@ -333,19 +332,21 @@ export default smithers((rawCtx) => {
                 />
               </Task>
 
-              {outline ? (
-                <Task
-                  id="draft-blog"
-                  output={outputs.blogDraft}
-                  agent={contentAgent}
-                  heartbeatTimeoutMs={900_000}
-                >
+              <Task
+                id="draft-blog"
+                output={outputs.blogDraft}
+                agent={contentAgent}
+                heartbeatTimeoutMs={900_000}
+                needs={{ outline: "draft-blog-outline" }}
+                deps={{ outline: outputs.blogOutline }}
+              >
+                {(deps) => (
                   <DraftBlogPrompt
                     probe={probe}
                     analysis={analysis}
                     template={selected}
                     brief={brief}
-                    outline={outline}
+                    outline={deps.outline}
                     globalAdditional={input.additionalPrompts.global}
                     additional={input.additionalPrompts.blogPost}
                     targetWords={input.blogPost.targetWords}
@@ -353,8 +354,8 @@ export default smithers((rawCtx) => {
                     includeMigrationNotes={input.blogPost.includeMigrationNotes}
                     frontmatter={input.blogPost.frontmatter}
                   />
-                </Task>
-              ) : null}
+                )}
+              </Task>
             </Sequence>
           </Parallel>
         ) : null}

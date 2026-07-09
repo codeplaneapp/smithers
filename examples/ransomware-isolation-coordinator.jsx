@@ -66,7 +66,6 @@ data into a concise incident report with a timeline, containment status, and sum
 export default smithers((ctx) => {
     const detection = ctx.outputMaybe("detection", { nodeId: "detect" });
     const approval = ctx.outputMaybe("approval", { nodeId: "approve-containment" });
-    const containment = ctx.outputMaybe("containment", { nodeId: "contain" });
     return (<Workflow name="ransomware-isolation-coordinator">
       <Sequence>
         {/* Step 1 — Detect ransomware indicators */}
@@ -86,8 +85,8 @@ export default smithers((ctx) => {
             </Task>} else={null}/>
 
         {/* Step 4 — Compile incident report */}
-        <Task id="report" output={outputs.report} agent={reportingAgent} timeoutMs={60_000}>
-          <ReportPrompt hostId={detection?.hostId ?? "unknown"} indicators={detection?.indicators ?? []} severity={detection?.severity ?? "unknown"} contained={containment?.networkIsolated ?? false} evidenceUrl={containment?.evidenceSnapshotUrl ?? "N/A"} notifiedChannels={containment?.notifiedChannels ?? []}/>
+        <Task id="report" output={outputs.report} agent={reportingAgent} timeoutMs={60_000} deps={{ contain: outputs.containment }} depsOptional>
+          {(deps) => <ReportPrompt hostId={detection?.hostId ?? "unknown"} indicators={detection?.indicators ?? []} severity={detection?.severity ?? "unknown"} contained={deps.contain?.networkIsolated ?? false} evidenceUrl={deps.contain?.evidenceSnapshotUrl ?? "N/A"} notifiedChannels={deps.contain?.notifiedChannels ?? []}/>}
         </Task>
       </Sequence>
     </Workflow>);

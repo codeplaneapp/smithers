@@ -218,8 +218,8 @@ test command for sanity-checking. Note interdependencies (some targets build on
 others) and ordering. Be specific and technical.`}
         </Task>
 
-        <Task id="implement" output={implementSchema} agent={opus}>
-          {`Continue task "${input.taskId}". Now IMPLEMENT the full roadmap.
+        <Task id="implement" output={implementSchema} agent={opus} deps={{ plan: planSchema }}>
+          {(deps) => `Continue task "${input.taskId}". Now IMPLEMENT the full roadmap.
 
 ${ENV}
 
@@ -227,7 +227,7 @@ ${ENV}
 ${instruction}
 
 # Plan from the planning phase
-${JSON.stringify(ctx.outputMaybe("plan", { nodeId: "plan" }) ?? {}, null, 2)}
+${JSON.stringify(deps.plan ?? {}, null, 2)}
 
 # Your job
 Implement EVERY target in the roadmap, end to end, editing files in the working
@@ -239,8 +239,8 @@ compatibility. Do not stop until all targets are implemented and your own
 sanity checks pass. Report exactly what you changed.`}
         </Task>
 
-        <Task id="review" output={reviewSchema} agent={codex}>
-          {`You are an independent senior reviewer (a DIFFERENT engineer and model)
+        <Task id="review" output={reviewSchema} agent={codex} deps={{ implement: implementSchema }}>
+          {(deps) => `You are an independent senior reviewer (a DIFFERENT engineer and model)
 auditing the implementation for task "${input.taskId}". Be adversarial and precise.
 
 ${ENV}
@@ -249,7 +249,7 @@ ${ENV}
 ${instruction}
 
 # What the implementer reported
-${JSON.stringify(ctx.outputMaybe("implement", { nodeId: "implement" }) ?? {}, null, 2)}
+${JSON.stringify(deps.implement ?? {}, null, 2)}
 
 # Your job
 Independently verify each target against the spec. Look hard for: missing
@@ -265,11 +265,12 @@ you found and the fixes you applied.`}
           id="finalize"
           output={finalizeSchema}
           agent={opus}
+          deps={{ review: reviewSchema }}
           scorers={{
             reward: { scorer: roadmapScorer(input), sampling: { type: "all" } },
           }}
         >
-          {`Final completeness pass for task "${input.taskId}".
+          {(deps) => `Final completeness pass for task "${input.taskId}".
 
 ${ENV}
 
@@ -277,7 +278,7 @@ ${ENV}
 ${instruction}
 
 # Reviewer report
-${JSON.stringify(ctx.outputMaybe("review", { nodeId: "review" }) ?? {}, null, 2)}
+${JSON.stringify(deps.review ?? {}, null, 2)}
 
 # Your job
 Do a final end-to-end verification. For EVERY target and every documented

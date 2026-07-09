@@ -105,8 +105,6 @@ open a PR via the gh CLI. The PR body should include a table of fixed examples.`
 });
 // ── Workflow ─────────────────────────────────────────────────────────────────
 export default smithers((ctx) => {
-    const scan = ctx.outputMaybe("scan", { nodeId: "scan-docs" });
-    const repair = ctx.outputMaybe("repair", { nodeId: "repair" });
     const verification = ctx.outputMaybe("verify", { nodeId: "verify" });
     return (<Workflow name="docs-fixup-bot">
       <Sequence>
@@ -116,18 +114,18 @@ export default smithers((ctx) => {
         </Task>
 
         {/* ═══ REPAIR: fix each broken example ═══ */}
-        <Task id="repair" output={outputs.repair} agent={repairAgent}>
-          <RepairPrompt brokenExamples={scan?.brokenExamples ?? []} totalBroken={scan?.totalBroken ?? 0}/>
+        <Task id="repair" output={outputs.repair} agent={repairAgent} needs={{ scan: "scan-docs" }} deps={{ scan: outputs.scan }}>
+          {(deps) => <RepairPrompt brokenExamples={deps.scan.brokenExamples} totalBroken={deps.scan.totalBroken}/>}
         </Task>
 
         {/* ═══ VERIFY + PR: validate fixes then open PR in parallel ═══ */}
         <Parallel>
-          <Task id="verify" output={outputs.verify} agent={verifier}>
-            <VerifyPrompt fixes={repair?.fixes ?? []} filesChanged={repair?.filesChanged ?? []}/>
+          <Task id="verify" output={outputs.verify} agent={verifier} deps={{ repair: outputs.repair }}>
+            {(deps) => <VerifyPrompt fixes={deps.repair.fixes} filesChanged={deps.repair.filesChanged}/>}
           </Task>
 
-          <Task id="open-pr" output={outputs.pr} agent={prOpener}>
-            <OpenPRPrompt filesChanged={repair?.filesChanged ?? []} summary={repair?.summary ?? ""} totalFixed={repair?.fixes?.length ?? 0} skipped={repair?.skipped ?? []} repo={ctx.input.repo} dryRun={ctx.input.dryRun ?? false}/>
+          <Task id="open-pr" output={outputs.pr} agent={prOpener} deps={{ repair: outputs.repair }}>
+            {(deps) => <OpenPRPrompt filesChanged={deps.repair.filesChanged} summary={deps.repair.summary} totalFixed={deps.repair.fixes.length} skipped={deps.repair.skipped} repo={ctx.input.repo} dryRun={ctx.input.dryRun ?? false}/>}
           </Task>
         </Parallel>
       </Sequence>

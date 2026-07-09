@@ -832,10 +832,7 @@ export default smithers((ctx) => {
   const preflight = (ctx as any).outputMaybe("preflight", { nodeId: "preflight", iteration: 0 });
   const intake = (ctx as any).outputMaybe("intake", { nodeId: "intake", iteration: 0 });
   const brainstorm = (ctx as any).outputMaybe("brainstorm", { nodeId: "brainstorm", iteration: 0 });
-  const researchDomain = (ctx as any).outputMaybe("research", { nodeId: "research:domain", iteration: 0 });
-  const researchPriorArt = (ctx as any).outputMaybe("research", { nodeId: "research:prior-art", iteration: 0 });
   const questions = (ctx as any).outputMaybe("questions", { nodeId: "questions", iteration: 0 });
-  const answers = (ctx as any).outputMaybe("humanAnswers", { nodeId: "answers", iteration: 0 });
   const prd = (ctx as any).outputMaybe("prd", { nodeId: "prd", iteration: 0 });
 
   const gateRow = (nodeId: string) =>
@@ -923,7 +920,6 @@ export default smithers((ctx) => {
     !!reviewSynth &&
     (mustFix.length === 0 || ((ctx as any).outputs("polishReport") ?? []).length > 0);
 
-  const gather = (ctx as any).outputMaybe("reportGather", { nodeId: "report:gather", iteration: 0 });
   const finalReport = (ctx as any).outputMaybe("finalReport", { nodeId: "report:final", iteration: 0 });
   const deliveryApproved = !!finalReport && gatePassed("gate:delivery");
   const deliveryOut = (ctx as any).outputMaybe("delivery", { nodeId: "delivery", iteration: 0 });
@@ -1065,8 +1061,13 @@ export default smithers((ctx) => {
         ) : null}
 
         {/* ── 2b. Clarifying questions: only what research could not answer ── */}
-        {brainstorm && researchDomain && researchPriorArt ? (
-          <Task id="questions" output={outputs.questions} agent={fable}>
+        {brainstorm ? (
+          <Task
+            id="questions"
+            output={outputs.questions}
+            agent={fable}
+            deps={{ "research:domain": outputs.research, "research:prior-art": outputs.research }}
+          >
             <QuestionsPrompt />
             <Rules />
           </Task>
@@ -1096,16 +1097,24 @@ export default smithers((ctx) => {
         ) : null}
 
         {/* ── 3. PRD + end-user interface artifacts (PROMPT.md step 3) ── */}
-        {answers ? (
-          <Task id="prd" output={outputs.prd} agent={fable} heartbeatTimeoutMs={900_000}>
-            <PrdPrompt
-              answers={JSON.stringify(answers.answers ?? [])}
-              additionalContext={answers.additionalContext}
-              productType={intake?.productType ?? "other"}
-            />
-            <Rules />
-          </Task>
-        ) : null}
+        <Task
+          id="prd"
+          output={outputs.prd}
+          agent={fable}
+          heartbeatTimeoutMs={900_000}
+          deps={{ answers: outputs.humanAnswers }}
+        >
+          {(deps) => (
+            <>
+              <PrdPrompt
+                answers={JSON.stringify(deps.answers.answers ?? [])}
+                additionalContext={deps.answers.additionalContext}
+                productType={intake?.productType ?? "other"}
+              />
+              <Rules />
+            </>
+          )}
+        </Task>
 
         {prd && review && !gateRow("gate:prd") ? (
           <Approval
@@ -1557,16 +1566,21 @@ export default smithers((ctx) => {
           </Task>
         ) : null}
 
-        {gather ? (
-          <Task id="report:final" output={outputs.finalReport} agent={fable} heartbeatTimeoutMs={900_000}>
-            <ReportFinalPrompt
-              reviewSynth={JSON.stringify(reviewSynth ?? {}, null, 2)}
-              implRunId={implRunId}
-              parentRunId={ctx.runId}
-            />
-            <Rules />
-          </Task>
-        ) : null}
+        <Task
+          id="report:final"
+          output={outputs.finalReport}
+          agent={fable}
+          heartbeatTimeoutMs={900_000}
+          needs={{ gather: "report:gather" }}
+          deps={{ gather: outputs.reportGather }}
+        >
+          <ReportFinalPrompt
+            reviewSynth={JSON.stringify(reviewSynth ?? {}, null, 2)}
+            implRunId={implRunId}
+            parentRunId={ctx.runId}
+          />
+          <Rules />
+        </Task>
 
         {finalReport && review && !gateRow("gate:delivery") ? (
           <Approval

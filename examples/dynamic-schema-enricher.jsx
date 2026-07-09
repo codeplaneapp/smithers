@@ -87,13 +87,13 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Stage 2: Dynamically resolve the right schema for this document type */}
-        <Task id="resolve" output={outputs.resolvedSchema} agent={resolverAgent}>
-          <ResolvePrompt documentFamily={context?.documentFamily ?? "unknown"} tenant={context?.tenant ?? "default"} source={context?.source ?? "unknown"} detectedLanguage={context?.detectedLanguage ?? "en"} schemaRegistry={ctx.input.schemaRegistry ?? "default"}/>
+        <Task id="resolve" output={outputs.resolvedSchema} agent={resolverAgent} deps={{ context: outputs.context }}>
+          {(deps) => <ResolvePrompt documentFamily={deps.context.documentFamily ?? "unknown"} tenant={deps.context.tenant ?? "default"} source={deps.context.source ?? "unknown"} detectedLanguage={deps.context.detectedLanguage ?? "en"} schemaRegistry={ctx.input.schemaRegistry ?? "default"}/>}
         </Task>
 
         {/* Stage 3: Extract fields from raw content using the resolved schema */}
-        <Task id="extract" output={outputs.extraction} agent={extractorAgent}>
-          <ExtractPrompt rawContent={context?.rawContent ?? ""} schemaId={resolved?.schemaId ?? ""} fields={resolved?.fields ?? []} tenantOverrides={resolved?.tenantOverrides ?? []}/>
+        <Task id="extract" output={outputs.extraction} agent={extractorAgent} deps={{ context: outputs.context, resolve: outputs.resolvedSchema }}>
+          {(deps) => <ExtractPrompt rawContent={deps.context.rawContent ?? ""} schemaId={deps.resolve.schemaId ?? ""} fields={deps.resolve.fields ?? []} tenantOverrides={deps.resolve.tenantOverrides ?? []}/>}
         </Task>
 
         {/* Stage 4: Validate and produce the final typed output */}

@@ -47,8 +47,6 @@ const aggregator = new Agent({
 });
 
 export default smithers((ctx) => {
-  const secReview = ctx.outputMaybe("review", { nodeId: "security-review" });
-  const qualReview = ctx.outputMaybe("review", { nodeId: "quality-review" });
   const diff = [
     "- const token = req.query.token;",
     "+ const token = sanitize(req.headers.authorization);",
@@ -67,13 +65,23 @@ export default smithers((ctx) => {
           </Task>
         </Parallel>
 
-        <Task id="aggregate" output={outputs.verdict} agent={aggregator}>
-          Combine these two reviews into a final verdict:{"\n\n"}
-          Security review: {secReview?.approved ? "APPROVED" : "REJECTED"} -{" "}
-          {secReview?.feedback}
-          {"\n\n"}
-          Quality review: {qualReview?.approved ? "APPROVED" : "REJECTED"} -{" "}
-          {qualReview?.feedback}
+        <Task
+          id="aggregate"
+          output={outputs.verdict}
+          agent={aggregator}
+          needs={{ secReview: "security-review", qualReview: "quality-review" }}
+          deps={{ secReview: outputs.review, qualReview: outputs.review }}
+        >
+          {(deps) => (
+            <>
+              Combine these two reviews into a final verdict:{"\n\n"}
+              Security review: {deps.secReview.approved ? "APPROVED" : "REJECTED"} -{" "}
+              {deps.secReview.feedback}
+              {"\n\n"}
+              Quality review: {deps.qualReview.approved ? "APPROVED" : "REJECTED"} -{" "}
+              {deps.qualReview.feedback}
+            </>
+          )}
         </Task>
       </Sequence>
     </Workflow>
@@ -111,4 +119,4 @@ const secReview = ctx.outputMaybe("review", { nodeId: "security-review" });
 const qualReview = ctx.outputMaybe("review", { nodeId: "quality-review" });
 ```
 
-Both return `undefined` until their respective tasks complete.
+Both return `undefined` until their respective tasks complete. When a downstream task just needs to consume those results as its prompt, as `aggregate` does above, prefer `<Task deps={{ secReview: outputs.review, qualReview: outputs.review }} needs={{ secReview: "security-review", qualReview: "quality-review" }}>` with a `(deps) => ...` children callback instead: it defers the task until both rows exist and hands you resolved, non-optional values.

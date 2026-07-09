@@ -107,7 +107,6 @@ and drop. Report every action taken.`,
 // --- Workflow ---
 export default smithers((ctx) => {
     const deduped = ctx.outputMaybe("dedupeResult", { nodeId: "dedupe" });
-    const context = ctx.outputMaybe("context", { nodeId: "context-lookup" });
     const classification = ctx.outputMaybe("classification", { nodeId: "classify" });
     const sinkResult = ctx.outputMaybe("sinkResult", { nodeId: "dispatch" });
     const alerts = ctx.input.alerts ?? [];
@@ -126,13 +125,13 @@ export default smithers((ctx) => {
         </Parallel>
 
         {/* 2. Classify each unique alert using incident context + noise rules */}
-        <Task id="classify" output={outputs.classification} agent={classifierAgent}>
-          <ClassifyPrompt uniqueAlerts={deduped?.uniqueAlerts ?? []} context={context} noiseRules={context?.noiseRules ?? []} recentIncidents={context?.recentIncidents ?? []}/>
+        <Task id="classify" output={outputs.classification} agent={classifierAgent} deps={{ dedupe: outputs.dedupeResult, context: outputs.context }} needs={{ context: "context-lookup" }}>
+          {(deps) => <ClassifyPrompt uniqueAlerts={deps.dedupe.uniqueAlerts} context={deps.context} noiseRules={deps.context.noiseRules} recentIncidents={deps.context.recentIncidents}/>}
         </Task>
 
         {/* 3. Dispatch — page, ticket, or drop */}
-        <Task id="dispatch" output={outputs.sinkResult} agent={sinkAgent}>
-          <SinkPrompt classifications={classification?.classifications ?? []} pageChannel={ctx.input.pageChannel ?? "pagerduty"} ticketSystem={ctx.input.ticketSystem ?? "jira"}/>
+        <Task id="dispatch" output={outputs.sinkResult} agent={sinkAgent} deps={{ classify: outputs.classification }}>
+          {(deps) => <SinkPrompt classifications={deps.classify.classifications} pageChannel={ctx.input.pageChannel ?? "pagerduty"} ticketSystem={ctx.input.ticketSystem ?? "jira"}/>}
         </Task>
 
         {/* 4. Final summary */}

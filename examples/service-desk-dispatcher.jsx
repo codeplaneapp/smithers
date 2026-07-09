@@ -105,7 +105,6 @@ const promptForCategory = {
     policy: PolicyPrompt,
 };
 export default smithers((ctx) => {
-    const intake = ctx.outputMaybe("intake", { nodeId: "intake" });
     const classification = ctx.outputMaybe("classification", { nodeId: "classify" });
     const results = ctx.outputs.handlerResult ?? [];
     const classifiedTickets = classification?.classified ?? [];
@@ -117,8 +116,8 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Step 2: Classify each ticket as incident, request, or policy */}
-        <Task id="classify" output={outputs.classification} agent={classifierAgent}>
-          <ClassifyPrompt tickets={intake?.tickets ?? []}/>
+        <Task id="classify" output={outputs.classification} agent={classifierAgent} deps={{ intake: outputs.intake }}>
+          {(deps) => <ClassifyPrompt tickets={deps.intake.tickets}/>}
         </Task>
 
         {/* Step 3: Route to specialized handlers in parallel */}

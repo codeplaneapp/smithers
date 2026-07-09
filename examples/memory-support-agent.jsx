@@ -86,7 +86,6 @@ tier and package the full context so the receiving team can act without re-askin
 the customer.`,
 });
 export default smithers((ctx) => {
-    const recall = ctx.outputMaybe("recall", { nodeId: "recall" });
     const response = ctx.outputMaybe("response", { nodeId: "respond" });
     const persist = ctx.outputMaybe("persist", { nodeId: "persist" });
     const needsEscalation = response?.needsEscalation ?? false;
@@ -98,18 +97,18 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2. Respond: craft a personalised reply using recalled memory */}
-        <Task id="respond" output={outputs.response} agent={respondAgent}>
-          <RespondPrompt customerId={recall?.customerId ?? "unknown"} facts={recall?.facts ?? []} recentTickets={recall?.recentTickets ?? []} sentiment={recall?.sentiment ?? "neutral"} latestMessage={ctx.input.latestMessage ?? ""}/>
+        <Task id="respond" output={outputs.response} agent={respondAgent} deps={{ recall: outputs.recall }}>
+          {(deps) => <RespondPrompt customerId={deps.recall.customerId} facts={deps.recall.facts} recentTickets={deps.recall.recentTickets} sentiment={deps.recall.sentiment} latestMessage={ctx.input.latestMessage ?? ""}/>}
         </Task>
 
         {/* 3. Persist: update the customer's durable memory store */}
-        <Task id="persist" output={outputs.persist} agent={persistAgent}>
-          <PersistPrompt customerId={recall?.customerId ?? "unknown"} existingFacts={recall?.facts ?? []} reply={response?.reply ?? ""} latestMessage={ctx.input.latestMessage ?? ""}/>
+        <Task id="persist" output={outputs.persist} agent={persistAgent} deps={{ recall: outputs.recall }}>
+          {(deps) => <PersistPrompt customerId={deps.recall.customerId} existingFacts={deps.recall.facts} reply={response?.reply ?? ""} latestMessage={ctx.input.latestMessage ?? ""}/>}
         </Task>
 
         {/* 4. Escalation path for low-confidence or complex cases */}
-        <Branch if={needsEscalation} then={<Task id="escalate" output={outputs.escalation} agent={escalationAgent}>
-              <EscalatePrompt customerId={recall?.customerId ?? "unknown"} confidenceScore={response?.confidenceScore ?? 0} reasoning={response?.reasoning ?? ""} suggestedActions={response?.suggestedActions ?? []} sentiment={recall?.sentiment ?? "neutral"} recentTickets={recall?.recentTickets ?? []}/>
+        <Branch if={needsEscalation} then={<Task id="escalate" output={outputs.escalation} agent={escalationAgent} deps={{ recall: outputs.recall }}>
+              {(deps) => <EscalatePrompt customerId={deps.recall.customerId} confidenceScore={response?.confidenceScore ?? 0} reasoning={response?.reasoning ?? ""} suggestedActions={response?.suggestedActions ?? []} sentiment={deps.recall.sentiment} recentTickets={deps.recall.recentTickets}/>}
             </Task>}/>
       </Sequence>
     </Workflow>);

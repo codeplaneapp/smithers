@@ -157,12 +157,14 @@ export default smithers((ctx) => {
                     <RankSlotsPrompt request={request} availability={ctx.outputs.availability ?? []} preferences={ctx.input.preferences ?? []} />
                 </Task>
 
-                <Task id="draft-reply" output={outputs.reply} agent={replyAgent}>
-                    <DraftReplyPrompt
-                        request={request}
-                        rankedSlots={ctx.outputMaybe("rankedSlots", { nodeId: "rank-slots" })}
-                        sender={ctx.input.sender ?? "me"}
-                    />
+                <Task id="draft-reply" output={outputs.reply} agent={replyAgent} needs={{ rankedSlots: "rank-slots" }} deps={{ rankedSlots: outputs.rankedSlots }}>
+                    {(deps) => (
+                        <DraftReplyPrompt
+                            request={request}
+                            rankedSlots={deps.rankedSlots}
+                            sender={ctx.input.sender ?? "me"}
+                        />
+                    )}
                 </Task>
 
                 <Approval

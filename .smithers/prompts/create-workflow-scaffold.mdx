@@ -44,10 +44,13 @@ own `.mdx` file, one per prompt named in the design. Write the custom UI to
 5. **Graph**: `export default smithers((ctx) => ( <Workflow name="<id>"> ... ))`,
    matching the design's `graphShape`. If writing a custom UI, the first child of
    `<Workflow>` must be `<UI entry="../ui/<workflowName>.tsx" title="<Title>" />`.
-   Gate later stages on earlier outputs with `ctx.outputMaybe("table", { nodeId })`,
-   exactly like the existing workflows. Remember: `ctx.input` fields arrive null
-   when unsupplied, so coalesce (`ctx.input.x ?? default`) rather than trusting
-   Zod defaults.
+   When a task simply consumes one upstream task's output, prefer
+   `<Task deps={{ upstreamId: outputs.table }}>` with a `(deps) => ...` prompt or
+   compute function over a manual guard. Reach for `ctx.outputMaybe("table", { nodeId })`
+   when the gate is structural instead (branches, loops, multiple siblings, or a
+   condition that inspects content, not just existence), exactly like the existing
+   workflows. Remember: `ctx.input` fields arrive null when unsupplied, so coalesce
+   (`ctx.input.x ?? default`) rather than trusting Zod defaults.
 6. **Prompts**: author each `.mdx` from the design's `prompts` list. Pass props
    from the task and end every prompt with:
    ```

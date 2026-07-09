@@ -161,12 +161,16 @@ export default smithers((ctx) => {
                                 id={`draft-${nodeId(requirement.id)}`}
                                 output={outputs.answerDraft}
                                 agent={draftAgent}
+                                needs={{ answerPlan: "build-answer-plan" }}
+                                deps={{ answerPlan: outputs.answerPlan }}
                             >
-                                <DraftPrompt
-                                    requirement={requirement}
-                                    answerPlan={ctx.outputMaybe("answerPlan", { nodeId: "build-answer-plan" })}
-                                    approvedSources={ctx.input.approvedSources ?? "fixtures/rfp-response-room/approved-answers"}
-                                />
+                                {(deps) => (
+                                    <DraftPrompt
+                                        requirement={requirement}
+                                        answerPlan={deps.answerPlan}
+                                        approvedSources={ctx.input.approvedSources ?? "fixtures/rfp-response-room/approved-answers"}
+                                    />
+                                )}
                             </Task>
                         ))}
                     </Parallel>

@@ -533,6 +533,8 @@ The runtime injects a JSON-schema description of `outputs.analysis` into the pro
 
 Tasks see each other's outputs through `ctx.outputMaybe(...)`. An incomplete upstream returns `undefined`; on the next render frame the upstream output appears and the downstream Task mounts.
 
+For the common case of one Task consuming exactly one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback is the more ergonomic form; reach for `ctx.outputMaybe` when the guard needs to inspect content or gate more than one sibling.
+
 ```tsx
 import { createSmithers, Sequence, Task, AnthropicAgent } from "smithers-orchestrator";
 import { z } from "zod";
@@ -834,7 +836,7 @@ function useReviewState(ticketId: string) {
 
 `useState` and `useMemo` are process-local; they reset on every render frame. Use them for ephemeral render-time state. **Anything the workflow must remember across crashes goes through `ctx` and a Task output.**
 
-Conditional mounting matters: a Task that doesn't render is not in the plan. No "skipped" placeholder unless you use `<Branch>` or `skipIf`. That's what lets `{analysis ? <Task .../> : null}` work as a clean dependency check.
+Conditional mounting matters: a Task that doesn't render is not in the plan. No "skipped" placeholder unless you use `<Branch>` or `skipIf`. That's what lets `{analysis ? <Task .../> : null}` work as a clean dependency check. For the common case of one Task consuming one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback is the more ergonomic form of the same check.
 
 ## Approvals & human-in-the-loop
 
@@ -2187,6 +2189,8 @@ const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
 ```
 
 The `report` Task doesn't exist in the plan until `analysis` completes. No placeholder, no skipped node. The conditional IS the dependency. Unlike static DAG tools that require you to declare optional nodes upfront, the JSX conditional is evaluated fresh each frame: if `analysis` is undefined, the `report` task simply doesn't exist in that frame's plan.
+
+For the common case of a task simply consuming one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback expresses the same gating more directly; reach for `ctx.outputMaybe` when the logic is structural (branching on content, loops, counts) rather than plain existence.
 
 ## Read next
 
@@ -6723,6 +6727,8 @@ Reading a downstream output before its task has completed returns `undefined`, n
 const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
 return analysis ? <Task id="report" output={outputs.report} agent={writer}>...</Task> : null;
 ```
+
+When a task's only job is waiting on one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback is the more direct form: it defers until the row exists and hands it straight to `children`, no guard variable needed.
 
 ### An output schema is a shared pool; do not write stray rows into one you filter
 

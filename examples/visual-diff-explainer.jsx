@@ -99,25 +99,22 @@ into a clear, actionable report. Prioritize by severity. Include a recommendatio
 whether the changes are intentional (update baselines) or bugs (file issues).`,
 });
 export default smithers((ctx) => {
-    const failedTests = ctx.outputMaybe("failedTests", { nodeId: "run-tests" });
-    const imagePairs = ctx.outputMaybe("imagePairs", { nodeId: "collect-pairs" });
-    const analysis = ctx.outputMaybe("analysis", { nodeId: "analyze-diff" });
     return (<Workflow name="visual-diff-explainer">
       <Sequence>
         <Task id="run-tests" output={outputs.failedTests} agent={testRunner}>
           <RunTestsPrompt testCommand={ctx.input.testCommand ?? "npx playwright test --reporter=json"} baselineDir={ctx.input.baselineDir ?? "__screenshots__/baseline"} currentDir={ctx.input.currentDir ?? "__screenshots__/current"}/>
         </Task>
 
-        <Task id="collect-pairs" output={outputs.imagePairs} agent={collector}>
-          <CollectPairsPrompt tests={failedTests?.tests ?? []} totalFailed={failedTests?.totalFailed ?? 0}/>
+        <Task id="collect-pairs" output={outputs.imagePairs} agent={collector} needs={{ runTests: "run-tests" }} deps={{ runTests: outputs.failedTests }}>
+          {(deps) => <CollectPairsPrompt tests={deps.runTests.tests} totalFailed={deps.runTests.totalFailed}/>}
         </Task>
 
-        <Task id="analyze-diff" output={outputs.analysis} agent={visionAnalyst}>
-          <AnalyzeDiffPrompt pairs={imagePairs?.pairs ?? []}/>
+        <Task id="analyze-diff" output={outputs.analysis} agent={visionAnalyst} needs={{ collectPairs: "collect-pairs" }} deps={{ collectPairs: outputs.imagePairs }}>
+          {(deps) => <AnalyzeDiffPrompt pairs={deps.collectPairs.pairs}/>}
         </Task>
 
-        <Task id="report" output={outputs.report} agent={reporter}>
-          <ReportPrompt findings={analysis?.findings ?? []} outputFile={ctx.input.outputFile ?? "visual-regression-report.md"} repository={ctx.input.repository ?? "unknown"}/>
+        <Task id="report" output={outputs.report} agent={reporter} needs={{ analyzeDiff: "analyze-diff" }} deps={{ analyzeDiff: outputs.analysis }}>
+          {(deps) => <ReportPrompt findings={deps.analyzeDiff.findings} outputFile={ctx.input.outputFile ?? "visual-regression-report.md"} repository={ctx.input.repository ?? "unknown"}/>}
         </Task>
       </Sequence>
     </Workflow>);

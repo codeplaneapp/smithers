@@ -90,8 +90,6 @@ claims, and factual inconsistencies. If you find issues, propose revised answers
 the contradictions while staying faithful to the source material. Be strict but fair.`,
 });
 export default smithers((ctx) => {
-    const context = ctx.outputMaybe("sourceContext", { nodeId: "gather-context" });
-    const answers = ctx.outputMaybe("surveyAnswers", { nodeId: "generate-answers" });
     return (<Workflow name="survey-answerer-agent">
       <Sequence>
         {/* Stage 1: Gather and index source material */}
@@ -100,13 +98,13 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Stage 2: Generate typed, cited answers */}
-        <Task id="generate-answers" output={outputs.surveyAnswers} agent={answerGeneratorAgent}>
-          <GenerateAnswersPrompt questions={ctx.input.questions ?? []} documentSummaries={context?.documentSummaries ?? []} keyFacts={context?.keyFacts ?? {}}/>
+        <Task id="generate-answers" output={outputs.surveyAnswers} agent={answerGeneratorAgent} needs={{ context: "gather-context" }} deps={{ context: outputs.sourceContext }}>
+          {(deps) => <GenerateAnswersPrompt questions={ctx.input.questions ?? []} documentSummaries={deps.context.documentSummaries} keyFacts={deps.context.keyFacts}/>}
         </Task>
 
         {/* Stage 3: Validate consistency and accuracy */}
-        <Task id="validate" output={outputs.validation} agent={validatorAgent}>
-          <ValidatePrompt answers={answers?.answers ?? []} unanswered={answers?.unanswered ?? []} keyFacts={context?.keyFacts ?? {}} documentSummaries={context?.documentSummaries ?? []}/>
+        <Task id="validate" output={outputs.validation} agent={validatorAgent} needs={{ context: "gather-context", answers: "generate-answers" }} deps={{ context: outputs.sourceContext, answers: outputs.surveyAnswers }}>
+          {(deps) => <ValidatePrompt answers={deps.answers.answers} unanswered={deps.answers.unanswered} keyFacts={deps.context.keyFacts} documentSummaries={deps.context.documentSummaries}/>}
         </Task>
       </Sequence>
     </Workflow>);

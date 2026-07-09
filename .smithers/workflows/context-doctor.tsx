@@ -261,15 +261,15 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2 — Agent advice for resolving every non-ok finding. */}
-        {check ? (
-          <Task id="advise" output={outputs.advise} agent={agents.cheapFast}>
+        <Task id="advise" output={outputs.advise} agent={agents.cheapFast} deps={{ check: outputs.check }}>
+          {(deps) => (
             <AdvisePrompt
-              summary={check.summary}
-              score={check.score}
-              issues={check.issues}
+              summary={deps.check.summary}
+              score={deps.check.score}
+              issues={deps.check.issues}
             />
-          </Task>
-        ) : null}
+          )}
+        </Task>
 
         {/* 3 — Terminal summary: the run's printed output. Aggregates the
             deterministic verdict/score with the agent's advice so a bare

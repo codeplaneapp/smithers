@@ -104,8 +104,6 @@ open a PR using the gh CLI. Include a checklist of every doc file changed and wh
 });
 // ── Workflow ─────────────────────────────────────────────────────────────────
 export default smithers((ctx) => {
-    const drift = ctx.outputMaybe("drift", { nodeId: "detect-drift" });
-    const patch = ctx.outputMaybe("patch", { nodeId: "patch-docs" });
     const verification = ctx.outputMaybe("verify", { nodeId: "verify" });
     return (<Workflow name="docs-patcher">
       <Sequence>
@@ -115,18 +113,18 @@ export default smithers((ctx) => {
         </Task>
 
         {/* ═══ PATCH: rewrite stale snippets in affected docs ═══ */}
-        <Task id="patch-docs" output={outputs.patch} agent={patchAgent}>
-          <PatchDocsPrompt changes={drift?.changes ?? []} affectedDocs={drift?.affectedDocs ?? []} severity={drift?.severity ?? "minor"}/>
+        <Task id="patch-docs" output={outputs.patch} agent={patchAgent} needs={{ drift: "detect-drift" }} deps={{ drift: outputs.drift }}>
+          {(deps) => <PatchDocsPrompt changes={deps.drift.changes} affectedDocs={deps.drift.affectedDocs} severity={deps.drift.severity}/>}
         </Task>
 
         {/* ═══ VERIFY + PR: validate patches then open follow-up PR in parallel ═══ */}
         <Parallel>
-          <Task id="verify" output={outputs.verify} agent={verifier}>
-            <VerifyPrompt patches={patch?.patches ?? []} filesChanged={patch?.filesChanged ?? []} baseBranch={ctx.input.baseBranch ?? "main"}/>
+          <Task id="verify" output={outputs.verify} agent={verifier} needs={{ patch: "patch-docs" }} deps={{ patch: outputs.patch }}>
+            {(deps) => <VerifyPrompt patches={deps.patch.patches} filesChanged={deps.patch.filesChanged} baseBranch={ctx.input.baseBranch ?? "main"}/>}
           </Task>
 
-          <Task id="create-pr" output={outputs.pr} agent={prCreator}>
-            <CreatePRPrompt filesChanged={patch?.filesChanged ?? []} summary={patch?.summary ?? ""} severity={drift?.severity ?? "minor"} repo={ctx.input.repo} dryRun={ctx.input.dryRun ?? false}/>
+          <Task id="create-pr" output={outputs.pr} agent={prCreator} needs={{ patch: "patch-docs", drift: "detect-drift" }} deps={{ patch: outputs.patch, drift: outputs.drift }}>
+            {(deps) => <CreatePRPrompt filesChanged={deps.patch.filesChanged} summary={deps.patch.summary} severity={deps.drift.severity} repo={ctx.input.repo} dryRun={ctx.input.dryRun ?? false}/>}
           </Task>
         </Parallel>
       </Sequence>

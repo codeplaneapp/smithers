@@ -39,7 +39,6 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
 
 export default smithers((ctx) => {
   const bootstrap = ctx.outputMaybe("bootstrap", { nodeId: "bootstrap" });
-  const scanResult = ctx.outputMaybe("featureScan", { nodeId: "scan" });
 
   return (
     <Workflow name="sync-features">
@@ -249,25 +248,26 @@ export default smithers((ctx) => {
       ) : null}
 
       {/* Step 3: Write the TypeScript file */}
-      {scanResult ? (
-        <Task
-          id="write-features"
-          output={outputs.writeResult}
-          agent={agents.smartTool}
-          heartbeatTimeoutMs={300000}
-          memory={{
-            remember: {
-              namespace: memoryNamespace,
-              key: "last-sync",
-            },
-          }}
-        >
+      <Task
+        id="write-features"
+        output={outputs.writeResult}
+        agent={agents.smartTool}
+        heartbeatTimeoutMs={300000}
+        memory={{
+          remember: {
+            namespace: memoryNamespace,
+            key: "last-sync",
+          },
+        }}
+        deps={{ scan: outputs.featureScan }}
+      >
+        {(deps) => (
           <SyncFeaturesWritePrompt
-            lastCommitHash={scanResult.lastCommitHash}
-            featureGroups={scanResult.featureGroups}
+            lastCommitHash={deps.scan.lastCommitHash}
+            featureGroups={deps.scan.featureGroups}
           />
-        </Task>
-      ) : null}
+        )}
+      </Task>
     </Workflow>
   );
 });

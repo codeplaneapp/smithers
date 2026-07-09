@@ -94,8 +94,6 @@ identify which consumers are likely affected (from the consumer list provided) a
 concrete migration path. Produce a risk score from 0-100.`,
 });
 export default smithers((ctx) => {
-    const schema = ctx.outputMaybe("schema", { nodeId: "load" });
-    const diff = ctx.outputMaybe("diff", { nodeId: "diff" });
     const analysis = ctx.outputMaybe("analysis", { nodeId: "analyze" });
     const riskScore = analysis?.riskScore ?? 0;
     const breakingCount = analysis?.breakingChanges.length ?? 0;
@@ -108,13 +106,13 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Phase 2: Structural diff between the two revisions */}
-        <Task id="diff" output={outputs.diff} agent={diffEngine}>
-          <DiffPrompt format={schema?.format ?? "unknown"} baseline={schema?.baseline ?? ""} current={schema?.current ?? ""} entities={schema?.entities ?? []}/>
+        <Task id="diff" output={outputs.diff} agent={diffEngine} deps={{ load: outputs.schema }}>
+          {(deps) => <DiffPrompt format={deps.load.format} baseline={deps.load.baseline} current={deps.load.current} entities={deps.load.entities}/>}
         </Task>
 
         {/* Phase 3: Analyst agent evaluates breaking changes and consumer impact */}
-        <Task id="analyze" output={outputs.analysis} agent={analyst}>
-          <AnalyzePrompt diff={diff} consumers={ctx.input.consumers ?? []} format={schema?.format ?? "unknown"}/>
+        <Task id="analyze" output={outputs.analysis} agent={analyst} deps={{ diff: outputs.diff, load: outputs.schema }}>
+          {(deps) => <AnalyzePrompt diff={deps.diff} consumers={ctx.input.consumers ?? []} format={deps.load.format}/>}
         </Task>
 
         {/* Phase 4: Produce PR comment and status gate */}

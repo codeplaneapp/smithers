@@ -92,8 +92,6 @@ decide which deserve a Slack alert, which warrant a Jira ticket, and compose a d
 report. Critical pain points should always create urgent Slack messages and Jira tickets.`,
 });
 export default smithers((ctx) => {
-    const intake = ctx.outputMaybe("intake", { nodeId: "intake" });
-    const extraction = ctx.outputMaybe("extraction", { nodeId: "extract" });
     return (<Workflow name="feedback-pulse">
       <Sequence>
         {/* Stage 1: Ingest and normalize raw feedback from all sources */}
@@ -102,13 +100,13 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Stage 2: Extract sentiment, themes, and pain points */}
-        <Task id="extract" output={outputs.extraction} agent={extractorAgent}>
-          <ExtractPrompt items={intake?.items ?? []} totalCount={intake?.totalCount ?? 0}/>
+        <Task id="extract" output={outputs.extraction} agent={extractorAgent} deps={{ intake: outputs.intake }}>
+          {(deps) => <ExtractPrompt items={deps.intake.items} totalCount={deps.intake.totalCount}/>}
         </Task>
 
         {/* Stage 3: Route notable themes to Slack, Jira, and reports */}
-        <Task id="notify" output={outputs.notification} agent={notifierAgent}>
-          <NotifyPrompt themes={extraction?.themes ?? []} painPoints={extraction?.painPoints ?? []} sentimentBreakdown={extraction?.sentimentBreakdown ?? {}} notableInsights={extraction?.notableInsights ?? []}/>
+        <Task id="notify" output={outputs.notification} agent={notifierAgent} deps={{ extract: outputs.extraction }}>
+          {(deps) => <NotifyPrompt themes={deps.extract.themes} painPoints={deps.extract.painPoints} sentimentBreakdown={deps.extract.sentimentBreakdown} notableInsights={deps.extract.notableInsights}/>}
         </Task>
       </Sequence>
     </Workflow>);

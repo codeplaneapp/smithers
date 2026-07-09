@@ -159,6 +159,8 @@ const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
 return analysis ? <Task id="report" output={outputs.report} agent={writer}>...</Task> : null;
 ```
 
+When a task's only job is waiting on one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback is the more direct form: it defers until the row exists and hands it straight to `children`, no guard variable needed.
+
 ### An output schema is a shared pool; do not write stray rows into one you filter
 
 `ctx.outputs.<schema>` is every row written for that schema by every node and

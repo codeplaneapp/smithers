@@ -164,15 +164,15 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2 — Render a self-contained HTML slideshow from the captured state. */}
-        {gather ? (
-          <Task id="render" output={outputs.render} agent={agents.smart}>
+        <Task id="render" output={outputs.render} agent={agents.smart} deps={{ gather: outputs.gather }}>
+          {(deps) => (
             <RenderPrompt
               runId={runId}
               title={fallbackTitle}
-              gather={gather}
+              gather={deps.gather}
             />
-          </Task>
-        ) : null}
+          )}
+        </Task>
 
         {/* 3 — Surface a concise, human-meaningful terminal summary. */}
         {gather && render ? (

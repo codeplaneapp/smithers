@@ -60,7 +60,6 @@ determine whether to rollback, mitigate in place, or observe. Consider data safe
 blast radius, and available mitigations. Be decisive and justify your recommendation.`,
 });
 export default smithers((ctx) => {
-    const evidence = ctx.outputMaybe("evidence", { nodeId: "gather" });
     const advice = ctx.outputMaybe("advice", { nodeId: "advise" });
     const approval = ctx.outputMaybe("approval", { nodeId: "approve-rollback" });
     return (<Workflow name="rollback-advisor">
@@ -69,8 +68,8 @@ export default smithers((ctx) => {
           <GatherEvidencePrompt deployment={ctx.input.deployment ?? "unknown"} symptoms={(ctx.input.symptoms ?? []).join(", ")}/>
         </Task>
 
-        <Task id="advise" output={outputs.advice} agent={advisor}>
-          <AdvisePrompt deployment={ctx.input.deployment ?? "unknown"} evidence={evidence?.rawFindings ?? "no evidence gathered"}/>
+        <Task id="advise" output={outputs.advice} agent={advisor} deps={{ gather: outputs.evidence }}>
+          {(deps) => <AdvisePrompt deployment={ctx.input.deployment ?? "unknown"} evidence={deps.gather.rawFindings}/>}
         </Task>
 
         <Branch if={advice?.shouldRollback ?? false} then={<Approval id="approve-rollback" output={outputs.approval} request={{

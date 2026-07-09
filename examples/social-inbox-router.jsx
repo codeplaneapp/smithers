@@ -119,7 +119,6 @@ provide context on the conversation history, draft a thoughtful reply, and
 set a due-by date to keep the relationship warm.`,
 });
 export default smithers((ctx) => {
-    const inbox = ctx.outputMaybe("inboxItem", { nodeId: "trigger" });
     const classified = ctx.outputMaybe("classification", { nodeId: "classify" });
     const leads = (classified?.items ?? []).filter((i) => i.category === "lead");
     const supportItems = (classified?.items ?? []).filter((i) => i.category === "support");
@@ -135,8 +134,8 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Stage 2: Classify each item */}
-        <Task id="classify" output={outputs.classification} agent={classifierAgent}>
-          <ClassifyPrompt items={inbox ? [inbox] : ctx.input.messages ?? []}/>
+        <Task id="classify" output={outputs.classification} agent={classifierAgent} deps={{ trigger: outputs.inboxItem }}>
+          {(deps) => <ClassifyPrompt items={[deps.trigger]}/>}
         </Task>
 
         {/* Stage 3: Route actions in parallel by category */}

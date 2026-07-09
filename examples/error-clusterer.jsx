@@ -98,8 +98,6 @@ severity clusters that lack existing tickets. Output a searchable remediation ta
 });
 export default smithers((ctx) => {
     const ingest = ctx.outputMaybe("ingestResult", { nodeId: "ingest" });
-    const clusters = ctx.outputMaybe("clusters", { nodeId: "cluster" });
-    const explanations = ctx.outputMaybe("explanations", { nodeId: "explain" });
     return (<Workflow name="error-clusterer">
       <Sequence>
         {/* Phase 1: Ingest — read raw errors and normalize fingerprints */}
@@ -137,13 +135,13 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Phase 3: Explain — agent analyzes each cluster for root cause */}
-        <Task id="explain" output={outputs.explanations} agent={explainer}>
-          <ExplainPrompt clusters={clusters?.clusters ?? []} totalClusters={clusters?.totalClusters ?? 0} kbPath={ctx.input.kbPath ?? "./error-kb"}/>
+        <Task id="explain" output={outputs.explanations} agent={explainer} deps={{ cluster: outputs.clusters }}>
+          {(deps) => <ExplainPrompt clusters={deps.cluster.clusters} totalClusters={deps.cluster.totalClusters} kbPath={ctx.input.kbPath ?? "./error-kb"}/>}
         </Task>
 
         {/* Phase 4: KB/ticket update — persist explanations and create tickets */}
-        <Task id="kb-update" output={outputs.kbUpdate} agent={updater}>
-          <UpdatePrompt explanations={explanations?.explanations ?? []} kbPath={ctx.input.kbPath ?? "./error-kb"} ticketPrefix={ctx.input.ticketPrefix ?? "ERR"} clusters={clusters?.clusters ?? []}/>
+        <Task id="kb-update" output={outputs.kbUpdate} agent={updater} deps={{ explain: outputs.explanations, cluster: outputs.clusters }}>
+          {(deps) => <UpdatePrompt explanations={deps.explain.explanations} kbPath={ctx.input.kbPath ?? "./error-kb"} ticketPrefix={ctx.input.ticketPrefix ?? "ERR"} clusters={deps.cluster.clusters}/>}
         </Task>
       </Sequence>
     </Workflow>);

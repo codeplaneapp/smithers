@@ -71,8 +71,6 @@ run the repro command, and verify the bug manifests. Capture stdout, stderr, and
 Report whether reproduction succeeded. Do not attempt to fix the bug.`,
 });
 export default smithers((ctx) => {
-    const analysis = ctx.outputMaybe("analysis", { nodeId: "analyze" });
-    const environment = ctx.outputMaybe("environment", { nodeId: "build" });
     return (<Workflow name="repro-harness-builder">
       <Sequence>
         {/* Phase 1: Issue analyzer — extract reproduction essentials */}
@@ -81,13 +79,13 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Phase 2: Environment builder — create Dockerfile and repro script */}
-        <Task id="build" output={outputs.environment} agent={environmentBuilder}>
-          <PlanPrompt analysis={analysis} language={analysis?.language ?? ctx.input.language ?? "node"} dependencies={analysis?.dependencies ?? []} minimalSteps={analysis?.minimalSteps ?? []}/>
+        <Task id="build" output={outputs.environment} agent={environmentBuilder} deps={{ analyze: outputs.analysis }}>
+          {(deps) => <PlanPrompt analysis={deps.analyze} language={deps.analyze?.language ?? ctx.input.language ?? "node"} dependencies={deps.analyze?.dependencies ?? []} minimalSteps={deps.analyze?.minimalSteps ?? []}/>}
         </Task>
 
         {/* Phase 3: Docker/code tool executor — build and run the container */}
-        <Task id="validate" output={outputs.validation} agent={reproValidator}>
-          <ValidatePrompt dockerfile={environment?.dockerfile ?? ""} runCommand={environment?.runCommand ?? "docker run --rm repro-harness"} reproScript={environment?.reproScript ?? ""} expectedError={analysis?.errorSignature ?? ""}/>
+        <Task id="validate" output={outputs.validation} agent={reproValidator} deps={{ analyze: outputs.analysis, build: outputs.environment }}>
+          {(deps) => <ValidatePrompt dockerfile={deps.build?.dockerfile ?? ""} runCommand={deps.build?.runCommand ?? "docker run --rm repro-harness"} reproScript={deps.build?.reproScript ?? ""} expectedError={deps.analyze?.errorSignature ?? ""}/>}
         </Task>
       </Sequence>
     </Workflow>);

@@ -233,18 +233,19 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2 — Agent reads the evidence and names the most likely root cause. */}
-        {gather ? (
-          <Task id="diagnose" output={outputs.diagnose} agent={agents.smart}>
-            <DiagnosePrompt runId={runId} evidence={gather} />
-          </Task>
-        ) : null}
+        <Task id="diagnose" output={outputs.diagnose} agent={agents.smart} deps={{ gather: outputs.gather }}>
+          {(deps) => <DiagnosePrompt runId={runId} evidence={deps.gather} />}
+        </Task>
 
         {/* 3 — Agent proposes the concrete next action + the exact command. */}
-        {gather && diagnose ? (
-          <Task id="recommend" output={outputs.recommend} agent={agents.smart}>
-            <RecommendPrompt runId={runId} evidence={gather} diagnosis={diagnose} />
-          </Task>
-        ) : null}
+        <Task
+          id="recommend"
+          output={outputs.recommend}
+          agent={agents.smart}
+          deps={{ gather: outputs.gather, diagnose: outputs.diagnose }}
+        >
+          {(deps) => <RecommendPrompt runId={runId} evidence={deps.gather} diagnosis={deps.diagnose} />}
+        </Task>
 
         {/* 4 — Surface the triage as the run's printed terminal output. */}
         {gather && diagnose && recommend ? (

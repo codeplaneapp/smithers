@@ -82,7 +82,6 @@ sales playbook. Be specific about talking points that reference the prospect's c
 });
 export default smithers((ctx) => {
     const intake = ctx.outputMaybe("intake", { nodeId: "intake" });
-    const enrichment = ctx.outputMaybe("enrichment", { nodeId: "enrich" });
     const profile = ctx.outputMaybe("profile", { nodeId: "profiler" });
     return (<Workflow name="lead-enricher">
       <Sequence>
@@ -92,13 +91,13 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Stage 2: Enrich with firmographic and contextual data */}
-        <Task id="enrich" output={outputs.enrichment} agent={enrichmentAgent}>
-          <EnrichPrompt company={intake?.company ?? ""} contactEmail={intake?.contactEmail ?? ""} rawNotes={intake?.rawNotes ?? ""}/>
+        <Task id="enrich" output={outputs.enrichment} agent={enrichmentAgent} deps={{ intake: outputs.intake }}>
+          {(deps) => (<EnrichPrompt company={deps.intake.company} contactEmail={deps.intake.contactEmail} rawNotes={deps.intake.rawNotes}/>)}
         </Task>
 
         {/* Stage 3: Profiler agent synthesizes enrichment into a scored profile */}
-        <Task id="profiler" output={outputs.profile} agent={profilerAgent}>
-          <ProfilePrompt intake={intake ?? {}} firmographics={enrichment?.firmographics ?? {}} techStack={enrichment?.techStack ?? []} recentNews={enrichment?.recentNews ?? []}/>
+        <Task id="profiler" output={outputs.profile} agent={profilerAgent} deps={{ intake: outputs.intake, enrich: outputs.enrichment }}>
+          {(deps) => (<ProfilePrompt intake={deps.intake} firmographics={deps.enrich.firmographics} techStack={deps.enrich.techStack} recentNews={deps.enrich.recentNews}/>)}
         </Task>
 
         {/* Stage 4: Write structured record for CRM ingestion */}

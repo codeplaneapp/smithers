@@ -69,25 +69,22 @@ const publisher = new Agent({
     instructions: `You are a publisher. Format content for the target medium and write it to a file.`,
 });
 export default smithers((ctx) => {
-    const outline = ctx.outputMaybe("outline", { nodeId: "outline" });
-    const draft = ctx.outputMaybe("draft", { nodeId: "draft" });
-    const edited = ctx.outputMaybe("edit", { nodeId: "edit" });
     return (<Workflow name="waterfall">
       <Sequence>
         <Task id="outline" output={outputs.outline} agent={outliner}>
           <OutlinePrompt topic={ctx.input.topic} audience={ctx.input.audience ?? "developers"} targetWords={ctx.input.targetWords ?? 2000} context={ctx.input.context}/>
         </Task>
 
-        <Task id="draft" output={outputs.draft} agent={drafter}>
-          <DraftPrompt sections={outline?.sections ?? []} targetAudience={outline?.targetAudience ?? ctx.input.audience ?? "developers"}/>
+        <Task id="draft" output={outputs.draft} agent={drafter} deps={{ outline: outputs.outline }}>
+          {(deps) => <DraftPrompt sections={deps.outline.sections} targetAudience={deps.outline.targetAudience ?? ctx.input.audience ?? "developers"}/>}
         </Task>
 
-        <Task id="edit" output={outputs.edit} agent={editor}>
-          <EditPrompt content={draft?.content ?? "Waiting for draft..."}/>
+        <Task id="edit" output={outputs.edit} agent={editor} deps={{ draft: outputs.draft }}>
+          {(deps) => <EditPrompt content={deps.draft.content}/>}
         </Task>
 
-        <Task id="publish" output={outputs.publish} agent={publisher}>
-          <PublishPrompt content={edited?.content ?? "Waiting for edits..."} outputFile={ctx.input.outputFile ?? "output.md"} format={ctx.input.format ?? "markdown"}/>
+        <Task id="publish" output={outputs.publish} agent={publisher} deps={{ edit: outputs.edit }}>
+          {(deps) => <PublishPrompt content={deps.edit.content} outputFile={ctx.input.outputFile ?? "output.md"} format={ctx.input.format ?? "markdown"}/>}
         </Task>
       </Sequence>
     </Workflow>);

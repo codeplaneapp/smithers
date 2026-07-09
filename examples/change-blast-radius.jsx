@@ -70,8 +70,6 @@ based on how central the changed code is. Identify all owners who should review 
 Be specific about why each service is impacted.`,
 });
 export default smithers((ctx) => {
-    const parsed = ctx.outputMaybe("parsedDiff", { nodeId: "parse-diff" });
-    const context = ctx.outputMaybe("dependencyContext", { nodeId: "gather-context" });
     return (<Workflow name="change-blast-radius">
       <Sequence>
         {/* Stage 1: Parse the raw diff into structured changed-file records */}
@@ -80,13 +78,13 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Stage 2: Gather dependency graph, related tests, docs, and owners */}
-        <Task id="gather-context" output={outputs.dependencyContext} agent={gatherer}>
-          <GatherPrompt files={parsed?.files ?? []} repoRoot={ctx.input.repoRoot ?? "."}/>
+        <Task id="gather-context" output={outputs.dependencyContext} agent={gatherer} needs={{ parse: "parse-diff" }} deps={{ parse: outputs.parsedDiff }}>
+          {(deps) => <GatherPrompt files={deps.parse.files} repoRoot={ctx.input.repoRoot ?? "."}/>}
         </Task>
 
         {/* Stage 3: Blast-radius agent synthesizes impact analysis */}
-        <Task id="blast-radius" output={outputs.blastRadius} agent={blastRadiusAgent}>
-          <BlastRadiusPrompt files={parsed?.files ?? []} dependencies={context?.dependencies ?? []} relatedTests={context?.relatedTests ?? []} relatedDocs={context?.relatedDocs ?? []} owners={context?.owners ?? []}/>
+        <Task id="blast-radius" output={outputs.blastRadius} agent={blastRadiusAgent} needs={{ parse: "parse-diff", context: "gather-context" }} deps={{ parse: outputs.parsedDiff, context: outputs.dependencyContext }}>
+          {(deps) => <BlastRadiusPrompt files={deps.parse.files} dependencies={deps.context.dependencies} relatedTests={deps.context.relatedTests} relatedDocs={deps.context.relatedDocs} owners={deps.context.owners}/>}
         </Task>
       </Sequence>
     </Workflow>);

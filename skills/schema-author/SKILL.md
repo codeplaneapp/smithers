@@ -81,6 +81,12 @@ The prompt body stays clean: end it with the task, let the runtime append the
 schema. Don't hand-write a "return JSON like {…}" block — it fights the injected
 one (see `skills/prompt-author/SKILL.md`).
 
+When a task simply consumes an upstream output with no branching involved,
+prefer `<Task deps={{ triage: outputs.triage }}>` with a `(deps) => ...`
+callback: it makes the dependency explicit and needs no `ctx.outputMaybe`
+guard. `ctx.outputMaybe`/`<Branch>` stays the right tool when downstream logic
+depends on the row's content, as in the example above.
+
 ## Rich or extensible outputs: `z.looseObject`
 
 When you can't enumerate every field up front (a typed-extraction step, a payload

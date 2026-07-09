@@ -92,6 +92,8 @@ const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
 
 The `report` Task doesn't exist in the plan until `analysis` completes. No placeholder, no skipped node. The conditional IS the dependency. Unlike static DAG tools that require you to declare optional nodes upfront, the JSX conditional is evaluated fresh each frame: if `analysis` is undefined, the `report` task simply doesn't exist in that frame's plan.
 
+For the common case of a task simply consuming one upstream output, `<Task deps={{ analyze: outputs.analysis }}>` with a `(deps) => ...` children callback expresses the same gating more directly; reach for `ctx.outputMaybe` when the logic is structural (branching on content, loops, counts) rather than plain existence.
+
 ## Read next
 
 - [Tour](/tour): six-step worked example with agents, schemas, approvals, resume.

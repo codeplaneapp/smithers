@@ -110,9 +110,7 @@ issues. End with a disposition: approve, request-changes, or comment.`,
 });
 // ── Workflow ─────────────────────────────────────────────────────────────────
 export default smithers((ctx) => {
-    const diff = ctx.outputMaybe("diff", { nodeId: "gather-diff" });
     const testResults = ctx.outputMaybe("testResults", { nodeId: "gather-tests" });
-    const prContext = ctx.outputMaybe("prContext", { nodeId: "gather-context" });
     const review = ctx.outputMaybe("review", { nodeId: "reviewer" });
     const criticalCount = review?.comments.filter((c) => c.severity === "critical").length ?? 0;
     const warningCount = review?.comments.filter((c) => c.severity === "warning").length ?? 0;
@@ -141,8 +139,8 @@ export default smithers((ctx) => {
         </Parallel>
 
         {/* ═══ REVIEWER: structured comments from gathered context ═══ */}
-        <Task id="reviewer" output={outputs.review} agent={reviewerAgent}>
-          <ReviewerPrompt diff={diff} testResults={testResults} prContext={prContext}/>
+        <Task id="reviewer" output={outputs.review} agent={reviewerAgent} needs={{ diff: "gather-diff", context: "gather-context" }} deps={{ diff: outputs.diff, context: outputs.prContext }}>
+          {(deps) => (<ReviewerPrompt diff={deps.diff} testResults={testResults} prContext={deps.context}/>)}
         </Task>
 
         {/* ═══ REPORT: final review status ═══ */}

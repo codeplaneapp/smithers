@@ -92,7 +92,6 @@ const executionAgent = new Agent({
 // --- Workflow ---
 export default smithers((ctx) => {
     const autoExecute = ctx.input.autoExecute ?? false;
-    const inspection = ctx.outputMaybe("inspection", { nodeId: "inspect" });
     const diagnosis = ctx.outputMaybe("diagnosis", { nodeId: "diagnose" });
     const plan = ctx.outputMaybe("plan", { nodeId: "plan" });
     const execution = ctx.outputMaybe("execution", { nodeId: "execute" });
@@ -104,18 +103,18 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2. Diagnose the root cause */}
-        <Task id="diagnose" output={outputs.diagnosis} agent={diagnosisAgent}>
-          <DiagnosePrompt inspection={inspection} symptoms={ctx.input.symptoms ?? []}/>
+        <Task id="diagnose" output={outputs.diagnosis} agent={diagnosisAgent} deps={{ inspect: outputs.inspection }}>
+          {(deps) => <DiagnosePrompt inspection={deps.inspect} symptoms={ctx.input.symptoms ?? []}/>}
         </Task>
 
         {/* 3. Build the recovery command plan */}
-        <Task id="plan" output={outputs.plan} agent={planAgent}>
-          <PlanPrompt diagnosis={diagnosis} inspection={inspection} repoPath={ctx.input.repoPath} baseBranch={ctx.input.baseBranch ?? "main"}/>
+        <Task id="plan" output={outputs.plan} agent={planAgent} deps={{ inspect: outputs.inspection, diagnose: outputs.diagnosis }}>
+          {(deps) => <PlanPrompt diagnosis={deps.diagnose} inspection={deps.inspect} repoPath={ctx.input.repoPath} baseBranch={ctx.input.baseBranch ?? "main"}/>}
         </Task>
 
         {/* 4. Optionally execute safe recovery steps */}
-        <Branch if={autoExecute} then={<Task id="execute" output={outputs.execution} agent={executionAgent}>
-              <ExecutePrompt commands={plan?.commands ?? []} repoPath={ctx.input.repoPath}/>
+        <Branch if={autoExecute} then={<Task id="execute" output={outputs.execution} agent={executionAgent} deps={{ plan: outputs.plan }}>
+              {(deps) => <ExecutePrompt commands={deps.plan.commands} repoPath={ctx.input.repoPath}/>}
             </Task>}/>
 
         {/* 5. Final summary */}

@@ -130,12 +130,14 @@ export default smithers((ctx) => {
                     />
                 </Task>
 
-                <Task id="generate-tests" output={outputs.generatedTests} agent={generatorAgent}>
-                    <GeneratePrompt
-                        plan={ctx.outputMaybe("testPlan", { nodeId: "plan-tests" })}
-                        testDirectory={ctx.input.testDirectory ?? "tests/generated"}
-                        appUrl={ctx.input.appUrl ?? "http://localhost:3000"}
-                    />
+                <Task id="generate-tests" output={outputs.generatedTests} agent={generatorAgent} needs={{ plan: "plan-tests" }} deps={{ plan: outputs.testPlan }}>
+                    {(deps) => (
+                        <GeneratePrompt
+                            plan={deps.plan}
+                            testDirectory={ctx.input.testDirectory ?? "tests/generated"}
+                            appUrl={ctx.input.appUrl ?? "http://localhost:3000"}
+                        />
+                    )}
                 </Task>
 
                 <Loop
@@ -163,13 +165,15 @@ export default smithers((ctx) => {
                     </Sequence>
                 </Loop>
 
-                <Task id="report" output={outputs.finalReport} agent={reporterAgent}>
-                    <ReportPrompt
-                        plan={ctx.outputMaybe("testPlan", { nodeId: "plan-tests" })}
-                        generatedAttempts={generatedAttempts}
-                        runs={runs}
-                        passed={passed}
-                    />
+                <Task id="report" output={outputs.finalReport} agent={reporterAgent} needs={{ plan: "plan-tests" }} deps={{ plan: outputs.testPlan }}>
+                    {(deps) => (
+                        <ReportPrompt
+                            plan={deps.plan}
+                            generatedAttempts={generatedAttempts}
+                            runs={runs}
+                            passed={passed}
+                        />
+                    )}
                 </Task>
             </Sequence>
         </Workflow>

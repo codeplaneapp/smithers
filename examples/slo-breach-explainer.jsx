@@ -107,7 +107,6 @@ about the root cause, quantify impact, and recommend both immediate mitigation a
 Write the summary as a concise paragraph suitable for posting in an incident Slack channel.`,
 });
 export default smithers((ctx) => {
-    const alarm = ctx.outputMaybe("alarm", { nodeId: "trigger" });
     return (<Workflow name="slo-breach-explainer">
       <Sequence>
         {/* Phase 1: Parse and validate the incoming alarm */}
@@ -117,16 +116,16 @@ export default smithers((ctx) => {
 
         {/* Phase 2: Fetch context in parallel — traces, logs, change history */}
         <Parallel maxConcurrency={3}>
-          <Task id="traces" output={outputs.traces} agent={traceFetcher}>
-            <TracesPrompt service={alarm?.service} window={alarm?.window} sloName={alarm?.sloName}/>
+          <Task id="traces" output={outputs.traces} agent={traceFetcher} deps={{ trigger: outputs.alarm }}>
+            {(deps) => <TracesPrompt service={deps.trigger.service} window={deps.trigger.window} sloName={deps.trigger.sloName}/>}
           </Task>
 
-          <Task id="logs" output={outputs.logs} agent={logFetcher}>
-            <LogsPrompt service={alarm?.service} window={alarm?.window} observed={alarm?.observed}/>
+          <Task id="logs" output={outputs.logs} agent={logFetcher} deps={{ trigger: outputs.alarm }}>
+            {(deps) => <LogsPrompt service={deps.trigger.service} window={deps.trigger.window} observed={deps.trigger.observed}/>}
           </Task>
 
-          <Task id="changes" output={outputs.changes} agent={changeFetcher}>
-            <ChangesPrompt service={alarm?.service} window={alarm?.window}/>
+          <Task id="changes" output={outputs.changes} agent={changeFetcher} deps={{ trigger: outputs.alarm }}>
+            {(deps) => <ChangesPrompt service={deps.trigger.service} window={deps.trigger.window}/>}
           </Task>
         </Parallel>
 

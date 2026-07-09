@@ -61,8 +61,8 @@ export default smithers((ctx) => (
       <Task id="research" output={outputs.research} agent={researcher}>
         {`Research: ${ctx.input.topic}`}
       </Task>
-      <Task id="summarize" output={outputs.summary} agent={writer}>
-        {`Summarize: ${ctx.outputMaybe("research", { nodeId: "research" })?.findings}`}
+      <Task id="summarize" output={outputs.summary} agent={writer} deps={{ research: outputs.research }}>
+        {(deps) => `Summarize: ${deps.research.findings}`}
       </Task>
     </Sequence>
   </Workflow>
@@ -73,6 +73,6 @@ export default smithers((ctx) => (
 
 1. Use `createSmithers` for schema-driven workflows with auto-persistence.
 2. Use `outputs.xxx` as the `output` prop on `<Task>` (the Zod schema, not a string key).
-3. Use `ctx.outputMaybe()` for cross-task data flow (returns `undefined` if not yet available).
+3. Use `ctx.outputMaybe()` for cross-task data flow (returns `undefined` if not yet available). For a single task consuming one upstream output, prefer `<Task deps={{ id: outputs.x }}>` with a `(deps) => ...` children callback instead.
 4. Set `maxIterations` on `<Loop>` to prevent infinite loops.
 5. Include `continueOnFail` on non-critical tasks.

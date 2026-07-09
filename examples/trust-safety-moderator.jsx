@@ -77,8 +77,6 @@ policy action: approve safe content, apply modifications for borderline cases, r
 or escalate edge cases with detailed context for human reviewers.`,
 });
 export default smithers((ctx) => {
-    const intake = ctx.outputMaybe("intake", { nodeId: "intake" });
-    const moderation = ctx.outputMaybe("moderation", { nodeId: "moderate" });
     return (<Workflow name="trust-safety-moderator">
       <Sequence>
         {/* Content intake — normalize and extract metadata */}
@@ -87,13 +85,13 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Moderator agent — classify risk and policy */}
-        <Task id="moderate" output={outputs.moderation} agent={moderator}>
-          <ModeratePrompt contentId={intake?.contentId ?? "unknown"} contentType={intake?.contentType ?? "text"} rawText={intake?.rawText ?? ctx.input.content ?? ""} policies={ctx.input.policies ?? "default"}/>
+        <Task id="moderate" output={outputs.moderation} agent={moderator} deps={{ intake: outputs.intake }}>
+          {(deps) => <ModeratePrompt contentId={deps.intake.contentId} contentType={deps.intake.contentType} rawText={deps.intake.rawText} policies={ctx.input.policies ?? "default"}/>}
         </Task>
 
         {/* Policy-specific action or escalation */}
-        <Task id="action" output={outputs.action} agent={actionAgent}>
-          <ActionPrompt contentId={moderation?.contentId ?? intake?.contentId ?? "unknown"} riskLevel={moderation?.riskLevel ?? "allow"} policyClass={moderation?.policyClass ?? "safe"} confidence={moderation?.confidence ?? 1} reasoning={moderation?.reasoning ?? ""} flaggedSegments={moderation?.flaggedSegments ?? []} needsHumanReview={moderation?.needsHumanReview ?? false} rawText={intake?.rawText ?? ctx.input.content ?? ""}/>
+        <Task id="action" output={outputs.action} agent={actionAgent} deps={{ moderate: outputs.moderation, intake: outputs.intake }}>
+          {(deps) => <ActionPrompt contentId={deps.moderate.contentId} riskLevel={deps.moderate.riskLevel} policyClass={deps.moderate.policyClass} confidence={deps.moderate.confidence} reasoning={deps.moderate.reasoning} flaggedSegments={deps.moderate.flaggedSegments} needsHumanReview={deps.moderate.needsHumanReview} rawText={deps.intake.rawText}/>}
         </Task>
       </Sequence>
     </Workflow>);

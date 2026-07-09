@@ -131,8 +131,6 @@ function readExistingSkills(root: string) {
 }
 
 export default smithers((ctx) => {
-  const collected = ctx.outputMaybe("collect", { nodeId: "collect" });
-
   return (
     <Workflow name={WORKFLOW_ID}>
       <UI entry="../ui/workflow-skill.tsx" title={"Workflow Skill"} />
@@ -179,24 +177,25 @@ export default smithers((ctx) => {
         }}
       </Task>
 
-      {collected ? (
-        <Task
-          id="write-skills"
-          output={outputs.writeResult}
-          agent={agents.smartTool}
-          heartbeatTimeoutMs={600_000}
-        >
+      <Task
+        id="write-skills"
+        output={outputs.writeResult}
+        agent={agents.smartTool}
+        heartbeatTimeoutMs={600_000}
+        deps={{ collect: outputs.collect }}
+      >
+        {(deps) => (
           <WorkflowSkillPrompt
-            workflowTarget={collected.workflowTarget}
-            output={collected.output}
-            outputRule={collected.outputRule}
-            defaultSkillDir={collected.defaultSkillDir}
-            workflows={collected.workflows}
-            existingSkills={collected.existingSkills}
-            prompt={collected.prompt}
+            workflowTarget={deps.collect.workflowTarget}
+            output={deps.collect.output}
+            outputRule={deps.collect.outputRule}
+            defaultSkillDir={deps.collect.defaultSkillDir}
+            workflows={deps.collect.workflows}
+            existingSkills={deps.collect.existingSkills}
+            prompt={deps.collect.prompt}
           />
-        </Task>
-      ) : null}
+        )}
+      </Task>
     </Workflow>
   );
 });

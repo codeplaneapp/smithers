@@ -111,11 +111,6 @@ the message ID if available.`,
 });
 /* ── Workflow ──────────────────────────────────────────────────────────── */
 export default smithers((ctx) => {
-    const schedule = ctx.outputMaybe("scheduleContext", { nodeId: "schedule" });
-    const github = ctx.outputMaybe("githubDigest", { nodeId: "collect-github" });
-    const linear = ctx.outputMaybe("linearDigest", { nodeId: "collect-linear" });
-    const slack = ctx.outputMaybe("slackDigest", { nodeId: "collect-slack" });
-    const summary = ctx.outputMaybe("summary", { nodeId: "summarize" });
     return (<Workflow name="friday-bot">
       <Sequence>
         {/* Stage 1: Determine reporting period */}
@@ -125,27 +120,27 @@ export default smithers((ctx) => {
 
         {/* Stage 2: Collect data from systems in parallel */}
         <Parallel maxConcurrency={3}>
-          <Task id="collect-github" output={outputs.githubDigest} agent={githubCollector}>
-            <CollectGithubPrompt repo={ctx.input.repo ?? ""} cutoff={schedule?.cutoffISO ?? ""} periodLabel={schedule?.periodLabel ?? ""}/>
+          <Task id="collect-github" output={outputs.githubDigest} agent={githubCollector} deps={{ schedule: outputs.scheduleContext }}>
+            {(deps) => <CollectGithubPrompt repo={ctx.input.repo ?? ""} cutoff={deps.schedule.cutoffISO} periodLabel={deps.schedule.periodLabel}/>}
           </Task>
 
-          <Task id="collect-linear" output={outputs.linearDigest} agent={linearCollector}>
-            <CollectLinearPrompt teamId={ctx.input.linearTeamId ?? ""} cutoff={schedule?.cutoffISO ?? ""} periodLabel={schedule?.periodLabel ?? ""}/>
+          <Task id="collect-linear" output={outputs.linearDigest} agent={linearCollector} deps={{ schedule: outputs.scheduleContext }}>
+            {(deps) => <CollectLinearPrompt teamId={ctx.input.linearTeamId ?? ""} cutoff={deps.schedule.cutoffISO} periodLabel={deps.schedule.periodLabel}/>}
           </Task>
 
-          <Task id="collect-slack" output={outputs.slackDigest} agent={slackCollector}>
-            <CollectSlackPrompt channels={ctx.input.slackChannels ?? []} cutoff={schedule?.cutoffISO ?? ""} periodLabel={schedule?.periodLabel ?? ""}/>
+          <Task id="collect-slack" output={outputs.slackDigest} agent={slackCollector} deps={{ schedule: outputs.scheduleContext }}>
+            {(deps) => <CollectSlackPrompt channels={ctx.input.slackChannels ?? []} cutoff={deps.schedule.cutoffISO} periodLabel={deps.schedule.periodLabel}/>}
           </Task>
         </Parallel>
 
         {/* Stage 3: Summarize all collected data */}
-        <Task id="summarize" output={outputs.summary} agent={summarizer}>
-          <SummarizePrompt periodLabel={schedule?.periodLabel ?? ""} isWeekly={schedule?.isWeekly ?? false} github={github} linear={linear} slack={slack}/>
+        <Task id="summarize" output={outputs.summary} agent={summarizer} deps={{ schedule: outputs.scheduleContext, github: outputs.githubDigest, linear: outputs.linearDigest, slack: outputs.slackDigest }} needs={{ github: "collect-github", linear: "collect-linear", slack: "collect-slack" }}>
+          {(deps) => <SummarizePrompt periodLabel={deps.schedule.periodLabel} isWeekly={deps.schedule.isWeekly} github={deps.github} linear={deps.linear} slack={deps.slack}/>}
         </Task>
 
         {/* Stage 4: Publish to message sink */}
-        <Task id="publish" output={outputs.publishResult} agent={publisher}>
-          <PublishPrompt destination={ctx.input.publishTo ?? "slack"} channel={ctx.input.slackChannel ?? "#team-updates"} summary={summary}/>
+        <Task id="publish" output={outputs.publishResult} agent={publisher} deps={{ summary: outputs.summary }} needs={{ summary: "summarize" }}>
+          {(deps) => <PublishPrompt destination={ctx.input.publishTo ?? "slack"} channel={ctx.input.slackChannel ?? "#team-updates"} summary={deps.summary}/>}
         </Task>
       </Sequence>
     </Workflow>);

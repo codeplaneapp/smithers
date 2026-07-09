@@ -461,8 +461,8 @@ export default smithers((ctx) => {
           </Task>)}
 
         {/* ═══ FINAL REPORT: Convoy summary ═══ */}
-        <Task id="report" output={outputs.report} agent={reportAgent}>
-          <ReportPrompt convoyId={plan?.convoyId ?? "unknown"} goal={ctx.input.goal} beads={plan?.beads ?? []} polecatResults={polecatResults} mergeRequests={mergeRequests} witnessEvents={witnessEvents}/>
+        <Task id="report" output={outputs.report} agent={reportAgent} deps={{ mayor: outputs.plan }} depsOptional>
+          {(deps) => <ReportPrompt convoyId={deps.mayor?.convoyId ?? "unknown"} goal={ctx.input.goal} beads={deps.mayor?.beads ?? []} polecatResults={polecatResults} mergeRequests={mergeRequests} witnessEvents={witnessEvents}/>}
         </Task>
       </Sequence>
     </Workflow>);

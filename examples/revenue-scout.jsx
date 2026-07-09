@@ -82,7 +82,6 @@ value. Map each opportunity to the appropriate sales rep or queue.`,
 });
 export default smithers((ctx) => {
     const classified = ctx.outputMaybe("opportunity", { nodeId: "classify" });
-    const extracted = ctx.outputMaybe("extraction", { nodeId: "extract" });
     const flagged = classified?.conversations?.filter((c) => c.hasSignal) ?? [];
     return (<Workflow name="revenue-scout">
       <Sequence>
@@ -97,8 +96,8 @@ export default smithers((ctx) => {
           </Task>)}
 
         {/* Stage 3: Route opportunities to CRM / sales reps */}
-        <Task id="handoff" output={outputs.handoff} agent={router}>
-          <HandoffPrompt opportunities={extracted?.opportunities ?? []} totalScanned={classified?.conversations?.length ?? 0} crmTarget={ctx.input.crmTarget ?? "salesforce"} teamMapping={ctx.input.teamMapping ?? null}/>
+        <Task id="handoff" output={outputs.handoff} agent={router} deps={{ extract: outputs.extraction }} depsOptional>
+          {(deps) => (<HandoffPrompt opportunities={deps.extract?.opportunities ?? []} totalScanned={classified?.conversations?.length ?? 0} crmTarget={ctx.input.crmTarget ?? "salesforce"} teamMapping={ctx.input.teamMapping ?? null}/>)}
         </Task>
       </Sequence>
     </Workflow>);

@@ -62,7 +62,6 @@ and note any rollback considerations. Be specific — mention replica counts, re
 timeout changes, feature flags, and network policy shifts.`,
 });
 export default smithers((ctx) => {
-    const fetched = ctx.outputMaybe("fetchedDiff", { nodeId: "fetch-diffs" });
     const explanation = ctx.outputMaybe("explanation", { nodeId: "explain" });
     return (<Workflow name="config-diff-explainer">
       <Sequence>
@@ -72,8 +71,8 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Stage 2: Explainer agent produces blast-radius analysis */}
-        <Task id="explain" output={outputs.explanation} agent={explainer}>
-          <ExplainPrompt files={fetched?.files ?? []} totalChanges={fetched?.totalChanges ?? 0} context={ctx.input.context ?? ""}/>
+        <Task id="explain" output={outputs.explanation} agent={explainer} needs={{ fetched: "fetch-diffs" }} deps={{ fetched: outputs.fetchedDiff }}>
+          {(deps) => <ExplainPrompt files={deps.fetched.files} totalChanges={deps.fetched.totalChanges} context={ctx.input.context ?? ""}/>}
         </Task>
 
         {/* Stage 3: Approval/comment sink */}

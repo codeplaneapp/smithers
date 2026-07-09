@@ -106,7 +106,6 @@ and produce a prioritized list of first-response actions. Be specific and action
 });
 export default smithers((ctx) => {
     const ingested = ctx.outputMaybe("ingestedAlert", { nodeId: "ingest" });
-    const external = ctx.outputMaybe("externalEnrichment", { nodeId: "external-enrich" });
     const internal = ctx.outputMaybe("internalEnrichment", { nodeId: "internal-enrich" });
     const verdict = ctx.outputMaybe("analystVerdict", { nodeId: "analyst" });
     return (<Workflow name="threat-intel-enricher">
@@ -118,18 +117,18 @@ export default smithers((ctx) => {
 
         {/* Stage 2: Enrich indicators via external feeds and internal systems in parallel */}
         <Parallel maxConcurrency={2}>
-          <Task id="external-enrich" output={outputs.externalEnrichment} agent={enrichmentAgent}>
-            <ExternalEnrichPrompt indicators={ingested?.indicators ?? []} alertId={ingested?.alertId ?? ""}/>
+          <Task id="external-enrich" output={outputs.externalEnrichment} agent={enrichmentAgent} deps={{ ingest: outputs.ingestedAlert }}>
+            {(deps) => <ExternalEnrichPrompt indicators={deps.ingest.indicators} alertId={deps.ingest.alertId}/>}
           </Task>
 
-          <Task id="internal-enrich" output={outputs.internalEnrichment} agent={internalContextAgent}>
-            <InternalEnrichPrompt indicators={ingested?.indicators ?? []} rawDescription={ingested?.rawDescription ?? ""}/>
+          <Task id="internal-enrich" output={outputs.internalEnrichment} agent={internalContextAgent} deps={{ ingest: outputs.ingestedAlert }}>
+            {(deps) => <InternalEnrichPrompt indicators={deps.ingest.indicators} rawDescription={deps.ingest.rawDescription}/>}
           </Task>
         </Parallel>
 
         {/* Stage 3: Analyst agent synthesizes enrichment into a verdict */}
-        <Task id="analyst" output={outputs.analystVerdict} agent={analystAgent}>
-          <AnalystPrompt alert={ingested ?? {}} externalEnrichment={external ?? {}} internalEnrichment={internal ?? {}}/>
+        <Task id="analyst" output={outputs.analystVerdict} agent={analystAgent} deps={{ ingest: outputs.ingestedAlert, external: outputs.externalEnrichment, internal: outputs.internalEnrichment }} needs={{ external: "external-enrich", internal: "internal-enrich" }}>
+          {(deps) => <AnalystPrompt alert={deps.ingest} externalEnrichment={deps.external} internalEnrichment={deps.internal}/>}
         </Task>
 
         {/* Stage 4: File into the case management system */}

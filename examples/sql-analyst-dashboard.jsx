@@ -156,11 +156,13 @@ export default smithers((ctx) => {
                     />
                 </Task>
 
-                <Task id="plan-query" output={outputs.queryPlan} agent={plannerAgent}>
-                    <PlanQueryPrompt
-                        question={ctx.input.question ?? "Which acquisition channel has the highest 90-day gross margin, and is it trending up or down?"}
-                        schemaMap={ctx.outputMaybe("schemaMap", { nodeId: "inspect-schema" })}
-                    />
+                <Task id="plan-query" output={outputs.queryPlan} agent={plannerAgent} needs={{ schemaMap: "inspect-schema" }} deps={{ schemaMap: outputs.schemaMap }}>
+                    {(deps) => (
+                        <PlanQueryPrompt
+                            question={ctx.input.question ?? "Which acquisition channel has the highest 90-day gross margin, and is it trending up or down?"}
+                            schemaMap={deps.schemaMap}
+                        />
+                    )}
                 </Task>
 
                 <Loop
@@ -213,14 +215,16 @@ export default smithers((ctx) => {
                     />
                 </Task>
 
-                <Task id="make-dashboard" output={outputs.dashboard} agent={dashboardAgent}>
-                    <MakeDashboardPrompt
-                        question={ctx.input.question}
-                        queryPlan={ctx.outputMaybe("queryPlan", { nodeId: "plan-query" })}
-                        sqlCheck={latestCheck}
-                        queryResult={ctx.outputMaybe("queryResult", { nodeId: "execute-query" })}
-                        approval={approval}
-                    />
+                <Task id="make-dashboard" output={outputs.dashboard} agent={dashboardAgent} needs={{ queryPlan: "plan-query" }} deps={{ queryPlan: outputs.queryPlan }}>
+                    {(deps) => (
+                        <MakeDashboardPrompt
+                            question={ctx.input.question}
+                            queryPlan={deps.queryPlan}
+                            sqlCheck={latestCheck}
+                            queryResult={ctx.outputMaybe("queryResult", { nodeId: "execute-query" })}
+                            approval={approval}
+                        />
+                    )}
                 </Task>
             </Sequence>
         </Workflow>

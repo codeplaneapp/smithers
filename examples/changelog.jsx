@@ -56,15 +56,14 @@ Group by category with emojis. Highlight breaking changes prominently.
 Write for end users, not developers (unless configured otherwise).`,
 });
 export default smithers((ctx) => {
-    const analysis = ctx.outputMaybe("commitAnalysis", { nodeId: "analyze" });
     return (<Workflow name="changelog">
       <Sequence>
         <Task id="analyze" output={outputs.commitAnalysis} agent={analyst}>
           <AnalyzePrompt range={ctx.input.range ?? "last tag to HEAD"} command={`git log ${ctx.input.range ?? "--since='1 week ago'"} --pretty=format:"%H|%s|%an|%ai" --no-merges`}/>
         </Task>
 
-        <Task id="generate" output={outputs.changelog} agent={writer}>
-          <GeneratePrompt totalCommits={analysis?.totalCommits ?? 0} commits={analysis?.commits ?? []} version={ctx.input.version ?? "Unreleased"} dateRange={analysis?.dateRange ?? "unknown"} audience={ctx.input.audience ?? "users"} outputFile={ctx.input.outputFile ?? "CHANGELOG.md"}/>
+        <Task id="generate" output={outputs.changelog} agent={writer} deps={{ analyze: outputs.commitAnalysis }}>
+          {(deps) => (<GeneratePrompt totalCommits={deps.analyze?.totalCommits ?? 0} commits={deps.analyze?.commits ?? []} version={ctx.input.version ?? "Unreleased"} dateRange={deps.analyze?.dateRange ?? "unknown"} audience={ctx.input.audience ?? "users"} outputFile={ctx.input.outputFile ?? "CHANGELOG.md"}/>)}
         </Task>
       </Sequence>
     </Workflow>);

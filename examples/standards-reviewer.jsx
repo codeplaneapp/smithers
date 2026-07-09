@@ -63,7 +63,6 @@ exist, say so and move on.`,
 });
 // --- Workflow ---
 export default smithers((ctx) => {
-    const loadedStandards = ctx.outputMaybe("standards", { nodeId: "load-standards" });
     return (<Workflow name="standards-reviewer">
       <Sequence>
         {/* Stage 1: Discover and load repo-local standards files */}
@@ -72,8 +71,8 @@ export default smithers((ctx) => {
         </Task>
 
         {/* Stage 2: Review the diff against loaded standards */}
-        <Task id="review-diff" output={outputs.review} agent={reviewerAgent}>
-          <ReviewDiffPrompt diff={ctx.input.diff ?? ""} rules={loadedStandards?.rules ?? []} ruleCount={loadedStandards?.ruleCount ?? 0} standardsFiles={loadedStandards?.files.map((f) => f.path) ?? []}/>
+        <Task id="review-diff" output={outputs.review} agent={reviewerAgent} needs={{ standards: "load-standards" }} deps={{ standards: outputs.standards }}>
+          {(deps) => (<ReviewDiffPrompt diff={ctx.input.diff ?? ""} rules={deps.standards.rules} ruleCount={deps.standards.ruleCount} standardsFiles={deps.standards.files.map((f) => f.path)}/>)}
         </Task>
       </Sequence>
     </Workflow>);

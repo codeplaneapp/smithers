@@ -65,11 +65,13 @@ export default smithers((ctx) => {
               <Task id="plan" output={outputs.plan} agent={planner}>
                 Create a step-by-step plan for: {analysis?.summary}
               </Task>
-              <Task id="implement" output={outputs.result} agent={implementer}>
-                Execute these steps:{" "}
-                {ctx
-                  .outputMaybe("plan", { nodeId: "plan" })
-                  ?.steps.join(", ")}
+              <Task
+                id="implement"
+                output={outputs.result}
+                agent={implementer}
+                deps={{ plan: outputs.plan }}
+              >
+                {(deps) => `Execute these steps: ${deps.plan.steps.join(", ")}`}
               </Task>
             </Sequence>
           }

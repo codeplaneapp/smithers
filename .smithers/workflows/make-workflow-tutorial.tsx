@@ -469,8 +469,6 @@ export default smithers((ctx) => {
   // Stable child run id derived from this tutorial run (survives resume)
   const buildRunId = `build-wf-tutorial-${ctx.runId}`;
 
-  const bootstrap = ctx.outputMaybe("bootstrap", { nodeId: "bootstrap" });
-  const sessions = ctx.outputMaybe("sessions", { nodeId: "sessions" });
   const recommend = ctx.outputMaybe("recommend", { nodeId: "recommend" });
   const pick = ctx.outputMaybe("pick", { nodeId: "pick" });
   const buildLaunch = ctx.outputMaybe("buildLaunch", { nodeId: "build-launch" });
@@ -485,7 +483,6 @@ export default smithers((ctx) => {
   const monitorStopped =
     buildEnded || lastTriage?.escalate === true || monitorPolls >= MONITOR_MAX_ITERATIONS;
 
-  const diveDeeperDocs = ctx.outputMaybe("diveDeeperDocs", { nodeId: "dive-deeper-docs" });
   const diveDeeper = ctx.outputMaybe("diveDeeper", { nodeId: "dive-deeper" });
 
   return (
@@ -503,17 +500,22 @@ export default smithers((ctx) => {
         </Task>
 
         {/* ── 3. Recommend: agent ranks 5 candidate workflows by relevance ── */}
-        {bootstrap && sessions ? (
-          <Task id="recommend" output={outputs.recommend} agent={agents.smart}>
+        <Task
+          id="recommend"
+          output={outputs.recommend}
+          agent={agents.smart}
+          deps={{ bootstrap: outputs.bootstrap, sessions: outputs.sessions }}
+        >
+          {(deps) => (
             <RecommendPrompt
               hint={input.hint ?? ""}
-              codebaseSummary={bootstrap.codebaseSummary}
-              smithersDocs={bootstrap.smithersDocs}
-              sessionContext={sessions.agentMessages}
-              sessionSummary={sessions.summary}
+              codebaseSummary={deps.bootstrap.codebaseSummary}
+              smithersDocs={deps.bootstrap.smithersDocs}
+              sessionContext={deps.sessions.agentMessages}
+              sessionSummary={deps.sessions.summary}
             />
-          </Task>
-        ) : null}
+          )}
+        </Task>
 
         {/* ── 4. Pick: operating agent asks the human which workflow to build ── */}
         {recommend ? (
@@ -594,14 +596,20 @@ export default smithers((ctx) => {
           </Task>
         ) : null}
 
-        {diveDeeperDocs ? (
-          <Task id="dive-deeper" output={outputs.diveDeeper} agent={agents.cheapFast}>
+        <Task
+          id="dive-deeper"
+          output={outputs.diveDeeper}
+          agent={agents.cheapFast}
+          needs={{ diveDeeperDocs: "dive-deeper-docs" }}
+          deps={{ diveDeeperDocs: outputs.diveDeeperDocs }}
+        >
+          {(deps) => (
             <DiveDeeperPrompt
               builtWorkflow={pick?.workflowName ?? "your-workflow"}
-              docs={diveDeeperDocs.docs}
+              docs={deps.diveDeeperDocs.docs}
             />
-          </Task>
-        ) : null}
+          )}
+        </Task>
 
         {/* ── 8. Terminal output ── */}
         {diveDeeper ? (

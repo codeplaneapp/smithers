@@ -82,11 +82,15 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2 — Write the JSONL fixture to disk and report the run command. */}
-        {derive ? (
-          <Task id="write" output={outputs.write} agent={agents.cheapFast} heartbeatTimeoutMs={600_000}>
-            <WritePrompt suite={derive} workflow={ctx.input.workflow} evalsDir={EVALS_DIR} />
-          </Task>
-        ) : null}
+        <Task
+          id="write"
+          output={outputs.write}
+          agent={agents.cheapFast}
+          heartbeatTimeoutMs={600_000}
+          deps={{ derive: outputs.derive }}
+        >
+          {(deps) => <WritePrompt suite={deps.derive} workflow={ctx.input.workflow} evalsDir={EVALS_DIR} />}
+        </Task>
 
         {/* 3 — Surface the terminal result as the run's printed output. */}
         {write ? (

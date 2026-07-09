@@ -165,14 +165,19 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2 — Smart investigator WITH tools: dig until the cause is named. */}
-        {gather ? (
-          <Task id="investigate" output={outputs.investigate} agent={agents.smart} timeoutMs={30 * 60_000}>
-            {`You are the investigator in a post-failure autopsy. Smithers run "${targetRunId}" failed and this autopsy was launched automatically. Find out WHY, classify the failure, and produce ONE concrete suggestion.
+        <Task
+          id="investigate"
+          output={outputs.investigate}
+          agent={agents.smart}
+          timeoutMs={30 * 60_000}
+          deps={{ gather: outputs.gather }}
+        >
+          {(deps) => `You are the investigator in a post-failure autopsy. Smithers run "${targetRunId}" failed and this autopsy was launched automatically. Find out WHY, classify the failure, and produce ONE concrete suggestion.
 
 You have shell access — use it for READ-ONLY digging only: \`bunx smithers-orchestrator inspect ${targetRunId} --format json\`, \`bunx smithers-orchestrator events ${targetRunId}\`, \`bunx smithers-orchestrator output ${targetRunId} <nodeId>\`, reading workflow/prompt source files, checking tool availability (\`which\`, versions), and reading logs. Do NOT mutate anything: no retry, no rewind, no edits, no commits — you only diagnose and recommend.
 
 Pre-gathered evidence (dig deeper yourself where it is thin):
-${JSON.stringify({ state: gather.state, runError: gather.runError, smithersVersion: gather.smithersVersion, lastEvents: gather.lastEvents, workflowPath, workflowSourcePreview: gather.workflowSource.slice(0, 4000) }, null, 2)}
+${JSON.stringify({ state: deps.gather.state, runError: deps.gather.runError, smithersVersion: deps.gather.smithersVersion, lastEvents: deps.gather.lastEvents, workflowPath, workflowSourcePreview: deps.gather.workflowSource.slice(0, 4000) }, null, 2)}
 
 Classify failureClass strictly:
 - "workflow-bug": the workflow script/prompts are at fault (bad schema, wrong deps/needs, a compute task throwing, a prompt asking the impossible).
@@ -191,9 +196,8 @@ Choose suggestion (one):
 
 Put the exact command(s) in \`commands\`, runnable from the failed run's project directory.
 
-If (and only if) failureClass is "smithers-bug", also write \`bugTitle\` (one line) and \`bugBody\` (markdown: what happened, minimal repro or the failing run's shape, expected vs actual, the evidence lines, smithers version "${gather.smithersVersion}"). A human will review these before anything is sent.`}
-          </Task>
-        ) : null}
+If (and only if) failureClass is "smithers-bug", also write \`bugTitle\` (one line) and \`bugBody\` (markdown: what happened, minimal repro or the failing run's shape, expected vs actual, the evidence lines, smithers version "${deps.gather.smithersVersion}"). A human will review these before anything is sent.`}
+        </Task>
 
         {/* 3 — Human gate: only file a smithers bug with explicit approval. */}
         {investigate && isSmithersBug && !bugApproval ? (

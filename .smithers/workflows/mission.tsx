@@ -269,7 +269,6 @@ function renderMilestone(ctx: any, plan: any, milestone: any, milestoneIndex: nu
   const features = milestone.features;
   const integrationId = milestoneIntegrateId(milestoneIndex);
   const validationId = milestoneValidationId(milestoneIndex);
-  const integration = ctx.outputMaybe("milestoneIntegration", { nodeId: integrationId });
   const validation = ctx.outputMaybe("milestoneValidation", { nodeId: validationId });
   const needsFollowUp = Boolean(validation && validation.passed === false);
 
@@ -340,8 +339,8 @@ function renderMilestone(ctx: any, plan: any, milestone: any, milestoneIndex: nu
             id={milestoneRevalidationId(milestoneIndex)}
             output={outputs.milestoneValidation}
             agent={agents.smart}
-            needs={{ followUp: milestoneFollowUpId(milestoneIndex) }}
-            deps={{ followUp: outputs.missionFeature }}
+            needs={{ followUp: milestoneFollowUpId(milestoneIndex), integration: integrationId }}
+            deps={{ followUp: outputs.missionFeature, integration: outputs.milestoneIntegration }}
             timeoutMs={1_800_000}
             heartbeatTimeoutMs={900_000}
             memory={{ remember: { namespace: missionMemory, key: milestoneRevalidationId(milestoneIndex) } }}
@@ -350,7 +349,7 @@ function renderMilestone(ctx: any, plan: any, milestone: any, milestoneIndex: nu
               <MissionValidatePrompt
                 missionGoal={plan.goal || ctx.input.prompt}
                 milestone={milestone}
-                integration={integration}
+                integration={deps.integration}
                 followUp={deps.followUp}
               />
             )}
