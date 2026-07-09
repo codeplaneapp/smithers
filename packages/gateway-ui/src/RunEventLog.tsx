@@ -44,10 +44,11 @@ export function RunEventLog({
 }: RunEventLogProps) {
   const { events, error, streaming } = useGatewayRunEvents(runId, { afterSeq: 0, maxEvents });
   const endRef = useRef<HTMLDivElement | null>(null);
+  const latestSeq = events[events.length - 1]?.seq;
 
   useEffect(() => {
     if (follow) endRef.current?.scrollIntoView({ block: "end" });
-  }, [events.length, follow]);
+  }, [latestSeq, follow]);
 
   return (
     <div

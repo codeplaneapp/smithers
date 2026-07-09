@@ -35,6 +35,8 @@ export type InMemoryGateway = {
   };
   launches: Array<{ workflow: string; input: unknown }>;
   approvalsSubmitted: Array<Record<string, unknown>>;
+  /** Append rows to a run's event log after mount and notify SSE subscribers. */
+  pushEvents(runId: string, rows: Array<Record<string, unknown>>): void;
   close(): Promise<void>;
 };
 
@@ -182,6 +184,10 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     state,
     launches: [],
     approvalsSubmitted: [],
+    pushEvents(runId, rows) {
+      state.events[runId] = [...(state.events[runId] ?? []), ...rows];
+      broadcast(["events"]);
+    },
     async close() {
       for (const controller of controllers) {
         try {
