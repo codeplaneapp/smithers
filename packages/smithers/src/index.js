@@ -98,6 +98,7 @@
 /** @typedef {import("@smithers-orchestrator/components").OutputTarget} OutputTarget */
 /** @typedef {import("@smithers-orchestrator/agents").PiAgentOptions} PiAgentOptions */
 /** @typedef {import("@smithers-orchestrator/agents").OmpAgentOptions} OmpAgentOptions */
+/** @typedef {import("@smithers-orchestrator/agents").CursorAgentOptions} CursorAgentOptions */
 /** @typedef {import("@smithers-orchestrator/agents").PiExtensionUiRequest} PiExtensionUiRequest */
 /** @typedef {import("@smithers-orchestrator/agents").PiExtensionUiResponse} PiExtensionUiResponse */
 /** @typedef {import("@smithers-orchestrator/agents").OpenCodeAgentOptions} OpenCodeAgentOptions */
@@ -315,7 +316,7 @@ export {
   AmpAgent,
   AntigravityAgent,
   ClaudeCodeAgent,
-  CodexAgent,
+  CodexAgent, CursorAgent,
   GeminiAgent,
   PiAgent,
   OmpAgent,
