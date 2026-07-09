@@ -21,6 +21,7 @@
 /** @typedef {import("./HermesCliAgentOptions.ts").HermesCliAgentOptions} HermesCliAgentOptions */
 /** @typedef {import("./OpenClawAgentOptions.ts").OpenClawAgentOptions} OpenClawAgentOptions */
 /** @typedef {import("./PiAgentOptions.ts").PiAgentOptions} PiAgentOptions */
+/** @typedef {import("./CursorAgentOptions.ts").CursorAgentOptions} CursorAgentOptions */
 /** @typedef {import("./BaseCliAgent/PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
 /** @typedef {import("./BaseCliAgent/PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
 /** @typedef {import("./OpenCodeAgentOptions.ts").OpenCodeAgentOptions} OpenCodeAgentOptions */
@@ -70,6 +71,7 @@ export { AmpAgent } from "./AmpAgent.js";
 export { AntigravityAgent } from "./AntigravityAgent.js";
 export { ClaudeCodeAgent } from "./ClaudeCodeAgent.js";
 export { CodexAgent } from "./CodexAgent.js";
+export { CursorAgent } from "./CursorAgent.js";
 export { GeminiAgent } from "./GeminiAgent.js";
 export { PiAgent } from "./PiAgent.js";
 export { OmpAgent, createOmpCapabilityRegistry } from "./OmpAgent.js";

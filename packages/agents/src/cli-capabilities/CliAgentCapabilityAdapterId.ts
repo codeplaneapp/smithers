@@ -3,6 +3,7 @@ export type CliAgentCapabilityAdapterId =
   | "amp"
   | "antigravity"
   | "codex"
+  | "cursor"
   | "forge"
   | "hermes"
   | "kimi"

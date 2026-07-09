@@ -3,6 +3,7 @@ import { createAmpCapabilityRegistry } from "../AmpAgent.js";
 import { createAntigravityCapabilityRegistry } from "../AntigravityAgent.js";
 import { createClaudeCodeCapabilityRegistry } from "../ClaudeCodeAgent.js";
 import { createCodexCapabilityRegistry } from "../CodexAgent.js";
+import { createCursorCapabilityRegistry } from "../CursorAgent.js";
 import { createForgeCapabilityRegistry } from "../ForgeAgent.js";
 import { createHermesCliCapabilityRegistry } from "../HermesCliAgent.js";
 import { createKimiCapabilityRegistry } from "../KimiAgent.js";
@@ -31,6 +32,11 @@ const CLI_AGENT_CAPABILITY_ADAPTERS = [
     binary: "codex",
     buildRegistry: () => createCodexCapabilityRegistry(),
   },
+    {
+        id: "cursor",
+        binary: "cursor-agent",
+        buildRegistry: () => createCursorCapabilityRegistry(),
+    },
   {
     id: "antigravity",
     binary: "agy",

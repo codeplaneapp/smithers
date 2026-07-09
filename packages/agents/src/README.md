@@ -7,8 +7,8 @@ Agent adapters for Smithers. Two families:
   `streamResultToGenerateResult.js`).
 - **CLI agents** extending `BaseCliAgent`: `ClaudeCodeAgent`, `CodexAgent`,
   `KimiAgent`, `PiAgent`, `OpenCodeAgent`, `AmpAgent`, `AntigravityAgent`,
-  `ForgeAgent`, `HermesCliAgent`, `OpenClawAgent`, `VibeAgent`. `GeminiAgent`
-  is sunset and only surfaces `GEMINI_SUNSET_MESSAGE`.
+  `ForgeAgent`, `HermesCliAgent`, `OpenClawAgent`, `VibeAgent`, `CursorAgent`.
+  `GeminiAgent` is sunset and only surfaces `GEMINI_SUNSET_MESSAGE`.
 
 Support directories: `BaseCliAgent/` (shared CLI lifecycle), `agent-contract/`,
 `capability-registry/`, `cli-capabilities/`, `cli-surface/`, `diagnostics/`,
