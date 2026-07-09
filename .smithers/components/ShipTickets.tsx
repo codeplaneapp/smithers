@@ -36,9 +36,12 @@ export type ShipTicketsAgents = {
   smart: AgentLike[];
   smartTool: AgentLike[];
   cheapFast: AgentLike[];
-  /** Codex-led implementation tier (the middle of the fable sandwich). */
+  research: AgentLike[];
+  planning: AgentLike[];
+  midTier: AgentLike[];
+  /** Codex Luna implementation tier. */
   implement: AgentLike[];
-  /** Fable-led review tier (the bread of the fable sandwich). */
+  /** Codex Sol review tier. */
   review: AgentLike[];
 };
 
@@ -160,18 +163,18 @@ function renderTicket(
     <Sequence key={slug}>
       <Worktree path={`.worktrees/ship-${slug}`} branch={`ship/${slug}`} baseBranch={baseBranch}>
         <Sequence>
-          <Task id={`${slug}:research`} output={researchOutputSchema} agent={agents.smartTool}>
+          <Task id={`${slug}:research`} output={researchOutputSchema} agent={agents.research}>
             <ResearchPrompt prompt={base} />
           </Task>
-          <Task id={`${slug}:plan`} output={planOutputSchema} agent={agents.smart}>
+          <Task id={`${slug}:plan`} output={planOutputSchema} agent={agents.planning}>
             <PlanPrompt prompt={planPrompt} />
           </Task>
           <ValidationLoop
             idPrefix={slug}
             prompt={implementPrompt}
             implementAgents={agents.implement}
-            validateAgents={agents.cheapFast}
-            reviewAgents={agents.review}
+            validateAgents={agents.midTier}
+            reviewAgents={[agents.review]}
             feedback={feedback}
             done={done}
             maxIterations={3}
@@ -180,7 +183,7 @@ function renderTicket(
       </Worktree>
 
       {/* Outside the worktree: commit the branch and merge it into the base branch. */}
-      <Task id={`${slug}:merge`} output={shipResultSchema} agent={agents.smart} continueOnFail>
+      <Task id={`${slug}:merge`} output={shipResultSchema} agent={agents.implement} continueOnFail>
         {mergePrompt(slug, ticket.id, baseBranch)}
       </Task>
     </Sequence>

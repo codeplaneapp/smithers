@@ -5,11 +5,11 @@
 import { Database } from "bun:sqlite";
 import { createSmithers, approvalDecisionSchema } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { agents, providers } from "../agents";
+import { agents } from "../agents";
 
-// All release content is written by Claude Code running claude-fable-5 —
-// no failover to other providers for content-authoring steps.
-const contentAgent = providers.claude;
+// Luna writes and researches release content; Sol scores it; Terra handles the
+// routine commit step. Generated agent pools retain non-Codex fallback only.
+const contentAgent = agents.implement;
 import AnalyzeReleasePrompt from "../prompts/release-content/analyze-release.mdx";
 import DraftBlogPrompt from "../prompts/release-content/draft-blog.mdx";
 import DraftBlogOutlinePrompt from "../prompts/release-content/draft-blog-outline.mdx";
@@ -238,7 +238,7 @@ export default smithers((rawCtx) => {
           <Task
             id="analyze-release"
             output={outputs.releaseAnalysis}
-            agent={input.skip.analyze ? undefined : contentAgent}
+            agent={input.skip.analyze ? undefined : agents.research}
             heartbeatTimeoutMs={900_000}
           >
             {input.skip.analyze
@@ -401,7 +401,7 @@ export default smithers((rawCtx) => {
               <Task
                 id="score-content"
                 output={outputs.scoreReport}
-                agent={contentAgent}
+                agent={agents.review}
                 skipIf={input.skip.scoring}
                 needs={{ edited: "edit-content", deterministicCheck: "claim-check" }}
                 deps={{ edited: outputs.editedContent, deterministicCheck: outputs.deterministicCheck }}
@@ -559,7 +559,7 @@ export default smithers((rawCtx) => {
           <Task
             id="commit-release-content"
             output={outputs.commitResult}
-            agent={agents.cheapFast}
+            agent={agents.midTier}
             skipIf={input.skip.autoCommit}
             heartbeatTimeoutMs={300_000}
           >

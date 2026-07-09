@@ -168,7 +168,7 @@ export default smithers((ctx) => {
         <Task
           id="investigate"
           output={outputs.investigate}
-          agent={agents.smart}
+          agent={agents.research}
           timeoutMs={30 * 60_000}
           deps={{ gather: outputs.gather }}
         >

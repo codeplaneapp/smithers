@@ -1,7 +1,7 @@
 /**
- * Guards the hand-embedded seeded components in workflow-pack.js against drift
- * from their canonical `.smithers/components/*` sources. `smithers init` ships
- * these files from the embedded strings (they are NOT in the generated pack), so
+ * Guards the hand-embedded seeded components and agent scaffolds in
+ * workflow-pack.js against drift from their canonical `.smithers/*` sources.
+ * `smithers init` ships these files from embedded strings (they are NOT in the generated pack), so
  * a stale embed silently installs an outdated component — e.g. roles.ts once
  * shipped a pre-Fable, Gemini-first registry while the canonical file had moved
  * to Codex-first + Fable panels + a polishReviewer.
@@ -10,15 +10,17 @@
  * actually-installed files, not the source constants in isolation.
  */
 import { expect, onTestFinished, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createExecutableDir, writeFakeCodexBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { initWorkflowPack } from "../src/workflow-pack.js";
+import { codexFirst } from "../../../.smithers/lib/codexAccounts.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..", "..");
+const PACK_DRIFT_TIMEOUT_MS = 30_000;
 
 // Every component workflow-pack.js embeds by hand and ships via `smithers init`.
 const EMBEDDED_COMPONENTS = [
@@ -30,6 +32,13 @@ const EMBEDDED_COMPONENTS = [
   "GrillMe.tsx",
   "ForEachFeature.tsx",
   "FeatureEnum.tsx",
+];
+
+const EMBEDDED_AGENT_SCAFFOLDS = [
+  "claude-code.ts",
+  "codex.ts",
+  "opencode.ts",
+  "antigravity.ts",
 ];
 
 function seededAgentEnv() {
@@ -45,7 +54,7 @@ function seededAgentEnv() {
   };
 }
 
-test("embedded seeded components match their canonical .smithers/components sources", () => {
+test("embedded seeded components and agents match their canonical .smithers sources", () => {
   const tmpDir = mkdtempSync(join(tmpdir(), "smithers-comp-drift-"));
   onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
   initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true, env: seededAgentEnv() });
@@ -55,6 +64,37 @@ test("embedded seeded components match their canonical .smithers/components sour
     const canonical = readFileSync(join(REPO_ROOT, ".smithers", "components", name), "utf8");
     expect(installed, `${name} embed drifted from .smithers/components/${name}`).toBe(canonical);
   }
+
+  for (const name of EMBEDDED_AGENT_SCAFFOLDS) {
+    const installed = readFileSync(join(tmpDir, ".smithers", "agents", name), "utf8");
+    const canonical = readFileSync(join(REPO_ROOT, ".smithers", "agents", name), "utf8");
+    expect(installed, `${name} embed drifted from .smithers/agents/${name}`).toBe(canonical);
+    expect(installed, `${name} pins the launch cwd and overrides <Worktree>`).not.toContain("cwd: process.cwd()");
+  }
+}, PACK_DRIFT_TIMEOUT_MS);
+
+test("shared Codex helper exhausts registered Codex accounts before fallback providers", () => {
+  const root = mkdtempSync(join(tmpdir(), "smithers-codex-helper-"));
+  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, "accounts.json"), JSON.stringify({
+    version: 1,
+    accounts: [
+      { label: "codex-a", provider: "codex", configDir: "/accounts/codex-a" },
+      { label: "openai-b", provider: "openai-api", apiKey: "sk-openai-b" },
+    ],
+  }));
+  const fallback = { generate: async () => ({ text: "fallback" }) };
+  const chain = codexFirst(
+    { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } },
+    [fallback],
+    { SMITHERS_HOME: root },
+  );
+  expect(chain).toHaveLength(4);
+  expect(chain.slice(0, 3).map((agent) => agent.cliEngine)).toEqual(["codex", "codex", "codex"]);
+  expect(chain[1].opts.configDir).toBe("/accounts/codex-a");
+  expect(chain[2].opts.apiKey).toBe("sk-openai-b");
+  expect(chain[3]).toBe(fallback);
 });
 
 // Guards the class of bug where a seeded workflow imports a local `../lib/*`,
@@ -92,4 +132,4 @@ test("seeded workflows' local imports all resolve to installed files", () => {
       );
     }
   }
-});
+}, PACK_DRIFT_TIMEOUT_MS);

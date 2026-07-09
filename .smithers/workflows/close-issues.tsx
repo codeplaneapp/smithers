@@ -2,10 +2,11 @@
 // smithers-source: one-off — fix + review + land every open GitHub issue not opened by roninjin10.
 /** @jsxImportSource smithers-orchestrator */
 import { UI } from "smithers-orchestrator";
-import { CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const REPO = "smithersai/smithers";
@@ -100,16 +101,22 @@ const { Workflow, Task, Sequence, Parallel, Loop, Approval, Worktree, MergeQueue
 });
 
 // ── Agents ───────────────────────────────────────────────────────────────────
-// One Codex (OpenAI gpt-5.x) agent, used for both implementation and review.
-// danger-full-access + bypass so it can read/edit/run inside the isolated worktree.
-// NOTE: Codex here is on a ChatGPT subscription (auth_mode=chatgpt), which rejects
-// "-codex" model suffixes (e.g. gpt-5.3-codex). Use a plain ChatGPT model id.
-const codex = new CodexAgent({
-  model: process.env.SMITHERS_CLOSE_ISSUES_CODEX_MODEL?.trim() || "gpt-5.5",
+// Codex 5.6 role split: Luna implements; Sol independently reviews. The legacy
+// single-model override still applies to both seats for backwards compatibility.
+const legacyCodexModel = process.env.SMITHERS_CLOSE_ISSUES_CODEX_MODEL?.trim();
+const implementer = codexFirst({
+  model: process.env.SMITHERS_CLOSE_ISSUES_IMPLEMENT_MODEL?.trim() || legacyCodexModel || "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   sandbox: "danger-full-access",
   dangerouslyBypassApprovalsAndSandbox: true,
   skipGitRepoCheck: true,
-});
+}, [new ClaudeCodeAgent({ model: "claude-sonnet-5" })]);
+const reviewer = codexFirst({
+  model: process.env.SMITHERS_CLOSE_ISSUES_REVIEW_MODEL?.trim() || legacyCodexModel || "gpt-5.6-sol",
+  sandbox: "danger-full-access",
+  dangerouslyBypassApprovalsAndSandbox: true,
+  skipGitRepoCheck: true,
+}, [new ClaudeCodeAgent({ model: "claude-opus-4-8" })]);
 
 const AGENT_RETRIES = 2;
 const IMPLEMENT_TIMEOUT_MS = 45 * 60_000;
@@ -354,7 +361,7 @@ export default smithers((ctx) => {
                         <Task
                           id={`issue-${n}-implement`}
                           output={outputs.implementation}
-                          agent={codex}
+                          agent={implementer}
                           retries={AGENT_RETRIES}
                           timeoutMs={IMPLEMENT_TIMEOUT_MS}
                           heartbeatTimeoutMs={HEARTBEAT_MS}
@@ -364,7 +371,7 @@ export default smithers((ctx) => {
                         <Task
                           id={`issue-${n}-review`}
                           output={outputs.review}
-                          agent={codex}
+                          agent={reviewer}
                           retries={AGENT_RETRIES}
                           timeoutMs={REVIEW_TIMEOUT_MS}
                           heartbeatTimeoutMs={HEARTBEAT_MS}

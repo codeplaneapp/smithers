@@ -30,6 +30,39 @@ function uncommented(source) {
         .join("\n");
 }
 
+const CODEX_DEFAULT_TIERS = {
+    cheapFast: "Luna",
+    research: "Luna",
+    implement: "Luna",
+    midTier: "Terra",
+    smartTool: "Terra",
+    validate: "Terra",
+    smart: "Sol",
+    review: "Sol",
+    planning: "Sol",
+    orchestrator: "Sol",
+};
+
+function activePoolProviders(source, pool) {
+    const match = uncommented(source).match(new RegExp(`(?:^|\\n)  ${pool}: \\[([\\s\\S]*?)\\n  \\],`));
+    expect(match, `missing generated ${pool} pool`).toBeTruthy();
+    return [...match[1].matchAll(/providers\.([A-Za-z_$][\w$]*)/g)].map((entry) => entry[1]);
+}
+
+function expectCodexFirstDefaultTiers(source, providerPrefix = "codex") {
+    for (const [tier, modelTier] of Object.entries(CODEX_DEFAULT_TIERS)) {
+        expect(activePoolProviders(source, tier)[0], `${tier} must start with Codex`).toBe(
+            `${providerPrefix}${modelTier}`,
+        );
+    }
+}
+
+function expectSingleProviderFallback(source, providerId) {
+    for (const tier of Object.keys(CODEX_DEFAULT_TIERS)) {
+        expect(activePoolProviders(source, tier), `${tier} should use the available fallback`).toEqual([providerId]);
+    }
+}
+
 test("smithers init prefers Claude when only a Claude CLI signal is available", () => {
     const repo = createTempRepo();
     const binDir = createExecutableDir();
@@ -43,14 +76,20 @@ test("smithers init prefers Claude when only a Claude CLI signal is available", 
     expect(result.exitCode).toBe(0);
     const agentsSource = repo.read(".smithers/agents.ts");
     expect(agentsSource).toContain('export { ClaudeCodeAgent } from "./agents/claude-code";');
-    expect(agentsSource).toContain("claude: ClaudeCodeAgent");
+    expect(agentsSource).toContain("claude: new SmithersClaudeCodeAgent(");
     expect(agentsSource).toMatch(/cheapFast:\s*\[\s*providers\.claudeSonnet,/);
     expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,/);
-    expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,/);
+    expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.claudeSonnet,/);
     expect(agentsSource).toMatch(/review:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,/);
+    expect(agentsSource).toMatch(/research:\s*\[\s*providers\.claudeSonnet,/);
+    expect(agentsSource).toMatch(/implement:\s*\[\s*providers\.claudeSonnet,/);
+    expect(agentsSource).toMatch(/midTier:\s*\[\s*providers\.claudeSonnet,/);
+    expect(agentsSource).toMatch(/validate:\s*\[\s*providers\.claudeSonnet,/);
+    expect(agentsSource).toMatch(/planning:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,/);
+    expect(agentsSource).toMatch(/orchestrator:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,/);
     expect(uncommented(agentsSource)).not.toContain("providers.codex");
 });
-test("smithers init includes Codex implementation roles when Codex plus OPENAI_API_KEY are available", () => {
+test("smithers init routes every default tier to its Codex 5.6 model", () => {
     const repo = createTempRepo();
     const binDir = createExecutableDir();
     writeFakeCodexBinary(binDir);
@@ -64,14 +103,63 @@ test("smithers init includes Codex implementation roles when Codex plus OPENAI_A
     expect(result.exitCode).toBe(0);
     const agentsSource = repo.read(".smithers/agents.ts");
     expect(agentsSource).toContain('export { CodexAgent } from "./agents/codex";');
-    expect(agentsSource).toContain("codex: CodexAgent");
-    expect(agentsSource).toMatch(/cheapFast:\s*\[\s*providers\.codex,/);
-    expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.codex,/);
-    expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.codex,/);
-    expect(agentsSource).toMatch(/review:\s*\[\s*providers\.codex,/);
-    expect(agentsSource).toContain("smart: Smithers would normally suggest Claude Code here");
-    expect(agentsSource).toContain("cheapFast: Smithers would normally suggest Kimi here");
+    expect(agentsSource).toContain("codex: new SmithersCodexAgent(");
+    expect(agentsSource).toContain('codexSol: new SmithersCodexAgent({ model: "gpt-5.6-sol"');
+    expect(agentsSource).toContain('codexTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
+    expect(agentsSource).toContain('codexLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
+    expectCodexFirstDefaultTiers(agentsSource);
+    expect(agentsSource).toContain("Codex runs first. Later entries are runtime fallbacks");
 });
+
+test("re-init preserves a customized legacy scaffold while repairing generated Worktree defaults", () => {
+    const repo = createTempRepo();
+    const binDir = createExecutableDir();
+    writeFakeCodexBinary(binDir);
+    const env = buildEnv(repo.dir, binDir, { OPENAI_API_KEY: "sk-test-openai-key" });
+
+    const first = runSmithers(["init", "--agents-only"], {
+        cwd: repo.dir,
+        format: "json",
+        env,
+    });
+    expect(first.exitCode).toBe(0);
+
+    const customizedLegacyScaffold = [
+        'import { CodexAgent as BaseCodexAgent } from "smithers-orchestrator";',
+        "export const CodexAgent = new BaseCodexAgent({",
+        '  model: "gpt-5.4",',
+        "  cwd: process.cwd(),",
+        "});",
+        "// user customization must survive re-init",
+        "",
+    ].join("\n");
+    repo.write(".smithers/agents/codex.ts", customizedLegacyScaffold);
+    repo.write(".smithers/agents.ts", [
+        "// smithers-source: generated",
+        'import { CodexAgent } from "./agents/codex";',
+        "export const providers = {",
+        "  codex: CodexAgent,",
+        "} as const;",
+        "",
+    ].join("\n"));
+
+    const second = runSmithers(["init", "--agents-only"], {
+        cwd: repo.dir,
+        format: "json",
+        env,
+    });
+    expect(second.exitCode).toBe(0);
+    expect(repo.read(".smithers/agents/codex.ts")).toBe(customizedLegacyScaffold);
+
+    const regenerated = repo.read(".smithers/agents.ts");
+    expect(regenerated).toContain("codex: new SmithersCodexAgent(");
+    expect(regenerated).toContain("codexSol: new SmithersCodexAgent(");
+    expect(regenerated).toContain("codexTerra: new SmithersCodexAgent(");
+    expect(regenerated).toContain("codexLuna: new SmithersCodexAgent(");
+    expect(uncommented(regenerated)).not.toContain("codex: CodexAgent");
+    expect(uncommented(regenerated)).not.toContain("cwd: process.cwd()");
+}, 30_000);
+
 test("smithers init uses OpenCode for OpenCode-only credentials", () => {
     const repo = createTempRepo();
     const binDir = createExecutableDir();
@@ -85,11 +173,12 @@ test("smithers init uses OpenCode for OpenCode-only credentials", () => {
     expect(result.exitCode).toBe(0);
     const agentsSource = repo.read(".smithers/agents.ts");
     const active = uncommented(agentsSource);
-    expect(agentsSource).toContain("opencode: OpenCodeAgent");
+    expect(agentsSource).toContain("opencode: new SmithersOpenCodeAgent(");
     expect(active).toMatch(/cheapFast:\s*\[\s*providers\.opencode,/);
     expect(active).toMatch(/smart:\s*\[\s*providers\.opencode,/);
     expect(active).toMatch(/smartTool:\s*\[\s*providers\.opencode,/);
     expect(active).toMatch(/review:\s*\[\s*providers\.opencode,/);
+    expectSingleProviderFallback(agentsSource, "opencode");
     expect(active).not.toContain("openrouter: createOpenRouterAgent()");
 });
 test("smithers init can use OpenClaw as the only workflow agent", () => {
@@ -110,10 +199,11 @@ test("smithers init can use OpenClaw as the only workflow agent", () => {
     expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.openclaw,/);
     expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.openclaw,/);
     expect(agentsSource).toMatch(/review:\s*\[\s*providers\.openclaw,/);
+    expectSingleProviderFallback(agentsSource, "openclaw");
     expect(uncommented(agentsSource)).not.toContain("providers.claude");
     expect(uncommented(agentsSource)).not.toContain("providers.codex");
 });
-test("smithers init orders role chains correctly when multiple local agent CLIs are available", () => {
+test("smithers init keeps Codex first and other local CLIs as runtime fallbacks", () => {
     const repo = createTempRepo();
     const binDir = createExecutableDir();
     writeFakeClaudeBinary(binDir);
@@ -133,11 +223,56 @@ test("smithers init orders role chains correctly when multiple local agent CLIs 
     });
     expect(result.exitCode).toBe(0);
     const agentsSource = repo.read(".smithers/agents.ts");
-    expect(agentsSource).toMatch(/cheapFast:\s*\[\s*providers\.claudeSonnet,\s*providers\.antigravity,/);
-    expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,\s*providers\.codex,/);
-    expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,\s*providers\.codex,/);
-    expect(agentsSource).toMatch(/review:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,\s*providers\.claudeSonnet,/);
-    expect(uncommented(agentsSource)).not.toContain("providers.gemini");
+    expectCodexFirstDefaultTiers(agentsSource);
+    expect(activePoolProviders(agentsSource, "implement").slice(1)).toEqual([
+        "claudeSonnet",
+        "antigravity",
+        "claude",
+    ]);
+    expect(activePoolProviders(agentsSource, "review").slice(1)).toEqual([
+        "claude",
+        "claudeOpus",
+        "claudeSonnet",
+    ]);
+});
+
+test("smithers init creates role-specific Sol, Terra, and Luna variants for a Codex account", () => {
+    const repo = createTempRepo();
+    const binDir = createExecutableDir();
+    repo.write(".smithers/accounts.json", JSON.stringify({
+        version: 1,
+        accounts: [
+            {
+                label: "codex-work",
+                provider: "codex",
+                configDir: join(repo.dir, ".smithers", "accounts", "codex-work"),
+                model: "gpt-5.4",
+                addedAt: "2026-07-09T00:00:00.000Z",
+            },
+            {
+                label: "claude-backup",
+                provider: "claude-code",
+                configDir: join(repo.dir, ".smithers", "accounts", "claude-backup"),
+                addedAt: "2026-07-09T00:00:00.000Z",
+            },
+        ],
+    }) + "\n");
+
+    const result = runSmithers(["init"], {
+        cwd: repo.dir,
+        format: "json",
+        env: buildEnv(repo.dir, binDir),
+    });
+    expect(result.exitCode).toBe(0);
+    const agentsSource = repo.read(".smithers/agents.ts");
+    expect(agentsSource).toContain('codexWork: new SmithersCodexAgent({ model: "gpt-5.4"');
+    expect(agentsSource).toContain('codexWorkSol: new SmithersCodexAgent({ model: "gpt-5.6-sol"');
+    expect(agentsSource).toContain('codexWorkTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
+    expect(agentsSource).toContain('codexWorkLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
+    expectCodexFirstDefaultTiers(agentsSource, "codexWork");
+    for (const tier of Object.keys(CODEX_DEFAULT_TIERS)) {
+        expect(activePoolProviders(agentsSource, tier)).toContain("claudeBackup");
+    }
 });
 test("smithers init emits OpenRouter default when no usable agents are detected", () => {
     const repo = createTempRepo();
@@ -152,11 +287,12 @@ test("smithers init emits OpenRouter default when no usable agents are detected"
     const active = uncommented(agentsSource);
     expect(agentsSource).toContain("openrouter: createOpenRouterAgent()");
     expect(agentsSource).toContain("OPENROUTER_API_KEY is not set");
-    expect(agentsSource).toContain("//   claude: ClaudeCodeAgent,");
-    expect(agentsSource).toContain("//   codex: CodexAgent,");
+    expect(agentsSource).toContain("//   claude: new SmithersClaudeCodeAgent(");
+    expect(agentsSource).toContain("//   codex: new SmithersCodexAgent(");
     expect(active).toContain("smart: [\n    providers.openrouter,");
     expect(active).toContain("smartTool: [\n    providers.openrouter,");
     expect(active).toContain("review: [\n    providers.openrouter,");
+    expectSingleProviderFallback(agentsSource, "openrouter");
 });
 
 test("smithers init comments out a CLI that is present but not authenticated", () => {
@@ -170,7 +306,7 @@ test("smithers init comments out a CLI that is present but not authenticated", (
     });
     expect(result.exitCode).toBe(0);
     const agentsSource = repo.read(".smithers/agents.ts");
-    expect(agentsSource).toContain("//   codex: CodexAgent,");
+    expect(agentsSource).toContain("//   codex: new SmithersCodexAgent(");
     expect(agentsSource).toContain("missing credentials");
     expect(agentsSource).toContain("OPENAI_API_KEY");
     expect(uncommented(agentsSource)).not.toContain("providers.codex");
@@ -187,8 +323,8 @@ test("smithers init comments out OpenCode CLI when it is present but not authent
     });
     expect(result.exitCode).toBe(0);
     const agentsSource = repo.read(".smithers/agents.ts");
-    expect(agentsSource).toContain("//   opencode: OpenCodeAgent,");
-    expect(agentsSource).toContain("// import { OpenCodeAgent } from \"./agents/opencode\";");
+    expect(agentsSource).toContain("//   opencode: new SmithersOpenCodeAgent(");
+    expect(agentsSource).toContain("// import { OpenCodeAgent as SmithersOpenCodeAgent } from \"smithers-orchestrator\";");
     expect(agentsSource).toContain("// export { OpenCodeAgent } from \"./agents/opencode\";");
     expect(uncommented(agentsSource)).not.toContain("providers.opencode");
 });
@@ -211,7 +347,7 @@ test("smithers init ignores old Gemini CLI credentials", () => {
     });
     expect(trusted.exitCode).toBe(0);
     const agentsSource = repo.read(".smithers/agents.ts");
-    expect(agentsSource).toContain("//   antigravity: AntigravityAgent,");
+    expect(agentsSource).toContain("//   antigravity: new SmithersAntigravityAgent(),");
     expect(agentsSource).toContain("Antigravity");
     expect(agentsSource).not.toContain("Gemini");
 });
@@ -278,7 +414,7 @@ test("smithers init survives a legacy unknown provider account (regression)", ()
     });
     expect(result.exitCode).toBe(0);
     const agentsSource = repo.read(".smithers/agents.ts");
-    expect(agentsSource).toContain("claude: ClaudeCodeAgent");
+    expect(agentsSource).toContain("claude: new SmithersClaudeCodeAgent(");
     // The legacy account must not leak into the generated providers map.
     expect(agentsSource).not.toContain("Smithersundefined");
     expect(agentsSource).not.toContain("my-gemini");

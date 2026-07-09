@@ -1,29 +1,26 @@
 // smithers-source: user
 // smithers-display-name: Plan → Implement → Review (PR per issue)
-// smithers-description: Discover every unresolved GitHub issue (each unchecked checkbox is its own item), group related items, then run a plan(Claude)→implement(Gemini/Codex by difficulty)→review(Claude+Gemini+Codex) loop in an isolated worktree and open ONE PR per group. Every role has rate-limit backup models.
+// smithers-description: Discover every unresolved GitHub issue, then run a Codex Sol plan/review → Luna implement → Terra validate/PR loop in isolated worktrees. Non-Codex providers are failover-only.
 // smithers-tags: coding, github, issues, pr, plan, implement, review, worktree, parallel
 /** @jsxImportSource smithers-orchestrator */
 //
 // What this does
 // --------------
-// 1. discover (Claude): `gh issue list` the open issues, DECOMPOSE each into work
+// 1. discover (Codex Sol): `gh issue list` the open issues, DECOMPOSE each into work
 //    items — every UNCHECKED `- [ ]` checkbox in an issue body is its own item; an
 //    issue with no checkboxes is one item. Checked `- [x]` items are skipped. Items
 //    that already have an open PR are dropped (no duplicate PRs). Each item is rated
 //    easy/hard, then related items are GROUPED (one group = one PR) when they would
 //    conflict (touch the same files) or share useful context.
 // 2. per group, in its own git worktree (branch fix/<slug> off baseBranch):
-//      plan      → Claude (claudeOpus, with codex/gemini backups)
-//      implement → Gemini=antigravity for "easy", Codex for "hard"   (+ backups)
-//      validate  → Claude (runs the gate)                            (+ backups)
-//      review    → Claude + Gemini + Codex in parallel               (each + backups)
+//      plan/review → Codex Sol
+//      implement   → Codex Luna for every difficulty
+//      validate/PR → Codex Terra
 //    looping implement→validate→review until validation passes AND the synthesized review verdict approves
 //    (or reviewIterations is hit).
-// 3. pr (Claude/Sonnet): commit + push the branch and open exactly ONE PR per group,
+// 3. pr (Codex Terra): commit + push the branch and open exactly ONE PR per group,
 //    reusing an existing PR for the branch if present. `Closes #N` for issues fully
 //    resolved by the group; `Relates to #N` for partially-addressed issues.
-//
-// "Gemini" == Google Antigravity harness (`agy`) == providers.antigravity1.
 //
 // Run it
 // ------
@@ -46,35 +43,21 @@
 //  - ctx.input is NOT schema-defaulted at runtime, so every field is defaulted in code.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { createSmithers, Parallel, Sequence, Task, Worktree, type AgentLike } from "smithers-orchestrator";
+import { createSmithers, Parallel, Sequence, Task, Worktree } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { implementer, panelists, synthesizer, validator } from "../components/roles";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
 
 // ----------------------------------------------------------------------------
-// Agent pools. An ARRAY is a failover chain: Smithers tries the first agent and,
-// on a rate-limit / transient failure, falls through to the next. That is the
-// rate-limit "backup model" for each role.
-//   providers.claudeOpus / claudeSonnet = Claude   (planning, validate, PR)
-//   providers.antigravity1              = Gemini (antigravity `agy` harness)
-//   providers.codex / codex1            = Codex
-// (providers.claude == fable-5 is intentionally avoided — no Fable access today.)
+// Shared Codex-first role chains retain legacy providers as fallback-only.
 // ----------------------------------------------------------------------------
-const planChain: AgentLike[] = [providers.claudeOpus, providers.codex, providers.antigravity1, providers.claudeSonnet];
-const geminiImplChain: AgentLike[] = [providers.antigravity1, providers.codex, providers.codex1, providers.claudeOpus]; // easy items
-const codexImplChain: AgentLike[] = [providers.codex, providers.codex1, providers.antigravity1, providers.claudeOpus]; // hard items
-const validateChain: AgentLike[] = [providers.claudeSonnet, providers.codex, providers.antigravity1];
-const prChain: AgentLike[] = [providers.claudeSonnet, providers.claudeOpus, providers.codex];
-
-// Three reviewers (Claude, Gemini, Codex), each itself a failover chain
-// (primary + backups). reviewAgents accepts a chain-per-reviewer (each entry is
-// one panelist whose task runs the chain as failover), so every reviewer keeps
-// its own rate-limit backups.
-const claudeReviewChain: AgentLike[] = [providers.claudeOpus, providers.claudeSonnet, providers.codex];
-const geminiReviewChain: AgentLike[] = [providers.antigravity1, providers.codex1, providers.claudeSonnet];
-const codexReviewChain: AgentLike[] = [providers.codex, providers.codex1, providers.antigravity1];
-const reviewers = [claudeReviewChain, geminiReviewChain, codexReviewChain];
+const planChain = synthesizer;
+const geminiImplChain = implementer; // Legacy difficulty name; Luna implements every item.
+const codexImplChain = implementer;
+const validateChain = validator;
+const prChain = validator;
+const reviewers = panelists;
 
 // ----------------------------------------------------------------------------
 // Schemas
@@ -185,7 +168,7 @@ function buildDiscoverPrompt(opts: {
   if (opts.maxGroups > 0) filters.push(`Return at most ${opts.maxGroups} groups; prioritize the highest-value / most-blocking work first.`);
   const filterText = filters.length ? `\nFilters:\n- ${filters.join("\n- ")}\n` : "";
 
-  return `You are the planning agent (Claude). Build the work plan for opening ONE GitHub PR per unresolved unit of work in the repository ${opts.repo}. Do NOT write any code or open any PRs in this step — only discover, decompose, rate, and group. Return the structured \`groups\` array.
+  return `You are the Codex Sol planning agent. Build the work plan for opening ONE GitHub PR per unresolved unit of work in the repository ${opts.repo}. Do NOT write any code or open any PRs in this step — only discover, decompose, rate, and group. Return the structured \`groups\` array.
 
 Use the shell:
 1. List open issues with bodies:
@@ -200,7 +183,7 @@ Decompose each open issue into work items:
 
 Rate DIFFICULTY for each work item:
 - "hard": touches the core engine / scheduler / db / driver / durability / concurrency, spans multiple packages, is large e2e or test-infrastructure work, or is subtle correctness. Hard items are implemented by Codex.
-- "easy": localized change, single file or package, docs, a focused unit test, a small mechanical fix. Easy items are implemented by Gemini (the antigravity harness).
+- "easy": localized change, single file or package, docs, a focused unit test, a small mechanical fix. Codex Luna implements it.
 
 GROUP work items into PR-sized groups — one group becomes one PR:
 - Group items together ONLY when they are related enough to likely cause merge conflicts (they touch the same files / module) OR when sharing their context materially helps implementation. Otherwise keep each item as its own single-item group.
@@ -212,8 +195,8 @@ Skip anything already complete. Be honest: if you cannot verify an item is still
 }
 
 function buildPlanPrompt(opts: { repo: string; group: Group; difficulty: "easy" | "hard" }): string {
-  const impl = opts.difficulty === "hard" ? "Codex" : "Gemini (antigravity)";
-  return `You are the planning agent (Claude). Produce a concrete, minimal implementation plan for this PR group in ${opts.repo}. Do NOT write code yet — output the structured plan (summary, steps[], filesToTouch[]).
+  const impl = "Codex Luna";
+  return `You are the Codex Sol planning agent. Produce a concrete, minimal implementation plan for this PR group in ${opts.repo}. Do NOT write code yet — output the structured plan (summary, steps[], filesToTouch[]).
 
 Group: ${opts.group.title}
 Difficulty: ${opts.difficulty} → will be implemented by ${impl}.
@@ -322,7 +305,7 @@ function renderGroup(opts: {
             validateAgents={validateChain}
             reviewAgents={reviewers}
             synthesizeReview
-            reviewModerator={providers.codex}
+            reviewModerator={synthesizer}
             feedback={feedback}
             done={done}
             maxIterations={reviewIterations}

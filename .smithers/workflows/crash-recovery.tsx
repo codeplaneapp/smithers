@@ -60,7 +60,7 @@ export default smithers((ctx) => {
       <Parallel>
         {/* Lane A: smithers repo — serialized because both steps share the working tree */}
         <Sequence>
-          <Task id="cli-suggestions-verify" output={outputs.report} agent={agents.smart} timeoutMs={45 * 60_000}>
+          <Task id="cli-suggestions-verify" output={outputs.report} agent={agents.midTier} timeoutMs={45 * 60_000}>
             {`${COMMON}
 
 Lane "cli-suggestions": In /Users/williamcory/smithers a session had finished implementing "every CLI command emits what-to-suggest-next guidance" and died while its apps/cli test suite verification ran.
@@ -70,7 +70,7 @@ Lane "cli-suggestions": In /Users/williamcory/smithers a session had finished im
 Return lane="cli-suggestions".`}
           </Task>
 
-          <Task id="tsync-assess" output={outputs.tsyncPlan} agent={agents.smart} timeoutMs={60 * 60_000}>
+          <Task id="tsync-assess" output={outputs.tsyncPlan} agent={agents.planning} timeoutMs={60 * 60_000}>
             {`${COMMON}
 
 Lane "tsync": In /Users/williamcory/smithers the tsync orchestrator (TanStack sync REST+SSE integration, PR #485, bookmark tsync/integrate) died mid-verification. It had rebuilt its commit chain with \`git reset --hard b174f764b6\` plus an amended feat(sync)! commit and was running pnpm install + the CLI suite as the gate BEFORE a force-push that never happened.
@@ -92,7 +92,7 @@ Lane "tsync": In /Users/williamcory/smithers the tsync orchestrator (TanStack sy
           ) : null}
 
           {tsyncApproval?.approved && tsyncPlan ? (
-            <Task id="tsync-push" output={outputs.report} agent={agents.smart} timeoutMs={20 * 60_000}>
+            <Task id="tsync-push" output={outputs.report} agent={agents.implement} timeoutMs={20 * 60_000}>
               {`${COMMON}
 
 Lane "tsync-push": The human approved publishing the rebuilt tsync branch. cd /Users/williamcory/smithers and execute exactly this plan, verifying each step:
@@ -103,7 +103,7 @@ Then confirm the remote state (gh pr view 485 if applicable). Return lane="tsync
         </Sequence>
 
         {/* Lane B: smithers4 Panel.js fix */}
-        <Task id="panel-fix-commit" output={outputs.report} agent={agents.smart} timeoutMs={45 * 60_000}>
+        <Task id="panel-fix-commit" output={outputs.report} agent={agents.implement} timeoutMs={45 * 60_000}>
           {`${COMMON}
 
 Lane "panel-fix": In /Users/williamcory/smithers4 a workflow agent had fixed a real smithers-core bug — <Panel>/<ReviewPanel> moderators synthesize blind when panelists are gated without deps / string children — in packages/components/src/components/Panel.js plus packages/components/tests/composite-coverage.test.jsx. Tests were green; it died during the final \`bunx tsc --noEmit\`.
@@ -114,7 +114,7 @@ Return lane="panel-fix".`}
         </Task>
 
         {/* Lane C: browser DDD run */}
-        <Task id="browser-ddd-resume" output={outputs.report} agent={agents.smart} timeoutMs={120 * 60_000}>
+        <Task id="browser-ddd-resume" output={outputs.report} agent={agents.implement} timeoutMs={120 * 60_000}>
           {`${COMMON}
 
 Lane "browser-ddd": In /Users/williamcory/browser a smithers DDD run was building an agentic-browser SDK. Wave-3 tickets (sdk-events, sdk-browser-api) plus three fresh Codex ticket workers were killed mid-implementation.
@@ -125,7 +125,7 @@ Return lane="browser-ddd" with the run id and final/current status.`}
         </Task>
 
         {/* Lane D: vercel-example smoke run */}
-        <Task id="vercel-smoke-resume" output={outputs.report} agent={agents.smart} timeoutMs={120 * 60_000}>
+        <Task id="vercel-smoke-resume" output={outputs.report} agent={agents.implement} timeoutMs={120 * 60_000}>
           {`${COMMON}
 
 Lane "vercel-smoke": In /Users/williamcory/vercel-example a fixer agent had relaunched smoke run "smoke-fix-verify-1" (workflow .smithers/workflows/smithering-impl.tsx) with --detach and died while polling it; a just-spawned ticket implementer (walking-skeleton-summary-slice) also died.
@@ -136,7 +136,7 @@ Return lane="vercel-smoke".`}
         </Task>
 
         {/* Lane E: fable-review-smithers detached run */}
-        <Task id="fable-review-check" output={outputs.report} agent={agents.cheapFast} timeoutMs={30 * 60_000}>
+        <Task id="fable-review-check" output={outputs.report} agent={agents.review} timeoutMs={30 * 60_000}>
           {`${COMMON}
 
 Lane "fable-review": A session launched a detached smithers dynamic workflow "fable-review-smithers" (27 reviewer agents over disjoint package scopes) in /Users/williamcory/smithers, then died on a session limit before the crash.
@@ -147,7 +147,7 @@ Return lane="fable-review".`}
 
         {/* Lane F: plue CLI publish decision */}
         <Sequence>
-          <Task id="plue-assess" output={outputs.report} agent={agents.cheapFast} timeoutMs={30 * 60_000}>
+          <Task id="plue-assess" output={outputs.report} agent={agents.planning} timeoutMs={30 * 60_000}>
             {`${COMMON}
 
 Lane "plue-assess": A session had extracted the plue CLI into a standalone repo (in a Claude scratchpad directory under /private/tmp/claude-501/, via an extract-cli-repo.ts script; an \`npm publish --dry-run\` of plue@0.1.0 had already passed in earlier work). It was waiting on the human to decide about making the repo public and publishing before it died.
@@ -170,7 +170,7 @@ Return lane="plue-assess".`}
           ) : null}
 
           {plueApproval?.approved && plueReport?.ok ? (
-            <Task id="plue-publish" output={outputs.report} agent={agents.smart} timeoutMs={30 * 60_000}>
+            <Task id="plue-publish" output={outputs.report} agent={agents.implement} timeoutMs={30 * 60_000}>
               {`${COMMON}
 
 Lane "plue-publish": The human approved publishing the extracted plue CLI. Using the repo located by the previous step (${plueReport.summary}), run \`npm publish\` (and push/make the repo public if a remote is configured). Verify the published package with \`npm view plue\`. Return lane="plue-publish".`}

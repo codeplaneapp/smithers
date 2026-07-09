@@ -4,7 +4,7 @@
 import { UI } from "smithers-orchestrator";
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { implementer } from "../components/roles";
+import { implementer, panelists, synthesizer, validator } from "../components/roles";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
 
@@ -158,7 +158,7 @@ export default smithers((ctx) => {
     <Workflow name="issue-522-components-seven-composite-components-ar">
       <UI entry="../ui/implement.tsx" title={"Issue 522 — composite deps wiring"} />
       <Sequence>
-        <Task id="p522:plan" output={outputs.plan} agent={implementer}>
+        <Task id="p522:plan" output={outputs.plan} agent={synthesizer}>
           {`You are planning a well-scoped, TDD-first fix for issue #522. Read the spec, then read the
 Panel precedent (packages/components/src/components/Panel.js), the deps machinery
 (packages/components/src/components/Task.js resolveDeps/deriveDepNodeIds), the Poller until pattern
@@ -176,9 +176,10 @@ ${spec}`}
             idPrefix="p522:impl"
             prompt={implementPrompt}
             implementAgents={implementer}
-            validateAgents={implementer}
-            reviewAgents={implementer}
+            validateAgents={validator}
+            reviewAgents={panelists}
             synthesizeReview
+            reviewModerator={synthesizer}
             feedback={feedback}
             done={done}
             maxIterations={3}

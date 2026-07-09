@@ -25,7 +25,7 @@ const { Workflow, Task, smithers } = createSmithers({
 export default smithers((ctx) => (
   <Workflow name="ticket-create">
     <UI entry="../ui/ticket-create.tsx" title={"Ticket Create"} />
-    <Task id="ticket" output={ticketCreateOutputSchema} agent={agents.smart}>
+    <Task id="ticket" output={ticketCreateOutputSchema} agent={agents.planning}>
       <TicketPrompt prompt={ctx.input.prompt} />
     </Task>
   </Workflow>

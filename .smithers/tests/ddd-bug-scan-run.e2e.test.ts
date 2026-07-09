@@ -86,19 +86,28 @@ class FixtureAgent implements AgentLike {
   }
 }
 
+const claudeSmartFallback = new FixtureAgent("claude", "claude-fable-5", "fixture-claude");
+const claudeImplementationFallback = new FixtureAgent("claude", "claude-sonnet-5", "fixture-claude-sonnet");
+const sol = [new FixtureAgent("codex", "gpt-5.6-sol", "fixture-codex-sol"), claudeSmartFallback];
+const terra = [new FixtureAgent("codex", "gpt-5.6-terra", "fixture-codex-terra"), claudeImplementationFallback];
+const luna = [new FixtureAgent("codex", "gpt-5.6-luna", "fixture-codex-luna"), claudeImplementationFallback];
+
 export const providers = {
-  claude: new FixtureAgent("claude", "claude-fable-5", "fixture-claude"),
-  claudeSonnet: new FixtureAgent("claude", "claude-sonnet-5", "fixture-claude-sonnet"),
-  codex: new FixtureAgent("codex", "gpt-5.5", "fixture-codex"),
+  sol,
+  terra,
+  luna,
+  claude: sol,
+  claudeSonnet: luna,
+  codex: luna,
 } as const;
 
 export const agents = {
-  cheapFast: [providers.claudeSonnet, providers.codex],
-  smart: [providers.claude, providers.claudeSonnet, providers.codex],
-  smartTool: [providers.claude, providers.claudeSonnet, providers.codex],
-  planning: [providers.claude],
-  review: [providers.claude],
-  implement: [providers.codex],
+  cheapFast: providers.luna,
+  smart: providers.sol,
+  smartTool: providers.terra,
+  planning: providers.sol,
+  review: providers.sol,
+  implement: providers.luna,
 } as const satisfies Record<string, AgentLike[]>;
 `);
   writeFileSync(join(root, ".smithers/agents/index.ts"), 'export { agents, providers } from "../agents.ts";\n');
@@ -174,7 +183,7 @@ async function runBugScan(repo: { root: string; binDir: string }, runId: string,
 }
 
 describe("ddd-bug-scan real workflow run", () => {
-  test("uses the default Claude verifier while the scan prompt preserves the default maxFindings bound", async () => {
+  test("uses Codex Luna to scan and Codex Sol to verify while preserving the default maxFindings bound", async () => {
     const repo = tempRepo();
     const finding = {
       id: "default-bound",
@@ -187,24 +196,22 @@ describe("ddd-bug-scan real workflow run", () => {
     writeFakeCodex(repo.binDir, {
       findings: [finding],
       areasCovered: ["packages/core"],
-      summary: "codex default scan",
-    });
-    writeFakeClaude(repo.binDir, {
       confirmed: [finding],
       rejected: [],
-      summary: "claude verified the default scan",
+      summary: "codex default scan and verification",
     });
+    writeFakeClaude(repo.binDir, { confirmed: [finding], rejected: [], summary: "dormant Claude fallback" });
 
-    const runId = "ddd-bug-scan-default-claude";
+    const runId = "ddd-bug-scan-default-codex";
     const gateway = await runBugScan(repo, runId, {});
     const connection = createConnectionContext();
 
     const scan = await nodeOutput(gateway, connection, runId, "scan");
-    expect(scan.row.summary).toBe("codex default scan");
+    expect(scan.row.summary).toBe("codex default scan and verification");
     expect(scan.row.findings).toHaveLength(1);
 
     const verify = await nodeOutput(gateway, connection, runId, "verify");
-    expect(verify.row.summary).toBe("claude verified the default scan");
+    expect(verify.row.summary).toBe("codex default scan and verification");
     expect(verify.row.confirmed[0]).toMatchObject({ id: "default-bound", featureId: "known-feature" });
 
     const filed = await nodeOutput(gateway, connection, runId, "file-tickets");
@@ -213,18 +220,15 @@ describe("ddd-bug-scan real workflow run", () => {
     const codexCalls = readFileSync(join(repo.root, "codex-calls.jsonl"), "utf8")
       .trim()
       .split(/\r?\n/)
-      .map((line) => JSON.parse(line) as { prompt: string });
-    expect(codexCalls[0]!.prompt).toContain("Report at most 8 findings");
-
-    const claudeCalls = readFileSync(join(repo.root, "claude-calls.jsonl"), "utf8")
-      .trim()
-      .split(/\r?\n/)
       .map((line) => JSON.parse(line) as { args: string[]; prompt: string; payload: { summary?: string } });
-    expect(claudeCalls).toHaveLength(1);
-    expect(claudeCalls[0]!.args).toEqual(expect.arrayContaining(["--model", "claude-fable-5"]));
-    expect(claudeCalls[0]!.prompt).toContain("Adversarially verify each finding below");
-    expect(claudeCalls[0]!.prompt).toContain("default-bound");
-    expect(claudeCalls[0]!.payload.summary).toBe("claude verified the default scan");
+    expect(codexCalls).toHaveLength(2);
+    expect(codexCalls[0]!.args).toEqual(expect.arrayContaining(["--model", "gpt-5.6-luna"]));
+    expect(codexCalls[0]!.prompt).toContain("Report at most 8 findings");
+    expect(codexCalls[1]!.args).toEqual(expect.arrayContaining(["--model", "gpt-5.6-sol"]));
+    expect(codexCalls[1]!.prompt).toContain("Adversarially verify each finding below");
+    expect(codexCalls[1]!.prompt).toContain("default-bound");
+    expect(codexCalls[1]!.payload.summary).toBe("codex default scan and verification");
+    expect(existsSync(join(repo.root, "claude-calls.jsonl"))).toBe(false);
   }, 120_000);
 
   test("scans, verifies, files a ticket, updates features.json, and rebuilds generated docs", async () => {

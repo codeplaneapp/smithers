@@ -116,17 +116,17 @@ export default smithers((ctx) => {
       <Sequence>
         <Parallel>
           {/* 1 — A brand-new HUMAN follows the "Get Started" / Quickstart track. */}
-          <Task id="onboarding-human" output={outputs.area} agent={agents.cheapFast} continueOnFail>
+          <Task id="onboarding-human" output={outputs.area} agent={agents.midTier} continueOnFail>
             <HumanOnboardingPrompt version={CURRENT_VERSION} humanGuide={humanGuide} />
           </Task>
 
           {/* 2 — An AI agent is onboarded via the curated skill ("60 seconds to the aha"). */}
-          <Task id="onboarding-agent" output={outputs.area} agent={agents.cheapFast} continueOnFail>
+          <Task id="onboarding-agent" output={outputs.area} agent={agents.midTier} continueOnFail>
             <AgentOnboardingPrompt version={CURRENT_VERSION} agentSkill={agentSkill} />
           </Task>
 
           {/* 3 — Every user-facing change across the last RELEASE_COUNT releases. */}
-          <Task id="features" output={outputs.area} agent={agents.cheapFast} continueOnFail>
+          <Task id="features" output={outputs.area} agent={agents.midTier} continueOnFail>
             <FeaturesPrompt
               prompt={prompt}
               version={CURRENT_VERSION}
@@ -136,7 +136,7 @@ export default smithers((ctx) => {
           </Task>
 
           {/* 4 — A real workflow UI + gateway root routing, served over HTTP. */}
-          <Task id="workflow-ui" output={outputs.area} agent={agents.cheapFast} continueOnFail>
+          <Task id="workflow-ui" output={outputs.area} agent={agents.midTier} continueOnFail>
             <WorkflowUiPrompt version={CURRENT_VERSION} />
           </Task>
         </Parallel>

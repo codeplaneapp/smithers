@@ -299,7 +299,7 @@ export default smithers((ctx) => {
     <Workflow name="build-tui-monitor">
       <Sequence>
         {/* 1 — Write the buildable spec from the design contract. */}
-        <Task id="design" output={outputs.design} agent={agents.smart}>
+        <Task id="design" output={outputs.design} agent={agents.planning}>
           {`You are designing the single-run Smithers monitor TUI. Write a concise,
 buildable engineering spec to "${specPath}" (create the directory if needed).
 
@@ -355,7 +355,7 @@ summary, the mode ids, and any open questions.`}
               {/* 3a — Foundation: deps, tsconfig, entry + provider stack, app
                   shell, mode router, keymap context, header, and the headless
                   gateway data-layer adapter. No mode screens yet. */}
-              <Task id="scaffold" output={outputs.scaffold} agent={agents.smartTool} heartbeatTimeoutMs={900_000}>
+              <Task id="scaffold" output={outputs.scaffold} agent={agents.implement} heartbeatTimeoutMs={900_000}>
                 {`${MAIN_GUIDANCE}
 
 VERIFY the ${pkg} foundation against the spec at "${specPath}" and fill any gaps.
@@ -402,7 +402,7 @@ per mode is fine for now. Do NOT push. Report files written and the bin command.
                         key={m.id}
                         id={`mode-${m.id}`}
                         output={outputs.mode}
-                        agent={agents.smartTool}
+                        agent={agents.implement}
                         heartbeatTimeoutMs={900_000}
                       >
                         {`${MAIN_GUIDANCE}
@@ -437,7 +437,7 @@ Report { mode: "${m.id}", summary, files }.`}
 
               {/* 3c — Ship it: replace `up --interactive` with the monitor. */}
               {allModesBuilt ? (
-                <Task id="wire-cli" output={outputs.wiring} agent={agents.smartTool} heartbeatTimeoutMs={600_000}>
+                <Task id="wire-cli" output={outputs.wiring} agent={agents.implement} heartbeatTimeoutMs={600_000}>
                   {`${MAIN_GUIDANCE}
 
 Wire the monitor into the CLI so it SHIPS. In apps/cli, make
@@ -474,7 +474,7 @@ Report a summary and the files changed.`}
                       }}
                     </Task>
                     {(ctx.latest("verify", "verify-check") as { passed?: boolean } | undefined)?.passed === false ? (
-                      <Task id="verify-fix" output={outputs.mode} agent={agents.smartTool} heartbeatTimeoutMs={900_000}>
+                      <Task id="verify-fix" output={outputs.mode} agent={agents.implement} heartbeatTimeoutMs={900_000}>
                         {`${MAIN_GUIDANCE}
 
 The ${pkg} gate (\`bun run typecheck && bun test\`) is RED.
@@ -494,7 +494,7 @@ Report { mode: "verify-fix", summary, files }.`}
 
               {/* 3e — Document for the next agent once the gate is green. */}
               {verifyPassed ? (
-                <Task id="document" output={outputs.document} agent={agents.smart} heartbeatTimeoutMs={600_000}>
+                <Task id="document" output={outputs.document} agent={agents.implement} heartbeatTimeoutMs={600_000}>
                   {`The monitor TUI is built and the gate is green. Document it for
 the next agent/user: a short README in ${pkg}, and update the relevant CLI docs
 to describe that \`smithers up --interactive\` now opens the full-screen monitor

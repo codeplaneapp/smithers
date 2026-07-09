@@ -175,8 +175,9 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   openRegister: () =>
     set({
       registering: true,
-      // Preselect the first subscription provider so the drawer renders a field.
-      draftProviderId: "claude-code",
+      // Preselect the Codex subscription provider, matching the catalog and
+      // generated-workflow default.
+      draftProviderId: "codex",
       draftLabel: "",
       draftConfigDir: "",
       draftApiKey: "",

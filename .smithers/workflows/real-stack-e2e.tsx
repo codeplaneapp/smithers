@@ -13,16 +13,16 @@
  *   - the real Cloudflare Worker code for /api/chat with a REAL LLM upstream:
  *     Cerebras when CEREBRAS_API_KEY is set, else Gemini Flash through
  *     Gemini's OpenAI-compatible endpoint (GEMINI_API_KEY)
- *   - real gateway workflow runs that make REAL Claude LLM calls through the
- *     host claude CLI (already authenticated on this machine)
+ *   - real gateway workflow runs that make REAL Codex 5.6 Luna calls through
+ *     the host Codex CLI, with Claude retained only as a no-Codex fallback
  *
- * Agent roles (per operator instruction): Claude Fable plans and reviews;
- * Codex (ChatGPT auth, model gpt-5.5) implements, with Claude fallback.
+ * Agent roles: Codex Sol plans/reviews and Codex Luna implements, with Claude
+ * retained only as no-Codex fallback. Provider probes remain real compatibility checks.
  *
  * Phases:
- *   1. Preflight loop — compute probes for docker / plue / claude CLI + auth
- *      (real one-line completion on the fable model) / chat upstream (real
- *      completion against Cerebras or Gemini) / codex auth. Anything missing
+ *   1. Preflight loop — compute probes for docker / plue / Codex CLI + auth
+ *      (real one-line Luna completion), the Claude fallback only when Codex
+ *      cannot run, and the real Cerebras/Gemini chat upstream. Anything missing
  *      mounts a HumanTask that blocks the run; answers persist to
  *      apps/smithers/.env.e2e.local (gitignored) and the probe re-runs.
  *   2. Tickets — ten subgoals, each defined as "this command exits 0 against
@@ -35,10 +35,10 @@
  *      implementer (already-landed tickets skim through). Implement (Codex)
  *      mounts only when the artifact is missing or a gate produced feedback.
  *      Loop until verify+audit+review all pass, max 6, fail loudly.
- *   4. Ralph quality loop — after the basics are green: plan (Fable) picks
+ *   4. Ralph quality loop — after the basics are green: plan (Codex Sol) picks
  *      1-3 high-value items (code quality, missing unit tests, missing e2e
  *      coverage), implement (Codex), verify (FULL gate: typecheck + unit +
- *      real suite), audit, review (Fable), push per green iteration. Repeats
+ *      real suite), audit, review (Codex Sol), push per green iteration. Repeats
  *      until the planner declares done or 12 iterations.
  *   5. Finalize — re-record every spec into the feature-gif slideshow
  *      (artifacts/feature-gifs/index.html), push any remainder, then write an
@@ -46,7 +46,6 @@
  */
 import {
   ClaudeCodeAgent,
-  CodexAgent,
   createSmithers,
   HumanTask,
   Loop,
@@ -56,6 +55,7 @@ import { z } from "zod/v4";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { codexFirst, registeredCodexCredentials } from "../lib/codexAccounts";
 
 // ---------------------------------------------------------------------------
 // Paths & helpers (resolved from this file so cwd does not matter)
@@ -71,7 +71,9 @@ const GEMINI_OPENAI_BASE = "https://generativelanguage.googleapis.com/v1beta/ope
 // Verified live against the OpenAI-compatible endpoint's /models list
 // (gemini-flash-latest is NOT served there).
 const GEMINI_FLASH_MODEL = process.env.SMITHERS_E2E_CHAT_MODEL ?? "gemini-2.5-flash";
-const CODEX_MODEL = process.env.SMITHERS_E2E_CODEX_MODEL ?? "gpt-5.5";
+const LEGACY_CODEX_MODEL = process.env.SMITHERS_E2E_CODEX_MODEL;
+const SOL_MODEL = process.env.SMITHERS_E2E_SOL_MODEL ?? LEGACY_CODEX_MODEL ?? "gpt-5.6-sol";
+const LUNA_MODEL = process.env.SMITHERS_E2E_LUNA_MODEL ?? LEGACY_CODEX_MODEL ?? "gpt-5.6-luna";
 const RALPH_MAX_ITERATIONS = 12;
 
 function tailOf(s: string, n: number): string {
@@ -158,20 +160,22 @@ function verifyEnv(): Record<string, string> {
 }
 
 // ---------------------------------------------------------------------------
-// Agents — Claude Fable plans/reviews, Codex implements (Claude fallback)
+// Agents — Codex Sol plans/reviews, Luna implements (Claude fallback)
 // ---------------------------------------------------------------------------
 
-// Model ids follow the SOTA registry (docs/data/sota-models.json); probe them
-// against this account's claude CLI before long runs (hallucinated ids 404).
+// Model ids follow the SOTA registry (docs/data/sota-models.json). Every Codex
+// credential is attempted before these provider fallbacks are eligible.
 const fable = new ClaudeCodeAgent({ model: "claude-fable-5", cwd: REPO });
 const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: REPO });
 const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8", cwd: REPO });
-const codexImpl = new CodexAgent({ model: CODEX_MODEL, cwd: REPO, skipGitRepoCheck: true });
-
-const planners = [fable, sonnet]; // planning + review: Fable first
-function implementers(codexOk: boolean) {
-  return codexOk ? [codexImpl, opus, sonnet] : [opus, sonnet];
-}
+const planners = codexFirst(
+  { model: SOL_MODEL, cwd: REPO, skipGitRepoCheck: true },
+  [fable, sonnet],
+);
+const implementers = codexFirst(
+  { model: LUNA_MODEL, config: { model_reasoning_effort: "medium" }, cwd: REPO, skipGitRepoCheck: true },
+  [opus, sonnet],
+);
 
 // ---------------------------------------------------------------------------
 // Shared prompt fragments
@@ -179,15 +183,15 @@ function implementers(codexOk: boolean) {
 
 const GROUND_RULES = `## Ground rules (non-negotiable)
 - Repo root: ${REPO}. Plue checkout (smithers cloud): ${PLUE_DIR}.
-- ZERO MOCKS. Nothing under apps/smithers/tests/e2e-real/, apps/smithers/playwright.real.config.ts, or scripts/e2e-real/ may use page.route()/routeWebSocket, import anything from apps/smithers/tests/fixtures/, or rely on hardcoded/fallback stand-in data. Real backends only: real Plue compose, the real gateway process in this repo's cwd, a REAL LLM chat upstream (Cerebras or Gemini Flash through Gemini's OpenAI-compatible endpoint — both are real model APIs), real Claude agent calls. Deliberate failure-injection against a real fault path is fine; fabricated responses are not.
+- ZERO MOCKS. Nothing under apps/smithers/tests/e2e-real/, apps/smithers/playwright.real.config.ts, or scripts/e2e-real/ may use page.route()/routeWebSocket, import anything from apps/smithers/tests/fixtures/, or rely on hardcoded/fallback stand-in data. Real backends only: real Plue compose, the real gateway process in this repo's cwd, a REAL LLM chat upstream (Cerebras or Gemini Flash through Gemini's OpenAI-compatible endpoint — both are real model APIs), and real Codex 5.6 calls (Claude only if no Codex credential works). Deliberate failure-injection against a real fault path is fine; fabricated responses are not.
 - Do NOT touch the existing fixture suite: apps/smithers/playwright.config.ts and apps/smithers/tests/e2e/** must remain byte-identical. The real suite is additive.
-- Work directly on main. Atomic commits, emoji + conventional-commit subject, ending with the trailer "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>". Use explicit pathspecs with git add (never "git add -A" — other agents may share this working tree). Commit when your ticket's verify command passes locally. Do NOT push; the workflow pushes after gates.
+- Work directly on main. Atomic commits, emoji + conventional-commit subject, ending with the trailer "Co-Authored-By: Codex <noreply@openai.com>". Use explicit pathspecs with git add (never "git add -A" — other agents may share this working tree). Commit when your ticket's verify command passes locally. Do NOT push; the workflow pushes after gates.
 - Secrets live in apps/smithers/.env.e2e.local (gitignored). Source it when you need CEREBRAS_API_KEY / GEMINI_API_KEY / CLAUDE_CODE_OAUTH_TOKEN. NEVER commit it, copy values into tracked files, or print values to stdout/logs. (Plue's seeded dev tokens like smithers_deadbeef… are public fixtures committed in plue's own repo; those may appear in specs.)
 - Ports (all env-overridable, defaults chosen to avoid the fixture suite and dev): plue api 127.0.0.1:4000 (fixed by plue's compose), e2e gateway 127.0.0.1:7342 — a LOCAL process: \`PORT=7342 HOST=127.0.0.1 bun .smithers/gateway.ts\` (NOT a container), real app origin 127.0.0.1:5375, real worker leg 127.0.0.1:5376. Never bind the fixture ports 5275-5292 and never clobber or kill the dev gateway on 7331.
 - The e2e gateway shares .smithers/smithers.db with any dev gateway on this machine. Specs must therefore assert on the runId THEY launched, never on list counts, and the real config runs with workers: 1.
 - Everything you build must be idempotent: re-running the stack boot with services already up is a no-op; playwright webServer entries use reuseExistingServer.
 - Asserting on LLM output: assert BEHAVIOR (a non-empty assistant message streamed, the run reached finished, structured output validated) — never exact model text.
-- The shell-exported ANTHROPIC_API_KEY on this machine has NO credits. Any script that spawns the claude CLI directly (probes, helpers) must \`unset ANTHROPIC_API_KEY\` first so the CLI uses subscription auth, unless apps/smithers/.env.e2e.local explicitly supplies a working key.
+- Probe Codex first (ambient auth, then every registered Codex/OpenAI account) on \`gpt-5.6-luna\`. Only if all Codex credentials fail may a probe or workflow invoke Claude. The shell-exported ANTHROPIC_API_KEY on this machine has NO credits, so a Claude fallback probe must \`unset ANTHROPIC_API_KEY\` unless apps/smithers/.env.e2e.local explicitly supplies a working key.
 - App code style (if you touch src/): zero useState/useEffect, state in zustand; one named export per file, filename = export name; index.ts is barrels only; colocate by domain.
 - Generated capture output (artifacts/feature-gifs/**, apps/smithers/capture-results/, apps/smithers/capture-report/) is NEVER committed — keep it gitignored. Gif conversion uses the host ffmpeg (preflight-verified). Capture and slideshow scripts must be idempotent: re-running replaces prior output.`;
 
@@ -231,7 +235,7 @@ const TICKETS: Ticket[] = [
 2. \`apps/smithers/playwright.real.config.ts\`:
    - testDir tests/e2e-real, workers: 1 (shared gateway DB + shared plue state), webServer entries:
      (a) plue: command \`bash ../../scripts/e2e-real/plue-up.sh\`, url http://127.0.0.1:4000/api/health, reuseExistingServer: true, timeout 240s.
-     (b) gateway in the cwd: command \`bun ../../.smithers/gateway.ts\`, env { PORT: "7342", HOST: "127.0.0.1" }, url http://127.0.0.1:7342/health, reuseExistingServer: true. (gateway.ts chdir's itself to the repo root, so the command cwd does not matter.) Inject the values read from apps/smithers/.env.e2e.local (plain fs read in the config, tolerate absence) into this leg's env so agent credentials reach the claude CLI processes the gateway spawns.
+     (b) gateway in the cwd: command \`bun ../../.smithers/gateway.ts\`, env { PORT: "7342", HOST: "127.0.0.1" }, url http://127.0.0.1:7342/health, reuseExistingServer: true. (gateway.ts chdir's itself to the repo root, so the command cwd does not matter.) Inject the values read from apps/smithers/.env.e2e.local (plain fs read in the config, tolerate absence) into this leg's env so agent credentials reach the Codex-first chain the gateway spawns.
      (c) vite on 127.0.0.1:5375 with SMITHERS_AUTH_PROXY_TARGET + SMITHERS_PLATFORM_PROXY_TARGET = http://127.0.0.1:4000 and SMITHERS_GATEWAY_PROXY_TARGET = http://127.0.0.1:7342. No fixture processes anywhere in this config.
    - Seed onboarding-completed localStorage for the app origin like the fixture config does (that is app state, not a mock).
 3. \`apps/smithers/tests/e2e-real/stack.spec.ts\`:
@@ -285,17 +289,17 @@ Success criteria: verify command exits 0 with a REAL upstream (the workflow's pr
   },
   {
     id: "t4-real-gateway-run",
-    title: "Launch a gateway workflow run that makes a REAL Claude LLM call, watch it finish in the UI",
+    title: "Launch a gateway workflow run that makes a REAL Codex Luna call, watch it finish in the UI",
     probeFile: "apps/smithers/tests/e2e-real/gatewayRun.spec.ts",
     verifyCmd:
       "bash scripts/e2e-real/probe-agent-cred.sh && pnpm -C apps/smithers exec playwright test --config playwright.real.config.ts tests/e2e-real/gatewayRun.spec.ts",
     verifyTimeoutMs: 40 * 60 * 1000,
     md: `Make the cwd gateway execute a real agent workflow end to end.
 
-1. \`.smithers/workflows/e2e-probe.tsx\`: a minimal one-task agent workflow (output schema like { answer: z.string() }) whose Task uses a ClaudeCodeAgent (model claude-sonnet-5, cheap) and asks for a one-line answer. The gateway auto-mounts every .smithers/workflows/*.tsx at boot, so creating the file registers it on next gateway boot.
+1. \`.smithers/workflows/e2e-probe.tsx\`: a minimal one-task agent workflow (output schema like { answer: z.string() }) whose Task uses the shared \`codexFirst\` helper with Codex \`gpt-5.6-luna\` at medium reasoning and Claude Sonnet only as the final no-Codex fallback. It asks for a one-line answer. The gateway auto-mounts every .smithers/workflows/*.tsx at boot, so creating the file registers it on next gateway boot.
    - Mount caveat: an ALREADY-RUNNING e2e gateway on 7342 will not see the new file. If 7342 is up and /workflows lacks e2e-probe, kill ONLY that gateway process (the one bound to 7342; never 7331) and let playwright's webServer reboot it. Script this guard into the spec setup or a tiny stack helper.
-2. \`scripts/e2e-real/probe-agent-cred.sh\` — ASSUMPTION PROBE, must run before the spec: source apps/smithers/.env.e2e.local if present, \`unset ANTHROPIC_API_KEY\` unless that file supplied one (see ground rules: the shell-exported key has no credits), then run \`claude -p "Say OK" --model claude-sonnet-5\` ON THE HOST (the gateway spawns the same host CLI) and require exit 0 with non-empty output. If this fails, the spec is doomed — fail fast naming the missing credential (claude /login, claude setup-token, or ANTHROPIC_API_KEY).
-3. \`apps/smithers/tests/e2e-real/gatewayRun.spec.ts\`: through the UI (study tests/e2e/launchRun.spec.ts + gatewayRun.spec.ts for the surfaces, but target the real config), launch the e2e-probe workflow on the real gateway, watch live run events arrive, and assert THAT run (by its runId) reaches finished with a visible non-empty output. Timeout generous (a real Claude call takes 30-120s).
+2. \`scripts/e2e-real/probe-agent-cred.sh\` — ASSUMPTION PROBE, must run before the spec: source apps/smithers/.env.e2e.local if present, then try a real \`codex exec --model gpt-5.6-luna\` call with ambient auth and every registered Codex/OpenAI account. Only after every Codex candidate fails may it probe Claude Sonnet. Require exit 0 with non-empty output; otherwise fail fast naming both Codex and fallback authentication remedies.
+3. \`apps/smithers/tests/e2e-real/gatewayRun.spec.ts\`: through the UI (study tests/e2e/launchRun.spec.ts + gatewayRun.spec.ts for the surfaces, but target the real config), launch the e2e-probe workflow on the real gateway, watch live run events arrive, and assert THAT run (by its runId) reaches finished with a visible non-empty output. Timeout generous (a real agent call can take 30-120s).
 
 Success criteria: probe script + spec both green via the verify command. The LLM call is real (visible token usage / agent events in the gateway run, no canned text).`,
   },
@@ -429,14 +433,39 @@ async function runPreflight() {
   const plueDirOk = existsSync(resolve(PLUE_DIR, "docker-compose.yml"));
   const ffmpeg = await sh("ffmpeg -version", { timeoutMs: 20_000 });
   const ffmpegOk = ffmpeg.exitCode === 0;
-  const claude = await sh("claude --version", { timeoutMs: 20_000 });
-  const claudeCliOk = claude.exitCode === 0;
 
-  // The e2e gateway and the planner/reviewer tasks spawn the HOST claude CLI
-  // on the fable model, so prove that exact credential+model completes a
-  // prompt (one tiny real call). Tokens from .env.e2e.local are honored.
+  // Codex is the primary provider. Probe Luna through ambient auth first and
+  // then every registered Codex/OpenAI account before the Claude fallback is
+  // even inspected. The legacy model override still applies to both role seats.
+  const codexSkipped = has("SMITHERS_E2E_SKIP_CODEX");
+  let codexOk = false;
+  if (!codexSkipped) {
+    const cli = await sh("codex --version", { timeoutMs: 20_000 });
+    if (cli.exitCode === 0) {
+      const credentials = [undefined, ...registeredCodexCredentials()];
+      for (const credential of credentials) {
+        const accountEnv: Record<string, string> = {};
+        if (credential?.provider === "codex") accountEnv.CODEX_HOME = credential.configDir;
+        if (credential?.provider === "openai-api") accountEnv.OPENAI_API_KEY = credential.apiKey;
+        const probe = await sh(`codex exec --skip-git-repo-check --model ${LUNA_MODEL} "Say OK"`, {
+          timeoutMs: 180_000,
+          env: { ...verifyEnv(), ...accountEnv },
+        });
+        codexOk = probe.exitCode === 0 && probe.tail.trim() !== "";
+        if (codexOk) break;
+      }
+    }
+  }
+
+  // A Claude call is a true provider fallback, not a parallel prerequisite.
+  // Probe it only when no Codex candidate completed the real Luna call.
+  let claudeCliOk = false;
   let claudeAuthOk = false;
-  if (claudeCliOk) {
+  if (!codexOk) {
+    const claude = await sh("claude --version", { timeoutMs: 20_000 });
+    claudeCliOk = claude.exitCode === 0;
+  }
+  if (!codexOk && claudeCliOk) {
     // The inherited shell ANTHROPIC_API_KEY has no credits and flips the
     // claude CLI to API billing. Unset it (exactly what ClaudeCodeAgent does)
     // unless the operator explicitly supplied a key via the env file.
@@ -468,28 +497,11 @@ async function runPreflight() {
     if (!chatUpstreamOk) chatProvider += ` (probe failed: ${tailOf(probe.tail, 300).replace(/\n/g, " ")})`;
   }
 
-  // Codex: the operator wants Codex implementing. Probe a real one-liner on
-  // ChatGPT auth (model from SMITHERS_E2E_CODEX_MODEL, default gpt-5.5 — the
-  // -codex model names are rejected under ChatGPT auth). skipCodex=true from
-  // the human falls back to Claude implementation.
-  const codexSkipped = has("SMITHERS_E2E_SKIP_CODEX");
-  let codexOk = false;
-  if (!codexSkipped) {
-    const cli = await sh("codex --version", { timeoutMs: 20_000 });
-    if (cli.exitCode === 0) {
-      const probe = await sh(`codex exec --skip-git-repo-check --model ${CODEX_MODEL} "Say OK"`, {
-        timeoutMs: 180_000,
-        env: verifyEnv(),
-      });
-      codexOk = probe.exitCode === 0 && probe.tail.trim() !== "";
-    }
-  }
-
   const missing: string[] = [];
   if (!dockerOk) missing.push("docker daemon is not running (start Docker Desktop)");
   if (!plueDirOk) missing.push(`plue checkout with docker-compose.yml not found at ${PLUE_DIR} (set PLUE_DIR)`);
-  if (!claudeCliOk) missing.push("claude CLI not on PATH (the cwd gateway and planner tasks spawn it)");
-  if (claudeCliOk && !claudeAuthOk)
+  if (!codexOk && !claudeCliOk) missing.push("neither usable Codex nor the Claude fallback CLI is available");
+  if (!codexOk && claudeCliOk && !claudeAuthOk)
     missing.push(
       "claude CLI cannot complete a prompt on claude-fable-5 — authenticate it (run `claude /login`, or `claude setup-token` and supply claudeOauthToken; the known ANTHROPIC_API_KEY has no credits)",
     );
@@ -501,8 +513,8 @@ async function runPreflight() {
     );
   if (!ffmpegOk)
     missing.push("ffmpeg not on PATH (gif conversion in t9 needs it) — brew install ffmpeg");
-  // Codex unavailability is NOT blocking: the implementer list automatically
-  // falls back to Claude. The probe result is still surfaced in detail.
+  // Codex unavailability is not itself blocking: only then may the explicit
+  // Claude fallback satisfy the agent prerequisite.
 
   return {
     ok: missing.length === 0,
@@ -516,7 +528,7 @@ async function runPreflight() {
     codexOk,
     codexSkipped,
     missing: missing.join("; ") || "none",
-    detail: `env file: ${ENV_FILE} (${existsSync(ENV_FILE) ? "exists" : "absent"}); plue: ${PLUE_DIR}; chat: ${chatProvider}; ffmpeg: ${ffmpegOk ? "ok" : "missing"}; codex: ${codexOk ? "ok" : codexSkipped ? "skipped by operator" : "unavailable -> Claude implements"}`,
+    detail: `env file: ${ENV_FILE} (${existsSync(ENV_FILE) ? "exists" : "absent"}); plue: ${PLUE_DIR}; chat: ${chatProvider}; ffmpeg: ${ffmpegOk ? "ok" : "missing"}; codex: ${codexOk ? "ok" : codexSkipped ? "skipped by operator -> Claude fallback" : "all candidates unavailable -> Claude fallback"}`,
   };
 }
 
@@ -816,8 +828,7 @@ export default smithers((ctx) => {
     | undefined;
   const preflightOk = Boolean(pf?.ok);
   const preflightBad = pf !== undefined && !pf.ok;
-  const codexAvailable = Boolean(pf?.codexOk);
-  const impl = implementers(codexAvailable);
+  const impl = implementers;
 
   // ---- per-ticket state ----
   const ticketState = (t: Ticket) => {
@@ -898,7 +909,7 @@ export default smithers((ctx) => {
                 id="preflight:fix"
                 output={outputs.humanEnv}
                 maxAttempts={10}
-                prompt={`The real-stack-e2e run is blocked on missing prerequisites:\n\n  ${pf?.missing}\n\n(${pf?.detail})\n\nPlease answer with JSON: {"cerebrasApiKey": string|null, "geminiApiKey": string|null, "claudeOauthToken": string|null, "anthropicApiKey": string|null, "skipCodex": boolean|null, "note": string|null}.\n- geminiApiKey: from https://aistudio.google.com — powers real /api/chat via Gemini Flash until Cerebras is set up.\n- cerebrasApiKey: from https://cloud.cerebras.ai — takes precedence over Gemini once supplied.\n- claudeOauthToken: ONLY if the claude auth probe failed — run \`claude setup-token\` and paste, or fix out-of-band with \`claude /login\` and answer null.\n- skipCodex: true = stop requiring codex and fall back to Claude for implementation.\n- Provide null for anything you fixed out-of-band (e.g. ran \`codex login\` yourself) and say so in note.\nValues are written only to ${ENV_FILE} (gitignored, chmod 600).`}
+                prompt={`The real-stack-e2e run is blocked on missing prerequisites:\n\n  ${pf?.missing}\n\n(${pf?.detail})\n\nPlease answer with JSON: {"cerebrasApiKey": string|null, "geminiApiKey": string|null, "claudeOauthToken": string|null, "anthropicApiKey": string|null, "skipCodex": boolean|null, "note": string|null}.\n- geminiApiKey: from https://aistudio.google.com — powers real /api/chat via Gemini Flash until Cerebras is set up.\n- cerebrasApiKey: from https://cloud.cerebras.ai — takes precedence over Gemini once supplied.\n- First repair Codex out-of-band (for example, run \`codex login\` or register another Codex/OpenAI account); all Codex credentials are tried before any backup.\n- claudeOauthToken: ONLY when every Codex credential is unavailable and the Claude fallback probe also failed — run \`claude setup-token\` and paste, or fix out-of-band with \`claude /login\` and answer null.\n- skipCodex: true = explicitly skip Codex probing and permit the Claude fallback for this run.\n- Provide null for anything you fixed out-of-band and say so in note.\nValues are written only to ${ENV_FILE} (gitignored, chmod 600).`}
               />
               <Task
                 id="preflight:apply"
@@ -974,8 +985,8 @@ export default smithers((ctx) => {
         {() => pushMain()}
       </Task>
 
-      {/* Phase 4: ralph quality loop — Fable plans, Codex implements, full gate
-          verifies, Fable reviews, every approved iteration pushes. */}
+      {/* Phase 4: ralph quality loop — Sol plans/reviews, Luna implements, full
+          gate verifies, and every approved iteration pushes. */}
       <Loop
         id="ralph:loop"
         until={ralphDone}

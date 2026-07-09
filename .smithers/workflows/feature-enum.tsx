@@ -24,7 +24,7 @@ export default smithers((ctx) => (
     <UI entry="../ui/feature-enum.tsx" title={"Feature Enum"} />
     <FeatureEnum
       idPrefix="feature-enum"
-      agent={agents.smartTool}
+      agent={agents.research}
       refineIterations={ctx.input.refineIterations}
       existingFeatures={ctx.input.existingFeatures}
       lastCommitHash={ctx.input.lastCommitHash}

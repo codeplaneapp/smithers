@@ -136,6 +136,7 @@ describe("optimize suite helpers", () => {
         expect(getOptimizerProviderConfig("codex")?.kind).toBe("openai-compatible");
         expect(getOptimizerProviderConfig("antigravity")?.kind).toBe("gemini");
         expect(getOptimizerProviderConfig("kimi")?.kind).toBe("openai-compatible");
+        expect(resolveOptimizerProviderModel("openai-api")).toBe("gpt-5.6-luna");
         expect(resolveOptimizerProviderModel("cerebras")).toBe("zai-glm-4.7");
         expect(resolveOptimizerProviderModel("openai-compatible", "custom-model")).toBe("custom-model");
     });
@@ -171,14 +172,36 @@ describe("optimize suite helpers", () => {
         };
 
         const openaiPatches = await buildProviderGepaPatches({
-            provider: "codex",
+            provider: "openai-api",
             promptTasks,
             cases,
             baselineReport,
         }, { fetch: fakeFetch, env: { OPENAI_API_KEY: "openai-key" } });
-        expect(openaiPatches.answer.source).toBe("codex-gepa");
+        expect(openaiPatches.answer.source).toBe("openai-api-gepa");
         expect(calls.at(-1).url).toBe("https://api.openai.com/v1/chat/completions");
-        expect(calls.at(-1).body.model).toBe("gpt-5.5");
+        expect(calls.at(-1).body.model).toBe("gpt-5.6-luna");
+        expect(calls.at(-1).body.reasoning_effort).toBe("medium");
+        expect(calls.at(-1).body.temperature).toBeUndefined();
+
+        await buildProviderGepaPatches({
+            provider: "openai-api",
+            model: "gpt-4.1",
+            promptTasks,
+            cases,
+            baselineReport,
+        }, { fetch: fakeFetch, env: { OPENAI_API_KEY: "openai-key" } });
+        expect(calls.at(-1).body.reasoning_effort).toBeUndefined();
+        expect(calls.at(-1).body.temperature).toBe(0.2);
+
+        await buildProviderGepaPatches({
+            provider: "cerebras",
+            promptTasks,
+            cases,
+            baselineReport,
+        }, { fetch: fakeFetch, env: { CEREBRAS_API_KEY: "cerebras-key" } });
+        expect(calls.at(-1).url).toBe("https://api.cerebras.ai/v1/chat/completions");
+        expect(calls.at(-1).body.reasoning_effort).toBeUndefined();
+        expect(calls.at(-1).body.temperature).toBe(0.2);
 
         await buildProviderGepaPatches({
             provider: "claude-code",

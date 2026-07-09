@@ -1,8 +1,8 @@
 // smithers-display-name: Fix All Issues
 // smithers-source: one-off — discover every open GitHub issue, decompose multi-finding
 // epics into one work-item-per-fix, then for each work item (in its own git worktree, up
-// to 8 in parallel): Codex researches + plans + TDD-fixes in a SINGLE task; Codex + Claude
-// (Opus) review in a loop until BOTH approve (LGTM); then Sonnet opens ONE PR per work
+// to 8 in parallel): Codex Luna researches + TDD-fixes in a SINGLE task; two Codex Sol
+// review passes loop until BOTH approve (LGTM); then Codex Terra opens ONE PR per work
 // item via the gh CLI. One fix == one PR; epics get "Relates to #N", single-fix issues get
 // "Closes #N". No human gate and no auto-merge — the workflow runs to a wall of open PRs.
 //
@@ -13,10 +13,11 @@
 // Scope a first validation run to one standalone bug:
 //   ... --input '{"numbers":[296],"reviewIterations":2}'
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const REPO = "smithersai/smithers";
@@ -133,15 +134,23 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, smithers, outputs } 
 // ── Agents ─────────────────────────────────────────────────────────────────────
 // NO `cwd` on any agent used inside a <Worktree>: an explicit cwd overrides the
 // worktree, so the agent would read/write the repo root and the branch stays empty.
-// Codex on ChatGPT auth rejects "-codex" model ids — use a plain id (issue #236 / memory).
-const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
-const codex = new CodexAgent({
-  model: "gpt-5.5",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-});
+// Codex is primary in every chain; Claude is retained only for failover.
+const opus = codexFirst(
+  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
+);
+const solReviewer = codexFirst(
+  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
+);
+const sonnet = codexFirst(
+  { model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
+);
+const codex = codexFirst(
+  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
+);
 
 const AGENT_RETRIES = 2;
 const DECOMPOSE_TIMEOUT_MS = 15 * 60_000;
@@ -225,8 +234,8 @@ function itemFeedback(ctx: any, key: string): string {
     parts.push(`PRIOR ATTEMPT SELF-REPORTED ${fix.status.toUpperCase()}:\n${fix.summary}`);
   }
   for (const [who, rows] of [
-    ["CLAUDE REVIEWER", ctx.outputs.reviewClaude],
-    ["CODEX REVIEWER", ctx.outputs.reviewCodex],
+    ["CODEX SOL REVIEWER A", ctx.outputs.reviewClaude],
+    ["CODEX SOL REVIEWER B", ctx.outputs.reviewCodex],
   ] as const) {
     const r = latestForItem<Review>(rows, key);
     if (r && !r.approved) {
@@ -339,9 +348,9 @@ function fixPrompt(wi: WorkItem, feedback: string) {
   ].join("\n");
 }
 
-function reviewPrompt(wi: WorkItem, fix: Fix | undefined, who: "claude" | "codex") {
+function reviewPrompt(wi: WorkItem, fix: Fix | undefined, reviewer: "a" | "b") {
   return [
-    `You are the ${who === "claude" ? "Claude Opus" : "Codex"} STRICT, INDEPENDENT REVIEWER for the candidate fix to ONE work item from GitHub issue #${wi.issueNumber} in smithersai/smithers.`,
+    `You are Codex Sol reviewer ${reviewer.toUpperCase()}, a STRICT, INDEPENDENT REVIEWER for the candidate fix to ONE work item from GitHub issue #${wi.issueNumber} in smithersai/smithers.`,
     "Your current working directory IS the worktree containing the candidate fix. Do NOT edit any files — review only.",
     "",
     `WORK ITEM: ${wi.title}`,
@@ -467,18 +476,18 @@ export default smithers((ctx) => {
                             heartbeatTimeoutMs={HEARTBEAT_MS}
                             continueOnFail
                           >
-                            {reviewPrompt(wi, fix, "claude")}
+                            {reviewPrompt(wi, fix, "a")}
                           </Task>
                           <Task
                             id={`${key}:review-codex`}
                             output={outputs.reviewCodex}
-                            agent={codex}
+                            agent={solReviewer}
                             retries={AGENT_RETRIES}
                             timeoutMs={REVIEW_TIMEOUT_MS}
                             heartbeatTimeoutMs={HEARTBEAT_MS}
                             continueOnFail
                           >
-                            {reviewPrompt(wi, fix, "codex")}
+                            {reviewPrompt(wi, fix, "b")}
                           </Task>
                         </Parallel>
                       </Sequence>

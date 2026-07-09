@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 import { listAccounts } from "@smithers-orchestrator/accounts";
-import { SOTA_SLOTS } from "./sota-models.generated.js";
+import { SOTA_DEPRECATED_MODELS, SOTA_SLOTS } from "./sota-models.generated.js";
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
 /** @typedef {import("./AgentAvailabilityStatus.ts").AgentAvailabilityStatus} AgentAvailabilityStatus */
 
@@ -244,21 +244,48 @@ const DETECTORS = [
     },
 ];
 const ROLE_PREFERENCES = {
-    spec: ["claude", "codex", "opencode", "openclaw"],
-    research: ["antigravity", "kimi", "opencode", "codex", "claude", "openclaw"],
-    plan: ["claude", "codex", "opencode", "antigravity", "kimi", "openclaw"],
+    spec: ["codex", "claude", "opencode", "openclaw"],
+    research: ["codex", "kimi", "antigravity", "opencode", "claude", "openclaw"],
+    plan: ["codex", "claude", "opencode", "antigravity", "kimi", "openclaw"],
     implement: ["codex", "opencode", "amp", "antigravity", "openclaw", "claude", "kimi"],
-    validate: ["codex", "opencode", "amp", "antigravity", "openclaw"],
-    review: ["claude", "amp", "codex", "opencode", "openclaw"],
+    validate: ["codex", "opencode", "amp", "antigravity", "openclaw", "claude", "kimi"],
+    review: ["codex", "claude", "amp", "opencode", "openclaw", "kimi"],
 };
 const AGENT_VARIANTS = [
+    {
+        derivedFrom: "codex",
+        variantId: "codexSol",
+        displayName: "Codex Sol",
+        constructor: {
+            importName: "CodexAgent",
+            expr: `new SmithersCodexAgent({ model: "${SOTA_SLOTS.codexSol}", config: { model_reasoning_effort: "xhigh" }, skipGitRepoCheck: true })`,
+        },
+    },
+    {
+        derivedFrom: "codex",
+        variantId: "codexTerra",
+        displayName: "Codex Terra",
+        constructor: {
+            importName: "CodexAgent",
+            expr: `new SmithersCodexAgent({ model: "${SOTA_SLOTS.codexTerra}", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true })`,
+        },
+    },
+    {
+        derivedFrom: "codex",
+        variantId: "codexLuna",
+        displayName: "Codex Luna",
+        constructor: {
+            importName: "CodexAgent",
+            expr: `new SmithersCodexAgent({ model: "${SOTA_SLOTS.codex}", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true })`,
+        },
+    },
     {
         derivedFrom: "claude",
         variantId: "claudeOpus",
         displayName: "Claude Opus",
         constructor: {
             importName: "ClaudeCodeAgent",
-            expr: `new SmithersClaudeCodeAgent({ model: "${SOTA_SLOTS.opus}", cwd: process.cwd() })`,
+            expr: `new SmithersClaudeCodeAgent({ model: "${SOTA_SLOTS.opus}" })`,
         },
     },
     {
@@ -267,7 +294,7 @@ const AGENT_VARIANTS = [
         displayName: "Claude Sonnet",
         constructor: {
             importName: "ClaudeCodeAgent",
-            expr: `new SmithersClaudeCodeAgent({ model: "${SOTA_SLOTS.sonnet}", cwd: process.cwd() })`,
+            expr: `new SmithersClaudeCodeAgent({ model: "${SOTA_SLOTS.sonnet}" })`,
         },
     },
 ];
@@ -291,33 +318,33 @@ const LOCAL_SCAFFOLDED_PROVIDERS = {
 const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
     ...SCAFFOLDED_PROVIDER_FILES,
 };
-// The fable sandwich (see docs/guides/context-engineering.mdx "sandwich
-// delegation"): Fable plans and reviews at the two ends (planning/review,
-// claude-family-led), Codex implements the middle (implement, codex-led with a
-// guaranteed claude-sonnet-5 fallback), and cheapFast/smart/smartTool serve the
-// generic tiers. planning/implement are additive pool names — existing
-// workflows on cheapFast/smart/smartTool/review are unaffected.
+// Codex-first role routing. When any usable Codex detection or registered
+// Codex/OpenAI account exists, every default chain starts with Codex: Sol for
+// judgment-heavy work, Terra for balanced/tool-heavy work, and Luna (the base
+// `codex` provider) for implementation, research, and cheap work. Detected
+// non-Codex providers remain after Codex as dormant runtime fallbacks; a healthy
+// Codex attempt completes the task before any fallback is invoked.
 const TIER_PREFERENCES = {
-    cheapFast: { order: ["claudeSonnet", "kimi", "vibe", "antigravity", "openclaw", "pi"], maxSize: 2 },
-    smart: { order: ["claude", "claudeOpus", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
-    smartTool: { order: ["claude", "claudeOpus", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
-    review: { order: ["claude", "claudeOpus", "claudeSonnet", "amp", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
-    // Fable-led senior planning/architecture seat; degrades to codex when no claude CLI.
-    planning: { order: ["claude", "claudeOpus", "claudeSonnet", "codex", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
-    // Codex-led implementation middle; claude-sonnet-5 is the guaranteed
-    // fallback, then gemini/claude. opencode stays a deep fallback (demoted like
-    // smart/smartTool) so codex+sonnet win when both are present.
-    implement: { order: ["codex", "claudeSonnet", "antigravity", "claude", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    cheapFast: { codexVariant: "codexLuna", order: ["codexLuna", "claudeSonnet", "kimi", "vibe", "antigravity", "openclaw", "pi"], maxSize: 3 },
+    research: { codexVariant: "codexLuna", order: ["codexLuna", "kimi", "antigravity", "opencode", "claudeSonnet", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    implement: { codexVariant: "codexLuna", order: ["codexLuna", "claudeSonnet", "kimi", "antigravity", "claude", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    midTier: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    smartTool: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    validate: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    smart: { codexVariant: "codexSol", order: ["codexSol", "claude", "claudeOpus", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "antigravity", "amp", "kimi"], maxSize: 3 },
+    review: { codexVariant: "codexSol", order: ["codexSol", "claude", "claudeOpus", "claudeSonnet", "kimi", "amp", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    planning: { codexVariant: "codexSol", order: ["codexSol", "claude", "claudeOpus", "claudeSonnet", "kimi", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    orchestrator: { codexVariant: "codexSol", order: ["codexSol", "claude", "claudeOpus", "kimi", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
 };
 const REQUIRED_DEFAULT_TIERS = ["smart", "smartTool"];
 const CONSTRUCTORS = {
     claude: {
         importName: "ClaudeCodeAgent",
-        expr: `new SmithersClaudeCodeAgent({ model: "${SOTA_SLOTS.fable}", cwd: process.cwd() })`,
+        expr: `new SmithersClaudeCodeAgent({ model: "${SOTA_SLOTS.fable}" })`,
     },
     codex: {
         importName: "CodexAgent",
-        expr: `new SmithersCodexAgent({ model: "${SOTA_SLOTS.codex}", cwd: process.cwd(), skipGitRepoCheck: true })`,
+        expr: `new SmithersCodexAgent({ model: "${SOTA_SLOTS.codex}", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true })`,
     },
     openrouter: {
         importName: "OpenAIAgent",
@@ -325,11 +352,11 @@ const CONSTRUCTORS = {
     },
     opencode: {
         importName: "OpenCodeAgent",
-        expr: `new SmithersOpenCodeAgent({ model: "anthropic/${SOTA_SLOTS.fable}", cwd: process.cwd() })`,
+        expr: `new SmithersOpenCodeAgent({ model: "anthropic/${SOTA_SLOTS.fable}" })`,
     },
     antigravity: {
         importName: "AntigravityAgent",
-        expr: "new SmithersAntigravityAgent({ cwd: process.cwd() })",
+        expr: "new SmithersAntigravityAgent()",
     },
     pi: {
         importName: "PiAgent",
@@ -345,15 +372,15 @@ const CONSTRUCTORS = {
     },
     vibe: {
         importName: "VibeAgent",
-        expr: 'new SmithersVibeAgent({ agent: "auto-approve", cwd: process.cwd() })',
+        expr: 'new SmithersVibeAgent({ agent: "auto-approve" })',
     },
     hermes: {
         importName: "HermesCliAgent",
-        expr: "new SmithersHermesCliAgent({ cwd: process.cwd() })",
+        expr: "new SmithersHermesCliAgent()",
     },
     openclaw: {
         importName: "OpenClawAgent",
-        expr: "new SmithersOpenClawAgent({ cwd: process.cwd() })",
+        expr: "new SmithersOpenClawAgent()",
     },
 };
 /**
@@ -890,6 +917,38 @@ const ACCOUNT_PROVIDER_DEFAULT_MODEL = {
     "kimi": SOTA_SLOTS.kimi,
 };
 
+const CODEX_TIER_MODEL = {
+    cheapFast: SOTA_SLOTS.codex,
+    research: SOTA_SLOTS.codex,
+    implement: SOTA_SLOTS.codex,
+    midTier: SOTA_SLOTS.codexTerra,
+    smartTool: SOTA_SLOTS.codexTerra,
+    validate: SOTA_SLOTS.codexTerra,
+    smart: SOTA_SLOTS.codexSol,
+    review: SOTA_SLOTS.codexSol,
+    planning: SOTA_SLOTS.codexSol,
+    orchestrator: SOTA_SLOTS.codexSol,
+};
+
+const CODEX_MODEL_SUFFIX = {
+    [SOTA_SLOTS.codexSol]: "Sol",
+    [SOTA_SLOTS.codexTerra]: "Terra",
+    [SOTA_SLOTS.codex]: "Luna",
+};
+
+/** @param {import("@smithers-orchestrator/accounts").Account} account */
+function isCodexAccount(account) {
+    return ACCOUNT_PROVIDER_POOL[account.provider] === "codex";
+}
+
+/**
+ * @param {import("@smithers-orchestrator/accounts").Account} account
+ * @param {string} model
+ */
+function codexAccountVariantId(account, model) {
+    return `${labelToCamel(account.label)}${CODEX_MODEL_SUFFIX[model]}`;
+}
+
 /**
  * @param {string} label
  * @returns {string}
@@ -932,12 +991,31 @@ function pathLiteral(absPath, homeDir) {
  * @returns {string}
  */
 function renderAccountProviderLine(account, homeDir) {
+    return renderAccountProviderVariantLine(account, homeDir, labelToCamel(account.label), undefined);
+}
+
+/**
+ * Render one account-backed provider with an optional role-specific model.
+ * Codex accounts receive Sol/Terra/Luna siblings so default pools can select
+ * the right model without discarding the account's configDir or API key.
+ *
+ * @param {import("@smithers-orchestrator/accounts").Account} account
+ * @param {string} homeDir
+ * @param {string} providerId
+ * @param {string | undefined} modelOverride
+ * @returns {string}
+ */
+function renderAccountProviderVariantLine(account, homeDir, providerId, modelOverride) {
     const cls = ACCOUNT_PROVIDER_CLASSES[account.provider];
-    const camel = labelToCamel(account.label);
-    const model = account.model ?? ACCOUNT_PROVIDER_DEFAULT_MODEL[account.provider];
+    const requestedModel = modelOverride ?? account.model ?? ACCOUNT_PROVIDER_DEFAULT_MODEL[account.provider];
+    const model = requestedModel ? (SOTA_DEPRECATED_MODELS[requestedModel] ?? requestedModel) : undefined;
     /** @type {string[]} */
     const opts = [];
     if (model) opts.push(`model: ${JSON.stringify(model)}`);
+    if (account.provider === "codex" || account.provider === "openai-api") {
+        const reasoningEffort = model === SOTA_SLOTS.codexSol ? "xhigh" : "medium";
+        opts.push(`config: { model_reasoning_effort: ${JSON.stringify(reasoningEffort)} }`);
+    }
     if (account.configDir) opts.push(`configDir: ${pathLiteral(account.configDir, homeDir)}`);
     else if (account.apiKey) opts.push(`apiKey: ${JSON.stringify(account.apiKey)}`);
     if (account.provider === "codex" || account.provider === "openai-api") {
@@ -946,8 +1024,23 @@ function renderAccountProviderLine(account, homeDir) {
     if (account.provider === "gemini-api") {
         opts.push('baseURL: "https://generativelanguage.googleapis.com/v1beta/openai"');
     }
-    opts.push("cwd: process.cwd()");
-    return `  ${camel}: new Smithers${cls}({ ${opts.join(", ")} }),`;
+    return `  ${providerId}: new Smithers${cls}({ ${opts.join(", ")} }),`;
+}
+
+/**
+ * @param {import("@smithers-orchestrator/accounts").Account} account
+ * @param {string} homeDir
+ * @returns {string[]}
+ */
+function renderAccountProviderLines(account, homeDir) {
+    const base = renderAccountProviderLine(account, homeDir);
+    if (!isCodexAccount(account)) return [base];
+    return [
+        base,
+        renderAccountProviderVariantLine(account, homeDir, codexAccountVariantId(account, SOTA_SLOTS.codexSol), SOTA_SLOTS.codexSol),
+        renderAccountProviderVariantLine(account, homeDir, codexAccountVariantId(account, SOTA_SLOTS.codexTerra), SOTA_SLOTS.codexTerra),
+        renderAccountProviderVariantLine(account, homeDir, codexAccountVariantId(account, SOTA_SLOTS.codex), SOTA_SLOTS.codex),
+    ];
 }
 
 /**
@@ -991,14 +1084,15 @@ function renderTierLine(tier, activeProviderIds, commentedProviderIds, comments)
  * @param {string} line
  */
 function commentIfInactive(active, line) {
-    return active ? line : `// ${line}`;
+    if (active) return line;
+    return line ? `// ${line}` : "//";
 }
 
 /**
  * @param {string} providerId
  */
 function canRenderProvider(providerId) {
-    return providerId in LOCAL_SCAFFOLDED_PROVIDERS || providerId in CONSTRUCTORS;
+    return providerId in CONSTRUCTORS;
 }
 
 /**
@@ -1079,7 +1173,7 @@ export function generateAgentsTs(env = process.env, options = {}) {
     const registeredAccounts = listAccounts(env);
     const detections = detectAvailableAgents(env, options);
     const scaffoldProviderIds = new Set(options.scaffoldProviderIds ?? Object.keys(SCAFFOLDED_PROVIDERS));
-    const usesLocalScaffold = (providerId) => providerId in LOCAL_SCAFFOLDED_PROVIDERS && scaffoldProviderIds.has(providerId);
+    const hasLocalScaffold = (providerId) => providerId in LOCAL_SCAFFOLDED_PROVIDERS && scaffoldProviderIds.has(providerId);
     const availableById = new Map(detections.filter((entry) => entry.usable && !entry.deprecated).map((entry) => [entry.id, entry]));
     for (const providerId of options.preserveProviderIds ?? []) {
         const baseId = baseAgentIdForProviderId(providerId);
@@ -1126,10 +1220,8 @@ export function generateAgentsTs(env = process.env, options = {}) {
     const activeImportNames = new Set();
     const inactiveImportNames = new Set();
     for (const provider of providerStates) {
-        if (!usesLocalScaffold(provider.id)) {
-            const importName = CONSTRUCTORS[provider.id]?.importName;
-            if (importName) (provider.active ? activeImportNames : inactiveImportNames).add(importName);
-        }
+        const importName = CONSTRUCTORS[provider.id]?.importName;
+        if (importName) (provider.active ? activeImportNames : inactiveImportNames).add(importName);
     }
     for (const variant of variantStates) {
         (variant.active ? activeImportNames : inactiveImportNames).add(variant.constructor.importName);
@@ -1149,17 +1241,18 @@ export function generateAgentsTs(env = process.env, options = {}) {
     const homeDir = env.HOME ?? homedir();
     const hasAccounts = registeredAccounts.length > 0;
     // Provider lines: detection base + variants + accounts (additive — `agent
-    // add` must never silently delete a previously-emitted provider).
+    // add` must never silently delete a previously-emitted provider). Base
+    // providers deliberately use cwd-neutral SDK constructors instead of the
+    // preserved user scaffold instances, so Task rootDir and <Worktree> remain
+    // authoritative after re-init. The scaffold names are still re-exported
+    // below for workflows that import them explicitly.
     const providerLines = [
-        ...providerStates.map((provider) => commentIfInactive(provider.active, `  ${provider.id}: ${usesLocalScaffold(provider.id) ? LOCAL_SCAFFOLDED_PROVIDERS[provider.id] : CONSTRUCTORS[provider.id].expr},`)),
+        ...providerStates.map((provider) => commentIfInactive(provider.active, `  ${provider.id}: ${CONSTRUCTORS[provider.id].expr},`)),
         ...variantStates.map((variant) => commentIfInactive(variant.active, `  ${variant.variantId}: ${variant.constructor.expr},`)),
-        ...registeredAccounts.map((account) => renderAccountProviderLine(account, homeDir)),
+        ...registeredAccounts.flatMap((account) => renderAccountProviderLines(account, homeDir)),
     ];
-    const scaffoldImportLines = providerStates
-        .filter((provider) => usesLocalScaffold(provider.id))
-        .map((provider) => commentIfInactive(provider.active, `import { ${LOCAL_SCAFFOLDED_PROVIDERS[provider.id]} } from "./agents/${LOCAL_SCAFFOLDED_PROVIDER_FILES[provider.id]}";`));
     const scaffoldExportLines = providerStates
-        .filter((provider) => usesLocalScaffold(provider.id))
+        .filter((provider) => hasLocalScaffold(provider.id))
         .map((provider) => commentIfInactive(provider.active, `export { ${LOCAL_SCAFFOLDED_PROVIDERS[provider.id]} } from "./agents/${LOCAL_SCAFFOLDED_PROVIDER_FILES[provider.id]}";`));
     const openRouterHelperLines = renderOpenRouterHelper(activeBaseIds.has(DEFAULT_PROVIDER_ID));
     // All known provider/variant IDs for tier resolution
@@ -1167,6 +1260,8 @@ export function generateAgentsTs(env = process.env, options = {}) {
         ...activeProviderStates.map((p) => p.id),
         ...variantStates.filter((v) => v.active).map((v) => v.variantId),
     ]);
+    const codexAccounts = registeredAccounts.filter(isCodexAccount);
+    const hasCodexDefaults = activeBaseIds.has("codex") || codexAccounts.length > 0;
     const detectionsById = new Map(detections.map((entry) => [entry.id, entry]));
     // Fallback: all base provider IDs sorted by score (for tiers with no preferred match)
     const fallbackIds = activeProviderStates.map((p) => p.id);
@@ -1184,7 +1279,43 @@ export function generateAgentsTs(env = process.env, options = {}) {
     ).flat();
     // Tier lines: detection-resolved members, then accounts whose engine
     // family is in the tier's preference order get appended.
-    const resolvedTierLines = Object.entries(TIER_PREFERENCES).map(([tier, { order, maxSize }]) => {
+    const resolvedTierLines = Object.entries(TIER_PREFERENCES).map(([tier, { codexVariant, order, maxSize }]) => {
+        if (hasCodexDefaults) {
+            const model = CODEX_TIER_MODEL[tier];
+            const detected = allProviderIds.has(codexVariant) ? [codexVariant] : [];
+            const accountVariants = codexAccounts.map((account) => codexAccountVariantId(account, model));
+            // Never cap Codex accounts ahead of a provider-family boundary.
+            // Every registered Codex credential must be exhausted before a
+            // non-Codex fallback can run; maxSize limits fallback breadth only.
+            const codexProviders = [...detected, ...accountVariants];
+            const fallbackOrder = order.filter((id) => id !== codexVariant && baseAgentIdForProviderId(id) !== "codex");
+            const fallbackFamilies = new Set(fallbackOrder.map(baseAgentIdForProviderId));
+            const accountFallbacksByFamily = new Map();
+            for (const account of registeredAccounts) {
+                const family = ACCOUNT_PROVIDER_POOL[account.provider];
+                if (isCodexAccount(account) || !family || !fallbackFamilies.has(family)) continue;
+                const members = accountFallbacksByFamily.get(family) ?? [];
+                members.push(labelToCamel(account.label));
+                accountFallbacksByFamily.set(family, members);
+            }
+            const orderedFallbacks = [];
+            const emittedAccountFamilies = new Set();
+            for (const id of fallbackOrder) {
+                if (allProviderIds.has(id)) orderedFallbacks.push(id);
+                const family = baseAgentIdForProviderId(id);
+                if (emittedAccountFamilies.has(family)) continue;
+                emittedAccountFamilies.add(family);
+                orderedFallbacks.push(...(accountFallbacksByFamily.get(family) ?? []));
+            }
+            const runtimeFallbacks = [...new Set(orderedFallbacks)].slice(0, maxSize);
+            const unavailableFallbacks = fallbackOrder.filter((id) => !allProviderIds.has(id));
+            return renderTierLine(
+                tier,
+                [...codexProviders, ...runtimeFallbacks],
+                unavailableFallbacks,
+                ["  // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails."],
+            );
+        }
         let resolved = order
             .filter((id) => allProviderIds.has(id))
             .slice(0, maxSize);
@@ -1226,7 +1357,6 @@ export function generateAgentsTs(env = process.env, options = {}) {
         ...(hasAccounts ? ["// Account providers (camelCase labels) come from ~/.smithers/accounts.json — managed via `smithers agent add|list|remove`."] : []),
         ...(hasAccounts ? ['import { homedir } from "node:os";', 'import path from "node:path";'] : []),
         ...smithersImportLines,
-        ...scaffoldImportLines,
         "",
         ...scaffoldExportLines,
         ...(scaffoldExportLines.length ? [""] : []),

@@ -23,7 +23,6 @@
 import {
   Approval,
   ClaudeCodeAgent,
-  CodexAgent,
   Panel,
   Parallel,
   Sequence,
@@ -35,6 +34,7 @@ import {
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 const SPEC = ".smithers/specs/context-engineering-and-execution-levers.md";
 
@@ -119,36 +119,58 @@ const { Workflow, Loop, smithers, outputs } = createSmithers({
 
 // ---- agents (bypass flags so a detached run never blocks on a permission
 //      prompt; NO cwd pinned so <Worktree> controls the dir) ----
-const opus = new ClaudeCodeAgent({
+const opusFallback = new ClaudeCodeAgent({
   model: "claude-opus-4-8",
   permissionMode: "bypassPermissions",
   dangerouslySkipPermissions: true,
 });
-const codex = new CodexAgent({
-  model: "gpt-5.5",
+const sonnetFallback = new ClaudeCodeAgent({
+  model: "claude-sonnet-5",
+  permissionMode: "bypassPermissions",
+  dangerouslySkipPermissions: true,
+});
+const solPrimary = codexFirst({
+  model: "gpt-5.6-sol",
   sandbox: "danger-full-access",
   dangerouslyBypassApprovalsAndSandbox: true,
   skipGitRepoCheck: true,
-});
+}, [opusFallback]);
 // Steered moderator: the bare-opus moderator once discarded the panelists'
 // grounded findings (the #271 discovery) and synthesized a generic plan. This
 // systemPrompt forces it to preserve concrete findings.
-const speedModerator = new ClaudeCodeAgent({
+const solSecondary = codexFirst({
+  model: "gpt-5.6-sol",
+  sandbox: "danger-full-access",
+  dangerouslyBypassApprovalsAndSandbox: true,
+  skipGitRepoCheck: true,
+}, [opusFallback]);
+const speedSystemPrompt =
+  "You merge implementation plans into ONE strongest consolidated plan. PRESERVE the panelists' concrete grounded findings verbatim: exact file paths, line numbers, prior-PR references (e.g. #271), and what ALREADY exists in the code. Do NOT generalize, re-scope, or drift to a different layer than the panelists analyzed. Keep the best concrete steps, reconcile disagreements with code evidence. Output the consolidated plan + ordered steps.";
+const speedModerator: AgentLike[] = codexFirst({
+  model: "gpt-5.6-sol",
+  sandbox: "danger-full-access",
+  dangerouslyBypassApprovalsAndSandbox: true,
+  skipGitRepoCheck: true,
+  systemPrompt: speedSystemPrompt,
+}, [new ClaudeCodeAgent({
   model: "claude-opus-4-8",
   permissionMode: "bypassPermissions",
   dangerouslySkipPermissions: true,
-  systemPrompt:
-    "You merge implementation plans into ONE strongest consolidated plan. PRESERVE the panelists' concrete grounded findings verbatim: exact file paths, line numbers, prior-PR references (e.g. #271), and what ALREADY exists in the code. Do NOT generalize, re-scope, or drift to a different layer than the panelists analyzed. Keep the best concrete steps, reconcile disagreements with code evidence. Output the consolidated plan + ordered steps.",
-});
+  systemPrompt: speedSystemPrompt,
+})]);
 
-// Sandwich delegation: smart model plans/reviews; implementer does the middle.
-const planners: { agent: AgentLike; role: string }[] = [
-  { agent: opus, role: "panel-opus" },
-  { agent: codex, role: "panel-codex" },
+// Codex role split; Claude remains fallback-only.
+const planners: { agent: AgentLike | AgentLike[]; role: string }[] = [
+  { agent: solPrimary, role: "panel-sol-primary" },
+  { agent: solSecondary, role: "panel-sol-secondary" },
 ];
-const docsAgent: AgentLike[] = [opus, codex]; // Opus writes docs (Codex failover)
-const codeAgent: AgentLike[] = [codex, opus]; // Codex implements (Opus failover)
-const reviewAgent: AgentLike[] = [opus, codex]; // Opus reviews
+const planningAgent: AgentLike[] = solPrimary;
+const docsAgent: AgentLike[] = codexFirst(
+  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [sonnetFallback],
+);
+const codeAgent = docsAgent;
+const reviewAgent = planningAgent;
 const RETRIES = 2;
 const AGENT_TIMEOUT = 60 * 60_000;
 const HEARTBEAT = 12 * 60_000;
@@ -302,7 +324,7 @@ export default smithers((ctx: any) => {
         {/* ============ DELIVERABLE 1: DOCS ============ */}
         {includeDocs ? (
           <Sequence>
-            <Task id="plan-docs" output={outputs.plan} agent={docsAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
+            <Task id="plan-docs" output={outputs.plan} agent={planningAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
               {planPrompt("docs")}
             </Task>
             <Approval id="approve-docs" output={outputs.approval} onDeny="skip" request={{ title: "Approve the DOCS plan?", summary: planSummary(ctx, "docs") }} />
@@ -315,7 +337,7 @@ export default smithers((ctx: any) => {
         {/* ============ DELIVERABLE 2: SIDECAR ============ */}
         {includeSidecar ? (
           <Sequence>
-            <Task id="plan-sidecar" output={outputs.plan} agent={planners.map((p) => p.agent)} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
+            <Task id="plan-sidecar" output={outputs.plan} agent={planningAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
               {planPrompt("sidecar")}
             </Task>
             <Approval id="approve-sidecar" output={outputs.approval} onDeny="skip" request={{ title: "Approve the <Sidecar> plan?", summary: planSummary(ctx, "sidecar") }} />

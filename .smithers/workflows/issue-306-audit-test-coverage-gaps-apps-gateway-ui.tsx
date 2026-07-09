@@ -64,8 +64,8 @@ export default smithers((ctx) => (
       idPrefix="issue-306-cov"
       prompt={ctx.input.prompt ?? DEFAULT_PROMPT()}
       implementAgents={agents.implement}
-      validateAgents={agents.cheapFast}
-      reviewAgents={agents.review}
+      validateAgents={agents.midTier}
+      reviewAgents={[agents.review]}
       reviewWhen={false}
       maxIterations={2}
     />

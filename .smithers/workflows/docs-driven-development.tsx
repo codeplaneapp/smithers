@@ -16,8 +16,8 @@ import { validateFeatures } from "../lib/ddd/validateFeatures.ts";
 // .smithers/. No absolute machine paths.
 const ROOT = dddRootOrCwd();
 
-const planner = providers.claude;
-const trivialEditor = providers.claudeSonnet;
+const planner = providers.sol;
+const trivialEditor = providers.luna;
 const codex = providers.codex;
 
 // One changed-file shape, shared by the editor-submitted input ticket and the
@@ -166,7 +166,7 @@ Goal:
 - Track feature status, test cases, observability, debugging instructions, architecture docs, fixes, and commit diff hints.
 - Audit the spec for broken, missing, partial, or untested features.
 - Pick up to the configured maxAgents best next work items every round. Prefer fixing broken P0 features, then partial P0 proof gaps, then missing e2e tests, then high-impact reviews/issues, then new features.
-- Use Codex as the main implementation agent. Use Sonnet for trivial bounded docs/code updates and Fable/Opus-class Claude for planning/review when Claude is available; if Claude is rate-limited, resume with useClaudeForPlanning=false so those slots route to Codex.
+- Use Codex Luna for research and every implementation, Codex Sol for planning/review, and Codex Terra for routine validation. Claude is an automatic fallback only when Codex cannot run. The legacy useClaudeForPlanning input is accepted but no longer changes routing.
 - This workflow is long-running by design. It should continue round after round until the product spec is fully honest, tested, reviewed, documented, and the only remaining triage items are explicitly low-value/no-op issues.
 
 Architecture constraints:
@@ -397,17 +397,17 @@ export function resolveMaxIterations(value: unknown, runImplementation: boolean)
 export function agentForSlot(ctx: any, slot: number) {
   const triage = ctx.outputMaybe("triage", { nodeId: "triage" });
   const selected = triage?.selected?.find((item: any) => item.slot === slot);
-  if (selected?.agent === "opus") return ctx.input.useClaudeForPlanning ? planner : codex;
-  if (selected?.agent === "sonnet") return ctx.input.useClaudeForPlanning ? trivialEditor : codex;
+  if (selected?.agent === "opus") return planner;
+  if (selected?.agent === "sonnet") return trivialEditor;
   return codex;
 }
 
-export function planningAgent(ctx: any) {
-  return ctx.input.useClaudeForPlanning ? planner : codex;
+export function planningAgent(_ctx: any) {
+  return planner;
 }
 
-export function auditAgent(ctx: any) {
-  return ctx.input.useClaudeForPlanning ? trivialEditor : codex;
+export function auditAgent(_ctx: any) {
+  return providers.luna;
 }
 
 // The loop must NOT exit on a single round-summary "done" — a flaky/empty audit
@@ -442,7 +442,7 @@ Selected item:
 ${JSON.stringify(selected, null, 2)}
 
 Requirements:
-- Operate in the smithers repo root. Sonnet/Opus selections use Claude when useClaudeForPlanning=true and automatically route to Codex when the run is resumed with useClaudeForPlanning=false.
+- Operate in the smithers repo root. Implementation selections run on Codex Luna; planning/review selections run on Codex Sol. Claude is failover-only. The legacy useClaudeForPlanning input does not alter routing.
 - Make the feature status in .smithers/spec/features.json more true, not more optimistic.
 - Update the spec if tests, observability, debug instructions, architecture, fixes, or diffs changed, then run bun .smithers/lib/ddd/build.ts and keep features.json valid.
 - Run the selected tests where feasible and list exact commands (pnpm -C packages/<pkg> test, pnpm typecheck).
@@ -620,7 +620,7 @@ ${CONTEXT}`}
           </Task>
 
           <Task id="triage" output={outputs.triage} agent={planningAgent(ctx)} retries={1} timeoutMs={30 * 60 * 1000} dependsOn={["spec-update"]}>
-            {`Plan the next docs-driven-development round. First run "bun .smithers/lib/ddd/triageCandidates.ts --max ${Math.max(maxAgents * 4, 4)}" and use that bounded ranked list instead of re-auditing the entire repo. Read the meta-ticket output before selecting slots. If it contains a docs-editor change, triage tickets based on that latest docs delta, the recorded docs diff, and the current codebase state. Pick at most ${maxAgents} work items. Slots must be numbered 1..${maxAgents}. Prefer broken P0 fixes, then partial P0 proof gaps, then missing e2e tests, then high-impact reviews/issues, then new features. Choose "codex" for most implementation/review tasks, "sonnet" for trivial bounded docs/code updates, and "opus" when planning/review judgment is the work item. The runtime uses Claude for sonnet/opus while useClaudeForPlanning=true and routes those same slots to Codex when the run is resumed with useClaudeForPlanning=false after a Claude rate limit. Never select pointless issues unless the product is otherwise fully built, tested, documented, and reviewed. Return only JSON matching the triage schema. ${CONTEXT}`}
+            {`Plan the next docs-driven-development round. First run "bun .smithers/lib/ddd/triageCandidates.ts --max ${Math.max(maxAgents * 4, 4)}" and use that bounded ranked list instead of re-auditing the entire repo. Read the meta-ticket output before selecting slots. If it contains a docs-editor change, triage tickets based on that latest docs delta, the recorded docs diff, and the current codebase state. Pick at most ${maxAgents} work items. Slots must be numbered 1..${maxAgents}. Prefer broken P0 fixes, then partial P0 proof gaps, then missing e2e tests, then high-impact reviews/issues, then new features. Choose "codex" or "sonnet" for implementation tasks (both route to Codex Luna for compatibility), and "opus" only when planning/review judgment is the work item (routed to Codex Sol). Claude is failover-only. Never select pointless issues unless the product is otherwise fully built, tested, documented, and reviewed. Return only JSON matching the triage schema. ${CONTEXT}`}
           </Task>
 
           <Task

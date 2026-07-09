@@ -232,7 +232,7 @@ export default smithers((ctx) => {
           <Task
             id="inventory-context"
             output={outputs.inventory}
-            agent={agents.smartTool}
+            agent={agents.research}
             heartbeatTimeoutMs={600_000}
           >
             <InventoryPrompt
@@ -273,7 +273,7 @@ export default smithers((ctx) => {
 
         {/* 5 — Turn the success criteria into a backpressure gate matrix. */}
         {route ? (
-          <Task id="build-backpressure" output={outputs.backpressure} agent={agents.smart}>
+          <Task id="build-backpressure" output={outputs.backpressure} agent={agents.planning}>
             <BackpressurePrompt prompt={prompt} contract={contract} route={route} />
           </Task>
         ) : null}
@@ -318,7 +318,7 @@ export default smithers((ctx) => {
 
         {/* 8 — Report the whole concierge run as a self-contained HTML slideshow. */}
         {proceed && executed ? (
-          <Task id="report" output={outputs.report} agent={agents.smart}>
+          <Task id="report" output={outputs.report} agent={agents.research}>
             <ReportPrompt
               prompt={prompt}
               classification={classify}

@@ -151,8 +151,8 @@ export default smithers((ctx) => {
                     idPrefix={ticket.slug}
                     prompt={`Implement the ticket below in this worktree, then make it pass.\n\nTICKET FILE: .smithers/tickets/${ticket.id}\n\n${ticket.content}\n\n--- When the work is complete and green ---\n- COMMIT your changes to THIS worktree branch with one atomic emoji+conventional commit. Local commits only; the workflow lands them on main itself.\n- NEVER push, force-push, or run gh pr create; never switch branches or touch main/origin. An agent push corrupts shared main; the workflow owns all merging.`}
                     implementAgents={agents.implement}
-                    validateAgents={agents.smart}
-                    reviewAgents={agents.review}
+                    validateAgents={agents.midTier}
+                    reviewAgents={[agents.review]}
                     reviewWhen={validationPassed}
                     feedback={feedback}
                     done={done}
@@ -203,7 +203,7 @@ export default smithers((ctx) => {
         </Parallel>
 
         {/* Agent merges completed branches back into main */}
-        <Task id="merge" output={outputs.merge} agent={agents.smart}>
+        <Task id="merge" output={outputs.merge} agent={agents.implement}>
           <MergeTicketsPrompt ticketSummary={ticketResults
             .map((r) => `- ${r.ticketId}: branch "${r.branch}" — ${r.status} (${r.summary})`)
             .join("\n")} />

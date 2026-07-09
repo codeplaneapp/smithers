@@ -38,9 +38,16 @@ Custom UIs go in: {props.uiDir}
   paths, `<Loop>/<Ralph until maxIterations onMaxReached>` for "repeat until done".
 - **Human gates** become `<Approval>` / `<HumanTask>` nodes only where the spec
   asked for them.
-- **Agents per task:** map each task to a pool from the manifest (`agents.smart`,
-  `agents.smartTool` for file/shell work, `agents.cheapFast` for cheap checks);
-  function tasks (no agent) for pure compute / shelling out.
+- **Agents per task:** use the role-specific pool from the manifest. Choose
+  `agents.planning` for GPT-5.6 Sol planning, orchestration, and review;
+  `agents.research` for GPT-5.6 Luna research; `agents.implement` for GPT-5.6
+  Luna implementation; `agents.midTier` for GPT-5.6 Terra validation and
+  tool-heavy mid-tier work; and `agents.cheapFast` for GPT-5.6 Luna low-stakes,
+  high-volume work. Implementation stays on `agents.implement` even when it
+  edits files or runs shell commands. These five pools already encode
+  sequential Codex-first fallback, so never fan out to Claude or Kimi in
+  parallel merely as a fallback. Use function tasks (no agent) for pure compute
+  / shelling out.
 - **No mocks.** Function tasks and verification steps must run real commands
   against real files; never design a step whose output is fabricated data.
 

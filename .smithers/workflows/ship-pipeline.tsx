@@ -51,7 +51,7 @@ export default smithers((ctx) => (
         source={ctx.input.source}
         prompt={ctx.input.prompt}
         ticketsDir={ctx.input.ticketsDir}
-        agents={agents.smartTool}
+        agents={agents.planning}
       />
       <ShipTickets
         ctx={ctx}

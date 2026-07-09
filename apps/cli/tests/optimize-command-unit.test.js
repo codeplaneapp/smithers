@@ -64,7 +64,7 @@ describe("optimizeOptions bounds", () => {
 
     test("defaults provider/minImprovement/concurrency/log/allowNetwork", () => {
         const parsed = optimizeOptions.parse(base);
-        expect(parsed.provider).toBe("cerebras");
+        expect(parsed.provider).toBe("openai-api");
         expect(parsed.minImprovement).toBeCloseTo(0.000001);
         expect(parsed.concurrency).toBe(1);
         expect(parsed.log).toBe(true);

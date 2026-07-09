@@ -17,6 +17,10 @@ const DEFAULT_OUTPUT_CHAT_ENV = "TELEGRAM_DIGEST_OUTPUT_CHAT_ID";
 const DEFAULT_SOURCE_CHAT_ENV = "TELEGRAM_DIGEST_SOURCE_CHAT_ID";
 const DEFAULT_DRY_RUN_ENV = "TELEGRAM_DIGEST_DRY_RUN";
 const DEFAULT_POST_ENV = "TELEGRAM_DIGEST_POST_TO_TELEGRAM";
+const DEFAULT_OPENAI_KEY_ENV = "OPENAI_API_KEY";
+const DEFAULT_OPENAI_MODEL_ENV = "OPENAI_MODEL";
+const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
+const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_KIMI_KEY_ENV = "MOONSHOT_API_KEY";
 const DEFAULT_KIMI_MODEL_ENV = "KIMI_MODEL";
 const DEFAULT_KIMI_MODEL = "kimi-k2.6";
@@ -69,16 +73,18 @@ const inputSchema = z.object({
     .nullable()
     .default(null)
     .describe("Optional context about what the group cares about."),
+  openaiApiKeyEnv: z.string().nullable().default(null).describe(`Environment variable containing the OpenAI API key. Defaults to ${DEFAULT_OPENAI_KEY_ENV}.`),
+  openaiModel: z.string().nullable().default(null).describe(`Primary summarizer model. Defaults to ${DEFAULT_OPENAI_MODEL_ENV}, then ${DEFAULT_OPENAI_MODEL}.`),
   kimiApiKeyEnv: z
     .string()
     .nullable()
     .default(null)
-    .describe(`Environment variable containing the Kimi/Moonshot API key. Defaults to ${DEFAULT_KIMI_KEY_ENV}.`),
+    .describe(`Fallback-only Kimi/Moonshot API key environment variable. Defaults to ${DEFAULT_KIMI_KEY_ENV}.`),
   kimiModel: z
     .string()
     .nullable()
     .default(null)
-    .describe(`Kimi model id. Defaults to ${DEFAULT_KIMI_MODEL_ENV}, then ${DEFAULT_KIMI_MODEL}.`),
+    .describe(`Fallback-only Kimi model id. Defaults to ${DEFAULT_KIMI_MODEL_ENV}, then ${DEFAULT_KIMI_MODEL}.`),
   sourceChatId: z
     .string()
     .nullable()
@@ -224,6 +230,8 @@ type NormalizedInput = {
   maxMessages: number;
   maxPromptChars: number;
   topicHint: string | null;
+  openaiApiKeyEnv: string;
+  openaiModel: string;
   kimiApiKeyEnv: string;
   kimiModel: string;
   sourceChatId: string | null;
@@ -249,7 +257,7 @@ type TelegramApiResponse<T> = {
   error_code?: number;
 };
 
-type KimiChatResponse = {
+type ChatCompletionResponse = {
   choices?: Array<{ message?: { content?: unknown } }>;
   error?: { message?: string };
 };
@@ -288,6 +296,8 @@ function normalizeInput(input: Input): NormalizedInput {
     maxMessages: input.maxMessages ?? 500,
     maxPromptChars: input.maxPromptChars ?? 60000,
     topicHint: input.topicHint?.trim() ? input.topicHint.trim() : null,
+    openaiApiKeyEnv: input.openaiApiKeyEnv?.trim() || DEFAULT_OPENAI_KEY_ENV,
+    openaiModel: input.openaiModel?.trim() || envString(DEFAULT_OPENAI_MODEL_ENV) || DEFAULT_OPENAI_MODEL,
     kimiApiKeyEnv: input.kimiApiKeyEnv?.trim() || DEFAULT_KIMI_KEY_ENV,
     kimiModel: input.kimiModel?.trim() || envString(DEFAULT_KIMI_MODEL_ENV) || DEFAULT_KIMI_MODEL,
     sourceChatId,
@@ -738,7 +748,7 @@ function parseJsonObject(text: string): unknown {
     const start = trimmed.indexOf("{");
     const end = trimmed.lastIndexOf("}");
     if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1));
-    throw new Error("Kimi response did not contain a JSON object.");
+    throw new Error("Summarizer response did not contain a JSON object.");
   }
 }
 
@@ -791,13 +801,17 @@ function normalizeDigestJson(value: unknown, collect: CollectOutput): DigestOutp
   });
 }
 
-async function summarizeWithKimi(collect: CollectOutput, input: NormalizedInput): Promise<DigestOutput> {
-  const apiKey = envString(input.kimiApiKeyEnv);
-  if (!apiKey) throw new Error(`${input.kimiApiKeyEnv} is not set; Kimi summary cannot run.`);
+async function requestDigest(
+  collect: CollectOutput,
+  input: NormalizedInput,
+  endpoint: string,
+  apiKey: string,
+  model: string,
+  provider: string,
+  reasoningEffort?: "medium",
+): Promise<DigestOutput> {
   const body: Record<string, unknown> = {
-    model: input.kimiModel,
-    temperature: 0.2,
-    max_tokens: 4096,
+    model,
     messages: [
       {
         role: "system",
@@ -807,11 +821,18 @@ async function summarizeWithKimi(collect: CollectOutput, input: NormalizedInput)
       { role: "user", content: summarizePrompt(collect, input) },
     ],
   };
-  if (/^kimi-k2\.(5|6)\b/.test(input.kimiModel)) {
+  if (reasoningEffort) {
+    body.reasoning_effort = reasoningEffort;
+    body.max_completion_tokens = 4096;
+  } else {
+    body.temperature = 0.2;
+    body.max_tokens = 4096;
+  }
+  if (/^kimi-k2\.(5|6)\b/.test(model)) {
     body.thinking = { type: "disabled" };
   }
 
-  const response = await fetch(MOONSHOT_CHAT_COMPLETIONS_URL, {
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       authorization: `Bearer ${apiKey}`,
@@ -819,13 +840,40 @@ async function summarizeWithKimi(collect: CollectOutput, input: NormalizedInput)
     },
     body: JSON.stringify(body),
   });
-  const parsed = (await response.json()) as KimiChatResponse;
+  const parsed = (await response.json()) as ChatCompletionResponse;
   if (!response.ok) {
-    throw new Error(parsed.error?.message ?? `Kimi request failed with HTTP ${response.status}`);
+    throw new Error(parsed.error?.message ?? `${provider} request failed with HTTP ${response.status}`);
   }
   const content = parsed.choices?.[0]?.message?.content;
-  if (typeof content !== "string") throw new Error("Kimi response did not include message content.");
+  if (typeof content !== "string") throw new Error(`${provider} response did not include message content.`);
   return normalizeDigestJson(parseJsonObject(content), collect);
+}
+
+async function summarizeWithCodex(collect: CollectOutput, input: NormalizedInput): Promise<DigestOutput> {
+  const openaiKey = envString(input.openaiApiKeyEnv);
+  let primaryError: unknown;
+  if (openaiKey) {
+    try {
+      return await requestDigest(
+        collect,
+        input,
+        OPENAI_CHAT_COMPLETIONS_URL,
+        openaiKey,
+        input.openaiModel,
+        "OpenAI",
+        "medium",
+      );
+    } catch (error) {
+      primaryError = error;
+    }
+  }
+
+  const kimiKey = envString(input.kimiApiKeyEnv);
+  if (kimiKey) {
+    return requestDigest(collect, input, MOONSHOT_CHAT_COMPLETIONS_URL, kimiKey, input.kimiModel, "Kimi fallback");
+  }
+  if (primaryError instanceof Error) throw primaryError;
+  throw new Error(`${input.openaiApiKeyEnv} is not set and no ${input.kimiApiKeyEnv} fallback is available.`);
 }
 
 function emptyDigest(collect: CollectOutput): DigestOutput {
@@ -1101,7 +1149,7 @@ export default smithers((ctx) => {
         {collect ? (
           collect.messageCount > 0 ? (
             <Task id="summarize-digest" output={outputs.digest} heartbeatTimeoutMs={600_000}>
-              {() => summarizeWithKimi(collect, input)}
+              {() => summarizeWithCodex(collect, input)}
             </Task>
           ) : (
             <Task id="summarize-digest" output={outputs.digest}>

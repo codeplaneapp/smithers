@@ -1,12 +1,13 @@
 // smithers-display-name: Fix Six Issues
 // smithers-source: one-off — fix issues #236 #254 #255 #258 #262 #265, each in its own
-// worktree: Opus investigates, Codex implements, Opus + Codex review/improve in a loop,
-// a human approval gate reviews the PRs, then Sonnet merges and closes each issue.
+// worktree: Codex Sol investigates/reviews, Codex Luna implements, a human approval gate
+// reviews the PRs, then Codex Terra merges and closes each issue. Claude is failover-only.
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const REPO = "smithersai/smithers";
@@ -115,18 +116,23 @@ const { Workflow, Task, Sequence, Parallel, Loop, Approval, Worktree, MergeQueue
 });
 
 // ── Agents ───────────────────────────────────────────────────────────────────
-// Opus investigates and reviews; Codex implements and cross-reviews; Sonnet lands.
-// ClaudeCodeAgent defaults to --permission-mode bypassPermissions and subscription
-// auth (it unsets ANTHROPIC_API_KEY). Codex on ChatGPT auth rejects "-codex" model
-// ids, so use a plain id (see issue #236 / repo memory).
-const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
-const codex = new CodexAgent({
-  model: "gpt-5.5",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-});
+// Codex is primary in every chain; Claude is retained only for failover.
+const opus = codexFirst(
+  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
+);
+const solReviewer = codexFirst(
+  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
+);
+const sonnet = codexFirst(
+  { model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
+);
+const codex = codexFirst(
+  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
+);
 
 const AGENT_RETRIES = 2;
 const INVESTIGATE_TIMEOUT_MS = 25 * 60_000;
@@ -139,8 +145,8 @@ const HEARTBEAT_MS = 10 * 60_000;
 const HINTS: Record<number, string> = {
   236: [
     "The fix targets the SHIPPED init-pack template that generates .smithers/agents.ts, not this repo's local .smithers/agents.ts (which carries an uncommitted local override).",
-    "Find the template with: rg -l 'gpt-5.3-codex' apps/cli packages — likely in the workflow-pack/init sources.",
-    "Apply the issue's three proposed fixes to the template: ChatGPT-compatible codex model id (drop the -codex suffix), remove/repoint the opencode-over-Anthropic-API provider in default arrays, and reorder agents.smart/smartTool to lead with the known-working claude provider.",
+    "Find the template with: rg -l 'gpt-5.6-luna|codexLuna' apps/cli packages — likely in the workflow-pack/init sources.",
+    "Preserve the current Codex-first role policy: Luna implements/researches, Terra validates, Sol plans/reviews, and non-Codex providers are fallback-only.",
   ].join("\n"),
   254: [
     "Goal: Gateway should bridge persisted _smithers_events for runs it did not execute in-process, so streamRunEvents delivers real events for `smithers up -d` runs.",
@@ -197,8 +203,8 @@ function issueFeedback(ctx: any, n: number): string {
     parts.push(`IMPLEMENTATION SELF-REPORTED ${impl.status.toUpperCase()}:\n${impl.summary}`);
   }
   for (const [who, rows] of [
-    ["OPUS REVIEWER", ctx.outputs.reviewOpus],
-    ["CODEX REVIEWER", ctx.outputs.reviewCodex],
+    ["CODEX SOL REVIEWER A", ctx.outputs.reviewOpus],
+    ["CODEX SOL REVIEWER B", ctx.outputs.reviewCodex],
   ] as const) {
     const review = latestForIssue<Review>(rows, n);
     if (review && !review.approved) {
@@ -363,9 +369,9 @@ function implementPrompt(issue: Issue, inv: Investigation | undefined, feedback:
   ].join("\n");
 }
 
-function reviewPrompt(issue: Issue, impl: Implementation | undefined, who: "opus" | "codex") {
+function reviewPrompt(issue: Issue, impl: Implementation | undefined, reviewer: "a" | "b") {
   return [
-    `You are the ${who === "opus" ? "Claude Opus" : "Codex"} STRICT, INDEPENDENT REVIEWER for the candidate fix to GitHub issue #${issue.number} in smithersai/smithers.`,
+    `You are Codex Sol reviewer ${reviewer.toUpperCase()}, a STRICT, INDEPENDENT REVIEWER for the candidate fix to GitHub issue #${issue.number} in smithersai/smithers.`,
     "Your current working directory IS the worktree containing the candidate fix. Do NOT edit any files — review only.",
     "",
     issueHeader(issue),
@@ -491,17 +497,17 @@ export default smithers((ctx) => {
                             timeoutMs={REVIEW_TIMEOUT_MS}
                             heartbeatTimeoutMs={HEARTBEAT_MS}
                           >
-                            {reviewPrompt(issue, impl, "opus")}
+                            {reviewPrompt(issue, impl, "a")}
                           </Task>
                           <Task
                             id={`i${n}:review-codex`}
                             output={outputs.reviewCodex}
-                            agent={codex}
+                            agent={solReviewer}
                             retries={AGENT_RETRIES}
                             timeoutMs={REVIEW_TIMEOUT_MS}
                             heartbeatTimeoutMs={HEARTBEAT_MS}
                           >
-                            {reviewPrompt(issue, impl, "codex")}
+                            {reviewPrompt(issue, impl, "b")}
                           </Task>
                         </Parallel>
                       </Sequence>

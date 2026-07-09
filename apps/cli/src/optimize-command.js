@@ -30,7 +30,7 @@ import {
 export const optimizeOptions = z.object({
     cases: z.string().describe("JSON or JSONL eval case file"),
     suite: z.string().optional().describe("Stable suite ID used in run IDs and report paths"),
-    provider: z.enum(OPTIMIZER_PROVIDER_IDS).default("cerebras").describe("GEPA patch generator provider"),
+    provider: z.enum(OPTIMIZER_PROVIDER_IDS).default("openai-api").describe("GEPA patch generator provider"),
     model: z.string().optional().describe("Optimizer model for provider-backed GEPA"),
     artifact: z.string().optional().describe("Write the optimized prompt artifact to this path"),
     reportDir: z.string().optional().describe("Directory for baseline and optimized eval reports"),

@@ -965,7 +965,7 @@ export function Optimizer({
     relevancy({ question: ctx.input.question }),       // answers the question
     schemaAdherence(),                                 // matches the Zod schema
     llmJudge({                                         // custom L L M judge
-      model: anthropic("claude-sonnet-5"),
+      model: openai("gpt-5.6-sol"),
       rubric: "Score 0-100 on clarity and concision.",
     }),
   ]}
@@ -1023,7 +1023,7 @@ store.setFact(ns, "code-style", { tabs: 2, semi: true }, 30 * 24 * 3600_000);`,
         [
           "",
           `   ${C.cyan}Built-in tools${C.reset}     ${C.dim}read · write · edit · bash · grep · ls (path-contained)${C.reset}`,
-          `   ${C.cyan}Agent fallback${C.reset}     ${C.dim}agent={[claude, codex]}  // claude first, codex on fail${C.reset}`,
+          `   ${C.cyan}Agent fallback${C.reset}     ${C.dim}agent={[codex, claude]}  // codex first, claude on fail${C.reset}`,
           `   ${C.cyan}Agent runtimes${C.reset}     ${C.dim}claude · codex · antigravity · kimi · amp · forge · Effect-native${C.reset}`,
           `   ${C.cyan}MDX prompts${C.reset}        ${C.dim}prompt fragments with typed props · imports compose${C.reset}`,
           `   ${C.cyan}OpenAPI tools${C.reset}      ${C.dim}smithers openapi <spec> → typed AI SDK tool surface${C.reset}`,

@@ -110,7 +110,7 @@ const designSchema = z.looseObject({
       z.object({
         id: z.string(),
         purpose: z.string(),
-        agent: z.string().describe("agents.smart | agents.smartTool | agents.cheapFast | (none) for a function task."),
+        agent: z.string().describe("agents.planning | agents.research | agents.implement | agents.midTier | agents.cheapFast | (none) for a function task."),
         outputs: z.array(z.string()).default([]),
       }),
     )
@@ -262,7 +262,7 @@ export default smithers((ctx) => {
       <UI entry="../ui/create-workflow.tsx" title={"Create Workflow"} />
       <Sequence>
         {/* 1 — Turn the freeform ask into a structured, buildable spec. */}
-        <Task id="clarify" output={outputs.clarify} agent={agents.smart}>
+        <Task id="clarify" output={outputs.clarify} agent={agents.planning}>
           <ClarifyPrompt
             request={ctx.input.prompt ?? "Describe the workflow you want to build, in plain English."}
             name={ctx.input.name}
@@ -284,7 +284,7 @@ export default smithers((ctx) => {
 
         {/* 3 — Design the concrete workflow graph from spec + provisioning. */}
         {provision ? (
-          <Task id="design" output={outputs.design} agent={agents.smart}>
+          <Task id="design" output={outputs.design} agent={agents.planning}>
             <DesignPrompt
               spec={clarify}
               provisioning={provision}

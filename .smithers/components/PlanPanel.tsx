@@ -22,8 +22,8 @@ export const planSynthesisSchema = z.looseObject({
 type PlanPanelProps = {
   idPrefix: string;
   prompt: unknown;
-  /** Panelist planners (run in parallel); defaults to the shared model-diverse pair. */
-  panelists?: AgentLike[];
+  /** Panelist planners (run in parallel); each entry may itself be a failover chain. */
+  panelists?: Array<AgentLike | AgentLike[]>;
   /** The moderator that synthesizes the plans into one; defaults to the shared synthesizer (usually Codex, with Opus fallback). An AgentLike[] is a failover chain. */
   moderator?: AgentLike | AgentLike[];
   /** Per-panelist plan schema; defaults to planOutputSchema. Pass a workflow's own schema to preserve extra fields (e.g. risks). */

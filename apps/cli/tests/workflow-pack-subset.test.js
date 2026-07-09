@@ -121,11 +121,11 @@ test("selecting a workflow subset installs exactly that subset + transitive deps
     expect(writtenRelative).toContain("package.json");
     expect(writtenRelative).toContain(".gitignore");
     expect(writtenRelative).toContain("gateway.ts");
+    expect(writtenRelative).toContain("lib/codexAccounts.ts");
 }, 30_000);
 
-// NOTE: there is no test for .smithers/lib/* helper installation anymore — no
-// seeded workflow imports a lib/ helper since monitor-smithers (fleet-health.ts)
-// was removed. Re-add one if a seeded workflow grows a local helper import.
+// codexAccounts.ts is shared by hand-embedded role components as well as the
+// generated smithering workflow, so it remains infrastructure for every subset.
 
 test("default selectedWorkflows (undefined) emits the same set as all-workflow selection", () => {
     const tmpAll = mkdtempSync(join(tmpdir(), "smithers-all-"));

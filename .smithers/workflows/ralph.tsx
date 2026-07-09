@@ -23,7 +23,7 @@ export default smithers((ctx) => (
   <Workflow name="ralph">
     <UI entry="../ui/ralph.tsx" title={"Ralph"} />
     <Loop until={false} maxIterations={Infinity}>
-      <Task id="ralph" output={ralphOutputSchema} agent={agents.smart}>
+      <Task id="ralph" output={ralphOutputSchema} agent={agents.implement}>
         {ctx.input.prompt}
       </Task>
     </Loop>

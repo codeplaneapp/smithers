@@ -3,7 +3,6 @@
 import {
   AntigravityAgent,
   ClaudeCodeAgent,
-  CodexAgent,
   KimiAgent,
   MergeQueue,
   Parallel,
@@ -16,6 +15,7 @@ import {
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 const ticketKindSchema = z.enum([
   "feature",
@@ -149,13 +149,26 @@ const { Workflow, Loop, smithers, outputs } = createSmithers({
   finalAudit: finalAuditSchema,
 });
 
-const codexModel = process.env.SMITHERS_STUDIO_CODEX_MODEL?.trim();
-const codex = new CodexAgent({
-  ...(codexModel ? { model: codexModel } : {}),
+const legacyCodexModel = process.env.SMITHERS_STUDIO_CODEX_MODEL?.trim();
+const lunaOptions = {
+  model: process.env.SMITHERS_STUDIO_LUNA_MODEL?.trim() || legacyCodexModel || "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   sandbox: "danger-full-access",
   dangerouslyBypassApprovalsAndSandbox: true,
   skipGitRepoCheck: true,
-});
+} as const;
+const terraOptions = {
+  model: process.env.SMITHERS_STUDIO_TERRA_MODEL?.trim() || legacyCodexModel || "gpt-5.6-terra",
+  sandbox: "danger-full-access",
+  dangerouslyBypassApprovalsAndSandbox: true,
+  skipGitRepoCheck: true,
+} as const;
+const solOptions = {
+  model: process.env.SMITHERS_STUDIO_SOL_MODEL?.trim() || legacyCodexModel || "gpt-5.6-sol",
+  sandbox: "danger-full-access",
+  dangerouslyBypassApprovalsAndSandbox: true,
+  skipGitRepoCheck: true,
+} as const;
 const claude = new ClaudeCodeAgent({
   model: process.env.SMITHERS_STUDIO_CLAUDE_MODEL ?? "claude-sonnet-5",
   permissionMode: "bypassPermissions",
@@ -185,18 +198,27 @@ const availableAgents = {
   kimi: process.env.SMITHERS_STUDIO_ENABLE_KIMI === "1" && commandExists("kimi"),
 };
 
-function availableChain(entries: Array<[keyof typeof availableAgents, AgentLike]>): AgentLike[] {
-  const chain = entries
+function availableFallbacks(entries: Array<[keyof typeof availableAgents, AgentLike]>): AgentLike[] {
+  return entries
     .filter(([name]) => availableAgents[name])
     .map(([, agent]) => agent);
-  return chain.length > 0 ? chain : [codex];
 }
 
-const codexChain: AgentLike[] = availableChain([["codex", codex], ["claude", claude], ["kimi", kimi]]);
-const claudeChain: AgentLike[] = availableChain([["claude", claude], ["codex", codex], ["kimi", kimi]]);
-const antigravityChain: AgentLike[] = availableChain([["antigravity", antigravity], ["claude", claude], ["codex", codex], ["kimi", kimi]]);
-const reviewChain: AgentLike[] = availableChain([["codex", codex], ["claude", claude], ["kimi", kimi]]);
-const discoveryChain: AgentLike[] = availableChain([["codex", codex], ["claude", claude], ["kimi", kimi]]);
+const nonCodexFallbacks: Array<[keyof typeof availableAgents, AgentLike]> = [
+  ["claude", claude],
+  ["antigravity", antigravity],
+  ["kimi", kimi],
+];
+const activeFallbacks = availableFallbacks(nonCodexFallbacks);
+const lunaChain = availableAgents.codex || activeFallbacks.length === 0
+  ? codexFirst(lunaOptions, activeFallbacks)
+  : activeFallbacks;
+const terraChain = availableAgents.codex || activeFallbacks.length === 0
+  ? codexFirst(terraOptions, activeFallbacks)
+  : activeFallbacks;
+const solChain = availableAgents.codex || activeFallbacks.length === 0
+  ? codexFirst(solOptions, activeFallbacks)
+  : activeFallbacks;
 const agentTaskRetries = 3;
 const repoRootProbe = spawnSync("jj", ["root"], { encoding: "utf8" });
 const repoRoot = repoRootProbe.status === 0 ? repoRootProbe.stdout.trim() : process.cwd();
@@ -254,16 +276,9 @@ function hashString(value: string) {
 }
 
 function agentForTicket(ticket: ParityTicket, index: number): AgentLike[] {
-  if (ticket.requiresUi || ticket.kind === "ui" || ticket.kind === "terminal") {
-    return antigravityChain;
-  }
-  if (ticket.testsOnly || ticket.kind === "test-only" || ticket.difficulty === "easy") {
-    return claudeChain;
-  }
-  if (ticket.difficulty === "hard" || ticket.difficulty === "critical" || ticket.kind === "gateway") {
-    return codexChain;
-  }
-  return index % 2 === 0 ? codexChain : claudeChain;
+  void ticket;
+  void index;
+  return lunaChain;
 }
 
 function ticketDone(ticketId: string, ctx: any) {
@@ -534,7 +549,7 @@ export default smithers((ctx) => {
     <Workflow name="studio-parity-swarm">
       <Loop id="studio-parity-batches" until={done} maxIterations={ctx.input.maxBatches} onMaxReached="return-last">
         <Sequence>
-          <Task id="discover-next-16" output={outputs.discovery} agent={discoveryChain} retries={agentTaskRetries} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+          <Task id="discover-next-16" output={outputs.discovery} agent={lunaChain} retries={agentTaskRetries} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
             {discoveryPrompt(ticketResults, finalAudit)}
           </Task>
 
@@ -566,7 +581,7 @@ export default smithers((ctx) => {
                           <Task
                             id={`ticket-${ticketSlug}-validate`}
                             output={outputs.validation}
-                            agent={claudeChain}
+                            agent={terraChain}
                             retries={agentTaskRetries}
                             timeoutMs={35 * 60_000}
                             heartbeatTimeoutMs={10 * 60_000}
@@ -576,7 +591,7 @@ export default smithers((ctx) => {
                           <Task
                             id={`ticket-${ticketSlug}-review`}
                             output={outputs.review}
-                            agent={reviewChain}
+                            agent={solChain}
                             retries={agentTaskRetries}
                             timeoutMs={35 * 60_000}
                             heartbeatTimeoutMs={10 * 60_000}
@@ -609,7 +624,7 @@ export default smithers((ctx) => {
                 key={result.ticketId}
                 id={`merge-${slug(result.ticketId)}`}
                 output={outputs.merge}
-                agent={reviewChain}
+                agent={lunaChain}
                 retries={agentTaskRetries}
                 timeoutMs={45 * 60_000}
                 heartbeatTimeoutMs={10 * 60_000}
@@ -626,7 +641,7 @@ export default smithers((ctx) => {
           <Task
             id="studio-parity-final-audit"
             output={outputs.finalAudit}
-            agent={reviewChain}
+            agent={solChain}
             retries={agentTaskRetries}
             timeoutMs={45 * 60_000}
             heartbeatTimeoutMs={10 * 60_000}

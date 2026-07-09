@@ -81,7 +81,7 @@ export default smithers((ctx) => {
     <Workflow name="research-plan-implement">
       <UI entry="../ui/research-plan-implement.tsx" title={"Research Plan Implement"} />
       <Sequence>
-        <Task id="research" output={researchOutputSchema} agent={agents.smartTool}>
+        <Task id="research" output={researchOutputSchema} agent={agents.research}>
           <ResearchPrompt prompt={prompt} />
         </Task>
         <PlanPanel idPrefix="plan" prompt={planPrompt} />
@@ -89,7 +89,7 @@ export default smithers((ctx) => {
           idPrefix="impl"
           prompt={implementPrompt}
           implementAgents={implementer}
-          validateAgents={agents.cheapFast}
+          validateAgents={agents.midTier}
           reviewAgents={panelists}
           synthesizeReview
           feedback={feedback}

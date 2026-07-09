@@ -6,8 +6,9 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 const inputSchema = z.object({
   mode: z.enum(["fresh", "persistent"]).default("fresh"),
@@ -98,14 +99,14 @@ const MAX_OUTPUT = 18_000;
 const MEMORY_NAMESPACE = "workflow:daily-canary";
 const MEMORY_KEY = "test-lru";
 
-const smartBugHunter = new CodexAgent({
-  model: "gpt-5.5",
+const smartBugHunter = codexFirst({
+  model: "gpt-5.6-sol",
   cwd: ROOT,
   sandbox: "read-only",
   skipGitRepoCheck: true,
   extraArgs: ["-c", "tools.web_search=true"],
   timeoutMs: 35 * 60_000,
-});
+}, [new ClaudeCodeAgent({ model: "claude-fable-5", cwd: ROOT })]);
 
 function truncate(text: string, max = MAX_OUTPUT): string {
   return text.length > max ? `${text.slice(0, max)}\n...[truncated ${text.length - max} chars]` : text;

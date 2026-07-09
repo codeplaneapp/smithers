@@ -1,5 +1,5 @@
 // smithers-display-name: DDD Improve Loop
-// smithers-description: Loop a codex finder, a claude-fable-5 adversarial second opinion, and a codex implementer over the docs-driven-development surface until both declare it done. focus="quality" polishes the app; focus="tests" drives test coverage.
+// smithers-description: Loop a Codex Luna finder, Codex Sol adversarial second opinion, and Codex Luna implementer over the docs-driven-development surface until both declare it done. focus="quality" polishes the app; focus="tests" drives test coverage.
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Loop, Sequence, Task } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
@@ -11,7 +11,7 @@ import { dddRootOrCwd } from "../lib/ddd/dddRoot.ts";
 const ROOT = dddRootOrCwd();
 
 const codex = providers.codex;
-const fable = providers.claude; // claude-fable-5
+const fable = providers.sol; // Stable output/node naming; the reviewer is Codex Sol.
 
 const inputSchema = z.object({
   focus: z.preprocess((v) => v ?? undefined, z.enum(["quality", "tests"]).default("quality")),
@@ -137,8 +137,8 @@ export default smithers((ctx) => {
             {`You are the ${focus} finder for the DDD surface. List the highest-value candidates (max 6 per round, most valuable first). Set comprehensive=true with ZERO candidates ONLY when the surface genuinely meets the bar; otherwise comprehensive=false. Do not write any files. Return only JSON matching the find schema. ${SURFACE}`}
           </Task>
 
-          {/* claude-fable-5 second opinion: a cheap no-op while codex is still
-              iterating; a real adversarial hunt once codex claims done. */}
+          {/* Codex Sol second opinion: a cheap no-op while Luna is still
+              iterating; a real adversarial hunt once Luna claims done. */}
           <Task
             id="second-opinion"
             output={outputs.fable}
@@ -151,8 +151,8 @@ export default smithers((ctx) => {
           >
             {(deps: any) =>
               deps.find?.comprehensive === true && (deps.find?.candidates?.length ?? 0) === 0
-                ? `Codex has declared the DDD ${focus} bar met. You are the adversarial second-opinion finder. Independently inspect the whole surface with fresh eyes and hunt for anything codex missed. Set comprehensive=true with ZERO candidates only if you genuinely find nothing worth adding; otherwise list candidates (max 6). Do not write files. Return only JSON matching the find schema. ${SURFACE}`
-                : `Codex is still iterating (its finder has open candidates or comprehensive=false). Do nothing. Return only JSON: {"comprehensive": false, "candidates": [], "summary": "deferred until codex declares comprehensive"}.`
+                ? `Codex Luna has declared the DDD ${focus} bar met. You are the Codex Sol adversarial second-opinion finder. Independently inspect the whole surface with fresh eyes and hunt for anything Luna missed. Set comprehensive=true with ZERO candidates only if you genuinely find nothing worth adding; otherwise list candidates (max 6). Do not write files. Return only JSON matching the find schema. ${SURFACE}`
+                : `Codex Luna is still iterating (its finder has open candidates or comprehensive=false). Do nothing. Return only JSON: {"comprehensive": false, "candidates": [], "summary": "deferred until Luna declares comprehensive"}.`
             }
           </Task>
 

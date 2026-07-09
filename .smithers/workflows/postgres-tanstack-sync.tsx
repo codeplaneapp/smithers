@@ -35,10 +35,11 @@
 // backpressure audit → a final human approval gate → a DRAFT PR (never merges main).
 // ─────────────────────────────────────────────────────────────────────────────
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 // ── Repo + worktree layout ─────────────────────────────────────────────────────
 const repoRoot = (() => {
@@ -244,18 +245,21 @@ const { Workflow, Task, Sequence, Parallel, Approval, Worktree, smithers, output
 });
 
 // ── Agents ───────────────────────────────────────────────────────────────────────
-// Opus 4.8 designs/reviews/verifies/integrates; Codex 5.5 (gpt-5.5, xhigh) implements.
-// ClaudeCodeAgent defaults to --permission-mode bypassPermissions + subscription auth
-// (do NOT rely on ANTHROPIC_API_KEY — it has no credits). Codex on ChatGPT auth rejects
-// "-codex" model ids — use the plain "gpt-5.5" id.
-const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const codex = new CodexAgent({
-  model: "gpt-5.5",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-  config: { model_reasoning_effort: "xhigh" },
-});
+// Codex 5.6 role split. Opus/Sonnet remain fallback-only.
+const opusFallback = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
+const sonnetFallback = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+const solAgent = codexFirst(
+  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [opusFallback],
+);
+const lunaAgent = codexFirst(
+  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [sonnetFallback],
+);
+const terraAgent = codexFirst(
+  { model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [sonnetFallback],
+);
 
 const RETRIES = 2;
 const DESIGN_TIMEOUT_MS = 30 * 60_000;
@@ -913,18 +917,18 @@ function milestone(m: {
   return (
     <Worktree path={wt(s.wtName)} branch={s.branch} baseBranch={m.baseBranch}>
       <Sequence>
-        <Task id={`${s.key}-impl`} output={m.outImpl} agent={codex} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task id={`${s.key}-impl`} output={m.outImpl} agent={lunaAgent} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
           {implPrompt(s, m.design, m.feedback)}
         </Task>
         <Parallel maxConcurrency={2}>
-          <Task id={`${s.key}-review-opus`} output={m.outReviewOpus} agent={opus} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+          <Task id={`${s.key}-review-opus`} output={m.outReviewOpus} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
             {reviewPrompt(s, "opus")}
           </Task>
-          <Task id={`${s.key}-review-codex`} output={m.outReviewCodex} agent={codex} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+          <Task id={`${s.key}-review-codex`} output={m.outReviewCodex} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
             {reviewPrompt(s, "codex")}
           </Task>
         </Parallel>
-        <Task id={`${s.key}-verify`} output={m.outVerify} agent={opus} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task id={`${s.key}-verify`} output={m.outVerify} agent={terraAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
           {verifyPrompt(s, m.feedback, m.runE2e)}
         </Task>
         <Task id={`${s.key}-commit`} output={m.outCommit} timeoutMs={COMMIT_TIMEOUT_MS}>
@@ -960,7 +964,7 @@ export default smithers((ctx) => {
     <Workflow name="postgres-tanstack-sync">
       <Sequence>
         {/* Phase 0 — freeze the contracts (read-only, repo root). */}
-        <Task id="design" output={outputs.design} agent={opus} retries={RETRIES} timeoutMs={DESIGN_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task id="design" output={outputs.design} agent={solAgent} retries={RETRIES} timeoutMs={DESIGN_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
           {designPrompt()}
         </Task>
 
@@ -1036,7 +1040,7 @@ export default smithers((ctx) => {
 
         {/* ── Phase-7 GATE (always visible in the graph) ── */}
         {/* Read-only verification that PGlite cannot be an Electric source + cloud infra is ready. */}
-        <Task id="phase7-gate" output={outputs.phase7Gate} agent={opus} retries={RETRIES} timeoutMs={GATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task id="phase7-gate" output={outputs.phase7Gate} agent={solAgent} retries={RETRIES} timeoutMs={GATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
           {phase7GatePrompt()}
         </Task>
         <Approval
@@ -1078,14 +1082,14 @@ export default smithers((ctx) => {
         <Worktree path={wt(INTEGRATE_WT)} branch={INTEGRATE_BRANCH} baseBranch={integrateBase}>
           <Sequence>
             <Parallel maxConcurrency={2}>
-              <Task id="obs-audit" output={outputs.obsAudit} agent={opus} retries={RETRIES} timeoutMs={AUDIT_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task id="obs-audit" output={outputs.obsAudit} agent={solAgent} retries={RETRIES} timeoutMs={AUDIT_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
                 {obsAuditPrompt()}
               </Task>
-              <Task id="bp-audit" output={outputs.bpAudit} agent={codex} retries={RETRIES} timeoutMs={AUDIT_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task id="bp-audit" output={outputs.bpAudit} agent={solAgent} retries={RETRIES} timeoutMs={AUDIT_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
                 {bpAuditPrompt()}
               </Task>
             </Parallel>
-            <Task id="integrate" output={outputs.integrate} agent={opus} retries={RETRIES} timeoutMs={INTEGRATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task id="integrate" output={outputs.integrate} agent={lunaAgent} retries={RETRIES} timeoutMs={INTEGRATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
               {integratePrompt(integrateBase, runE2e)}
             </Task>
             <Task id="integrate-commit" output={outputs.integrateCommit} timeoutMs={COMMIT_TIMEOUT_MS}>

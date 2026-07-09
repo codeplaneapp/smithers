@@ -1,27 +1,25 @@
 // smithers-source: user
-// smithers-display-name: Serverless Refactor (Codex+Opus plan · Opus-synthesized review)
-// smithers-description: Drive the serverless (@effect/platform) refactor + provider examples + evals as a task list. For EVERY task: Codex AND Claude Opus both PLAN (Opus synthesizes one plan) → implement → validate → Codex AND Opus both REVIEW (Opus synthesizes ONE verdict) → loop until approved, then open one PR per task in an isolated worktree.
+// smithers-display-name: Serverless Refactor (Codex 5.6 role split)
+// smithers-description: Drive the serverless refactor as Sol plan/review → Luna implement → Terra validate/PR loops, with non-Codex providers as failover-only.
 // smithers-tags: refactor, serverless, cloudflare, vercel, effect-platform, plan, implement, review, panel, worktree
 /** @jsxImportSource smithers-orchestrator */
 //
 // The orchestration pattern (what the user asked for)
 // ---------------------------------------------------
 // Per task, inside its own git worktree (branch serverless/<id> off main):
-//   PLAN    → PlanPanel: providers.claudeOpus AND providers.codex each plan in
-//             parallel, then Opus (moderator) SYNTHESIZES them into one plan.
-//   BUILD   → ValidationLoop: implement (Codex-led) → validate (gate) → review
-//             PANEL where Opus AND Codex each review in parallel and Opus
+//   PLAN    → two Codex Sol panel seats plan in parallel, then Sol synthesizes.
+//   BUILD   → ValidationLoop: Luna implement → Terra validate → Sol review
+//             PANEL where two Sol seats review in parallel and Sol
 //             SYNTHESIZES their reviews into a single verdict — looping
 //             implement→validate→review until the synthesized verdict approves
 //             AND validation passes (or maxReviewIterations is hit).
 //   SHIP    → open exactly ONE PR for the task (only when approved).
 //
-// Every role is a failover CHAIN (primary first, then rate-limit backups), so an
-// "Opus" panelist stays Opus unless Opus is rate-limited, then falls back.
+// Every role is a failover chain with Codex first and legacy providers dormant.
 //
 // Run it
 // ------
-//   # Preview (plan only — Codex+Opus plans + Opus synthesis, no edits, no PRs):
+//   # Preview (Sol plan/synthesis only, no edits or PRs):
 //   smithers up .smithers/workflows/serverless-refactor.tsx --input '{"dryRun":true}'
 //
 //   # Work specific tasks first, detached:
@@ -41,34 +39,23 @@
 //    phase's PR before its dependents land, or run them in waves via `only`.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { createSmithers, Parallel, Sequence, Task, Worktree, type AgentLike } from "smithers-orchestrator";
+import { createSmithers, Parallel, Sequence, Task, Worktree } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { implementer, panelists, synthesizer, validator } from "../components/roles";
 import { PlanPanel, planOutputSchema, planSynthesisSchema } from "../components/PlanPanel";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
 
 // ----------------------------------------------------------------------------
-// Roles. Each is a failover chain: Smithers tries the first agent and, on a
-// rate-limit / transient failure, falls through to the next.
-//   Opus  = providers.claudeOpus (ClaudeCodeAgent, claude-opus-4-8)
-//   Codex = providers.codex / codex1 (CodexAgent, gpt-5.5)
-// The two PLAN panelists are Opus and Codex; the two REVIEW panelists are Opus
-// and Codex; Opus is the moderator that synthesizes both plans and both reviews.
+// Roles: Sol plans/reviews/synthesizes, Luna implements, Terra validates and
+// opens PRs. Shared role chains retain non-Codex providers as fallback-only.
 // ----------------------------------------------------------------------------
-const opusPanelist: AgentLike[] = [providers.claudeOpus, providers.claudeSonnet];
-const codexPanelist: AgentLike[] = [providers.codex, providers.codex1];
-// Review panel: two panelists (Opus, Codex), each a failover chain.
-const panel = [opusPanelist, codexPanelist];
-// Plan panel: two planners (Opus, Codex) as single agents (PlanPanel types
-// panelists as AgentLike[]); the moderator + build loop provide the resilience.
-const planPanel: AgentLike[] = [providers.claudeOpus, providers.codex];
-// Opus synthesizes (moderator), with Sonnet as its rate-limit backup.
-const opusModerator: AgentLike[] = [providers.claudeOpus, providers.claudeSonnet];
-// Codex-led implementation middle (the repo's "sandwich"), Opus as backup.
-const implementChain: AgentLike[] = [providers.codex, providers.codex1, providers.claudeOpus];
-const validateChain: AgentLike[] = [providers.claudeSonnet, providers.codex];
-const prChain: AgentLike[] = [providers.claudeSonnet, providers.claudeOpus, providers.codex];
+const panel = panelists;
+const planPanel = panelists;
+const opusModerator = synthesizer; // Stable local name; moderator is Codex Sol.
+const implementChain = implementer;
+const validateChain = validator;
+const prChain = validator;
 
 // ----------------------------------------------------------------------------
 // Schemas
@@ -300,7 +287,7 @@ Done criteria: ${t.done || "typecheck + touched-package tests green"}`;
 
 function buildImplementPrompt(t: WorkTask, plan: z.infer<typeof planSynthesisSchema> | undefined, branch: string): string {
   const planText = plan
-    ? `Synthesized plan (Opus merged Codex's + Opus's plans):\n${plan.summary}\n${(plan.steps ?? []).map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`
+    ? `Synthesized Codex Sol plan:\n${plan.summary}\n${(plan.steps ?? []).map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`
     : "Plan: (pending — follow the goal + done criteria below.)";
   const location = t.isolate === false
     ? `This task runs in the launch checkout (NOT a smithers worktree). If the goal targets another repository, \`cd\` there first (the goal names the path). Commit your work with explicit pathspecs in that repository. Do NOT open a PR here.`

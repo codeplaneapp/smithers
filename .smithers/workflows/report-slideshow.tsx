@@ -164,7 +164,7 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2 — Render a self-contained HTML slideshow from the captured state. */}
-        <Task id="render" output={outputs.render} agent={agents.smart} deps={{ gather: outputs.gather }}>
+        <Task id="render" output={outputs.render} agent={agents.implement} deps={{ gather: outputs.gather }}>
           {(deps) => (
             <RenderPrompt
               runId={runId}

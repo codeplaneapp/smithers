@@ -4,17 +4,12 @@
 import { UI } from "smithers-orchestrator";
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
-import { implementer } from "../components/roles";
+import { implementer, panelists, synthesizer, validator } from "../components/roles";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
 
-// This account pool has no live Anthropic/Claude quota (only codex/kimi/gemini
-// are registered), so the seeded claude-led `agents.planning`/`panelists` pools
-// park the run on `waiting-quota` forever. Route every stage through Codex
-// (gpt-5.5) — the reliably-available CLI here. `implementer` already leads with
-// Codex; this pool keeps planning/validate/review on it too.
-const codexPool = [providers.codex1, providers.codex];
+// Codex role split: Sol plans/reviews, Luna implements, Terra validates.
+// The shared role chains retain Claude/Gemini as no-Codex fallbacks.
 
 // The hosted walkthrough lifecycle (#491) is almost entirely on main already:
 // D1 metadata rows on publish, per-repo history (GET /api/walkthroughs?repo=),
@@ -109,7 +104,7 @@ export default smithers((ctx) => {
     <Workflow name="issue-491-review-cloud-hosted-walkthrough-lifecycl">
       <UI entry="../ui/implement.tsx" title={"Issue 491 — landing onboarding"} />
       <Sequence>
-        <Task id="p491:plan" output={outputs.plan} agent={codexPool}>
+        <Task id="p491:plan" output={outputs.plan} agent={synthesizer}>
           {`You are planning a small, well-scoped fix. Read the spec, then read the referenced files in
 apps/review/src/server (landingPage.ts, worker.ts, plan/handlePlan.ts, sessions/handleSessions.ts) and the
 existing test tests/server/workerMissingDb.test.ts. Produce a concrete, minimal implementation plan and
@@ -124,9 +119,10 @@ ${spec}`}
             idPrefix="p491:impl"
             prompt={implementPrompt}
             implementAgents={implementer}
-            validateAgents={codexPool}
-            reviewAgents={codexPool}
+            validateAgents={validator}
+            reviewAgents={panelists}
             synthesizeReview
+            reviewModerator={synthesizer}
             feedback={feedback}
             done={done}
             maxIterations={3}

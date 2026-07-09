@@ -84,6 +84,9 @@ function RegisterDrawer() {
   const cancelRegister = useAgentsStore((state) => state.cancelRegister);
 
   const provider = providerId ? findProvider(providerId) : undefined;
+  const providerSlug = provider?.id.replace(/-api$/, "") ?? "codex";
+  const labelPlaceholder = provider?.id === "claude-code" ? "claude-work" : `${providerSlug}-work`;
+  const configDirPlaceholder = provider?.id === "claude-code" ? "~/.claude" : `~/.${providerSlug}`;
   const draft: AccountDraft = { providerId, label, configDir, apiKey, model, force };
   const error = validateDraft(draft, accounts);
   const valid = error === null;
@@ -115,7 +118,7 @@ function RegisterDrawer() {
         <label>Label</label>
         <input
           className="field-input"
-          placeholder="claude-work"
+          placeholder={labelPlaceholder}
           value={label}
           onChange={(event) => setDraftLabel(event.target.value)}
           data-testid="agents-register-label"
@@ -127,7 +130,7 @@ function RegisterDrawer() {
           <label>Config dir</label>
           <input
             className="field-input is-mono"
-            placeholder="~/.claude"
+            placeholder={configDirPlaceholder}
             value={configDir}
             onChange={(event) => setDraftConfigDir(event.target.value)}
             data-testid="agents-register-config"
@@ -153,11 +156,19 @@ function RegisterDrawer() {
         <label>Model (optional)</label>
         <input
           className="field-input is-mono"
-          placeholder={provider ? provider.modelPlaceholder : "claude-opus-4-8"}
+          placeholder={provider ? provider.modelPlaceholder : "gpt-5.6-luna"}
+          list={provider?.modelOptions?.length ? "agent-model-options" : undefined}
           value={model}
           onChange={(event) => setDraftModel(event.target.value)}
           data-testid="agents-register-model"
         />
+        {provider?.modelOptions?.length ? (
+          <datalist id="agent-model-options">
+            {provider.modelOptions.map((modelId) => (
+              <option key={modelId} value={modelId} />
+            ))}
+          </datalist>
+        ) : null}
       </div>
 
       <label className="agent-force">

@@ -5,8 +5,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 /**
  * Audit Fix Train — turns the `bulletproof-audit` backlog into landed code.
@@ -180,25 +181,36 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, MergeQueue, smithers
 });
 
 // ── Agents ───────────────────────────────────────────────────────────────────
-// Codex / GPT-5.5 is the engineer (plans + implements). Claude Opus is the
-// independent reviewer (different model → real second opinion). Worktree agents
-// get NO cwd so <Worktree> controls their directory; the merge/push agents run
-// outside any worktree and are pinned to the repo-root `main` checkout.
-const codex = new CodexAgent({
-  model: "gpt-5.5",
+// Codex 5.6 role split: Sol plans/reviews; Luna implements and lands changes.
+// Worktree agents get NO cwd so <Worktree> controls their directory; the
+// merge/push agents run outside any worktree and are pinned to repo-root main.
+const planner = codexFirst({
+  model: "gpt-5.6-sol",
   sandbox: "danger-full-access",
   dangerouslyBypassApprovalsAndSandbox: true,
   skipGitRepoCheck: true,
-});
-const reviewer = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
+}, [new ClaudeCodeAgent({ model: "claude-opus-4-8" })]);
+const implementer = codexFirst({
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
+  sandbox: "danger-full-access",
+  dangerouslyBypassApprovalsAndSandbox: true,
+  skipGitRepoCheck: true,
+}, [new ClaudeCodeAgent({ model: "claude-sonnet-5" })]);
+const reviewer = codexFirst({
+  model: "gpt-5.6-sol",
+  sandbox: "read-only",
+  skipGitRepoCheck: true,
+}, [new ClaudeCodeAgent({ model: "claude-opus-4-8" })]);
 function repoAgent() {
-  return new CodexAgent({
-    model: "gpt-5.5",
+  return codexFirst({
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
     sandbox: "danger-full-access",
     dangerouslyBypassApprovalsAndSandbox: true,
     skipGitRepoCheck: true,
     cwd: repoRoot,
-  });
+  }, [new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: repoRoot })]);
 }
 
 const AGENT_RETRIES = 2;
@@ -520,7 +532,7 @@ export default smithers((ctx) => {
                     <Task
                       id={`${key}:plan`}
                       output={outputs.plan}
-                      agent={codex}
+                      agent={planner}
                       retries={AGENT_RETRIES}
                       timeoutMs={PLAN_TIMEOUT_MS}
                       heartbeatTimeoutMs={HEARTBEAT_MS}
@@ -535,7 +547,7 @@ export default smithers((ctx) => {
                         <Task
                           id={`${key}:implement`}
                           output={outputs.implement}
-                          agent={codex}
+                          agent={implementer}
                           retries={AGENT_RETRIES}
                           timeoutMs={IMPLEMENT_TIMEOUT_MS}
                           heartbeatTimeoutMs={HEARTBEAT_MS}

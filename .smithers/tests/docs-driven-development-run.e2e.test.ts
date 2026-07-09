@@ -158,7 +158,7 @@ describe("docs-driven-development real workflow run", () => {
     expect(metaTicket.row.changedFiles[0].afterMarkdown).toContain("Edited from e2e");
 
     const triage = await nodeOutput(gateway, connection, runId, "triage");
-    expect(triage.row.summary).toBe("claude fake output");
+    expect(triage.row.summary).toBe("codex fake output");
 
     const materialized = await nodeOutput(gateway, connection, runId, "materialize-tickets");
     expect(materialized.row.created).toBe(1);

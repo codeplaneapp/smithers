@@ -5,7 +5,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { Loop, Parallel, Sequence, Task, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { implementer, polishReviewer } from "../components/roles";
 import { FeatureGroups } from "../specs/features";
 import {
   TestFortressTrack,
@@ -84,12 +84,10 @@ const { Workflow, smithers, outputs } = createSmithers({
   codexFix: codexFixSchema,
 });
 
-// Opus for most tasks (Sonnet as failover); Codex leads the final review.
-const opusPool = [providers.claudeOpus, providers.claudeSonnet];
-const codexPool = [providers.codex, providers.codex1];
-// Fable is the agent that actually adds the test coverage (user-directed);
-// Sonnet as failover. providers.claude is claude-fable-5.
-const fablePool = [providers.claude, providers.claudeSonnet];
+// Luna discovers and implements; Sol handles every review/judgment pass.
+// The shared role chains retain non-Codex providers as failover-only.
+const lunaPool = implementer;
+const solPool = polishReviewer;
 
 // Audit scope shared with .smithers/specs/features.ts — the discovery swarm
 // shards these areas across N agents looking for user-observable behavior that
@@ -256,7 +254,7 @@ export default smithers((ctx) => {
                   key={`discover-${index}`}
                   id={`tf:discover:${index}`}
                   output={outputs.discovery}
-                  agent={opusPool}
+                  agent={lunaPool}
                   continueOnFail
                   timeoutMs={30 * 60_000}
                   heartbeatTimeoutMs={10 * 60_000}
@@ -268,7 +266,7 @@ export default smithers((ctx) => {
             <Task
               id="tf:discover:merge"
               output={outputs.merge}
-              agent={opusPool}
+              agent={solPool}
               continueOnFail
               timeoutMs={30 * 60_000}
               heartbeatTimeoutMs={10 * 60_000}
@@ -286,10 +284,10 @@ export default smithers((ctx) => {
               outputs={outputs}
               track="unit"
               groups={groups}
-              implementAgent={fablePool}
-              reviewAgent={opusPool}
-              debateAgent={opusPool}
-              judgeAgent={opusPool}
+              implementAgent={lunaPool}
+              reviewAgent={solPool}
+              debateAgent={solPool}
+              judgeAgent={solPool}
               maxRounds={maxRounds}
               maxConcurrency={trackConcurrency}
             />
@@ -300,10 +298,10 @@ export default smithers((ctx) => {
               outputs={outputs}
               track="e2e"
               groups={groups}
-              implementAgent={fablePool}
-              reviewAgent={opusPool}
-              debateAgent={opusPool}
-              judgeAgent={opusPool}
+              implementAgent={lunaPool}
+              reviewAgent={solPool}
+              debateAgent={solPool}
+              judgeAgent={solPool}
               maxRounds={maxRounds}
               maxConcurrency={trackConcurrency}
             />
@@ -321,7 +319,7 @@ export default smithers((ctx) => {
             <Task
               id="tf:codex:fix"
               output={outputs.codexFix}
-              agent={opusPool}
+              agent={lunaPool}
               continueOnFail
               timeoutMs={60 * 60_000}
               heartbeatTimeoutMs={10 * 60_000}
@@ -331,7 +329,7 @@ export default smithers((ctx) => {
             <Task
               id="tf:codex:review"
               output={outputs.codexReview}
-              agent={codexPool}
+              agent={solPool}
               continueOnFail
               timeoutMs={40 * 60_000}
               heartbeatTimeoutMs={10 * 60_000}

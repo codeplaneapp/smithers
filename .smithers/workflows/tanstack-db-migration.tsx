@@ -14,10 +14,11 @@
 // and apps/smithers then migrate in PARALLEL worktrees off the client branch; an integrate
 // worktree merges + green-builds everything; a human approval gate guards landing.
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 // ── Repo + branch/worktree layout ────────────────────────────────────────────
 const repoRoot = (() => {
@@ -127,17 +128,12 @@ const { Workflow, Task, Sequence, Parallel, Approval, Worktree, smithers, output
 });
 
 // ── Agents ───────────────────────────────────────────────────────────────────
-// Opus 4.8 designs/reviews/integrates; Codex 5.5 (gpt-5.5, xhigh reasoning) implements.
-// ClaudeCodeAgent defaults to --permission-mode bypassPermissions + subscription auth.
-// Codex on ChatGPT auth rejects "-codex" model ids — use the plain "gpt-5.5" id.
-const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const codex = new CodexAgent({
-  model: "gpt-5.5",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-  config: { model_reasoning_effort: "xhigh" },
-});
+// Codex 5.6 role split. Opus/Sonnet remain fallback-only.
+const opusFallback = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
+const sonnetFallback = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+const solAgent = codexFirst({ model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [opusFallback]);
+const lunaAgent = codexFirst({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [sonnetFallback]);
+const terraAgent = codexFirst({ model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [sonnetFallback]);
 
 const RETRIES = 2;
 const DESIGN_TIMEOUT_MS = 30 * 60_000;
@@ -513,25 +509,25 @@ export default smithers((ctx) => {
     <Workflow name="tanstack-db-migration">
       <Sequence>
         {/* Phase 0 — design + freeze the public hook contract (read-only, repo root). */}
-        <Task id="design" output={outputs.design} agent={opus} retries={RETRIES} timeoutMs={DESIGN_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task id="design" output={outputs.design} agent={solAgent} retries={RETRIES} timeoutMs={DESIGN_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
           {designPrompt()}
         </Task>
 
         {/* Phase 1 — gateway-client foundation, committed to CLIENT_BRANCH. */}
         <Worktree path={wt("tanstack-db-client")} branch={CLIENT_BRANCH} baseBranch="main">
           <Sequence>
-            <Task id="client-impl" output={outputs.clientImpl} agent={codex} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task id="client-impl" output={outputs.clientImpl} agent={lunaAgent} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
               {clientImplPrompt(design, clientFeedback)}
             </Task>
             <Parallel maxConcurrency={2}>
-              <Task id="client-review-opus" output={outputs.clientReviewOpus} agent={opus} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task id="client-review-opus" output={outputs.clientReviewOpus} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
                 {clientReviewPrompt("opus")}
               </Task>
-              <Task id="client-review-codex" output={outputs.clientReviewCodex} agent={codex} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task id="client-review-codex" output={outputs.clientReviewCodex} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
                 {clientReviewPrompt("codex")}
               </Task>
             </Parallel>
-            <Task id="client-fix-verify" output={outputs.clientVerify} agent={opus} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task id="client-fix-verify" output={outputs.clientVerify} agent={lunaAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
               {clientVerifyPrompt(clientFeedback)}
             </Task>
             <Task id="client-commit" output={outputs.clientCommit} timeoutMs={5 * 60_000}>
@@ -544,10 +540,10 @@ export default smithers((ctx) => {
         <Parallel maxConcurrency={2}>
           <Worktree path={wt("tanstack-db-react")} branch={REACT_BRANCH} baseBranch={CLIENT_BRANCH}>
             <Sequence>
-              <Task id="react-impl" output={outputs.reactImpl} agent={opus} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task id="react-impl" output={outputs.reactImpl} agent={lunaAgent} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
                 {reactImplPrompt(design)}
               </Task>
-              <Task id="react-verify" output={outputs.reactVerify} agent={codex} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task id="react-verify" output={outputs.reactVerify} agent={terraAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
                 {reactVerifyPrompt()}
               </Task>
               <Task id="react-commit" output={outputs.reactCommit} timeoutMs={5 * 60_000}>
@@ -557,10 +553,10 @@ export default smithers((ctx) => {
           </Worktree>
           <Worktree path={wt("tanstack-db-app")} branch={APP_BRANCH} baseBranch={CLIENT_BRANCH}>
             <Sequence>
-              <Task id="app-impl" output={outputs.appImpl} agent={codex} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task id="app-impl" output={outputs.appImpl} agent={lunaAgent} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
                 {appImplPrompt(design)}
               </Task>
-              <Task id="app-verify" output={outputs.appVerify} agent={opus} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task id="app-verify" output={outputs.appVerify} agent={terraAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
                 {appVerifyPrompt()}
               </Task>
               <Task id="app-commit" output={outputs.appCommit} timeoutMs={5 * 60_000}>
@@ -573,7 +569,7 @@ export default smithers((ctx) => {
         {/* Phase 3 — integrate: merge the two branches, green-build everything. */}
         <Worktree path={wt("tanstack-db-integrate")} branch={INTEGRATE_BRANCH} baseBranch={CLIENT_BRANCH}>
           <Sequence>
-            <Task id="integrate" output={outputs.integrate} agent={opus} retries={RETRIES} timeoutMs={INTEGRATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task id="integrate" output={outputs.integrate} agent={lunaAgent} retries={RETRIES} timeoutMs={INTEGRATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
               {integratePrompt()}
             </Task>
             <Task id="integrate-commit" output={outputs.integrateCommit} timeoutMs={5 * 60_000}>

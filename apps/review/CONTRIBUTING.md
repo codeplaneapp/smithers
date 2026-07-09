@@ -145,8 +145,12 @@ SMITHERS_REVIEW_E2E=1 pnpm -C apps/review test        # includes live publish e2
 
 ## Models
 
-Agents default to ClaudeCode subscription providers (opus primary, sonnet
-failover). Override with `SMITHERS_REVIEW_MODEL` /
+When Codex is installed and authenticated, agents default to Codex: Sol reviews
+and verifies, while Luna narrates and writes quizzes. If Codex is unavailable,
+the workflow falls back to Claude Code (Fable primary, Opus failover). Override
+the engine with `SMITHERS_REVIEW_ENGINE`, the primary model with
+`SMITHERS_REVIEW_MODEL`, the Codex cheap model with
+`SMITHERS_REVIEW_CHEAP_MODEL`, or the Claude fallback with
 `SMITHERS_REVIEW_FALLBACK_MODEL`.
 
 ## Tests

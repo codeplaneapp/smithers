@@ -71,9 +71,11 @@ const agentTierSchema = z.enum(["cheap", "smart", "smartTool"]).default("cheap")
 type AgentTier = z.infer<typeof agentTierSchema>;
 
 const AGENT_TIERS: Record<AgentTier, { work: (typeof agents)[keyof typeof agents]; merge: (typeof agents)[keyof typeof agents] }> = {
-  cheap: { work: agents.cheapFast, merge: agents.cheapFast },
-  smart: { work: agents.smart, merge: agents.smart },
-  smartTool: { work: agents.smartTool, merge: agents.smart },
+  // Every topic prompt edits or fixes files, so the work seat is always Luna.
+  // The legacy model selector now controls only the report/synthesis seat.
+  cheap: { work: agents.implement, merge: agents.cheapFast },
+  smart: { work: agents.implement, merge: agents.smart },
+  smartTool: { work: agents.implement, merge: agents.smart },
 };
 
 const inputSchema = z.object({

@@ -3,7 +3,6 @@
 /** @jsxImportSource smithers-orchestrator */
 import {
   ClaudeCodeAgent,
-  CodexAgent,
   Parallel,
   Sequence,
   Task,
@@ -13,6 +12,7 @@ import {
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 const repoRoot = (() => {
   try {
@@ -113,26 +113,21 @@ const { Workflow, Loop, smithers, outputs } = createSmithers({
   final: finalSchema,
 });
 
-const claude = new ClaudeCodeAgent({
+const claudeFallback = new ClaudeCodeAgent({
   model: process.env.SMITHERS_LOCAL_UI_CLAUDE_MODEL ?? "claude-sonnet-5",
   permissionMode: "bypassPermissions",
   dangerouslySkipPermissions: true,
 });
 
-const codex = new CodexAgent({
-  model: process.env.SMITHERS_LOCAL_UI_CODEX_MODEL ?? "gpt-5.5",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-});
-
-const mergeCodex = new CodexAgent({
-  model: process.env.SMITHERS_LOCAL_UI_CODEX_MODEL ?? "gpt-5.5",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-  cwd: repoRoot,
-});
+const solModel = process.env.SMITHERS_LOCAL_UI_SOL_MODEL ?? process.env.SMITHERS_LOCAL_UI_CODEX_MODEL ?? "gpt-5.6-sol";
+const lunaModel = process.env.SMITHERS_LOCAL_UI_LUNA_MODEL ?? process.env.SMITHERS_LOCAL_UI_CODEX_MODEL ?? "gpt-5.6-luna";
+const solPrimary = codexFirst({ model: solModel, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [claudeFallback]);
+const solSecondary = codexFirst({ model: solModel, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [claudeFallback]);
+const luna = codexFirst({ model: lunaModel, config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [claudeFallback]);
+const mergeLuna = codexFirst(
+  { model: lunaModel, config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true, cwd: repoRoot },
+  [new ClaudeCodeAgent({ model: process.env.SMITHERS_LOCAL_UI_CLAUDE_MODEL ?? "claude-sonnet-5", cwd: repoRoot })],
+);
 
 const AGENT_RETRIES = 2;
 const PLAN_TIMEOUT_MS = 25 * 60_000;
@@ -621,7 +616,7 @@ export default smithers((ctx) => {
                         id={`${feature.id}:plan-panel-claude-plan`}
                         label="Claude planner"
                         output={outputs.plan}
-                        agent={claude}
+                        agent={solPrimary}
                       >
                         {planPrompt(feature)}
                       </Task>
@@ -629,13 +624,13 @@ export default smithers((ctx) => {
                         id={`${feature.id}:plan-panel-codex-plan`}
                         label="Codex planner"
                         output={outputs.plan}
-                        agent={codex}
+                        agent={solSecondary}
                       >
                         {planPrompt(feature)}
                       </Task>
                     </Parallel>
 
-                    <Task id={`${feature.id}:plan-synthesis`} output={outputs.planSynthesis} agent={codex}>
+                    <Task id={`${feature.id}:plan-synthesis`} output={outputs.planSynthesis} agent={solPrimary}>
                       {planSynthesisPrompt(feature, plans)}
                     </Task>
 
@@ -644,7 +639,7 @@ export default smithers((ctx) => {
                         <Task
                           id={`${feature.id}:implement`}
                           output={outputs.implementation}
-                          agent={codex}
+                          agent={luna}
                           retries={AGENT_RETRIES}
                           timeoutMs={IMPLEMENT_TIMEOUT_MS}
                           heartbeatTimeoutMs={HEARTBEAT_MS}
@@ -656,7 +651,7 @@ export default smithers((ctx) => {
                           <Task
                             id={`${feature.id}:review-claude`}
                             output={outputs.reviewClaude}
-                            agent={claude}
+                            agent={solPrimary}
                             retries={AGENT_RETRIES}
                             timeoutMs={REVIEW_TIMEOUT_MS}
                             heartbeatTimeoutMs={HEARTBEAT_MS}
@@ -667,7 +662,7 @@ export default smithers((ctx) => {
                           <Task
                             id={`${feature.id}:review-codex`}
                             output={outputs.reviewCodex}
-                            agent={codex}
+                            agent={solSecondary}
                             retries={AGENT_RETRIES}
                             timeoutMs={REVIEW_TIMEOUT_MS}
                             heartbeatTimeoutMs={HEARTBEAT_MS}
@@ -684,7 +679,7 @@ export default smithers((ctx) => {
                 <Task
                   id={`${feature.id}:merge`}
                   output={outputs.merge}
-                  agent={mergeCodex}
+                  agent={mergeLuna}
                   retries={1}
                   timeoutMs={MERGE_TIMEOUT_MS}
                   heartbeatTimeoutMs={HEARTBEAT_MS}

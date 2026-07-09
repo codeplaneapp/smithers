@@ -19,10 +19,8 @@
 //   4. Integrate: whole-stack green, docs + llms bundles + init-pack, the
 //      both-backend matrix, draft PR (never auto-merges).
 //
-// MODELS (sandwich delegation): Fable 5 freezes the design contracts and does
-// the final integrate review; Codex 5.5 (gpt-5.5, xhigh) implements and
-// cross-reviews; Sonnet 5 runs the mechanical steps (test-matrix runs, docs
-// regeneration checks). Deterministic compute tasks do commits and the PR.
+// MODELS: Codex Sol freezes design contracts and reviews, Luna implements, and
+// Terra runs mechanical verification. Claude remains failover-only.
 //
 // TESTING BACKPRESSURE: every milestone's verify task asserts the spec's
 // acceptance criteria one-by-one with evidence; the parity suite must run on
@@ -30,10 +28,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 /** @jsxImportSource smithers-orchestrator */
 import { UI } from "smithers-orchestrator";
-import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 // ── Repo + worktree layout ────────────────────────────────────────────────────
 const repoRoot = (() => {
@@ -188,23 +187,27 @@ const { Workflow, Task, Sequence, Parallel, Approval, Worktree, smithers, output
 });
 
 // ── Agents ────────────────────────────────────────────────────────────────────
-// Fable 5 = planning (design freeze) + final review. Codex 5.5 (gpt-5.5, xhigh;
-// ChatGPT auth rejects "-codex" ids) = implementation + cross-review. Sonnet 5 =
-// mechanical steps (matrix runs, light second-opinion reviews). Fallback arrays
-// keep runs alive through transient provider 429s.
-const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
-const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
-const codex = new CodexAgent({
-  model: "gpt-5.5",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-  config: { model_reasoning_effort: "xhigh" },
-});
-const planAgent = [fable, codex];
-const implAgent = [codex, sonnet];
-const mechAgent = [sonnet, codex];
-const finalAgent = [fable, codex];
+// Codex 5.6 role split. Claude remains fallback-only.
+const fableFallback = new ClaudeCodeAgent({ model: "claude-fable-5" });
+const sonnetFallback = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+const planAgent = codexFirst(
+  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [fableFallback],
+);
+const implAgent = codexFirst(
+  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [sonnetFallback],
+);
+const mechAgent = codexFirst(
+  { model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [sonnetFallback],
+);
+const reviewAgent = planAgent;
+const secondaryReviewAgent = codexFirst(
+  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  [new ClaudeCodeAgent({ model: "claude-fable-5" })],
+);
+const finalAgent = planAgent;
 
 const RETRIES = 2;
 const DESIGN_TIMEOUT_MS = 40 * 60_000;
@@ -492,9 +495,9 @@ function designBlock(design: Design | undefined): string {
   ].join("\n");
 }
 
-function reviewFeedbackBlock(codexR?: Review, sonnetR?: Review): string {
+function reviewFeedbackBlock(primaryR?: Review, secondaryR?: Review): string {
   const parts: string[] = [];
-  for (const [who, r] of [["CODEX", codexR], ["SONNET", sonnetR]] as const) {
+  for (const [who, r] of [["CODEX SOL A", primaryR], ["CODEX SOL B", secondaryR]] as const) {
     if (r && !r.approved) {
       parts.push(`${who} REVIEW — CHANGES REQUIRED:\n${r.feedback}`);
       for (const i of r.issues ?? []) {
@@ -565,9 +568,9 @@ function implPrompt(spec: MilestoneSpec, design: Design | undefined, feedback: s
   ].join("\n");
 }
 
-function reviewPrompt(spec: MilestoneSpec, who: "codex" | "sonnet"): string {
+function reviewPrompt(spec: MilestoneSpec, reviewer: "a" | "b"): string {
   return [
-    `You are the ${who === "codex" ? "Codex" : "Sonnet"} STRICT INDEPENDENT REVIEWER of MILESTONE ${spec.n} —`,
+    `You are Codex Sol reviewer ${reviewer.toUpperCase()}, the STRICT INDEPENDENT REVIEWER of MILESTONE ${spec.n} —`,
     `${spec.title}. cwd is the worktree with the candidate change. Do NOT edit — review only.`,
     "",
     ARCH,
@@ -720,14 +723,14 @@ function milestone(m: {
           {implPrompt(s, m.design, m.feedback)}
         </Task>
         <Parallel maxConcurrency={2}>
-          <Task id={`${s.key}-review-codex`} output={m.outReviewCodex} agent={codex} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
-            {reviewPrompt(s, "codex")}
+          <Task id={`${s.key}-review-codex`} output={m.outReviewCodex} agent={reviewAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            {reviewPrompt(s, "a")}
           </Task>
-          <Task id={`${s.key}-review-sonnet`} output={m.outReviewSonnet} agent={mechAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
-            {reviewPrompt(s, "sonnet")}
+          <Task id={`${s.key}-review-sonnet`} output={m.outReviewSonnet} agent={secondaryReviewAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            {reviewPrompt(s, "b")}
           </Task>
         </Parallel>
-        <Task id={`${s.key}-verify`} output={m.outVerify} agent={implAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task id={`${s.key}-verify`} output={m.outVerify} agent={mechAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
           {verifyPrompt(s, m.feedback)}
         </Task>
         <Task id={`${s.key}-matrix`} output={m.outMatrix} agent={mechAgent} retries={RETRIES} timeoutMs={MATRIX_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>

@@ -190,19 +190,28 @@ class FixtureAgent implements AgentLike {
   }
 }
 
+const claudeSmartFallback = new FixtureAgent("claude", "claude-fable-5", "fixture-claude");
+const claudeImplementationFallback = new FixtureAgent("claude", "claude-sonnet-5", "fixture-claude-sonnet");
+const sol = [new FixtureAgent("codex", "gpt-5.6-sol", "fixture-codex-sol"), claudeSmartFallback];
+const terra = [new FixtureAgent("codex", "gpt-5.6-terra", "fixture-codex-terra"), claudeImplementationFallback];
+const luna = [new FixtureAgent("codex", "gpt-5.6-luna", "fixture-codex-luna"), claudeImplementationFallback];
+
 export const providers = {
-  claude: new FixtureAgent("claude", "claude-fable-5", "fixture-claude"),
-  claudeSonnet: new FixtureAgent("claude", "claude-sonnet-5", "fixture-claude-sonnet"),
-  codex: new FixtureAgent("codex", "gpt-5.5", "fixture-codex"),
+  sol,
+  terra,
+  luna,
+  claude: sol,
+  claudeSonnet: luna,
+  codex: luna,
 } as const;
 
 export const agents = {
-  cheapFast: [providers.claudeSonnet, providers.codex],
-  smart: [providers.claude, providers.claudeSonnet, providers.codex],
-  smartTool: [providers.claude, providers.claudeSonnet, providers.codex],
-  planning: [providers.claude],
-  review: [providers.claude],
-  implement: [providers.codex],
+  cheapFast: providers.luna,
+  smart: providers.sol,
+  smartTool: providers.terra,
+  planning: providers.sol,
+  review: providers.sol,
+  implement: providers.luna,
 } as const satisfies Record<string, AgentLike[]>;
 `;
 }

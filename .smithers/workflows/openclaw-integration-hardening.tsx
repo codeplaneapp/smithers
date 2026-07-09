@@ -1,8 +1,9 @@
 // smithers-source: user
 // smithers-display-name: OpenClaw Integration Hardening
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, CodexAgent, Parallel, Sequence, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, Parallel, Sequence, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,16 +49,9 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   summary: summarySchema,
 });
 
-const fable = new ClaudeCodeAgent({
-  model: "claude-fable-5",
-  cwd: REPO,
-});
-
-const codex = new CodexAgent({
-  model: "gpt-5.5",
-  cwd: REPO,
-  skipGitRepoCheck: true,
-});
+const fableFallback = new ClaudeCodeAgent({ model: "claude-fable-5", cwd: REPO });
+const fable = codexFirst({ model: "gpt-5.6-sol", cwd: REPO, skipGitRepoCheck: true }, [fableFallback]);
+const codex = codexFirst({ model: "gpt-5.6-sol", cwd: REPO, skipGitRepoCheck: true }, [fableFallback]);
 
 function guard(mode: string, allowEdits: boolean) {
   return allowEdits || mode === "implement"

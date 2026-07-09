@@ -93,7 +93,7 @@ export type InitSelections = {
     selectedAgentDocs: string[];
 };
 
-export type AgentSetupOptionId = "openrouter" | "claude" | "codex" | "opencode" | "custom";
+export type AgentSetupOptionId = "codex" | "claude" | "kimi" | "opencode" | "openrouter" | "custom";
 export type AgentSetupOption = { id: AgentSetupOptionId; label: string; detail: string };
 export type WorkflowOption = { id: string; label: string; header?: string };
 export type SkillOption = { id: string; label: string };
@@ -132,24 +132,29 @@ export function buildWorkflowOptions(): WorkflowOption[] {
 export function buildAgentSetupOptions(): AgentSetupOption[] {
     return [
         {
-            id: "openrouter",
-            label: "OpenRouter API key",
-            detail: "Set OPENROUTER_API_KEY. Smithers uses OpenAIAgent with the OpenRouter base URL; first run errors loudly until the key exists.",
+            id: "codex",
+            label: "Codex CLI / OpenAI key (recommended)",
+            detail: "Install the codex CLI and log in, or set OPENAI_API_KEY. Smithers routes planning/review to Sol, balanced work to Terra, and implementation/research to Luna.",
         },
         {
             id: "claude",
-            label: "Claude Code CLI",
-            detail: "Install the claude CLI, run claude, then /login. Smithers will uncomment the provider after detection succeeds.",
+            label: "Claude Code CLI (fallback)",
+            detail: "Install the claude CLI, run claude, then /login. Smithers keeps it behind Codex as a runtime fallback after detection succeeds.",
         },
         {
-            id: "codex",
-            label: "Codex CLI / OpenAI key",
-            detail: "Install the codex CLI and log in, or set OPENAI_API_KEY for Codex-backed runs.",
+            id: "kimi",
+            label: "Kimi CLI (fallback)",
+            detail: "Install the kimi CLI and run kimi login. Smithers keeps it behind Codex as a runtime fallback after detection succeeds.",
         },
         {
             id: "opencode",
             label: "OpenCode CLI / provider key",
             detail: "Install opencode and authenticate, or set one of its provider API keys.",
+        },
+        {
+            id: "openrouter",
+            label: "OpenRouter API key (last resort)",
+            detail: "Set OPENROUTER_API_KEY. Smithers uses OpenAIAgent with the OpenRouter base URL only when no preferred local provider can run.",
         },
         {
             id: "custom",
@@ -272,7 +277,8 @@ function buildNoAgentsMessage(detections: AgentAvailability[]): string {
         lines.push("");
     }
     lines.push(
-        "Choose the setup path you want. Smithers still scaffolds a default OpenRouter-backed AgentLike so init never fails here.",
+        "Choose the setup path you want. Codex is recommended; other providers remain fallback options.",
+        "Smithers still scaffolds a default OpenRouter-backed AgentLike so init never fails here.",
         "AgentLike contract: implement generate(args) and return the assistant text for the task.",
     );
     return lines.join("\n");

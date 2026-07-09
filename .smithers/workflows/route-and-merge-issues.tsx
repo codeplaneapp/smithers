@@ -1,13 +1,13 @@
 // smithers-display-name: Route Issues → Strategy Agents → Merge Queue to main
 // smithers-source: one-off — walk every open GitHub issue, read the maintainers' ROUTING
 // COMMENT on each issue (via gh), and dispatch each issue to the strategy the comment asks
-// for. OPUS-ONLY: every agent runs on claude-opus-4-8; the strategy selects the pipeline
-// SHAPE, not the model. Three strategies:
+// for. Codex Sol routes/plans/reviews, Luna implements, and Terra lands; Claude remains
+// fallback-only. The strategy selects the pipeline SHAPE, not the model. Three strategies:
 //   • self-workflow  — an agent authors a bespoke smithers workflow for the issue in its own
 //                      worktree, verifies `smithers graph` renders, runs it to completion,
 //                      then hand-verifies the result.
-//   • fable-sandwich — plan → implement → review, loop until LGTM (all on Opus).
-//   • opus-sandwich  — plan → implement → review, loop until LGTM (all on Opus).
+//   • fable-sandwich — plan → implement → review, loop until LGTM.
+//   • opus-sandwich  — plan → implement → review, loop until LGTM.
 // Each issue runs in its own <Worktree>. Once approved, the fix is NOT turned into a PR —
 // instead it goes through a SERIAL LOCAL MERGE QUEUE (<MergeQueue maxConcurrency={1}>) that,
 // one item at a time: rebases the item's worktree onto the LATEST origin/main, runs the full
@@ -42,6 +42,7 @@ import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const REPO = "smithersai/smithers";
@@ -194,18 +195,20 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, MergeQueue, smithers
 });
 
 // ── Agents ───────────────────────────────────────────────────────────────────
-// OPUS-ONLY: every role — routing, planning, implementing, reviewing, and the merge
-// queue — runs on claude-opus-4-8. No Codex, Sonnet, or Fable. Single-agent chains mean
-// no failover: if Opus itself is unavailable a task parks (the health cron auto-resumes
-// when quota returns), but Opus is the one pool we are told is not rate limited.
+// Codex-first role chains: Sol routes/plans/reviews, Luna authors workflows and
+// implements fixes, and Terra handles the routine merge queue. Opus remains the
+// fallback in each chain for machines where Codex cannot run.
 // NO `cwd` on agents used INSIDE a <Worktree> (a pinned cwd overrides the worktree). The
 // merge agent is the exception: it runs OUTSIDE any <Worktree> in the serial MergeQueue
 // and MUST be pointed at its item's already-on-disk worktree via cwd.
-const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const fableChain = [opus];
-const opusChain = [opus];
-const implementChain = [opus];
-const routerChain = [opus];
+const opusFallback = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
+const solChain = codexFirst({ model: "gpt-5.6-sol", skipGitRepoCheck: true }, [opusFallback]);
+const lunaChain = codexFirst({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }, [opusFallback]);
+const terraChain = codexFirst({ model: "gpt-5.6-terra", skipGitRepoCheck: true }, [opusFallback]);
+const fableChain = lunaChain;
+const opusChain = solChain;
+const implementChain = lunaChain;
+const routerChain = solChain;
 
 const AGENT_RETRIES = 2;
 const ROUTE_TIMEOUT_MS = 10 * 60_000;
@@ -375,7 +378,7 @@ function routePrompt(issue: Issue) {
   ].join("\n");
 }
 
-function planPrompt(item: WorkItem, tier: "Fable" | "Opus") {
+function planPrompt(item: WorkItem, tier: "Fable" | "Opus" | "Sol") {
   return [
     `You are the ${tier} PLANNER for one GitHub issue in the smithersai/smithers monorepo (pnpm + bun, packages/* + apps/*).`,
     "Your current working directory IS an isolated worktree checked out from main. READ-ONLY: research and plan, do not edit files.",
@@ -443,7 +446,7 @@ function selfWorkflowPrompt(item: WorkItem, feedback: string) {
   ].join("\n");
 }
 
-function reviewPrompt(item: WorkItem, tier: "Fable" | "Opus", fix: Fix | undefined) {
+function reviewPrompt(item: WorkItem, tier: "Fable" | "Opus" | "Sol", fix: Fix | undefined) {
   return [
     `You are the ${tier} STRICT, INDEPENDENT REVIEWER for the candidate fix to GitHub issue #${item.issueNumber} in ${REPO}.`,
     "Your current working directory IS the worktree containing the candidate fix. Do NOT edit any files — review only.",
@@ -598,9 +601,9 @@ export default smithers((ctx) => {
               const feedback = itemFeedback(ctx, n);
               const fix = latestForIssue<Fix>(ctx.outputs.fix, n);
               const plan = latestForIssue<Plan>(ctx.outputs.plan, n);
-              // Opus-only: both the fable-sandwich and opus-sandwich strategies now run on
-              // Opus; the strategy still selects the pipeline shape, not the model.
-              const tier = "Opus" as const;
+              // Both legacy strategy names use the Codex 5.6 role split; the
+              // strategy still selects the pipeline shape, not the model.
+              const tier = "Sol" as const;
               const planReviewChain = opusChain;
               return (
                 <Worktree key={`i${n}`} path={item.worktreePath} branch={item.branch} baseBranch="main">
@@ -666,8 +669,7 @@ export default smithers((ctx) => {
             <MergeQueue maxConcurrency={1}> runs these one at a time: item N+1 fetches +
             rebases AFTER item N has landed, so each fix pushes onto the freshest main. Each
             merge runs INSIDE the item's <Worktree> (re-attaching to the on-disk worktree that
-            holds the approved fix) with a plain Opus agent — NOT a cwd-pinned agent, because a
-            pinned cwd makes the claude CLI fail its preflight PATH check (see agents.ts). The
+            holds the approved fix) with the Terra chain — NOT a cwd-pinned agent. The
             worktree gives the agent the same env as the implement/review agents. continueOnFail
             keeps the queue moving past a conflicting/failing item; skipIf is idempotent. */}
         {mergeItems.length > 0 ? (
@@ -679,7 +681,7 @@ export default smithers((ctx) => {
                   <Task
                     id={`i${item.issueNumber}:merge`}
                     output={outputs.merge}
-                    agent={opusChain}
+                    agent={terraChain}
                     retries={1}
                     timeoutMs={MERGE_TIMEOUT_MS}
                     heartbeatTimeoutMs={HEARTBEAT_MS}
@@ -705,7 +707,7 @@ export default smithers((ctx) => {
             <Task
               id="consolidate"
               output={outputs.consolidate}
-              agent={opusChain}
+              agent={lunaChain}
               retries={1}
               timeoutMs={CONSOLIDATE_TIMEOUT_MS}
               heartbeatTimeoutMs={HEARTBEAT_MS}

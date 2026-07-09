@@ -55,7 +55,7 @@ export default smithers((ctx) => {
           idPrefix="impl"
           prompt={ctx.input.prompt}
           implementAgents={implementer}
-          validateAgents={agents.cheapFast}
+          validateAgents={agents.midTier}
           reviewAgents={panelists}
           synthesizeReview
           feedback={feedback}
@@ -63,8 +63,8 @@ export default smithers((ctx) => {
           maxIterations={3}
         />
 
-        {/* Closing slice of the fable sandwich: once the feature is fully
-            implemented (validation green + review approved), Fable makes one
+        {/* Closing review slice: once the feature is fully implemented
+            (validation green + review approved), Codex Sol makes one
             final whole-feature polish pass over everything that changed. */}
         {done ? (
           <Task id="impl:polish" output={outputs.polish} agent={polishReviewer}>

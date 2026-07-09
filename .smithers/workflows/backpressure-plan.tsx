@@ -118,7 +118,7 @@ export default smithers((ctx) => {
       <UI entry="../ui/backpressure-plan.tsx" title={"Backpressure Plan"} />
       <Sequence>
         {/* 1 — Pull the prompt apart into atomic, verifiable acceptance criteria. */}
-        <Task id="extract-criteria" output={outputs.extractCriteria} agent={agents.smart}>
+        <Task id="extract-criteria" output={outputs.extractCriteria} agent={agents.planning}>
           <ExtractCriteriaPrompt prompt={prompt} />
         </Task>
 
@@ -137,7 +137,7 @@ export default smithers((ctx) => {
 
         {/* 2 — Map each criterion to a verification method + enforcement gate. */}
         {criteria && criteriaList.length > 0 ? (
-          <Task id="plan-gates" output={outputs.planGates} agent={agents.smart}>
+          <Task id="plan-gates" output={outputs.planGates} agent={agents.planning}>
             <PlanGatesPrompt criteria={criteriaList} prompt={prompt} />
           </Task>
         ) : null}

@@ -32,6 +32,18 @@ describe("priceEstimate", () => {
     expect(e.costUsd).toBeCloseTo(2.4, 6);
   });
 
+  test("uses Luna as the default pricing model", () => {
+    const e = priceEstimate({
+      perTask: [{ nodeId: "impl", tokens: 1_000_000, iterations: 1 }],
+      confidence: "high",
+      assumptions: [],
+    });
+    expect(e.perTask[0].model).toBe("gpt-5.6-luna");
+    // The coarse estimate assumes a 50/50 split. Its 500K estimated input is
+    // above GPT-5.6's 272K threshold, so the whole request is 2x input / 1.5x output.
+    expect(e.costUsd).toBeCloseTo(5.5, 6);
+  });
+
   test("unknown (unpriced) models cost $0 but still count tokens", () => {
     const e = priceEstimate({
       perTask: [{ nodeId: "a", tokens: 50_000, iterations: 2, model: "gpt-5.5" }],

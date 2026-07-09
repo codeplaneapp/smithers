@@ -3,19 +3,19 @@
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Sequence, Loop } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { implementer, polishReviewer } from "../components/roles";
 
 /**
  * PR Review, Improve & Merge — validate an external PR is legit, improve it on
  * the contributor's branch, have a SEPARATE fresh reviewer re-review, then merge
  * deterministically once CI is green.
  *
- * Shape (all agent steps are Fable-led):
- *   1. review    — Fable validates legitimacy (claim vs main, security scan,
+ * Shape (Codex-first, with Claude fallback):
+ *   1. review    — Sol validates legitimacy (claim vs main, security scan,
  *                  conventions) and emits an improvement list. Read-only.
- *   2. improve   — Fable applies the improvements in an ISOLATED CLONE (never
+ *   2. improve   — Luna applies the improvements in an ISOLATED CLONE (never
  *                  the shared jj tree), runs gates, pushes to the PR branch.
- *   3. rereview  — a fresh Fable agent reviews the LIVE diff; loop 2↔3 until
+ *   3. rereview  — a fresh Sol agent reviews the LIVE diff; loop 2↔3 until
  *                  approved (or maxReviewIterations).
  *   4. merge     — deterministic compute task: approves any first-contributor
  *                  CI runs, polls checks, squash-merges, verifies MERGED via
@@ -29,8 +29,8 @@ import { providers } from "../agents";
 const REPO_ROOT = process.cwd();
 const SCRATCH = "/private/tmp/claude-501/-Users-williamcory-smithers4/52673bb6-db42-47b5-8069-92705ac609e1/scratchpad";
 
-// Fable-led with a Claude-family fallback for preflight resilience.
-const fable = [providers.claude, providers.claudeOpus];
+const reviewer = polishReviewer;
+const improver = implementer;
 
 const inputSchema = z.object({
   pr: z.number().int(),
@@ -163,8 +163,8 @@ export default smithers((ctx) => {
   return (
     <Workflow name="pr-review-improve-merge">
       <Sequence>
-        {/* 1. FIRST REVIEW — legitimacy + improvement list (read-only, Fable). */}
-        <Task id="review" output={outputs.review} agent={fable}>
+        {/* 1. FIRST REVIEW — legitimacy + improvement list (read-only, Sol). */}
+        <Task id="review" output={outputs.review} agent={reviewer}>
           {reviewPrompt(pr)}
         </Task>
 
@@ -185,10 +185,10 @@ export default smithers((ctx) => {
             {/* 2↔3. IMPROVE + RE-REVIEW loop until the fresh reviewer approves. */}
             <Loop id="polish" until={approved} maxIterations={maxIter} onMaxReached="return-last">
               <Sequence>
-                <Task id="improve" output={outputs.improve} agent={fable}>
+                <Task id="improve" output={outputs.improve} agent={improver}>
                   {improvePrompt(pr, improvements, blocking)}
                 </Task>
-                <Task id="rereview" output={outputs.rereview} agent={fable}>
+                <Task id="rereview" output={outputs.rereview} agent={reviewer}>
                   {rereviewPrompt(pr)}
                 </Task>
               </Sequence>

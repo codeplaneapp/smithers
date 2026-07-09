@@ -118,7 +118,7 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2. INDEPENDENT REVIEW — read-only agent judges the hardening. */}
-        <Review idPrefix="hardening:review" prompt={reviewPrompt} agents={agents.smart} />
+        <Review idPrefix="hardening:review" prompt={reviewPrompt} agents={[agents.smart]} />
 
         {/* 3. VERDICT — combine the deterministic gate and the review. */}
         <Task id="verdict" output={outputs.verdict}>

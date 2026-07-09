@@ -1,109 +1,108 @@
 // smithers-source: seeded
 //
-// Central role registry for the plan-implement family. Defines WHO plays each
-// role so the workflows stay declarative:
+// Codex-first roles for the plan/implement family:
 //
-//   - implementer  — the heavy implementation tier: Codex first, Sonnet as the
-//                    guaranteed fallback (the middle of the fable sandwich).
-//   - panelists    — the model-diverse pair for the PLAN and REVIEW panels,
-//                    led by Fable 5 (Fable + Codex by default). Planning and
-//                    reviewing stay on the strongest tier.
-//   - synthesizer  — the panel MODERATOR that merges panelist outputs. Usually
-//                    Codex.
+//   - Sol handles planning, review, orchestration, and synthesis.
+//   - Terra handles balanced validation and tool-heavy work.
+//   - Luna handles every implementation and research step.
 //
-// These are self-contained agent instances (not the generated `../agents`
-// providers) so the file is robust regardless of which accounts a given user
-// has registered.
-import { spawnSync } from "node:child_process";
+// Each planning/review panel seat is a failover chain whose first member is
+// Codex Sol. That shape matters: a flat list would run every provider in
+// parallel, while the nested chain keeps Claude/Kimi dormant unless Codex
+// fails preflight. When Codex is not installed, the fallback providers become
+// the active panel instead.
+import { accessSync, constants } from "node:fs";
+import { delimiter, extname, join } from "node:path";
 import {
   type AgentLike,
-  AntigravityAgent,
   ClaudeCodeAgent,
-  CodexAgent,
+  KimiAgent,
 } from "smithers-orchestrator";
+import { codexFirst } from "../lib/codexAccounts";
 
-// The implementer model. Sonnet is the strong default for the implementation
-// tier. Claude Sonnet 5 (`claude-sonnet-5`) shipped 2026-06-29 and is now the
-// newest Sonnet (verified against the live Anthropic Models API: id
-// `claude-sonnet-5`, created_at 2026-06-29, 1M context), so it is the default
-// implementer. Override with SMITHERS_IMPLEMENTER_MODEL to pin another model.
+export const SOL_MODEL = process.env.SMITHERS_SOL_MODEL?.trim() || "gpt-5.6-sol";
+export const TERRA_MODEL = process.env.SMITHERS_TERRA_MODEL?.trim() || "gpt-5.6-terra";
 export const IMPLEMENTER_MODEL =
-  process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || "claude-sonnet-5";
+  process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || "gpt-5.6-luna";
 
-// Gemini is reached through Antigravity's `agy` CLI (the legacy `gemini` CLI is
-// sunset in Smithers and only throws), so we probe for `agy`, not `gemini`.
-// Gemini 3.5 Flash (2026-05-19) beats 3.1 Pro on coding/agentic work at Flash
-// speed and cost, so it is the default (see docs/reference/sota-models.mdx).
-export const GEMINI_MODEL =
-  process.env.SMITHERS_GEMINI_MODEL?.trim() || "gemini-3.5-flash";
+const testAgentPath = process.env.SMITHERS_TEST_AGENT_PATH?.trim();
+const testAgentEnv = testAgentPath ? { PATH: testAgentPath } : undefined;
 
 function commandExists(command: string): boolean {
-  const probe =
-    process.platform === "win32"
-      ? spawnSync("where", [command], { stdio: "ignore" })
-      : spawnSync("which", [command], { stdio: "ignore" });
-  return probe.status === 0;
+  const searchPath = testAgentPath || process.env.PATH || "";
+  const extensions =
+    process.platform === "win32" && extname(command) === ""
+      ? (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";")
+      : [""];
+
+  return searchPath.split(delimiter).some((directory) =>
+    extensions.some((extension) => {
+      try {
+        accessSync(join(directory, `${command}${extension}`), constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    }),
+  );
 }
 
-const hasGemini = commandExists("agy");
-const hasCodex = commandExists("codex");
 const hasClaude = commandExists("claude");
+const hasKimi = commandExists("kimi");
 
-const sonnet = new ClaudeCodeAgent({ model: IMPLEMENTER_MODEL });
-const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-// Fable 5: the planning/review tier of the fable sandwich (subscription access
-// verified 2026-07-02). Fable plans and reviews; Codex implements.
-const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
-const codex = new CodexAgent({ model: "gpt-5.5", skipGitRepoCheck: true });
-const gemini = new AntigravityAgent({ model: GEMINI_MODEL });
+const solOptions = {
+  model: SOL_MODEL,
+  config: { model_reasoning_effort: "xhigh" },
+  skipGitRepoCheck: true,
+  env: testAgentEnv,
+} as const;
+const terraOptions = {
+  model: TERRA_MODEL,
+  config: { model_reasoning_effort: "medium" },
+  skipGitRepoCheck: true,
+  env: testAgentEnv,
+} as const;
+const lunaOptions = {
+  model: IMPLEMENTER_MODEL,
+  config: { model_reasoning_effort: "medium" },
+  skipGitRepoCheck: true,
+  env: testAgentEnv,
+} as const;
 
-// Implementer failover chain (the middle of the fable sandwich): Codex leads
-// when its CLI is installed, Sonnet is the guaranteed strong fallback so the
-// implementer works even with no Codex/Gemini CLI installed.
-export const implementer: AgentLike[] = [
-  ...(hasCodex ? [codex] : []),
-  sonnet,
-  ...(hasGemini ? [gemini] : []),
+// Non-Codex agents are fallbacks only. They remain constructible so a pack
+// installed on a machine without Codex still has useful defaults.
+const fable = new ClaudeCodeAgent({ model: "claude-fable-5", env: testAgentEnv });
+const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8", env: testAgentEnv });
+const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5", env: testAgentEnv });
+const kimi = new KimiAgent({ model: "kimi-k2.7-code", env: testAgentEnv });
+
+const implementationFallbacks: AgentLike[] = [
+  ...(hasClaude ? [sonnet] : []),
+  ...(hasKimi ? [kimi] : []),
 ];
 
-// Plan & review panel: a model-diverse pair. Claude (Opus) + Codex by default,
-// or whatever 2 CLIs are installed (never Sonnet). Falls back to the static
-// Opus+Codex pair when fewer than 2 CLIs are detected (e.g. CI without agent
-// CLIs) so panel structure and graph-rendering never break.
-// Fable leads the panel (the bread of the fable sandwich); the second seat
-// goes to a model-diverse CLI (Codex, then Gemini).
-const detectedPanel: AgentLike[] = [
-  ...(hasClaude ? [fable] : []),
-  ...(hasCodex ? [codex] : []),
-  ...(hasGemini ? [gemini] : []),
-];
-export const panelists: AgentLike[] =
-  detectedPanel.length >= 2 ? detectedPanel.slice(0, 2) : [fable, codex];
+/** Luna implementation chain; non-Codex agents engage only when Luna cannot. */
+export const implementer: AgentLike[] = codexFirst(lunaOptions, implementationFallbacks);
 
-// The panel moderator / synthesizer — prefer another detected subscription CLI
-// (Gemini, then Codex) before falling back to Opus, so a stray/fake
-// OPENAI_API_KEY does not make Codex preflight fail when another CLI can do the
-// job. Opus is the always-present fallback. This is a failover chain (not a
-// single agent), but be precise about HOW the fallback engages: the engine
-// advances a failover chain across retry attempts, and a preflight/auth failure
-// is non-retryable, so the chain does NOT by itself walk from Codex to Opus on a
-// moderator-only Codex auth failure. What actually makes the shipped panels
-// resilient is the engine's per-run circuit breaker combined with the invariant
-// below: `panelists` always includes the SAME Codex instance, so when Codex auth
-// is stale a panelist fails preflight first and disables that instance run-wide;
-// the moderator (which runs after the panelists) then finds Codex disabled and
-// selects the next healthy agent on its first attempt. Keeping Opus in the chain
-// guarantees a healthy fallback exists for that path. Custom panels that use a
-// Codex moderator WITHOUT Codex among the panelists are not covered by this and
-// can still fail to produce a verdict — the review UI surfaces that terminal
-// no-verdict state explicitly.
-export const synthesizer: AgentLike[] = [
-  ...(hasGemini ? [gemini] : []),
-  ...(hasCodex ? [codex] : []),
-  opus,
+/** Terra validation/mid-tier chain. */
+export const validator: AgentLike[] = codexFirst(terraOptions, implementationFallbacks);
+
+const solFallbacks: AgentLike[] = [
+  ...(hasClaude ? [fable, opus] : []),
+  ...(hasKimi ? [kimi] : []),
 ];
 
-// The end-of-feature polish reviewer: Fable reviews the WHOLE implemented
-// feature once it is complete (the closing slice of the fable sandwich).
-// Opus stays in the chain as the always-present fallback.
-export const polishReviewer: AgentLike[] = [fable, opus];
+/**
+ * Two planning/review panel seats. Both seats run Sol first; each nested array
+ * is one panelist with registered Codex accounts before dormant fallbacks.
+ */
+export const panelists: Array<AgentLike | AgentLike[]> = [
+  codexFirst(solOptions, solFallbacks),
+  codexFirst(solOptions, solFallbacks),
+];
+
+/** Sol moderator/synthesizer with no-Codex fallbacks. */
+export const synthesizer: AgentLike[] = codexFirst(solOptions, solFallbacks);
+
+/** Sol final whole-feature review with no-Codex fallbacks. */
+export const polishReviewer: AgentLike[] = codexFirst(solOptions, solFallbacks);

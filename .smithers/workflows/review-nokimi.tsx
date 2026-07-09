@@ -3,7 +3,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { panelists, synthesizer } from "../components/roles";
 import { ReviewPanel, reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 
 const inputSchema = z.object({
@@ -16,20 +16,13 @@ const { Workflow, smithers } = createSmithers({
   reviewSynthesis: reviewSynthesisSchema,
 });
 
-const workingReviewers = [
-  providers.claude,
-  providers.codex,
-  providers.codex1,
-  providers.antigravity1,
-];
-
 export default smithers((ctx) => (
   <Workflow name="review-nokimi">
     <ReviewPanel
       idPrefix="review"
       prompt={ctx.input.prompt}
-      agents={workingReviewers}
-      moderator={providers.codex}
+      agents={panelists}
+      moderator={synthesizer}
     />
   </Workflow>
 ));

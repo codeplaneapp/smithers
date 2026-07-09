@@ -282,11 +282,16 @@ Acceptance criteria (machine-checkable):
 
 ## Ground-truth API facts (so agents don't guess)
 
-- Autonomous agents need bypass flags: `ClaudeCodeAgent({ model: "claude-opus-4-8",
-  permissionMode: "bypassPermissions", dangerouslySkipPermissions: true })`;
-  `CodexAgent({ model: "gpt-5.5", dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true, sandbox: "danger-full-access" })`. Never pin `cwd`
-  (it overrides `<Worktree>`).
+- Autonomous agents need bypass flags. Codex is the primary engine: use
+  `gpt-5.6-sol` for planning/review/orchestration, `gpt-5.6-terra` for
+  validation and tool-heavy work, and `gpt-5.6-luna` with explicit
+  `model_reasoning_effort: "medium"` for implementation and research. A typical
+  implementation seat is `CodexAgent({ model: "gpt-5.6-luna", config:
+  { model_reasoning_effort: "medium" }, dangerouslyBypassApprovalsAndSandbox:
+  true, skipGitRepoCheck: true, sandbox: "danger-full-access" })`. Keep
+  `ClaudeCodeAgent({ model: "claude-opus-4-8", permissionMode:
+  "bypassPermissions", dangerouslySkipPermissions: true })` only as a
+  sequential no-Codex fallback. Never pin `cwd` (it overrides `<Worktree>`).
 - `<Aspects tokenBudget={{ max: number, onExceeded?: "fail"|"warn"|"skip-remaining" }}>`
   enforced at dispatch; breach throws `ASPECT_BUDGET_EXCEEDED`.
 - `<TryCatchFinally try={el} catch={el|(err)=>el} catchErrors={[code]} finally={el} />`.

@@ -261,7 +261,7 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2 — Agent advice for resolving every non-ok finding. */}
-        <Task id="advise" output={outputs.advise} agent={agents.cheapFast} deps={{ check: outputs.check }}>
+        <Task id="advise" output={outputs.advise} agent={agents.midTier} deps={{ check: outputs.check }}>
           {(deps) => (
             <AdvisePrompt
               summary={deps.check.summary}

@@ -6,8 +6,9 @@
 
 > **STATUS: shipped & verified end-to-end 2026-07-01.** `run-on-plue` executed
 > `plue-demo-child.tsx` on a real plue Freestyle VM (workspace
-> 2cda524e, repo alice/smoke-test) and returned `claudeAnswer:"4"` +
-> `codexAnswer:"Paris"` — BOTH agents produced real output on plue infra. Proof
+> 2cda524e, repo alice/smoke-test) and returned two real answers on plue
+> infrastructure. The original proof exercised both provider CLIs; the shipped
+> demo now runs Codex 5.6 Luna for both tasks and keeps Claude fallback-only. Proof
 > runs: run-1782960686557 (finished) and run-1782960898698. Only operator step
 > left: `npm login && npm publish` of the `plue` package (repo + release binaries
 > already live at github.com/roninjin10/plue-cli @ v0.1.0).
@@ -81,10 +82,11 @@ smithers script than the runner script).
 - Template: `examples/freestyle/provider.ts` (mock client;
   real-client-shaped). Spec guidance: do NOT extend `SandboxRuntime`; use a
   provider object (cloud-execution-engineering.md Part 5).
-- Agents: `.smithers/agents.ts` — `ClaudeCodeAgent` (claude CLI, model
-  claude-sonnet-4-6 pool default) and `CodexAgent` (codex CLI, gpt-5.5).
-  Claude auth: `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. Codex auth:
-  `~/.codex/auth.json` or `OPENAI_API_KEY`.
+- Agents: the shipped demo pins `CodexAgent` to `gpt-5.6-luna` with explicit
+  medium reasoning for both tasks. `ClaudeCodeAgent` (`claude-sonnet-5`) is a
+  sequential fallback only when Codex cannot run. Codex auth comes from
+  `~/.codex/auth.json` or `OPENAI_API_KEY`; Claude fallback auth comes from
+  `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
 
 ### Host environment (verified 2026-07-01)
 - `FREESTYLE_API_KEY` set; `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` set;

@@ -151,7 +151,7 @@ export default smithers((ctx) => {
           <Branch
             if={durable}
             then={
-              <Task id="recommend" output={outputs.recommend} agent={agents.smart}>
+              <Task id="recommend" output={outputs.recommend} agent={agents.planning}>
                 <RecommendPrompt
                   prompt={prompt}
                   classification={classify}

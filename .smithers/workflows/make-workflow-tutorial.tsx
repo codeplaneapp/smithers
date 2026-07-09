@@ -503,7 +503,7 @@ export default smithers((ctx) => {
         <Task
           id="recommend"
           output={outputs.recommend}
-          agent={agents.smart}
+          agent={agents.research}
           deps={{ bootstrap: outputs.bootstrap, sessions: outputs.sessions }}
         >
           {(deps) => (
@@ -555,7 +555,7 @@ export default smithers((ctx) => {
               <Task
                 id="monitor-report"
                 output={outputs.monitorReport}
-                agent={agents.cheapFast}
+                agent={agents.midTier}
                 continueOnFail
                 retries={1}
               >
@@ -570,7 +570,7 @@ export default smithers((ctx) => {
                   <Task
                     id="monitor-triage"
                     output={outputs.triage}
-                    agent={agents.cheapFast}
+                    agent={agents.planning}
                   >
                     <TriagePrompt
                       childRunId={childRunId as string}
@@ -599,7 +599,7 @@ export default smithers((ctx) => {
         <Task
           id="dive-deeper"
           output={outputs.diveDeeper}
-          agent={agents.cheapFast}
+          agent={agents.research}
           needs={{ diveDeeperDocs: "dive-deeper-docs" }}
           deps={{ diveDeeperDocs: outputs.diveDeeperDocs }}
         >

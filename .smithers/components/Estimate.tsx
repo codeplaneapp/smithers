@@ -1,6 +1,6 @@
 // smithers-source: seeded
 /** @jsxImportSource smithers-orchestrator */
-import { Sequence, Task, ClaudeCodeAgent, estimateCostUsd, type AgentLike } from "smithers-orchestrator";
+import { Sequence, Task, estimateCostUsd, type AgentLike } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import EstimatePrompt from "../prompts/estimate.mdx";
@@ -59,7 +59,7 @@ export type WorkflowEstimate = z.infer<typeof workflowEstimateSchema>;
  */
 export function priceEstimate(
   forecast: EstimateForecast | null | undefined,
-  defaultModel = "claude-sonnet-5",
+  defaultModel = "gpt-5.6-luna",
 ): WorkflowEstimate {
   const perTask = (forecast?.perTask ?? []).map((task) => {
     const iterations = Math.max(1, Math.round(Number(task.iterations) || 1));
@@ -79,7 +79,7 @@ export function priceEstimate(
 // A concise example the prompt shows the model so it returns the right shape.
 const SCHEMA_HINT = JSON.stringify(
   {
-    perTask: [{ nodeId: "plan", tokens: 8000, iterations: 1, model: "claude-fable-5" }],
+    perTask: [{ nodeId: "plan", tokens: 8000, iterations: 1, model: "gpt-5.6-sol" }],
     confidence: "medium",
     assumptions: ["the implement loop converges in ~2 iterations"],
   },
@@ -87,9 +87,9 @@ const SCHEMA_HINT = JSON.stringify(
   2,
 );
 
-// The cheapest capable model, with the shared cheap pool as failover so an
-// unprovisioned haiku account never blocks the estimate.
-const defaultEstimator: AgentLike[] = [new ClaudeCodeAgent({ model: "claude-haiku-4-5" }), ...agents.cheapFast];
+// The shared cheap pool is Luna when Codex is available and falls back to the
+// configured non-Codex cheap providers only on no-Codex installs.
+const defaultEstimator: AgentLike[] = agents.cheapFast;
 
 export type EstimateProps = {
   /** Namespaces the two node ids. Read the priced result at `${idPrefix}:priced`. */
@@ -98,7 +98,7 @@ export type EstimateProps = {
   input: unknown;
   /** Which workflow this is — the estimator reads `.smithers/workflows/<key>.tsx`. */
   workflowKey: string;
-  /** The estimator pool; defaults to a haiku-cheapest chain. */
+  /** The estimator pool; defaults to the Codex-first cheap chain. */
   estimator?: AgentLike[];
   /** Model to price tasks whose model the forecaster left blank. */
   defaultModel?: string;
@@ -124,7 +124,7 @@ export function Estimate({
   input,
   workflowKey,
   estimator = defaultEstimator,
-  defaultModel = "claude-sonnet-5",
+  defaultModel = "gpt-5.6-luna",
   forecast = null,
 }: EstimateProps) {
   const inputText = JSON.stringify(input ?? null, null, 2);

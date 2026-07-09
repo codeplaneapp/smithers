@@ -82,7 +82,7 @@ below starts with the prompt that produces it.
 > *"make me a smithers workflow that analyzes a bug report, then fixes it"*
 
 ```tsx
-import { createSmithers, Sequence, AnthropicAgent } from "smithers-orchestrator";
+import { createSmithers, Sequence, OpenAIAgent } from "smithers-orchestrator";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -97,8 +97,8 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   }),
 });
 
-const analyzer = new AnthropicAgent({ model: "claude-fable-5" });
-const fixer = new AnthropicAgent({ model: "claude-fable-5" });
+const analyzer = new OpenAIAgent({ model: "gpt-5.6-terra" });
+const fixer = new OpenAIAgent({ model: "gpt-5.6-luna" });
 
 export default smithers((ctx) => (
   <Workflow name="bugfix">
@@ -128,7 +128,7 @@ This page is the 90-second version. The **[Tour](https://smithers.sh/tour)** is 
 > *"implement this request and keep iterating until a reviewer signs off"*
 
 ```tsx
-import { createSmithers, Loop, ClaudeCodeAgent } from "smithers-orchestrator";
+import { createSmithers, Loop, CodexAgent } from "smithers-orchestrator";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -137,8 +137,15 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   review: z.object({ approved: z.boolean(), feedback: z.string() }),
 });
 
-const coder = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
-const reviewer = new ClaudeCodeAgent({ model: "claude-fable-5" });
+const coder = new CodexAgent({
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
+});
+const reviewer = new CodexAgent({
+  model: "gpt-5.6-sol",
+  config: { model_reasoning_effort: "xhigh" },
+  sandbox: "read-only",
+});
 
 export default smithers((ctx) => (
   <Workflow name="implement-reviewed">
@@ -169,7 +176,7 @@ resumes at the current iteration instead of iteration one.
 ```tsx
 import {
   createSmithers, Sequence, Parallel, Loop, Worktree, MergeQueue,
-  Approval, ClaudeCodeAgent, PiAgent, approvalDecisionSchema,
+  Approval, CodexAgent, approvalDecisionSchema,
 } from "smithers-orchestrator";
 import { z } from "zod";
 
@@ -184,9 +191,20 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   merge: z.object({ ticketId: z.string(), status: z.enum(["merged", "conflict"]) }),
 });
 
-const planner = new ClaudeCodeAgent({ model: "claude-fable-5" });
-const coder = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
-const reviewer = new PiAgent({ provider: "openai-codex", model: "gpt-5.5", thinking: "xhigh" });
+const planner = new CodexAgent({
+  model: "gpt-5.6-sol",
+  config: { model_reasoning_effort: "xhigh" },
+  sandbox: "read-only",
+});
+const coder = new CodexAgent({
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
+});
+const reviewer = new CodexAgent({
+  model: "gpt-5.6-sol",
+  config: { model_reasoning_effort: "xhigh" },
+  sandbox: "read-only",
+});
 
 export default smithers((ctx) => {
   const plan = ctx.outputMaybe(outputs.triage, { nodeId: "triage" });

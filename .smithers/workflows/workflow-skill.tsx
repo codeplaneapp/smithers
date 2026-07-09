@@ -180,7 +180,7 @@ export default smithers((ctx) => {
       <Task
         id="write-skills"
         output={outputs.writeResult}
-        agent={agents.smartTool}
+        agent={agents.implement}
         heartbeatTimeoutMs={600_000}
         deps={{ collect: outputs.collect }}
       >

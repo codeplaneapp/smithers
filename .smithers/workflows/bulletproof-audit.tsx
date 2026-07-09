@@ -6,7 +6,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSmithers, Parallel, Sequence } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { agents } from "../agents";
 import { FeatureGroups } from "../specs/features";
 
 /**
@@ -14,7 +14,7 @@ import { FeatureGroups } from "../specs/features";
  * feature inventory.
  *
  * It loops over every feature group in `.smithers/specs/features.ts` and, for
- * each group, runs ONE grounded audit agent (Codex / GPT-5.5) that scores the
+ * each group, runs ONE grounded Codex Sol audit agent that scores the
  * group across ten production-hardening dimensions (see {@link DIMENSIONS}):
  * end-to-end test coverage, unit-test depth (error/boundary/edge cases),
  * observability, architecture quality, JSDoc coverage, human + LLM docs,
@@ -371,12 +371,10 @@ export default smithers((ctx) => {
     workItems.map((_, i) => [`g${i}`, groupAuditSchema]),
   ) as Record<string, typeof groupAuditSchema>;
 
-  // Codex / GPT-5.5 is the auditor (per request). The report agent gets a second
-  // Codex account as a fallback so a single transient failure can't sink the
-  // synthesis; the per-group audits run with continueOnFail so a bad group is
-  // skipped rather than fatal.
-  const auditAgent = providers.codex;
-  const reportAgent = [providers.codex, providers.codex1];
+  // Sol owns the audit and report synthesis. The generated role pool is
+  // Codex-only when available and exposes legacy providers only as fallback.
+  const auditAgent = agents.review;
+  const reportAgent = agents.review;
 
   return (
     <Workflow name="bulletproof-audit">

@@ -77,10 +77,26 @@ recommended) and the reason.
 
 ### 5. Choose the agent pools
 
-From `.smithers/agents.ts`, pick which named pools the workflow's tasks should
-use: `agents.smart` (deep reasoning), `agents.smartTool` (reasoning + file/shell
-tools, for steps that edit or run things), `agents.cheapFast` (cheap validation /
-classification). List them in `agents`.
+From `.smithers/agents.ts`, pick the narrowest role pool for every AI task. The
+generated pools are ordered fallback chains: Codex runs first, and Claude/Kimi
+are attempted only when every Codex candidate in that pool is unavailable or
+fails. Do not put providers in parallel just to obtain fallback behavior.
+
+- `agents.planning` uses GPT-5.6 Sol for graph architecture, orchestration,
+  review, and other judgment-heavy work.
+- `agents.research` uses GPT-5.6 Luna for source gathering and synthesis.
+- `agents.implement` uses GPT-5.6 Luna for code writing, fixes, and other
+  implementation tasks, even when they use file or shell tools.
+- `agents.midTier` uses GPT-5.6 Terra for validation, tool-heavy checks, and
+  ordinary mid-tier reasoning that is neither implementation nor top-tier
+  planning/review.
+- `agents.cheapFast` uses GPT-5.6 Luna for low-stakes classification,
+  extraction, summarization, and other cheap high-volume work.
+
+List the selected role pools in `agents`, along with which task will use each
+one. The design manifest should use these five public roles (`planning`,
+`research`, `implement`, `midTier`, `cheapFast`) rather than generic legacy
+pool names.
 
 ## Acceptance criteria
 

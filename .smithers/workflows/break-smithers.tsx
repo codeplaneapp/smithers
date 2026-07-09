@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createSmithers, UI } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { agents } from "../agents";
 
 /**
  * Break Smithers — a durable eval-driven-development loop.
@@ -21,12 +21,12 @@ import { providers } from "../agents";
  *   1. clock      — wall-clock gate; the loop stops after `deadlineIso`.
  *   2. run-haiku  — run one rotating haiku fluency suite (weak model stresses the
  *                   docs); capture pass/fail + the friction it surfaced.
- *   3. break      — OPUS adversarially drives smithers (author a workflow, run a
+ *   3. break      — Codex Luna adversarially drives smithers (author a workflow, run a
  *                   CLI verb, inspect a generated report/UI) to find ONE concrete
  *                   NEW friction or bad-experience failure.
- *   4. author     — OPUS turns that friction into a runnable eval case, appended
+ *   4. author     — Codex Luna turns that friction into a runnable eval case, appended
  *                   to the corpus + cases regenerated (the durable regression).
- *   5. fix        — OPUS fixes the root cause (docs preferred; minimal code if
+ *   5. fix        — Codex Luna fixes the root cause (docs preferred; minimal code if
  *                   needed) and returns exactly the files it touched.
  *   6. commit     — scoped LOCAL commit of the new eval + fix (git commit
  *                   <pathspec>, never add -A; no push/pull). Tolerant of races.
@@ -46,9 +46,8 @@ const ROOT = process.cwd();
 const SUITES_DIR = join(ROOT, "evals", "suites");
 const CURATED = join(ROOT, "evals/_inventory/curated-tasks.jsonl");
 
-// Opus-primary pool (Sonnet only as a failover so a single Opus hiccup can't
-// stall a multi-hour loop). "Use opus primarily."
-const opus = [providers.claudeOpus, providers.claudeSonnet];
+const researchAgent = agents.research;
+const implementationAgent = agents.implement;
 
 type SpawnResult = { status: number | null; stdout: string; stderr: string };
 
@@ -322,14 +321,14 @@ export default smithers((ctx) => {
             }}
           </Task>
 
-          {/* 3. BREAK — OPUS adversarially finds ONE new friction / bad UX. */}
-          <Task id="break" output={outputs.friction} agent={opus} heartbeatTimeoutMs={900_000}>
+          {/* 3. BREAK — Luna adversarially finds ONE new friction / bad UX. */}
+          <Task id="break" output={outputs.friction} agent={researchAgent} heartbeatTimeoutMs={900_000}>
             {BREAK_PROMPT(suite, evalRun?.tail ?? "(no eval output captured)")}
           </Task>
 
-          {/* 4. AUTHOR — OPUS turns the friction into a runnable eval case. */}
+          {/* 4. AUTHOR — Luna turns the friction into a runnable eval case. */}
           {friction ? (
-            <Task id="author" output={outputs.authored} agent={opus} heartbeatTimeoutMs={600_000}>
+            <Task id="author" output={outputs.authored} agent={implementationAgent} heartbeatTimeoutMs={600_000}>
               {AUTHOR_PROMPT(friction)}
             </Task>
           ) : null}
@@ -379,9 +378,9 @@ export default smithers((ctx) => {
             </Task>
           ) : null}
 
-          {/* 5. FIX — OPUS fixes the root cause (docs preferred), returns changed paths. */}
+          {/* 5. FIX — Luna fixes the root cause (docs preferred), returns changed paths. */}
           {authored ? (
-            <Task id="fix" output={outputs.fixed} agent={opus} heartbeatTimeoutMs={1_200_000}>
+            <Task id="fix" output={outputs.fixed} agent={implementationAgent} heartbeatTimeoutMs={1_200_000}>
               {FIX_PROMPT(friction!, authored)}
             </Task>
           ) : null}

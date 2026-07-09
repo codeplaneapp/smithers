@@ -152,10 +152,10 @@ Work in ${SMITHERS_REPO}. Deliverables:
    false (default fails closed for unattended runs). Remember ctx.input fields
    arrive raw-or-null — coalesce defaults.
 3. \`.smithers/workflows/plue-demo-child.tsx\` — a tiny SELF-CONTAINED demo
-   child workflow (no ../agents import; defines its own ClaudeCodeAgent and
-   CodexAgent inline, env-authenticated): two sequential Tasks with small
-   typed outputs — one answered by claude, one by codex (trivial questions,
-   minimal tokens). This is the script the e2e verification will run on plue.
+   child workflow (no ../agents import; defines a Codex 5.6 Luna medium chain
+   inline with Claude only as sequential fallback): two trivial sequential
+   Tasks with small typed outputs. A healthy Codex account must complete both
+   without invoking Claude. This is the script the e2e verification runs.
 4. Unit tests (bun test) for the provider's pure pieces: ssh-command parsing,
    result mapping, remote-script construction, name sanitization. Put them
    next to the provider (.smithers/lib/plue-provider.test.ts). No fabricated
@@ -343,7 +343,7 @@ run-on-plue with the demo child).`;
           idPrefix="m1"
           prompt={withBin(M1_PROMPT)}
           implementAgents={implementer}
-          validateAgents={agents.cheapFast}
+          validateAgents={agents.midTier}
           reviewAgents={panelists}
           synthesizeReview
           feedback={m1.feedback}
@@ -354,7 +354,7 @@ run-on-plue with the demo child).`;
           idPrefix="m2"
           prompt={withBin(M2_PROMPT)}
           implementAgents={implementer}
-          validateAgents={agents.cheapFast}
+          validateAgents={agents.midTier}
           reviewAgents={panelists}
           synthesizeReview
           feedback={m2.feedback}
@@ -365,7 +365,7 @@ run-on-plue with the demo child).`;
           idPrefix="m3"
           prompt={withBin(M3_PROMPT)}
           implementAgents={implementer}
-          validateAgents={agents.cheapFast}
+          validateAgents={agents.midTier}
           reviewAgents={panelists}
           synthesizeReview
           feedback={m3.feedback}
@@ -376,7 +376,7 @@ run-on-plue with the demo child).`;
           idPrefix="m4"
           prompt={withBin(M4_PROMPT)}
           implementAgents={implementer}
-          validateAgents={agents.cheapFast}
+          validateAgents={agents.midTier}
           reviewAgents={panelists}
           synthesizeReview
           feedback={m4.feedback}
@@ -386,7 +386,7 @@ run-on-plue with the demo child).`;
         <Task
           id="final-summary"
           output={summarySchema}
-          agent={agents.smartTool}
+          agent={agents.orchestrator}
           timeoutMs={900_000}
         >
           {summaryPrompt}

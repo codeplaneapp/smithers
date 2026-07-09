@@ -169,13 +169,14 @@ test("UI_WORKFLOWS gateway-mounts / ui-files / e2e-descriptors are in sync", () 
     }
 });
 
-test("seeded-workflow-pack.generated.js does not reference stale model gpt-5.3-codex", () => {
-    // smithering.tsx used gpt-5.3-codex; the live model is gpt-5.5. Guard against
-    // the model string being re-introduced by any workflow in the generated pack.
+test("seeded-workflow-pack.generated.js does not reference replaced Codex models", () => {
+    // The seeded workflows use the exact GPT-5.6 role models. Guard against old
+    // implementation defaults being reintroduced into the generated pack.
     const packPath = resolve(
         dirname(fileURLToPath(import.meta.url)),
         "../src/seeded-workflow-pack.generated.js",
     );
     const packSource = readFileSync(packPath, "utf8");
     expect(packSource).not.toContain("gpt-5.3-codex");
+    expect(packSource).not.toContain("gpt-5.5");
 });

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { createExecutableDir, writeExecutable, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenClawBinary, writeFakeOpenCodeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
-import { ask } from "../src/ask.js";
+import { ask, buildAskAttemptPlan, runAskAttempts } from "../src/ask.js";
 // We test the exported pure-logic functions by importing the module.
 // detectAvailableAgents calls spawnSync so we test the scoring/status logic
 // via generateAgentsTs with controlled env.
@@ -36,6 +36,25 @@ describe("detectAvailableAgents", () => {
             .split("\n")
             .filter((line) => !line.trimStart().startsWith("//"))
             .join("\n");
+    }
+
+    const CODEX_DEFAULT_TIERS = {
+        cheapFast: "codexLuna",
+        research: "codexLuna",
+        implement: "codexLuna",
+        midTier: "codexTerra",
+        smartTool: "codexTerra",
+        validate: "codexTerra",
+        smart: "codexSol",
+        review: "codexSol",
+        planning: "codexSol",
+        orchestrator: "codexSol",
+    };
+
+    function activePoolProviders(source, pool) {
+        const match = uncommented(source).match(new RegExp(`(?:^|\\n)  ${pool}: \\[([\\s\\S]*?)\\n  \\],`));
+        expect(match, `missing generated ${pool} pool`).toBeTruthy();
+        return [...match[1].matchAll(/providers\.([A-Za-z_$][\w$]*)/g)].map((entry) => entry[1]);
     }
 
     function writeLoggedOutClaudeBinary(binDir) {
@@ -175,6 +194,27 @@ describe("detectAvailableAgents", () => {
         const probeCheck = openclaw.checks.find((c) => c.startsWith("probe:openclaw:"));
         expect(probeCheck).toContain("probe:openclaw:no:");
     });
+    test("Codex availability activates the exact Sol, Terra, and Luna default tiers", () => {
+        const home = tempHome();
+        const binDir = createExecutableDir();
+        writeFakeCodexBinary(binDir);
+        writeFakeClaudeBinary(binDir);
+        writeFakeOpenCodeBinary(binDir);
+        mkdirSync(join(home, ".local", "share", "opencode"), { recursive: true });
+        writeFileSync(join(home, ".local", "share", "opencode", "auth.json"), JSON.stringify({ anthropic: { accessToken: "test" } }) + "\n");
+
+        const source = generateAgentsTs(envWithPath(home, binDir, {
+            OPENAI_API_KEY: "sk-test-openai-key",
+        }), { cwd: home });
+        expect(source).toContain('codexSol: new SmithersCodexAgent({ model: "gpt-5.6-sol"');
+        expect(source).toContain('codexTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
+        expect(source).toContain('codexLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
+        for (const [tier, provider] of Object.entries(CODEX_DEFAULT_TIERS)) {
+            expect(activePoolProviders(source, tier)[0], `${tier} must start with Codex`).toBe(provider);
+        }
+        expect(activePoolProviders(source, "implement").slice(1)).toContain("claudeSonnet");
+        expect(activePoolProviders(source, "review").slice(1)).toContain("claude");
+    });
     test("generated agents.ts uses OpenCode for OpenCode-only defaults", () => {
         const home = tempHome();
         const binDir = createExecutableDir();
@@ -185,7 +225,7 @@ describe("detectAvailableAgents", () => {
             cwd: home,
         });
         const active = uncommented(source);
-        expect(active).toContain("opencode: OpenCodeAgent");
+        expect(active).toContain("opencode: new SmithersOpenCodeAgent(");
         expect(active).toContain("cheapFast: [\n    providers.opencode,");
         expect(active).toContain("smart: [\n    providers.opencode,");
         expect(active).toContain("smartTool: [\n    providers.opencode,");
@@ -327,6 +367,142 @@ describe("detectAvailableAgents", () => {
         }
         expect(stdout).toContain("* antigravity");
         expect(stdout).not.toContain("* gemini");
+    });
+    test("smithers ask selects Codex over a higher-scored Claude subscription", async () => {
+        const home = tempHome();
+        const binDir = createExecutableDir();
+        writeFakeClaudeBinary(binDir);
+        writeFakeCodexBinary(binDir);
+        const cwd = join(home, "repo");
+        mkdirSync(cwd, { recursive: true });
+        const originalEnv = { ...process.env };
+        const originalWrite = process.stdout.write;
+        let stdout = "";
+        Object.assign(process.env, envWithPath(home, binDir, { OPENAI_API_KEY: "sk-codex-test" }));
+        process.stdout.write = ((chunk, ...args) => {
+            stdout += String(chunk);
+            const callback = args.find((arg) => typeof arg === "function");
+            if (callback)
+                callback();
+            return true;
+        });
+        try {
+            await ask(undefined, cwd, { listAgents: true });
+        }
+        finally {
+            process.stdout.write = originalWrite;
+            for (const key of Object.keys(process.env))
+                delete process.env[key];
+            Object.assign(process.env, originalEnv);
+        }
+        expect(stdout).toContain("* codex");
+        expect(stdout).not.toContain("* claude");
+    });
+    test("smithers ask selects a registered Codex account before Claude", async () => {
+        const home = tempHome();
+        const binDir = createExecutableDir();
+        writeFakeClaudeBinary(binDir);
+        writeFakeCodexBinary(binDir);
+        const cwd = join(home, "repo");
+        mkdirSync(cwd, { recursive: true });
+        mkdirSync(join(home, ".smithers"), { recursive: true });
+        writeFileSync(join(home, ".smithers", "accounts.json"), JSON.stringify({
+            version: 1,
+            accounts: [{ label: "codex-work", provider: "codex", configDir: join(home, ".codex-work") }],
+        }));
+        const originalEnv = { ...process.env };
+        const originalWrite = process.stdout.write;
+        let stdout = "";
+        Object.assign(process.env, envWithPath(home, binDir));
+        process.stdout.write = ((chunk, ...args) => {
+            stdout += String(chunk);
+            const callback = args.find((arg) => typeof arg === "function");
+            if (callback)
+                callback();
+            return true;
+        });
+        try {
+            await ask(undefined, cwd, { listAgents: true });
+        }
+        finally {
+            process.stdout.write = originalWrite;
+            for (const key of Object.keys(process.env))
+                delete process.env[key];
+            Object.assign(process.env, originalEnv);
+        }
+        expect(stdout).toContain("* codex");
+        expect(stdout).not.toContain("* claude");
+    });
+    test("smithers ask exhausts ambient and registered Codex credentials before backups", async () => {
+        const availability = (id, usable, score) => ({
+            id,
+            displayName: id,
+            binary: id,
+            hasBinary: true,
+            hasAuthSignal: usable,
+            hasApiKeySignal: false,
+            hasProjectTrustSignal: true,
+            status: usable ? "likely-subscription" : "unavailable",
+            score,
+            usable,
+            checks: [],
+            unusableReasons: usable ? [] : ["missing credentials"],
+        });
+        const accounts = [
+            { label: "codex-work", provider: "codex", configDir: "/tmp/codex-work" },
+            { label: "openai-ci", provider: "openai-api", apiKey: "sk-test-ci" },
+        ];
+        const attempts = buildAskAttemptPlan([
+            availability("codex", true, 4),
+            availability("claude", true, 4),
+            availability("kimi", true, 3),
+        ], {}, accounts, {});
+        expect(attempts.map((attempt) => [
+            attempt.selection.availability.id,
+            attempt.codexAccount?.label ?? "ambient",
+        ])).toEqual([
+            ["codex", "ambient"],
+            ["codex", "codex-work"],
+            ["codex", "openai-ci"],
+            ["claude", "ambient"],
+            ["kimi", "ambient"],
+        ]);
+        const visited = [];
+        const answer = await runAskAttempts(attempts, async (attempt) => {
+            const label = attempt.codexAccount?.label ?? attempt.selection.availability.id;
+            visited.push(label);
+            if (label !== "claude")
+                throw new Error(`${label} failed`);
+            return "fallback answer";
+        });
+        expect(answer).toBe("fallback answer");
+        expect(visited).toEqual(["codex", "codex-work", "openai-ci", "claude"]);
+    });
+    test("smithers ask respects an explicit provider without cross-provider failover", async () => {
+        const availability = (id, usable, score) => ({
+            id,
+            displayName: id,
+            binary: id,
+            hasBinary: true,
+            hasAuthSignal: usable,
+            hasApiKeySignal: false,
+            hasProjectTrustSignal: true,
+            status: usable ? "likely-subscription" : "unavailable",
+            score,
+            usable,
+            checks: [],
+            unusableReasons: usable ? [] : ["missing credentials"],
+        });
+        const attempts = buildAskAttemptPlan([
+            availability("codex", true, 4),
+            availability("claude", true, 4),
+            availability("kimi", true, 3),
+        ], { agent: "claude" }, [
+            { label: "codex-work", provider: "codex", configDir: "/tmp/codex-work" },
+        ], {});
+        expect(attempts).toHaveLength(1);
+        expect(attempts[0].selection.availability.id).toBe("claude");
+        expect(attempts[0].selection.selectionReason).toBe("requested via --agent");
     });
     test("kimi detects KIMI_SHARE_DIR as auth signal path", () => {
         const results = detectAvailableAgents({

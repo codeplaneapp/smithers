@@ -163,7 +163,7 @@ Return:
         ) : null}
 
         {gather && needsSmart ? (
-          <Task id="smart-upgrade" output={outputs.smartUpgrade} agent={agents.smart} timeoutMs={45 * 60_000}>
+          <Task id="smart-upgrade" output={outputs.smartUpgrade} agent={agents.implement} timeoutMs={45 * 60_000}>
             {`The cheap Smithers upgrade driver stopped and requested help:
 ${cheap?.needsHelp}
 

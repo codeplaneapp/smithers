@@ -24,7 +24,7 @@ const { Workflow, Task, smithers } = createSmithers({
 export default smithers((ctx) => (
   <Workflow name="research">
     <UI entry="../ui/research.tsx" title={"Research"} />
-    <Task id="research" output={researchOutputSchema} agent={agents.smartTool}>
+    <Task id="research" output={researchOutputSchema} agent={agents.research}>
       <ResearchPrompt prompt={ctx.input.prompt} />
     </Task>
   </Workflow>

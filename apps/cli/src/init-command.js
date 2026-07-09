@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { z } from "incur";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
+import { regenerateAgentsTsIfPresent } from "./agent-commands/regenerateAgentsTsIfPresent.js";
 import { runInitCeremony } from "./initCeremony.js";
 import { renderInitNextSteps } from "./renderInitNextSteps.js";
 import { STARTER_TEMPLATE_IDS, buildStarterGallery, findStarterRecipe } from "./starter-gallery.js";
@@ -188,6 +189,7 @@ export async function runInitCommand(c, fail) {
         if (!human && !c.options.agentsOnly && !c.options.global && !c.options.addAgents && !c.options.template) {
             const durable = await runDurableReinit({ force: c.options.force, skipInstall: !c.options.install, refreshSkills: c.options.skill });
             if (durable) {
+                durable.regen = regenerateAgentsTsIfPresent();
                 return c.ok(durable, { cta: { ...buildInitCta(undefined), description: "Next steps:" } });
             }
         }
@@ -211,6 +213,12 @@ export async function runInitCommand(c, fail) {
                 global: c.options.global,
                 installSkill: c.options.skill,
             });
+        // Generated agent routing is safe to refresh on every non-interactive
+        // local re-init: the sentinel guard preserves hand-edited agents.ts,
+        // while user-owned files under .smithers/agents/ remain untouched.
+        if (!human && !c.options.global) {
+            result.regen = regenerateAgentsTsIfPresent();
+        }
         const templateResult = selectedTemplate
             ? buildStarterGallery({ id: selectedTemplate.id }).selected
             : undefined;
@@ -223,7 +231,6 @@ export async function runInitCommand(c, fail) {
             // Regenerate agents.ts now that accounts are in place; the initial
             // generateAgentsTs() call ran before any accounts were registered.
             if (added.length > 0) {
-                const { regenerateAgentsTsIfPresent } = await import("./agent-commands/regenerateAgentsTsIfPresent.js");
                 result.regen = regenerateAgentsTsIfPresent();
             }
         }

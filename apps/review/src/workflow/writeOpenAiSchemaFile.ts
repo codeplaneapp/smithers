@@ -36,8 +36,8 @@ function sanitizeForOpenAI(node: unknown): void {
  * Convert a Zod schema to a Codex-compatible JSON Schema and write it to a
  * temp file, returning the path. Codex enforces the file passed via
  * `--output-schema`, which is how a ChatGPT-subscription review run produces
- * the structured JSON the pipeline needs (gpt-5.5 otherwise emits prose, and
- * this smithers build does not auto-wire `--output-schema` for codex).
+ * the structured JSON the pipeline needs (the model may otherwise emit prose,
+ * and this smithers build does not auto-wire `--output-schema` for codex).
  */
 export function writeOpenAiSchemaFile(schema: z.ZodType): string {
   const jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>;

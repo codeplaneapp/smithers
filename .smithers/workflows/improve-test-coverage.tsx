@@ -26,8 +26,8 @@ export default smithers((ctx) => (
       idPrefix="improve-test-coverage"
       prompt={ctx.input.prompt}
       implementAgents={agents.implement}
-      validateAgents={agents.cheapFast}
-      reviewAgents={agents.review}
+      validateAgents={agents.midTier}
+      reviewAgents={[agents.review]}
     />
   </Workflow>
 ));

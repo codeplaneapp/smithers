@@ -9,10 +9,11 @@
 // workflow harvests that product work onto the #286 base, KEEPS the TanStack DB sync layer,
 // drops the bespoke SDK, ports any old-sync usage to the new public hooks, and greens it.
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 const repoRoot = (() => {
   try {
@@ -84,14 +85,11 @@ const { Workflow, Task, Sequence, Loop, Worktree, smithers, outputs } = createSm
   commit: commitSchema,
 });
 
-const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const codex = new CodexAgent({
-  model: "gpt-5.5",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-  config: { model_reasoning_effort: "xhigh" },
-});
+const opusFallback = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
+const sonnetFallback = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+const solAgent = codexFirst({ model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [opusFallback]);
+const lunaAgent = codexFirst({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [sonnetFallback]);
+const terraAgent = codexFirst({ model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [sonnetFallback]);
 
 const RETRIES = 2;
 const CONSOLIDATE_TIMEOUT_MS = 180 * 60_000;
@@ -222,15 +220,15 @@ export default smithers((ctx) => {
       <Sequence>
         <Worktree path={WT} branch={WORK_BRANCH} baseBranch={BASE_BRANCH}>
           <Sequence>
-            <Task id="consolidate" output={outputs.consolidate} agent={opus} retries={RETRIES} timeoutMs={CONSOLIDATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task id="consolidate" output={outputs.consolidate} agent={lunaAgent} retries={RETRIES} timeoutMs={CONSOLIDATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
               {consolidatePrompt(prevConsolidate, verify)}
             </Task>
             <Loop id="verify-loop" until={green} maxIterations={iterations} onMaxReached="return-last">
-              <Task id="verify" output={outputs.verify} agent={opus} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task id="verify" output={outputs.verify} agent={terraAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
                 {verifyPrompt()}
               </Task>
             </Loop>
-            <Task id="review" output={outputs.review} agent={codex} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task id="review" output={outputs.review} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
               {reviewPrompt()}
             </Task>
             <Task id="commit" output={outputs.commit} timeoutMs={5 * 60_000}>

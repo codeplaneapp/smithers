@@ -188,7 +188,7 @@ test("agents add appends to a detection-based agents.ts without dropping detecte
     expect(initResult.exitCode).toBe(0);
     const initialAgentsTs = repo.read(".smithers/agents.ts");
     expect(initialAgentsTs).toContain("// smithers-source: generated");
-    expect(initialAgentsTs).toContain("claude: ClaudeCodeAgent");
+    expect(initialAgentsTs).toContain("claude: new SmithersClaudeCodeAgent(");
     // Now register an account and verify agents.ts adds the new provider
     // without removing the detected `claude` entry.
     runSmithers(
@@ -209,7 +209,7 @@ test("agents add appends to a detection-based agents.ts without dropping detecte
     expect(agentsTs).toContain("~/.smithers/accounts.json");
     expect(agentsTs).toContain("codexProd: new SmithersCodexAgent(");
     // Detection-based provider survives the regen.
-    expect(agentsTs).toContain("claude: ClaudeCodeAgent");
+    expect(agentsTs).toContain("claude: new SmithersClaudeCodeAgent(");
 }, 20_000);
 
 test("agents add preserves a legacy unknown-provider account, and agents remove deletes it", () => {

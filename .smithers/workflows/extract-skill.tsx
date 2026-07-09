@@ -120,7 +120,7 @@ export default smithers((ctx) => {
         <Task
           id="analyze"
           output={outputs.analyze}
-          agent={agents.smartTool}
+          agent={agents.research}
           heartbeatTimeoutMs={600_000}
         >
           <AnalyzePrompt prompt={prompt} runId={ctx.input.targetRunId} skillsDir={SKILLS_DIR} />
@@ -141,7 +141,7 @@ export default smithers((ctx) => {
               <Task
                 id="scaffold-skill"
                 output={outputs.scaffoldSkill}
-                agent={agents.smartTool}
+                agent={agents.implement}
                 heartbeatTimeoutMs={600_000}
               >
                 <ScaffoldSkillPrompt skill={propose?.proposedSkill} skillsDir={SKILLS_DIR} />

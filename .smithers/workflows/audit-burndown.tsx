@@ -316,8 +316,8 @@ export default smithers((ctx) => {
                       idPrefix={idPrefix}
                       prompt={itemPrompt(item)}
                       implementAgents={agents.implement}
-                      validateAgents={agents.cheapFast}
-                      reviewAgents={agents.review}
+                      validateAgents={agents.midTier}
+                      reviewAgents={[agents.review]}
                       feedback={feedback}
                       done={done}
                       maxIterations={maxItemIterations}
@@ -339,7 +339,7 @@ export default smithers((ctx) => {
           </Parallel>
 
           {/* 3. MERGE — land only the green+approved branches onto LOCAL main. NEVER push. */}
-          <Task id="merge" output={outputs.merge} agent={agents.smart}>
+          <Task id="merge" output={outputs.merge} agent={agents.implement}>
             {[
               `Merge the completed burndown branches from this batch into LOCAL \`main\` only.`,
               ``,

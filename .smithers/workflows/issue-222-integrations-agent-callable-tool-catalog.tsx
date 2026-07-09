@@ -1,16 +1,16 @@
 // smithers-source: bespoke
 // smithers-display-name: Issue 222 — OAuth authorization-URL builder
 /** @jsxImportSource smithers-orchestrator */
-import { CodexAgent, createSmithers, Sequence, Task, UI, type AgentLike } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers, Sequence, Task, UI, type AgentLike } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
+import { codexFirst } from "../lib/codexAccounts";
 
-// Codex-only pool. The shared roles/agents pools lead with Claude, but this
-// worktree's Anthropic org is currently quota-disabled (7-day overage), so we
-// route plan/implement/validate/review entirely through Codex (separate pool).
-const codex = new CodexAgent({ model: "gpt-5.5", skipGitRepoCheck: true });
-const codexPool: AgentLike[] = [codex];
+// Codex-first role pools: Sol plans/reviews, Luna implements, Terra validates.
+const solPool: AgentLike[] = codexFirst({ model: "gpt-5.6-sol", skipGitRepoCheck: true }, [new ClaudeCodeAgent({ model: "claude-opus-4-8" })]);
+const lunaPool: AgentLike[] = codexFirst({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }, [new ClaudeCodeAgent({ model: "claude-sonnet-5" })]);
+const terraPool: AgentLike[] = codexFirst({ model: "gpt-5.6-terra", skipGitRepoCheck: true }, [new ClaudeCodeAgent({ model: "claude-sonnet-5" })]);
 
 // Issue #222 is an integrations program (72 items). Its named "load-bearing
 // gap" is the delegated per-user OAuth connection plane: auth-code + PKCE,
@@ -128,7 +128,7 @@ export default smithers((ctx) => {
     <Workflow name="issue-222-integrations-agent-callable-tool-catalog">
       <UI entry="../ui/implement.tsx" title={"Issue 222 — OAuth authorize URL"} />
       <Sequence>
-        <Task id="i222:plan" output={outputs.plan} agent={codexPool}>
+        <Task id="i222:plan" output={outputs.plan} agent={solPool}>
           {`You are planning a small, well-scoped, pure addition. Read the spec, then read
 packages/accounts/src/pkce.js, packages/accounts/src/index.js, packages/accounts/tests/pkce.test.js,
 and packages/accounts/src/README.md so the new file matches local conventions exactly. Produce a
@@ -142,10 +142,10 @@ ${spec}`}
           <ValidationLoop
             idPrefix="i222:impl"
             prompt={implementPrompt}
-            implementAgents={codexPool}
-            validateAgents={codexPool}
-            reviewAgents={codexPool}
-            reviewModerator={codexPool}
+            implementAgents={lunaPool}
+            validateAgents={terraPool}
+            reviewAgents={[solPool]}
+            reviewModerator={solPool}
             synthesizeReview
             feedback={feedback}
             done={done}

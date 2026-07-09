@@ -129,10 +129,12 @@ multi-tenant service from one seat. For that, fund the platform API key.
 
 ## Run it from the terminal
 
-The CLI runs through the main Smithers binary against any repo on your
-machine, with your own Claude credentials (a logged-in `claude` CLI, a
-`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or an
-`ANTHROPIC_API_KEY`):
+The CLI runs through the main Smithers binary against any repo on your machine.
+It prefers your logged-in Codex CLI (Sol for review/verification, Luna for
+narration/quiz) and falls back to Claude when Codex is unavailable. Run
+`codex login` for the default path; the fallback accepts a logged-in `claude`
+CLI, a `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or an
+`ANTHROPIC_API_KEY`:
 
 ```sh
 bunx smithers-orchestrator review --help

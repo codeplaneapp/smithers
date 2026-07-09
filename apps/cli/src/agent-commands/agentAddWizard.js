@@ -5,12 +5,12 @@ import { runAgentAdd, pingAccount } from "./runAgentAdd.js";
 /** @typedef {import("@smithers-orchestrator/accounts").AccountProvider} AccountProvider */
 
 const PROVIDER_CHOICES = [
-    { value: "claude-code", label: "Claude Code (subscription)", hint: "Pro / Max plan via `claude` CLI" },
-    { value: "antigravity", label: "Antigravity (subscription)", hint: "Google account via `agy` CLI" },
-    { value: "codex", label: "Codex (subscription)", hint: "ChatGPT Plus/Pro via `codex` CLI" },
-    { value: "kimi", label: "Kimi (subscription)", hint: "OAuth via `kimi` CLI" },
-    { value: "anthropic-api", label: "Anthropic API key", hint: "Pay-per-token via api.anthropic.com" },
-    { value: "openai-api", label: "OpenAI API key", hint: "Pay-per-token via api.openai.com (used by Codex)" },
+    { value: "codex", label: "Codex (subscription, recommended)", hint: "ChatGPT Plus/Pro via `codex` CLI" },
+    { value: "openai-api", label: "OpenAI API key", hint: "Pay-per-token via api.openai.com (Codex-first roles)" },
+    { value: "claude-code", label: "Claude Code (fallback)", hint: "Pro / Max plan via `claude` CLI" },
+    { value: "kimi", label: "Kimi (fallback)", hint: "OAuth via `kimi` CLI" },
+    { value: "antigravity", label: "Antigravity (fallback)", hint: "Google account via `agy` CLI" },
+    { value: "anthropic-api", label: "Anthropic API key (fallback)", hint: "Pay-per-token via api.anthropic.com" },
     { value: "gemini-api", label: "Gemini API key", hint: "Pay-per-token via Google AI Studio" },
 ];
 

@@ -8,19 +8,15 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname } from "node:path";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { agents } from "../agents";
 
 const LEDGER = ".smithers/state/repo-prospector.json";
 const WORK_ROOT = ".smithers/tmp/repo-prospector";
 const FORK_OWNER = "roninjin10";
 const THROTTLE_MS = 15 * 60 * 1000;
 
-// Curated worker pool — only providers proven to run in THIS environment. The
-// shared `agents.smartTool` includes kimi/configDir variants that throw a
-// NON-RETRYABLE "LLM not set" config error here; when provider rotation lands on
-// one mid-run it kills the whole run. claude (subscription) leads, with codex /
-// opencode / claudeSonnet as same-tier fallbacks. No kimi, no configDir variants.
-const WORKER = [providers.claude, providers.codex, providers.opencode, providers.claudeSonnet];
+// Codex-first semantic roles keep discovery/implementation cheap on Luna and
+// reserve Sol for the judgment-heavy assessment. Legacy providers are fallback-only.
 
 // ---------------------------------------------------------------------------
 // Seen ledger — local, gitignored, the source of truth for "never look twice".
@@ -322,7 +318,7 @@ export default smithers((ctx) => {
 
         {/* 2 — Find one unseen, high-fit repo via gh. */}
         {proceed ? (
-          <Task id="discover" output={outputs.discover} agent={WORKER} heartbeatTimeoutMs={600_000}>
+          <Task id="discover" output={outputs.discover} agent={agents.research} heartbeatTimeoutMs={600_000}>
             {discoverPrompt(gate?.seen ?? [], topic, minStars)}
           </Task>
         ) : null}
@@ -344,7 +340,7 @@ export default smithers((ctx) => {
 
         {/* 4 — Inspect the repo and design the demo. */}
         {found ? (
-          <Task id="assess" output={outputs.assess} agent={WORKER} heartbeatTimeoutMs={900_000}>
+          <Task id="assess" output={outputs.assess} agent={agents.planning} heartbeatTimeoutMs={900_000}>
             {discover ? assessPrompt(discover, workDir) : ""}
           </Task>
         ) : null}
@@ -408,7 +404,7 @@ export default smithers((ctx) => {
 
         {/* 5b — Build the demo on the prepared branch and push. Allowed without approval. */}
         {forked ? (
-          <Task id="implement" output={outputs.implement} agent={WORKER} heartbeatTimeoutMs={1_800_000}>
+          <Task id="implement" output={outputs.implement} agent={agents.implement} heartbeatTimeoutMs={1_800_000}>
             {discover && assess && fork ? implementPrompt(discover, assess, fork) : ""}
           </Task>
         ) : null}
@@ -445,7 +441,7 @@ export default smithers((ctx) => {
 
         {/* 7 — Draft the outreach (issue / email / dm). Nothing is sent yet. */}
         {published ? (
-          <Task id="draft" output={outputs.draft} agent={WORKER}>
+          <Task id="draft" output={outputs.draft} agent={agents.research}>
             {discover && assess && implement && publish ? draftPrompt(discover, assess, implement, publish) : ""}
           </Task>
         ) : null}

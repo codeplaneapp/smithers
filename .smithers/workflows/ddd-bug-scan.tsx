@@ -1,5 +1,5 @@
 // smithers-display-name: DDD Bug Scan
-// smithers-description: Async read-only bug hunt over the product surface — codex finds, claude-fable-5 adversarially verifies, confirmed bugs become real tickets and features.json gaps.
+// smithers-description: Async read-only bug hunt over the product surface — Codex Luna finds, Codex Sol adversarially verifies, confirmed bugs become real tickets and features.json gaps.
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
@@ -65,8 +65,10 @@ const { Workflow, smithers, outputs } = createSmithers({
   tickets: ticketsSchema,
 });
 
-function verifyAgent(ctx: any) {
-  return ctx.input.useClaudeForPlanning !== false ? providers.claude : codex;
+function verifyAgent(_ctx: any) {
+  // useClaudeForPlanning is retained as an accepted legacy input only. Codex
+  // Sol now owns review; Claude is already the chain's automatic fallback.
+  return providers.sol;
 }
 
 export function bugSlug(value: unknown): string {

@@ -128,10 +128,10 @@ const actionPrompt = `
 Implement the client side of smithers review cloud: the zero-secret composite GitHub Action, per the spec's "Composite action" section and the README template.
 ${sharedRules}
 Scope:
-1. apps/review/action/action.yml — composite action. Inputs: service-url (default https://review.jjhub.tech). Steps: setup bun (oven-sh/setup-bun@v2.2.0, bun 1.3.13) and pnpm/node like .github/workflows/pr-review.yml does, pnpm install --frozen-lockfile at the action's repo root (github.action_path/../../..), npm install -g @anthropic-ai/claude-code, then bun run the gate/session/review driver scripts below. The user's repo is already checked out at the workflow's workspace; the smithers checkout lives at the action path.
-2. apps/review/action/src/ — the action logic as bun-executable TypeScript, one export per file, unit-testable: gateEvent.ts (decide run/skip from the GitHub event payload: pull_request non-draft same-repo; issue_comment must be on a PR, body starting "@smithers review", author_association OWNER/MEMBER/COLLABORATOR; emits the PR number and head ref), createSession.ts (fetch the Actions OIDC token using ACTIONS_ID_TOKEN_REQUEST_URL/TOKEN env with audience smithers-review, POST {oidcToken} to <service-url>/api/sessions, handle 402 as neutral quota skip and 403 as not-registered notice), runReview.ts (resolve and fetch the PR head into the workspace checkout when the event is issue_comment, then exec the existing CLI: bun <smithersRoot>/apps/review/src/cli/main.ts <workspace> --pr <n> --publish with env ANTHROPIC_BASE_URL=<session.anthropicBaseUrl>, ANTHROPIC_API_KEY=<session.token>, SMITHERS_REVIEW_PUBLISH_URL=<session.publishUrl>, SMITHERS_REVIEW_PUBLISH_TOKEN=<session.token>, GH_TOKEN passthrough). Mode rule: pull_request event on a comment-mode repo exits neutral with a notice naming "@smithers review".
-3. apps/review/src/workflow/createReviewAgents.ts — when both ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY are set, construct the ClaudeCodeAgent pair in API-key mode (so CI runs under the proxy deterministically); otherwise keep today's subscription behavior. Check the ClaudeCodeAgent options in node_modules/smithers-orchestrator for the right way to force api-key auth; if claude CLI picks the env up automatically the change may be a no-op, but then assert that with a comment and leave a seam-free passthrough.
-4. bun tests for gateEvent and the session client (402/403/200 paths against a Bun.serve fixture service). No tests that hit GitHub.
+1. apps/review/action/action.yml — composite action. Inputs: service-url (default https://review.jjhub.tech). Steps: setup bun (oven-sh/setup-bun@v2.2.0, bun 1.3.13) and pnpm/node like .github/workflows/pr-review.yml does, pnpm install --frozen-lockfile at the action's repo root (github.action_path/../../..), install @openai/codex when CODEX_AUTH_JSON is present and otherwise install @anthropic-ai/claude-code for the unavailable-Codex fallback, then bun run the gate/session/review driver scripts below. The user's repo is already checked out at the workflow's workspace; the smithers checkout lives at the action path.
+2. apps/review/action/src/ — the action logic as bun-executable TypeScript, one export per file, unit-testable: gateEvent.ts (decide run/skip from the GitHub event payload: pull_request non-draft same-repo; issue_comment must be on a PR, body starting "@smithers review", author_association OWNER/MEMBER/COLLABORATOR; emits the PR number and head ref), createSession.ts (fetch the Actions OIDC token using ACTIONS_ID_TOKEN_REQUEST_URL/TOKEN env with audience smithers-review, POST {oidcToken} to <service-url>/api/sessions, handle 402 as neutral quota skip and 403 as not-registered notice), and runReview.ts (resolve and fetch the PR head into the workspace checkout for issue_comment, then exec bun <smithersRoot>/apps/review/src/cli/main.ts <workspace> --pr <n> --publish). Resolve inference before the exec: CODEX_AUTH_JSON wins, is materialized into an isolated CODEX_HOME then scrubbed, and selects SMITHERS_REVIEW_ENGINE=codex; otherwise CLAUDE_CODE_OAUTH_TOKEN selects the Claude subscription fallback; without either subscription credential, select Claude and set ANTHROPIC_BASE_URL=<session.anthropicBaseUrl> plus ANTHROPIC_API_KEY=<session.token> for the metered proxy. Every path sets SMITHERS_REVIEW_PUBLISH_URL=<session.publishUrl>, SMITHERS_REVIEW_PUBLISH_TOKEN=<session.token>, and passes through GH_TOKEN. Mode rule: pull_request on a comment-mode repo exits neutral with a notice naming "@smithers review".
+3. apps/review/src/workflow/createReviewAgents.ts — make Codex the default whenever the CLI is installed and authenticated, with an explicit SMITHERS_REVIEW_ENGINE override for diagnostics. In the Codex path, use gpt-5.6-sol at xhigh effort for review and verdict verification, and gpt-5.6-luna at explicit medium effort for narration and quiz generation. If Codex is unavailable, fall back to Claude (Fable primary, Opus failover). When both ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY are set, construct that Claude fallback in API-key mode so zero-secret CI runs under the proxy deterministically; otherwise use Claude subscription auth. Never run Claude in parallel with a healthy Codex path merely to provide fallback behavior. Check the agent options in node_modules/smithers-orchestrator rather than guessing.
+4. bun tests for gateEvent, the session client (402/403/200 paths against a Bun.serve fixture service), engine resolution, and the exact Codex role split (Sol review/verify, Luna narrate/quiz). No tests that hit GitHub.
 5. Keep apps/review/README.md truthful: if any implemented behavior differs from the README's workflow template or trigger phrasing, fix the docs in the same change.
 `;
 
@@ -140,7 +140,7 @@ Dogfood smithers review cloud end to end on the real repo using gh and git.
 Steps, in order:
 1. Create an isolated worktree: git worktree add /tmp/review-cloud-dogfood origin/main (never switch branches in the main working tree). Work only inside it on branch dogfood/review-cloud-action.
 2. Replace .github/workflows/pr-review.yml content with the zero-secret template from apps/review/README.md ("Add it to your repo" section): pull_request + issue_comment triggers, id-token write, uses smithersai/smithers/apps/review/action@main. Keep a concurrency group keyed on the PR/issue number.
-3. Commit (emoji conventional style, Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>), push the branch, open a PR titled "👷 ci(review): dogfood the zero-secret review action" with a body that names the spec.
+3. Commit (emoji conventional style, Co-Authored-By: Codex <noreply@openai.com>), push the branch, open a PR titled "👷 ci(review): dogfood the zero-secret review action" with a body that names the spec.
 4. The PR push itself triggers the OLD pr-review.yml from main on this PR, and the NEW workflow file only runs once merged — so to test the action pre-merge, also comment "@smithers review" on the PR and watch for the run of the workflow from the PR branch if GitHub starts one; otherwise rely on the run of the action triggered after you merge (step 6) on a follow-up trivial PR. Prefer the simplest path that yields one real run of the composite action.
 5. Watch runs with gh run list / gh run watch (timeout 25 minutes). Success = a run that authenticates via /api/sessions (no secrets), posts a PR review, and links a hosted walkthrough.
 6. Outcomes: if the action run posts the review, merge the PR (squash) and report status "merged". If the proxy rejects with credit/billing/insufficient-funds errors from Anthropic, close the PR unmerged, report status "blocked-on-funding" and quote the exact error. Anything else: leave the PR open, report status "failed" with run URLs and log excerpts.
@@ -157,14 +157,14 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="review-cloud-ship" cache>
-      <Task id="implement-worker" output={outputs.implementWorker} agent={agents.smart} timeoutMs={75 * 60 * 1000} retries={2}>
+      <Task id="implement-worker" output={outputs.implementWorker} agent={agents.implement} timeoutMs={75 * 60 * 1000} retries={2}>
         {workerPrompt}
       </Task>
 
       <Task
         id="implement-action"
         output={outputs.implementAction}
-        agent={agents.smart}
+        agent={agents.implement}
         dependsOn={["implement-worker"]}
         timeoutMs={60 * 60 * 1000}
         retries={2}
@@ -187,7 +187,7 @@ export default smithers((ctx) => {
           <Task
             id="fix-round"
             output={outputs.fixRound}
-            agent={agents.smart}
+            agent={agents.implement}
             skipIf={ctx.latest("verify", "verify")?.pass === true}
             timeoutMs={45 * 60 * 1000}
             retries={2}
@@ -224,7 +224,7 @@ Final answer JSON: {"summary": "what you fixed"}.`}
                 "git",
                 "commit",
                 "-m",
-                "✨ feat(review): smithers review cloud — OIDC sessions, metered proxy, quota, /metrics, zero-secret action\n\nImplements .smithers/specs/smithers-review-cloud.md.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+                "✨ feat(review): smithers review cloud — OIDC sessions, metered proxy, quota, /metrics, zero-secret action\n\nImplements .smithers/specs/smithers-review-cloud.md.\n\nCo-Authored-By: Codex <noreply@openai.com>",
                 "--",
                 "apps/review",
               ]);
@@ -310,7 +310,7 @@ Final answer JSON: {"summary": "what you fixed"}.`}
           <Task
             id="dogfood-pr"
             output={outputs.dogfood}
-            agent={agents.smart}
+            agent={agents.implement}
             dependsOn={["smoke"]}
             skipIf={(ctx.input.dogfood ?? true) === false}
             timeoutMs={60 * 60 * 1000}

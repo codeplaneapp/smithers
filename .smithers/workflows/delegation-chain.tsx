@@ -45,15 +45,14 @@ const { Workflow, smithers, outputs } = createSmithers({
 // ── Tiers ────────────────────────────────────────────────────────────────────
 // Labels, not model ids, mapped onto the generated ../agents pools (the only
 // names guaranteed on every init, whatever accounts are registered): the
-// FABLE SANDWICH supplies the strong ends (planning-led tiers plan/review),
-// the implement pool executes leaves, and cheapFast renders previews +
-// research probes at near-zero cost. Swap any tier here without touching the
-// workflow body.
+// Codex Sol supplies planning/review, Terra handles mid-tier work, and Luna
+// executes leaves plus research/cheap probes. Legacy tier keys remain because
+// DelegationChain's public schema uses them; they no longer name the provider.
 const tierAgents = {
   fable: agents.planning,
-  opus: agents.smart,
+  opus: agents.midTier,
   sonnet: agents.implement,
-  haiku: agents.cheapFast,
+  haiku: agents.research,
 };
 
 // Judge for tier-fit runs on the cheap tier — judging "was this the right

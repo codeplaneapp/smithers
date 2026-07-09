@@ -306,7 +306,7 @@ export default smithers((ctx) => {
         <Task
           id="feature-doc-sync"
           output={outputs.featureDocSync}
-          agent={agents.smartTool}
+          agent={agents.research}
           skipIf={ctx.input.skipFeatureDocSync}
           heartbeatTimeoutMs={300000}
         >

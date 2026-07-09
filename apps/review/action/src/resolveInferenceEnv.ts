@@ -2,7 +2,8 @@
  * Decide how the review subprocess authenticates its agents, in priority order:
  *
  * 1. Codex / ChatGPT subscription — when `CODEX_AUTH_JSON` is present (the repo
- *    owner's `~/.codex/auth.json`). The engine switches to codex (`gpt-5.5`) and
+ *    owner's `~/.codex/auth.json`). The engine switches to Codex (Sol for
+ *    review/verification and Luna for narration/quiz) and
  *    no ANTHROPIC_* overrides are set; the caller writes the auth file and sets
  *    CODEX_HOME before spawning.
  * 2. Claude subscription — when `CLAUDE_CODE_OAUTH_TOKEN` is present. The engine

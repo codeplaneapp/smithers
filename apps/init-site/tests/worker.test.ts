@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { createInitSiteWorker, type InitSiteEnv } from "../src/worker.ts";
+
+const homeHtml = readFileSync(new URL("../site/index.html", import.meta.url), "utf8");
 
 function makeEnv(): InitSiteEnv {
   return {
@@ -18,6 +21,17 @@ function makeEnv(): InitSiteEnv {
 }
 
 describe("init site worker", () => {
+  test("presents Codex as the default detected agent", () => {
+    const codexRow = '<div class="item on"><span class="box">[x]</span>codex';
+    const claudeRow = '<div class="item"><span class="box">[ ]</span>claude';
+
+    expect(homeHtml).toContain(codexRow);
+    expect(homeHtml).toContain(claudeRow);
+    expect(homeHtml).toContain("5.6 Sol · Terra · Luna · default");
+    expect(homeHtml).toContain("claude<span class=\"desc\">fallback only");
+    expect(homeHtml.indexOf(codexRow)).toBeLessThan(homeHtml.indexOf(claudeRow));
+  });
+
   test("serves the marketing home page", async () => {
     const response = await createInitSiteWorker().fetch(new Request("https://init.smithers.sh/"), makeEnv());
     expect(response.status).toBe(200);

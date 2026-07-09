@@ -11,8 +11,6 @@ import { dddRootOrCwd } from "../lib/ddd/dddRoot.ts";
 
 const ROOT = dddRootOrCwd();
 
-const codex = providers.codex;
-
 const inputSchema = z.object({
   useClaudeForPlanning: z.preprocess((v) => v ?? undefined, z.boolean().default(true)),
   // Skip launching the detached bug scan (tests and quick refreshes set false).
@@ -71,8 +69,10 @@ const { Workflow, smithers, outputs } = createSmithers({
   kickoff: kickoffSchema,
 });
 
-function planningAgent(ctx: any) {
-  return ctx.input.useClaudeForPlanning !== false ? providers.claude : codex;
+function planningAgent(_ctx: any) {
+  // Compatibility input is intentionally ignored: Sol is the default planner
+  // and reviewer, with Claude embedded as its failover.
+  return providers.sol;
 }
 
 function listDir(dir: string): string[] {
@@ -316,7 +316,7 @@ export default smithers((ctx) => {
         <Task
           id="draft-spec"
           output={outputs.draft}
-          agent={planningAgent(ctx)}
+          agent={providers.luna}
           retries={1}
           timeoutMs={40 * 60 * 1000}
           dependsOn={["survey"]}

@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { listAccounts } from "@smithers-orchestrator/accounts";
 import { AntigravityAgent } from "@smithers-orchestrator/agents/AntigravityAgent";
 import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
 import { CodexAgent } from "@smithers-orchestrator/agents/CodexAgent";
@@ -22,13 +23,51 @@ import { describeUnavailableAgent, detectAvailableAgents, formatNoUsableAgentsMe
 /** @typedef {import("@smithers-orchestrator/agents/agent-contract").SmithersAgentContract} SmithersAgentContract */
 /** @typedef {import("@smithers-orchestrator/agents/BaseCliAgent").BaseCliAgent} BaseCliAgent */
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
+/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
 /** @typedef {"mcp-config-file" | "mcp-config-inline" | "mcp-allow-list" | "prompt-only"} AskBootstrapMode */
 /** @typedef {AgentAvailability & { id: AskAgentId }} AskSupportedAvailability */
 /** @typedef {{ availability: AskSupportedAvailability; bootstrapMode: AskBootstrapMode; selectionReason: string }} AskSelection */
+/** @typedef {{ selection: AskSelection; codexAccount?: Account }} AskAttempt */
 /** @typedef {{ mode: "mcp-config-file"; serverName: string; toolSurface: SmithersToolSurface; config: ReturnType<typeof buildJsonMcpConfig> } | { mode: "mcp-config-inline"; serverName: string; toolSurface: SmithersToolSurface; configOverrides: string[] } | { mode: "mcp-allow-list"; serverName: string; toolSurface: SmithersToolSurface; allowedMcpServerNames: string[]; note: string } | { mode: "prompt-only"; serverName: string; toolSurface: SmithersToolSurface; note: string }} AskBootstrap */
 
-const ASK_AGENT_IDS = ["claude", "codex", "kimi", "antigravity", "pi"];
+const ASK_AGENT_IDS = ["codex", "claude", "kimi", "antigravity", "pi"];
 const DEFAULT_SERVER_NAME = "smithers";
+
+/** @param {NodeJS.ProcessEnv} env */
+function registeredCodexAccounts(env) {
+    try {
+        return listAccounts(env).filter((account) => account.provider === "codex"
+            ? Boolean(account.configDir?.trim())
+            : account.provider === "openai-api" && Boolean(account.apiKey?.trim()));
+    }
+    catch {
+        return [];
+    }
+}
+
+/**
+ * A registered credential makes Codex usable when the binary exists even if
+ * the ambient/default profile is logged out. The selected account is passed to
+ * CodexAgent below; Claude/Kimi remain behind it as provider fallbacks.
+ * @param {AgentAvailability[]} agents
+ * @param {Account | undefined} account
+ */
+function withRegisteredCodexAvailability(agents, account) {
+    if (!account)
+        return agents;
+    return agents.map((agent) => agent.id !== "codex" || agent.usable || !agent.hasBinary
+        ? agent
+        : {
+            ...agent,
+            usable: true,
+            status: account.provider === "openai-api" ? "api-key" : "likely-subscription",
+            score: account.provider === "openai-api" ? 3 : 4,
+            hasAuthSignal: account.provider === "codex",
+            hasApiKeySignal: account.provider === "openai-api",
+            unusableReasons: [],
+            reason: `registered ${account.provider} account ${account.label}`,
+        });
+}
 /**
  * @param {AgentAvailability["id"]} value
  * @returns {value is AskAgentId}
@@ -226,7 +265,11 @@ function selectAgent(agents, options) {
     if (usable.length === 0) {
         throw noUsableAgentError(agents);
     }
-    const best = [...usable].sort((left, right) => compareAgents(left, right, options.noMcp))[0];
+    // Smithers is Codex-first: availability score chooses among fallback
+    // engines only when Codex itself is unavailable. In particular, a Claude
+    // subscription score (4) must not outrank usable Codex API-key auth (3).
+    const best = usable.find((agent) => agent.id === "codex")
+        ?? [...usable].sort((left, right) => compareAgents(left, right, options.noMcp))[0];
     if (!best) {
         throw noUsableAgentError(agents);
     }
@@ -234,8 +277,122 @@ function selectAgent(agents, options) {
     return {
         availability: best,
         bootstrapMode,
-        selectionReason: `best available ${bootstrapMode} bootstrap`,
+        selectionReason: best.id === "codex"
+            ? `Codex is available; using Codex-first ${bootstrapMode} bootstrap`
+            : `best available ${bootstrapMode} fallback`,
     };
+}
+/**
+ * Build the runtime failover order for `smithers ask`.
+ *
+ * Default selection is Codex-first at the credential level: ambient auth,
+ * every registered Codex/OpenAI account, then the usable non-Codex agents.
+ * An explicit `--agent` remains a hard override and produces one attempt only.
+ *
+ * @param {AgentAvailability[]} detectedAgents
+ * @param {AskOptions} options
+ * @param {Account[]} codexAccounts
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {AskAttempt[]}
+ */
+export function buildAskAttemptPlan(detectedAgents, options, codexAccounts, env = process.env) {
+    const ambientCodex = detectedAgents.find((agent) => agent.id === "codex");
+    const accounts = codexAccounts.filter((account) => account.provider === "codex"
+        ? Boolean(account.configDir?.trim())
+        : account.provider === "openai-api" && Boolean(account.apiKey?.trim()));
+    const agentsWithRegisteredCodex = withRegisteredCodexAvailability(detectedAgents, accounts[0]);
+    if (options.agent) {
+        const selection = selectAgent(agentsWithRegisteredCodex, options);
+        return [{
+                selection,
+                ...(selection.availability.id === "codex" && !ambientCodex?.usable && accounts[0]
+                    ? { codexAccount: accounts[0] }
+                    : {}),
+            }];
+    }
+    /** @type {AskAttempt[]} */
+    const attempts = [];
+    if (ambientCodex?.usable && isSupportedAvailability(ambientCodex)) {
+        const bootstrapMode = resolveBootstrapMode("codex", options.noMcp);
+        attempts.push({
+            selection: {
+                availability: ambientCodex,
+                bootstrapMode,
+                selectionReason: `Codex is available; using Codex-first ${bootstrapMode} bootstrap`,
+            },
+        });
+    }
+    if (ambientCodex?.hasBinary && isSupportedAvailability(ambientCodex)) {
+        const seen = new Set();
+        for (const account of accounts) {
+            const key = account.provider === "codex"
+                ? `codex:${account.configDir?.trim()}`
+                : `openai-api:${account.apiKey?.trim()}`;
+            const duplicatesAmbient = ambientCodex.usable && (account.provider === "codex"
+                ? account.configDir?.trim() === env.CODEX_HOME?.trim()
+                : account.apiKey?.trim() === env.OPENAI_API_KEY?.trim());
+            if (seen.has(key) || duplicatesAmbient)
+                continue;
+            seen.add(key);
+            const bootstrapMode = resolveBootstrapMode("codex", options.noMcp);
+            attempts.push({
+                selection: {
+                    availability: {
+                        ...ambientCodex,
+                        usable: true,
+                        status: account.provider === "openai-api" ? "api-key" : "likely-subscription",
+                        score: account.provider === "openai-api" ? 3 : 4,
+                        hasAuthSignal: account.provider === "codex",
+                        hasApiKeySignal: account.provider === "openai-api",
+                        unusableReasons: [],
+                        reason: `registered ${account.provider} account ${account.label}`,
+                    },
+                    bootstrapMode,
+                    selectionReason: `registered ${account.provider} account ${account.label}; Codex-first ${bootstrapMode} bootstrap`,
+                },
+                codexAccount: account,
+            });
+        }
+    }
+    const fallbacks = detectedAgents
+        .filter(isSupportedAvailability)
+        .filter((agent) => agent.id !== "codex" && agent.usable && !agent.deprecated)
+        .sort((left, right) => compareAgents(left, right, options.noMcp));
+    for (const availability of fallbacks) {
+        const bootstrapMode = resolveBootstrapMode(availability.id, options.noMcp);
+        attempts.push({
+            selection: {
+                availability,
+                bootstrapMode,
+                selectionReason: `Codex attempts exhausted; using ${availability.id} ${bootstrapMode} fallback`,
+            },
+        });
+    }
+    if (attempts.length === 0) {
+        throw noUsableAgentError(detectedAgents);
+    }
+    return attempts;
+}
+/**
+ * Run an attempt plan sequentially, stopping at the first success and
+ * rethrowing the final failure if every candidate fails.
+ *
+ * @template T
+ * @param {AskAttempt[]} attempts
+ * @param {(attempt: AskAttempt) => Promise<T>} run
+ * @returns {Promise<T>}
+ */
+export async function runAskAttempts(attempts, run) {
+    let lastError;
+    for (const attempt of attempts) {
+        try {
+            return await run(attempt);
+        }
+        catch (error) {
+            lastError = error;
+        }
+    }
+    throw lastError ?? new SmithersError("NO_USABLE_AGENTS", "No agent attempts were available for `smithers ask`.");
 }
 /**
  * @param {SmithersAgentContract} contract
@@ -309,7 +466,7 @@ function formatAgentList(agents, options, selectedAgentId) {
  * @param {string} cwd
  * @returns {{ agent: BaseCliAgent; cleanup: () => void }}
  */
-function buildAgent(selection, bootstrap, systemPrompt, cwd) {
+function buildAgent(selection, bootstrap, systemPrompt, cwd, codexAccount) {
     switch (selection.availability.id) {
         case "claude": {
             if (bootstrap.mode !== "mcp-config-file") {
@@ -375,13 +532,16 @@ function buildAgent(selection, bootstrap, systemPrompt, cwd) {
             return {
                 agent: new CodexAgent({
                     cwd,
-                    model: "gpt-5.5",
-                    config: bootstrap.mode === "mcp-config-inline"
-                        ? bootstrap.configOverrides
-                        : undefined,
+                    model: "gpt-5.6-luna",
+                    config: [
+                        ...(bootstrap.mode === "mcp-config-inline" ? bootstrap.configOverrides : []),
+                        "model_reasoning_effort=medium",
+                    ],
                     systemPrompt,
                     fullAuto: true,
                     skipGitRepoCheck: true,
+                    ...(codexAccount?.configDir ? { configDir: codexAccount.configDir } : {}),
+                    ...(codexAccount?.apiKey ? { apiKey: codexAccount.apiKey } : {}),
                 }),
                 cleanup() { },
             };
@@ -390,7 +550,7 @@ function buildAgent(selection, bootstrap, systemPrompt, cwd) {
                 agent: new PiAgent({
                     cwd,
                     provider: "openai",
-                    model: "gpt-5.5",
+                    model: "gpt-5.6-luna",
                     systemPrompt,
                 }),
                 cleanup() { },
@@ -404,7 +564,9 @@ function buildAgent(selection, bootstrap, systemPrompt, cwd) {
  * @returns {Promise<void>}
  */
 export async function ask(question, cwd, options = {}) {
-    const agents = detectAvailableAgents(process.env, { cwd });
+    const detectedAgents = detectAvailableAgents(process.env, { cwd });
+    const codexAccounts = registeredCodexAccounts(process.env);
+    const agents = withRegisteredCodexAvailability(detectedAgents, codexAccounts[0]);
     if (options.listAgents) {
         let selectedAgentId;
         try {
@@ -414,7 +576,8 @@ export async function ask(question, cwd, options = {}) {
         process.stdout.write(`${formatAgentList(agents, options, selectedAgentId)}\n`);
         return;
     }
-    const selection = selectAgent(agents, options);
+    const attempts = buildAskAttemptPlan(detectedAgents, options, codexAccounts);
+    const selection = attempts[0].selection;
     const toolSurface = options.toolSurface ?? "semantic";
     const launchSpec = buildSmithersMcpLaunchSpec(toolSurface);
     const transport = new StdioClientTransport({
@@ -477,15 +640,19 @@ export async function ask(question, cwd, options = {}) {
     if (!question?.trim()) {
         throw new SmithersError("INVALID_ARGUMENT", "A question is required unless you use --list-agents, --dump-prompt, or --print-bootstrap.");
     }
-    const { agent, cleanup } = buildAgent(selection, bootstrap, systemPrompt, cwd);
-    try {
-        await agent.generate({
-            prompt: question,
-            onStdout: (chunk) => process.stdout.write(chunk),
-        });
-        process.stdout.write("\n");
-    }
-    finally {
-        cleanup();
-    }
+    await runAskAttempts(attempts, async (attempt) => {
+        const attemptBootstrap = buildBootstrap(attempt.selection, toolSurface);
+        const attemptSystemPrompt = buildSystemPrompt(contract, attemptBootstrap);
+        const { agent, cleanup } = buildAgent(attempt.selection, attemptBootstrap, attemptSystemPrompt, cwd, attempt.codexAccount);
+        try {
+            await agent.generate({
+                prompt: question,
+                onStdout: (chunk) => process.stdout.write(chunk),
+            });
+            process.stdout.write("\n");
+        }
+        finally {
+            cleanup();
+        }
+    });
 }

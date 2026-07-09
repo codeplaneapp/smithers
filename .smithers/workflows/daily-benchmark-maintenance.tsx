@@ -6,8 +6,9 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
-import { CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 const inputSchema = z.object({
   runLabel: z.string().default(new Date().toISOString().slice(0, 10)),
@@ -72,15 +73,16 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
 const ROOT = resolve(import.meta.dir, "../..");
 const MAX_OUTPUT = 20_000;
 
-const smartResearcher = new CodexAgent({
-  model: "gpt-5.5",
+const smartResearcher = codexFirst({
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   cwd: ROOT,
   sandbox: "workspace-write",
   fullAuto: true,
   skipGitRepoCheck: true,
   extraArgs: ["-c", "tools.web_search=true"],
   timeoutMs: 45 * 60_000,
-});
+}, [new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: ROOT })]);
 
 function truncate(text: string, max = MAX_OUTPUT): string {
   return text.length > max ? `${text.slice(0, max)}\n...[truncated ${text.length - max} chars]` : text;

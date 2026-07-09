@@ -23,23 +23,42 @@ export type Agent = {
   available: boolean;
 };
 
+/** Codex 5.6 models in Smithers' default routing order. */
+export const CODEX_5_6_MODELS = [
+  "gpt-5.6-luna",
+  "gpt-5.6-terra",
+  "gpt-5.6-sol",
+] as const;
+
+/** Luna is the default account model; workflows promote to Terra or Sol by role. */
+export const DEFAULT_CODEX_MODEL = CODEX_5_6_MODELS[0];
+
 export const AGENTS: Agent[] = [
-  {
-    id: "claude",
-    name: "Claude Code",
-    initials: "C",
-    color: "#0f8f78",
-    detail: "claude-opus-4-8 · code, review",
-    auth: "oauth",
-    available: true,
-  },
   {
     id: "codex",
     name: "Codex",
     initials: "X",
     color: "#356fd2",
-    detail: "gpt-5.5 · code",
+    detail: "5.6 Luna · Terra · Sol · default",
     auth: "key set",
+    available: true,
+  },
+  {
+    id: "claude",
+    name: "Claude Code",
+    initials: "C",
+    color: "#0f8f78",
+    detail: "claude-opus-4-8 · fallback only",
+    auth: "oauth",
+    available: true,
+  },
+  {
+    id: "kimi",
+    name: "Kimi",
+    initials: "K",
+    color: "#bf5b16",
+    detail: "kimi-k2.7-code · fallback only",
+    auth: "oauth",
     available: true,
   },
   {
@@ -50,14 +69,6 @@ export const AGENTS: Agent[] = [
     detail: "zai-glm-4.7 · chat",
     auth: "key set",
     available: true,
-  },
-  {
-    id: "gemini",
-    name: "Gemini",
-    initials: "G",
-    color: "#9a9aa3",
-    detail: "not detected",
-    available: false,
   },
 ];
 
@@ -87,6 +98,8 @@ export type Provider = {
   defaultRoles: AgentRole[];
   /** Placeholder shown in the drawer's Model field. */
   modelPlaceholder: string;
+  /** Known model ids offered by the drawer while keeping custom ids editable. */
+  modelOptions?: readonly string[];
 };
 
 /**
@@ -127,6 +140,26 @@ export type Account = {
 /** The 8 providers the `smithers agents add` CLI exposes, in catalog order. */
 export const PROVIDERS: Provider[] = [
   {
+    id: "codex",
+    name: "Codex",
+    initials: "X",
+    color: "#356fd2",
+    authMode: "subscription",
+    defaultRoles: ["coding", "implement", "research", "spec", "review"],
+    modelPlaceholder: DEFAULT_CODEX_MODEL,
+    modelOptions: CODEX_5_6_MODELS,
+  },
+  {
+    id: "openai-api",
+    name: "OpenAI API",
+    initials: "Oa",
+    color: "#10a37f",
+    authMode: "api-key",
+    defaultRoles: ["coding", "implement", "research", "spec", "review"],
+    modelPlaceholder: DEFAULT_CODEX_MODEL,
+    modelOptions: CODEX_5_6_MODELS,
+  },
+  {
     id: "claude-code",
     name: "Claude Code",
     initials: "C",
@@ -134,33 +167,6 @@ export const PROVIDERS: Provider[] = [
     authMode: "subscription",
     defaultRoles: ["coding", "review", "spec"],
     modelPlaceholder: "claude-opus-4-8",
-  },
-  {
-    id: "antigravity",
-    name: "Antigravity",
-    initials: "Ag",
-    color: "#6d56d8",
-    authMode: "subscription",
-    defaultRoles: ["coding", "research"],
-    modelPlaceholder: "gemini-3-pro",
-  },
-  {
-    id: "codex",
-    name: "Codex",
-    initials: "X",
-    color: "#356fd2",
-    authMode: "subscription",
-    defaultRoles: ["coding", "implement"],
-    modelPlaceholder: "gpt-5.5",
-  },
-  {
-    id: "gemini",
-    name: "Gemini",
-    initials: "G",
-    color: "#9a9aa3",
-    authMode: "subscription",
-    defaultRoles: ["coding", "research"],
-    modelPlaceholder: "gemini-3-pro",
   },
   {
     id: "kimi",
@@ -172,6 +178,24 @@ export const PROVIDERS: Provider[] = [
     modelPlaceholder: "kimi-k2",
   },
   {
+    id: "antigravity",
+    name: "Antigravity",
+    initials: "Ag",
+    color: "#6d56d8",
+    authMode: "subscription",
+    defaultRoles: ["coding", "research"],
+    modelPlaceholder: "gemini-3-pro",
+  },
+  {
+    id: "gemini",
+    name: "Gemini",
+    initials: "G",
+    color: "#9a9aa3",
+    authMode: "subscription",
+    defaultRoles: ["coding", "research"],
+    modelPlaceholder: "gemini-3-pro",
+  },
+  {
     id: "anthropic-api",
     name: "Anthropic API",
     initials: "An",
@@ -179,15 +203,6 @@ export const PROVIDERS: Provider[] = [
     authMode: "api-key",
     defaultRoles: ["coding", "review"],
     modelPlaceholder: "claude-opus-4-8",
-  },
-  {
-    id: "openai-api",
-    name: "OpenAI API",
-    initials: "Oa",
-    color: "#10a37f",
-    authMode: "api-key",
-    defaultRoles: ["coding", "implement"],
-    modelPlaceholder: "gpt-5.5",
   },
   {
     id: "gemini-api",

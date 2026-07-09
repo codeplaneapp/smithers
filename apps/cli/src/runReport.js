@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { listAccounts } from "@smithers-orchestrator/accounts";
 import { AntigravityAgent } from "@smithers-orchestrator/agents/AntigravityAgent";
 import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
 import { CodexAgent } from "@smithers-orchestrator/agents/CodexAgent";
@@ -20,12 +21,22 @@ import { SOTA_SLOTS } from "./sota-models.generated.js";
  * builds a tool-less agent (no MCP): it only reads the transcript we hand it.
  */
 const REPORT_AGENTS = [
+    { id: "codex", build: (cwd, systemPrompt, account) => new CodexAgent({ cwd, model: SOTA_SLOTS.codex, config: { model_reasoning_effort: "medium" }, systemPrompt, fullAuto: true, skipGitRepoCheck: true, ...(account?.configDir ? { configDir: account.configDir } : {}), ...(account?.apiKey ? { apiKey: account.apiKey } : {}) }) },
     { id: "claude", build: (cwd, systemPrompt) => new ClaudeCodeAgent({ cwd, model: SOTA_SLOTS.sonnet, systemPrompt, dangerouslySkipPermissions: true }) },
-    { id: "codex", build: (cwd, systemPrompt) => new CodexAgent({ cwd, model: SOTA_SLOTS.codex, systemPrompt, fullAuto: true, skipGitRepoCheck: true }) },
     { id: "antigravity", build: (cwd, systemPrompt) => new AntigravityAgent({ cwd, model: SOTA_SLOTS.gemini, systemPrompt, dangerouslySkipPermissions: true }) },
     { id: "kimi", build: (cwd, systemPrompt) => new KimiAgent({ cwd, model: SOTA_SLOTS.kimi, systemPrompt }) },
     { id: "pi", build: (cwd, systemPrompt) => new PiAgent({ cwd, provider: "openai", model: SOTA_SLOTS.codex, systemPrompt }) },
 ];
+
+/** @param {NodeJS.ProcessEnv} env */
+function registeredCodexAccounts(env) {
+    try {
+        return listAccounts(env).filter((account) => account.provider === "codex" || account.provider === "openai-api");
+    }
+    catch {
+        return [];
+    }
+}
 
 const TERMINAL_SENTINEL = "===SMITHERS_TERMINAL===";
 const HTML_SENTINEL = "===SMITHERS_HTML===";
@@ -232,10 +243,21 @@ export async function generateRunReport(params) {
 
         const detections = detectAvailableAgents(env, { cwd });
         const usable = new Set(detections.filter((d) => !d.deprecated && d.usable).map((d) => d.id));
-        const choice = REPORT_AGENTS.find((entry) => usable.has(entry.id));
-        if (choice) {
+        const codex = detections.find((entry) => entry.id === "codex");
+        const candidates = [];
+        const codexBuilder = REPORT_AGENTS.find((entry) => entry.id === "codex");
+        if (codexBuilder && codex?.hasBinary) {
+            if (codex.usable) candidates.push({ entry: codexBuilder, account: undefined });
+            for (const account of registeredCodexAccounts(env)) {
+                candidates.push({ entry: codexBuilder, account });
+            }
+        }
+        for (const entry of REPORT_AGENTS) {
+            if (entry.id !== "codex" && usable.has(entry.id)) candidates.push({ entry, account: undefined });
+        }
+        for (const candidate of candidates) {
             try {
-                const agent = choice.build(cwd, SYSTEM_PROMPT);
+                const agent = candidate.entry.build(cwd, SYSTEM_PROMPT, candidate.account);
                 const prompt = `Here is the run to narrate:\n\n${context}`;
                 const generated = await agent.generate({
                     prompt,
@@ -245,10 +267,11 @@ export async function generateRunReport(params) {
                 const parsed = parseNarratorResponse(responseText);
                 if (parsed.html) {
                     narration = parsed;
-                    agentId = choice.id;
+                    agentId = candidate.entry.id;
+                    break;
                 }
             } catch {
-                /* narrator failed — fall through to the deterministic report */
+                /* Try the next Codex account, then non-Codex fallbacks. */
             }
         }
         if (!narration) {

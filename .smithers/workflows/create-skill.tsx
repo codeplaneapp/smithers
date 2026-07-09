@@ -146,7 +146,7 @@ export default smithers((ctx) => {
       <UI entry="../ui/create-skill.tsx" title={"Create Skill"} />
       <Sequence>
         {/* 1 — Turn the freeform ask into a structured skill spec. */}
-        <Task id="clarify" output={outputs.clarify} agent={agents.smart}>
+        <Task id="clarify" output={outputs.clarify} agent={agents.planning}>
           <ClarifyPrompt
             request={ctx.input.prompt ?? "Describe the agent skill you want to create, in plain English."}
             name={ctx.input.name}
@@ -155,7 +155,7 @@ export default smithers((ctx) => {
 
         {/* 2 — Design the concrete SKILL.md from the spec. */}
         {clarify ? (
-          <Task id="design" output={outputs.design} agent={agents.smart}>
+          <Task id="design" output={outputs.design} agent={agents.planning}>
             <DesignPrompt spec={clarify} skillsDir={SKILLS_DIR} />
           </Task>
         ) : null}

@@ -6,7 +6,7 @@
 import { join } from "node:path";
 import { createSmithers, Parallel, Sequence, Task, Worktree } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { agents } from "../agents";
 
 const packageStats = [
   { path: "packages/db", lines: 83.57, functions: 81.10 },
@@ -119,9 +119,8 @@ export default smithers((ctx) => {
           </Task>
         ) : (
           <Parallel maxConcurrency={maxConcurrency}>
-            {workItems.map((item, index) => {
+            {workItems.map((item) => {
               const slug = slugify(item.path);
-              const agent = index % 2 === 0 ? providers.codex : providers.codex1;
               return (
                 <Worktree
                   key={item.path}
@@ -132,7 +131,7 @@ export default smithers((ctx) => {
                   <Task
                     id={`coverage:${slug}`}
                     output={coverageResultSchema}
-                    agent={agent}
+                    agent={agents.implement}
                     timeoutMs={90 * 60_000}
                     heartbeatTimeoutMs={10 * 60_000}
                     retries={1}

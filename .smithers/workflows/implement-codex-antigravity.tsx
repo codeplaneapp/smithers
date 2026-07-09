@@ -3,7 +3,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { providers } from "../agents";
+import { implementer, panelists, synthesizer, validator } from "../components/roles";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
 
@@ -18,8 +18,6 @@ const { Workflow, smithers } = createSmithers({
   review: reviewOutputSchema,
   reviewSynthesis: reviewSynthesisSchema,
 });
-
-const codexAntigravityOnly = [providers.codex, providers.codex1, providers.antigravity1];
 
 export default smithers((ctx) => {
   const validate = ctx.outputMaybe("validate", { nodeId: "impl:validate" });
@@ -43,11 +41,11 @@ export default smithers((ctx) => {
       <ValidationLoop
         idPrefix="impl"
         prompt={ctx.input.prompt}
-        implementAgents={codexAntigravityOnly}
-        validateAgents={codexAntigravityOnly}
-        reviewAgents={codexAntigravityOnly}
+        implementAgents={implementer}
+        validateAgents={validator}
+        reviewAgents={panelists}
         synthesizeReview
-        reviewModerator={providers.codex}
+        reviewModerator={synthesizer}
         feedback={feedback}
         done={done}
         maxIterations={3}

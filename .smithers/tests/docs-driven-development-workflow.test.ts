@@ -260,7 +260,7 @@ describe("docs-driven-development workflow guards", () => {
     expect(materialized).toContain("Materialized and gateway tickets must dedupe");
   });
 
-  test("agent routing caps max agents to the single rendered work slot and falls back to Codex when Claude planning is disabled", async () => {
+  test("agent routing caps max agents and remains Codex-first regardless of the legacy Claude toggle", async () => {
     const mod = await importWorkflow(tempRoot());
 
     expect(mod.resolvedMaxAgents(undefined)).toBe(1);
@@ -277,12 +277,13 @@ describe("docs-driven-development workflow guards", () => {
       input: { useClaudeForPlanning },
       outputMaybe: () => ({ selected: [{ slot: 1, agent: "opus" }, { slot: 2, agent: "sonnet" }] }),
     });
-    expect(mod.agentForSlot(ctx(false), 1).cliEngine).toBe("codex");
-    expect(mod.agentForSlot(ctx(false), 2).cliEngine).toBe("codex");
-    expect(mod.planningAgent(ctx(false)).cliEngine).toBe("codex");
-    expect(mod.auditAgent(ctx(false)).cliEngine).toBe("codex");
-    expect(mod.agentForSlot(ctx(true), 1).cliEngine).toBe("claude-code");
-    expect(mod.agentForSlot(ctx(true), 3).cliEngine).toBe("codex");
+    const primaryEngine = (agent: any) => (Array.isArray(agent) ? agent[0] : agent).cliEngine;
+    expect(primaryEngine(mod.agentForSlot(ctx(false), 1))).toBe("codex");
+    expect(primaryEngine(mod.agentForSlot(ctx(false), 2))).toBe("codex");
+    expect(primaryEngine(mod.planningAgent(ctx(false)))).toBe("codex");
+    expect(primaryEngine(mod.auditAgent(ctx(false)))).toBe("codex");
+    expect(primaryEngine(mod.agentForSlot(ctx(true), 1))).toBe("codex");
+    expect(primaryEngine(mod.agentForSlot(ctx(true), 3))).toBe("codex");
   });
 
   test("productComplete trusts round-summary done only when features.json has zero incomplete records", async () => {

@@ -5,12 +5,12 @@ import { SmithersError } from "@smithers-orchestrator/errors";
 
 const ARTIFACT_SCHEMA_VERSION = 1;
 export const OPTIMIZER_PROVIDER_IDS = [
-    "heuristic",
-    "cerebras",
     "openai-api",
+    "codex",
     "openai",
     "openai-sdk",
-    "codex",
+    "heuristic",
+    "cerebras",
     "anthropic-api",
     "anthropic",
     "anthropic-sdk",
@@ -34,7 +34,8 @@ const OPENAI_CONFIG = {
     kind: "openai-compatible",
     baseURL: "https://api.openai.com/v1",
     apiKeyEnv: "OPENAI_API_KEY",
-    defaultModel: "gpt-5.5",
+    defaultModel: "gpt-5.6-luna",
+    lunaReasoningEffort: "medium",
 };
 // Aliases: anthropic-api, anthropic, anthropic-sdk, claude-code, claude.
 const ANTHROPIC_CONFIG = {
@@ -88,7 +89,7 @@ const PROVIDER_CONFIGS = {
     kimi: MOONSHOT_CONFIG,
     moonshot: MOONSHOT_CONFIG,
     opencode: { ...CUSTOM_ENDPOINT_CONFIG, defaultModel: "anthropic/claude-fable-5" },
-    pi: { ...CUSTOM_ENDPOINT_CONFIG, defaultModel: "gpt-5.5" },
+    pi: { ...CUSTOM_ENDPOINT_CONFIG, defaultModel: "gpt-5.6-luna" },
     amp: CUSTOM_ENDPOINT_CONFIG,
     forge: CUSTOM_ENDPOINT_CONFIG,
     "openai-compatible": CUSTOM_ENDPOINT_CONFIG,
@@ -277,7 +278,16 @@ export async function buildProviderGepaPatches(input, options = {}) {
         ? await requestAnthropicOptimizer(fetchFn, { provider: input.provider, apiKey, baseURL, model, optimizerPrompt })
         : config.kind === "gemini"
             ? await requestGeminiOptimizer(fetchFn, { provider: input.provider, apiKey, baseURL, model, optimizerPrompt })
-            : await requestOpenAICompatibleOptimizer(fetchFn, { provider: input.provider, apiKey, baseURL, model, optimizerPrompt });
+            : await requestOpenAICompatibleOptimizer(fetchFn, {
+                provider: input.provider,
+                apiKey,
+                baseURL,
+                model,
+                optimizerPrompt,
+                reasoningEffort: config.lunaReasoningEffort && model === OPENAI_CONFIG.defaultModel
+                    ? config.lunaReasoningEffort
+                    : undefined,
+            });
     return parseOptimizerPatches(text, input.provider);
 }
 
@@ -327,7 +337,7 @@ function endpoint(baseURL, path) {
 
 /**
  * @param {typeof fetch} fetchFn
- * @param {{ provider: string; apiKey: string; baseURL: string; model: string; optimizerPrompt: string }} input
+ * @param {{ provider: string; apiKey: string; baseURL: string; model: string; optimizerPrompt: string; reasoningEffort?: string }} input
  */
 async function requestOpenAICompatibleOptimizer(fetchFn, input) {
     const response = await fetchFn(endpoint(input.baseURL, "/chat/completions"), {
@@ -345,7 +355,9 @@ async function requestOpenAICompatibleOptimizer(fetchFn, input) {
                 },
                 { role: "user", content: input.optimizerPrompt },
             ],
-            temperature: 0.2,
+            ...(input.reasoningEffort
+                ? { reasoning_effort: input.reasoningEffort }
+                : { temperature: 0.2 }),
         }),
     });
     await assertOptimizerResponseOk(response, input.provider);

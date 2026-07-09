@@ -106,7 +106,7 @@ export default smithers((ctx) => {
 
         {/* ── worker plane: one worker per directive (dynamic dispatch) ────── */}
         {directives.map((u, i) => (
-          <Task key={`worker-${i}`} id={`worker:${i}`} output={outputs.work} agent={agents.smart}>
+          <Task key={`worker-${i}`} id={`worker:${i}`} output={outputs.work} agent={agents.implement}>
             {workerPrompt({
               goal: ctx.input.goal,
               artifactPath: ctx.input.artifactPath,

@@ -1,6 +1,6 @@
 // smithers-source: authored
 // smithers-display-name: Plue Demo Child
-// smithers-description: Tiny self-contained demo workflow shipped to a plue Freestyle VM by run-on-plue.tsx — one task answered by Claude, one by Codex.
+// smithers-description: Tiny self-contained demo workflow shipped to a plue Freestyle VM by run-on-plue.tsx — both tasks use Codex 5.6 Luna, with Claude only as a no-Codex fallback.
 /** @jsxImportSource smithers-orchestrator */
 import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
@@ -11,45 +11,51 @@ import { z } from "zod/v4";
  * provider, so it must define its own env-authenticated agents and have no
  * dependency on anything outside this one file.
  *
- * Two trivial sequential tasks, minimal tokens: one answered by claude, one
- * by codex, so an e2e run of `run-on-plue` can assert both CLIs produced
- * real (non-templated) completions on the remote VM.
+ * Two trivial sequential tasks, minimal tokens. Both use the same Codex-first
+ * Luna chain, so a healthy Codex account prevents Claude from running while a
+ * VM without usable Codex auth can still complete through the fallback.
  */
 
-const claude = new ClaudeCodeAgent({});
-const codex = new CodexAgent({ skipGitRepoCheck: true });
+const luna = [
+	new CodexAgent({
+		model: "gpt-5.6-luna",
+		config: { model_reasoning_effort: "medium" },
+		skipGitRepoCheck: true,
+	}),
+	new ClaudeCodeAgent({ model: "claude-sonnet-5" }),
+];
 
 const answerSchema = z.object({
 	answer: z.string().describe("A short, direct answer."),
 });
 
 const outputSchema = z.object({
-	claudeAnswer: z.string(),
-	codexAnswer: z.string(),
+	firstAnswer: z.string(),
+	secondAnswer: z.string(),
 });
 
 const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
-	claudeStep: answerSchema,
-	codexStep: answerSchema,
+	firstStep: answerSchema,
+	secondStep: answerSchema,
 	output: outputSchema,
 });
 
 export default smithers((ctx) => {
-	const claudeStep = ctx.outputMaybe("claudeStep", { nodeId: "ask-claude" });
-	const codexStep = ctx.outputMaybe("codexStep", { nodeId: "ask-codex" });
+	const firstStep = ctx.outputMaybe("firstStep", { nodeId: "ask-first" });
+	const secondStep = ctx.outputMaybe("secondStep", { nodeId: "ask-second" });
 
 	return (
 		<Workflow name="plue-demo-child">
 			<Sequence>
-				<Task id="ask-claude" output={outputs.claudeStep} agent={claude}>
+				<Task id="ask-first" output={outputs.firstStep} agent={luna}>
 					What is 2 + 2? Answer with just the number.
 				</Task>
-				<Task id="ask-codex" output={outputs.codexStep} agent={codex}>
+				<Task id="ask-second" output={outputs.secondStep} agent={luna}>
 					What is the capital of France? Answer with just the city name.
 				</Task>
-				{claudeStep && codexStep ? (
+				{firstStep && secondStep ? (
 					<Task id="output" output={outputs.output}>
-						{() => ({ claudeAnswer: claudeStep.answer, codexAnswer: codexStep.answer })}
+						{() => ({ firstAnswer: firstStep.answer, secondAnswer: secondStep.answer })}
 					</Task>
 				) : null}
 			</Sequence>

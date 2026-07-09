@@ -63,6 +63,7 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "  export const OpenCodeAgent: any;",
         "  export const AntigravityAgent: any;",
         "  export const GeminiAgent: any;",
+        "  export const KimiAgent: any;",
         "  export const tools: any;",
         "  export const read: any;",
         "  export const write: any;",
@@ -247,11 +248,16 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
     expect(repo.exists(".smithers/agents.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/claude-code.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/codex.ts")).toBe(true);
+    expect(repo.read(".smithers/agents/codex.ts")).toContain('model: "gpt-5.6-luna"');
+    expect(repo.read(".smithers/agents/codex.ts")).toContain('config: { model_reasoning_effort: "medium" }');
     expect(repo.exists(".smithers/agents/opencode.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/antigravity.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/gemini.ts")).toBe(false);
     expect(repo.exists(".smithers/agents/index.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/README.md")).toBe(true);
+    for (const name of ["claude-code.ts", "codex.ts", "opencode.ts", "antigravity.ts"]) {
+        expect(repo.read(`.smithers/agents/${name}`)).not.toContain("cwd: process.cwd()");
+    }
     expect(repo.exists(".smithers/smithers.config.ts")).toBe(true);
     expect(repo.exists(".smithers/prompts/review.mdx")).toBe(true);
     expect(repo.exists(".smithers/prompts/plan.mdx")).toBe(true);
@@ -361,6 +367,8 @@ test("smithers init --agents-only creates only the user-owned agent scaffold", (
     expect(result.exitCode).toBe(0);
     expect(repo.exists(".smithers/agents/claude-code.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/codex.ts")).toBe(true);
+    expect(repo.read(".smithers/agents/codex.ts")).toContain('model: "gpt-5.6-luna"');
+    expect(repo.read(".smithers/agents/codex.ts")).toContain('config: { model_reasoning_effort: "medium" }');
     expect(repo.exists(".smithers/agents/opencode.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/antigravity.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/gemini.ts")).toBe(false);

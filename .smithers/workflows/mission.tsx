@@ -197,9 +197,9 @@ function featureDeps(features: any[]): Record<string, typeof missionFeatureResul
 }
 
 function workerAgentsFor(feature: any): any {
-  if (feature.workerType === "research") return agents.smartTool;
+  if (feature.workerType === "research") return agents.research;
   if (feature.workerType === "docs") return agents.cheapFast;
-  return agents.smart;
+  return agents.implement;
 }
 
 function previousMilestoneSummary(ctx: any): string {
@@ -280,7 +280,7 @@ function renderMilestone(ctx: any, plan: any, milestone: any, milestoneIndex: nu
       <Task
         id={integrationId}
         output={outputs.milestoneIntegration}
-        agent={agents.smartTool}
+        agent={agents.implement}
         needs={featureNeeds(milestoneIndex, features)}
         deps={featureDeps(features)}
         timeoutMs={1_800_000}
@@ -301,7 +301,7 @@ function renderMilestone(ctx: any, plan: any, milestone: any, milestoneIndex: nu
       <Task
         id={validationId}
         output={outputs.milestoneValidation}
-        agent={agents.smart}
+        agent={agents.midTier}
         needs={{ integration: integrationId }}
         deps={{ integration: outputs.milestoneIntegration }}
         timeoutMs={1_800_000}
@@ -321,7 +321,7 @@ function renderMilestone(ctx: any, plan: any, milestone: any, milestoneIndex: nu
           <Task
             id={milestoneFollowUpId(milestoneIndex)}
             output={outputs.missionFeature}
-            agent={agents.smart}
+            agent={agents.implement}
             needs={{ validation: validationId }}
             deps={{ validation: outputs.milestoneValidation }}
             timeoutMs={1_800_000}
@@ -338,7 +338,7 @@ function renderMilestone(ctx: any, plan: any, milestone: any, milestoneIndex: nu
           <Task
             id={milestoneRevalidationId(milestoneIndex)}
             output={outputs.milestoneValidation}
-            agent={agents.smart}
+            agent={agents.midTier}
             needs={{ followUp: milestoneFollowUpId(milestoneIndex), integration: integrationId }}
             deps={{ followUp: outputs.missionFeature, integration: outputs.milestoneIntegration }}
             timeoutMs={1_800_000}
@@ -362,7 +362,7 @@ function renderMilestone(ctx: any, plan: any, milestone: any, milestoneIndex: nu
 
 function renderFinal(ctx: any, plan: any, milestones: any[]) {
   return (
-    <Task id="mission:final" output={outputs.missionFinal} agent={agents.smartTool}>
+    <Task id="mission:final" output={outputs.missionFinal} agent={agents.orchestrator}>
       <MissionFinalPrompt
         plan={{ ...plan, milestones }}
         featureResults={ctx.outputs.missionFeature ?? []}
@@ -389,7 +389,7 @@ export default smithers((ctx) => {
         <Task
           id="mission:plan"
           output={outputs.missionPlan}
-          agent={agents.smartTool}
+          agent={agents.planning}
           timeoutMs={1_800_000}
           heartbeatTimeoutMs={900_000}
           memory={{ remember: { namespace: missionMemory, key: "mission:plan" } }}

@@ -71,8 +71,10 @@ describe("buildAgentSetupOptions", () => {
         expect(ids).toContain("openrouter");
         expect(ids).toContain("claude");
         expect(ids).toContain("codex");
+        expect(ids).toContain("kimi");
         expect(ids).toContain("opencode");
         expect(ids).toContain("custom");
+        expect(ids[0]).toBe("codex");
     });
 
     test("documents the AgentLike generate contract for custom adapters", () => {

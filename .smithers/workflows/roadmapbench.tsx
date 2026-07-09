@@ -2,7 +2,8 @@
 /** @jsxImportSource smithers-orchestrator */
 //
 // RoadmapBench-on-smithers: a multi-agent, long-horizon software-development
-// workflow that mixes Claude Opus 4.8 and Codex 5.5 to implement a real
+// workflow that uses Codex 5.6 Sol for planning/review/finalization and Codex
+// 5.6 Luna for implementation, with Claude fallbacks, to implement a real
 // version-upgrade "roadmap" (multiple independent targets) against a pinned
 // V_old repository.
 //
@@ -19,13 +20,13 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ClaudeCodeAgent,
-  CodexAgent,
   Sequence,
   Task,
   createScorer,
   createSmithers,
 } from "smithers-orchestrator";
 import { z } from "zod/v4";
+import { codexFirst } from "../lib/codexAccounts";
 
 const HARNESS = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -153,16 +154,33 @@ export default smithers((ctx) => {
   const input = ctx.input;
   const instruction = readFileSync(input.instructionPath, "utf8");
 
-  // Mixed model fleet: Opus 4.8 plans/implements/finalizes the interdependent
-  // GP work; Codex 5.5 runs an independent adversarial review-and-fix pass.
+  // Codex-first role split: Sol plans/reviews/finalizes; Luna implements. The
+  // benchmark fleet's existing review-model override remains supported.
   const common = {
     cwd: input.repoDir,
     yolo: true,
     timeoutMs: 75 * 60_000,
     idleTimeoutMs: 12 * 60_000,
   };
-  const opus = new ClaudeCodeAgent({ ...common, model: "claude-opus-4-8" });
-  const codex = new CodexAgent({ ...common, model: "gpt-5.5" });
+  const solModel = process.env.SMITHERS_ROADMAPBENCH_SOL_MODEL?.trim() || "gpt-5.6-sol";
+  const lunaModel = process.env.SMITHERS_ROADMAPBENCH_LUNA_MODEL?.trim() || "gpt-5.6-luna";
+  const reviewModel =
+    process.env.SMITHERS_ROADMAPBENCH_REVIEW_MODEL?.trim() ||
+    process.env.ROADMAPBENCH_REVIEW_MODEL?.trim() ||
+    solModel;
+  const opusFallback = () => new ClaudeCodeAgent({ ...common, model: "claude-opus-4-8" });
+  const sonnetFallback = () => new ClaudeCodeAgent({ ...common, model: "claude-sonnet-5" });
+  const solAgent = (model = solModel) => codexFirst(
+    { ...common, model, config: { model_reasoning_effort: "xhigh" } },
+    [opusFallback()],
+  );
+  const planAgent = solAgent();
+  const implementAgent = codexFirst(
+    { ...common, model: lunaModel, config: { model_reasoning_effort: "medium" } },
+    [sonnetFallback()],
+  );
+  const reviewAgent = solAgent(reviewModel);
+  const finalizeAgent = solAgent();
 
   const ENV = `## Working environment
 
@@ -201,7 +219,7 @@ Edits you make to files here are LIVE at /app immediately (bind mount).
   return (
     <Workflow name="roadmapbench">
       <Sequence>
-        <Task id="plan" output={planSchema} agent={opus}>
+        <Task id="plan" output={planSchema} agent={planAgent}>
           {`You are the lead engineer for a long-horizon version-upgrade task: "${input.taskId}".
 
 ${ENV}
@@ -218,7 +236,7 @@ test command for sanity-checking. Note interdependencies (some targets build on
 others) and ordering. Be specific and technical.`}
         </Task>
 
-        <Task id="implement" output={implementSchema} agent={opus} deps={{ plan: planSchema }}>
+        <Task id="implement" output={implementSchema} agent={implementAgent} deps={{ plan: planSchema }}>
           {(deps) => `Continue task "${input.taskId}". Now IMPLEMENT the full roadmap.
 
 ${ENV}
@@ -239,7 +257,7 @@ compatibility. Do not stop until all targets are implemented and your own
 sanity checks pass. Report exactly what you changed.`}
         </Task>
 
-        <Task id="review" output={reviewSchema} agent={codex} deps={{ implement: implementSchema }}>
+        <Task id="review" output={reviewSchema} agent={reviewAgent} deps={{ implement: implementSchema }}>
           {(deps) => `You are an independent senior reviewer (a DIFFERENT engineer and model)
 auditing the implementation for task "${input.taskId}". Be adversarial and precise.
 
@@ -264,7 +282,7 @@ you found and the fixes you applied.`}
         <Task
           id="finalize"
           output={finalizeSchema}
-          agent={opus}
+          agent={finalizeAgent}
           deps={{ review: reviewSchema }}
           scorers={{
             reward: { scorer: roadmapScorer(input), sampling: { type: "all" } },

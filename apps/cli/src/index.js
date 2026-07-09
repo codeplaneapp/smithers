@@ -8452,7 +8452,8 @@ async function createChatAgent(agentId, cwd) {
             const { CodexAgent } = await import("@smithers-orchestrator/agents/CodexAgent");
             return new CodexAgent({
                 cwd,
-                model: "gpt-5.5",
+                model: "gpt-5.6-luna",
+                config: { model_reasoning_effort: "medium" },
                 skipGitRepoCheck: true,
             });
         }

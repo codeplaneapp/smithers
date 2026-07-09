@@ -204,7 +204,7 @@ export default smithers((ctx) => {
         <Task
           id="scan"
           output={outputs.featureScan}
-          agent={agents.smartTool}
+          agent={agents.research}
           heartbeatTimeoutMs={300000}
           memory={{
             remember: {
@@ -224,7 +224,7 @@ export default smithers((ctx) => {
         <Task
           id="scan"
           output={outputs.featureScan}
-          agent={agents.smartTool}
+          agent={agents.research}
           heartbeatTimeoutMs={300000}
           memory={{
             recall: {
@@ -251,7 +251,7 @@ export default smithers((ctx) => {
       <Task
         id="write-features"
         output={outputs.writeResult}
-        agent={agents.smartTool}
+        agent={agents.implement}
         heartbeatTimeoutMs={300000}
         memory={{
           remember: {

@@ -28,6 +28,33 @@ function uncommented(source) {
         .join("\n");
 }
 
+const CODEX_DEFAULT_TIERS = {
+    cheapFast: "Luna",
+    research: "Luna",
+    implement: "Luna",
+    midTier: "Terra",
+    smartTool: "Terra",
+    validate: "Terra",
+    smart: "Sol",
+    review: "Sol",
+    planning: "Sol",
+    orchestrator: "Sol",
+};
+
+function activePoolProviders(source, pool) {
+    const match = uncommented(source).match(new RegExp(`(?:^|\\n)  ${pool}: \\[([\\s\\S]*?)\\n  \\],`));
+    expect(match, `missing generated ${pool} pool`).toBeTruthy();
+    return [...match[1].matchAll(/providers\.([A-Za-z_$][\w$]*)/g)].map((entry) => entry[1]);
+}
+
+function expectCodexFirstDefaultTiers(source, providerPrefix) {
+    for (const [tier, modelTier] of Object.entries(CODEX_DEFAULT_TIERS)) {
+        expect(activePoolProviders(source, tier)[0], `${tier} must start with Codex`).toBe(
+            `${providerPrefix}${modelTier}`,
+        );
+    }
+}
+
 describe("generateAgentsTs (account-driven)", () => {
     test("emits one provider per account and a pool per engine family", () => {
         const env = newSmithersHome();
@@ -48,10 +75,37 @@ describe("generateAgentsTs (account-driven)", () => {
         // pools group by engine family
         expect(generated).toMatch(/claude:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*\]/);
         expect(generated).toMatch(/codex:\s*\[\s*providers\.codexWork,\s*\]/);
-        // Smart pools lead with subscription Claude so failover is not on the hot path.
-        expect(generated).toMatch(/smart:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*providers\.codexWork,/);
-        expect(generated).toMatch(/smartTool:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*providers\.codexWork,/);
-        expect(generated).toMatch(/review:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*providers\.codexWork,/);
+        // A registered Codex account gets role-specific model siblings. Claude
+        // accounts remain behind Codex as runtime fallbacks.
+        expect(generated).toContain('codexWorkSol: new SmithersCodexAgent({ model: "gpt-5.6-sol"');
+        expect(generated).toContain('codexWorkTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
+        expect(generated).toContain('codexWorkLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
+        expectCodexFirstDefaultTiers(generated, "codexWork");
+        expect(activePoolProviders(generated, "implement").slice(1)).toContain("claudeWork");
+        expect(uncommented(generated)).not.toContain("cwd: process.cwd()");
+    });
+
+    test("keeps every registered Codex account ahead of non-Codex fallbacks", () => {
+        const env = newSmithersHome();
+        for (const label of ["codex-a", "codex-b", "codex-c", "codex-d"]) {
+            addAccount(
+                { label, provider: "codex", configDir: `${env.HOME}/.smithers/accounts/${label}` },
+                { env },
+            );
+        }
+        addAccount(
+            { label: "claude-backup", provider: "claude-code", configDir: `${env.HOME}/.smithers/accounts/claude-backup` },
+            { env },
+        );
+
+        const providers = activePoolProviders(generateAgentsTs(env), "implement");
+        expect(providers.slice(0, 4)).toEqual([
+            "codexALuna",
+            "codexBLuna",
+            "codexCLuna",
+            "codexDLuna",
+        ]);
+        expect(providers.indexOf("claudeBackup")).toBeGreaterThan(3);
     });
 
     test("path.join(homedir(), ...) is used for paths under $HOME", () => {
@@ -84,6 +138,13 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toMatch(/claude:\s*\[\s*providers\.anthropicProd,\s*\]/);
         // user-specified model wins over the default
         expect(generated).toContain('model: "gpt-5"');
+        // The explicit base-account pin does not weaken the Smithers default
+        // roles: its generated siblings still use Sol/Terra/Luna.
+        expect(generated).toContain('openaiProdSol: new SmithersCodexAgent({ model: "gpt-5.6-sol"');
+        expect(generated).toContain('openaiProdTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
+        expect(generated).toContain('openaiProdLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
+        expectCodexFirstDefaultTiers(generated, "openaiProd");
+        expect(activePoolProviders(generated, "review")).toContain("anthropicProd");
     });
 
     test("does not serialize both configDir and apiKey for malformed account entries", () => {
@@ -110,17 +171,72 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).not.toContain("~/.smithers/accounts.json");
     });
 
-    test("detection smart pools lead with Claude and skip opencode", () => {
+    test("Codex detection emits Sol, Terra, and Luna first with runtime fallbacks", () => {
         const env = newSmithersHome();
         const generated = generateAgentsTs(env, {
             preserveProviderIds: ["claude", "codex", "opencode"],
         });
 
         expect(generated).not.toContain("gpt-5.3-codex");
-        expect(generated).toMatch(/smart:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,\s*providers\.codex,/);
-        expect(generated).toMatch(/smartTool:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,\s*providers\.codex,/);
-        expect(uncommented(generated)).not.toContain("providers.opencode");
-        expect(uncommented(generated)).not.toMatch(/smartTool:\s*\[\s*providers\.codex/);
+        expect(generated).toContain('codexSol: new SmithersCodexAgent({ model: "gpt-5.6-sol"');
+        expect(generated).toContain('config: { model_reasoning_effort: "xhigh" }');
+        expect(generated).toContain('codexTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
+        expect(generated).toContain('codexLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
+        expectCodexFirstDefaultTiers(generated, "codex");
+        expect(activePoolProviders(generated, "implement").slice(1)).toEqual([
+            "claudeSonnet",
+            "claude",
+            "opencode",
+        ]);
+        expect(activePoolProviders(generated, "review").slice(1)).toEqual([
+            "claude",
+            "claudeOpus",
+            "claudeSonnet",
+        ]);
+    });
+
+    test("direct generated CLI providers leave cwd to the task root and Worktree", () => {
+        const env = newSmithersHome();
+        const generated = generateAgentsTs(env, {
+            preserveProviderIds: ["claude", "codex", "opencode", "antigravity", "vibe", "hermes", "openclaw"],
+            scaffoldProviderIds: [],
+        });
+
+        expect(uncommented(generated)).not.toContain("cwd: process.cwd()");
+        expect(generated).toContain('claude: new SmithersClaudeCodeAgent({ model: "claude-fable-5" })');
+        expect(generated).toContain('opencode: new SmithersOpenCodeAgent({ model: "anthropic/claude-fable-5" })');
+        expect(generated).toContain("antigravity: new SmithersAntigravityAgent()");
+        expect(generated).toContain('vibe: new SmithersVibeAgent({ agent: "auto-approve" })');
+        expect(generated).toContain("hermes: new SmithersHermesCliAgent()");
+        expect(generated).toContain("openclaw: new SmithersOpenClawAgent()");
+    });
+
+    test("mixed detected and registered fallbacks follow tier priority before the pool cap", () => {
+        const env = newSmithersHome();
+        addAccount(
+            {
+                label: "kimi-backup",
+                provider: "kimi",
+                configDir: `${env.HOME}/.smithers/accounts/kimi-backup`,
+            },
+            { env },
+        );
+        const generated = generateAgentsTs(env, {
+            preserveProviderIds: ["codex", "claude", "opencode", "antigravity"],
+        });
+
+        expect(activePoolProviders(generated, "research")).toEqual([
+            "codexLuna",
+            "kimiBackup",
+            "antigravity",
+            "opencode",
+        ]);
+        expect(activePoolProviders(generated, "implement")).toEqual([
+            "codexLuna",
+            "claudeSonnet",
+            "kimiBackup",
+            "antigravity",
+        ]);
     });
 
     test("detection smart pools use OpenCode when it is the only preserved CLI provider", () => {
@@ -129,11 +245,14 @@ describe("generateAgentsTs (account-driven)", () => {
             preserveProviderIds: ["opencode"],
         });
         const active = uncommented(generated);
-        expect(generated).toContain("opencode: OpenCodeAgent");
+        expect(generated).toContain("opencode: new SmithersOpenCodeAgent(");
         expect(active).not.toContain("openrouter: createOpenRouterAgent()");
         expect(active).toMatch(/smart:\s*\[\s*providers\.opencode,/);
         expect(active).toMatch(/smartTool:\s*\[\s*providers\.opencode,/);
         expect(active).toMatch(/review:\s*\[\s*providers\.opencode,/);
+        for (const tier of Object.keys(CODEX_DEFAULT_TIERS)) {
+            expect(activePoolProviders(generated, tier)).toEqual(["opencode"]);
+        }
     });
 
     test("preserves generated detection providers when adding accounts in a different shell", () => {
@@ -145,15 +264,20 @@ describe("generateAgentsTs (account-driven)", () => {
             PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
             ANTHROPIC_API_KEY: "sk-ant-test",
         });
-        expect(initial).toContain("claude: ClaudeCodeAgent");
+        expect(initial).toContain("claude: new SmithersClaudeCodeAgent(");
         addAccount({ label: "codex-prod", provider: "codex", configDir: `${env.HOME}/.smithers/accounts/codex-prod` }, { env });
         const regenerated = generateAgentsTs(env, {
             preserveProviderIds: extractGeneratedDetectionProviderIds(initial),
         });
-        expect(regenerated).toContain("claude: ClaudeCodeAgent");
+        expect(regenerated).toContain("claude: new SmithersClaudeCodeAgent(");
         expect(regenerated).toContain("claudeOpus: new SmithersClaudeCodeAgent(");
         expect(regenerated).toContain("claudeSonnet: new SmithersClaudeCodeAgent(");
         expect(regenerated).toContain("codexProd: new SmithersCodexAgent(");
+        expect(regenerated).toContain("codexProdSol: new SmithersCodexAgent(");
+        expect(regenerated).toContain("codexProdTerra: new SmithersCodexAgent(");
+        expect(regenerated).toContain("codexProdLuna: new SmithersCodexAgent(");
+        expectCodexFirstDefaultTiers(regenerated, "codexProd");
+        expect(activePoolProviders(regenerated, "planning")).toContain("claude");
     });
 
     test("preserved OpenRouter default is demoted below a real account added later (never the hot path)", () => {
@@ -202,9 +326,13 @@ describe("generateAgentsTs (account-driven)", () => {
 
         const regenerated = generateAgentsTs(env, { preserveProviderIds: preserved });
         expect(regenerated).toContain("codex: new SmithersCodexAgent(");
+        expect(regenerated).toContain("codexSol: new SmithersCodexAgent(");
+        expect(regenerated).toContain("codexTerra: new SmithersCodexAgent(");
+        expect(regenerated).toContain("codexLuna: new SmithersCodexAgent(");
         expect(regenerated).toContain("claudeSonnet: new SmithersClaudeCodeAgent(");
         expect(uncommented(regenerated)).not.toContain("codex: CodexAgent");
         expect(uncommented(regenerated)).not.toContain("claude: ClaudeCodeAgent");
+        expectCodexFirstDefaultTiers(regenerated, "codex");
     });
 
     test("preserves generated detection providers during account-driven rewrites", () => {
@@ -213,7 +341,7 @@ describe("generateAgentsTs (account-driven)", () => {
         const previous = [
             "// smithers-source: generated",
             "export const providers = {",
-            "  claude: ClaudeCodeAgent,",
+            "  claude: new SmithersClaudeCodeAgent({ model: \"claude-fable-5\", cwd: process.cwd() }),",
             "  claudeOpus: new SmithersClaudeCodeAgent({ model: \"claude-opus-4-8\", cwd: process.cwd() }),",
             "  claudeSonnet: new SmithersClaudeCodeAgent({ model: \"claude-sonnet-5\", cwd: process.cwd() }),",
             "} as const;",
@@ -222,10 +350,15 @@ describe("generateAgentsTs (account-driven)", () => {
         const generated = generateAgentsTs({ ...env, PATH: "/no-agent-binaries" }, {
             preserveProviderIds: extractGeneratedDetectionProviderIds(previous),
         });
-        expect(generated).toContain("claude: ClaudeCodeAgent");
+        expect(generated).toContain("claude: new SmithersClaudeCodeAgent(");
+        expect(uncommented(generated)).not.toContain("cwd: process.cwd()");
         expect(generated).toContain("claudeOpus: new SmithersClaudeCodeAgent(");
         expect(generated).toContain("claudeSonnet: new SmithersClaudeCodeAgent(");
         expect(generated).toContain("codexProd: new SmithersCodexAgent(");
+        expect(generated).toContain("codexProdSol: new SmithersCodexAgent(");
+        expect(generated).toContain("codexProdTerra: new SmithersCodexAgent(");
+        expect(generated).toContain("codexProdLuna: new SmithersCodexAgent(");
+        expectCodexFirstDefaultTiers(generated, "codexProd");
     });
 
     test("no detected CLI binaries emits OpenRouter default and comments unavailable providers", () => {
@@ -234,12 +367,16 @@ describe("generateAgentsTs (account-driven)", () => {
         const active = uncommented(generated);
         expect(generated).toContain("import { OpenAIAgent as SmithersOpenAIAgent } from \"smithers-orchestrator\";");
         expect(generated).toContain("openrouter: createOpenRouterAgent()");
-        expect(generated).toContain("//   claude: ClaudeCodeAgent,");
-        expect(generated).toContain("// import { CodexAgent } from \"./agents/codex\";");
+        expect(generated).toContain("//   claude: new SmithersClaudeCodeAgent(");
+        expect(generated).toContain("// import { CodexAgent as SmithersCodexAgent } from \"smithers-orchestrator\";");
         expect(generated).toContain("// export { CodexAgent } from \"./agents/codex\";");
+        expect(generated).not.toMatch(/^\/\/ $/m);
         expect(active).toContain("smart: [\n    providers.openrouter,");
         expect(active).toContain("smartTool: [\n    providers.openrouter,");
         expect(active).toContain("review: [\n    providers.openrouter,");
+        for (const tier of Object.keys(CODEX_DEFAULT_TIERS)) {
+            expect(activePoolProviders(generated, tier)).toEqual(["openrouter"]);
+        }
         expect(active).not.toContain("providers.claude");
         expect(active).not.toContain("providers.codex");
     });

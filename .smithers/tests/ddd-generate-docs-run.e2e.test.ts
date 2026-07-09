@@ -97,6 +97,7 @@ class FixtureAgent implements AgentLike {
     const root = args.rootDir ?? process.cwd();
     const prompt = typeof args.prompt === "string" ? args.prompt : JSON.stringify(args.messages ?? []);
     const modelArgs = ["--model", this.model];
+    const task = prompt.includes("Generate (or refresh) the living product spec") ? "draft-spec" : prompt.includes("Adversarially review the freshly generated spec") ? "review" : "unknown";
     let payload: Record<string, unknown>;
 
     if (this.engine === "codex") {
@@ -107,8 +108,8 @@ class FixtureAgent implements AgentLike {
         writeFileSync(join(root, ".smithers/spec/features.json"), JSON.stringify([{ id: "known-feature", title: "Known Feature", summary: "Review corrupted the spec after the first build", status: "not-real", priority: "p0", owner: "product", missing: [] }], null, 2) + "\\n");
       }
       payload = JSON.parse(process.env.SMITHERS_FAKE_CODEX_RESPONSE ?? defaultCodexPayload);
+      appendFileSync(join(root, "codex-calls.jsonl"), JSON.stringify({ task, args: modelArgs, prompt, payload }) + "\\n");
     } else {
-      const task = prompt.includes("Generate (or refresh) the living product spec") ? "draft-spec" : prompt.includes("Adversarially review the freshly generated spec") ? "review" : "unknown";
       payload = task === "review"
         ? { approved: true, corrections: [], summary: "fake claude review approved generated docs" }
         : { status: "ready", featuresWritten: 1, updatedFiles: [".smithers/spec/features.json", ".smithers/spec/content/overview.md"], summary: "fake claude draft refreshed the DDD spec" };
@@ -120,19 +121,28 @@ class FixtureAgent implements AgentLike {
   }
 }
 
+const claudeSmartFallback = new FixtureAgent("claude", "claude-fable-5", "fixture-claude");
+const claudeImplementationFallback = new FixtureAgent("claude", "claude-sonnet-5", "fixture-claude-sonnet");
+const sol = [new FixtureAgent("codex", "gpt-5.6-sol", "fixture-codex-sol"), claudeSmartFallback];
+const terra = [new FixtureAgent("codex", "gpt-5.6-terra", "fixture-codex-terra"), claudeImplementationFallback];
+const luna = [new FixtureAgent("codex", "gpt-5.6-luna", "fixture-codex-luna"), claudeImplementationFallback];
+
 export const providers = {
-  claude: new FixtureAgent("claude", "claude-fable-5", "fixture-claude"),
-  claudeSonnet: new FixtureAgent("claude", "claude-sonnet-5", "fixture-claude-sonnet"),
-  codex: new FixtureAgent("codex", "gpt-5.5", "fixture-codex"),
+  sol,
+  terra,
+  luna,
+  claude: sol,
+  claudeSonnet: luna,
+  codex: luna,
 } as const;
 
 export const agents = {
-  cheapFast: [providers.claudeSonnet, providers.codex],
-  smart: [providers.claude, providers.claudeSonnet, providers.codex],
-  smartTool: [providers.claude, providers.claudeSonnet, providers.codex],
-  planning: [providers.claude],
-  review: [providers.claude],
-  implement: [providers.codex],
+  cheapFast: providers.luna,
+  smart: providers.sol,
+  smartTool: providers.terra,
+  planning: providers.sol,
+  review: providers.sol,
+  implement: providers.luna,
 } as const satisfies Record<string, AgentLike[]>;
 `);
   writeFileSync(join(root, ".smithers/agents/index.ts"), 'export { agents, providers } from "../agents.ts";\n');
@@ -262,38 +272,40 @@ async function waitForGenerateRunToSettle(gateway: Gateway, runId: string, timeo
 }
 
 describe("ddd-generate-docs real workflow run", () => {
-  test("uses the default Claude planning agent for draft and review before gated bug-scan kickoff", async () => {
+  test("uses Codex Luna for drafting and Sol for review before gated bug-scan kickoff", async () => {
     const repo = tempRepo();
     writeFakeClaude(repo.binDir);
-    const runId = "ddd-generate-docs-default-claude";
+    const runId = "ddd-generate-docs-default-codex-roles";
     const gateway = await runGenerate(repo, runId, {});
     const connection = createConnectionContext();
 
     const draft = await nodeOutput(gateway, connection, runId, "draft-spec");
     expect(draft.row.status).toBe("ready");
-    expect(draft.row.summary).toBe("fake claude draft refreshed the DDD spec");
+    expect(draft.row.summary).toBe("seeded fake agent refreshed the DDD spec");
 
     const build = await nodeOutput(gateway, connection, runId, "build");
     expect(build.row.passed).toBe(true);
 
     const review = await nodeOutput(gateway, connection, runId, "review");
     expect(review.row.approved).toBe(true);
-    expect(review.row.summary).toBe("fake claude review approved generated docs");
+    expect(review.row.summary).toBe("seeded fake agent refreshed the DDD spec");
 
     const kickoff = await nodeOutput(gateway, connection, runId, "kickoff-bug-scan");
     expect(kickoff.row.launched).toBe(true);
     expect(kickoff.row.bugScanRunId).toBe("run-ddd-bugscan-123");
 
-    const calls = readFileSync(join(repo.root, "claude-calls.jsonl"), "utf8")
+    const calls = readFileSync(join(repo.root, "codex-calls.jsonl"), "utf8")
       .trim()
       .split(/\r?\n/)
       .map((line) => JSON.parse(line) as { task: string; args: string[]; prompt: string });
     expect(calls.map((call) => call.task)).toEqual(["draft-spec", "review"]);
-    expect(calls.every((call) => call.args.includes("--model") && call.args.includes("claude-fable-5"))).toBe(true);
+    expect(calls[0]!.args).toEqual(expect.arrayContaining(["--model", "gpt-5.6-luna"]));
+    expect(calls[1]!.args).toEqual(expect.arrayContaining(["--model", "gpt-5.6-sol"]));
     expect(calls[0]!.prompt).toContain("Generate (or refresh) the living product spec");
     expect(calls[0]!.prompt).toContain("Survey:");
     expect(calls[1]!.prompt).toContain("Adversarially review the freshly generated spec");
     expect(calls[1]!.prompt).toContain('"passed": true');
+    expect(existsSync(join(repo.root, "claude-calls.jsonl"))).toBe(false);
   }, 120_000);
 
   test("surveys, drafts, builds, reviews, and honors runBugScan=false", async () => {

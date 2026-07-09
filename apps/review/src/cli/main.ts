@@ -13,7 +13,7 @@ import { supersedePriorReviews } from "../github/supersedePriorReviews";
 import { quizSchema, type Quiz } from "../quiz/quizSchema";
 import { fenceFor } from "../text/fenceFor";
 import { storySchema } from "../walkthrough/storySchema";
-import { createReviewAgents } from "../workflow/createReviewAgents";
+import { createReviewAgents, resolveReviewEngine } from "../workflow/createReviewAgents";
 import { createReviewWorkflow } from "../workflow/createReviewWorkflow";
 import { createProgressReporter } from "./createProgressReporter";
 import { parseJsonColumn } from "./parseJsonColumn";
@@ -126,8 +126,9 @@ Misc
   -h, --help                show this help
 
 Environment
-  SMITHERS_REVIEW_ENGINE    "claude" (default) or "codex"
-  SMITHERS_REVIEW_MODEL     model override for the selected engine
+  SMITHERS_REVIEW_ENGINE    "codex" (default when usable) or "claude" fallback
+  SMITHERS_REVIEW_MODEL     smart review-model override for the selected engine
+  SMITHERS_REVIEW_CHEAP_MODEL  Codex narration/quiz override (default gpt-5.6-luna)
   CODEX_HOME                codex auth/config dir (codex engine)
   ANTHROPIC_BASE_URL        with ANTHROPIC_API_KEY: API/proxy mode for Claude
   ANTHROPIC_API_KEY         (otherwise the Claude subscription login is used)
@@ -172,7 +173,7 @@ export async function runReviewCli(
   // --quiz on needs agents even when review and narration are both off.
   const needsAgents = args.review || args.narrate || args.quiz === "on";
   if (needsAgents) {
-    const engine = process.env.SMITHERS_REVIEW_ENGINE?.trim().toLowerCase() === "codex" ? "codex" : "claude";
+    const engine = resolveReviewEngine();
     if (!Bun.which(engine)) {
       console.error(
         `smithers-review: the \`${engine}\` CLI is required to run agents (SMITHERS_REVIEW_ENGINE=${engine}) — install it, or pass --no-review --no-narrate (and --quiz off) for a walkthrough-only run`,

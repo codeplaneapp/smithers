@@ -97,11 +97,12 @@ Implication:
 
 ### 5. Smithers and Codeplane already encode model precedence
 
-Smithers’ current guidance in `docs/guides/model-selection.mdx` says:
+Smithers' current guidance in `docs/guides/model-selection.mdx` is Codex-first:
 
-- `gpt-5.3-codex` for implementation and validation
-- `claude-opus-4-7` for research, planning, and review
-- `claude-sonnet-4-5-20250929` for lighter/faster tasks
+- `gpt-5.6-sol` for planning, review, orchestration, and smart work
+- `gpt-5.6-terra` for validation, mid-tier, and tool-heavy work
+- `gpt-5.6-luna` for every implementation, research, and cheap task
+- Claude and Kimi remain sequential fallbacks only when Codex cannot run
 
 `~/codeplane/specs/generate/index.tsx` goes further and encodes role-specific fallback chains:
 
@@ -366,13 +367,14 @@ export const roleChains = {
 }
 ```
 
-Recommended default models, based on current Smithers and local Codeplane usage:
+Recommended default models, based on current Smithers policy:
 
-- Claude: `claude-opus-4-7`
-- Claude fast: `claude-sonnet-4-5-20250929`
-- Codex: `gpt-5.3-codex` with reasoning effort `high`
+- Codex smart: `gpt-5.6-sol`
+- Codex mid-tier: `gpt-5.6-terra`
+- Codex implementation/research/cheap: `gpt-5.6-luna` with explicit reasoning effort `medium`
+- Claude and Kimi: fallback-only when no Codex credential succeeds
 - Antigravity: CLI default model
-- Kimi: `kimi-latest`
+- Kimi: pinned fallback model `kimi-k2.7-code`
 - Pi:
   - provider chosen from detected auth
   - default model should mirror the best detected fast/high-capability pair, not invent a separate strategy

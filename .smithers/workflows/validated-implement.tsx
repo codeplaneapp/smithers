@@ -239,11 +239,11 @@ Rules:
   return (
     <Workflow name="validated-implement">
       <Sequence>
-        <Task id="research" output={outputs.research} agent={agents.smartTool} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
+        <Task id="research" output={outputs.research} agent={agents.research} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
           {researchPrompt}
         </Task>
 
-        <Task id="depgate" output={outputs.depgate} agent={agents.smartTool} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
+        <Task id="depgate" output={outputs.depgate} agent={agents.implement} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
           {depgatePrompt}
         </Task>
 
@@ -299,7 +299,7 @@ Rules:
           idPrefix="impl"
           prompt={implementPrompt}
           implementAgents={implementer}
-          validateAgents={agents.cheapFast}
+          validateAgents={agents.midTier}
           reviewAgents={panelists}
           synthesizeReview
           feedback={feedback}

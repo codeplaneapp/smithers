@@ -1,8 +1,9 @@
 # smithers review cloud: hosted PR reviews, one workflow file, zero secrets
 
 `apps/review` already reviews PRs from CI, but only for this repo: the
-workflow runs from the monorepo checkout and brings its own Claude
-credentials. smithers review cloud turns it into a product. A user adds one
+workflow runs from the monorepo checkout and brings its own agent
+credentials. Codex is the preferred engine whenever it is usable; Claude is
+kept as the unavailable-Codex fallback. smithers review cloud turns it into a product. A user adds one
 GitHub Actions workflow file to their repo. No secrets, no Anthropic account,
 no smithers checkout. The service authenticates the repo, runs the agents
 through our metered inference proxy, posts the review, and hosts the
@@ -70,11 +71,15 @@ Steps, in order:
    skip with a notice naming the magic phrase. `issue_comment` trigger works
    on both modes.
 4. **Review.** Run `bun <action>/../src/cli/main.ts <workspace> --pr <n>
-   --publish` with `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` pointing at
-   the proxy session, `SMITHERS_REVIEW_PUBLISH_URL`/`_TOKEN` pointing at the
-   service with the same session token, and `GH_TOKEN` from the workflow's
-   `github.token`. The review posts onto the PR exactly as the in-repo CI
-   does today.
+   --publish`. If `CODEX_AUTH_JSON` is present, materialize an isolated
+   `$CODEX_HOME/auth.json`, install Codex, and select the Codex engine. Codex
+   uses GPT-5.6 Sol for review/verification and GPT-5.6 Luna for
+   narration/quiz. Without usable Codex, use the caller's
+   `CLAUDE_CODE_OAUTH_TOKEN` or point `ANTHROPIC_BASE_URL` and
+   `ANTHROPIC_API_KEY` at the metered proxy session. In every mode,
+   `SMITHERS_REVIEW_PUBLISH_URL`/`_TOKEN` point at the service with the same
+   session token, and `GH_TOKEN` comes from the workflow's `github.token`.
+   The review posts onto the PR exactly as the in-repo CI does today.
 5. **Quota exceeded** (402 from `/api/sessions`): neutral skip plus a notice
    telling the user the monthly PR quota is spent.
 
@@ -90,12 +95,14 @@ subscription instead of the metered proxy. Two engines:
   `codex login` (`auth_mode: "chatgpt"`, OAuth `tokens`, null
   `OPENAI_API_KEY`). The action writes it to `$CODEX_HOME/auth.json`,
   installs the `codex` CLI, sets `SMITHERS_REVIEW_ENGINE=codex`, and the
-  review runs `CodexAgent` on `gpt-5.5` (note: `gpt-5.5-codex` is rejected
-  for ChatGPT-account auth; plain `gpt-5.5` is required). ChatGPT's device
-  flow makes this credential easy to mint off a CI box.
-- **Claude / setup-token.** A `CLAUDE_CODE_OAUTH_TOKEN` secret (from
-  `claude setup-token`) keeps the engine on Claude with no `ANTHROPIC_*`
-  overrides, so `ClaudeCodeAgent` uses subscription auth.
+  review and verification stages run `CodexAgent` on `gpt-5.6-sol`; the
+  narration and quiz stages run it on `gpt-5.6-luna` with explicit medium
+  reasoning effort. ChatGPT's device flow makes this credential easy to mint
+  off a CI box.
+- **Claude / setup-token (fallback).** When Codex is unavailable, a
+  `CLAUDE_CODE_OAUTH_TOKEN` secret (from `claude setup-token`) keeps the
+  engine on Claude with no `ANTHROPIC_*` overrides, so `ClaudeCodeAgent` uses
+  subscription auth.
 
 In both cases the OIDC session is still minted, the PR still counts against
 quota, and the walkthrough still publishes through the session token; only
@@ -107,8 +114,11 @@ from one personal seat. The funded platform API key is the only licensed
 path for serving other people's repos.
 
 Engine selection lives in `createReviewAgents`, keyed on
-`SMITHERS_REVIEW_ENGINE` (`codex` | `claude`, default `claude`). The action
-sets it from which subscription secret is present.
+`SMITHERS_REVIEW_ENGINE` (`codex` | `claude`). With no explicit override it
+selects Codex when the CLI is installed and authenticated, otherwise Claude.
+The action prefers Codex when `CODEX_AUTH_JSON` is present (including when both
+subscription secrets are present); Claude is selected only for a
+`CLAUDE_CODE_OAUTH_TOKEN` fallback or the service's metered Anthropic proxy.
 
 The README documents the two-trigger workflow template
 (`pull_request` + `issue_comment`) that covers both modes. It must stay on
@@ -167,11 +177,15 @@ has no credits), `ADMIN_TOKEN`, `METRICS_TOKEN`, plus the existing
 
 ### CLI
 
-No flag changes. The action drives everything through environment variables
-the claude CLI already honors (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`).
-`createReviewAgents` gains one rule: when both variables are set, build the
-agent pair in API-key mode instead of subscription mode so CI runs under the
-proxy deterministically.
+No flag changes. The action selects Codex through `SMITHERS_REVIEW_ENGINE` and
+an isolated `CODEX_HOME` whenever usable; the Claude fallback honors
+`ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` for the metered proxy.
+`createReviewAgents` defaults to Codex when it is installed and authenticated:
+GPT-5.6 Sol for review and verdict verification, GPT-5.6 Luna for narration and
+quiz generation. Claude remains the unavailable-Codex fallback. When both
+Anthropic proxy variables are set, build that Claude fallback in API-key mode
+instead of subscription mode so zero-secret hosted CI runs under the proxy
+deterministically.
 
 ## Observability (Grafana Cloud)
 
