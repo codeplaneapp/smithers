@@ -22,6 +22,8 @@ export type SeedState = {
   failPaths?: Set<string>;
   /** When set, the SSE stream endpoint answers with this HTTP status. */
   streamStatus?: number;
+  /** When true, POST /v1/api/approvals/:id (submitApproval) always fails. */
+  failApprovalSubmit?: boolean;
 };
 
 export type InMemoryGateway = {
@@ -54,6 +56,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     outputs: seed.outputs ?? {},
     failPaths: seed.failPaths ?? new Set<string>(),
     streamStatus: seed.streamStatus ?? 200,
+    failApprovalSubmit: seed.failApprovalSubmit ?? false,
   };
 
   const controllers = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -151,6 +154,9 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
       }
       // POST /v1/api/approvals/:id (submitApproval)
       if (path.startsWith("/v1/api/approvals/") && request.method === "POST") {
+        if (state.failApprovalSubmit) {
+          return fail(500, "BOOM", "Forced failure for approval submit");
+        }
         const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
         gateway.approvalsSubmitted.push(body);
         state.approvals = state.approvals.filter(

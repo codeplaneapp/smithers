@@ -8,6 +8,8 @@ export type ApprovalPanelProps = {
   filter?: { workflow?: string; runId?: string; limit?: number };
   /** Poll interval (ms) to refresh the pending list. 0 disables. Default 2000. */
   pollMs?: number;
+  /** Called if the submitApproval RPC throws. */
+  onError?: (error: Error) => void;
   className?: string;
   style?: CSSProperties;
 };
@@ -32,10 +34,11 @@ function approvalKey(row: ApprovalRow): string {
  * {@link useGatewayActions}. Drop it in to make a workflow's human gates
  * actionable from your UI.
  */
-export function ApprovalPanel({ filter, pollMs = 2000, className, style }: ApprovalPanelProps) {
+export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style }: ApprovalPanelProps) {
   const { data, loading, error, refetch } = useGatewayApprovals(filter ? { filter } : undefined);
   const actions = useGatewayActions();
   const [busy, setBusy] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<{ key: string; message: string } | null>(null);
   const approvals = (data ?? []) as ApprovalRow[];
 
   // listApprovals is pull-only on the local gateway path, so poll to stay live.
@@ -46,6 +49,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, className, style }: Appro
   }, [refetch, pollMs]);
 
   const decide = async (row: ApprovalRow, approved: boolean) => {
+    setSubmitError(null);
     setBusy(approvalKey(row));
     try {
       await actions.submitApproval({
@@ -55,6 +59,10 @@ export function ApprovalPanel({ filter, pollMs = 2000, className, style }: Appro
         decision: { approved },
       });
       refetch?.();
+    } catch (cause) {
+      const err = cause instanceof Error ? cause : new Error(String(cause));
+      setSubmitError({ key: approvalKey(row), message: err.message });
+      onError?.(err);
     } finally {
       setBusy(null);
     }
@@ -119,6 +127,9 @@ export function ApprovalPanel({ filter, pollMs = 2000, className, style }: Appro
                 Deny
               </button>
             </div>
+            {submitError?.key === key ? (
+              <div style={{ color: theme.danger, fontSize: 13 }}>{submitError.message}</div>
+            ) : null}
           </div>
         );
       })}

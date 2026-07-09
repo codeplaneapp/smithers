@@ -9457,7 +9457,7 @@ tokens, never hex-plus-alpha.
 | `RunTree` | The node tree for a run (initial snapshot plus live updates). | `runId`, `onSelectNode`, `activeNodeId` |
 | `RunEventLog` | A scrolling, auto-following event log for a run. | `runId`, `maxEvents`, `follow` |
 | `NodeOutputView` | The output of a single node, fetched on demand. | `runId`, `nodeId`, `iteration` |
-| `ApprovalPanel` | The pending approval queue with Approve and Deny buttons. | `filter`, `pollMs` |
+| `ApprovalPanel` | The pending approval queue with Approve and Deny buttons. | `filter`, `pollMs`, `onError` |
 | `LaunchButton` | A button that launches a workflow run. | `workflow`, `input`, `onLaunched` |
 | `WorkflowPicker` | A select of the workflows registered on the Gateway. | `value`, `onChange`, `hasUiOnly` |
 | `ConnectionBadge` | A live Gateway connection indicator. | none |
