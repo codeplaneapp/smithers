@@ -166,7 +166,22 @@ export async function loadWorkflowsFromDir({ dir, source = "unknown" }) {
   const entries = readdirSync(dir);
   for (const entry of entries) {
     const filePath = join(dir, entry);
-    if (!statSync(filePath).isFile()) continue;
+    // A dangling symlink (or a file deleted between readdir and stat) makes
+    // statSync throw ENOENT. Skip that one entry with a diagnostic rather than
+    // aborting discovery for the whole directory, matching the loader's
+    // established per-file failure handling below.
+    let stat;
+    try {
+      stat = statSync(filePath);
+    } catch (error) {
+      diagnostics.push({
+        type: "error",
+        message: `Could not stat workflow entry (${source}): ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+        path: filePath,
+      });
+      continue;
+    }
+    if (!stat.isFile()) continue;
     if (!WORKFLOW_EXTENSIONS.has(extname(entry))) continue;
 
     // Read source text and parse frontmatter BEFORE dynamic import. The

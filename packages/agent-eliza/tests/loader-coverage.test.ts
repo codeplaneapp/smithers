@@ -13,11 +13,36 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { loadWorkflows, loadWorkflowsFromDir } from "../src/conventions/loader.js";
+
+describe("loadWorkflowsFromDir — dangling symlink", () => {
+  test("skips a dangling symlink with a diagnostic instead of aborting the whole directory", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-loader-cov-"));
+    // A valid workflow file that must still be discovered.
+    writeFileSync(
+      join(dir, "good.js"),
+      "export default { name: 'good', steps: [] };",
+      "utf8",
+    );
+    // A symlink pointing at a non-existent target -> statSync throws ENOENT.
+    symlinkSync(join(dir, "missing-target.js"), join(dir, "broken.js"));
+
+    const result = await loadWorkflowsFromDir({ dir, source: "test" });
+
+    // The valid workflow still loads.
+    expect(result.workflows).toHaveLength(1);
+    // The broken symlink is reported, not thrown.
+    const statErrors = result.diagnostics.filter(
+      (d) => d.type === "error" && /Could not stat workflow entry/.test(d.message),
+    );
+    expect(statErrors).toHaveLength(1);
+    expect(statErrors[0]!.path).toBe(join(dir, "broken.js"));
+  });
+});
 
 describe("loadWorkflowsFromDir — non-object export", () => {
   test("emits 'no recognizable export' error when the module default is not an object", async () => {
