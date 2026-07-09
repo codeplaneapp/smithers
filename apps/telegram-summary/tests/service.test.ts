@@ -22,6 +22,8 @@ function buildEnv(overrides: Partial<TelegramSummaryEnv> = {}): TelegramSummaryE
     TELEGRAM_BOT_TOKEN: "test-token",
     TELEGRAM_SOURCE_CHAT_ID: "-100123",
     TELEGRAM_OUTPUT_CHAT_ID: "-100123",
+    OPENAI_API_KEY: "openai-key",
+    OPENAI_MODEL: "gpt-5.6-luna",
     MOONSHOT_API_KEY: "moon-key",
     KIMI_MODEL: "kimi-k2.6",
     ADMIN_TOKEN: "admin",
@@ -35,10 +37,10 @@ type FetchLike = typeof globalThis.fetch;
 
 // A router that returns a stubbed object whose .json() resolves to `body`.
 // This mirrors the pattern the existing worker.test.ts already uses.
-function routeFetch(route: (url: string) => { ok?: boolean; status?: number; body: unknown }): FetchLike {
-  return (async (input: Request | string | URL) => {
+function routeFetch(route: (url: string, init?: RequestInit) => { ok?: boolean; status?: number; body: unknown }): FetchLike {
+  return (async (input: Request | string | URL, init?: RequestInit) => {
     const url = String(input);
-    const { ok = true, status = 200, body } = route(url);
+    const { ok = true, status = 200, body } = route(url, init);
     return { ok, status, json: async () => body } as unknown as Response;
   }) as unknown as FetchLike;
 }
@@ -204,17 +206,26 @@ const richContent = JSON.stringify({
   caveats: ["low confidence"],
 });
 
-function kimiAndTelegramFetch(options: {
+function modelAndTelegramFetch(options: {
+  openai?: { ok?: boolean; status?: number; body?: unknown };
   kimi?: { ok?: boolean; status?: number; body?: unknown };
   send?: { ok?: boolean; status?: number; body?: unknown };
+  requests?: Array<{ url: string; init?: RequestInit }>;
 } = {}): FetchLike {
+  const openai = options.openai ?? {
+    ok: true,
+    status: 200,
+    body: { choices: [{ message: { content: richContent } }] },
+  };
   const kimi = options.kimi ?? {
     ok: true,
     status: 200,
     body: { choices: [{ message: { content: richContent } }] },
   };
   const send = options.send ?? { ok: true, status: 200, body: { ok: true, result: {} } };
-  return routeFetch((url) => {
+  return routeFetch((url, init) => {
+    options.requests?.push({ url, init });
+    if (url.includes("api.openai.com")) return { ok: openai.ok ?? true, status: openai.status ?? 200, body: openai.body };
     if (url.includes("moonshot")) return { ok: kimi.ok ?? true, status: kimi.status ?? 200, body: kimi.body };
     return { ok: send.ok ?? true, status: send.status ?? 200, body: send.body };
   });
@@ -275,7 +286,7 @@ describe("service digest", () => {
     });
     await ingestTelegramUpdates(env, 1782931400000);
 
-    globalThis.fetch = kimiAndTelegramFetch();
+    globalThis.fetch = modelAndTelegramFetch();
     const result = await runDailyDigest(env, 1782931400000);
     expect(result.status).toBe("created");
     expect(result.posted).toBe(true);
@@ -295,13 +306,14 @@ describe("service digest", () => {
 
     const snapshot = await status(env);
     expect(snapshot.digests).toBe(1);
-    expect(snapshot.kimiConfigured).toBe(true);
+    expect(snapshot.openaiConfigured).toBe(true);
+    expect(snapshot.kimiFallbackConfigured).toBe(true);
   });
 
   test("records an error when telegram sendMessage fails", async () => {
     const env = buildEnv();
     await seedNoDateMessages(env, 2);
-    globalThis.fetch = kimiAndTelegramFetch({
+    globalThis.fetch = modelAndTelegramFetch({
       send: { ok: false, status: 400, body: { ok: false, description: "chat not found" } },
     });
     const result = await runDailyDigest(env, 1782931400000);
@@ -310,31 +322,76 @@ describe("service digest", () => {
     expect(result.error).toContain("chat not found");
   });
 
+  test("uses GPT-5.6 Luna first with explicit medium reasoning", async () => {
+    const env = buildEnv();
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    await seedNoDateMessages(env, 1);
+    globalThis.fetch = modelAndTelegramFetch({ requests });
+
+    const result = await runDailyDigest(env, 1782931400000);
+
+    expect(result.status).toBe("created");
+    expect(result.model).toBe("gpt-5.6-luna");
+    const request = requests.find((entry) => entry.url.includes("api.openai.com"));
+    expect(request).toBeDefined();
+    const body = JSON.parse(String(request?.init?.body)) as Record<string, unknown>;
+    expect(body.model).toBe("gpt-5.6-luna");
+    expect(body.reasoning_effort).toBe("medium");
+    expect(body.max_completion_tokens).toBe(4096);
+    expect(body.temperature).toBeUndefined();
+    expect(body.max_tokens).toBeUndefined();
+    expect(requests.some((entry) => entry.url.includes("moonshot"))).toBe(false);
+  });
+
+  test("uses the Kimi fallback when the OpenAI key is unavailable", async () => {
+    const env = buildEnv({ OPENAI_API_KEY: undefined });
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    await seedNoDateMessages(env, 1);
+    globalThis.fetch = modelAndTelegramFetch({ requests });
+
+    const result = await runDailyDigest(env, 1782931400000);
+
+    expect(result.status).toBe("created");
+    expect(result.model).toBe("kimi-k2.6");
+    expect(requests.some((entry) => entry.url.includes("api.openai.com"))).toBe(false);
+    expect(requests.some((entry) => entry.url.includes("moonshot"))).toBe(true);
+  });
+
   test("reports a config error when the output chat/token is missing", async () => {
     const env = buildEnv();
     await seedNoDateMessages(env, 1);
     env.TELEGRAM_BOT_TOKEN = undefined;
-    globalThis.fetch = kimiAndTelegramFetch();
+    globalThis.fetch = modelAndTelegramFetch();
     const result = await runDailyDigest(env, 1782931400000);
     expect(result.status).toBe("created");
     expect(result.posted).toBe(false);
     expect(result.error).toContain("Telegram token or output chat id is not configured");
   });
 
-  test("parses prose-wrapped JSON from kimi", async () => {
+  test("falls back to Kimi after an OpenAI failure and records the fallback model", async () => {
     const env = buildEnv();
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
     await seedNoDateMessages(env, 1);
-    globalThis.fetch = kimiAndTelegramFetch({
+    globalThis.fetch = modelAndTelegramFetch({
+      openai: { ok: false, status: 503, body: { error: { message: "OpenAI unavailable" } } },
       kimi: { ok: true, status: 200, body: { choices: [{ message: { content: `Sure!\n${richContent}\nDone.` } }] } },
+      requests,
     });
     const result = await runDailyDigest(env, 1782931400000);
     expect(result.status).toBe("created");
+    expect(result.model).toBe("kimi-k2.6");
+    expect(requests.filter((entry) => entry.url.includes("chat/completions")).map((entry) => entry.url)).toEqual([
+      "https://api.openai.com/v1/chat/completions",
+      "https://api.moonshot.ai/v1/chat/completions",
+    ]);
+    expect((await latestDigest(env.DB))?.model).toBe("kimi-k2.6");
   });
 
   test("fails when kimi returns a non-string content", async () => {
     const env = buildEnv();
     await seedNoDateMessages(env, 1);
-    globalThis.fetch = kimiAndTelegramFetch({
+    globalThis.fetch = modelAndTelegramFetch({
+      openai: { ok: false, status: 503, body: { error: { message: "OpenAI unavailable" } } },
       kimi: { ok: true, status: 200, body: { choices: [{ message: { content: { not: "a string" } } }] } },
     });
     const result = await runDailyDigest(env, 1782931400000);
@@ -345,7 +402,8 @@ describe("service digest", () => {
   test("fails when kimi returns no JSON object", async () => {
     const env = buildEnv();
     await seedNoDateMessages(env, 1);
-    globalThis.fetch = kimiAndTelegramFetch({
+    globalThis.fetch = modelAndTelegramFetch({
+      openai: { ok: false, status: 503, body: { error: { message: "OpenAI unavailable" } } },
       kimi: { ok: true, status: 200, body: { choices: [{ message: { content: "no json here" } }] } },
     });
     const result = await runDailyDigest(env, 1782931400000);
@@ -356,7 +414,8 @@ describe("service digest", () => {
   test("fails when kimi returns an HTTP error", async () => {
     const env = buildEnv();
     await seedNoDateMessages(env, 1);
-    globalThis.fetch = kimiAndTelegramFetch({
+    globalThis.fetch = modelAndTelegramFetch({
+      openai: { ok: false, status: 503, body: { error: { message: "OpenAI unavailable" } } },
       kimi: { ok: false, status: 500, body: { error: { message: "rate limited" } } },
     });
     const result = await runDailyDigest(env, 1782931400000);
@@ -364,22 +423,32 @@ describe("service digest", () => {
     expect(result.error).toContain("rate limited");
   });
 
-  test("fails when the moonshot key is absent (guard before calling the model)", async () => {
-    const env = buildEnv({ MOONSHOT_API_KEY: undefined });
+  test("fails before calling a model when neither primary nor fallback key is configured", async () => {
+    const env = buildEnv({ OPENAI_API_KEY: undefined, MOONSHOT_API_KEY: undefined });
     await seedNoDateMessages(env, 1);
     const result = await runDailyDigest(env, 1782931400000);
-    expect(result.status).toBe("missing-kimi-key");
+    expect(result.status).toBe("missing-model-key");
+    expect(result.error).toContain("OPENAI_API_KEY");
+    expect(result.error).toContain("MOONSHOT_API_KEY");
   });
 });
 
 describe("service status defaults", () => {
   test("reports null offset and default model on a fresh db", async () => {
-    const env = buildEnv({ KIMI_MODEL: undefined, MOONSHOT_API_KEY: undefined, INGEST_CRON: undefined, DIGEST_CRON: undefined });
+    const env = buildEnv({
+      OPENAI_API_KEY: undefined,
+      OPENAI_MODEL: undefined,
+      KIMI_MODEL: undefined,
+      MOONSHOT_API_KEY: undefined,
+      INGEST_CRON: undefined,
+      DIGEST_CRON: undefined,
+    });
     const snapshot = await status(env);
     expect(snapshot.messages).toBe(0);
     expect(snapshot.lastUpdateId).toBeNull();
-    expect(snapshot.model).toBe("kimi-k2.6");
-    expect(snapshot.kimiConfigured).toBe(false);
+    expect(snapshot.model).toBe("gpt-5.6-luna");
+    expect(snapshot.openaiConfigured).toBe(false);
+    expect(snapshot.kimiFallbackConfigured).toBe(false);
     expect(snapshot.ingestCron).toBeNull();
     expect(snapshot.digestCron).toBeNull();
     expect(snapshot.latestDigestId).toBeNull();

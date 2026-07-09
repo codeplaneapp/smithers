@@ -15,6 +15,8 @@ function buildEnv(overrides: Partial<TelegramSummaryEnv> = {}): TelegramSummaryE
     TELEGRAM_BOT_TOKEN: "test-token",
     TELEGRAM_SOURCE_CHAT_ID: "-100123",
     TELEGRAM_OUTPUT_CHAT_ID: "-100123",
+    OPENAI_API_KEY: "openai-key",
+    OPENAI_MODEL: "gpt-5.6-luna",
     KIMI_MODEL: "kimi-k2.6",
     ADMIN_TOKEN: "admin",
     INGEST_CRON: "*/15 * * * *",

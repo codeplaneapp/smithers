@@ -5,8 +5,9 @@ Source of the Cloudflare Worker behind telegram-summary.smithers.sh.
 - `worker.ts` — default export: HTTP routes and cron dispatch, plus the
   constant-time admin bearer check (`timingSafeEqual`).
 - `service.ts` — the whole ingest/digest pipeline: Telegram `getUpdates` -> D1
-  `messages`, Kimi (Moonshot) digest generation, `sendMessage` post-back, and
-  the `status`/`latestDigest`/`listDigests` reads.
+  `messages`, OpenAI GPT-5.6 Luna digest generation with Kimi (Moonshot) as a
+  runtime fallback, `sendMessage` post-back, and the
+  `status`/`latestDigest`/`listDigests` reads.
 - `ui.ts` — self-contained dashboard HTML, the `json`/`notFound` response
   helpers, and `digestPayload` (API shaping for digest rows).
 - `schema.ts` — idempotent D1 DDL; `ensureSchema` runs at every entry point.
@@ -21,8 +22,11 @@ Gotchas:
 
 - Worker binding names (`TELEGRAM_SOURCE_CHAT_ID`, `DIGEST_WINDOW_HOURS`, ...)
   differ from the deploy-time `TELEGRAM_SUMMARY_*` env vars — `alchemy.run.ts`
-  does the mapping (and supplies the `KIMI_MODEL` default that
-  `DEFAULT_KIMI_MODEL` in `service.ts` must stay in sync with).
+  does the mapping. It also supplies the `OPENAI_MODEL` and `KIMI_MODEL`
+  defaults that their corresponding constants in `service.ts` must match.
+- `OPENAI_API_KEY` is the primary summarizer credential. `MOONSHOT_API_KEY`
+  enables only the Kimi runtime fallback used after an unavailable or failed
+  OpenAI request.
 - Raw ingested messages are stored in D1 but deliberately never exposed by the
   dashboard API.
 - Mutation endpoints (`/api/ingest`, `/api/run-digest`) require the

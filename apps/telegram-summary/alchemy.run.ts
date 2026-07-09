@@ -2,16 +2,17 @@
  * Cloudflare deployment for telegram-summary.smithers.sh.
  *
  * The Worker is the production bot service: Cloudflare cron ingests Telegram
- * updates into D1, runs a Kimi daily digest, posts back to Telegram, and serves
- * a small dashboard. Smithers remains the local workflow/replay surface.
+ * updates into D1, runs a Codex 5.6 Luna daily digest, posts back to Telegram,
+ * and serves a small dashboard. Smithers remains the local workflow/replay
+ * surface. Kimi is retained only as a runtime fallback.
  *
  * Deploy:
  *   TELEGRAM_BOT_TOKEN=... TELEGRAM_SUMMARY_SOURCE_CHAT_ID=... \
- *   TELEGRAM_SUMMARY_ADMIN_TOKEN=... MOONSHOT_API_KEY=... \
+ *   TELEGRAM_SUMMARY_ADMIN_TOKEN=... OPENAI_API_KEY=... \
  *   CLOUDFLARE_SMITHERS_ZONE_ID=... bun x alchemy deploy
  *
- * MOONSHOT_API_KEY can be omitted for an infrastructure-only deploy; digest
- * runs will report missing Kimi credentials until the secret is provided.
+ * Both model keys can be omitted for an infrastructure-only deploy. Set
+ * MOONSHOT_API_KEY only when Kimi should be available as a runtime fallback.
  */
 import alchemy from "alchemy";
 import { D1Database, Worker } from "alchemy/cloudflare";
@@ -35,6 +36,7 @@ const db = await D1Database("telegram-summary-db", {
 
 const secrets = {
   TELEGRAM_BOT_TOKEN: optionalSecret("TELEGRAM_BOT_TOKEN"),
+  OPENAI_API_KEY: optionalSecret("OPENAI_API_KEY"),
   MOONSHOT_API_KEY: optionalSecret("MOONSHOT_API_KEY"),
   ADMIN_TOKEN: optionalSecret("TELEGRAM_SUMMARY_ADMIN_TOKEN"),
 };
@@ -54,12 +56,14 @@ export const worker = await Worker("telegram-summary", {
     TELEGRAM_SOURCE_CHAT_ID: optionalText("TELEGRAM_SUMMARY_SOURCE_CHAT_ID") ?? "",
     TELEGRAM_OUTPUT_CHAT_ID: optionalText("TELEGRAM_SUMMARY_OUTPUT_CHAT_ID") ?? "",
     TELEGRAM_OUTPUT_THREAD_ID: optionalText("TELEGRAM_SUMMARY_OUTPUT_THREAD_ID") ?? "",
+    OPENAI_MODEL: optionalText("OPENAI_MODEL") ?? "gpt-5.6-luna",
     KIMI_MODEL: optionalText("KIMI_MODEL") ?? "kimi-k2.6",
     DIGEST_WINDOW_HOURS: optionalText("TELEGRAM_SUMMARY_WINDOW_HOURS") ?? "24",
     DIGEST_TOPIC_HINT: optionalText("TELEGRAM_SUMMARY_TOPIC_HINT") ?? "",
     INGEST_CRON: ingestCron,
     DIGEST_CRON: digestCron,
     ...(secrets.TELEGRAM_BOT_TOKEN ? { TELEGRAM_BOT_TOKEN: alchemy.secret(secrets.TELEGRAM_BOT_TOKEN) } : {}),
+    ...(secrets.OPENAI_API_KEY ? { OPENAI_API_KEY: alchemy.secret(secrets.OPENAI_API_KEY) } : {}),
     ...(secrets.MOONSHOT_API_KEY ? { MOONSHOT_API_KEY: alchemy.secret(secrets.MOONSHOT_API_KEY) } : {}),
     ...(secrets.ADMIN_TOKEN ? { ADMIN_TOKEN: alchemy.secret(secrets.ADMIN_TOKEN) } : {}),
   },

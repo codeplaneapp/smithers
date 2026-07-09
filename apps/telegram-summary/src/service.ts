@@ -2,20 +2,22 @@ import type { D1Database, TelegramSummaryEnv } from "./env.ts";
 import { ensureSchema } from "./schema.ts";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
+const OPENAI_CHAT_COMPLETIONS = "https://api.openai.com/v1/chat/completions";
 const MOONSHOT_CHAT_COMPLETIONS = "https://api.moonshot.ai/v1/chat/completions";
 // Telegram sendMessage rejects texts over 4096 chars; 3800 leaves headroom so
 // splitTelegramText's trim/newline handling can never overshoot.
 const TELEGRAM_SEND_LIMIT = 3800;
 const STATE_LAST_UPDATE_ID = "telegram.last_update_id";
-// Must stay in sync with the KIMI_MODEL binding default in alchemy.run.ts.
+// These must stay in sync with the model binding defaults in alchemy.run.ts.
+const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
 const DEFAULT_KIMI_MODEL = "kimi-k2.6";
 // getUpdates page size; also the ingest loop's exit check (a short page means
 // Telegram has no more updates), so both uses must agree.
 const GETUPDATES_PAGE_SIZE = 100;
 // Bounds one cron invocation; any remaining backlog is picked up by the next run.
 const MAX_GETUPDATES_BATCHES_PER_RUN = 5;
-// Caps the prompt payload sent to Kimi; transcriptFor keeps the TAIL (the most
-// recent messages) when over budget.
+// Caps the prompt payload sent to the summarizer; transcriptFor keeps the TAIL
+// (the most recent messages) when over budget.
 const TRANSCRIPT_MAX_CHARS = 120000;
 
 export interface MessageRecord {
@@ -84,7 +86,7 @@ export interface DigestRunResult {
   periodStartMs: number;
   periodEndMs: number;
   model: string;
-  status: "created" | "empty" | "missing-kimi-key" | "failed";
+  status: "created" | "empty" | "missing-model-key" | "failed";
   posted: boolean;
   error: string | null;
 }
@@ -169,6 +171,13 @@ function sourceChatId(env: TelegramSummaryEnv): string | null {
 
 function outputChatId(env: TelegramSummaryEnv): string | null {
   return compact(env.TELEGRAM_OUTPUT_CHAT_ID) ?? sourceChatId(env);
+}
+
+function configuredDigestModel(env: TelegramSummaryEnv): string {
+  if (compact(env.OPENAI_API_KEY) || !compact(env.MOONSHOT_API_KEY)) {
+    return compact(env.OPENAI_MODEL) ?? DEFAULT_OPENAI_MODEL;
+  }
+  return compact(env.KIMI_MODEL) ?? DEFAULT_KIMI_MODEL;
 }
 
 function parseThreadId(env: TelegramSummaryEnv): number | null {
@@ -389,62 +398,75 @@ function normalizeDigest(value: unknown): DigestJson {
   };
 }
 
-async function createKimiDigest(
+function digestRequestMessages(
   env: TelegramSummaryEnv,
   messages: MessageRow[],
   startMs: number,
   endMs: number,
-): Promise<DigestJson> {
-  const apiKey = compact(env.MOONSHOT_API_KEY);
-  if (!apiKey) throw new Error("MOONSHOT_API_KEY is not configured.");
-  const model = compact(env.KIMI_MODEL) ?? DEFAULT_KIMI_MODEL;
+): Array<{ role: "system" | "user"; content: string }> {
   const hint = compact(env.DIGEST_TOPIC_HINT);
+  return [
+    {
+      role: "system",
+      content:
+        "You summarize busy Telegram group discussions for members who missed the day. Be concise, specific, and preserve concrete names, tools, links, decisions, and disagreements. Return only JSON.",
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        task: "Create a daily Telegram group digest.",
+        period: {
+          start: new Date(startMs).toISOString(),
+          end: new Date(endMs).toISOString(),
+        },
+        topicHint: hint,
+        requiredJsonShape: {
+          headline: "short headline",
+          summary: "one concise paragraph",
+          topics: [
+            {
+              title: "topic title",
+              summary: "what was discussed",
+              keyPoints: ["specific point"],
+              participants: ["name or handle"],
+              followUps: ["optional follow-up"],
+            },
+          ],
+          actionItems: ["ownerless action item"],
+          openQuestions: ["question"],
+          notableLinks: [{ label: "label", url: "https://example.com", context: "why it came up" }],
+          caveats: ["uncertainty or low confidence note"],
+        },
+        transcript: transcriptFor(messages, TRANSCRIPT_MAX_CHARS),
+      }),
+    },
+  ];
+}
+
+async function requestDigest(
+  endpoint: string,
+  apiKey: string,
+  model: string,
+  provider: string,
+  messages: Array<{ role: "system" | "user"; content: string }>,
+  reasoningEffort?: "medium",
+): Promise<DigestJson> {
   const body: Record<string, unknown> = {
     model,
-    temperature: 0.2,
-    max_tokens: 4096,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You summarize busy Telegram group discussions for members who missed the day. Be concise, specific, and preserve concrete names, tools, links, decisions, and disagreements. Return only JSON.",
-      },
-      {
-        role: "user",
-        content: JSON.stringify({
-          task: "Create a daily Telegram group digest.",
-          period: {
-            start: new Date(startMs).toISOString(),
-            end: new Date(endMs).toISOString(),
-          },
-          topicHint: hint,
-          requiredJsonShape: {
-            headline: "short headline",
-            summary: "one concise paragraph",
-            topics: [
-              {
-                title: "topic title",
-                summary: "what was discussed",
-                keyPoints: ["specific point"],
-                participants: ["name or handle"],
-                followUps: ["optional follow-up"],
-              },
-            ],
-            actionItems: ["ownerless action item"],
-            openQuestions: ["question"],
-            notableLinks: [{ label: "label", url: "https://example.com", context: "why it came up" }],
-            caveats: ["uncertainty or low confidence note"],
-          },
-          transcript: transcriptFor(messages, TRANSCRIPT_MAX_CHARS),
-        }),
-      },
-    ],
+    messages,
   };
+  if (reasoningEffort) {
+    body.reasoning_effort = reasoningEffort;
+    body.max_completion_tokens = 4096;
+  } else {
+    body.temperature = 0.2;
+    body.max_tokens = 4096;
+  }
   if (/^kimi-k2\.(5|6)\b/.test(model)) {
     body.thinking = { type: "disabled" };
   }
 
-  const response = await fetch(MOONSHOT_CHAT_COMPLETIONS, {
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       authorization: `Bearer ${apiKey}`,
@@ -454,11 +476,59 @@ async function createKimiDigest(
   });
   const parsed = (await response.json()) as ChatCompletionResponse;
   if (!response.ok) {
-    throw new Error(parsed.error?.message ?? `Kimi request failed with HTTP ${response.status}`);
+    throw new Error(parsed.error?.message ?? `${provider} request failed with HTTP ${response.status}`);
   }
   const content = parsed.choices?.[0]?.message?.content;
-  if (typeof content !== "string") throw new Error("Kimi response did not include message content.");
+  if (typeof content !== "string") throw new Error(`${provider} response did not include message content.`);
   return normalizeDigest(extractJson(content));
+}
+
+async function createCodexFirstDigest(
+  env: TelegramSummaryEnv,
+  messages: MessageRow[],
+  startMs: number,
+  endMs: number,
+): Promise<{ digest: DigestJson; model: string }> {
+  const requestMessages = digestRequestMessages(env, messages, startMs, endMs);
+  const openaiKey = compact(env.OPENAI_API_KEY);
+  const openaiModel = compact(env.OPENAI_MODEL) ?? DEFAULT_OPENAI_MODEL;
+  let primaryError: unknown;
+
+  if (openaiKey) {
+    try {
+      return {
+        digest: await requestDigest(
+          OPENAI_CHAT_COMPLETIONS,
+          openaiKey,
+          openaiModel,
+          "OpenAI",
+          requestMessages,
+          "medium",
+        ),
+        model: openaiModel,
+      };
+    } catch (error) {
+      primaryError = error;
+    }
+  }
+
+  const kimiKey = compact(env.MOONSHOT_API_KEY);
+  if (kimiKey) {
+    const kimiModel = compact(env.KIMI_MODEL) ?? DEFAULT_KIMI_MODEL;
+    return {
+      digest: await requestDigest(
+        MOONSHOT_CHAT_COMPLETIONS,
+        kimiKey,
+        kimiModel,
+        "Kimi fallback",
+        requestMessages,
+      ),
+      model: kimiModel,
+    };
+  }
+
+  if (primaryError instanceof Error) throw primaryError;
+  throw new Error("OPENAI_API_KEY is not configured and no MOONSHOT_API_KEY fallback is available.");
 }
 
 function renderTelegramDigest(digest: DigestJson, messages: MessageRow[], startMs: number, endMs: number): string {
@@ -576,7 +646,7 @@ export async function runDailyDigest(env: TelegramSummaryEnv, nowMs = Date.now()
   const hours = Number.isFinite(parsedHours) ? Math.min(168, Math.max(1, Math.floor(parsedHours))) : 24;
   const periodEndMs = nowMs;
   const periodStartMs = nowMs - hours * 60 * 60 * 1000;
-  const model = compact(env.KIMI_MODEL) ?? DEFAULT_KIMI_MODEL;
+  const configuredModel = configuredDigestModel(env);
   const messages = await selectMessagesForDigest(env.DB, periodStartMs, periodEndMs);
   if (messages.length === 0) {
     return {
@@ -584,27 +654,27 @@ export async function runDailyDigest(env: TelegramSummaryEnv, nowMs = Date.now()
       messageCount: 0,
       periodStartMs,
       periodEndMs,
-      model,
+      model: configuredModel,
       status: "empty",
       posted: false,
       error: null,
     };
   }
-  if (!compact(env.MOONSHOT_API_KEY)) {
+  if (!compact(env.OPENAI_API_KEY) && !compact(env.MOONSHOT_API_KEY)) {
     return {
       id: null,
       messageCount: messages.length,
       periodStartMs,
       periodEndMs,
-      model,
-      status: "missing-kimi-key",
+      model: configuredModel,
+      status: "missing-model-key",
       posted: false,
-      error: "MOONSHOT_API_KEY is not configured.",
+      error: "OPENAI_API_KEY is not configured and no MOONSHOT_API_KEY fallback is available.",
     };
   }
 
   try {
-    const digest = await createKimiDigest(env, messages, periodStartMs, periodEndMs);
+    const { digest, model } = await createCodexFirstDigest(env, messages, periodStartMs, periodEndMs);
     const telegramText = renderTelegramDigest(digest, messages, periodStartMs, periodEndMs);
     const id = `digest-${new Date(nowMs).toISOString().replace(/[:.]/g, "-")}`;
     await insertDigest(env.DB, id, digest, telegramText, model, messages.length, periodStartMs, periodEndMs, nowMs);
@@ -626,7 +696,7 @@ export async function runDailyDigest(env: TelegramSummaryEnv, nowMs = Date.now()
       messageCount: messages.length,
       periodStartMs,
       periodEndMs,
-      model,
+      model: configuredModel,
       status: "failed",
       posted: false,
       error: error instanceof Error ? error.message : String(error),
@@ -671,8 +741,9 @@ export async function status(env: TelegramSummaryEnv): Promise<Record<string, un
     digests: digestRow?.count ?? 0,
     lastUpdateId: offset ? Number(offset) : null,
     latestDigestId: latest?.id ?? null,
-    model: compact(env.KIMI_MODEL) ?? DEFAULT_KIMI_MODEL,
-    kimiConfigured: Boolean(compact(env.MOONSHOT_API_KEY)),
+    model: configuredDigestModel(env),
+    openaiConfigured: Boolean(compact(env.OPENAI_API_KEY)),
+    kimiFallbackConfigured: Boolean(compact(env.MOONSHOT_API_KEY)),
     telegramConfigured: Boolean(compact(env.TELEGRAM_BOT_TOKEN)),
     outputChatConfigured: Boolean(outputChatId(env)),
     ingestCron: compact(env.INGEST_CRON),

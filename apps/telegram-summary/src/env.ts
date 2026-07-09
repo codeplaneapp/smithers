@@ -32,6 +32,8 @@ export interface TelegramSummaryEnv {
   TELEGRAM_SOURCE_CHAT_ID?: string;
   TELEGRAM_OUTPUT_CHAT_ID?: string;
   TELEGRAM_OUTPUT_THREAD_ID?: string;
+  OPENAI_API_KEY?: string;
+  OPENAI_MODEL?: string;
   MOONSHOT_API_KEY?: string;
   KIMI_MODEL?: string;
   ADMIN_TOKEN?: string;

@@ -8,7 +8,7 @@ function digestRow(overrides: Partial<DigestRow> = {}): DigestRow {
     period_start_ms: 1000,
     period_end_ms: 2000,
     message_count: 3,
-    model: "kimi-k2.6",
+    model: "gpt-5.6-luna",
     summary_json: JSON.stringify({ headline: "Hi", summary: "There", topics: [] }),
     telegram_text: "Hi\nThere",
     created_at_ms: 1500,
@@ -30,7 +30,7 @@ describe("ui", () => {
     expect(payload?.periodStartMs).toBe(1000);
     expect(payload?.periodEndMs).toBe(2000);
     expect(payload?.messageCount).toBe(3);
-    expect(payload?.model).toBe("kimi-k2.6");
+    expect(payload?.model).toBe("gpt-5.6-luna");
     expect(payload?.postedAtMs).toBe(1600);
     expect(payload?.telegramText).toBe("Hi\nThere");
     expect((payload?.summary as { headline: string }).headline).toBe("Hi");

@@ -12,6 +12,8 @@ function buildEnv(overrides: Partial<TelegramSummaryEnv> = {}): TelegramSummaryE
     TELEGRAM_BOT_TOKEN: "test-token",
     TELEGRAM_SOURCE_CHAT_ID: "-100123",
     TELEGRAM_OUTPUT_CHAT_ID: "-100123",
+    OPENAI_API_KEY: "openai-key",
+    OPENAI_MODEL: "gpt-5.6-luna",
     KIMI_MODEL: "kimi-k2.6",
     ADMIN_TOKEN: "admin",
     INGEST_CRON: "*/15 * * * *",
@@ -108,8 +110,8 @@ describe("telegram summary worker", () => {
     expect(snapshot.lastUpdateId).toBe(10);
   });
 
-  test("daily digest reports missing Kimi key without calling the model", async () => {
-    const env = buildEnv({ MOONSHOT_API_KEY: undefined });
+  test("daily digest reports missing model credentials without calling a model", async () => {
+    const env = buildEnv({ OPENAI_API_KEY: undefined, MOONSHOT_API_KEY: undefined });
     globalThis.fetch = (async () =>
       Response.json({
         ok: true,
@@ -130,8 +132,9 @@ describe("telegram summary worker", () => {
     await ingestTelegramUpdates(env, 1782931300000);
     const result = await runDailyDigest(env, 1782931400000);
 
-    expect(result.status).toBe("missing-kimi-key");
+    expect(result.status).toBe("missing-model-key");
     expect(result.messageCount).toBe(1);
+    expect(result.error).toContain("OPENAI_API_KEY");
     expect(result.error).toContain("MOONSHOT_API_KEY");
   });
 });
