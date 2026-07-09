@@ -211,3 +211,32 @@ test("agents add appends to a detection-based agents.ts without dropping detecte
     // Detection-based provider survives the regen.
     expect(agentsTs).toContain("claude: ClaudeCodeAgent");
 }, 20_000);
+
+test("agents add preserves a legacy unknown-provider account, and agents remove deletes it", () => {
+    // #529: a pre-0.25 `gemini` subscription row is unparseable by this build,
+    // but rewriting accounts.json must not erase the credentials it points at.
+    const repo = createTempRepo();
+    const home = newSmithersHome();
+    const accountsPath = join(home, "accounts.json");
+    const legacy = { label: "my-gemini", provider: "gemini", configDir: "/p/gem", model: "gemini-2.0" };
+    writeFileSync(accountsPath, `${JSON.stringify({ version: 1, accounts: [legacy] }, null, 2)}\n`, { mode: 0o600 });
+
+    const added = runSmithers(
+        ["agents", "add", "--provider", "kimi", "--label", "kimi-1", "--skip-login"],
+        { cwd: repo.dir, format: "json", env: { SMITHERS_HOME: home } },
+    );
+    expect(added.exitCode).toBe(0);
+    const afterAdd = JSON.parse(readFileSync(accountsPath, "utf8")).accounts;
+    expect(afterAdd).toContainEqual(legacy);
+    expect(afterAdd.map((a) => a.label).sort()).toEqual(["kimi-1", "my-gemini"]);
+    // The legacy row stays invisible to the read API.
+    const listed = runSmithers(["agents", "list"], { cwd: repo.dir, format: "json", env: { SMITHERS_HOME: home } });
+    expect(listed.json.accounts.map((a) => a.label)).toEqual(["kimi-1"]);
+
+    // `agents remove` is the supported way to clean it up.
+    const removed = runSmithers(["agents", "remove", "my-gemini"], {
+        cwd: repo.dir, format: "json", env: { SMITHERS_HOME: home },
+    });
+    expect(removed.exitCode).toBe(0);
+    expect(JSON.parse(readFileSync(accountsPath, "utf8")).accounts.map((a) => a.label)).toEqual(["kimi-1"]);
+}, 20_000);

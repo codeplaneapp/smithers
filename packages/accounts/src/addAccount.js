@@ -38,8 +38,13 @@ export function addAccount(account, options = {}) {
     // same one we persist.
     return withAccountsLock(env, () => {
         const existing = readAccounts(env);
+        // Legacy rows this build can't parse ride through the rewrite untouched:
+        // an unrelated add must not destroy the configDir/apiKey they point at.
+        // They still own their label, so a collision is a real duplicate.
+        const preserved = existing.unknownAccounts ?? [];
         const conflict = existing.accounts.findIndex((entry) => entry.label === account.label);
-        if (conflict >= 0 && !options.replace) {
+        const preservedConflict = preserved.findIndex((entry) => entry.label === account.label);
+        if ((conflict >= 0 || preservedConflict >= 0) && !options.replace) {
             throw new SmithersError("ACCOUNT_DUPLICATE_LABEL", `An account with label "${account.label}" already exists. Pass replace: true to overwrite, or use a different label.`);
         }
         /** @type {Account} */
@@ -54,7 +59,9 @@ export function addAccount(account, options = {}) {
         const next = conflict >= 0
             ? existing.accounts.map((entry, i) => (i === conflict ? persisted : entry))
             : [...existing.accounts, persisted];
-        writeAccounts({ version: 1, accounts: next }, env);
+        // `replace: true` on a legacy label supersedes it — the migration path.
+        const nextUnknown = preserved.filter((entry) => entry.label !== account.label);
+        writeAccounts({ version: 1, accounts: next, unknownAccounts: nextUnknown }, env);
         return persisted;
     });
 }

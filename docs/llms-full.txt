@@ -3077,7 +3077,7 @@ commands[88]:
 - **Serve mode** (`up --serve`): starts the HTTP app and keeps the process alive until interrupted. Add `--supervise` to run stale-run recovery in the same process.
 - **Watch mode**: `ps`, `events`, `inspect`, `node`, and `tree` have watch-style behavior. They stop cleanly on SIGINT and most stop when the run becomes terminal.
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
-- **Account commands**: `agents add|list|remove|test` manage `~/.smithers/accounts.json`; subscription providers use CLI config directories, API providers use API keys.
+- **Account commands**: `agents add|list|remove|test` manage `~/.smithers/accounts.json`; subscription providers use CLI config directories, API providers use API keys. Legacy entries with an unknown provider are preserved across `add`/`remove`; `agents remove <label>` deletes one.
 - **Output format**: all commands honour `--format toon|json|yaml|md|jsonl`; `--filter-output <key.path>` extracts a nested field from JSON output.
 - **Interactive TUI**: use `bunx smithers-orchestrator up --interactive` or `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive` for the current full-screen terminal monitor. `bunx smithers-orchestrator init` also has a human setup wizard. See Interactive TUI.
 
@@ -8816,7 +8816,12 @@ connection setup problems are not hidden behind unrelated source-store errors.
 Unknown legacy account providers are tolerated entry-by-entry. For example, an
 old `"provider": "gemini"` subscription is skipped with a warning that names the
 account label and valid providers, while the remaining valid accounts still
-load. `ACCOUNTS_FILE_INVALID` is reserved for invalid JSON or entries whose
+load. Such an entry is left out of the active account list but preserved
+verbatim in `accounts.json` across later `agents add` and `agents remove` calls,
+so an unrelated change never destroys the credentials its `configDir` points at.
+Run `smithers agents remove <label>` to delete it, or `smithers agents add
+--label <label> --replace ...` to migrate it onto a supported provider.
+`ACCOUNTS_FILE_INVALID` is reserved for invalid JSON or entries whose
 known provider shape is malformed.
 
 ## HTTP API Errors

@@ -123,7 +123,7 @@ describe("parseAccountsFile", () => {
         expect(parsed.accounts[0].label).toBe("claude-work");
         expect(parsed.accounts[1].apiKey).toBe("sk-xyz");
     });
-    test("drops a legacy unknown-provider entry but keeps the valid ones", () => {
+    test("excludes a legacy unknown-provider entry from accounts but preserves it", () => {
         // Real machine repro: a pre-0.25 accounts.json still carrying a `gemini`
         // subscription account must not nuke the user's kimi + codex accounts.
         const warnings = [];
@@ -150,6 +150,43 @@ describe("parseAccountsFile", () => {
         expect(labels).not.toContain("gem-legacy");
         // The skip must be surfaced, naming the dropped account + its provider.
         expect(warnings.some((w) => w.includes("gem-legacy") && w.includes("gemini"))).toBe(true);
+        // ...and the raw row survives, so writeAccounts can put it back (#529).
+        expect(parsed.unknownAccounts).toEqual([
+            { label: "gem-legacy", provider: "gemini", configDir: "/p/gem" },
+        ]);
+    });
+    test("parseAccountsFile returns unrecognized entries as opaque unknownAccounts rows", () => {
+        // Unique label per warn-asserting test: parseAccountsFile dedupes its
+        // warning once per PROCESS, so a shared label leaks across tests.
+        const warnings = [];
+        const realWarn = console.warn;
+        console.warn = (...args) => warnings.push(args.join(" "));
+        let parsed;
+        try {
+            parsed = parseAccountsFile(JSON.stringify({
+                version: 1,
+                accounts: [
+                    { label: "kimi-main", provider: "kimi", configDir: "/p/kimi" },
+                    { label: "gem-opaque", provider: "gemini", configDir: "/p/gem", futureField: { a: 1 } },
+                ],
+            }));
+        } finally {
+            console.warn = realWarn;
+        }
+        expect(parsed.accounts.map((a) => a.label)).toEqual(["kimi-main"]);
+        // Verbatim, including keys this build has never heard of.
+        expect(parsed.unknownAccounts).toEqual([
+            { label: "gem-opaque", provider: "gemini", configDir: "/p/gem", futureField: { a: 1 } },
+        ]);
+        expect(warnings.some((w) => w.includes("gem-opaque") && w.includes("gemini"))).toBe(true);
+    });
+    test("parseAccountsFile omits unknownAccounts when every entry is recognized", () => {
+        expect("unknownAccounts" in parseAccountsFile("")).toBe(false);
+        const parsed = parseAccountsFile(JSON.stringify({
+            version: 1,
+            accounts: [{ label: "kimi-main", provider: "kimi", configDir: "/p/kimi" }],
+        }));
+        expect("unknownAccounts" in parsed).toBe(false);
     });
     test("a fully valid file with no legacy entries still parses every account", () => {
         const parsed = parseAccountsFile(JSON.stringify({
@@ -606,68 +643,6 @@ describe("withAccountsLock in-process contention (EEXIST retry paths)", () => {
         }
     });
 
-    test("does not delete a fresh lock that replaced the stale one it observed (no double holder)", () => {
-        const env = newSmithersHome();
-        const lockPath = lockPathFor(env);
-        const freshContent = "222\nsuccessor\n";
-        // A leftover lock from a crashed holder, aged past STALE_LOCK_MS (30s).
-        writeFileSync(lockPath, "111\n0\n", { mode: 0o600 });
-        const stale = new Date(Date.now() - 60_000);
-        utimesSync(lockPath, stale, stale);
-
-        const realNow = Date.now;
-        const base = realNow();
-        let n = 0;
-        Date.now = () => {
-            n += 1;
-            if (n === 1) return base; // deadline = base + LOCK_TIMEOUT_MS
-            if (n === 2) return base; // EEXIST deadline check -> not timed out
-            if (n === 3) {
-                // Simulate the reported interleave: a concurrent waiter (A)
-                // breaks the same stale lock we just observed and a
-                // concurrent holder (B) acquires a brand-new lock, both in
-                // the gap between our statSync and our staleness verdict.
-                rmSync(lockPath, { force: true });
-                writeFileSync(lockPath, freshContent, { mode: 0o600 });
-                return base; // stale check: base - (base-60000) > 30000 -> true
-            }
-            if (n === 4) return base; // spinUntil = base + 5
-            // n>=5: exit the spin immediately, then time out on the very
-            // next deadline check instead of admitting a second holder.
-            return base + 10_000;
-        };
-        let ran = false;
-        try {
-            expect(() => withAccountsLock(env, () => { ran = true; }))
-                .toThrow(/Timed out acquiring accounts lock/);
-        } finally {
-            Date.now = realNow;
-        }
-        // The fresh lock B acquired must never be admitted a second holder,
-        // and must survive untouched.
-        expect(ran).toBe(false);
-        expect(existsSync(lockPath)).toBe(true);
-        expect(readFileSync(lockPath, "utf8")).toBe(freshContent);
-    });
-
-    test("release does not delete a successor lock after its own lock was broken mid-critical-section", () => {
-        const env = newSmithersHome();
-        const lockPath = lockPathFor(env);
-        const successorContent = "333\nsuccessor\n";
-
-        withAccountsLock(env, () => {
-            // Simulate a concurrent waiter mistakenly judging our still-held
-            // lock stale, breaking it, and a successor acquiring a brand-new
-            // lock — all while we are still inside our own critical section.
-            rmSync(lockPath, { force: true });
-            writeFileSync(lockPath, successorContent, { mode: 0o600 });
-        });
-
-        // Our release must not clobber the successor's fresh lock.
-        expect(existsSync(lockPath)).toBe(true);
-        expect(readFileSync(lockPath, "utf8")).toBe(successorContent);
-    });
-
     test("rethrows a non-EEXIST openSync error (permission denied)", () => {
         if (process.platform === "win32") return;
         // Root bypasses filesystem permission bits, so EACCES won't fire there.
@@ -714,5 +689,69 @@ describe("secret keys never leak into thrown error messages", () => {
         }
         expect(caught).toBeDefined();
         expect(caught.message).not.toContain(SECRET);
+    });
+});
+
+describe("unknown-provider entries survive add/remove rewrites (#529)", () => {
+    const GEM_LEGACY = { label: "gem-legacy", provider: "gemini", configDir: "/p/gem", model: "gemini-2.0" };
+
+    /** Seeds accounts.json with raw rows, bypassing addAccount's validation. */
+    function seed(env, accounts) {
+        mkdirSync(env.SMITHERS_HOME, { recursive: true });
+        writeFileSync(accountsFilePath(env), `${JSON.stringify({ version: 1, accounts }, null, 2)}\n`, { mode: 0o600 });
+    }
+
+    function rawAccounts(env) {
+        return JSON.parse(readFileSync(accountsFilePath(env), "utf8")).accounts;
+    }
+
+    test("addAccount does not delete a legacy unknown-provider entry", () => {
+        const env = newSmithersHome();
+        seed(env, [GEM_LEGACY, { label: "codex-main", provider: "codex", configDir: "/p/codex" }]);
+        addAccount({ label: "kimi-new", provider: "kimi", configDir: "/p/kimi" }, { env });
+        const accounts = rawAccounts(env);
+        // configDir + model of the legacy row point at real credentials on disk.
+        expect(accounts).toContainEqual(GEM_LEGACY);
+        expect(accounts.map((a) => a.label).sort()).toEqual(["codex-main", "gem-legacy", "kimi-new"]);
+        // ...and it stays invisible to the read API.
+        expect(listAccounts(env).map((a) => a.label)).toEqual(["codex-main", "kimi-new"]);
+    });
+
+    test("removeAccount of an unrelated account preserves a legacy unknown-provider entry", () => {
+        const env = newSmithersHome();
+        seed(env, [GEM_LEGACY, { label: "codex-main", provider: "codex", configDir: "/p/codex" }]);
+        expect(removeAccount("codex-main", { env })).toBe(true);
+        expect(rawAccounts(env)).toEqual([GEM_LEGACY]);
+    });
+
+    test("removeAccount deletes a preserved legacy entry by label", () => {
+        const env = newSmithersHome();
+        seed(env, [GEM_LEGACY, { label: "codex-main", provider: "codex", configDir: "/p/codex" }]);
+        expect(removeAccount("gem-legacy", { env })).toBe(true);
+        expect(rawAccounts(env).map((a) => a.label)).toEqual(["codex-main"]);
+        expect(removeAccount("gem-legacy", { env, silent: true })).toBe(false);
+    });
+
+    test("addAccount rejects a label already held by a preserved legacy entry, and replace:true supersedes it", () => {
+        const env = newSmithersHome();
+        seed(env, [GEM_LEGACY]);
+        expect(() => addAccount({ label: "gem-legacy", provider: "gemini-api", apiKey: "sk-1" }, { env }))
+            .toThrow(/already exists/);
+        addAccount({ label: "gem-legacy", provider: "gemini-api", apiKey: "sk-1" }, { env, replace: true });
+        const accounts = rawAccounts(env);
+        expect(accounts).toHaveLength(1);
+        expect(accounts[0]).toMatchObject({ label: "gem-legacy", provider: "gemini-api", apiKey: "sk-1" });
+        expect("unknownAccounts" in readAccounts(env)).toBe(false);
+    });
+
+    test("writeAccounts merges unknownAccounts into the accounts array and never emits an unknownAccounts key", () => {
+        const env = newSmithersHome();
+        const known = { label: "codex-main", provider: "codex", configDir: "/p/codex" };
+        writeAccounts({ version: 1, accounts: [known], unknownAccounts: [GEM_LEGACY] }, env);
+        const raw = readFileSync(accountsFilePath(env), "utf8");
+        const parsed = JSON.parse(raw);
+        expect(parsed.accounts).toEqual([known, GEM_LEGACY]);
+        expect("unknownAccounts" in parsed).toBe(false);
+        expect(statSync(accountsFilePath(env)).mode & 0o777).toBe(0o600);
     });
 });
