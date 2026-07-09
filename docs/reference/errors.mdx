@@ -258,8 +258,9 @@ account label and valid providers, while the remaining valid accounts still
 load. Such an entry is left out of the active account list but preserved
 verbatim in `accounts.json` across later `agents add` and `agents remove` calls,
 so an unrelated change never destroys the credentials its `configDir` points at.
-Run `smithers agents remove <label>` to delete it, or `smithers agents add
---label <label> --replace ...` to migrate it onto a supported provider.
+Run `bunx smithers-orchestrator agents remove <label>` to delete it, or
+`bunx smithers-orchestrator agents add --label <label> --replace ...` to migrate
+it onto a supported provider.
 `ACCOUNTS_FILE_INVALID` is reserved for invalid JSON or entries whose
 known provider shape is malformed.
 
