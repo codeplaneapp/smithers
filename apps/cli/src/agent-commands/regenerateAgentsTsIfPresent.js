@@ -22,6 +22,7 @@ export function regenerateAgentsTsIfPresent(cwd = process.cwd()) {
   const scaffoldFiles = {
     claude: "claude-code.ts",
     codex: "codex.ts",
+      cursor: "cursor.ts",
     opencode: "opencode.ts",
     antigravity: "antigravity.ts",
     gemini: "gemini.ts",

@@ -307,7 +307,7 @@ const HEADERS = {
   observability: "> Smithers observability surface: HTTP server, gateway, MCP, OpenTelemetry, metrics.",
   effect: "> Smithers Effect-ts authoring API: build workflows as Effect values without JSX or React.",
   integrations:
-    "> Smithers integrations: agent runtimes (Claude Code, Codex, Gemini, Pi), tool surfaces, ecosystem partners.",
+    "> Smithers integrations: agent runtimes (Claude Code, Codex, Cursor, Gemini, Pi), tool surfaces, ecosystem partners.",
   events:
     "> Smithers event surface: how to subscribe, the event categories, and the full SmithersEvent discriminated union.",
 };

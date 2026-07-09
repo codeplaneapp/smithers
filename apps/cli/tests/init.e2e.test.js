@@ -281,6 +281,7 @@ test(
     expect(repo.exists(".smithers/agents/codex.ts")).toBe(true);
     expect(repo.read(".smithers/agents/codex.ts")).toContain('model: "gpt-5.6-luna"');
     expect(repo.read(".smithers/agents/codex.ts")).toContain('config: { model_reasoning_effort: "medium" }');
+    expect(repo.exists(".smithers/agents/cursor.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/opencode.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/antigravity.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/gemini.ts")).toBe(false);
@@ -382,6 +383,7 @@ test(
     expect(repo.exists(".smithers/agents/codex.ts")).toBe(true);
     expect(repo.read(".smithers/agents/codex.ts")).toContain('model: "gpt-5.6-luna"');
     expect(repo.read(".smithers/agents/codex.ts")).toContain('config: { model_reasoning_effort: "medium" }');
+    expect(repo.exists(".smithers/agents/cursor.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/opencode.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/antigravity.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/gemini.ts")).toBe(false);
