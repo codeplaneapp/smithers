@@ -71,45 +71,176 @@ To wire the MCP server into every detected agent too, run `bunx smithers-orchest
 add`. See [Agent Support](https://smithers.sh/agents/overview) for the full per-agent
 matrix, and [`skills/smithers/`](./skills/smithers) for the onboarding skill itself.
 
-## Drive it yourself
+## What a workflow looks like
 
-Prefer the CLI? The seeded `hello` workflow is the smallest possible run, and its entire
-prompt is an editable Markdown file at `.smithers/prompts/hello.mdx`:
+A workflow is a JSX tree of tasks. You usually don't write these by hand: you prompt your
+agent, and it writes them from the same primitives the built-in pack uses. Each example
+below starts with the prompt that produces it.
 
-```bash
-# run your first workflow (edit .smithers/prompts/hello.mdx to change it)
-bunx smithers-orchestrator workflow run hello
+### 1. Two tasks, typed and persisted
 
-# turn a request into a practical implementation plan
-bunx smithers-orchestrator workflow run plan --prompt "add rate limiting, audit logging, and API key rotation"
+> *"make me a smithers workflow that analyzes a bug report, then fixes it"*
+
+```tsx
+import { createSmithers, Sequence, AnthropicAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  input: z.object({ description: z.string() }),
+  analyze: z.object({
+    summary: z.string(),
+    severity: z.enum(["low", "medium", "high"]),
+  }),
+  fix: z.object({
+    patch: z.string(),
+    explanation: z.string(),
+  }),
+});
+
+const analyzer = new AnthropicAgent({ model: "claude-fable-5" });
+const fixer = new AnthropicAgent({ model: "claude-fable-5" });
+
+export default smithers((ctx) => (
+  <Workflow name="bugfix">
+    <Sequence>
+      <Task id="analyze" output={outputs.analyze} agent={analyzer}>
+        {`Analyze the bug: ${ctx.input.description}`}
+      </Task>
+
+      <Task id="fix" output={outputs.fix} agent={fixer} deps={{ analyze: outputs.analyze }}>
+        {(deps) => `Fix this issue: ${deps.analyze.summary}`}
+      </Task>
+    </Sequence>
+  </Workflow>
+));
 ```
 
-You can chain a request from tickets to implementation:
+Each task output is validated against its Zod schema and persisted to SQLite the moment it
+completes. `deps` gives the fix task typed access to the analysis and mounts it only after
+`analyze` finishes. If the process crashes, the run resumes without re-running finished
+work.
 
-```bash
-# break a request into ticket files under .smithers/tickets/
-bunx smithers-orchestrator workflow run tickets-create --prompt "add rate limiting, audit logging, and API key rotation"
+This page is the 90-second version. The **[Tour](https://smithers.sh/tour)** is the
+15-minute version: it builds a real code-review workflow one capability at a time.
 
-# implement the tickets, each in its own worktree branch
-bunx smithers-orchestrator workflow run kanban
+### 2. Loop until a reviewer approves
+
+> *"implement this request and keep iterating until a reviewer signs off"*
+
+```tsx
+import { createSmithers, Loop, ClaudeCodeAgent } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  input: z.object({ request: z.string() }),
+  impl: z.object({ summary: z.string(), filesChanged: z.array(z.string()) }),
+  review: z.object({ approved: z.boolean(), feedback: z.string() }),
+});
+
+const coder = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+const reviewer = new ClaudeCodeAgent({ model: "claude-fable-5" });
+
+export default smithers((ctx) => (
+  <Workflow name="implement-reviewed">
+    <Loop until={ctx.latest(outputs.review, "validate")?.approved} maxIterations={5}>
+      <Task id="implement" output={outputs.impl} agent={coder}>
+        {`Implement: ${ctx.input.request}
+Address this reviewer feedback first: ${ctx.latest(outputs.review, "validate")?.feedback ?? "none yet"}`}
+      </Task>
+
+      <Task id="validate" output={outputs.review} agent={reviewer}>
+        {`Review the working-tree changes for: ${ctx.input.request}.
+Approve only when the change is correct and tested.`}
+      </Task>
+    </Loop>
+  </Workflow>
+));
 ```
 
-Run `bunx smithers-orchestrator starters` to browse plain-English starters, and
-`bunx smithers-orchestrator workflow list` to see what's installed.
+This is the loop a one-shot agent call can't give you: implement, review, feed the
+feedback back in, repeat until approved. Every iteration is persisted, so a crash mid-loop
+resumes at the current iteration instead of iteration one.
 
-## Watch your runs
+### 3. A small engineering team in one file
 
-Whether your agent started a run or you did, you can see exactly what's happening:
+> *"split this request into tickets, implement them in parallel worktrees with review
+> loops, and after I sign off merge the approved branches one at a time"*
 
-```bash
-bunx smithers-orchestrator ps              # list active, paused, and recently completed runs
-bunx smithers-orchestrator inspect RUN_ID  # steps, agents, approvals, and outputs for one run
-bunx smithers-orchestrator logs RUN_ID     # tail the event log
-bunx smithers-orchestrator chat RUN_ID     # read the agent's chat output
+```tsx
+import {
+  createSmithers, Sequence, Parallel, Loop, Worktree, MergeQueue,
+  Approval, ClaudeCodeAgent, PiAgent, approvalDecisionSchema,
+} from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  input: z.object({ request: z.string() }),
+  triage: z.object({
+    tickets: z.array(z.object({ id: z.string(), description: z.string() })),
+  }),
+  impl: z.object({ ticketId: z.string(), summary: z.string() }),
+  review: z.object({ ticketId: z.string(), approved: z.boolean(), feedback: z.string() }),
+  shipApproval: approvalDecisionSchema,
+  merge: z.object({ ticketId: z.string(), status: z.enum(["merged", "conflict"]) }),
+});
+
+const planner = new ClaudeCodeAgent({ model: "claude-fable-5" });
+const coder = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+const reviewer = new PiAgent({ provider: "openai-codex", model: "gpt-5.5", thinking: "xhigh" });
+
+export default smithers((ctx) => {
+  const plan = ctx.outputMaybe(outputs.triage, { nodeId: "triage" });
+  return (
+    <Workflow name="ship-tickets">
+      <Sequence>
+        <Task id="triage" output={outputs.triage} agent={planner}>
+          {`Split this request into independent tickets: ${ctx.input.request}`}
+        </Task>
+
+        <Parallel maxConcurrency={4}>
+          {plan?.tickets.map((t) => (
+            <Worktree key={t.id} path={`.worktrees/${t.id}`} branch={`ticket/${t.id}`}>
+              <Loop until={ctx.latest(outputs.review, `review-${t.id}`)?.approved} maxIterations={4}>
+                <Task id={`implement-${t.id}`} output={outputs.impl} agent={coder}>
+                  {`Implement ticket ${t.id}: ${t.description}
+Reviewer feedback: ${ctx.latest(outputs.review, `review-${t.id}`)?.feedback ?? "none yet"}`}
+                </Task>
+                <Task id={`review-${t.id}`} output={outputs.review} agent={reviewer}>
+                  {`Review the work for ticket ${t.id}. Approve only when correct and tested.`}
+                </Task>
+              </Loop>
+            </Worktree>
+          ))}
+        </Parallel>
+
+        <Approval
+          id="ship"
+          output={outputs.shipApproval}
+          request={{ title: `Merge ${plan?.tickets.length ?? 0} reviewed branches?` }}
+          onDeny="fail"
+        >
+          <MergeQueue id="merge" maxConcurrency={1}>
+            {plan?.tickets.map((t) => (
+              <Task key={t.id} id={`merge-${t.id}`} output={outputs.merge} agent={coder}>
+                {`Rebase ticket/${t.id} onto main, run the test gate, and merge.`}
+              </Task>
+            ))}
+          </MergeQueue>
+        </Approval>
+      </Sequence>
+    </Workflow>
+  );
+});
 ```
 
-`ps` shows you what needs attention (a paused approval, a recent failure); `inspect` drills
-into a single run so you can follow each step and agent as it works.
+Triage fans the request into tickets. Each ticket gets its own git worktree and its own
+implement-review loop, with a frontier model planning, a fast model implementing, and a
+different lab's model reviewing. Nothing merges until a human approves, and the merge
+queue then lands branches one at a time. Kill the process at any point and resume:
+finished tickets are skipped, in-flight ones re-run.
+
+The full version of this pattern (dependency-ordered waves, a researcher agent for blocked
+implementers) is [`examples/parallel-tickets.jsx`](./examples/parallel-tickets.jsx).
 
 ## Durable by default
 
@@ -126,6 +257,10 @@ That loop is the whole model: a task runs, its output is validated against a sch
 written down, then the workflow re-renders from persisted state to decide the next task. A
 crash at any point resumes from the last write, not from the top.
 
+*A run killed mid-task, then resumed: the completed task is skipped, the interrupted task re-runs, the run finishes.*
+
+<img src="./docs/images/why/crash-resume.gif" alt="A Smithers run is killed partway through, then resumes: the completed task is skipped, the in-flight task re-runs as a new attempt, and the run finishes" width="1032" />
+
 ```bash
 bunx smithers-orchestrator up workflow.tsx --input '{"description":"Fix bug"}'
 bunx smithers-orchestrator up workflow.tsx --run-id abc123 --resume true   # resume after a crash
@@ -133,6 +268,25 @@ bunx smithers-orchestrator rewind abc123 --frame 4                          # ti
 bunx smithers-orchestrator fork abc123                                      # branch an alternate timeline
 bunx smithers-orchestrator replay abc123                                    # replay from a checkpoint
 ```
+
+## Drive and watch your runs
+
+Prefer the CLI? The seeded workflows run directly, and whether your agent started a run or
+you did, you can see exactly what's happening:
+
+```bash
+bunx smithers-orchestrator workflow run hello   # smallest possible run; prompt lives at .smithers/prompts/hello.mdx
+bunx smithers-orchestrator workflow run plan --prompt "add rate limiting and API key rotation"
+
+bunx smithers-orchestrator ps              # list active, paused, and recently completed runs
+bunx smithers-orchestrator inspect RUN_ID  # steps, agents, approvals, and outputs for one run
+bunx smithers-orchestrator logs RUN_ID     # tail the event log
+bunx smithers-orchestrator chat RUN_ID     # read the agent's chat output
+```
+
+`ps` shows you what needs attention (a paused approval, a recent failure); `inspect` drills
+into a single run so you can follow each step and agent as it works. Run
+`bunx smithers-orchestrator starters` to browse plain-English starters.
 
 ## Any agent, any model
 
@@ -168,37 +322,14 @@ server into Cursor, Copilot, Hermes, OpenClaw, and ~20 more coding agents.
 
 ## Built-in workflows
 
-`bunx smithers-orchestrator init` installs a pack of ready-to-run workflows. Point your agent at one and go
-via `bunx smithers-orchestrator workflow run WORKFLOW_ID --prompt "..."`:
+`bunx smithers-orchestrator init` installs a pack of ready-to-run workflows: `implement`,
+`plan`, `research`, `review`, `debug`, `tickets-create`, `kanban`, `mission`, `grill-me`,
+`improve-test-coverage`, `audit`, `research-plan-implement`, and more. Point your agent at
+one, or run it yourself:
 
-**Build**
-
-| Workflow | What it does |
-| --- | --- |
-| `implement` | Implement a focused change with validation and review feedback loops. |
-| `research-plan-implement` | Research a request, produce a plan, then implement it with validation and review. |
-| `ticket-create` / `tickets-create` | Turn a request into one or many structured implementation tickets. |
-| `kanban` | Implement ticket files in worktree branches, board-style. |
-
-**Plan**
-
-| Workflow | What it does |
-| --- | --- |
-| `plan` | Create a practical implementation plan before code changes begin. |
-| `research` | Gather repository and external context before planning or building. |
-| `grill-me` | Ask targeted questions until vague requirements become actionable. |
-| `mission` | Run long-horizon work as approved milestones with focused workers and validation. |
-
-**Quality**
-
-| Workflow | What it does |
-| --- | --- |
-| `review` | Review current repository changes with one or more configured agents. |
-| `debug` | Reproduce, fix, validate, and review a reported bug. |
-| `improve-test-coverage` | Find and add high-impact missing tests for the repository. |
-| `audit` | Audit feature groups for tests, docs, observability, and maintainability gaps. |
-| `feature-enum` | Build or refine a code-backed feature inventory for a repository. |
-| `ralph` | Keep working continuously on an open-ended maintenance prompt. |
+```bash
+bunx smithers-orchestrator workflow run implement --prompt "add rate limiting"
+```
 
 See [`docs/workflows/`](./docs/workflows/overview.mdx) for the full pack.
 
@@ -212,68 +343,18 @@ pattern. Copy one as a starting point:
 | Example | Pattern |
 | --- | --- |
 | [`code-review-loop`](./examples/code-review-loop.jsx) | Implement → review → fix, looped until approved. |
-| [`coverage-loop`](./examples/coverage-loop.jsx) | Run tests, measure coverage, write tests, repeat to target. |
-| [`panel`](./examples/panel.jsx) | N specialist agents review in parallel, a moderator synthesizes. |
-| [`supervisor`](./examples/supervisor.jsx) | A boss agent plans and delegates to workers dynamically. |
-| [`fan-out-fan-in`](./examples/fan-out-fan-in.jsx) | Split work across N parallel agents, aggregate results. |
 | [`parallel-tickets`](./examples/parallel-tickets.jsx) | Triage, run waves of work in parallel, merge-queue the results. |
-| [`migration`](./examples/migration.jsx) | Plan → transform files → validate → report. |
-| [`pr-shepherd`](./examples/pr-shepherd.jsx) | Watch a PR, gather context, leave structured review comments. |
+| [`supervisor`](./examples/supervisor.jsx) | A boss agent plans and delegates to workers dynamically. |
 | [`playwright-test-agent`](./examples/playwright-test-agent.jsx) | Plan E2E flows, generate Playwright tests, run/heal until stable. |
-| [`adaptive-rag-citation-loop`](./examples/adaptive-rag-citation-loop.jsx) | Retrieve evidence, draft cited answers, grade grounding, retry. |
 | [`sql-analyst-dashboard`](./examples/sql-analyst-dashboard.jsx) | Discover schema, check read-only SQL, execute, summarize with a chart. |
-| [`rfp-response-room`](./examples/rfp-response-room.jsx) | Extract RFP requirements, draft cited answers, review, package. |
-| [`calendar-negotiator-with-approval`](./examples/calendar-negotiator-with-approval.jsx) | Rank meeting slots and write calendar state only after approval. |
-| [`document-exception-queue`](./examples/document-exception-queue.jsx) | Extract document packets, reconcile them, route exceptions. |
 
-That's fourteen of 100+. The folder also covers debates, canary judging,
+The folder also covers panels, debates, migrations, RAG citation loops, canary judging,
 SLO-breach explainers, repo janitors, and dozens more. Browse the full set in
 [`examples/`](./examples).
 
-## Author your own
+## Components
 
-The built-in workflows are normal Smithers TSX files: run them as-is, have your agent
-adapt them to your repo, or have it write new ones from the same primitives. A workflow
-is a JSX tree of tasks:
-
-```tsx
-import { createSmithers, Sequence, AnthropicAgent } from "smithers-orchestrator";
-import { z } from "zod";
-
-const { Workflow, Task, smithers, outputs } = createSmithers({
-  analyze: z.object({
-    summary: z.string(),
-    severity: z.enum(["low", "medium", "high"]),
-  }),
-  fix: z.object({
-    patch: z.string(),
-    explanation: z.string(),
-  }),
-});
-
-const analyzer = new AnthropicAgent({ model: "claude-fable-5" });
-const fixer = new AnthropicAgent({ model: "claude-fable-5" });
-
-export default smithers((ctx) => (
-  <Workflow name="bugfix">
-    <Sequence>
-      <Task id="analyze" output={outputs.analyze} agent={analyzer}>
-        {`Analyze the bug: ${ctx.input.description}`}
-      </Task>
-
-      <Task id="fix" output={outputs.fix} agent={fixer} deps={{ analyze: outputs.analyze }}>
-        {(deps) => `Fix this issue: ${deps.analyze.summary}`}
-      </Task>
-    </Sequence>
-  </Workflow>
-));
-```
-
-Each task output is validated against its Zod schema and persisted to SQLite. If the
-process crashes, Smithers resumes from the last completed node without re-running
-finished work.
-
-### Components
+The examples above use a handful of primitives from a much larger set:
 
 | Component    | Purpose                         |
 | ------------ | ------------------------------- |
@@ -284,23 +365,21 @@ finished work.
 | `<Branch>`   | Conditional execution           |
 | `<Loop>`     | Repeat tasks until a condition is met  |
 
-```tsx
-<Loop until={ctx.latest(outputs.review, "validate")?.approved} maxIterations={5}>
-  <Task id="implement" output={outputs.implement} agent={coder}>
-    Fix based on feedback
-  </Task>
+There are many more: approvals, worktrees, merge queues, sub-workflows, signals, timers,
+sagas, and composite patterns. See [Components](https://smithers.sh/components/workflow).
 
-  <Task id="validate" output={outputs.review} agent={reviewer}>
-    Review the implementation
-  </Task>
-</Loop>
-```
+## Also in the box
 
-There are many more: approvals, merge queues, sub-workflows, signals, timers, sagas, and
-composite patterns. See [Components](https://smithers.sh/components/workflow).
+Smithers is built for agents that modify real repositories, so control is wired into the
+runtime:
 
-## Deeper capabilities
-
+- **Approvals**: gate destructive or risky steps behind a human `approve` / `deny` before
+  they run.
+- **Inspectable and reversible**: every step, tool call, and output is persisted and
+  replayable; `rewind`, `fork`, or `replay` any run from a checkpoint instead of living
+  with whatever the agent left behind.
+- **Isolated**: run agents in a [sandbox](#any-agent-any-model) (Bubblewrap, Docker, or a
+  bring-your-own remote provider) so edits never touch your host.
 - **Observability**: every run emits Prometheus metrics and OpenTelemetry traces. Bring up
   the local stack with `bunx smithers-orchestrator observability --detach` (Grafana, Prometheus, Tempo, OTLP
   collector) and serve metrics with `bunx smithers-orchestrator up workflow.tsx --serve --metrics`.
@@ -313,33 +392,14 @@ composite patterns. See [Components](https://smithers.sh/components/workflow).
 - **Hot reload**: edit prompts, config, agent settings, or JSX structure mid-run with
   `bunx smithers-orchestrator up workflow.tsx --hot`. In-flight tasks finish on their original code; only
   newly scheduled tasks pick up changes.
-- **Scale across machines**: run agents in remote sandboxes via the `<Sandbox>` primitive
-  ([provider table above](#any-agent-any-model)) with no change to the workflow. Start from
-  [`examples/freestyle-sandbox-provider`](./docs/examples/freestyle-sandbox-provider.mdx)
-  and the [Sandbox component](https://smithers.sh/components/sandbox).
-
-## Security and safety
-
-Smithers is built for agents that modify real repositories, so control is wired into the
-runtime:
-
-- **Approvals**: gate destructive or risky steps behind a human `approve` / `deny` before
-  they run.
-- **Inspectable**: every step, tool call, and output is persisted and replayable, so you
-  can see exactly what an agent did and why.
-- **Reversible**: `rewind`, `fork`, or `replay` any run from a checkpoint instead of living
-  with whatever the agent left behind.
-- **Isolated**: run agents in a [sandbox](#any-agent-any-model) (Bubblewrap, Docker,
-  or a bring-your-own remote provider) so edits never touch your host.
-- **Auditable**: every run emits Prometheus metrics and OpenTelemetry traces.
 
 ## Read next
 
+- [Tour](https://smithers.sh/tour): build a real code-review workflow in six steps.
 - [Install the agent skill](./skills/smithers): make your coding agent fluent in Smithers.
-- [Awesome Smithers](https://github.com/smithersai/awesome-smithers): community projects, workflow packs, examples, and integrations.
-- [Tour](https://smithers.sh/tour): a guided walk through a real run.
 - [How It Works](https://smithers.sh/how-it-works): the durable execution model.
 - [Components](https://smithers.sh/components/workflow): the full primitive set.
+- [Awesome Smithers](https://github.com/smithersai/awesome-smithers): community projects, workflow packs, examples, and integrations.
 
 ## Docs
 
