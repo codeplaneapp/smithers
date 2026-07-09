@@ -567,6 +567,42 @@ describe("migrateSmithersStore", () => {
     }
   });
 
+  test("does not provision an existing-but-uninitialized pglite store while inferring --from", async () => {
+    const cwd = makeWorkspace("smithers-migrate-pglite-probe-no-provision");
+    const pgliteDir = join(cwd, ".smithers", "pg");
+    mkdirSync(pgliteDir, { recursive: true });
+
+    let caught;
+    try {
+      await migrateSmithersStore({ cwd, to: "pglite" });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(SmithersError);
+    expect(caught.code).toBe("CLI_DB_NOT_FOUND");
+    // The probe must never boot/ensureSchema the candidate store: no cluster
+    // files should appear in a dataDir it only inspected.
+    expect(existsSync(join(pgliteDir, "PG_VERSION"))).toBe(false);
+  });
+
+  test("refuses to migrate from an uninitialized pglite source without provisioning it", async () => {
+    const cwd = makeWorkspace("smithers-migrate-pglite-source-no-provision");
+    const pgliteDir = join(cwd, ".smithers", "pg");
+    mkdirSync(pgliteDir, { recursive: true });
+
+    let caught;
+    try {
+      await migrateSmithersStore({ cwd, from: "pglite", to: "sqlite" });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(SmithersError);
+    expect(caught.code).toBe("CLI_DB_NOT_FOUND");
+    expect(existsSync(join(pgliteDir, "PG_VERSION"))).toBe(false);
+  });
+
   test("infers --from when exactly one backend store has runs and refuses ambiguous populated stores", async () => {
     const pgliteOnly = makeWorkspace("smithers-migrate-infer-pglite");
     const originalSqlite = await seedPgliteStore(pgliteOnly);
