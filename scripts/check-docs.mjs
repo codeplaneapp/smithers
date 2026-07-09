@@ -357,7 +357,7 @@ function checkFacadeDeclarations() {
     "type GatewayOperatorUiConfig",
     "type GatewayRegisterOptions",
     "type GatewayWebhookConfig",
-    "export { SmithersDb } from '@smithers-orchestrator/db/adapter';",
+    "export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smithers-orchestrator/db';",
     "export { revertToAttempt } from '@smithers-orchestrator/time-travel/revert';",
     "export { timeTravel } from '@smithers-orchestrator/time-travel/timetravel';",
     "VibeAgent",
@@ -1749,7 +1749,7 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     [AGENT_LIKE_SOURCE, "generate: (args?: AgentGenerateOptions) => Promise<unknown>;"],
     [AGENT_GENERATE_OPTIONS_SOURCE, "taskContext?: {"],
     [AGENT_GENERATE_OPTIONS_SOURCE, "[key: string]: unknown;"],
-    [AGENT_CAPABILITY_REGISTRY_SOURCE, 'engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "openclaw" | "vibe";'],
+    [AGENT_CAPABILITY_REGISTRY_SOURCE, 'engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "openclaw" | "vibe";'],
     [AGENT_CAPABILITY_REGISTRY_SOURCE, "runtimeTools: Record<string, AgentToolDescriptor>;"],
     [AGENT_TOOL_DESCRIPTOR_SOURCE, 'source?: "builtin" | "mcp" | "extension" | "skill" | "runtime";'],
     [TYPES_REFERENCE, "type CachePolicy<Ctx = unknown> = {"],
@@ -1757,7 +1757,7 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     [TYPES_REFERENCE, "type AgentToolDescriptor = {"],
     [TYPES_REFERENCE, 'source?: "builtin" | "mcp" | "extension" | "skill" | "runtime";'],
     [TYPES_REFERENCE, "type AgentCapabilityRegistry = {"],
-    [TYPES_REFERENCE, 'engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "openclaw" | "vibe";'],
+    [TYPES_REFERENCE, 'engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "openclaw" | "vibe";'],
     [TYPES_REFERENCE, "runtimeTools: Record<string, AgentToolDescriptor>;"],
     [TYPES_REFERENCE, "type AgentGenerateOptions = {"],
     [TYPES_REFERENCE, "taskContext?: {"],
@@ -2082,7 +2082,7 @@ function checkServeDocsMatchServerTypes() {
     [join(root, "packages/server/src/ServeOptions.ts"), "workflow: SmithersWorkflow<unknown>;"],
     [join(root, "packages/server/src/ServeOptions.ts"), "adapter: SmithersDb;"],
     [join(root, "packages/smithers/src/index.js"), 'export { SmithersDb } from "@smithers-orchestrator/db";'],
-    [join(root, "packages/smithers/src/index.d.ts"), "export { SmithersDb } from '@smithers-orchestrator/db/adapter';"],
+    [join(root, "packages/smithers/src/index.d.ts"), "export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smithers-orchestrator/db';"],
     [join(root, "docs/reference/types.mdx"), 'type SmithersDb = import("@smithers-orchestrator/db/adapter").SmithersDb;'],
     [join(root, "docs/reference/types.mdx"), "workflow: SmithersWorkflow<unknown>;"],
     [join(root, "docs/reference/types.mdx"), "adapter: SmithersDb;"],
@@ -2788,7 +2788,7 @@ function checkReadmeAvoidsDeprecatedRalphPromotion() {
     // README no longer ships that image, so only the Loop primitive guidance and
     // the Ralph/Studio-avoidance rules below are enforced.
     "| `<Loop>`     | Repeat tasks until a condition is met  |",
-    "<Loop until={ctx.latest(\"validate\")?.approved} maxIterations={5}>",
+    "<Loop until={ctx.latest(outputs.review, \"validate\")?.approved} maxIterations={5}>",
     "</Loop>",
   ];
   const forbidden = [
@@ -3560,7 +3560,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
   ]);
   const required = [
     [BASE_CLI_AGENT_SOURCE, "this.model = opts.model;"],
-    [CLI_AGENTS_INTEGRATION, "agents[12]{class,cli,modelDefault,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[13]{class,cli,modelDefault,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "ClaudeCodeAgent,claude,CLI default,native session id"],
     [CLI_AGENTS_INTEGRATION, "CodexAgent,codex,CLI default,native thread id"],
     [CLI_AGENTS_INTEGRATION, "PiAgent,pi,CLI default,native session id"],
@@ -3577,7 +3577,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
     [CLI_AGENT_AVAILABILITY_TYPE, '"openclaw"'],
   ];
   const forbidden = [
-    [CLI_AGENTS_INTEGRATION, "agents[12]{class,cli,defaultModel,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[13]{class,cli,defaultModel,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "ClaudeCodeAgent,claude,claude-sonnet-4-20250514,"],
     [CLI_AGENTS_INTEGRATION, "HermesCliAgent,hermes,hermes-4,"],
     [CLI_AGENTS_INTEGRATION, "CodexAgent,codex,gpt-5.3-codex,"],
@@ -3626,7 +3626,7 @@ function checkCliAgentHijackDocsMatchLauncher() {
     [CLI_AGENTS_INTEGRATION, "| `KimiAgent` | `kimi --session` |"],
     [CLI_AGENTS_INTEGRATION, "| `ForgeAgent` | `forge --conversation-id` |"],
     [CLI_AGENTS_INTEGRATION, "| `AmpAgent` | `amp threads continue` |"],
-    [CLI_AGENTS_INTEGRATION, "native `bunx smithers-orchestrator hijack` support for Vibe, OpenCode, and OpenClaw is not shipped yet"],
+    [CLI_AGENTS_INTEGRATION, "native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet"],
   ];
   const forbidden = [
     [CLI_AGENTS_INTEGRATION, "| `GeminiAgent` | `gemini --resume` |"],

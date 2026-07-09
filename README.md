@@ -237,7 +237,7 @@ adapt them to your repo, or have it write new ones from the same primitives. A w
 is a JSX tree of tasks:
 
 ```tsx
-import { createSmithers, Sequence } from "smithers-orchestrator";
+import { createSmithers, Sequence, AnthropicAgent } from "smithers-orchestrator";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -251,6 +251,9 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   }),
 });
 
+const analyzer = new AnthropicAgent({ model: "claude-fable-5" });
+const fixer = new AnthropicAgent({ model: "claude-fable-5" });
+
 export default smithers((ctx) => (
   <Workflow name="bugfix">
     <Sequence>
@@ -258,8 +261,8 @@ export default smithers((ctx) => (
         {`Analyze the bug: ${ctx.input.description}`}
       </Task>
 
-      <Task id="fix" output={outputs.fix} agent={fixer}>
-        {`Fix this issue: ${ctx.latest("analyze").summary}`}
+      <Task id="fix" output={outputs.fix} agent={fixer} deps={{ analyze: outputs.analyze }}>
+        {(deps) => `Fix this issue: ${deps.analyze.summary}`}
       </Task>
     </Sequence>
   </Workflow>
@@ -282,7 +285,7 @@ finished work.
 | `<Loop>`     | Repeat tasks until a condition is met  |
 
 ```tsx
-<Loop until={ctx.latest("validate")?.approved} maxIterations={5}>
+<Loop until={ctx.latest(outputs.review, "validate")?.approved} maxIterations={5}>
   <Task id="implement" output={outputs.implement} agent={coder}>
     Fix based on feedback
   </Task>
