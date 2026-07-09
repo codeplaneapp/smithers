@@ -206,10 +206,6 @@ const fableChain = [opus];
 const opusChain = [opus];
 const implementChain = [opus];
 const routerChain = [opus];
-// One merge agent per item, bound to that item's worktree directory (runs OUTSIDE <Worktree>).
-function makeMergeAgent(worktreePath: string) {
-  return new ClaudeCodeAgent({ model: "claude-opus-4-8", cwd: worktreePath });
-}
 
 const AGENT_RETRIES = 2;
 const ROUTE_TIMEOUT_MS = 10 * 60_000;
@@ -668,28 +664,31 @@ export default smithers((ctx) => {
 
         {/* ── Phase 3: SERIAL merge queue — rebase onto latest main, gate, push to main ──
             <MergeQueue maxConcurrency={1}> runs these one at a time: item N+1 fetches +
-            rebases AFTER item N has landed, so each fix pushes onto the freshest main. The
-            merge agent runs OUTSIDE a <Worktree> and is pointed at the item's existing
-            worktree via cwd. continueOnFail keeps the queue moving past a conflicting/failing
-            item; skipIf makes re-runs idempotent. */}
+            rebases AFTER item N has landed, so each fix pushes onto the freshest main. Each
+            merge runs INSIDE the item's <Worktree> (re-attaching to the on-disk worktree that
+            holds the approved fix) with a plain Opus agent — NOT a cwd-pinned agent, because a
+            pinned cwd makes the claude CLI fail its preflight PATH check (see agents.ts). The
+            worktree gives the agent the same env as the implement/review agents. continueOnFail
+            keeps the queue moving past a conflicting/failing item; skipIf is idempotent. */}
         {mergeItems.length > 0 ? (
           <MergeQueue id="issue-merge-queue" maxConcurrency={1}>
             {mergeItems.map((item) => {
               const fix = latestForIssue<Fix>(ctx.outputs.fix, item.issueNumber);
               return (
-                <Task
-                  key={`i${item.issueNumber}:merge`}
-                  id={`i${item.issueNumber}:merge`}
-                  output={outputs.merge}
-                  agent={makeMergeAgent(item.worktreePath)}
-                  retries={1}
-                  timeoutMs={MERGE_TIMEOUT_MS}
-                  heartbeatTimeoutMs={HEARTBEAT_MS}
-                  continueOnFail
-                  skipIf={itemLanded(ctx, item.issueNumber)}
-                >
-                  {mergePrompt(item, fix, input.gateCommand)}
-                </Task>
+                <Worktree key={`i${item.issueNumber}:merge-wt`} path={item.worktreePath} branch={item.branch} baseBranch="main">
+                  <Task
+                    id={`i${item.issueNumber}:merge`}
+                    output={outputs.merge}
+                    agent={opusChain}
+                    retries={1}
+                    timeoutMs={MERGE_TIMEOUT_MS}
+                    heartbeatTimeoutMs={HEARTBEAT_MS}
+                    continueOnFail
+                    skipIf={itemLanded(ctx, item.issueNumber)}
+                  >
+                    {mergePrompt(item, fix, input.gateCommand)}
+                  </Task>
+                </Worktree>
               );
             })}
           </MergeQueue>
