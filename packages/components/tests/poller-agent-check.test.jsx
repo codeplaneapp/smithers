@@ -1,10 +1,26 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, test } from "bun:test";
 import { Poller, runWorkflow } from "smithers-orchestrator";
-import { createTestSmithers } from "./helpers.js";
+import { createTestSmithers, sleep } from "./helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
 const COMPONENT_TIMEOUT_MS = 30_000;
+/**
+ * A Poller paces itself with a durable <Timer>, so a run with a non-trivial
+ * `intervalMs` parks as `waiting-timer` between attempts instead of sleeping
+ * in-process. In production the gateway timer sweep resumes it; here we drive
+ * the resumes ourselves, exactly as timer.test.jsx does.
+ * @param {any} workflow
+ * @returns {Promise<any>}
+ */
+async function pollToCompletion(workflow) {
+    let result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    for (let attempt = 0; attempt < 40 && result.status === "waiting-timer"; attempt++) {
+        await sleep(25);
+        result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: result.runId, resume: true }));
+    }
+    return result;
+}
 describe("Poller with an agent check", () => {
     test("an AgentLike check polls through the real engine until satisfied", async () => {
         const { Workflow, smithers, outputs, tables, db, cleanup } = createTestSmithers({
@@ -30,7 +46,7 @@ describe("Poller with an agent check", () => {
           Check whether the deploy finished.
         </Poller>
       </Workflow>));
-        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        const result = await pollToCompletion(workflow);
         expect(result.status).toBe("finished");
         // The check ran as an agent task (not compute): the agent was invoked
         // once per loop iteration with the authored prompt children.
@@ -66,7 +82,7 @@ describe("Poller with an agent check", () => {
         const workflow = smithers(() => (<Workflow name="poller-agent-exhaustion">
         <Poller id="deploy" check={neverReady} checkOutput={outputs.check} maxAttempts={2} intervalMs={10} onTimeout="fail"/>
       </Workflow>));
-        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        const result = await pollToCompletion(workflow);
         expect(result.status).toBe("failed");
         expect(result.error?.code).toBe("RALPH_MAX_REACHED");
         expect(generateCalls).toBe(2);

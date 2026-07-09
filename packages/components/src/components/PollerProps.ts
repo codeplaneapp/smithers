@@ -11,10 +11,15 @@ export type PollerProps = {
 	checkOutput: OutputTarget;
 	/** Maximum poll attempts. Default 30. */
 	maxAttempts?: number;
-	/** Backoff strategy between polls. Default "fixed". */
+	/** Strategy used to scale the inter-attempt delay. Default "fixed". */
 	backoff?: "fixed" | "linear" | "exponential";
-	/** Base interval in milliseconds between polls. Default 5000. */
+	/**
+	 * Base delay in milliseconds BETWEEN poll attempts; the first attempt runs
+	 * immediately. Enforced by a durable `<Timer>`. Default 5000.
+	 */
 	intervalMs?: number;
+	/** Timeout in ms for a single check attempt. Unbounded when unset. */
+	checkTimeoutMs?: number;
 	/** Behavior when maxAttempts is reached. Default "fail". */
 	onTimeout?: "fail" | "return-last";
 	/** Skip the entire component. */

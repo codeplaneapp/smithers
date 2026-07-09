@@ -65,14 +65,15 @@ describe("flow control component units", () => {
 		expect(resolved.tasks[0].dependsOn).toEqual(["gate", "load-source"]);
 	});
 
-	test("Poller applies fixed, linear, and exponential backoff from the current loop iteration", async () => {
+	test("Poller applies fixed, linear, and exponential backoff to the inter-attempt delay", async () => {
+		// At loop iteration 2 the pending gap is gap index 1 (the second pause).
 		const cases = [
-			["fixed", 100],
-			["linear", 300],
-			["exponential", 400],
+			["fixed", "100ms"],
+			["linear", "200ms"],
+			["exponential", "200ms"],
 		];
 
-		for (const [backoff, expectedTimeoutMs] of cases) {
+		for (const [backoff, expectedDuration] of cases) {
 			const graph = await render(
 				<SmithersContext.Provider
 					value={ctxFor({ iteration: 2, iterations: { "deploy-loop": 2 } })}
@@ -89,8 +90,10 @@ describe("flow control component units", () => {
 				</SmithersContext.Provider>,
 			);
 
-			expect(graph.tasks[0].nodeId).toBe("deploy-check");
-			expect(graph.tasks[0].timeoutMs).toBe(expectedTimeoutMs);
+			const delay = graph.tasks.find((task) => task.nodeId === "deploy-delay");
+			const check = graph.tasks.find((task) => task.nodeId === "deploy-check");
+			expect(delay.meta.__timerDuration).toBe(expectedDuration);
+			expect(check.timeoutMs).toBeNull();
 			expect(graph.xml.props).toMatchObject({
 				id: "deploy-loop",
 				maxIterations: "7",

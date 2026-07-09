@@ -1,29 +1,45 @@
 import React from "react";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { Task } from "./Task.js";
 import { Loop } from "./Ralph.js";
+import { Sequence } from "./Sequence.js";
+import { Timer } from "./Timer.js";
 /** @typedef {import("./PollerProps.ts").PollerProps} PollerProps */
 
 /**
- * Compute the timeout for a given attempt based on the backoff strategy.
- * This effectively controls the interval between polls by setting
- * the task's timeoutMs, giving the agent/compute time proportional
- * to the backoff delay.
- * @param {number} attempt
+ * Compute the real wall-clock delay (ms) for one gap between poll attempts.
+ *
+ * `gap` is 0-indexed over the gaps, not the attempts: gap 0 is the pause
+ * between attempt 1 and attempt 2. Nothing precedes the first attempt, so the
+ * first poll always fires immediately. The returned delay is enforced by a
+ * durable <Timer>; it is not a task timeout.
+ * @param {number} gap
  * @param {number} baseMs
  * @param {"fixed" | "linear" | "exponential"} strategy
  * @returns {number}
  */
-function computeTimeoutMs(attempt, baseMs, strategy) {
+function computeDelayMs(gap, baseMs, strategy) {
+    let raw;
     switch (strategy) {
         case "linear":
-            return baseMs * (attempt + 1);
+            raw = baseMs * (gap + 1);
+            break;
         case "exponential":
-            return baseMs * Math.pow(2, attempt);
+            raw = baseMs * Math.pow(2, gap);
+            break;
         case "fixed":
         default:
-            return baseMs;
+            raw = baseMs;
+            break;
     }
+    // A non-finite delay would be formatted as "Infinity ms"/"NaNms" (and any
+    // value >= 1e21 as "1e+21ms"), none of which the engine's duration parser
+    // accepts. Fail here, where the offending prop is still in scope.
+    if (!Number.isFinite(raw)) {
+        throw new SmithersError("INVALID_INPUT", `<Poller> computed a non-finite poll delay from intervalMs=${baseMs}, backoff="${strategy}".`);
+    }
+    return Math.max(0, Math.round(raw));
 }
 /**
  * @param {PollerProps} props
@@ -54,20 +70,29 @@ export function Poller(props) {
         ? React.createElement(Task, {
             id: `${prefix}-check`,
             output: props.checkOutput,
-            timeoutMs: computeTimeoutMs(iteration, baseInterval, backoff),
+            timeoutMs: props.checkTimeoutMs,
             agent: props.check,
             children: prompt,
         })
         : React.createElement(Task, {
             id: `${prefix}-check`,
             output: props.checkOutput,
-            timeoutMs: computeTimeoutMs(iteration, baseInterval, backoff),
+            timeoutMs: props.checkTimeoutMs,
             children: props.check,
         });
+    // Pace the loop with a durable <Timer> ahead of the check, inside a
+    // <Sequence> so the scheduler holds the check back until the timer fires.
+    // The timer is skipped on the first iteration (poll immediately), so the
+    // delay before attempt N is the (N-1)th gap.
+    const delayMs = iteration === 0 ? 0 : computeDelayMs(iteration - 1, baseInterval, backoff);
     return React.createElement(Loop, {
         id: `${prefix}-loop`,
         until,
         maxIterations: maxAttempts,
         onMaxReached: onTimeout === "fail" ? "fail" : "return-last",
-    }, checkTask);
+    }, React.createElement(Sequence, null, React.createElement(Timer, {
+        id: `${prefix}-delay`,
+        duration: `${delayMs}ms`,
+        skipIf: iteration === 0,
+    }), checkTask));
 }

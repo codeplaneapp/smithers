@@ -86,8 +86,11 @@ describe("Poller defaults and backoff boundaries", () => {
 		const graph = await render(
 			<Poller check={() => ({ satisfied: false })} checkOutput="check_out" />,
 		);
+		// The first attempt polls immediately, so iteration 0 has no delay timer,
+		// and `intervalMs` no longer leaks into the check's timeout.
+		expect(graph.tasks).toHaveLength(1);
 		expect(graph.tasks[0].nodeId).toBe("poll-check");
-		expect(graph.tasks[0].timeoutMs).toBe(5000);
+		expect(graph.tasks[0].timeoutMs).toBeNull();
 		expect(graph.xml.props).toMatchObject({
 			id: "poll-loop",
 			maxIterations: "30",
@@ -109,12 +112,13 @@ describe("Poller defaults and backoff boundaries", () => {
 				/>
 			</SmithersContext.Provider>,
 		);
-		expect(graph.tasks[0].timeoutMs).toBe(100);
+		const delay = graph.tasks.find((task) => task.nodeId === "deploy-delay");
+		expect(delay.meta.__timerDuration).toBe("100ms");
 	});
 
 	test("exponential backoff grows unclamped from the loop iteration", async () => {
-		// 100ms * 2^10 — there is no upper clamp today, so a long-running
-		// exponential poller inflates the check timeout geometrically.
+		// 100ms * 2^9 for the 10th gap — there is no upper clamp today, so a
+		// long-running exponential poller stretches the poll interval geometrically.
 		const graph = await render(
 			<SmithersContext.Provider
 				value={ctxFor({ iteration: 10, iterations: { "deploy-loop": 10 } })}
@@ -128,7 +132,8 @@ describe("Poller defaults and backoff boundaries", () => {
 				/>
 			</SmithersContext.Provider>,
 		);
-		expect(graph.tasks[0].timeoutMs).toBe(102400);
+		const delay = graph.tasks.find((task) => task.nodeId === "deploy-delay");
+		expect(delay.meta.__timerDuration).toBe("51200ms");
 	});
 });
 

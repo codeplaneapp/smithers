@@ -499,16 +499,18 @@ describe("remaining component branch coverage", () => {
         expect(drift.tasks[1].prompt).toContain("Baseline: main");
 
         const poller = await render(
-            <Poller id="poll-agent" check={agent} checkOutput="check_out" backoff="linear" intervalMs={100}>
+            <Poller id="poll-agent" check={agent} checkOutput="check_out" backoff="linear" intervalMs={100} checkTimeoutMs={7000}>
                 Agent check
             </Poller>,
         );
-        expect(poller.tasks[0].timeoutMs).toBe(100);
-        expect(poller.tasks[0].agent).toBe(agent);
+        const agentCheck = poller.tasks.find((task) => task.nodeId === "poll-agent-check");
+        // Only `checkTimeoutMs` bounds an attempt now; `intervalMs` paces the loop.
+        expect(agentCheck.timeoutMs).toBe(7000);
+        expect(agentCheck.agent).toBe(agent);
         const exponentialPoller = await render(
             <Poller id="poll-exp" check={() => ({ satisfied: false })} checkOutput="check_out" backoff="exponential" intervalMs={100} />,
         );
-        expect(exponentialPoller.tasks[0].timeoutMs).toBe(100);
+        expect(exponentialPoller.tasks.find((task) => task.nodeId === "poll-exp-check").timeoutMs).toBeNull();
 
         const runbook = await render(
             <Runbook

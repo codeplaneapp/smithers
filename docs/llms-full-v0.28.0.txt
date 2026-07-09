@@ -5550,7 +5550,8 @@ type PollerProps = {
   checkOutput: OutputTarget; // must include `satisfied: boolean`
   maxAttempts?: number; // default 30
   backoff?: "fixed" | "linear" | "exponential"; // default "fixed"
-  intervalMs?: number; // default 5000
+  intervalMs?: number; // delay BETWEEN attempts, default 5000
+  checkTimeoutMs?: number; // timeout for one check attempt; unbounded when unset
   onTimeout?: "fail" | "return-last"; // default "fail"
   skipIf?: boolean;
   children?: ReactNode; // condition description
@@ -5575,7 +5576,14 @@ type PollerProps = {
 ## Notes
 
 - `satisfied` drives the loop's `until`.
-- Backoff: fixed = `intervalMs`; linear = `intervalMs * (N+1)`; exponential = `intervalMs * 2^N`.
+- The first attempt runs immediately; `intervalMs` is the delay *between* attempts.
+- Backoff scales that gap. For the Nth gap (1-indexed): fixed = `intervalMs`;
+  linear = `intervalMs * N`; exponential = `intervalMs * 2^(N-1)`.
+- The gap is a durable `<Timer>`: the run parks as
+  `waiting-timer` between attempts and survives a crash or resume, rather than
+  sleeping in-process. A detached run is resumed by the gateway's timer sweep.
+- `intervalMs` does **not** bound how long a check may run. Use `checkTimeoutMs`
+  to cap a single attempt.
 
 ---
 
