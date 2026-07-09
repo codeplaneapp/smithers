@@ -81,10 +81,14 @@ export function ContentPipeline(props) {
             // First stage receives the initial prompt.
             return React.createElement(Task, taskProps, children);
         }
-        // Subsequent stages depend on the previous stage.
+        // Subsequent stages depend on the previous stage. `deps` resolves the
+        // previous stage's output into this stage's prompt (`needs` alone is
+        // cache-context only and injects nothing), so the waterfall actually
+        // passes output forward.
         const prevStage = stages[index - 1];
         taskProps.needs = { previous: prevStage.id };
-        return React.createElement(Task, taskProps, `Continue from the previous stage's output. Perform: ${stage.label ?? stage.id}`);
+        taskProps.deps = { previous: prevStage.output };
+        return React.createElement(Task, taskProps, (d) => `Continue from the previous stage's output. Perform: ${stage.label ?? stage.id}\n\nPrevious stage output:\n${JSON.stringify(d.previous ?? "(no output)")}`);
     });
     return React.createElement(Sequence, null, ...taskElements);
 }
