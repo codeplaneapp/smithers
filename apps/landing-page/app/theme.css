@@ -1,0 +1,145 @@
+/* ── Palettes (raw brand tokens) ─────────────────────────────────────────── */
+
+:root,
+[data-palette="brass"] {
+  --canvas: #0c0a09;
+  --surface: #161310;
+  --ink: #f2ede4;
+  --ink-muted: #9a9288;
+  --brand: #cab16a;
+  --brand-muted: #8a7a52;
+  --on-brand: #0c0a09;
+  --line: #2a2620;
+}
+
+[data-palette="teal"] {
+  --canvas: #060e0d;
+  --surface: #0e1816;
+  --ink: #e6f3f0;
+  --ink-muted: #7a9691;
+  --brand: #3ecfb8;
+  --brand-muted: #248f7f;
+  --on-brand: #03100e;
+  --line: #18302b;
+}
+
+[data-palette="blue"] {
+  --canvas: #070a11;
+  --surface: #0e1420;
+  --ink: #e7edf8;
+  --ink-muted: #8490a8;
+  --brand: #6ea8ff;
+  --brand-muted: #4a6fa8;
+  --on-brand: #060910;
+  --line: #1a2436;
+}
+
+/* ── Semantic tokens (palette-agnostic) ──────────────────────────────────── */
+
+:root {
+  /* Legacy aliases used in landing gradients */
+  --gold: var(--brand);
+  --gold-muted: var(--brand-muted);
+  --on-gold: var(--on-brand);
+
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--brand);
+  --primary-foreground: var(--on-brand);
+  --secondary: color-mix(in oklch, var(--surface) 88%, var(--ink));
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface);
+  --muted-foreground: var(--ink-muted);
+  --accent: color-mix(in oklch, var(--brand-muted) 24%, var(--surface));
+  --accent-foreground: var(--ink);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: var(--line);
+  --input: color-mix(in oklch, var(--line) 85%, var(--ink));
+  --ring: var(--brand-muted);
+  --chart-1: var(--brand);
+  --chart-2: var(--brand-muted);
+  --chart-3: var(--ink-muted);
+  --chart-4: var(--line);
+  --chart-5: var(--canvas);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--on-brand);
+  --sidebar-accent: color-mix(in oklch, var(--brand-muted) 24%, var(--surface));
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--brand-muted);
+}
+
+.dark {
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--brand);
+  --primary-foreground: var(--on-brand);
+  --secondary: color-mix(in oklch, var(--surface) 88%, var(--ink));
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface);
+  --muted-foreground: var(--ink-muted);
+  --accent: color-mix(in oklch, var(--brand-muted) 24%, var(--surface));
+  --accent-foreground: var(--ink);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: var(--line);
+  --input: color-mix(in oklch, var(--line) 85%, var(--ink));
+  --ring: var(--brand-muted);
+  --chart-1: var(--brand);
+  --chart-2: var(--brand-muted);
+  --chart-3: var(--ink-muted);
+  --chart-4: var(--line);
+  --chart-5: var(--canvas);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--on-brand);
+  --sidebar-accent: color-mix(in oklch, var(--brand-muted) 24%, var(--surface));
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--brand-muted);
+}
+
+/* ── Typography presets ────────────────────────────────────────────────────── */
+
+:root,
+[data-font="editorial"] {
+  --theme-font-sans: var(--font-dm-sans), system-ui, sans-serif;
+  --theme-font-display: var(--font-newsreader), Georgia, serif;
+}
+
+[data-font="atkinson"] {
+  --theme-font-sans: var(--font-atkinson), system-ui, sans-serif;
+  --theme-font-display: var(--font-atkinson), system-ui, sans-serif;
+}
+
+[data-font="instrument"] {
+  --theme-font-sans: var(--font-instrument-sans), system-ui, sans-serif;
+  --theme-font-display: var(--font-instrument-serif), Georgia, serif;
+}
+
+/* ── Radius presets ──────────────────────────────────────────────────────── */
+
+:root,
+[data-radius="none"] {
+  --radius: 0;
+}
+
+[data-radius="default"] {
+  --radius: 0.625rem;
+}
+
+[data-radius="none"] *,
+[data-radius="none"] *::before,
+[data-radius="none"] *::after {
+  border-radius: 0 !important;
+}

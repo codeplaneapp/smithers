@@ -1,0 +1,521 @@
+/* Landing runs full motion — OS prefers-reduced-motion is ignored. */
+.landing-root {
+  --landing-motion: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-root,
+  .landing-root *,
+  .landing-root *::before,
+  .landing-root *::after {
+    animation-duration: revert !important;
+    animation-delay: revert !important;
+    animation-iteration-count: revert !important;
+    animation-timing-function: revert !important;
+    animation-play-state: running !important;
+    transition-duration: revert !important;
+    transition-delay: revert !important;
+    transition-timing-function: revert !important;
+    scroll-behavior: revert !important;
+  }
+}
+
+.landing-grain {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 128px 128px;
+}
+
+.landing-enter {
+  animation: landing-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-enter-delay-1 {
+  animation-delay: 0.08s;
+}
+
+.landing-enter-delay-2 {
+  animation-delay: 0.16s;
+}
+
+@keyframes landing-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes landing-persist {
+  0% {
+    transform: scale(0.96);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.landing-persist {
+  animation: landing-persist 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes landing-pulse-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 35%, transparent);
+  }
+}
+
+.landing-pulse-ring {
+  animation: landing-pulse-ring 2s ease-in-out infinite;
+}
+
+@keyframes landing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.landing-spin {
+  animation: landing-spin 2s linear infinite;
+}
+
+@keyframes landing-drift {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(3px);
+  }
+}
+
+.landing-drift {
+  animation: landing-drift 4s ease-in-out infinite;
+}
+
+.landing-flow-line {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in oklch, var(--border) 80%, transparent) 20%,
+    color-mix(in oklch, var(--border) 80%, transparent) 80%,
+    transparent
+  );
+}
+
+/* Multi-step qualification card — soft sequential fade on card hover */
+.landing-multi-step-node {
+  border-color: color-mix(in oklch, var(--primary) 35%, var(--border));
+  background: color-mix(in oklch, var(--accent) 35%, var(--background));
+  color: var(--foreground);
+}
+
+.landing-multi-step-signal {
+  opacity: 0.4;
+}
+
+.landing-multi-step-signal[data-step="0"] {
+  opacity: 1;
+}
+
+.landing-multi-step-arrow-signal {
+  opacity: 0.35;
+}
+
+.landing-multi-step-arrow {
+  opacity: 0.85;
+}
+
+@keyframes landing-multi-step-signal-0 {
+  0%,
+  18% {
+    opacity: 1;
+  }
+  32%,
+  100% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes landing-multi-step-signal-1 {
+  0%,
+  28% {
+    opacity: 0.4;
+  }
+  42%,
+  58% {
+    opacity: 1;
+  }
+  72%,
+  100% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes landing-multi-step-signal-2 {
+  0%,
+  62% {
+    opacity: 0.4;
+  }
+  76%,
+  90% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes landing-multi-step-arrow-signal-0 {
+  0%,
+  22% {
+    opacity: 0.35;
+  }
+  34%,
+  46% {
+    opacity: 0.9;
+  }
+  58%,
+  100% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes landing-multi-step-arrow-signal-1 {
+  0%,
+  56% {
+    opacity: 0.35;
+  }
+  68%,
+  80% {
+    opacity: 0.9;
+  }
+  92%,
+  100% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes landing-multi-step-caption {
+  0%,
+  100% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+/* Approval qualification card — gate pulse + note on card hover only */
+.landing-approval-note {
+  opacity: 0;
+  transform: translateY(2px);
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .landing-qual-card:hover .landing-approval-gate {
+    border-color: color-mix(in oklch, var(--primary) 30%, var(--border));
+    background: color-mix(in oklch, var(--accent) 30%, var(--background));
+    color: var(--primary);
+    animation: landing-pulse-ring 2s ease-in-out infinite;
+  }
+
+  .landing-qual-card:hover .landing-approval-note {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Long-run qualification card — loading bar on card hover (fine pointer only) */
+.landing-long-run-track {
+  position: relative;
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 0;
+  background: color-mix(in oklch, var(--border) 82%, var(--background));
+  box-shadow: inset 0 1px 2px color-mix(in oklch, var(--canvas) 55%, transparent);
+  isolation: isolate;
+  transition: box-shadow 250ms ease;
+}
+
+.landing-long-run-shimmer {
+  position: absolute;
+  inset-block: 0;
+  z-index: 0;
+  width: 55%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklch, var(--primary) 6%, transparent) 35%,
+    color-mix(in oklch, var(--primary) 32%, transparent) 50%,
+    color-mix(in oklch, var(--primary) 6%, transparent) 65%,
+    transparent 100%
+  );
+  opacity: 0;
+  transform: translateX(-100%);
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0 22%, black 22% 100%);
+  mask-image: linear-gradient(to right, transparent 0 22%, black 22% 100%);
+}
+
+.landing-long-run-shimmer--offset {
+  animation-delay: -1.4s;
+}
+
+.landing-long-run-fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  z-index: 1;
+  width: 100%;
+  border-radius: inherit;
+  transform: scaleX(0.22);
+  transform-origin: left center;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--primary) 42%, var(--background)) 0%,
+    color-mix(in oklch, var(--primary) 78%, var(--background)) 55%,
+    var(--primary) 78%,
+    color-mix(in oklch, var(--primary) 88%, white) 100%
+  );
+}
+
+.landing-long-run-track::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: repeating-linear-gradient(
+    115deg,
+    transparent 0,
+    transparent 7px,
+    color-mix(in oklch, var(--primary) 10%, transparent) 7px,
+    color-mix(in oklch, var(--primary) 10%, transparent) 14px
+  );
+  opacity: 0;
+  -webkit-mask-image: linear-gradient(to right, transparent 0 22%, black 22% 100%);
+  mask-image: linear-gradient(to right, transparent 0 22%, black 22% 100%);
+  transform: translateX(0);
+}
+
+.landing-long-run-lid {
+  color: var(--muted-foreground);
+  transition: color 250ms ease;
+}
+
+.landing-long-run-elapsed-suffix {
+  opacity: 0.88;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .landing-qual-card:hover .landing-multi-step-signal[data-step="0"] {
+    animation: landing-multi-step-signal-0 4.8s ease-in-out infinite;
+  }
+
+  .landing-qual-card:hover .landing-multi-step-signal[data-step="1"] {
+    animation: landing-multi-step-signal-1 4.8s ease-in-out infinite;
+  }
+
+  .landing-qual-card:hover .landing-multi-step-signal[data-step="2"] {
+    animation: landing-multi-step-signal-2 4.8s ease-in-out infinite;
+  }
+
+  .landing-qual-card:hover .landing-multi-step-arrow-signal[data-after="0"] {
+    animation: landing-multi-step-arrow-signal-0 4.8s ease-in-out infinite;
+  }
+
+  .landing-qual-card:hover .landing-multi-step-arrow-signal[data-after="1"] {
+    animation: landing-multi-step-arrow-signal-1 4.8s ease-in-out infinite;
+  }
+
+  .landing-qual-card:hover .landing-multi-step-caption {
+    animation: landing-multi-step-caption 4.8s ease-in-out infinite;
+  }
+
+  .landing-qual-card:hover .landing-long-run-track {
+    box-shadow:
+      inset 0 1px 2px color-mix(in oklch, var(--canvas) 55%, transparent),
+      0 0 0 1px color-mix(in oklch, var(--primary) 18%, transparent),
+      0 0 14px color-mix(in oklch, var(--primary) 14%, transparent);
+  }
+
+  .landing-qual-card:hover .landing-long-run-shimmer {
+    opacity: 0.9;
+    animation: landing-long-run-shimmer 2.4s linear infinite;
+  }
+
+  .landing-qual-card:hover .landing-long-run-track::before {
+    opacity: 0.45;
+    animation: landing-long-run-track-stripes 1.1s linear infinite;
+  }
+
+  .landing-qual-card:hover .landing-long-run-elapsed-suffix {
+    animation: landing-long-run-status 3.2s ease-in-out infinite;
+  }
+
+  .landing-qual-card:hover .landing-long-run-lid {
+    color: var(--foreground);
+  }
+
+  .landing-qual-card:hover .landing-durable-resume-icon {
+    animation: landing-spin 1.15s linear infinite;
+  }
+}
+
+@keyframes landing-long-run-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+@keyframes landing-long-run-track-stripes {
+  to {
+    transform: translateX(-14px);
+  }
+}
+
+@keyframes landing-long-run-status {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Just say — recipe marquee */
+.landing-recipe-marquee-row {
+  display: flex;
+  min-height: 3.75rem;
+  align-items: center;
+  overflow: hidden;
+  padding-block: 0.875rem;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 65%, transparent);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 5%,
+    black 95%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 5%,
+    black 95%,
+    transparent 100%
+  );
+}
+
+.landing-recipe-marquee-row:last-child {
+  border-bottom: none;
+}
+
+.landing-recipe-marquee-track {
+  animation: landing-recipe-marquee 48s linear infinite;
+  will-change: transform;
+}
+
+.landing-recipe-marquee-track--reverse {
+  animation-direction: reverse;
+}
+
+.landing-recipe-marquee:hover .landing-recipe-marquee-track,
+.landing-recipe-marquee:focus-within .landing-recipe-marquee-track {
+  animation-play-state: paused;
+}
+
+.landing-recipe-marquee-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  border: 1px solid color-mix(in oklch, var(--border) 88%, var(--primary));
+  background: color-mix(in oklch, var(--background) 72%, var(--surface));
+  padding: 0.55rem 0.85rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+  text-decoration: none;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.landing-recipe-marquee-link:hover {
+  border-color: color-mix(in oklch, var(--primary) 50%, var(--border));
+  background: color-mix(in oklch, var(--accent) 70%, var(--background));
+  color: var(--foreground);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 18%, transparent);
+}
+
+@keyframes landing-recipe-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* Mobile — tighter rhythm, fewer marquee rows, no horizontal bleed */
+@media (max-width: 639px) {
+  .landing-recipe-marquee-row:nth-child(n + 3) {
+    display: none;
+  }
+
+  .landing-recipe-marquee-row {
+    min-height: 2.75rem;
+    padding-block: 0.5rem;
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0%,
+      black 10%,
+      black 90%,
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent 0%,
+      black 10%,
+      black 90%,
+      transparent 100%
+    );
+  }
+
+  .landing-recipe-marquee-link {
+    min-height: 1.65rem;
+    padding: 0.35rem 0.55rem;
+    font-size: 10px;
+  }
+
+  .landing-qual-card .landing-multi-step-caption,
+  .landing-qual-card .landing-approval-note {
+    opacity: 1;
+    transform: none;
+  }
+}

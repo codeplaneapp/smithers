@@ -1,0 +1,36 @@
+{
+  "name": "@smithers-orchestrator/landing-page",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Next.js landing page for Smithers",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chenglou/pretext": "^0.0.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.21.0",
+    "next": "16.2.9",
+    "radix-ui": "^1.6.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "shiki": "^4.3.0",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.9",
+    "tailwindcss": "^4",
+    "typescript": "~6.0.3"
+  }
+}
