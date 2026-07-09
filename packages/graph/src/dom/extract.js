@@ -43,7 +43,7 @@ export function __setRuntimeModuleLoader(loader) {
     loadRuntimeModule = previous;
   };
 }
-// CLI agents (Claude Code, Codex, Gemini, Kimi) can spend many minutes reading
+// CLI agents (Claude Code, Codex, Cursor, Gemini, Kimi) can spend many minutes reading
 // files and thinking without producing stdout. 5 min was still too aggressive:
 // reviewer agents on substantive diffs were getting killed mid-review and
 // breaking ValidationLoop. 10 min matches the explicit per-task overrides used

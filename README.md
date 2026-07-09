@@ -34,7 +34,7 @@ step is a database row, so live watching, rewind, and replay are built in.*
   learned, pick up `remember`/`recall` tools mid-task, and retain a digest afterward.
   Works locally out of the box; connect [Hindsight](https://smithers.sh/guide/setup/semantic-memory)
   for semantic recall by meaning.
-- 🔌 **Any agent, any model**: Claude Code, Codex, Pi, Antigravity, and more, plus any model
+- 🔌 **Any agent, any model**: Claude Code, Codex, Cursor, Pi, Antigravity, and more, plus any model
   through the AI SDK. Swap the harness without rewriting the workflow.
 - 🛠️ **Higher-quality output**: review loops, human approvals, and evals give agents the
   structure that real work demands.
@@ -238,6 +238,7 @@ harness can do the edits.
 | --- | --- |
 | [Claude Code](./docs/integrations/cli-agents.mdx) | CLI harness |
 | Codex | CLI harness |
+| Cursor | CLI harness |
 | [Pi](./docs/integrations/pi-integration.mdx) | CLI harness |
 | Antigravity | CLI harness |
 | Any [AI SDK](./docs/integrations/sdk-agents.mdx) model | SDK agent, with tools, structured output, and MCP |

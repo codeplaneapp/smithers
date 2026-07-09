@@ -8,7 +8,7 @@ import {
   runSmithers,
   writeFakeAntigravityBinary,
   writeFakeClaudeBinary,
-  writeFakeCodexBinary,
+  writeFakeCodexBinary, writeFakeCursorBinary,
   writeFakeOpenClawBinary,
   writeFakeOpenCodeBinary,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
@@ -147,6 +147,25 @@ test("smithers init routes every default tier to its Codex 5.6 model", () => {
   expect(agentsSource).toMatch(/planning:\s*\[\s*providers\.codexSol,/);
   expect(agentsSource).toMatch(/orchestrator:\s*\[\s*providers\.codexSol,/);
   expect(agentsSource).toContain("Codex runs first. Later entries are runtime fallbacks");
+});
+test("smithers init includes Cursor roles when cursor-agent is authenticated", () => {
+    const repo = createTempRepo();
+    const binDir = createExecutableDir();
+    writeFakeCursorBinary(binDir);
+    const result = runSmithers(["init"], {
+        cwd: repo.dir,
+        format: "json",
+        env: buildEnv(repo.dir, binDir),
+    });
+    expect(result.exitCode).toBe(0);
+    const agentsSource = repo.read(".smithers/agents.ts");
+    expect(agentsSource).toContain('export { CursorAgent } from "./agents/cursor";');
+    expect(agentsSource).toContain("cursor: CursorAgent");
+    expect(agentsSource).toMatch(/cheapFast:\s*\[\s*providers\.cursor,/);
+    expect(agentsSource).toMatch(/smart:\s*\[\s*providers\.cursor,/);
+    expect(agentsSource).toMatch(/smartTool:\s*\[\s*providers\.cursor,/);
+    expect(agentsSource).toMatch(/review:\s*\[\s*providers\.cursor,/);
+    expect(agentsSource).toContain("smart: Smithers would normally suggest Claude Code here");
 });
 
 test("smithers init --agents-only still scaffolds the pack manifest", () => {

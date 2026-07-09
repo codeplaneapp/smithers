@@ -1709,8 +1709,8 @@
     "kind": "knowledge",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "When would you use ClaudeCodeAgent vs CodexAgent vs OpenCodeAgent?",
-    "canonicalAnswer": "ClaudeCodeAgent: Anthropic CLI with sessions/MCP. CodexAgent: OpenAI CLI with sandbox. OpenCodeAgent: OpenCode CLI. Choose based on provider, session requirements, and sandbox isolation needs.",
+    "task": "When would you use ClaudeCodeAgent vs CodexAgent vs CursorAgent vs OpenCodeAgent?",
+    "canonicalAnswer": "ClaudeCodeAgent: Anthropic CLI with sessions/MCP. CodexAgent: OpenAI CLI with sandbox and structured-output flag support. CursorAgent: Cursor CLI with workspace trust, sandbox flags, and chat resumption. OpenCodeAgent: OpenCode CLI. Choose based on provider, session requirements, sandbox isolation needs, and local CLI support.",
     "slice": "agents-runtimes"
   },
   {
@@ -1743,7 +1743,7 @@
     "tier": "weak",
     "verify": "deterministic",
     "task": "What are the different MCP bootstrap modes and which agents use each?",
-    "canonicalAnswer": "project-config: ClaudeCodeAgent/KimiAgent/AntigravityAgent/OpenCodeAgent/VibeAgent. inline-config: CodexAgent. allow-list: GeminiAgent. unsupported: ForgeAgent/PiAgent",
+    "canonicalAnswer": "project-config: ClaudeCodeAgent/CursorAgent/KimiAgent/AntigravityAgent/OpenCodeAgent/VibeAgent. inline-config: CodexAgent. allow-list: GeminiAgent. unsupported: ForgeAgent/PiAgent",
     "slice": "agents-runtimes"
   },
   {
@@ -1754,7 +1754,7 @@
     "tier": "weak",
     "verify": "deterministic",
     "task": "Which agents support native structured output natively (via API) and which only support prompt-based structured output?",
-    "canonicalAnswer": "AnthropicAgent/OpenAIAgent native. CLI agents (ClaudeCodeAgent/CodexAgent/etc) support via outputSchema parameter",
+    "canonicalAnswer": "AnthropicAgent/OpenAIAgent native. CLI agents (ClaudeCodeAgent/CodexAgent/CursorAgent/etc) support via outputSchema parameter",
     "slice": "agents-runtimes"
   },
   {
@@ -1765,7 +1765,7 @@
     "tier": "weak",
     "verify": "deterministic",
     "task": "What skill installation modes do agents support and which agents use each?",
-    "canonicalAnswer": "plugin: ClaudeCodeAgent/AntigravityAgent/VibeAgent/OpenCodeAgent. dir: KimiAgent. files: PiAgent. none: CodexAgent/GeminiAgent/ForgeAgent",
+    "canonicalAnswer": "plugin: ClaudeCodeAgent/AntigravityAgent/VibeAgent/OpenCodeAgent. dir: KimiAgent. files: PiAgent/CursorAgent. none: CodexAgent/GeminiAgent/ForgeAgent",
     "slice": "agents-runtimes"
   },
   {
@@ -1776,7 +1776,7 @@
     "tier": "weak",
     "verify": "deterministic",
     "task": "How do different agents persist sessions and allow resumption?",
-    "canonicalAnswer": "ClaudeCodeAgent: sessionId. CodexAgent: threadId. PiAgent/KimiAgent/AntigravityAgent: sessionId. ForgeAgent: conversationId. AmpAgent: threadId",
+    "canonicalAnswer": "ClaudeCodeAgent: sessionId. CodexAgent: threadId. CursorAgent: chatId. PiAgent/KimiAgent/AntigravityAgent: sessionId. ForgeAgent: conversationId. AmpAgent: threadId",
     "slice": "agents-runtimes"
   },
   {

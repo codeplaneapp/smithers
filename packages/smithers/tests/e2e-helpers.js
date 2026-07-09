@@ -403,6 +403,24 @@ export function writeFakeCodexBinary(dir, response = FAKE_AGENT_RESPONSE) {
 /**
  * @param {string} dir
  */
+export function writeFakeCursorBinary(dir, response = FAKE_AGENT_RESPONSE) {
+    return writeExecutable(dir, "cursor-agent", [
+        EXECUTABLE_SHEBANG,
+        "const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? " + JSON.stringify(response) + ";",
+        "const args = process.argv.slice(2);",
+        "if (args.join(' ') === 'status --format json') {",
+        "  process.stdout.write(JSON.stringify({ isAuthenticated: true }) + '\\n');",
+        "  process.exit(0);",
+        "}",
+        "process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'fake-cursor-session' }) + '\\n');",
+        "process.stdout.write(JSON.stringify({ type: 'assistant', message: '```json\\n' + payload + '\\n```\\n' }) + '\\n');",
+        "process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: '```json\\n' + payload + '\\n```\\n' }) + '\\n');",
+        "",
+    ].join("\n"));
+}
+/**
+ * @param {string} dir
+ */
 export function writeFakeOpenCodeBinary(dir, response = FAKE_AGENT_RESPONSE) {
   return writeExecutable(
     dir,

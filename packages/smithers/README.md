@@ -8,7 +8,7 @@
 
 Tell your coding agent to do real, multi-step work, then Smithers runs it for minutes or
 days with crash recovery, retries, human approvals, and full observability. The same
-workflow runs across Claude Code, Codex, Pi, AI SDK models, and remote sandboxes.
+workflow runs across Claude Code, Codex, Cursor, Pi, AI SDK models, and remote sandboxes.
 
 This package is the published Smithers runtime: the engine, the `smithers` CLI, the JSX
 workflow primitives, the agent adapters, and the Gateway. Install it once and your coding
@@ -23,7 +23,7 @@ earlier checkpoint. Independent steps can run at the same time.*
 
 - 🛡️ **Durable runs that survive crashes**: every completed step is persisted the moment it
   finishes, so a run resumes from where it stopped instead of starting over.
-- 🔌 **Any agent, any model**: Claude Code, Codex, Pi, Antigravity, and more, plus any model
+- 🔌 **Any agent, any model**: Claude Code, Codex, Cursor, Pi, Antigravity, and more, plus any model
   through the AI SDK. Swap the harness without rewriting the workflow.
 - 🛠️ **Higher-quality output**: review loops, human approvals, and evals give agents the
   structure that real work demands.
@@ -206,7 +206,7 @@ Point each task at whichever agent is best for the job, mix several in one workf
 switch freely. The workflow doesn't change when the model does, so a frontier model can
 plan, a fast model can fan out, and a specialized harness can do the edits.
 
-Agent adapters ship in the box, including `ClaudeCodeAgent`, `CodexAgent`, `PiAgent`,
+Agent adapters ship in the box, including `ClaudeCodeAgent`, `CodexAgent`, `CursorAgent`, `PiAgent`,
 `AntigravityAgent`, `GeminiAgent`, and `AnthropicAgent` / `OpenAIAgent` for any AI SDK
 model (with tools, structured output, and MCP). The same `<Sandbox>` primitive runs an
 agent in a local hardware-isolated microVM with

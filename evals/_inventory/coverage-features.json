@@ -1274,6 +1274,15 @@
     "slice": "agents-runtimes"
   },
   {
+    "id": "cursor-agent",
+    "name": "CursorAgent",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new CursorAgent({...})",
+    "summary": "CLI agent wrapping Cursor's cursor-agent CLI in headless stream-json mode with model/mode selection, workspace trust, sandbox flags, MCP approvals, and chat resumption.",
+    "slice": "agents-runtimes"
+  },
+  {
     "id": "opencode-agent",
     "name": "OpenCodeAgent",
     "area": "agents-runtimes",

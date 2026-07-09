@@ -70,6 +70,28 @@ const DETECTORS = [
     setupHint: "Install the Codex CLI and run `codex login`, or set `OPENAI_API_KEY`.",
   },
   {
+    id: "cursor",
+    displayName: "Cursor",
+    binary: "cursor-agent",
+    authSignals: () => [],
+    apiKeys: ["CURSOR_API_KEY"],
+    availabilityProbe: (_homeDir, env) => {
+      if (env.CURSOR_API_KEY) {
+        return passProbe("$CURSOR_API_KEY is set");
+      }
+      const status = runProbeCommand("cursor-agent", ["status", "--format", "json"], env);
+      const parsed = parseJsonObject(status.stdout);
+      if (parsed && parsed.isAuthenticated === true) {
+        return passProbe("cursor-agent status reports authenticated");
+      }
+      if (parsed && parsed.isAuthenticated === false) {
+        return failProbe("cursor-agent status reports not authenticated");
+      }
+      return failProbe(status.output || "Cursor login not verified");
+    },
+    setupHint: "Install Cursor Agent and run `cursor-agent login`, or set `CURSOR_API_KEY`.",
+  },
+  {
     id: DEFAULT_PROVIDER_ID,
     displayName: "OpenRouter",
     binary: "openrouter-api",
@@ -274,12 +296,12 @@ const DETECTORS = [
   },
 ];
 const ROLE_PREFERENCES = {
-  spec: ["claude", "codex", "opencode", "pool", "openclaw"],
-  research: ["codex", "kimi", "antigravity", "opencode", "pool", "claude", "openclaw"],
-  plan: ["claude", "codex", "opencode", "pool", "antigravity", "kimi", "openclaw"],
-  implement: ["codex", "opencode", "amp", "pool", "antigravity", "openclaw", "claude", "kimi"],
-  validate: ["codex", "opencode", "amp", "pool", "antigravity", "openclaw", "claude", "kimi"],
-  review: ["codex", "claude", "amp", "opencode", "pool", "openclaw", "kimi"],
+  spec: ["claude", "codex", "opencode", "pool", "openclaw", "cursor"],
+  research: ["codex", "kimi", "antigravity", "opencode", "pool", "claude", "openclaw", "cursor"],
+  plan: ["claude", "codex", "opencode", "pool", "antigravity", "kimi", "openclaw", "cursor"],
+  implement: ["codex", "opencode", "amp", "pool", "antigravity", "openclaw", "claude", "kimi", "cursor"],
+  validate: ["codex", "opencode", "amp", "pool", "antigravity", "openclaw", "claude", "kimi", "cursor"],
+  review: ["codex", "claude", "amp", "opencode", "pool", "openclaw", "kimi", "cursor"],
 };
 const AGENT_VARIANTS = [
   {
@@ -331,6 +353,7 @@ const AGENT_VARIANTS = [
 const SCAFFOLDED_PROVIDERS = {
   claude: "ClaudeCodeAgent",
   codex: "CodexAgent",
+  cursor: "CursorAgent",
   opencode: "OpenCodeAgent",
   antigravity: "AntigravityAgent",
   pool: "PoolAgent",
@@ -338,6 +361,7 @@ const SCAFFOLDED_PROVIDERS = {
 const SCAFFOLDED_PROVIDER_FILES = {
   claude: "claude-code",
   codex: "codex",
+  cursor: "cursor",
   opencode: "opencode",
   antigravity: "antigravity",
   pool: "pool",
@@ -454,6 +478,10 @@ const CONSTRUCTORS = {
   codex: {
     importName: "CodexAgent",
     expr: `new SmithersCodexAgent({ model: "${SOTA_SLOTS.codex}", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true })`,
+  },
+  cursor: {
+    importName: "CursorAgent",
+    expr: "new SmithersCursorAgent({ cwd: process.cwd() })",
   },
   openrouter: {
     importName: "OpenAIAgent",
