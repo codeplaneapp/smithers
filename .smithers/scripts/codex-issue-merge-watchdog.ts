@@ -13,7 +13,7 @@
  * only invokes Sol when repair is actually required.
  */
 // crontab: */5 * * * * PATH=/usr/local/bin:/usr/bin:/bin SMITHERS_BIN=/absolute/path/to/smithers /absolute/path/to/bun /path/to/repo/.smithers/scripts/codex-issue-merge-watchdog.ts --root /path/to/repo RUN_ID
-import { CodexAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent, type AgentLike } from "smithers-orchestrator";
 import {
   existsSync,
   mkdirSync,
@@ -26,6 +26,8 @@ import {
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
+
+import { codexFirst } from "../lib/codexAccounts";
 
 export type WatchdogOptions = {
   runId: string;
@@ -710,26 +712,57 @@ export function runSmithersJson(
 }
 
 async function askTerra(runId: string, inspect: string, why: string, rootDir: string): Promise<HealthDecision | null> {
-  const terra = new CodexAgent({
+  const terra = codexFirst({
     model: "gpt-5.6-terra",
     config: { model_reasoning_effort: "medium" },
     sandbox: "read-only",
     yolo: false,
     skipGitRepoCheck: true,
-  });
-  const result = await terra.generate({
+  }, [
+    new ClaudeCodeAgent({
+      model: "claude-sonnet-5",
+      systemPrompt: "You are the Sonnet fallback for Terra's read-only Smithers health-check role.",
+      permissionMode: "plan",
+    }),
+  ]);
+  const text = await generateWithAgentFallback(terra, {
     rootDir,
     timeout: { totalMs: 10 * 60_000, idleMs: 2 * 60_000 },
     prompt: [
-      `You are Codex Terra performing a read-only health check for Smithers run ${runId}.`,
+      `You are serving the Terra read-only health-check role for Smithers run ${runId}.`,
       "Judge whether the workflow is making healthy durable progress. Waiting for an explicit approval, signal, timer, or known quota reset is healthy. Running with no recent progress, stale/orphaned owners, dependency deadlocks, repeated gate failures, and failed nodes are unhealthy.",
       "The inspect context includes a persisted PROGRESS COMPARISON derived only from durable event sequence and node-state transitions. Use unchangedTicks and changedAt to distinguish a quiet healthy interval from a genuinely stalled running run.",
       "Do not edit files, mutate the run, approve anything, merge, or push.",
       "Return ONLY one JSON object: {\"healthy\":boolean,\"repairRequired\":boolean,\"state\":string,\"reason\":string,\"recommendedAction\":string}.",
       "", "SMITHERS INSPECT:", boundedContext(inspect), "", "SMITHERS WHY:", boundedContext(why),
     ].join("\n"),
-  });
-  return parseHealthDecision(result.text);
+  }, (candidate) => parseHealthDecision(candidate) !== null);
+  return parseHealthDecision(text);
+}
+
+/**
+ * Run the same sequential provider chain that Task `agent={[...]}` uses. The
+ * watchdog is a standalone Bun process rather than a workflow Task, so it
+ * applies the array explicitly while preserving preflight-first failover.
+ */
+export async function generateWithAgentFallback(
+  agents: AgentLike[],
+  request: Parameters<AgentLike["generate"]>[0],
+  usable: (text: string) => boolean = (text) => text.trim().length > 0,
+): Promise<string> {
+  if (agents.length === 0) throw new Error("Agent fallback chain must not be empty.");
+  for (const agent of agents) {
+    try {
+      await agent.preflight?.(request);
+      const result = await agent.generate(request) as { text?: unknown } | null;
+      const text = typeof result?.text === "string" ? result.text : "";
+      if (!usable(text)) throw new Error("Agent returned unusable output.");
+      return text;
+    } catch {
+      // Provider/auth/preflight/schema failures fall through to the next agent.
+    }
+  }
+  throw new Error(`All ${agents.length} configured watchdog agents failed.`);
 }
 
 async function askSolToRepair(
@@ -739,19 +772,25 @@ async function askSolToRepair(
   why: string,
   rootDir: string,
 ): Promise<string> {
-  const sol = new CodexAgent({
+  const sol = codexFirst({
     model: "gpt-5.6-sol",
     config: { model_reasoning_effort: "xhigh" },
     sandbox: "workspace-write",
     fullAuto: true,
     yolo: false,
     skipGitRepoCheck: true,
-  });
-  const result = await sol.generate({
+  }, [
+    new ClaudeCodeAgent({
+      model: "claude-fable-5",
+      systemPrompt: "You are the Fable fallback for the Sol Smithers-repair role. Preserve Sol's safety constraints and return the exact requested JSON shape.",
+      permissionMode: "bypassPermissions",
+    }),
+  ]);
+  return generateWithAgentFallback(sol, {
     rootDir,
     timeout: { totalMs: 45 * 60_000, idleMs: 10 * 60_000 },
     prompt: [
-      `You are Codex Sol repairing unhealthy Smithers run ${runId} in ${rootDir}.`,
+      `You are serving the Sol repair role for unhealthy Smithers run ${runId} in ${rootDir}.`,
       `Terra diagnosis: ${JSON.stringify(decision)}`,
       "Use Smithers run-control commands first: inspect, why, logs/events, supervise/resume, retry-task, or fork as appropriate. Make the smallest safe repair and verify that durable progress resumes.",
       "Never auto-approve or deny a human gate. Never merge, land, or push branches/main. Never expose credentials.",
@@ -761,8 +800,7 @@ async function askSolToRepair(
       `Return ONLY one JSON object: {"outcome":"repaired"|"no-change"|"human-required","replacementRunId":string|null,"summary":string}. replacementRunId must be null unless you actually created or selected a different active run from ${runId}; when non-null it must be that exact run id.`,
       "", "SMITHERS INSPECT:", boundedContext(inspect), "", "SMITHERS WHY:", boundedContext(why),
     ].join("\n"),
-  });
-  return result.text;
+  }, (candidate) => parseSolRepairResult(candidate, runId) !== null);
 }
 
 function diagnosticFailureDecision(state: string, reason: string): HealthDecision {

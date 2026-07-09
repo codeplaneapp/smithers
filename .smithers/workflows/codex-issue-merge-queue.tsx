@@ -14,7 +14,7 @@
 // deliberately single-lane so independently green branches cannot race or
 // bypass integration testing against fixes landed earlier in the same run.
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, CodexAgent, Panel, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, Panel, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -31,6 +31,7 @@ import {
   reviewPanelIsComplete,
   tallyPanelWins,
 } from "../lib/codexIssueMergeQueue";
+import { codexFirst } from "../lib/codexAccounts";
 
 const DEFAULT_REPO = "smithersai/smithers";
 const DEFAULT_GATE = "pnpm typecheck && pnpm test";
@@ -293,48 +294,89 @@ const {
 
 // Workflow-local, no-cwd agents are intentional. A cwd on an agent overrides
 // the enclosing <Worktree> and would make concurrent Luna/Terra tasks edit root.
-const sol = new CodexAgent({
+const solOptions = {
   model: "gpt-5.6-sol",
   config: { model_reasoning_effort: "xhigh" },
   systemPrompt: "You are the Sol panelist. When a panel schema asks for planner or reviewer identity, use sol.",
   sandbox: "read-only",
   yolo: false,
   skipGitRepoCheck: true,
-});
-const fable = new ClaudeCodeAgent({
-  model: "claude-fable-5",
-  systemPrompt: "You are the Fable panelist. When a panel schema asks for planner or reviewer identity, use fable.",
-  permissionMode: "plan",
-});
-const lunaResearch = new CodexAgent({
+} as const;
+
+// Each logical panel seat is a sequential failover chain. The fallback keeps
+// the SEAT identity, not its provider identity, so a Fable process serving the
+// Sol seat still emits planner/reviewer="sol" (and vice versa).
+const sol = codexFirst(solOptions, [
+  new ClaudeCodeAgent({
+    model: "claude-fable-5",
+    systemPrompt: "You are the Fable fallback for the Sol panel seat. When a panel schema asks for planner or reviewer identity, use sol.",
+    permissionMode: "plan",
+  }),
+]);
+const fable = [
+  new ClaudeCodeAgent({
+    model: "claude-fable-5",
+    systemPrompt: "You are the Fable panelist. When a panel schema asks for planner or reviewer identity, use fable.",
+    permissionMode: "plan",
+  }),
+  ...codexFirst({
+    ...solOptions,
+    systemPrompt: "You are the Sol fallback for the Fable panel seat. When a panel schema asks for planner or reviewer identity, use fable.",
+  }),
+];
+const lunaResearch = codexFirst({
   model: "gpt-5.6-luna",
   config: { model_reasoning_effort: "medium" },
   sandbox: "read-only",
   yolo: false,
   skipGitRepoCheck: true,
-});
-const lunaImplement = new CodexAgent({
+}, [
+  new ClaudeCodeAgent({
+    model: "claude-sonnet-5",
+    systemPrompt: "You are the Sonnet fallback for the Luna research role. Research only; do not edit files.",
+    permissionMode: "plan",
+  }),
+]);
+const lunaImplement = codexFirst({
   model: "gpt-5.6-luna",
   config: { model_reasoning_effort: "medium" },
   sandbox: "danger-full-access",
   dangerouslyBypassApprovalsAndSandbox: true,
   skipGitRepoCheck: true,
-});
-const terra = new CodexAgent({
+}, [
+  new ClaudeCodeAgent({
+    model: "claude-sonnet-5",
+    systemPrompt: "You are the Sonnet fallback for the Luna implementation role. Implement and verify the requested fix in the active worktree.",
+    permissionMode: "bypassPermissions",
+  }),
+]);
+const terra = codexFirst({
   model: "gpt-5.6-terra",
   config: { model_reasoning_effort: "medium" },
   sandbox: "danger-full-access",
   dangerouslyBypassApprovalsAndSandbox: true,
   skipGitRepoCheck: true,
-});
-const terraPanelJudge = new CodexAgent({
+}, [
+  new ClaudeCodeAgent({
+    model: "claude-sonnet-5",
+    systemPrompt: "You are the Sonnet fallback for Terra's rebase and merge-queue role.",
+    permissionMode: "bypassPermissions",
+  }),
+]);
+const terraPanelJudge = codexFirst({
   model: "gpt-5.6-terra",
   config: { model_reasoning_effort: "medium" },
   systemPrompt: "You are the neutral moderator scoring Sol versus Fable. Inspect repository evidence when needed, synthesize the strongest result, assign calibrated 0-100 scores to both contributions, and never favor a model family by identity.",
   sandbox: "read-only",
   yolo: false,
   skipGitRepoCheck: true,
-});
+}, [
+  new ClaudeCodeAgent({
+    model: "claude-sonnet-5",
+    systemPrompt: "You are the neutral fallback moderator scoring the logical Sol and Fable panel seats. Synthesize evidence and never favor a provider family by identity.",
+    permissionMode: "plan",
+  }),
+]);
 
 const AGENT_RETRIES = 2;
 const HEARTBEAT_MS = 10 * 60_000;
@@ -720,7 +762,7 @@ function syncDraftPr(
       implementation.summary,
       "",
       "---",
-      "Researched and implemented by Codex Luna; planned and reviewed by the Codex Sol + Claude Fable panel; queued by Codex Terra.",
+      "Researched and implemented by the Luna role (Codex primary, Claude Sonnet fallback); planned and reviewed by the reciprocal Sol + Fable panel; queued by the Terra role.",
     ].join("\n");
     shell("gh", [
       "pr", "create", "--repo", input.repo, "--head", branch, "--base", input.baseBranch,
@@ -772,7 +814,7 @@ function finalizeReadiness(issueNumber: number, ctx: any, input: ResolvedInput):
 
 function triagePrompt(issue: Issue): string {
   return [
-    `You are Codex Sol triaging GitHub issue #${issue.number} for smithersai/smithers.`,
+    `You are serving the Sol triage role for GitHub issue #${issue.number} in smithersai/smithers.`,
     `Title: ${issue.title}`,
     `Labels: ${issue.labels.join(", ") || "none"}`,
     "", issue.body || "(no body)", "",
@@ -785,7 +827,7 @@ function triagePrompt(issue: Issue): string {
 
 function researchPrompt(issue: Issue, triage: Triage): string {
   return [
-    `You are Codex Luna doing read-only implementation research for issue #${issue.number}: ${issue.title}.`,
+    `You are serving the Luna read-only research role for issue #${issue.number}: ${issue.title}.`,
     "The current directory is its isolated worktree. Read AGENTS.md/CLAUDE.md, relevant source, tests, and docs. Use rg before broad reads.",
     "Do not edit files. Trace the real behavior, callers, invariants, and existing test strategy. Verify paths because the issue may be stale.",
     "", `Triage:\n${JSON.stringify(triage, null, 2)}`, "", `Issue body:\n${issue.body || "(no body)"}`, "",
@@ -821,7 +863,7 @@ function implementationFeedback(ctx: any, issueNumber: number): string {
 
 function implementPrompt(issue: Issue, research: Research, plan: Plan, feedback: string): string {
   return [
-    `You are Codex Luna implementing issue #${issue.number}: ${issue.title}.`,
+    `You are serving the Luna implementation role for issue #${issue.number}: ${issue.title}.`,
     "The current directory is the isolated issue worktree. Make all edits here. Do not commit, describe, bookmark, push, open a PR, merge, or touch local main; the workflow owns VCS operations.",
     "Follow AGENTS.md. Preserve unrelated changes, add focused regression tests, use real backends, and run the most relevant checks. Install dependencies inside this worktree if needed; never link parent node_modules.",
     "", `Research:\n${JSON.stringify(research, null, 2)}`, "", `Sol + Fable planning panel synthesis:\n${JSON.stringify(plan, null, 2)}`, "",
@@ -844,7 +886,7 @@ function reviewPrompt(issue: Issue, research: Research, plan: Plan, implementati
 
 function queuePrepPrompt(issue: Issue, pr: PullRequest, input: ResolvedInput): string {
   return [
-    `You are Codex Terra preparing PR #${pr.prNumber} for issue #${issue.number} in the parallel merge-queue preflight.`,
+    `You are serving the Terra role while preparing PR #${pr.prNumber} for issue #${issue.number} in the parallel merge-queue preflight.`,
     "The current directory is the issue worktree. Do not mutate the local main bookmark and do not merge. Other queue entries may be preparing concurrently.",
     `Fetch origin, rebase bookmark ${pr.branch} onto the current local ${input.baseBranch} bookmark (and the latest ${input.baseBranch}@origin when it advanced), and resolve conflicts to the correct combined result.`,
     "Search for every conflict marker after resolving. If conflicts are not responsibly solvable within this issue, return status=conflict without moving main.",
@@ -857,7 +899,7 @@ function queuePrepPrompt(issue: Issue, pr: PullRequest, input: ResolvedInput): s
 
 function landPrompt(issue: Issue, pr: PullRequest, input: ResolvedInput): string {
   return [
-    `You are Codex Terra preparing the final serialized landing of issue #${issue.number} from PR #${pr.prNumber}.`,
+    `You are serving the Terra role while preparing the final serialized landing of issue #${issue.number} from PR #${pr.prNumber}.`,
     "This task is inside a single-lane MergeQueue. Earlier queue entries may already be on local main; no other task is allowed to mutate main concurrently.",
     `Work in this issue worktree. Never use git add -A. Never merge with gh. Never push or move local/remote ${input.baseBranch}; the following deterministic task exclusively owns the local bookmark mutation.`,
     "1. Fetch origin and record the current local main revision.",

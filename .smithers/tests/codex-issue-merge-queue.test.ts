@@ -127,12 +127,22 @@ describe("codex issue merge queue gates", () => {
 describe("codex issue merge queue graph contract", () => {
   const source = readFileSync(join(import.meta.dir, "../workflows/codex-issue-merge-queue.tsx"), "utf8");
 
-  test("pins the requested Codex tiers and the Fable peer panelist", () => {
+  test("pins role-preserving Codex/Claude failover chains", () => {
     expect(source).toContain('model: "gpt-5.6-sol"');
     expect(source).toContain('model: "gpt-5.6-luna"');
     expect(source).toContain('model: "gpt-5.6-terra"');
     expect(source).toContain('model: "claude-fable-5"');
+    expect(source).toContain('model: "claude-sonnet-5"');
     expect(source).toContain("new ClaudeCodeAgent");
+    expect(source).toContain("const sol = codexFirst(solOptions, [");
+    expect(source).toContain("const fable = [");
+    expect(source).toContain("...codexFirst({");
+    expect(source).toContain("const lunaResearch = codexFirst({");
+    expect(source).toContain("const lunaImplement = codexFirst({");
+    expect(source).toContain("Fable fallback for the Sol panel seat");
+    expect(source).toContain("Sol fallback for the Fable panel seat");
+    expect(source).toContain("Sonnet fallback for the Luna research role");
+    expect(source).toContain("Sonnet fallback for the Luna implementation role");
   });
 
   test("fans out 16 issue subtrees, reviews beside CI, and serializes only local-main mutation", () => {

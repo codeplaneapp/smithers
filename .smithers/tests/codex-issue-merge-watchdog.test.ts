@@ -10,6 +10,7 @@ import {
   boundedContext,
   compareProgress,
   decisionAfterSolRepair,
+  generateWithAgentFallback,
   knownStateDecision,
   parseEventEvidence,
   parseHealthDecision,
@@ -282,6 +283,40 @@ describe("codex issue merge watchdog", () => {
       replacementRunId: null,
       summary: "resumed",
     })).toEqual({ decision: unhealthy, manualInterventionRequired: false });
+  });
+
+  test("falls through an ordered agent array on preflight or unusable output", async () => {
+    const calls: string[] = [];
+    const preflightFailure = {
+      preflight: async () => {
+        calls.push("first:preflight");
+        throw new Error("provider unavailable");
+      },
+      generate: async () => {
+        calls.push("first:generate");
+        return { text: "must not run" };
+      },
+    };
+    const malformed = {
+      generate: async () => {
+        calls.push("second:generate");
+        return { text: "not-json" };
+      },
+    };
+    const fallback = {
+      generate: async () => {
+        calls.push("third:generate");
+        return { text: '{"ok":true}' };
+      },
+    };
+
+    expect(await generateWithAgentFallback(
+      [preflightFailure, malformed, fallback],
+      { prompt: "health check" },
+      (text) => text === '{"ok":true}',
+    )).toBe('{"ok":true}');
+    expect(calls).toEqual(["first:preflight", "second:generate", "third:generate"]);
+    await expect(generateWithAgentFallback([], { prompt: "x" })).rejects.toThrow("must not be empty");
   });
 
   test("enforces the Sol escalation cooldown", () => {
