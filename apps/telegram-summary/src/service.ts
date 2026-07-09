@@ -316,7 +316,7 @@ async function selectMessagesForDigest(db: D1Database, startMs: number, endMs: n
     .prepare(
       `SELECT update_id, chat_id, message_id, author, text, at_ms, url
        FROM messages
-       WHERE at_ms IS NULL OR (at_ms >= ? AND at_ms < ?)
+       WHERE COALESCE(at_ms, created_at_ms) >= ? AND COALESCE(at_ms, created_at_ms) < ?
        ORDER BY COALESCE(at_ms, created_at_ms), update_id
        LIMIT 1200`,
     )
