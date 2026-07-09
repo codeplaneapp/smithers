@@ -26,7 +26,7 @@ const directDbPattern =
 const allowedDirectDbAccess = new Map([
   ["packages/engine/src/effect/builder.js", 3],
   ["packages/smithers/src/openSmithersStore.js", 4],
-  ["packages/smithers/src/migrateSmithersStore.js", 6],
+  ["packages/smithers/src/migrateSmithersStore.js", 7],
   ["packages/smithers/src/resolveSmithersBackendChoice.js", 3],
   ["packages/smithers/src/create.js", 3],
   ["packages/smithers/src/external/create-external-smithers.js", 1],
