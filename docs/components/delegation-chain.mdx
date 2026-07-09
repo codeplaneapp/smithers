@@ -43,22 +43,22 @@ type DelegationChainProps = DelegationSharedProps & {
 ```
 
 ```tsx
-import { ClaudeCodeAgent, DelegationChain, createSmithers, delegationSchemas } from "smithers-orchestrator";
+import { CodexAgent, DelegationChain, createSmithers, delegationSchemas } from "smithers-orchestrator";
 
 const { Workflow, smithers, outputs } = createSmithers({ ...delegationSchemas });
 
-// Tiers are labels, not model ids; point each at any agent or failover pool.
-// The seeded workflow maps them onto the generated `../agents` pools instead.
-const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
-const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
-const haiku = new ClaudeCodeAgent({ model: "claude-haiku-4-5-20251001" });
+// The legacy tier keys are labels, not provider or model ids. Point them at
+// Codex tiers by strength; the seeded workflow uses generated pools instead.
+const sol = new CodexAgent({ model: "gpt-5.6-sol" });
+const terra = new CodexAgent({ model: "gpt-5.6-terra" });
+const luna = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+const lunaCheap = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
 
 export default smithers((ctx) => (
   <Workflow name="delegation-chain">
     <DelegationChain
       prompt={ctx.input?.prompt ?? ""}
-      agents={{ fable, opus, sonnet, haiku }}
+      agents={{ fable: sol, opus: terra, sonnet: luna, haiku: lunaCheap }}
       outputs={outputs}
     />
   </Workflow>

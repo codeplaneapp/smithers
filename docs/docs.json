@@ -320,8 +320,8 @@
         "pages": [
           "agents/overview",
           "agents/setup",
-          "agents/claude-code",
           "agents/codex",
+          "agents/claude-code",
           "agents/cursor",
           "agents/copilot",
           "agents/pi",

@@ -34,6 +34,9 @@ const ROLES = [
   "planning",
   "review",
   "smart",
+  "midTier",
+  "smartTool",
+  "validate",
   "implement",
   "cheapFast",
   "ui",
@@ -257,7 +260,7 @@ function renderMdx(registry: SotaRegistry, benchmarks: Benchmark[]): string {
   lines.push("## Role defaults");
   lines.push("");
   lines.push(
-    "The fable-sandwich tiers (see the [workflow optimization guide](/guides/workflow-optimization)) resolve to these ids:",
+    "The Codex-first workflow tiers (see the [workflow optimization guide](/guides/workflow-optimization)) resolve to these ids:",
   );
   lines.push("");
   lines.push("| Role | Default model |");
@@ -319,7 +322,7 @@ function renderCliModule(registry: SotaRegistry): string {
   lines.push("// GENERATED FILE. Edit docs/data/sota-models.json, then run `pnpm sota:gen`.");
   lines.push("//");
   lines.push("// The SOTA model registry: which concrete model ids smithers configures by");
-  lines.push("// default. Code refers to stable slots (fable, codex, gemini, ...) so a model");
+  lines.push("// default. Code refers to stable slots (codexSol, codexTerra, codex, ...) so a model");
   lines.push("// bump is a registry edit, not a code change. See docs/reference/sota-models.mdx.");
   lines.push("");
   lines.push(`export const SOTA_REGISTRY_VERSION = ${registry.version};`);
@@ -329,7 +332,7 @@ function renderCliModule(registry: SotaRegistry): string {
   lines.push("/** Stable handle → current best model id for that seat. */");
   lines.push(`export const SOTA_SLOTS = Object.freeze(${JSON.stringify(slots, null, 2)});`);
   lines.push("");
-  lines.push("/** Fable-sandwich role → current best model id. */");
+  lines.push("/** Workflow role → current best model id. */");
   lines.push(`export const SOTA_ROLE_MODELS = Object.freeze(${JSON.stringify(roleDefaults(registry), null, 2)});`);
   lines.push("");
   lines.push("/** Deprecated id → the id sweeps rewrite it to. */");

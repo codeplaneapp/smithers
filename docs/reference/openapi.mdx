@@ -84,7 +84,7 @@ function createOpenApiTools(
 
 ```ts
 import { ToolLoopAgent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { createOpenApiTools } from "smithers-orchestrator";
 
 const tools = await createOpenApiTools("https://api.example.com/openapi.json", {
@@ -93,7 +93,7 @@ const tools = await createOpenApiTools("https://api.example.com/openapi.json", {
   include: ["listPets", "getPetById"],
 });
 
-const agent = new ToolLoopAgent({ model: anthropic("claude-fable-5"), tools });
+const agent = new ToolLoopAgent({ model: openai("gpt-5.6-terra"), tools });
 ```
 
 **Source** [`createOpenApiTools.js`](https://github.com/smithersai/smithers/blob/main/packages/openapi/src/tool-factory/createOpenApiTools.js) · [`OpenApiToolsOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/openapi/src/OpenApiToolsOptions.ts) · **Tests** [`tool-factory.test.js`](https://github.com/smithersai/smithers/blob/main/packages/openapi/tests/tool-factory.test.js) · **See also** [OpenAPI tools](/concepts/openapi-tools), [Tools](/integrations/tools)

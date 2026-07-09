@@ -14,17 +14,16 @@ type WorkflowProps = {
 ```
 
 ```tsx
-import { createSmithers } from "smithers-orchestrator";
-import { ToolLoopAgent as Agent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { CodexAgent, createSmithers } from "smithers-orchestrator";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
   research: z.object({ findings: z.string() }),
 });
 
-const researcher = new Agent({
-  model: anthropic("claude-fable-5"),
+const researcher = new CodexAgent({
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   instructions: "You are a research assistant.",
 });
 

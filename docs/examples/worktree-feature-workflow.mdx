@@ -1,24 +1,27 @@
 ---
 title: "Worktree Feature Workflow"
-description: "A multi-agent pipeline that discovers tickets from a PRD, implements them with Claude/Codex, validates, reviews in parallel, and generates reports."
+description: "A Codex-first pipeline that discovers tickets from a PRD, implements them with GPT-5.6 Luna, validates, reviews with GPT-5.6 Sol, and generates reports, with Claude only as an unavailable-Codex fallback."
 ---
 
 # Worktree Feature: Full Pipeline
 
 <Note>
-The most complex Smithers example: multiple CLI agents (Claude Code, OpenAI Codex) through a full development lifecycle.
+The most complex Smithers example: role-specific Codex agents, with sequential
+Claude fallback, through a full development lifecycle.
 </Note>
 
 ## Pipeline
 
 1. **Discover**: Read PRD, break into ordered independent tickets
-2. **Implement**: Write code end-to-end per ticket
+2. **Implement**: Write code end-to-end per ticket with GPT-5.6 Luna
 3. **Validate**: Run `bun test`
-4. **Review**: Claude + Codex review in parallel
+4. **Review**: Review with GPT-5.6 Sol; use Claude only if Codex is unavailable
 5. **ReviewFix**: Address review issues
 6. **Report**: Generate final report
 
-Steps 2--5 loop via `<Loop>` until both reviewers approve or max iterations reached.
+Steps 2--5 loop via `<Loop>` until the Codex-first review seat approves or max
+iterations are reached. Agent arrays are sequential fallback chains, not
+parallel reviewers.
 
 ## Schema Setup: smithers.ts
 
@@ -80,7 +83,8 @@ import { SYSTEM_PROMPT } from "./system-prompt";
 const USE_CLI = process.env.USE_CLI_AGENTS !== "0";
 const UNSAFE = process.env.SMITHERS_UNSAFE === "1";
 
-// Claude: switches between API agent and CLI agent
+// Claude is retained only as the unavailable-Codex fallback. It can switch
+// between API and CLI execution without changing the role chains below.
 const claudeApi = new Agent({
   model: anthropic("claude-fable-5"),
   instructions: SYSTEM_PROMPT,
@@ -94,16 +98,35 @@ const claudeCli = new ClaudeCodeAgent({
   timeoutMs: 30 * 60 * 1000,
 });
 
-export const claude = USE_CLI ? claudeCli : claudeApi;
+const claudeFallback = USE_CLI ? claudeCli : claudeApi;
 
-// Codex: CLI agent (CodexAgent does not have an API mode)
-export const codex = new CodexAgent({
-  model: "gpt-5.5",
+// Luna owns implementation. Explicit medium effort keeps the direct Luna
+// invocation within the model's supported effort range.
+const codexLuna = new CodexAgent({
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   systemPrompt: SYSTEM_PROMPT,
   yolo: UNSAFE,
   timeoutMs: 30 * 60 * 1000,
 });
+
+// Sol owns judgment-heavy review.
+const codexSol = new CodexAgent({
+  model: "gpt-5.6-sol",
+  config: { model_reasoning_effort: "xhigh" },
+  systemPrompt: SYSTEM_PROMPT,
+  yolo: UNSAFE,
+  timeoutMs: 30 * 60 * 1000,
+});
+
+// Smithers tries entries in order and advances only when the preceding agent
+// is unavailable or fails. Claude is never a parallel hot-path reviewer.
+export const implementAgents = [codexLuna, claudeFallback];
+export const reviewAgents = [codexSol, claudeFallback];
 ```
+
+The `Implement` task receives `agent={implementAgents}`. The review component
+below receives `agent={reviewAgents}`.
 
 ## Validation Loop: ValidationLoop.tsx
 
@@ -122,15 +145,13 @@ export function ValidationLoop({ ticket }: { ticket: { id: string } }) {
   const ctx = useCtx();
   const ticketId = ticket.id;
 
-  const claudeReview = ctx.latest("review", `${ticketId}:review-claude`);
-  const codexReview = ctx.latest("review", `${ticketId}:review-codex`);
-
-  const allApproved = !!claudeReview?.approved && !!codexReview?.approved;
+  const review = ctx.latest("review", `${ticketId}:review`);
+  const approved = !!review?.approved;
 
   return (
     <Loop
       id={`${ticketId}:impl-review-loop`}
-      until={allApproved}
+      until={approved}
       maxIterations={MAX_REVIEW_ROUNDS}
       onMaxReached="return-last"
     >
@@ -145,13 +166,12 @@ export function ValidationLoop({ ticket }: { ticket: { id: string } }) {
 }
 ```
 
-## Parallel Review: Review.tsx
+## Codex-First Review: Review.tsx
 
 ```tsx
 // scripts/worktree-feature/components/Review.tsx
-import { Parallel } from "smithers-orchestrator";
 import { Task, useCtx, outputs } from "../smithers";
-import { claude, codex } from "../agents";
+import { reviewAgents } from "../agents";
 import ReviewPrompt from "./Review.mdx";
 
 export function Review({ ticket }: { ticket: { id: string; title: string } }) {
@@ -162,27 +182,15 @@ export function Review({ ticket }: { ticket: { id: string; title: string } }) {
   if (!latestValidate?.allPassed) return null;
 
   return (
-    <Parallel>
-      <Task
-        id={`${ticketId}:review-claude`}
-        output={outputs.review}
-        agent={claude}
-        timeoutMs={15 * 60 * 1000}
-        continueOnFail
-      >
-        <ReviewPrompt ticketId={ticketId} reviewer="claude" />
-      </Task>
-
-      <Task
-        id={`${ticketId}:review-codex`}
-        output={outputs.review}
-        agent={codex}
-        timeoutMs={15 * 60 * 1000}
-        continueOnFail
-      >
-        <ReviewPrompt ticketId={ticketId} reviewer="codex" />
-      </Task>
-    </Parallel>
+    <Task
+      id={`${ticketId}:review`}
+      output={outputs.review}
+      agent={reviewAgents}
+      timeoutMs={15 * 60 * 1000}
+      continueOnFail
+    >
+      <ReviewPrompt ticketId={ticketId} reviewer="review" />
+    </Task>
   );
 }
 ```
@@ -221,9 +229,9 @@ bun install
 ## Key Patterns
 
 - **`createSmithers`** registers 6 output schemas; generates typed `tables`, `outputs`, and `Task` components.
-- **`ClaudeCodeAgent` / `CodexAgent`** run real CLI tools with full filesystem access.
-- **`<Loop>`** iterates implement/validate/review/fix until both reviewers approve or `MAX_REVIEW_ROUNDS` exhausted.
-- **`<Parallel>`** runs dual review simultaneously; both must approve.
+- **`CodexAgent` / `ClaudeCodeAgent`** run real agents with full filesystem access; Codex is ordered first and Claude is fallback-only.
+- **Role-specific chains** route implementation to Luna and review to Sol, then advance to Claude only when Codex is unavailable or fails.
+- **`<Loop>`** iterates implement/validate/review/fix until the Codex-first review seat approves or `MAX_REVIEW_ROUNDS` is exhausted.
 - **`ctx.latest(schemaKey, nodeId)`** reads the highest-iteration output for a task.
 - **MDX prompts** -- `.mdx` files serve as prompt templates with JSX interpolation.
 - **`skipIf`** skips already-completed tickets on resume.

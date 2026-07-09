@@ -161,11 +161,11 @@ Returns file contents as UTF-8. Throws `"File too large"` if size exceeds `maxOu
 
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { read, grep } from "smithers-orchestrator";
 
 const codeAgent = new Agent({
-  model: anthropic("claude-fable-5"),
+  model: openai("gpt-5.6-sol"),
   tools: { read, grep },
 });
 ```
@@ -194,11 +194,11 @@ Returns `"ok"`. Throws `"Content too large"` if content exceeds `maxOutputBytes`
 
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { write, read } from "smithers-orchestrator";
 
 const writerAgent = new Agent({
-  model: anthropic("claude-fable-5"),
+  model: openai("gpt-5.6-luna"),
   tools: { write, read },
 });
 ```
@@ -301,11 +301,11 @@ instead.
 
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { bash } from "smithers-orchestrator";
 
 const devAgent = new Agent({
-  model: anthropic("claude-fable-5"),
+  model: openai("gpt-5.6-terra"),
   tools: { bash },
 });
 ```
@@ -325,12 +325,12 @@ Pass tools to an [AI SDK](https://ai-sdk.dev) agent and assign the agent to a [`
 
 ```tsx
 import { ToolLoopAgent as Agent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { createSmithers, read, write, edit, grep, bash, Task } from "smithers-orchestrator";
 import { z } from "zod";
 
 const codeAgent = new Agent({
-  model: anthropic("claude-fable-5"),
+  model: openai("gpt-5.6-luna"),
   tools: { read, write, edit, grep, bash },
   instructions: "You are a senior engineer. Use the available tools to complete tasks.",
 });
@@ -352,11 +352,11 @@ The full bundle works too:
 
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { tools } from "smithers-orchestrator";
 
 const fullAgent = new Agent({
-  model: anthropic("claude-fable-5"),
+  model: openai("gpt-5.6-terra"),
   tools,
 });
 ```

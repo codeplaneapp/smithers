@@ -30,7 +30,7 @@ const claude = new AnthropicAgent({
 });
 
 const codex = new OpenAIAgent({
-  model: "gpt-5.5",
+  model: "gpt-5.6-luna",
   tools,
   instructions: "You are a precise implementation agent.",
   stopWhen: stepCountIs(40),
@@ -100,7 +100,7 @@ because many local Hermes servers do not honor JSON-schema response formats.
 
 ## Model Input
 
-`AnthropicAgent` and `OpenAIAgent` accept a model ID string (`"claude-fable-5"`, `"gpt-5.5"`) or a prebuilt provider model instance. `HermesAgent` accepts an optional model ID string and defaults it to `"hermes"`.
+`AnthropicAgent` and `OpenAIAgent` accept a model ID string (`"claude-fable-5"`, `"gpt-5.6-luna"`) or a prebuilt provider model instance. `HermesAgent` accepts an optional model ID string and defaults it to `"hermes"`.
 
 ## Options
 

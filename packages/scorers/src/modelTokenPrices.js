@@ -1,14 +1,16 @@
 /** @typedef {import("./ModelPrice.js").ModelPrice} ModelPrice */
 
 /**
- * Static USD price table, per MILLION tokens. Anthropic ids are priced today;
- * non-Anthropic ids (gpt-*, gemini-*, kimi-*) still record token counts but
- * price at $0 until their numbers are added here. Keep this the ONE table:
+ * Static USD price table, per MILLION tokens. Unknown ids still record token
+ * counts but price at $0 until their numbers are added here. Keep this the ONE table:
  * `apps/review` re-exports it, and the `<Estimate>` component prices against it.
  *
  * @type {Record<string, ModelPrice>}
  */
 const PRICES = {
+  "gpt-5.6-sol": { input: 5, output: 30, cacheWrite: 6.25, cacheRead: 0.5 },
+  "gpt-5.6-terra": { input: 2.5, output: 15, cacheWrite: 3.125, cacheRead: 0.25 },
+  "gpt-5.6-luna": { input: 1, output: 6, cacheWrite: 1.25, cacheRead: 0.1 },
   "claude-fable-5": { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
   "claude-opus-4-8": { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
   "claude-opus-4-7": { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },

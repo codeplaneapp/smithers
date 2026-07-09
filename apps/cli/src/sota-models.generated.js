@@ -1,12 +1,12 @@
 // GENERATED FILE. Edit docs/data/sota-models.json, then run `pnpm sota:gen`.
 //
 // The SOTA model registry: which concrete model ids smithers configures by
-// default. Code refers to stable slots (fable, codex, gemini, ...) so a model
+// default. Code refers to stable slots (codexSol, codexTerra, codex, ...) so a model
 // bump is a registry edit, not a code change. See docs/reference/sota-models.mdx.
 
-export const SOTA_REGISTRY_VERSION = 1;
+export const SOTA_REGISTRY_VERSION = 2;
 
-export const SOTA_REGISTRY_UPDATED_AT = "2026-07-06";
+export const SOTA_REGISTRY_UPDATED_AT = "2026-07-09";
 
 /** Stable handle → current best model id for that seat. */
 export const SOTA_SLOTS = Object.freeze({
@@ -14,7 +14,9 @@ export const SOTA_SLOTS = Object.freeze({
   "opus": "claude-opus-4-8",
   "sonnet": "claude-sonnet-5",
   "haiku": "claude-haiku-4-5",
-  "codex": "gpt-5.5",
+  "codexSol": "gpt-5.6-sol",
+  "codexTerra": "gpt-5.6-terra",
+  "codex": "gpt-5.6-luna",
   "codexMini": "gpt-5.4-mini",
   "spark": "gpt-5.3-codex-spark",
   "gemini": "gemini-3.5-flash",
@@ -23,17 +25,20 @@ export const SOTA_SLOTS = Object.freeze({
   "kimiFlagship": "kimi-k2.6"
 });
 
-/** Fable-sandwich role → current best model id. */
+/** Workflow role → current best model id. */
 export const SOTA_ROLE_MODELS = Object.freeze({
-  "orchestrator": "claude-fable-5",
-  "planning": "claude-fable-5",
-  "review": "claude-fable-5",
-  "smart": "claude-fable-5",
-  "implement": "gpt-5.5",
-  "cheapFast": "gemini-3.5-flash",
-  "ui": "gemini-3.5-flash",
+  "orchestrator": "gpt-5.6-sol",
+  "planning": "gpt-5.6-sol",
+  "review": "gpt-5.6-sol",
+  "smart": "gpt-5.6-sol",
+  "midTier": "gpt-5.6-terra",
+  "smartTool": "gpt-5.6-terra",
+  "validate": "gpt-5.6-terra",
+  "implement": "gpt-5.6-luna",
+  "cheapFast": "gpt-5.6-luna",
+  "ui": "gpt-5.6-luna",
   "realtime": "gpt-5.3-codex-spark",
-  "research": "kimi-k2.6"
+  "research": "gpt-5.6-luna"
 });
 
 /** Deprecated id → the id sweeps rewrite it to. */
@@ -41,8 +46,8 @@ export const SOTA_DEPRECATED_MODELS = Object.freeze({
   "claude-sonnet-4-6": "claude-sonnet-5",
   "claude-sonnet-4-7": "claude-sonnet-5",
   "claude-sonnet-4-20250514": "claude-sonnet-5",
-  "gpt-5.3-codex": "gpt-5.5",
-  "gpt-5.2": "gpt-5.5",
+  "gpt-5.3-codex": "gpt-5.6-luna",
+  "gpt-5.2": "gpt-5.6-luna",
   "gpt-4o": "gpt-5.4-mini",
   "kimi-latest": "kimi-k2.7-code"
 });
@@ -54,23 +59,19 @@ export const SOTA_MODELS = Object.freeze([
     "slot": "fable",
     "provider": "anthropic",
     "name": "Claude Fable 5",
-    "status": "sota",
+    "status": "current",
     "engines": [
       "claude",
       "opencode"
     ],
-    "badges": [
-      "best-orchestrator",
-      "smartest-reviewer",
-      "smartest-coder"
-    ],
+    "badges": [],
     "roles": [
       "orchestrator",
       "planning",
       "review",
       "smart"
     ],
-    "description": "Anthropic's Mythos-class frontier model, the first of the Claude 5 family. The strongest model available for planning, code review, and orchestrating other agents, which is why it sits at both ends of the fable sandwich: it writes the plan, delegates implementation, then reviews the result."
+    "description": "Anthropic's Mythos-class frontier model and the strongest non-Codex fallback for planning, code review, and orchestration. Smithers selects it only when Codex is unavailable."
   },
   {
     "id": "claude-opus-4-8",
@@ -104,7 +105,7 @@ export const SOTA_MODELS = Object.freeze([
       "implement",
       "cheapFast"
     ],
-    "description": "The newest Sonnet: fast, cheap, 1M context. The guaranteed implementer fallback in the fable sandwich and the default cheapFast Claude."
+    "description": "The newest Sonnet: fast, cheap, 1M context. It is the primary non-Codex fallback for implementation and cheap tool calls when Codex is unavailable."
   },
   {
     "id": "claude-haiku-4-5",
@@ -121,10 +122,33 @@ export const SOTA_MODELS = Object.freeze([
     "description": "Anthropic's cheapest tier, for high-volume summarization and classification where even Sonnet is overkill."
   },
   {
-    "id": "gpt-5.5",
-    "slot": "codex",
+    "id": "gpt-5.6-sol",
+    "slot": "codexSol",
     "provider": "openai",
-    "name": "GPT-5.5",
+    "name": "GPT-5.6 Sol",
+    "status": "sota",
+    "engines": [
+      "codex",
+      "pi"
+    ],
+    "badges": [
+      "best-orchestrator",
+      "smartest-reviewer",
+      "smartest-coder"
+    ],
+    "roles": [
+      "orchestrator",
+      "planning",
+      "review",
+      "smart"
+    ],
+    "description": "OpenAI's GPT-5.6 flagship for complex reasoning and coding. Smithers uses Sol for orchestration, planning, reviews, and other judgment-heavy work whenever Codex is available."
+  },
+  {
+    "id": "gpt-5.6-terra",
+    "slot": "codexTerra",
+    "provider": "openai",
+    "name": "GPT-5.6 Terra",
     "status": "sota",
     "engines": [
       "codex",
@@ -132,10 +156,47 @@ export const SOTA_MODELS = Object.freeze([
     ],
     "badges": [],
     "roles": [
-      "implement",
-      "smart"
+      "midTier",
+      "smartTool",
+      "validate"
     ],
-    "description": "OpenAI's GA flagship and the Codex CLI default. The implementation workhorse in the middle of the fable sandwich. With ChatGPT auth use the id gpt-5.5 exactly (gpt-5.5-codex and gpt-5.3-codex are deprecated in Codex)."
+    "description": "OpenAI's balanced GPT-5.6 model. Smithers uses Terra for everyday mid-tier work, validation, and tool-heavy tasks whenever Codex is available."
+  },
+  {
+    "id": "gpt-5.6-luna",
+    "slot": "codex",
+    "provider": "openai",
+    "name": "GPT-5.6 Luna",
+    "status": "sota",
+    "engines": [
+      "codex",
+      "pi"
+    ],
+    "badges": [
+      "fast-and-cheap",
+      "best-value-coding"
+    ],
+    "roles": [
+      "implement",
+      "cheapFast",
+      "research",
+      "ui"
+    ],
+    "description": "OpenAI's fast, affordable GPT-5.6 model for cost-sensitive, high-volume workloads. Smithers makes Luna the default implementation, research, and cheap-work model because it keeps strong agentic coding ability at the lowest GPT-5.6 tier."
+  },
+  {
+    "id": "gpt-5.5",
+    "slot": null,
+    "provider": "openai",
+    "name": "GPT-5.5",
+    "status": "current",
+    "engines": [
+      "codex",
+      "pi"
+    ],
+    "badges": [],
+    "roles": [],
+    "description": "The previous OpenAI flagship. Keep it as a compatibility fallback for Codex accounts that do not yet expose GPT-5.6."
   },
   {
     "id": "gpt-5.4",
@@ -149,7 +210,7 @@ export const SOTA_MODELS = Object.freeze([
     ],
     "badges": [],
     "roles": [],
-    "description": "The previous OpenAI flagship. Still solid for professional work when gpt-5.5 quota is tight."
+    "description": "The previous OpenAI flagship, retained for pinned compatibility. New Smithers workflows use the GPT-5.6 Sol/Terra/Luna role split instead."
   },
   {
     "id": "gpt-5.4-mini",
@@ -162,10 +223,8 @@ export const SOTA_MODELS = Object.freeze([
       "pi"
     ],
     "badges": [],
-    "roles": [
-      "cheapFast"
-    ],
-    "description": "OpenAI's fast, efficient tier. The default cheap OpenAI model, including via OpenRouter (openai/gpt-5.4-mini)."
+    "roles": [],
+    "description": "OpenAI's prior fast, efficient tier. Retained as the OpenRouter compatibility fallback (openai/gpt-5.4-mini); Codex-native cheap work defaults to GPT-5.6 Luna."
   },
   {
     "id": "gpt-5.3-codex-spark",
@@ -196,15 +255,14 @@ export const SOTA_MODELS = Object.freeze([
       "antigravity"
     ],
     "badges": [
-      "best-ui",
-      "fast-and-cheap"
+      "best-ui"
     ],
     "roles": [
       "ui",
       "implement",
       "cheapFast"
     ],
-    "description": "Google's best price-to-performance model and the best model for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. The default Gemini in smithers."
+    "description": "Google's best price-to-performance model and the best non-Codex fallback for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. Smithers selects it automatically only when Codex is unavailable."
   },
   {
     "id": "gemini-3.1-pro-preview",
@@ -242,14 +300,12 @@ export const SOTA_MODELS = Object.freeze([
     "engines": [
       "kimi"
     ],
-    "badges": [
-      "best-value-coding"
-    ],
+    "badges": [],
     "roles": [
       "implement",
       "cheapFast"
     ],
-    "description": "Moonshot's most capable coding model and the best coding value on the market: 256k context, roughly 30% fewer reasoning tokens than K2.6, strong instruction-following in long contexts. The default Kimi in smithers; the -highspeed variant trades a little quality for ~180 tok/s."
+    "description": "Moonshot's most capable coding model: 256k context, roughly 30% fewer reasoning tokens than K2.6, and strong instruction-following in long contexts. Smithers keeps it as a no-Codex implementation fallback; the -highspeed variant trades a little quality for ~180 tok/s."
   },
   {
     "id": "kimi-k2.7-code-highspeed",
@@ -335,13 +391,13 @@ export const SOTA_MODELS = Object.freeze([
     "provider": "openai",
     "name": "GPT-5.3-Codex",
     "status": "deprecated",
-    "replacedBy": "gpt-5.5",
+    "replacedBy": "gpt-5.6-luna",
     "engines": [
       "codex"
     ],
     "badges": [],
     "roles": [],
-    "description": "Deprecated in Codex under ChatGPT auth. Use gpt-5.5."
+    "description": "Deprecated in Codex under ChatGPT auth. Use GPT-5.6 Luna for implementation or select a role-specific GPT-5.6 tier."
   },
   {
     "id": "gpt-5.2",
@@ -349,13 +405,13 @@ export const SOTA_MODELS = Object.freeze([
     "provider": "openai",
     "name": "GPT-5.2",
     "status": "deprecated",
-    "replacedBy": "gpt-5.5",
+    "replacedBy": "gpt-5.6-luna",
     "engines": [
       "codex"
     ],
     "badges": [],
     "roles": [],
-    "description": "Deprecated in Codex under ChatGPT auth. Use gpt-5.5."
+    "description": "Deprecated in Codex under ChatGPT auth. Use GPT-5.6 Luna for implementation or select a role-specific GPT-5.6 tier."
   },
   {
     "id": "gpt-4o",
@@ -369,7 +425,7 @@ export const SOTA_MODELS = Object.freeze([
     ],
     "badges": [],
     "roles": [],
-    "description": "Two generations old. Use gpt-5.4-mini for the cheap tier or gpt-5.5 for real work."
+    "description": "Two generations old. Use GPT-5.6 Luna for implementation and research, Terra for balanced validation, or Sol for planning and review."
   },
   {
     "id": "kimi-latest",

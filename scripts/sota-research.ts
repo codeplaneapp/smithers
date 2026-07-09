@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 /**
  * Daily SOTA model research: ask a web-searching agent whether any provider
- * shipped new GA models since the registry's updatedAt, and if so rewrite
- * docs/data/sota-models.json and every surface generated or pinned from it.
+ * shipped a new model with an exact usable id since the registry's updatedAt,
+ * and if so rewrite docs/data/sota-models.json and every surface generated or
+ * pinned from it.
  *
  * Run by .github/workflows/sota-research.yml (cron) and by hand via
  * `pnpm sota:research`. The script only mutates the working tree; committing
@@ -11,12 +12,14 @@
  *
  * The agent proposes a full replacement registry as strict JSON. We never
  * trust it blindly: the proposal must pass the same validation as the
- * generator, bump version by exactly 1, and keep the policy rules (GA only,
- * no floating aliases, one holder per badge).
+ * generator, bump version by exactly 1, and keep the policy rules (exact usable
+ * ids, no floating aliases, one holder per badge).
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { listAccounts } from "@smithers-orchestrator/accounts";
+import { ClaudeCodeAgent, CodexAgent, KimiAgent, type AgentLike } from "smithers-orchestrator";
 import { validateRegistry } from "./generate-sota.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -24,11 +27,21 @@ const REGISTRY_PATH = resolve(ROOT, "docs/data/sota-models.json");
 const SUMMARY_PATH = process.env.SOTA_SUMMARY_PATH ?? "/tmp/sota-research-summary.md";
 
 /** Directories whose pinned model ids get mechanically rewritten on a bump. */
-const SWEEP_DIRS = [".smithers", "docs"];
+const SWEEP_DIRS = [
+  "README.md",
+  ".smithers",
+  "docs",
+  "apps/cli",
+  "apps/init-site",
+  "apps/review/action/src",
+  "apps/review/src",
+  "apps/smithers/src/agents",
+];
 const SWEEP_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mdx", ".md"]);
 const SWEEP_EXCLUDE = [
   /\/node_modules\//,
   /\/dist\//,
+  /apps\/cli\/ui-dist\//,
   /docs\/data\/sota-models\.json$/,
   /docs\/reference\/sota-models\.mdx$/, // regenerated
   /docs\/llms.*\.txt$/, // regenerated
@@ -55,12 +68,12 @@ function today(): string {
 function buildPrompt(registry: Registry): string {
   return [
     `Today is ${today()}. You maintain the SOTA model registry for smithers, an agent orchestrator.`,
-    `The registry was last confirmed on ${registry.updatedAt}. Research, with web search against official provider sources (Anthropic, OpenAI, Google/DeepMind, Moonshot AI, plus any major new frontier-lab entrant), whether any NEW generally-available model has shipped since then that changes what the registry should recommend.`,
+    `The registry was last confirmed on ${registry.updatedAt}. Research, with web search against official provider sources (Anthropic, OpenAI, Google/DeepMind, Moonshot AI, plus any major new frontier-lab entrant), whether any NEW usable model has shipped since then that changes what the registry should recommend. This includes a research preview only when provider documentation confirms an exact model id and real availability.`,
     "",
     "Registry policy (binding):",
     ...registry.policy.map((rule) => `- ${rule}`),
     "",
-    "Verification bar: only report a model when its exact API/CLI model id is confirmed by the provider's own documentation. Marketing names without a usable id do not count. Limited previews do not count.",
+    "Verification bar: only report a model when its exact API/CLI model id and real availability are confirmed by the provider's own documentation. Marketing names and previews without a usable id do not count.",
     "",
     "The current registry JSON:",
     "```json",
@@ -103,20 +116,69 @@ export function extractJson(stdout: string): Record<string, unknown> | null {
   return null;
 }
 
-function runResearchAgent(prompt: string): string {
-  // Codex with web search does the research; the repo's CI auth (~/.codex/
-  // auth.json from the CODEX_AUTH_JSON secret) or a local login covers it.
-  const result = spawnSync("codex", ["exec", "--sandbox", "read-only", "-c", "tools.web_search=true", "-m", "gpt-5.5", prompt], {
+async function runResearchAgent(prompt: string): Promise<string> {
+  const commonCodex = {
     cwd: ROOT,
-    encoding: "utf8",
-    timeout: 30 * 60 * 1000,
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  if (result.error) throw new Error(`codex exec failed to start: ${result.error.message}`);
-  if (result.status !== 0) {
-    throw new Error(`codex exec exited ${result.status}:\n${(result.stderr ?? "").slice(-2000)}`);
+    model: "gpt-5.6-luna",
+    config: ["tools.web_search=true", "model_reasoning_effort=medium"],
+    sandbox: "read-only" as const,
+    fullAuto: true,
+    skipGitRepoCheck: true,
+    timeoutMs: 30 * 60 * 1000,
+  };
+  let accounts: ReturnType<typeof listAccounts> = [];
+  try {
+    accounts = listAccounts(process.env);
+  } catch {
+    // A malformed registry must not prevent the ambient Codex attempt or the
+    // explicit non-Codex fallbacks below.
   }
-  return result.stdout ?? "";
+  const codexAccounts = accounts.filter((account) => account.provider === "codex" || account.provider === "openai-api");
+  const attempts: Array<{ label: string; agent: AgentLike }> = [
+    { label: "ambient Codex Luna", agent: new CodexAgent(commonCodex) },
+    ...codexAccounts.map((account) => ({
+      label: `registered Codex account ${account.label}`,
+      agent: new CodexAgent({
+        ...commonCodex,
+        ...(account.configDir ? { configDir: account.configDir } : {}),
+        ...(account.apiKey ? { apiKey: account.apiKey } : {}),
+      }),
+    })),
+    // Provider fallbacks stay last and run only after every Codex credential.
+    {
+      label: "Claude fallback",
+      agent: new ClaudeCodeAgent({
+        cwd: ROOT,
+        model: "claude-fable-5",
+        permissionMode: "bypassPermissions",
+        dangerouslySkipPermissions: true,
+        timeoutMs: 30 * 60 * 1000,
+      }),
+    },
+    {
+      label: "Kimi fallback",
+      agent: new KimiAgent({
+        cwd: ROOT,
+        model: "kimi-k2.7-code",
+        finalMessageOnly: true,
+        quiet: true,
+        timeoutMs: 30 * 60 * 1000,
+      }),
+    },
+  ];
+
+  const failures: string[] = [];
+  for (const attempt of attempts) {
+    try {
+      const result = await attempt.agent.generate({ prompt });
+      const text = typeof result === "string" ? result : result?.text;
+      if (typeof text === "string" && text.trim()) return text;
+      failures.push(`${attempt.label}: empty response`);
+    } catch (error) {
+      failures.push(`${attempt.label}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error(`all SOTA research agents failed:\n${failures.map((failure) => `- ${failure}`).join("\n")}`);
 }
 
 function run(command: string, args: string[]): void {
@@ -124,13 +186,13 @@ function run(command: string, args: string[]): void {
   if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} exited ${result.status}`);
 }
 
-function* walk(dir: string): Generator<string> {
-  for (const entry of readdirSync(dir)) {
-    const path = join(dir, entry);
-    if (SWEEP_EXCLUDE.some((re) => re.test(path))) continue;
-    if (statSync(path).isDirectory()) yield* walk(path);
-    else yield path;
+function* walk(path: string): Generator<string> {
+  if (SWEEP_EXCLUDE.some((re) => re.test(path))) return;
+  if (!statSync(path).isDirectory()) {
+    yield path;
+    return;
   }
+  for (const entry of readdirSync(path)) yield* walk(join(path, entry));
 }
 
 /**
@@ -190,7 +252,7 @@ function sweepReplacements(replacements: Map<string, string>): string[] {
 if (import.meta.main) {
   const registry: Registry = JSON.parse(readFileSync(REGISTRY_PATH, "utf8"));
   console.log(`Researching model landscape (registry v${registry.version}, ${registry.updatedAt})...`);
-  const stdout = runResearchAgent(buildPrompt(registry));
+  const stdout = await runResearchAgent(buildPrompt(registry));
   const verdict = extractJson(stdout);
   if (!verdict) {
     console.error(stdout.slice(-2000));
@@ -225,8 +287,8 @@ if (import.meta.main) {
       : "No id rewrites.",
     swept.length ? `Swept files:\n${swept.map((f) => `- ${f}`).join("\n")}` : "",
     "",
-    "Generated surfaces refreshed: docs page, CLI module, llms bundles, init pack.",
-    "Reviewer checklist: verify the researched ids against provider docs; check apps/review modelPrices.ts has rows for any new model.",
+    "Generated surfaces refreshed: docs page, CLI module, llms bundles, init pack, review defaults, and the Agents registry page.",
+    "Reviewer checklist: verify the researched ids against provider docs; confirm Sol/Terra/Luna role assignments on CLI, init, review, and Agents surfaces; check apps/review and packages/scorers price tables for any new model.",
   ].join("\n");
   writeFileSync(SUMMARY_PATH, `${summary}\n`);
   console.log(summary);

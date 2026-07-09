@@ -393,12 +393,14 @@ A code-review workflow built one capability at a time. Each step is a diff again
 
 ```bash
 bunx smithers-orchestrator init
-bun add smithers-orchestrator ai @ai-sdk/anthropic zod@^4
+bun add smithers-orchestrator zod@^4
 bun add -d typescript @types/bun
-export ANTHROPIC_API_KEY="sk-ant-..."
+codex login
 ```
 
-`init` creates `.smithers/` with seeded workflows, prompts, and components. The bun deps add the AI SDK, Anthropic provider, and Zod (schemas).
+`init` creates `.smithers/` with seeded workflows, prompts, and components. The
+bun deps add Smithers and Zod (schemas); `codex login` makes your Codex
+subscription available to workflow workers.
 
 <Note>
 **Zod v4 is required.** Smithers introspects your output schemas via Zod v4
@@ -473,7 +475,7 @@ Replace the literal Task with an agent Task whose output is structured.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence, Task, AnthropicAgent } from "smithers-orchestrator";
+import { CodexAgent, createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -489,8 +491,8 @@ const { Workflow, smithers, outputs } = createSmithers({
   }),
 });
 
-const analyst = new AnthropicAgent({
-  model: "claude-fable-5",
+const analyst = new CodexAgent({
+  model: "gpt-5.6-sol",
   instructions: "You are a senior code reviewer. Return structured JSON.",
 });
 
@@ -515,7 +517,7 @@ For the common case of one Task consuming exactly one upstream output, `<Task de
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence, Task, AnthropicAgent } from "smithers-orchestrator";
+import { CodexAgent, createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod";
 
 const AnalysisSchema = z.object({
@@ -537,13 +539,14 @@ const { Workflow, smithers, outputs } = createSmithers({
   }),
 });
 
-const analyst = new AnthropicAgent({
-  model: "claude-fable-5",
+const analyst = new CodexAgent({
+  model: "gpt-5.6-sol",
   instructions: "You are a senior code reviewer. Return structured JSON.",
 });
 
-const fixer = new AnthropicAgent({
-  model: "claude-fable-5",
+const fixer = new CodexAgent({
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   instructions: "Write minimal, correct fixes as a unified diff.",
 });
 
@@ -2430,7 +2433,7 @@ commands[88]:
     flags[16]{name,short,type,default,desc}:
       cases,c,string,,JSON array, { cases: [...] }, or JSONL case file
       suite,s,string,,Stable suite ID used in run IDs and report paths
-      provider,p,enum,cerebras,GEPA patch generator provider
+      provider,p,enum,openai-api,GEPA patch generator provider
       model,m,string,,Optimizer model for provider-backed GEPA
       artifact,a,string,,Write the optimized prompt artifact to this path
       report-dir,,string,,Directory for baseline and optimized eval reports
@@ -3176,17 +3179,16 @@ type WorkflowProps = {
 ```
 
 ```tsx
-import { createSmithers } from "smithers-orchestrator";
-import { ToolLoopAgent as Agent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { CodexAgent, createSmithers } from "smithers-orchestrator";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
   research: z.object({ findings: z.string() }),
 });
 
-const researcher = new Agent({
-  model: anthropic("claude-fable-5"),
+const researcher = new CodexAgent({
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   instructions: "You are a research assistant.",
 });
 
@@ -3270,15 +3272,19 @@ custom Drizzle table or string key and Smithers cannot infer the Zod schema.
 </Warning>
 
 ```tsx
-import { ToolLoopAgent as Agent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { CodexAgent } from "smithers-orchestrator";
 
-const codeAgent = new Agent({
-  model: anthropic("claude-fable-5"),
-  instructions: "You are a senior software engineer.",
+const analysisAgent = new CodexAgent({
+  model: "gpt-5.6-terra",
+  instructions: "You are a careful software analyst.",
 });
 
-<Task id="analyze" output={outputs.analysis} agent={codeAgent}>
+const reviewAgent = new CodexAgent({
+  model: "gpt-5.6-sol",
+  instructions: "You are a senior code reviewer.",
+});
+
+<Task id="analyze" output={outputs.analysis} agent={analysisAgent}>
   {`Analyze: ${ctx.input.repoPath}`}
 </Task>
 
@@ -3381,19 +3387,24 @@ Every agent task produces a reusable session snapshot. Use `fork` to start a new
 `fork` is immutable. It does not continue or mutate the source task; it copies the conversation into a fresh, independent session. Multiple tasks may fork the same source safely, and a forked task may itself be forked.
 
 ```tsx
+import { CodexAgent } from "smithers-orchestrator";
+
+const planner = new CodexAgent({ model: "gpt-5.6-sol" });
+const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+
 const PLAN = "plan" as const;
 const IMPLEMENT = "implement" as const;
 const VERIFY = "verify" as const;
 
-<Task id={PLAN} agent={claude} output={outputs.plan}>
+<Task id={PLAN} agent={planner} output={outputs.plan}>
   Make a plan.
 </Task>
 
-<Task id={IMPLEMENT} agent={claude} fork={PLAN} output={outputs.patch}>
+<Task id={IMPLEMENT} agent={implementer} fork={PLAN} output={outputs.patch}>
   Implement the plan.
 </Task>
 
-<Task id={VERIFY} agent={claude} fork={IMPLEMENT} output={outputs.result}>
+<Task id={VERIFY} agent={implementer} fork={IMPLEMENT} output={outputs.result}>
   Run tests and fix failures.
 </Task>
 ```
@@ -3403,15 +3414,20 @@ const VERIFY = "verify" as const;
 **Parallel branches**: fork the same source from sibling tasks; each gets its own copy and they never affect each other:
 
 ```tsx
-<Task id="investigate" agent={claude} output={outputs.investigation}>
+import { CodexAgent } from "smithers-orchestrator";
+
+const researcher = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+
+<Task id="investigate" agent={researcher} output={outputs.investigation}>
   Understand the bug and identify possible fixes.
 </Task>
 
 <Parallel>
-  <Task id="minimal-fix" agent={claude} fork="investigate" output={outputs.patch}>
+  <Task id="minimal-fix" agent={implementer} fork="investigate" output={outputs.patch}>
     Try the minimal fix.
   </Task>
-  <Task id="refactor-fix" agent={claude} fork="investigate" output={outputs.patch}>
+  <Task id="refactor-fix" agent={implementer} fork="investigate" output={outputs.patch}>
     Try the refactor fix.
   </Task>
 </Parallel>
@@ -6052,22 +6068,22 @@ type DelegationChainProps = DelegationSharedProps & {
 ```
 
 ```tsx
-import { ClaudeCodeAgent, DelegationChain, createSmithers, delegationSchemas } from "smithers-orchestrator";
+import { CodexAgent, DelegationChain, createSmithers, delegationSchemas } from "smithers-orchestrator";
 
 const { Workflow, smithers, outputs } = createSmithers({ ...delegationSchemas });
 
-// Tiers are labels, not model ids; point each at any agent or failover pool.
-// The seeded workflow maps them onto the generated `../agents` pools instead.
-const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
-const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
-const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
-const haiku = new ClaudeCodeAgent({ model: "claude-haiku-4-5-20251001" });
+// The legacy tier keys are labels, not provider or model ids. Point them at
+// Codex tiers by strength; the seeded workflow uses generated pools instead.
+const sol = new CodexAgent({ model: "gpt-5.6-sol" });
+const terra = new CodexAgent({ model: "gpt-5.6-terra" });
+const luna = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+const lunaCheap = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
 
 export default smithers((ctx) => (
   <Workflow name="delegation-chain">
     <DelegationChain
       prompt={ctx.input?.prompt ?? ""}
-      agents={{ fable, opus, sonnet, haiku }}
+      agents={{ fable: sol, opus: terra, sonnet: luna, haiku: lunaCheap }}
       outputs={outputs}
     />
   </Workflow>
@@ -6210,6 +6226,22 @@ Each recipe is a working snippet plus one line of context. They compose freely.
 
 If you want a ready-to-run outcome before writing workflow code, start with [Starters](/starters) or run `bunx smithers-orchestrator starters`.
 
+## Default model routing
+
+Smithers-generated workflows use Codex exclusively when usable Codex
+authentication is available. Pin the tier to the role:
+
+| Work | Model |
+|---|---|
+| Planning, orchestration, review, and the hardest reasoning | `gpt-5.6-sol` |
+| Mid-tier judgment, validation, and tool-focused work | `gpt-5.6-terra` |
+| **All implementation**, research, and cheap or high-volume work | `gpt-5.6-luna` |
+
+Luna remains the implementation model for large changes; implementation size
+does not promote it to Sol. Non-Codex adapters are automatic fallbacks only when
+Codex is unavailable. Explicit provider-specific workflows continue to run as
+written.
+
 ## Implement → review loop
 
 Iterate until a reviewer signs off, with a hard cap.
@@ -6235,22 +6267,23 @@ Stop conditions must be measurable (boolean, count, array length). Avoid "looks 
 
 In a `<Loop>` `until`, read the most recent iteration with `ctx.latest`. `ctx.outputMaybe(.., { nodeId })` without an explicit `iteration` resolves the *current render iteration* (which equals the loop iteration only for a single, non-nested loop, and is `0` when several loops coexist), so an `outputMaybe`-based `until` can silently never advance.
 
-## Parallel multi-agent review
+## Parallel Codex review
 
-Two models catch different bugs. Cost = the slower model's latency.
+Two Codex tiers provide independent signals without routing to another provider.
+Cost = the slower model's latency.
 
 ```tsx
 <Parallel>
-  <Task id={`${ticket.id}:review-claude`} output={outputs.review} agent={claude} continueOnFail>
-    <ReviewPrompt reviewer="claude" />
+  <Task id={`${ticket.id}:review-sol`} output={outputs.review} agent={codexSol} continueOnFail>
+    <ReviewPrompt reviewer="sol" />
   </Task>
-  <Task id={`${ticket.id}:review-codex`} output={outputs.review} agent={codex} continueOnFail>
-    <ReviewPrompt reviewer="codex" />
+  <Task id={`${ticket.id}:validate-terra`} output={outputs.review} agent={codexTerra} continueOnFail>
+    <ReviewPrompt reviewer="terra" />
   </Task>
 </Parallel>
 ```
 
-`continueOnFail` keeps one model's timeout from blocking the other.
+`continueOnFail` keeps one tier's timeout from blocking the other.
 
 ## Approval gate with branching
 
@@ -6351,11 +6384,12 @@ One context boundary per logical operation, not per step. Splitting too finely l
 ## Per-agent least-privilege tools
 
 ```tsx
-import { AnthropicAgent } from "smithers-orchestrator";
+import { OpenAIAgent } from "smithers-orchestrator";
 
-const analyst     = new AnthropicAgent({ model, instructions: "Return JSON" });               // no tools
-const reviewer    = new AnthropicAgent({ model, instructions: "...", tools: { read, grep } }); // read-only
-const implementer = new AnthropicAgent({ model, instructions: "...", tools: { read, write, edit, bash } });
+const researcher  = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "Return JSON" });
+const validator   = new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, grep } });
+const reviewer    = new OpenAIAgent({ model: "gpt-5.6-sol", instructions: "...", tools: { read, grep } });
+const implementer = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "...", tools: { read, write, edit, bash } });
 ```
 
 Match the tool surface to the role.
@@ -6439,9 +6473,9 @@ In `.mdx` prompt files, prose that looks like JSX or HTML is parsed as JSX. Wrap
 ```tsx
 function useReviewState(ticketId: string) {
   const ctx = useCtx();
-  const claude = ctx.latest("review", `${ticketId}:review-claude`);
-  const codex  = ctx.latest("review", `${ticketId}:review-codex`);
-  return { claude, codex, allApproved: !!(claude?.approved && codex?.approved) };
+  const sol = ctx.latest("review", `${ticketId}:review-sol`);
+  const terra = ctx.latest("review", `${ticketId}:validate-terra`);
+  return { sol, terra, allApproved: !!(sol?.approved && terra?.approved) };
 }
 ```
 
@@ -6536,15 +6570,15 @@ Edits to the workflow source apply on the next render frame without losing in-fl
 Every agent task produces a reusable session snapshot. `fork` starts a new task from a copy of another task's final context, without mutating the source.
 
 ```tsx
-<Task id="investigate" agent={claude} output={outputs.investigation}>
+<Task id="investigate" agent={codexLuna} output={outputs.investigation}>
   Understand the bug and identify possible fixes.
 </Task>
 
 <Parallel>
-  <Task id="minimal-fix" agent={claude} fork="investigate" output={outputs.patch}>
+  <Task id="minimal-fix" agent={codexLuna} fork="investigate" output={outputs.patch}>
     Try the minimal fix.
   </Task>
-  <Task id="refactor-fix" agent={claude} fork="investigate" output={outputs.patch}>
+  <Task id="refactor-fix" agent={codexLuna} fork="investigate" output={outputs.patch}>
     Try the refactor fix.
   </Task>
 </Parallel>
@@ -6658,7 +6692,8 @@ const opus = new ClaudeCodeAgent({
   dangerouslySkipPermissions: true,
 });
 const codex = new CodexAgent({
-  model: "gpt-5.5",
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   sandbox: "danger-full-access",
   dangerouslyBypassApprovalsAndSandbox: true,
   skipGitRepoCheck: true,
@@ -10608,13 +10643,16 @@ Agents should suggest the interactive commands to humans, but should not run the
 Run `bunx smithers-orchestrator optimize` to generate improved prompts for agent tasks via GEPA, verify the improvement against your eval suite, and save the result as a reusable artifact.
 
 ```bash
+OPENAI_API_KEY=... \
 bunx smithers-orchestrator optimize workflow.tsx \
   --cases evals/smoke.jsonl \
   --suite smoke-gepa \
-  --provider cerebras \
-  --model zai-glm-4.7 \
   --artifact .smithers/optimizations/smoke-gepa.json
 ```
+
+The implicit optimizer is OpenAI-compatible `gpt-5.6-luna` with reasoning
+effort `medium`. Pass `--provider` to select Cerebras, Claude, Kimi, or another
+supported backend explicitly.
 
 `bunx smithers-orchestrator optimize` runs the eval suite twice:
 
@@ -10679,16 +10717,21 @@ Observed result:
 
 | Provider | Optimizer API | Required env | Default model |
 | --- | --- | --- | --- |
+| `openai-api` (default), `openai`, `openai-sdk`, `codex` | OpenAI-compatible | `OPENAI_API_KEY` | `gpt-5.6-luna` (`medium` reasoning) |
 | `cerebras` | OpenAI-compatible | `CEREBRAS_API_KEY` | `zai-glm-4.7` |
-| `openai-api`, `openai`, `openai-sdk`, `codex` | OpenAI-compatible | `OPENAI_API_KEY` | `gpt-5.5` |
 | `anthropic-api`, `anthropic`, `anthropic-sdk`, `claude-code`, `claude` | Anthropic Messages API | `ANTHROPIC_API_KEY` | `claude-fable-5` |
 | `gemini-api`, `gemini`, `antigravity` | Gemini generateContent API | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3.5-flash` |
 | `kimi`, `moonshot` | OpenAI-compatible Moonshot API | `MOONSHOT_API_KEY` | `kimi-k2.7-code` |
 | `opencode` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `anthropic/claude-fable-5` |
-| `pi` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `gpt-5.5` |
+| `pi` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `gpt-5.6-luna` |
 | `amp`, `forge`, `openai-compatible` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | pass `--model` when needed |
 
-The default models track the [SOTA model registry](/reference/sota-models), which lists the current defaults and badges and is refreshed by a daily research job. The CLI provider names (`claude-code`, `codex`, `antigravity`, `gemini`, `kimi`) map to their hosted API equivalents for optimization because GEPA needs a direct model call to propose prompt patches. Providers with no single hosted backend (`opencode`, `pi`, `amp`, `forge`) are still accepted through a generic OpenAI-compatible endpoint.
+The default models track the [SOTA model registry](/reference/sota-models), which lists the current defaults and badges and is refreshed by a daily research job. The CLI provider names (`codex`, `claude-code`, `antigravity`, `gemini`, `kimi`) map to their hosted API equivalents for optimization because GEPA needs a direct model call to propose prompt patches. Providers with no single hosted backend (`opencode`, `pi`, `amp`, `forge`) are still accepted through a generic OpenAI-compatible endpoint.
+
+Smithers defaults research and prompt-optimization work to Luna. Automatic
+workflow routing keeps non-Codex providers behind Codex; this standalone command
+does not silently change paid API backends. If OpenAI is unavailable, select a
+Cerebras, Claude, Kimi, or other fallback explicitly with `--provider`.
 
 `--provider heuristic` is deterministic and intended for local tests and fixtures. Use `heuristic` when you want deterministic optimization without an API call: place `optimizationHints` in each case's `metadata` to control the patch. It uses eval-case metadata such as:
 
@@ -10708,11 +10751,11 @@ Artifacts are Smithers JSON records with baseline score, optimized score, improv
 
 ## SOTA models
 
-> The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v1, updated 2026-07-06.
+> The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v2, updated 2026-07-09.
 
 {/* GENERATED FILE. Edit docs/data/sota-models.json, then run `pnpm sota:gen`. */}
 
-**Registry v1** · updated **2026-07-06**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smithers-orchestrator update` picks the changes up on your machine, and re-running `bunx smithers-orchestrator init` refreshes installed workflows to the new defaults.
+**Registry v2** · updated **2026-07-09**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smithers-orchestrator update` picks the changes up on your machine, and re-running `bunx smithers-orchestrator init` refreshes installed workflows to the new defaults.
 
 ## Badges
 
@@ -10720,38 +10763,41 @@ Each badge names the single best model for that job right now.
 
 | Badge | Model | ID |
 | --- | --- | --- |
-| Best orchestrator | Claude Fable 5 | `claude-fable-5` |
-| Smartest reviewer | Claude Fable 5 | `claude-fable-5` |
-| Smartest coder | Claude Fable 5 | `claude-fable-5` |
+| Best orchestrator | GPT-5.6 Sol | `gpt-5.6-sol` |
+| Smartest reviewer | GPT-5.6 Sol | `gpt-5.6-sol` |
+| Smartest coder | GPT-5.6 Sol | `gpt-5.6-sol` |
+| Fast & cheap | GPT-5.6 Luna | `gpt-5.6-luna` |
+| Best value coding | GPT-5.6 Luna | `gpt-5.6-luna` |
 | Fastest coding | GPT-5.3-Codex-Spark | `gpt-5.3-codex-spark` |
 | Best at UI | Gemini 3.5 Flash | `gemini-3.5-flash` |
-| Fast & cheap | Gemini 3.5 Flash | `gemini-3.5-flash` |
-| Best value coding | Kimi K2.7-Code | `kimi-k2.7-code` |
 | Best open source | Kimi K2.6 | `kimi-k2.6` |
 
 ## Role defaults
 
-The fable-sandwich tiers (see the [workflow optimization guide](/guides/workflow-optimization)) resolve to these ids:
+The Codex-first workflow tiers (see the [workflow optimization guide](/guides/workflow-optimization)) resolve to these ids:
 
 | Role | Default model |
 | --- | --- |
-| orchestrator | `claude-fable-5` |
-| planning | `claude-fable-5` |
-| review | `claude-fable-5` |
-| smart | `claude-fable-5` |
-| implement | `gpt-5.5` |
-| cheapFast | `gemini-3.5-flash` |
-| ui | `gemini-3.5-flash` |
+| orchestrator | `gpt-5.6-sol` |
+| planning | `gpt-5.6-sol` |
+| review | `gpt-5.6-sol` |
+| smart | `gpt-5.6-sol` |
+| midTier | `gpt-5.6-terra` |
+| smartTool | `gpt-5.6-terra` |
+| validate | `gpt-5.6-terra` |
+| implement | `gpt-5.6-luna` |
+| cheapFast | `gpt-5.6-luna` |
+| ui | `gpt-5.6-luna` |
 | realtime | `gpt-5.3-codex-spark` |
-| research | `kimi-k2.6` |
+| research | `gpt-5.6-luna` |
 
 ## Anthropic
 
 ### Claude Fable 5 (`claude-fable-5`)
 
-**Best orchestrator** · **Smartest reviewer** · **Smartest coder** · state of the art · engines: `claude`, `opencode` · roles: orchestrator, planning, review, smart
+current · engines: `claude`, `opencode` · roles: orchestrator, planning, review, smart
 
-Anthropic's Mythos-class frontier model, the first of the Claude 5 family. The strongest model available for planning, code review, and orchestrating other agents, which is why it sits at both ends of the fable sandwich: it writes the plan, delegates implementation, then reviews the result.
+Anthropic's Mythos-class frontier model and the strongest non-Codex fallback for planning, code review, and orchestration. Smithers selects it only when Codex is unavailable.
 
 ### Claude Opus 4.8 (`claude-opus-4-8`)
 
@@ -10763,7 +10809,7 @@ Anthropic's Opus tier. Still a top-shelf generalist and the always-present fallb
 
 current · released 2026-06-29 · engines: `claude`, `opencode` · roles: implement, cheapFast
 
-The newest Sonnet: fast, cheap, 1M context. The guaranteed implementer fallback in the fable sandwich and the default cheapFast Claude.
+The newest Sonnet: fast, cheap, 1M context. It is the primary non-Codex fallback for implementation and cheap tool calls when Codex is unavailable.
 
 ### Claude Haiku 4.5 (`claude-haiku-4-5`)
 
@@ -10773,23 +10819,41 @@ Anthropic's cheapest tier, for high-volume summarization and classification wher
 
 ## OpenAI
 
+### GPT-5.6 Sol (`gpt-5.6-sol`)
+
+**Best orchestrator** · **Smartest reviewer** · **Smartest coder** · state of the art · engines: `codex`, `pi` · roles: orchestrator, planning, review, smart
+
+OpenAI's GPT-5.6 flagship for complex reasoning and coding. Smithers uses Sol for orchestration, planning, reviews, and other judgment-heavy work whenever Codex is available.
+
+### GPT-5.6 Terra (`gpt-5.6-terra`)
+
+state of the art · engines: `codex`, `pi` · roles: midTier, smartTool, validate
+
+OpenAI's balanced GPT-5.6 model. Smithers uses Terra for everyday mid-tier work, validation, and tool-heavy tasks whenever Codex is available.
+
+### GPT-5.6 Luna (`gpt-5.6-luna`)
+
+**Fast & cheap** · **Best value coding** · state of the art · engines: `codex`, `pi` · roles: implement, cheapFast, research, ui
+
+OpenAI's fast, affordable GPT-5.6 model for cost-sensitive, high-volume workloads. Smithers makes Luna the default implementation, research, and cheap-work model because it keeps strong agentic coding ability at the lowest GPT-5.6 tier.
+
 ### GPT-5.5 (`gpt-5.5`)
 
-state of the art · engines: `codex`, `pi` · roles: implement, smart
+current · engines: `codex`, `pi`
 
-OpenAI's GA flagship and the Codex CLI default. The implementation workhorse in the middle of the fable sandwich. With ChatGPT auth use the id gpt-5.5 exactly (gpt-5.5-codex and gpt-5.3-codex are deprecated in Codex).
+The previous OpenAI flagship. Keep it as a compatibility fallback for Codex accounts that do not yet expose GPT-5.6.
 
 ### GPT-5.4 (`gpt-5.4`)
 
 current · engines: `codex`, `pi`
 
-The previous OpenAI flagship. Still solid for professional work when gpt-5.5 quota is tight.
+The previous OpenAI flagship, retained for pinned compatibility. New Smithers workflows use the GPT-5.6 Sol/Terra/Luna role split instead.
 
 ### GPT-5.4 mini (`gpt-5.4-mini`)
 
-current · engines: `codex`, `pi` · roles: cheapFast
+current · engines: `codex`, `pi`
 
-OpenAI's fast, efficient tier. The default cheap OpenAI model, including via OpenRouter (openai/gpt-5.4-mini).
+OpenAI's prior fast, efficient tier. Retained as the OpenRouter compatibility fallback (openai/gpt-5.4-mini); Codex-native cheap work defaults to GPT-5.6 Luna.
 
 ### GPT-5.3-Codex-Spark (`gpt-5.3-codex-spark`)
 
@@ -10801,9 +10865,9 @@ OpenAI's first real-time coding model: 1000+ tokens per second on dedicated Cere
 
 ### Gemini 3.5 Flash (`gemini-3.5-flash`)
 
-**Best at UI** · **Fast & cheap** · state of the art · released 2026-05-19 · engines: `antigravity` · roles: ui, implement, cheapFast
+**Best at UI** · state of the art · released 2026-05-19 · engines: `antigravity` · roles: ui, implement, cheapFast
 
-Google's best price-to-performance model and the best model for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. The default Gemini in smithers.
+Google's best price-to-performance model and the best non-Codex fallback for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. Smithers selects it automatically only when Codex is unavailable.
 
 ### Gemini 3.1 Pro (`gemini-3.1-pro-preview`)
 
@@ -10821,9 +10885,9 @@ Frontier-class performance at a fraction of the cost. The floor of the Gemini li
 
 ### Kimi K2.7-Code (`kimi-k2.7-code`)
 
-**Best value coding** · state of the art · released 2026-06-12 · engines: `kimi` · roles: implement, cheapFast
+state of the art · released 2026-06-12 · engines: `kimi` · roles: implement, cheapFast
 
-Moonshot's most capable coding model and the best coding value on the market: 256k context, roughly 30% fewer reasoning tokens than K2.6, strong instruction-following in long contexts. The default Kimi in smithers; the -highspeed variant trades a little quality for ~180 tok/s.
+Moonshot's most capable coding model: 256k context, roughly 30% fewer reasoning tokens than K2.6, and strong instruction-following in long contexts. Smithers keeps it as a no-Codex implementation fallback; the -highspeed variant trades a little quality for ~180 tok/s.
 
 ### Kimi K2.7-Code High-Speed (`kimi-k2.7-code-highspeed`)
 
@@ -10895,14 +10959,14 @@ Rewrite these on sight; the daily research job does the same sweep mechanically.
 | `claude-sonnet-4-6` | `claude-sonnet-5` |
 | `claude-sonnet-4-7` | `claude-sonnet-5` |
 | `claude-sonnet-4-20250514` | `claude-sonnet-5` |
-| `gpt-5.3-codex` | `gpt-5.5` |
-| `gpt-5.2` | `gpt-5.5` |
+| `gpt-5.3-codex` | `gpt-5.6-luna` |
+| `gpt-5.2` | `gpt-5.6-luna` |
 | `gpt-4o` | `gpt-5.4-mini` |
 | `kimi-latest` | `kimi-k2.7-code` |
 
 ## Update policy
 
-- Only GA (generally available) models enter the registry. Limited previews (e.g. GPT-5.6 Sol/Terra/Luna) wait until they ship for real.
+- Only models with exact usable ids confirmed by provider documentation enter the default registry; marketing-only names and previews without usable ids wait.
 - Research previews with real availability (e.g. gpt-5.3-codex-spark on ChatGPT Pro) may enter with status sota for their niche, noted in the description.
 - No floating aliases (kimi-latest, *-latest). Pin concrete ids so a provider-side model swap cannot bypass this registry.
 - Every badge names exactly one model. A new badge holder demotes the old one in the same change.

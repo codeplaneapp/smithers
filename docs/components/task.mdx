@@ -62,15 +62,19 @@ custom Drizzle table or string key and Smithers cannot infer the Zod schema.
 </Warning>
 
 ```tsx
-import { ToolLoopAgent as Agent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { CodexAgent } from "smithers-orchestrator";
 
-const codeAgent = new Agent({
-  model: anthropic("claude-fable-5"),
-  instructions: "You are a senior software engineer.",
+const analysisAgent = new CodexAgent({
+  model: "gpt-5.6-terra",
+  instructions: "You are a careful software analyst.",
 });
 
-<Task id="analyze" output={outputs.analysis} agent={codeAgent}>
+const reviewAgent = new CodexAgent({
+  model: "gpt-5.6-sol",
+  instructions: "You are a senior code reviewer.",
+});
+
+<Task id="analyze" output={outputs.analysis} agent={analysisAgent}>
   {`Analyze: ${ctx.input.repoPath}`}
 </Task>
 
@@ -173,19 +177,24 @@ Every agent task produces a reusable session snapshot. Use `fork` to start a new
 `fork` is immutable. It does not continue or mutate the source task; it copies the conversation into a fresh, independent session. Multiple tasks may fork the same source safely, and a forked task may itself be forked.
 
 ```tsx
+import { CodexAgent } from "smithers-orchestrator";
+
+const planner = new CodexAgent({ model: "gpt-5.6-sol" });
+const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+
 const PLAN = "plan" as const;
 const IMPLEMENT = "implement" as const;
 const VERIFY = "verify" as const;
 
-<Task id={PLAN} agent={claude} output={outputs.plan}>
+<Task id={PLAN} agent={planner} output={outputs.plan}>
   Make a plan.
 </Task>
 
-<Task id={IMPLEMENT} agent={claude} fork={PLAN} output={outputs.patch}>
+<Task id={IMPLEMENT} agent={implementer} fork={PLAN} output={outputs.patch}>
   Implement the plan.
 </Task>
 
-<Task id={VERIFY} agent={claude} fork={IMPLEMENT} output={outputs.result}>
+<Task id={VERIFY} agent={implementer} fork={IMPLEMENT} output={outputs.result}>
   Run tests and fix failures.
 </Task>
 ```
@@ -195,15 +204,20 @@ const VERIFY = "verify" as const;
 **Parallel branches**: fork the same source from sibling tasks; each gets its own copy and they never affect each other:
 
 ```tsx
-<Task id="investigate" agent={claude} output={outputs.investigation}>
+import { CodexAgent } from "smithers-orchestrator";
+
+const researcher = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+const implementer = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+
+<Task id="investigate" agent={researcher} output={outputs.investigation}>
   Understand the bug and identify possible fixes.
 </Task>
 
 <Parallel>
-  <Task id="minimal-fix" agent={claude} fork="investigate" output={outputs.patch}>
+  <Task id="minimal-fix" agent={implementer} fork="investigate" output={outputs.patch}>
     Try the minimal fix.
   </Task>
-  <Task id="refactor-fix" agent={claude} fork="investigate" output={outputs.patch}>
+  <Task id="refactor-fix" agent={implementer} fork="investigate" output={outputs.patch}>
     Try the refactor fix.
   </Task>
 </Parallel>

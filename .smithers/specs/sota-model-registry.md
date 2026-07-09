@@ -46,24 +46,27 @@ Field rules:
   `apps/cli/src/agent-detection.js`: `orchestrator`, `planning`, `review`,
   `smart`, `implement`, `cheapFast`, `ui`, `realtime`.
 
-### Initial contents (researched 2026-07-06)
+### Initial contents (refreshed 2026-07-09)
 
 | Model | ID | Badges | Notes |
 | --- | --- | --- | --- |
-| Claude Fable 5 | `claude-fable-5` | best-orchestrator, smartest-reviewer, smartest-coder | Anthropic frontier (Mythos-class) |
+| Claude Fable 5 | `claude-fable-5` | — | strongest non-Codex smart fallback |
 | Claude Opus 4.8 | `claude-opus-4-8` | — | secondary smart Claude |
 | Claude Sonnet 5 | `claude-sonnet-5` | — | cheap/fast implementer |
-| GPT-5.5 | `gpt-5.5` | — | OpenAI flagship; Codex default (5.6 Sol/Terra/Luna are limited preview — not GA, excluded) |
+| GPT-5.6 Sol | `gpt-5.6-sol` | best-orchestrator, smartest-reviewer, smartest-coder | Codex-first planning, review, orchestration, and smart tier |
+| GPT-5.6 Terra | `gpt-5.6-terra` | — | Codex-first validation, mid-tier, and tool-heavy tier |
+| GPT-5.6 Luna | `gpt-5.6-luna` | fast-and-cheap, best-value-coding | Codex-first implementation, research, and cheap tier |
+| GPT-5.5 | `gpt-5.5` | — | previous compatibility model; never a new-workflow default |
 | GPT-5.4 / 5.4-mini | `gpt-5.4`, `gpt-5.4-mini` | — | previous flagship + fast variant |
 | GPT-5.3-Codex-Spark | `gpt-5.3-codex-spark` | fastest-coding | 1000+ tok/s realtime coding (ChatGPT Pro) |
-| Gemini 3.5 Flash | `gemini-3.5-flash` | best-ui, fast-and-cheap | stable; beats 3.1 Pro on coding/agentic at Flash cost |
+| Gemini 3.5 Flash | `gemini-3.5-flash` | best-ui | non-Codex UI fallback |
 | Gemini 3.1 Pro | `gemini-3.1-pro-preview` | — | preview; superseded for coding by 3.5 Flash |
-| Kimi K2.7-Code | `kimi-k2.7-code` | best-value-coding | Moonshot's best coding model; -30% reasoning tokens vs K2.6 |
+| Kimi K2.7-Code | `kimi-k2.7-code` | — | no-Codex implementation fallback |
 | Kimi K2.6 | `kimi-k2.6` | best-open-source | open-source (modified MIT) trillion-param agentic MoE |
 
 Deprecated (purge on sight): `claude-sonnet-4-6`, `claude-sonnet-4-7`,
 `claude-sonnet-4-20250514` → `claude-sonnet-5`; `gpt-5.3-codex`, `gpt-5.2` →
-`gpt-5.5`; `gemini-3.1-pro-preview` stays `current` as the Gemini API default
+`gpt-5.6-luna`; `gemini-3.1-pro-preview` stays `current` as the Gemini API default
 fallback but the coding/UI role default moves to `gemini-3.5-flash`;
 `kimi-latest` → pin `kimi-k2.7-code` (floating aliases hide model bumps from
 the registry, so we do not use them).

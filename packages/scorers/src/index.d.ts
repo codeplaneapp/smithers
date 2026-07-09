@@ -537,7 +537,9 @@ type ModelPrice$1 = ModelPrice$2;
  * When only a single `tokens` total is known (no input/output split), it is
  * priced at the blended midpoint of input and output rates — a token forecast
  * this coarse cannot know its own read/write mix, and the midpoint keeps a
- * cheap model's estimate from swinging 5x on that unknown.
+ * cheap model's estimate from swinging 5x on that unknown. The same 50/50
+ * assumption determines whether a coarse GPT-5.6 forecast crosses the 272K
+ * long-context input threshold.
  *
  * @param {{ model: string, tokens?: number, inputTokens?: number, outputTokens?: number, cacheReadTokens?: number, cacheWriteTokens?: number }} usage
  * @returns {number} dollars

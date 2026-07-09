@@ -18,12 +18,12 @@ fingerprints an agent's capabilities for cache keys.
 
 ```ts
 import {
-  AnthropicAgent,
-  ClaudeCodeAgent,
+  CodexAgent,
+  OpenAIAgent,
   createHttpTool,
   hashCapabilityRegistry,
 } from "smithers-orchestrator";
-import type { AgentLike, AnthropicAgentOptions } from "smithers-orchestrator";
+import type { AgentLike, OpenAIAgentOptions } from "smithers-orchestrator";
 ```
 
 <Note>
@@ -78,20 +78,21 @@ plus a `model`. Reach for these to bill a provider's API directly. For a vendor'
 full CLI surface, use a [CLI agent](#cli-agents).
 
 ```ts
-import { AnthropicAgent, OpenAIAgent, tools } from "smithers-orchestrator";
+import { OpenAIAgent, AnthropicAgent, tools } from "smithers-orchestrator";
 import { stepCountIs } from "ai";
 
-const claude = new AnthropicAgent({
-  model: "claude-fable-5",
+const implementer = new OpenAIAgent({
+  model: "gpt-5.6-luna",
   tools,
-  instructions: "You are a careful planner.",
+  instructions: "You are a precise implementation agent.",
   stopWhen: stepCountIs(40),
 });
 
-const codex = new OpenAIAgent({
-  model: "gpt-5.5",
+// Provider-specific agents remain available as explicit fallbacks.
+const fallbackPlanner = new AnthropicAgent({
+  model: "claude-fable-5",
   tools,
-  instructions: "You are a precise implementation agent.",
+  instructions: "You are a careful planner.",
   stopWhen: stepCountIs(40),
 });
 ```
@@ -181,7 +182,7 @@ OpenAI-compatible wrapper preconfigured for a Nous Research Hermes server.
   </Expandable>
 </ParamField>
 
-**Source** [`AnthropicAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/AnthropicAgent.js) · [`OpenAIAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/OpenAIAgent.js) · [`HermesAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/HermesAgent.js) · **Tests** [`sdk-agents.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/sdk-agents.test.js) · **See also** [SDK Agents](/integrations/sdk-agents), [`AnthropicAgentOptions`](/reference/types)
+**Source** [`OpenAIAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/OpenAIAgent.js) · [`AnthropicAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/AnthropicAgent.js) · [`HermesAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/HermesAgent.js) · **Tests** [`sdk-agents.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/sdk-agents.test.js) · **See also** [SDK Agents](/integrations/sdk-agents), [`OpenAIAgentOptions`](/reference/types)
 
 ## CLI agents
 
@@ -190,23 +191,33 @@ the runtime, and implement `AgentLike`. The binary must be on `PATH`. When you
 omit `model`, the underlying CLI picks its own default. Each class adds a few
 vendor-specific options on top of the shared base below.
 
+<Note>
+Smithers-generated workflows are Codex-first: Sol (`gpt-5.6-sol`) handles
+planning, orchestration, and review; Terra (`gpt-5.6-terra`) handles mid-tier
+judgment, validation, and tool work; Luna (`gpt-5.6-luna`) handles every
+implementation task, research, and cheap work. Non-Codex CLI agents enter
+automatic pools only when Codex is unavailable. Explicitly constructed agents
+always run as written.
+</Note>
+
 ```tsx
-import { ClaudeCodeAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
   analysis: z.object({ summary: z.string() }),
 });
 
-const claude = new ClaudeCodeAgent({
-  model: "claude-fable-5",
+const reviewer = new CodexAgent({
+  model: "gpt-5.6-sol",
   systemPrompt: "You are a careful code reviewer.",
+  sandbox: "read-only",
   timeoutMs: 30 * 60 * 1000,
 });
 
 export default smithers(() => (
   <Workflow name="review">
-    <Task id="analysis" output={outputs.analysis} agent={claude}>
+    <Task id="analysis" output={outputs.analysis} agent={reviewer}>
       Analyze the codebase and identify potential improvements.
     </Task>
   </Workflow>
@@ -341,7 +352,7 @@ wrapping the `hermes` CLI. Adds `model`, `provider`, and `continueSession`, and
 emits `--model` / `--provider` flags. See
 [`HermesCliAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/HermesCliAgentOptions.ts).
 
-**Source** [`ClaudeCodeAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/ClaudeCodeAgent.js) · [`CodexAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/CodexAgent.js) · [`BaseCliAgentOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/BaseCliAgent/BaseCliAgentOptions.ts) · **Tests** [`claude-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/claude-support.test.js) · [`codex-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/codex-support.test.js) · **See also** [CLI Agents](/integrations/cli-agents), [Agents overview](/agents/overview)
+**Source** [`CodexAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/CodexAgent.js) · [`ClaudeCodeAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/ClaudeCodeAgent.js) · [`BaseCliAgentOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/BaseCliAgent/BaseCliAgentOptions.ts) · **Tests** [`codex-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/codex-support.test.js) · [`claude-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/claude-support.test.js) · **See also** [CLI Agents](/integrations/cli-agents), [Agents overview](/agents/overview)
 
 ## createHttpTool
 
@@ -431,8 +442,8 @@ The model invokes the tool with an `HttpToolInput` and receives an
 </ResponseField>
 
 ```ts
-const claude = new AnthropicAgent({
-  model: "claude-fable-5",
+const implementer = new OpenAIAgent({
+  model: "gpt-5.6-luna",
   tools: {
     http: createHttpTool({
       defaultHeaders: { "user-agent": "smithers" },
@@ -495,7 +506,7 @@ function hashCapabilityRegistry(
 </ResponseField>
 
 ```ts
-const key = hashCapabilityRegistry(claude.capabilities);
+const key = hashCapabilityRegistry(implementer.capabilities);
 ```
 
 **Source** [`hashCapabilityRegistry.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/capability-registry/hashCapabilityRegistry.js) · [`AgentCapabilityRegistry.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/capability-registry/AgentCapabilityRegistry.ts) · **Tests** [`capability-registry.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/capability-registry.test.js) · **See also** [Caching](/reference/types), [Agents overview](/agents/overview)

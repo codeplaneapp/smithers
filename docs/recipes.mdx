@@ -9,6 +9,22 @@ Each recipe is a working snippet plus one line of context. They compose freely.
 
 If you want a ready-to-run outcome before writing workflow code, start with [Starters](/starters) or run `bunx smithers-orchestrator starters`.
 
+## Default model routing
+
+Smithers-generated workflows use Codex exclusively when usable Codex
+authentication is available. Pin the tier to the role:
+
+| Work | Model |
+|---|---|
+| Planning, orchestration, review, and the hardest reasoning | `gpt-5.6-sol` |
+| Mid-tier judgment, validation, and tool-focused work | `gpt-5.6-terra` |
+| **All implementation**, research, and cheap or high-volume work | `gpt-5.6-luna` |
+
+Luna remains the implementation model for large changes; implementation size
+does not promote it to Sol. Non-Codex adapters are automatic fallbacks only when
+Codex is unavailable. Explicit provider-specific workflows continue to run as
+written.
+
 ## Implement → review loop
 
 Iterate until a reviewer signs off, with a hard cap.
@@ -34,22 +50,23 @@ Stop conditions must be measurable (boolean, count, array length). Avoid "looks 
 
 In a `<Loop>` `until`, read the most recent iteration with `ctx.latest`. `ctx.outputMaybe(.., { nodeId })` without an explicit `iteration` resolves the *current render iteration* (which equals the loop iteration only for a single, non-nested loop, and is `0` when several loops coexist), so an `outputMaybe`-based `until` can silently never advance.
 
-## Parallel multi-agent review
+## Parallel Codex review
 
-Two models catch different bugs. Cost = the slower model's latency.
+Two Codex tiers provide independent signals without routing to another provider.
+Cost = the slower model's latency.
 
 ```tsx
 <Parallel>
-  <Task id={`${ticket.id}:review-claude`} output={outputs.review} agent={claude} continueOnFail>
-    <ReviewPrompt reviewer="claude" />
+  <Task id={`${ticket.id}:review-sol`} output={outputs.review} agent={codexSol} continueOnFail>
+    <ReviewPrompt reviewer="sol" />
   </Task>
-  <Task id={`${ticket.id}:review-codex`} output={outputs.review} agent={codex} continueOnFail>
-    <ReviewPrompt reviewer="codex" />
+  <Task id={`${ticket.id}:validate-terra`} output={outputs.review} agent={codexTerra} continueOnFail>
+    <ReviewPrompt reviewer="terra" />
   </Task>
 </Parallel>
 ```
 
-`continueOnFail` keeps one model's timeout from blocking the other.
+`continueOnFail` keeps one tier's timeout from blocking the other.
 
 ## Approval gate with branching
 
@@ -150,11 +167,12 @@ One context boundary per logical operation, not per step. Splitting too finely l
 ## Per-agent least-privilege tools
 
 ```tsx
-import { AnthropicAgent } from "smithers-orchestrator";
+import { OpenAIAgent } from "smithers-orchestrator";
 
-const analyst     = new AnthropicAgent({ model, instructions: "Return JSON" });               // no tools
-const reviewer    = new AnthropicAgent({ model, instructions: "...", tools: { read, grep } }); // read-only
-const implementer = new AnthropicAgent({ model, instructions: "...", tools: { read, write, edit, bash } });
+const researcher  = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "Return JSON" });
+const validator   = new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, grep } });
+const reviewer    = new OpenAIAgent({ model: "gpt-5.6-sol", instructions: "...", tools: { read, grep } });
+const implementer = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "...", tools: { read, write, edit, bash } });
 ```
 
 Match the tool surface to the role.
@@ -238,9 +256,9 @@ In `.mdx` prompt files, prose that looks like JSX or HTML is parsed as JSX. Wrap
 ```tsx
 function useReviewState(ticketId: string) {
   const ctx = useCtx();
-  const claude = ctx.latest("review", `${ticketId}:review-claude`);
-  const codex  = ctx.latest("review", `${ticketId}:review-codex`);
-  return { claude, codex, allApproved: !!(claude?.approved && codex?.approved) };
+  const sol = ctx.latest("review", `${ticketId}:review-sol`);
+  const terra = ctx.latest("review", `${ticketId}:validate-terra`);
+  return { sol, terra, allApproved: !!(sol?.approved && terra?.approved) };
 }
 ```
 
@@ -335,15 +353,15 @@ Edits to the workflow source apply on the next render frame without losing in-fl
 Every agent task produces a reusable session snapshot. `fork` starts a new task from a copy of another task's final context, without mutating the source.
 
 ```tsx
-<Task id="investigate" agent={claude} output={outputs.investigation}>
+<Task id="investigate" agent={codexLuna} output={outputs.investigation}>
   Understand the bug and identify possible fixes.
 </Task>
 
 <Parallel>
-  <Task id="minimal-fix" agent={claude} fork="investigate" output={outputs.patch}>
+  <Task id="minimal-fix" agent={codexLuna} fork="investigate" output={outputs.patch}>
     Try the minimal fix.
   </Task>
-  <Task id="refactor-fix" agent={claude} fork="investigate" output={outputs.patch}>
+  <Task id="refactor-fix" agent={codexLuna} fork="investigate" output={outputs.patch}>
     Try the refactor fix.
   </Task>
 </Parallel>

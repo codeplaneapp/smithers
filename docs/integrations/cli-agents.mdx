@@ -1,6 +1,6 @@
 ---
 title: CLI Agents
-description: Spawn external CLI tools (Claude Code, Codex, Pi, …) and pipe them through the workflow runtime.
+description: Spawn external CLI tools (Codex, Claude Code, Pi, …) and pipe them through the workflow runtime.
 ---
 
 CLI-backed agent classes wrap external AI command-line tools and implement the [AI SDK](https://ai-sdk.dev) `Agent` interface. Use them anywhere Smithers accepts an agent, including [`<Task>`](/components/task). Reach for these for a vendor's full CLI surface (sessions, sandboxes, slash commands, MCP). For API-billed provider wrappers, see [SDK Agents](/integrations/sdk-agents).
@@ -10,22 +10,23 @@ CLI-backed agent classes wrap external AI command-line tools and implement the [
 ## Quick Start
 
 ```tsx
-import { ClaudeCodeAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
   analysis: z.object({ summary: z.string() }),
 });
 
-const claude = new ClaudeCodeAgent({
-  model: "claude-fable-5",
+const reviewer = new CodexAgent({
+  model: "gpt-5.6-sol",
   systemPrompt: "You are a careful code reviewer.",
+  sandbox: "read-only",
   timeoutMs: 30 * 60 * 1000,
 });
 
 export default smithers((ctx) => (
   <Workflow name="review">
-    <Task id="analysis" output={outputs.analysis} agent={claude}>
+    <Task id="analysis" output={outputs.analysis} agent={reviewer}>
       {`Analyze the codebase and identify potential improvements.`}
     </Task>
   </Workflow>
@@ -36,8 +37,8 @@ export default smithers((ctx) => (
 
 ```toon
 agents[12]{class,cli,modelDefault,hijack,notes}:
-  ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
+  ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   AntigravityAgent,agy,CLI default,native session id,Google Antigravity CLI
   GeminiAgent,gemini,CLI default,legacy session id,Deprecated legacy Gemini CLI wrapper
   PiAgent,pi,CLI default,native session id,Pi CLI (text/json/rpc modes + extension UI hooks)
@@ -50,7 +51,7 @@ agents[12]{class,cli,modelDefault,hijack,notes}:
   OpenClawAgent,openclaw,CLI default,session id,OpenClaw CLI (openclaw agent --json)
 ```
 
-CLI binaries must be on `PATH`: `claude`, `codex`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`.
+CLI binaries must be on `PATH`: `codex`, `claude`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
@@ -61,6 +62,23 @@ which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
 OpenClaw agent, `sessionId` to resume a session with `--session-id`, `workspace`
 to set the workspace path, and `continueSession` when the installed CLI should
 continue its active session.
+
+## Codex-first defaults
+
+When `bunx smithers-orchestrator init` detects usable Codex authentication, its
+generated pools start with Codex workers using exact model pins:
+
+| Work | Model |
+|---|---|
+| Planning, orchestration, review, and the hardest reasoning | `gpt-5.6-sol` |
+| Mid-tier judgment, validation, and tool-focused work | `gpt-5.6-terra` |
+| **All implementation**, research, and cheap or high-volume work | `gpt-5.6-luna` |
+
+Luna remains the implementation model regardless of change size. Claude Code,
+Kimi, Antigravity, and the other CLI adapters stay later in the sequential
+runtime chains and run only after every Codex attempt fails. Directly
+constructing an agent is an explicit choice and bypasses that automatic routing
+policy.
 
 ## Codex CLI Agent
 
@@ -75,7 +93,8 @@ const { smithers, outputs } = createSmithers({
 });
 
 const codex = new CodexAgent({
-  model: "gpt-5.5",
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   sandbox: "workspace-write",
   skipGitRepoCheck: true,
   yolo: true,
@@ -90,7 +109,8 @@ export default smithers(() => (
 ));
 ```
 
-For ChatGPT-account Codex auth, use the ChatGPT model id such as `gpt-5.5`; `gpt-5.5-codex` is rejected by that auth surface.
+For ChatGPT-account Codex auth, use an exact Codex model id such as
+`gpt-5.6-luna`; do not invent a `-codex` suffix.
 
 ### Authentication
 
@@ -215,7 +235,8 @@ const schema = z.object({
 });
 
 const codex = new CodexAgent({
-  model: "gpt-5.5",
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   nativeStructuredOutput: true, // forwards outputSchema as --output-schema
   // no apiKey → bills your ChatGPT subscription
 });
@@ -549,7 +570,7 @@ Smithers persists the native session or conversation id on each task event. On h
 | `ForgeAgent` | `forge --conversation-id` |
 | `AmpAgent` | `amp threads continue` |
 
-On clean exit the workflow resumes in detached mode. Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See [How it works → Durability and resume](/how-it-works#durability--resume).
+On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See [How it works → Durability and resume](/how-it-works#durability--resume).
 
 ## Notes
 

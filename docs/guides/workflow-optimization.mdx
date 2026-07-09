@@ -6,13 +6,16 @@ description: Optimize Smithers workflow prompts against eval suites with GEPA-st
 Run `bunx smithers-orchestrator optimize` to generate improved prompts for agent tasks via GEPA, verify the improvement against your eval suite, and save the result as a reusable artifact.
 
 ```bash
+OPENAI_API_KEY=... \
 bunx smithers-orchestrator optimize workflow.tsx \
   --cases evals/smoke.jsonl \
   --suite smoke-gepa \
-  --provider cerebras \
-  --model zai-glm-4.7 \
   --artifact .smithers/optimizations/smoke-gepa.json
 ```
+
+The implicit optimizer is OpenAI-compatible `gpt-5.6-luna` with reasoning
+effort `medium`. Pass `--provider` to select Cerebras, Claude, Kimi, or another
+supported backend explicitly.
 
 `bunx smithers-orchestrator optimize` runs the eval suite twice:
 
@@ -77,16 +80,21 @@ Observed result:
 
 | Provider | Optimizer API | Required env | Default model |
 | --- | --- | --- | --- |
+| `openai-api` (default), `openai`, `openai-sdk`, `codex` | OpenAI-compatible | `OPENAI_API_KEY` | `gpt-5.6-luna` (`medium` reasoning) |
 | `cerebras` | OpenAI-compatible | `CEREBRAS_API_KEY` | `zai-glm-4.7` |
-| `openai-api`, `openai`, `openai-sdk`, `codex` | OpenAI-compatible | `OPENAI_API_KEY` | `gpt-5.5` |
 | `anthropic-api`, `anthropic`, `anthropic-sdk`, `claude-code`, `claude` | Anthropic Messages API | `ANTHROPIC_API_KEY` | `claude-fable-5` |
 | `gemini-api`, `gemini`, `antigravity` | Gemini generateContent API | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3.5-flash` |
 | `kimi`, `moonshot` | OpenAI-compatible Moonshot API | `MOONSHOT_API_KEY` | `kimi-k2.7-code` |
 | `opencode` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `anthropic/claude-fable-5` |
-| `pi` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `gpt-5.5` |
+| `pi` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | `gpt-5.6-luna` |
 | `amp`, `forge`, `openai-compatible` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | pass `--model` when needed |
 
-The default models track the [SOTA model registry](/reference/sota-models), which lists the current defaults and badges and is refreshed by a daily research job. The CLI provider names (`claude-code`, `codex`, `antigravity`, `gemini`, `kimi`) map to their hosted API equivalents for optimization because GEPA needs a direct model call to propose prompt patches. Providers with no single hosted backend (`opencode`, `pi`, `amp`, `forge`) are still accepted through a generic OpenAI-compatible endpoint.
+The default models track the [SOTA model registry](/reference/sota-models), which lists the current defaults and badges and is refreshed by a daily research job. The CLI provider names (`codex`, `claude-code`, `antigravity`, `gemini`, `kimi`) map to their hosted API equivalents for optimization because GEPA needs a direct model call to propose prompt patches. Providers with no single hosted backend (`opencode`, `pi`, `amp`, `forge`) are still accepted through a generic OpenAI-compatible endpoint.
+
+Smithers defaults research and prompt-optimization work to Luna. Automatic
+workflow routing keeps non-Codex providers behind Codex; this standalone command
+does not silently change paid API backends. If OpenAI is unavailable, select a
+Cerebras, Claude, Kimi, or other fallback explicitly with `--provider`.
 
 `--provider heuristic` is deterministic and intended for local tests and fixtures. Use `heuristic` when you want deterministic optimization without an API call: place `optimizationHints` in each case's `metadata` to control the patch. It uses eval-case metadata such as:
 

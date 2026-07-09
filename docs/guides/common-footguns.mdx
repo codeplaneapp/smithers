@@ -97,7 +97,8 @@ const opus = new ClaudeCodeAgent({
   dangerouslySkipPermissions: true,
 });
 const codex = new CodexAgent({
-  model: "gpt-5.5",
+  model: "gpt-5.6-luna",
+  config: { model_reasoning_effort: "medium" },
   sandbox: "danger-full-access",
   dangerouslyBypassApprovalsAndSandbox: true,
   skipGitRepoCheck: true,

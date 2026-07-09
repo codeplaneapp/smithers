@@ -1,11 +1,11 @@
 ---
 title: "SOTA models"
-description: "The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v1, updated 2026-07-06."
+description: "The state-of-the-art model roster smithers configures: descriptions, badges, and role defaults. Registry v2, updated 2026-07-09."
 ---
 
 {/* GENERATED FILE. Edit docs/data/sota-models.json, then run `pnpm sota:gen`. */}
 
-**Registry v1** · updated **2026-07-06**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smithers-orchestrator update` picks the changes up on your machine, and re-running `bunx smithers-orchestrator init` refreshes installed workflows to the new defaults.
+**Registry v2** · updated **2026-07-09**. This page is generated from [`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), the single source of truth for which models smithers configures by default. A daily research job checks every provider for new GA models and opens a PR here when the state of the art moves; `bunx smithers-orchestrator update` picks the changes up on your machine, and re-running `bunx smithers-orchestrator init` refreshes installed workflows to the new defaults.
 
 ## Badges
 
@@ -13,38 +13,41 @@ Each badge names the single best model for that job right now.
 
 | Badge | Model | ID |
 | --- | --- | --- |
-| Best orchestrator | Claude Fable 5 | `claude-fable-5` |
-| Smartest reviewer | Claude Fable 5 | `claude-fable-5` |
-| Smartest coder | Claude Fable 5 | `claude-fable-5` |
+| Best orchestrator | GPT-5.6 Sol | `gpt-5.6-sol` |
+| Smartest reviewer | GPT-5.6 Sol | `gpt-5.6-sol` |
+| Smartest coder | GPT-5.6 Sol | `gpt-5.6-sol` |
+| Fast & cheap | GPT-5.6 Luna | `gpt-5.6-luna` |
+| Best value coding | GPT-5.6 Luna | `gpt-5.6-luna` |
 | Fastest coding | GPT-5.3-Codex-Spark | `gpt-5.3-codex-spark` |
 | Best at UI | Gemini 3.5 Flash | `gemini-3.5-flash` |
-| Fast & cheap | Gemini 3.5 Flash | `gemini-3.5-flash` |
-| Best value coding | Kimi K2.7-Code | `kimi-k2.7-code` |
 | Best open source | Kimi K2.6 | `kimi-k2.6` |
 
 ## Role defaults
 
-The fable-sandwich tiers (see the [workflow optimization guide](/guides/workflow-optimization)) resolve to these ids:
+The Codex-first workflow tiers (see the [workflow optimization guide](/guides/workflow-optimization)) resolve to these ids:
 
 | Role | Default model |
 | --- | --- |
-| orchestrator | `claude-fable-5` |
-| planning | `claude-fable-5` |
-| review | `claude-fable-5` |
-| smart | `claude-fable-5` |
-| implement | `gpt-5.5` |
-| cheapFast | `gemini-3.5-flash` |
-| ui | `gemini-3.5-flash` |
+| orchestrator | `gpt-5.6-sol` |
+| planning | `gpt-5.6-sol` |
+| review | `gpt-5.6-sol` |
+| smart | `gpt-5.6-sol` |
+| midTier | `gpt-5.6-terra` |
+| smartTool | `gpt-5.6-terra` |
+| validate | `gpt-5.6-terra` |
+| implement | `gpt-5.6-luna` |
+| cheapFast | `gpt-5.6-luna` |
+| ui | `gpt-5.6-luna` |
 | realtime | `gpt-5.3-codex-spark` |
-| research | `kimi-k2.6` |
+| research | `gpt-5.6-luna` |
 
 ## Anthropic
 
 ### Claude Fable 5 (`claude-fable-5`)
 
-**Best orchestrator** · **Smartest reviewer** · **Smartest coder** · state of the art · engines: `claude`, `opencode` · roles: orchestrator, planning, review, smart
+current · engines: `claude`, `opencode` · roles: orchestrator, planning, review, smart
 
-Anthropic's Mythos-class frontier model, the first of the Claude 5 family. The strongest model available for planning, code review, and orchestrating other agents, which is why it sits at both ends of the fable sandwich: it writes the plan, delegates implementation, then reviews the result.
+Anthropic's Mythos-class frontier model and the strongest non-Codex fallback for planning, code review, and orchestration. Smithers selects it only when Codex is unavailable.
 
 ### Claude Opus 4.8 (`claude-opus-4-8`)
 
@@ -56,7 +59,7 @@ Anthropic's Opus tier. Still a top-shelf generalist and the always-present fallb
 
 current · released 2026-06-29 · engines: `claude`, `opencode` · roles: implement, cheapFast
 
-The newest Sonnet: fast, cheap, 1M context. The guaranteed implementer fallback in the fable sandwich and the default cheapFast Claude.
+The newest Sonnet: fast, cheap, 1M context. It is the primary non-Codex fallback for implementation and cheap tool calls when Codex is unavailable.
 
 ### Claude Haiku 4.5 (`claude-haiku-4-5`)
 
@@ -66,23 +69,41 @@ Anthropic's cheapest tier, for high-volume summarization and classification wher
 
 ## OpenAI
 
+### GPT-5.6 Sol (`gpt-5.6-sol`)
+
+**Best orchestrator** · **Smartest reviewer** · **Smartest coder** · state of the art · engines: `codex`, `pi` · roles: orchestrator, planning, review, smart
+
+OpenAI's GPT-5.6 flagship for complex reasoning and coding. Smithers uses Sol for orchestration, planning, reviews, and other judgment-heavy work whenever Codex is available.
+
+### GPT-5.6 Terra (`gpt-5.6-terra`)
+
+state of the art · engines: `codex`, `pi` · roles: midTier, smartTool, validate
+
+OpenAI's balanced GPT-5.6 model. Smithers uses Terra for everyday mid-tier work, validation, and tool-heavy tasks whenever Codex is available.
+
+### GPT-5.6 Luna (`gpt-5.6-luna`)
+
+**Fast & cheap** · **Best value coding** · state of the art · engines: `codex`, `pi` · roles: implement, cheapFast, research, ui
+
+OpenAI's fast, affordable GPT-5.6 model for cost-sensitive, high-volume workloads. Smithers makes Luna the default implementation, research, and cheap-work model because it keeps strong agentic coding ability at the lowest GPT-5.6 tier.
+
 ### GPT-5.5 (`gpt-5.5`)
 
-state of the art · engines: `codex`, `pi` · roles: implement, smart
+current · engines: `codex`, `pi`
 
-OpenAI's GA flagship and the Codex CLI default. The implementation workhorse in the middle of the fable sandwich. With ChatGPT auth use the id gpt-5.5 exactly (gpt-5.5-codex and gpt-5.3-codex are deprecated in Codex).
+The previous OpenAI flagship. Keep it as a compatibility fallback for Codex accounts that do not yet expose GPT-5.6.
 
 ### GPT-5.4 (`gpt-5.4`)
 
 current · engines: `codex`, `pi`
 
-The previous OpenAI flagship. Still solid for professional work when gpt-5.5 quota is tight.
+The previous OpenAI flagship, retained for pinned compatibility. New Smithers workflows use the GPT-5.6 Sol/Terra/Luna role split instead.
 
 ### GPT-5.4 mini (`gpt-5.4-mini`)
 
-current · engines: `codex`, `pi` · roles: cheapFast
+current · engines: `codex`, `pi`
 
-OpenAI's fast, efficient tier. The default cheap OpenAI model, including via OpenRouter (openai/gpt-5.4-mini).
+OpenAI's prior fast, efficient tier. Retained as the OpenRouter compatibility fallback (openai/gpt-5.4-mini); Codex-native cheap work defaults to GPT-5.6 Luna.
 
 ### GPT-5.3-Codex-Spark (`gpt-5.3-codex-spark`)
 
@@ -94,9 +115,9 @@ OpenAI's first real-time coding model: 1000+ tokens per second on dedicated Cere
 
 ### Gemini 3.5 Flash (`gemini-3.5-flash`)
 
-**Best at UI** · **Fast & cheap** · state of the art · released 2026-05-19 · engines: `antigravity` · roles: ui, implement, cheapFast
+**Best at UI** · state of the art · released 2026-05-19 · engines: `antigravity` · roles: ui, implement, cheapFast
 
-Google's best price-to-performance model and the best model for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. The default Gemini in smithers.
+Google's best price-to-performance model and the best non-Codex fallback for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. Smithers selects it automatically only when Codex is unavailable.
 
 ### Gemini 3.1 Pro (`gemini-3.1-pro-preview`)
 
@@ -114,9 +135,9 @@ Frontier-class performance at a fraction of the cost. The floor of the Gemini li
 
 ### Kimi K2.7-Code (`kimi-k2.7-code`)
 
-**Best value coding** · state of the art · released 2026-06-12 · engines: `kimi` · roles: implement, cheapFast
+state of the art · released 2026-06-12 · engines: `kimi` · roles: implement, cheapFast
 
-Moonshot's most capable coding model and the best coding value on the market: 256k context, roughly 30% fewer reasoning tokens than K2.6, strong instruction-following in long contexts. The default Kimi in smithers; the -highspeed variant trades a little quality for ~180 tok/s.
+Moonshot's most capable coding model: 256k context, roughly 30% fewer reasoning tokens than K2.6, and strong instruction-following in long contexts. Smithers keeps it as a no-Codex implementation fallback; the -highspeed variant trades a little quality for ~180 tok/s.
 
 ### Kimi K2.7-Code High-Speed (`kimi-k2.7-code-highspeed`)
 
@@ -188,14 +209,14 @@ Rewrite these on sight; the daily research job does the same sweep mechanically.
 | `claude-sonnet-4-6` | `claude-sonnet-5` |
 | `claude-sonnet-4-7` | `claude-sonnet-5` |
 | `claude-sonnet-4-20250514` | `claude-sonnet-5` |
-| `gpt-5.3-codex` | `gpt-5.5` |
-| `gpt-5.2` | `gpt-5.5` |
+| `gpt-5.3-codex` | `gpt-5.6-luna` |
+| `gpt-5.2` | `gpt-5.6-luna` |
 | `gpt-4o` | `gpt-5.4-mini` |
 | `kimi-latest` | `kimi-k2.7-code` |
 
 ## Update policy
 
-- Only GA (generally available) models enter the registry. Limited previews (e.g. GPT-5.6 Sol/Terra/Luna) wait until they ship for real.
+- Only models with exact usable ids confirmed by provider documentation enter the default registry; marketing-only names and previews without usable ids wait.
 - Research previews with real availability (e.g. gpt-5.3-codex-spark on ChatGPT Pro) may enter with status sota for their niche, noted in the description.
 - No floating aliases (kimi-latest, *-latest). Pin concrete ids so a provider-side model swap cannot bypass this registry.
 - Every badge names exactly one model. A new badge holder demotes the old one in the same change.

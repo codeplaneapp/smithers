@@ -1,8 +1,8 @@
 {
-  "version": 1,
-  "updatedAt": "2026-07-06",
+  "version": 2,
+  "updatedAt": "2026-07-09",
   "policy": [
-    "Only GA (generally available) models enter the registry. Limited previews (e.g. GPT-5.6 Sol/Terra/Luna) wait until they ship for real.",
+    "Only models with exact usable ids confirmed by provider documentation enter the default registry; marketing-only names and previews without usable ids wait.",
     "Research previews with real availability (e.g. gpt-5.3-codex-spark on ChatGPT Pro) may enter with status sota for their niche, noted in the description.",
     "No floating aliases (kimi-latest, *-latest). Pin concrete ids so a provider-side model swap cannot bypass this registry.",
     "Every badge names exactly one model. A new badge holder demotes the old one in the same change.",
@@ -15,11 +15,11 @@
       "slot": "fable",
       "provider": "anthropic",
       "name": "Claude Fable 5",
-      "status": "sota",
+      "status": "current",
       "engines": ["claude", "opencode"],
-      "badges": ["best-orchestrator", "smartest-reviewer", "smartest-coder"],
+      "badges": [],
       "roles": ["orchestrator", "planning", "review", "smart"],
-      "description": "Anthropic's Mythos-class frontier model, the first of the Claude 5 family. The strongest model available for planning, code review, and orchestrating other agents, which is why it sits at both ends of the fable sandwich: it writes the plan, delegates implementation, then reviews the result."
+      "description": "Anthropic's Mythos-class frontier model and the strongest non-Codex fallback for planning, code review, and orchestration. Smithers selects it only when Codex is unavailable."
     },
     {
       "id": "claude-opus-4-8",
@@ -42,7 +42,7 @@
       "engines": ["claude", "opencode"],
       "badges": [],
       "roles": ["implement", "cheapFast"],
-      "description": "The newest Sonnet: fast, cheap, 1M context. The guaranteed implementer fallback in the fable sandwich and the default cheapFast Claude."
+      "description": "The newest Sonnet: fast, cheap, 1M context. It is the primary non-Codex fallback for implementation and cheap tool calls when Codex is unavailable."
     },
     {
       "id": "claude-haiku-4-5",
@@ -56,15 +56,48 @@
       "description": "Anthropic's cheapest tier, for high-volume summarization and classification where even Sonnet is overkill."
     },
     {
-      "id": "gpt-5.5",
-      "slot": "codex",
+      "id": "gpt-5.6-sol",
+      "slot": "codexSol",
       "provider": "openai",
-      "name": "GPT-5.5",
+      "name": "GPT-5.6 Sol",
+      "status": "sota",
+      "engines": ["codex", "pi"],
+      "badges": ["best-orchestrator", "smartest-reviewer", "smartest-coder"],
+      "roles": ["orchestrator", "planning", "review", "smart"],
+      "description": "OpenAI's GPT-5.6 flagship for complex reasoning and coding. Smithers uses Sol for orchestration, planning, reviews, and other judgment-heavy work whenever Codex is available."
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "slot": "codexTerra",
+      "provider": "openai",
+      "name": "GPT-5.6 Terra",
       "status": "sota",
       "engines": ["codex", "pi"],
       "badges": [],
-      "roles": ["implement", "smart"],
-      "description": "OpenAI's GA flagship and the Codex CLI default. The implementation workhorse in the middle of the fable sandwich. With ChatGPT auth use the id gpt-5.5 exactly (gpt-5.5-codex and gpt-5.3-codex are deprecated in Codex)."
+      "roles": ["midTier", "smartTool", "validate"],
+      "description": "OpenAI's balanced GPT-5.6 model. Smithers uses Terra for everyday mid-tier work, validation, and tool-heavy tasks whenever Codex is available."
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "slot": "codex",
+      "provider": "openai",
+      "name": "GPT-5.6 Luna",
+      "status": "sota",
+      "engines": ["codex", "pi"],
+      "badges": ["fast-and-cheap", "best-value-coding"],
+      "roles": ["implement", "cheapFast", "research", "ui"],
+      "description": "OpenAI's fast, affordable GPT-5.6 model for cost-sensitive, high-volume workloads. Smithers makes Luna the default implementation, research, and cheap-work model because it keeps strong agentic coding ability at the lowest GPT-5.6 tier."
+    },
+    {
+      "id": "gpt-5.5",
+      "slot": null,
+      "provider": "openai",
+      "name": "GPT-5.5",
+      "status": "current",
+      "engines": ["codex", "pi"],
+      "badges": [],
+      "roles": [],
+      "description": "The previous OpenAI flagship. Keep it as a compatibility fallback for Codex accounts that do not yet expose GPT-5.6."
     },
     {
       "id": "gpt-5.4",
@@ -75,7 +108,7 @@
       "engines": ["codex", "pi"],
       "badges": [],
       "roles": [],
-      "description": "The previous OpenAI flagship. Still solid for professional work when gpt-5.5 quota is tight."
+      "description": "The previous OpenAI flagship, retained for pinned compatibility. New Smithers workflows use the GPT-5.6 Sol/Terra/Luna role split instead."
     },
     {
       "id": "gpt-5.4-mini",
@@ -85,8 +118,8 @@
       "status": "current",
       "engines": ["codex", "pi"],
       "badges": [],
-      "roles": ["cheapFast"],
-      "description": "OpenAI's fast, efficient tier. The default cheap OpenAI model, including via OpenRouter (openai/gpt-5.4-mini)."
+      "roles": [],
+      "description": "OpenAI's prior fast, efficient tier. Retained as the OpenRouter compatibility fallback (openai/gpt-5.4-mini); Codex-native cheap work defaults to GPT-5.6 Luna."
     },
     {
       "id": "gpt-5.3-codex-spark",
@@ -108,9 +141,9 @@
       "status": "sota",
       "released": "2026-05-19",
       "engines": ["antigravity"],
-      "badges": ["best-ui", "fast-and-cheap"],
+      "badges": ["best-ui"],
       "roles": ["ui", "implement", "cheapFast"],
-      "description": "Google's best price-to-performance model and the best model for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. The default Gemini in smithers."
+      "description": "Google's best price-to-performance model and the best non-Codex fallback for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. Smithers selects it automatically only when Codex is unavailable."
     },
     {
       "id": "gemini-3.1-pro-preview",
@@ -142,9 +175,9 @@
       "status": "sota",
       "released": "2026-06-12",
       "engines": ["kimi"],
-      "badges": ["best-value-coding"],
+      "badges": [],
       "roles": ["implement", "cheapFast"],
-      "description": "Moonshot's most capable coding model and the best coding value on the market: 256k context, roughly 30% fewer reasoning tokens than K2.6, strong instruction-following in long contexts. The default Kimi in smithers; the -highspeed variant trades a little quality for ~180 tok/s."
+      "description": "Moonshot's most capable coding model: 256k context, roughly 30% fewer reasoning tokens than K2.6, and strong instruction-following in long contexts. Smithers keeps it as a no-Codex implementation fallback; the -highspeed variant trades a little quality for ~180 tok/s."
     },
     {
       "id": "kimi-k2.7-code-highspeed",
@@ -211,11 +244,11 @@
       "provider": "openai",
       "name": "GPT-5.3-Codex",
       "status": "deprecated",
-      "replacedBy": "gpt-5.5",
+      "replacedBy": "gpt-5.6-luna",
       "engines": ["codex"],
       "badges": [],
       "roles": [],
-      "description": "Deprecated in Codex under ChatGPT auth. Use gpt-5.5."
+      "description": "Deprecated in Codex under ChatGPT auth. Use GPT-5.6 Luna for implementation or select a role-specific GPT-5.6 tier."
     },
     {
       "id": "gpt-5.2",
@@ -223,11 +256,11 @@
       "provider": "openai",
       "name": "GPT-5.2",
       "status": "deprecated",
-      "replacedBy": "gpt-5.5",
+      "replacedBy": "gpt-5.6-luna",
       "engines": ["codex"],
       "badges": [],
       "roles": [],
-      "description": "Deprecated in Codex under ChatGPT auth. Use gpt-5.5."
+      "description": "Deprecated in Codex under ChatGPT auth. Use GPT-5.6 Luna for implementation or select a role-specific GPT-5.6 tier."
     },
     {
       "id": "gpt-4o",
@@ -239,7 +272,7 @@
       "engines": ["pi"],
       "badges": [],
       "roles": [],
-      "description": "Two generations old. Use gpt-5.4-mini for the cheap tier or gpt-5.5 for real work."
+      "description": "Two generations old. Use GPT-5.6 Luna for implementation and research, Terra for balanced validation, or Sol for planning and review."
     },
     {
       "id": "kimi-latest",

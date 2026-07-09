@@ -5,4 +5,20 @@ description: Folded into Recipes.
 
 This material is now in [Recipes](/recipes).
 
-Rule-of-thumb assignments: Codex (`gpt-5.5`) for implementation, validation, and review-fix; Claude Fable (`claude-fable-5`) for research, planning, review, and reports; Claude Opus (`claude-opus-4-8`) as the secondary smart Claude model; Claude Sonnet (`claude-sonnet-5`) for cheap tool calls; Gemini (`gemini-3.5-flash`) for UI work; Kimi (`kimi-k2.7-code`) for best-value coding. The [SOTA model registry](/reference/sota-models) lists the current defaults and badges; it is refreshed by a daily research job. Run two different models in parallel for review, since they have different blind spots. Codex `model_reasoning_effort` defaults to `high`; bump to `xhigh` for multi-file refactors.
+Smithers defaults to Codex whenever usable Codex authentication is available:
+
+| Work | Model |
+|---|---|
+| Planning, orchestration, review, and the hardest reasoning | `gpt-5.6-sol` |
+| Mid-tier judgment, validation, and tool-focused work | `gpt-5.6-terra` |
+| **All implementation**, research, and cheap or high-volume work | `gpt-5.6-luna` |
+
+Pin the exact tier IDs above instead of the floating `gpt-5.6` alias. Luna is
+the implementation default even for large changes; Sol is reserved for
+planning, orchestration, and review. For independent review signals, pair Sol's
+review with Terra validation rather than introducing a different provider.
+
+When Codex is unavailable, Smithers falls back to detected Claude, Kimi,
+Gemini, or other compatible adapters. Explicit provider-specific workflows
+remain supported. The [SOTA model registry](/reference/sota-models) lists the
+current defaults and badges and is refreshed by a daily research job.
