@@ -469,8 +469,14 @@ export function extractGraph(root, opts) {
         if (node.tag === "smithers:subflow") {
             const logicalNodeId = requireTaskId(raw, "Subflow");
             const mode = raw.__smithersSubflowMode ?? raw.mode ?? "childRun";
+            const nodeId = logicalNodeId + ancestorScope;
+            if (mode === "inline") {
+                if (seen.has(nodeId)) {
+                    throw new SmithersError("DUPLICATE_ID", `Duplicate Subflow id detected: ${nodeId}`, { id: nodeId });
+                }
+                seen.add(nodeId);
+            }
             if (mode !== "inline") {
-                const nodeId = logicalNodeId + ancestorScope;
                 requireOutput(raw, nodeId, "Subflow");
                 const { retries, retryPolicy } = resolveRetryConfig(raw);
                 const output = resolveOutput(raw);

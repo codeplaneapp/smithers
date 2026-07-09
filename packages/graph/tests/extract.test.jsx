@@ -721,6 +721,28 @@ describe("extractGraph", () => {
 			]);
 			expect(() => extractGraph(root)).toThrow("Duplicate Subflow id detected");
 		});
+
+		test("rejects duplicate inline subflow id", () => {
+			const root = hostEl("smithers:workflow", {}, [
+				hostEl("smithers:subflow", { id: "sf", mode: "inline", output: "out" }, [
+					hostEl("smithers:task", { id: "a", output: "a_out" }),
+				]),
+				hostEl("smithers:subflow", { id: "sf", mode: "inline", output: "out" }, [
+					hostEl("smithers:task", { id: "b", output: "b_out" }),
+				]),
+			]);
+			expect(() => extractGraph(root)).toThrow("Duplicate Subflow id detected");
+		});
+
+		test("rejects inline subflow id colliding with a task id", () => {
+			const root = hostEl("smithers:workflow", {}, [
+				hostEl("smithers:subflow", { id: "x", mode: "inline", output: "out" }, [
+					hostEl("smithers:task", { id: "inner", output: "inner_out" }),
+				]),
+				hostEl("smithers:task", { id: "x", output: "x_out" }),
+			]);
+			expect(() => extractGraph(root)).toThrow("Duplicate");
+		});
 	});
 
 	describe("sandbox", () => {
