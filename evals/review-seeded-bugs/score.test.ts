@@ -40,9 +40,12 @@ describe("review seeded-bug corpus", () => {
     const cleanLabels = labels.filter((label) => label.clean);
 
     for (const bugClass of BUG_CLASSES) {
-      expect(bugLabels.filter((label) => label.bugClass === bugClass)).toHaveLength(1);
+      expect(bugLabels.filter((label) => label.bugClass === bugClass).length).toBeGreaterThanOrEqual(1);
     }
     expect(cleanLabels.length).toBeGreaterThanOrEqual(2);
+    expect(labels.length).toBeGreaterThanOrEqual(15);
+    expect(bugLabels.length).toBeGreaterThanOrEqual(12);
+    expect(cleanLabels.length).toBeGreaterThanOrEqual(4);
 
     for (const label of labels) {
       const baseDir = join(corpusDir, label.fixture, "base");
