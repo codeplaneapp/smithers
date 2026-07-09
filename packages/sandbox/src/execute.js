@@ -388,6 +388,7 @@ function isSandboxActive(status) {
  *   selectedRuntime: string;
  *   configJson: string;
  *   createdAtMs: number;
+ *   shippedAtMs: number | null;
  *   childStartedMs: number;
  *   validated: import("./ValidatedSandboxBundle.ts").ValidatedSandboxBundle;
  *   remoteRunId: string | undefined;
@@ -460,7 +461,7 @@ async function finalizeSandboxBundle(params) {
         containerId: params.containerId,
         configJson,
         status: validated.manifest.status,
-        shippedAtMs: params.createdAtMs,
+        shippedAtMs: params.shippedAtMs ?? params.createdAtMs,
         completedAtMs: nowMs(),
         bundlePath: validated.bundlePath,
     });
@@ -521,6 +522,11 @@ export async function executeSandbox(options) {
         ? options.transportLayerFor
         : layerForSandboxRuntime;
     const createdAtMs = nowMs();
+    // Real ship timestamp, captured when the bundle is shipped and threaded
+    // through to the completion/failure bookkeeping so it is not clobbered with
+    // createdAtMs (which would erase created→shipped and shipped→completed
+    // latencies for every completed/failed sandbox).
+    let shippedAtMs = null;
     const rawConfig = asPlainObject(options.config) ?? {};
     const egress = normalizeSandboxEgressConfig(rawConfig.egress);
     const configJson = JSON.stringify({
@@ -608,7 +614,7 @@ export async function executeSandbox(options) {
                 containerId: null,
                 configJson,
                 status: "shipped",
-                shippedAtMs: nowMs(),
+                shippedAtMs: (shippedAtMs = nowMs()),
                 completedAtMs: null,
                 bundlePath: null,
             });
@@ -647,6 +653,7 @@ export async function executeSandbox(options) {
                 selectedRuntime,
                 configJson,
                 createdAtMs,
+                shippedAtMs,
                 childStartedMs,
                 validated,
                 remoteRunId: materialized.remoteRunId ?? validated.manifest.runId,
@@ -696,7 +703,7 @@ export async function executeSandbox(options) {
             containerId: sandboxHandle.containerId ?? null,
             configJson,
             status: "shipped",
-            shippedAtMs: nowMs(),
+            shippedAtMs: (shippedAtMs = nowMs()),
             completedAtMs: null,
             bundlePath: null,
         });
@@ -760,6 +767,7 @@ export async function executeSandbox(options) {
             selectedRuntime,
             configJson,
             createdAtMs,
+            shippedAtMs,
             childStartedMs,
             validated,
             remoteRunId: child.runId,
@@ -769,33 +777,67 @@ export async function executeSandbox(options) {
         });
     }
     catch (error) {
-        await adapter.upsertSandbox({
-            runId: runtime.runId,
-            sandboxId: options.sandboxId,
-            runtime: selectedRuntime,
-            remoteRunId: null,
-            workspaceId: handle?.workspaceId ?? null,
-            containerId: handle?.containerId ?? null,
-            configJson,
-            status: "failed",
-            shippedAtMs: createdAtMs,
-            completedAtMs: nowMs(),
-            bundlePath: handle?.resultPath ?? null,
-        });
-        await emitSandboxEvent(runtimeDb, {
-            type: "SandboxFailed",
-            runId: runtime.runId,
-            sandboxId: options.sandboxId,
-            runtime: selectedRuntime,
-            error: errorToJson(error),
-            timestampMs: nowMs(),
-        });
-        runtime.heartbeat({
-            sandboxId: options.sandboxId,
-            stage: "failed",
-            progress: 100,
-            error: error instanceof Error ? error.message : String(error),
-        });
+        // Best-effort failure bookkeeping: a secondary exception here (DB closed
+        // after a cancel, disk/connection error) must never replace the primary
+        // sandbox error, and must not skip the remaining record-keeping. Mirror
+        // the finally block: catch, log a warning, and always rethrow `error`.
+        try {
+            await adapter.upsertSandbox({
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                runtime: selectedRuntime,
+                remoteRunId: null,
+                workspaceId: handle?.workspaceId ?? null,
+                containerId: handle?.containerId ?? null,
+                configJson,
+                status: "failed",
+                shippedAtMs: shippedAtMs ?? createdAtMs,
+                completedAtMs: nowMs(),
+                bundlePath: handle?.resultPath ?? null,
+            });
+        }
+        catch (bookkeepingError) {
+            logWarning("sandbox failure upsert failed", {
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                runtime: selectedRuntime,
+                error: errorToJson(bookkeepingError),
+            });
+        }
+        try {
+            await emitSandboxEvent(runtimeDb, {
+                type: "SandboxFailed",
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                runtime: selectedRuntime,
+                error: errorToJson(error),
+                timestampMs: nowMs(),
+            });
+        }
+        catch (bookkeepingError) {
+            logWarning("sandbox failure event emit failed", {
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                runtime: selectedRuntime,
+                error: errorToJson(bookkeepingError),
+            });
+        }
+        try {
+            runtime.heartbeat({
+                sandboxId: options.sandboxId,
+                stage: "failed",
+                progress: 100,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+        catch (bookkeepingError) {
+            logWarning("sandbox failure heartbeat failed", {
+                runId: runtime.runId,
+                sandboxId: options.sandboxId,
+                runtime: selectedRuntime,
+                error: errorToJson(bookkeepingError),
+            });
+        }
         throw error;
     }
     finally {

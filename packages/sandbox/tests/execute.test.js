@@ -46,6 +46,36 @@ function failingCleanupTransportLayer() {
 }
 
 /**
+ * A real transport layer whose ship() sleeps `delayMs` before completing, so the
+ * ship timestamp is guaranteed to advance past the create timestamp. Used to pin
+ * that the shipped→completed latency is preserved (created !== shipped).
+ * @param {number} delayMs
+ * @returns {import("effect").Layer.Layer<import("../src/transport.js").SandboxTransport>}
+ */
+function delayedShipTransportLayer(delayMs) {
+    const executor = SandboxEntityExecutor.of({
+        create: (config) =>
+            Effect.tryPromise(async () => {
+                const handle = makeBaseSandboxHandle(config);
+                await mkdir(handle.requestPath, { recursive: true });
+                await mkdir(handle.resultPath, { recursive: true });
+                return handle;
+            }),
+        ship: (bundlePath, handle) =>
+            Effect.tryPromise(async () => {
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+                await rm(handle.requestPath, { recursive: true, force: true });
+                await mkdir(handle.requestPath, { recursive: true });
+                await cp(bundlePath, handle.requestPath, { recursive: true });
+            }),
+        execute: () => Effect.succeed({ exitCode: 0 }),
+        collect: (handle) => Effect.succeed({ bundlePath: handle.resultPath }),
+        cleanup: () => Effect.succeed(undefined),
+    });
+    return makeSandboxTransportLayer(Layer.succeed(SandboxEntityExecutor, executor));
+}
+
+/**
  * @param {string} prefix
  */
 function tempDir(prefix) {
@@ -1195,6 +1225,102 @@ describe("executeSandbox", () => {
             expect(payload.totalDiffLines).toBe(4);
         }
         finally {
+            sqlite.close();
+        }
+    });
+
+    test("a failing failure-path upsert does not mask the primary sandbox error and still records the rest", async () => {
+        const { adapter, db, sqlite } = createDb();
+        // Pass the adapter itself as runtime.db so executeSandbox uses THIS adapter
+        // (isSmithersDbAdapter recognizes it) and our spy is on the real call path.
+        const heartbeats = [];
+        const runtime = createRuntime(adapter, { runId: "run-bookkeeping-fail", heartbeats });
+        let loggedWarnings = 0;
+        const restoreLogger = setSmithersLogRunner({
+            runFork() {
+                loggedWarnings += 1;
+            },
+            async runPromise() { },
+        });
+        const originalUpsert = adapter.upsertSandbox.bind(adapter);
+        adapter.upsertSandbox = async (record) => {
+            if (record.status === "failed") {
+                throw new Error("bookkeeping upsert exploded");
+            }
+            return originalUpsert(record);
+        };
+        try {
+            // The provider run() returns a malformed result → primary failure. The
+            // failure-path "failed" upsert then throws. The ORIGINAL error must be
+            // the one that surfaces, not the bookkeeping error.
+            await expect(
+                runInRuntime(runtime, {
+                    sandboxId: "sandbox-bookkeeping-fail",
+                    provider: {
+                        id: "malformed-result-provider",
+                        run: async () => ({ output: { missing: "status" } }),
+                    },
+                    runtime: undefined,
+                }),
+            ).rejects.toThrow("must include either bundlePath or status");
+
+            // The bookkeeping failure was surfaced as a warning, not swallowed.
+            expect(loggedWarnings).toBeGreaterThanOrEqual(1);
+            // Bookkeeping continued past the failed upsert: the SandboxFailed event
+            // and the "failed" heartbeat were still recorded.
+            expect(await eventTypes(adapter, "run-bookkeeping-fail")).toContain("SandboxFailed");
+            expect(heartbeats.map((entry) => entry.stage)).toContain("failed");
+        }
+        finally {
+            adapter.upsertSandbox = originalUpsert;
+            restoreLogger();
+            sqlite.close();
+        }
+    });
+
+    test("preserves the real ship timestamp on the completed sandbox instead of the create timestamp", async () => {
+        const { adapter, db, sqlite } = createDb();
+        const rootDir = tempDir("smithers-sandbox-shipped-at-");
+        const runtime = createRuntime(adapter, { runId: "run-shipped-at" });
+        /** @type {Array<{ status: string; shippedAtMs: number | null }>} */
+        const upserts = [];
+        const originalUpsert = adapter.upsertSandbox.bind(adapter);
+        adapter.upsertSandbox = async (record) => {
+            upserts.push({ status: record.status, shippedAtMs: record.shippedAtMs });
+            return originalUpsert(record);
+        };
+        try {
+            const output = await runInRuntime(runtime, {
+                sandboxId: "sandbox-shipped-at",
+                runtime: "codeplane",
+                rootDir,
+                reviewDiffs: false,
+                // Delay ship so the ship timestamp is strictly after the create timestamp.
+                transportLayerFor: () => delayedShipTransportLayer(5),
+                executeChildWorkflow: async () => {
+                    writeChildLog(rootDir, "child-shipped-at", "{\"stage\":\"done\"}\n");
+                    return {
+                        runId: "child-shipped-at",
+                        status: "finished",
+                        output: { answer: 7 },
+                    };
+                },
+            });
+
+            expect(output).toEqual({ answer: 7 });
+            const shipped = upserts.find((u) => u.status === "shipped");
+            const finished = upserts.find((u) => u.status === "finished");
+            expect(shipped?.shippedAtMs).toEqual(expect.any(Number));
+            // The completion row must carry the real ship timestamp, not createdAtMs.
+            expect(finished?.shippedAtMs).toBe(shipped?.shippedAtMs);
+
+            const sandbox = await adapter.getSandbox("run-shipped-at", "sandbox-shipped-at");
+            expect(sandbox.shippedAtMs).toBe(shipped?.shippedAtMs);
+            // A real created→shipped latency was preserved (not collapsed to zero).
+            expect(Number(sandbox.shippedAtMs)).toBeGreaterThan(0);
+        }
+        finally {
+            adapter.upsertSandbox = originalUpsert;
             sqlite.close();
         }
     });
