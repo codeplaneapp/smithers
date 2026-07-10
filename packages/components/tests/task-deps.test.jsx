@@ -5,9 +5,6 @@ import { renderFrame, runWorkflow } from "smithers-orchestrator";
 import { createTestSmithers } from "./helpers.js";
 import { z } from "zod";
 import { createSmithers } from "smithers-orchestrator";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Effect } from "effect";
 /**
@@ -131,13 +128,12 @@ describe("Task deps", () => {
         cleanup();
     });
     test("does not resolve deps from another createSmithers context", async () => {
-        const dir = mkdtempSync(join(tmpdir(), "smithers-task-deps-"));
         const api1 = createSmithers({
             source: z.object({ message: z.string() }),
-        }, { dbPath: join(dir, "ctx-one.db") });
+        }, { dbPath: ":memory:" });
         const api2 = createSmithers({
             source: z.object({ message: z.string() }),
-        }, { dbPath: join(dir, "ctx-two.db") });
+        }, { dbPath: ":memory:" });
         try {
             const workflow = api1.smithers(() => (<>
           <api1.Workflow name="ctx-one">
@@ -169,7 +165,6 @@ describe("Task deps", () => {
                 api2.db.$client?.close?.();
             }
             catch { }
-            rmSync(dir, { recursive: true, force: true });
         }
     });
 });
