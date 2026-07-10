@@ -352,8 +352,8 @@ const {
 
 // ---------------------------------------------------------------------------
 // Agents. luna/terra/sol are Codex GPT-5.6 variants; fable is Claude Fable 5.
-// Chains fan out across every registered Codex subscription and fall back to
-// Claude, matching .smithers/agents.ts conventions.
+// Codex chains fan out across every registered Codex subscription; only sol
+// falls back to Claude Fable 5, matching .smithers/agents.ts conventions.
 // ---------------------------------------------------------------------------
 
 function codexOptions(model: string, effort: "medium" | "high" | "xhigh", cwd?: string) {
@@ -365,14 +365,10 @@ function codexOptions(model: string, effort: "medium" | "high" | "xhigh", cwd?: 
   };
 }
 function lunaAgent(effort: "medium" | "high" | "xhigh", cwd?: string) {
-  return subscriptionCodexFirst(codexOptions("gpt-5.6-luna", effort, cwd), [
-    new ClaudeCodeAgent({ model: "claude-sonnet-5", ...(cwd ? { cwd } : {}) }),
-  ]);
+  return subscriptionCodexFirst(codexOptions("gpt-5.6-luna", effort, cwd));
 }
 function terraAgent(cwd?: string) {
-  return subscriptionCodexFirst(codexOptions("gpt-5.6-terra", "medium", cwd), [
-    new ClaudeCodeAgent({ model: "claude-sonnet-5", ...(cwd ? { cwd } : {}) }),
-  ]);
+  return subscriptionCodexFirst(codexOptions("gpt-5.6-terra", "medium", cwd));
 }
 function solAgent(cwd?: string) {
   return subscriptionCodexFirst(codexOptions("gpt-5.6-sol", "xhigh", cwd), [
