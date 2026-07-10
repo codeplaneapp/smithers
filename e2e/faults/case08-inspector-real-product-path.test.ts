@@ -81,8 +81,8 @@ function createCase08Workflow(dbPath: string, includeApproval: boolean) {
       {
         id: RESULT_NODE_ID,
         output: outputs.deploy,
+        children: { value: Number(ctx.input.value ?? 1) },
       },
-      { value: Number(ctx.input.value ?? 1) },
     );
 
     return React.createElement(
@@ -134,6 +134,9 @@ describe("case 08: inspector real product path never shows idle", () => {
 
     const run = await adapter.getRun(APPROVAL_RUN_ID);
     expect(run).toBeDefined();
+    if (!run) {
+      throw new Error(`Run ${APPROVAL_RUN_ID} was not persisted`);
+    }
     const view = await computeRunStateFromRow(adapter, run);
 
     expect(view.state).toBe("waiting-approval");
@@ -142,7 +145,10 @@ describe("case 08: inspector real product path never shows idle", () => {
       kind: "approval",
       nodeId: APPROVAL_NODE_ID,
     });
-    expect(typeof view.blocked?.requestedAt).toBe("string");
+    if (view.blocked?.kind !== "approval") {
+      throw new Error("Waiting-approval state did not include an approval blocker");
+    }
+    expect(typeof view.blocked.requestedAt).toBe("string");
   }, 30_000);
 
   test("gateway inspector read path reports completed literal tasks as succeeded", async () => {
@@ -162,6 +168,9 @@ describe("case 08: inspector real product path never shows idle", () => {
 
     const run = await adapter.getRun(FINISHED_RUN_ID);
     expect(run).toBeDefined();
+    if (!run) {
+      throw new Error(`Run ${FINISHED_RUN_ID} was not persisted`);
+    }
     const view = await computeRunStateFromRow(adapter, run);
 
     expect(view.state).toBe("succeeded");
