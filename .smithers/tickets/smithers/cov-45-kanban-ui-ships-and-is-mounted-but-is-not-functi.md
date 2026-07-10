@@ -1,3 +1,5 @@
+GitHub: https://github.com/smithersai/smithers/issues/833
+
 # kanban UI ships and is mounted but is not functionally covered by the all-UI e2e
 
 > Decomposed from #306 — test-coverage epic (`.smithers/tickets/.epics/0052-audit-test-coverage-gaps.md`)
