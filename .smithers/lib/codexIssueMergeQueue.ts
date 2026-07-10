@@ -18,10 +18,11 @@ export type PlanningContribution = IssueKeyed & {
   planner: "sol" | "fable";
 };
 
-export type CiVerdict = IssueKeyed & {
+/** A result from the fixed, sandboxed local verification command. */
+export type LocalGateVerdict = IssueKeyed & {
   passed: boolean;
   headSha: string;
-  phase?: "candidate" | "land";
+  phase?: "candidate" | "landing" | "main";
 };
 
 export type ReadinessVerdict = IssueKeyed & {
@@ -115,20 +116,20 @@ export function reviewPanelIsComplete(
 }
 
 /**
- * A review and CI result only bless the candidate revision they actually saw.
+ * A review and local-gate result only bless the candidate revision they saw.
  * This prevents an approval from an earlier loop pass being reused after Luna
  * changes the branch (or after a local rebase changes the candidate head).
  */
 export function candidateIsReady(
   candidate: CandidateHead | undefined,
   review: ReviewVerdict | undefined,
-  ci: CiVerdict | undefined,
+  gate: LocalGateVerdict | undefined,
 ): boolean {
   if (!candidate?.ready || !candidate.headSha) return false;
   return review?.approved === true
     && review.headSha === candidate.headSha
-    && ci?.passed === true
-    && ci.headSha === candidate.headSha;
+    && gate?.passed === true
+    && gate.headSha === candidate.headSha;
 }
 
 export function issueIsReady(
@@ -136,7 +137,7 @@ export function issueIsReady(
   candidates: CandidateHead[] | undefined,
   reviews: ReviewVerdict[] | undefined,
   panelReviews: PanelReviewVerdict[] | undefined,
-  checks: CiVerdict[] | undefined,
+  gates: LocalGateVerdict[] | undefined,
 ): boolean {
   const candidate = latestForIssue(candidates, issueNumber);
   const panelApproved = (["sol", "fable"] as const).every((reviewer) => {
@@ -149,7 +150,7 @@ export function issueIsReady(
   return candidateIsReady(
     candidate,
     latestForIssue(reviews, issueNumber),
-    latestForIssue((checks ?? []).filter((check) => check.phase === undefined || check.phase === "candidate"), issueNumber),
+    latestForIssue((gates ?? []).filter((gate) => gate.phase === undefined || gate.phase === "candidate"), issueNumber),
   ) && panelApproved;
 }
 
