@@ -448,7 +448,16 @@ function unique(values: string[]): string[] {
   return [...new Set(values)].sort();
 }
 function slugify(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50) || "ticket";
+  const slug = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (slug.length <= 50) return slug || "ticket";
+  // Truncation must stay collision-free: sibling tickets that share a 50-char
+  // prefix (epic decompositions do) would otherwise slug to the same Task id
+  // and kill the whole run with DUPLICATE_ID at graph extraction.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < slug.length; i++) {
+    hash = Math.imul(hash ^ slug.charCodeAt(i), 0x01000193) >>> 0;
+  }
+  return slug.slice(0, 42) + "-" + hash.toString(36).padStart(7, "0");
 }
 function changedWorkingPaths(cwd: string): string[] {
   return unique([
