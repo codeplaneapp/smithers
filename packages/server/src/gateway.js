@@ -3432,6 +3432,7 @@ a { color: var(--brand); }</style>
                 method,
                 params: {
                     hasUi: queryString(url.searchParams, "hasUi") === undefined ? undefined : url.searchParams.get("hasUi") === "true",
+                    includeSystem: queryString(url.searchParams, "includeSystem") === undefined ? undefined : url.searchParams.get("includeSystem") === "true",
                     kind: queryString(url.searchParams, "kind"),
                     namespace: queryString(url.searchParams, "namespace"),
                     runId: queryString(url.searchParams, "runId"),

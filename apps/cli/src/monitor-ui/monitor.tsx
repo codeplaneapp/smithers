@@ -1045,7 +1045,9 @@ function RunDetail({
 }) {
   const runQuery = useGatewayRun(runId);
   const actions = useGatewayActions();
-  const workflowsQuery = useGatewayWorkflows();
+  // The monitor is an operator surface: system workflows' runs show here too,
+  // so their UI lookup (Open UI / Create UI) must see them.
+  const workflowsQuery = useGatewayWorkflows({ filter: { includeSystem: true } });
   const [busyAction, setBusyAction] = useState<"cancel" | "resume" | null>(null);
   const [showCustomUi, setShowCustomUi] = useState(false);
   const [creatingUi, setCreatingUi] = useState(false);

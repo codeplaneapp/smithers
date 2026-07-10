@@ -99,6 +99,7 @@ function listRunsSearch(params: ListRunsRequest = {}) {
 function listWorkflowsSearch(params: ListWorkflowsRequest = {}) {
   const search = new URLSearchParams();
   append(search, "hasUi", params.filter?.hasUi);
+  append(search, "includeSystem", params.filter?.includeSystem);
   return search;
 }
 
