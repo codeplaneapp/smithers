@@ -31,3 +31,5 @@ workspace DB.
   `docs/rpc/get-dev-tools-snapshot.mdx` for the added field.
 - Real-backend test: launch a run with a fake agent and assert the snapshot's
   node states change across frames (no mocks).
+
+> Closed: fixed on main in 5740af8e43.
