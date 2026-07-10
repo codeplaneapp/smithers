@@ -202,7 +202,7 @@ function trackStall(run, stalledAfterMs, stalledRuns, emit, now) {
             kind: "run-stalled",
             runId,
             summary: `Run ${runId} has not heartbeaten for over ${Math.round(stalledAfterMs / 1000)}s.`,
-            action: `Check it with: smithers explain ${runId} (resume with: smithers up --resume ${runId})`,
+            action: `Check it with: smithers why ${runId} (resume with: smithers up --resume ${runId})`,
         });
     }
     else if (!isStalled && stalledRuns.has(runId)) {
