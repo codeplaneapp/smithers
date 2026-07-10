@@ -172,6 +172,12 @@ function nodeStatus(
   const taskState = node.task?.state;
   if (taskState) {
     const mapped = toRunStatus(taskState);
+    // A terminal run can strand node rows at in-progress (the engine died or
+    // was cancelled mid-task); "running" on a dead run is a lie — render the
+    // run's own terminal tone instead.
+    if (mapped === "running" && (runStatus === "ok" || runStatus === "cancelled" || runStatus === "failed")) {
+      return runStatus === "ok" ? "ok" : "cancelled";
+    }
     // "queued" is toRunStatus's unknown-state fallback; let unknown states
     // fall through so a finished run still renders them `ok`.
     if (mapped !== "queued") {

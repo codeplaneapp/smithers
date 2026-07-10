@@ -119,6 +119,26 @@ describe("snapshotToGatewayRunNode", () => {
     expect(mixed).toMatchObject({ status: "queued" });
   });
 
+  test("a terminal run never renders stranded in-progress nodes as running", () => {
+    // Cancelling (or crashing) a run can leave node rows frozen at
+    // in-progress; the tree must not claim anything is running on a dead run.
+    const tree = snapshotToGatewayRunNode({
+      root: {
+        id: 1,
+        name: "Workflow",
+        type: "workflow",
+        children: [
+          { id: 2, name: "A", type: "task", task: { nodeId: "a", kind: "agent", state: "in-progress" }, children: [] },
+          { id: 3, name: "B", type: "task", task: { nodeId: "b", kind: "compute", state: "finished" }, children: [] },
+        ],
+      },
+      runState: { state: "cancelled" },
+    });
+    const [a, b] = tree?.children ?? [];
+    expect(a).toMatchObject({ id: "a", status: "cancelled" });
+    expect(b).toMatchObject({ id: "b", status: "ok" });
+  });
+
   test("a finished run still renders stateless and unknown-state nodes ok", () => {
     const tree = snapshotToGatewayRunNode({
       root: {
