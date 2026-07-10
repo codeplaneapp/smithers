@@ -82,6 +82,10 @@ for (const { pkg, target, archive, bin } of MATRIX) {
 	const binDir = join(root, "packages", pkg, "bin");
 	const dest = join(binDir, bin);
 	if (existsSync(dest) && !FORCE) {
+		// A cached binary may have come from a tarball or copy operation that
+		// stripped its executable bits. Normalize it before publish just as we do
+		// for a fresh download; otherwise the next package can preserve mode 0644.
+		if (bin !== "jj.exe") chmodSync(dest, 0o755);
 		console.log(`  = ${pkg}: ${bin} present (use --force to refresh)`);
 		continue;
 	}

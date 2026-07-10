@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import { ensureJjExecutable } from "./ensureJjExecutable.js";
+import { isJjExecutable } from "./isJjExecutable.js";
+import { selectJjBinary } from "./selectJjBinary.js";
 
 const require = createRequire(import.meta.url);
 
@@ -26,9 +27,10 @@ const BUNDLED_PACKAGES = {
 
 /**
  * Locate the bundled `jj` binary for the current host, or null when no platform
- * package is installed (unsupported target, `--no-optional` install, or not yet
- * published). Resolution goes through the package's `package.json` so it works
- * regardless of hoisting layout.
+ * package is installed and executable (unsupported target, `--no-optional`
+ * install, not yet published, or stripped POSIX execute bits). Resolution goes
+ * through the package's `package.json` so it works regardless of hoisting
+ * layout.
  *
  * @returns {string | null}
  */
@@ -37,6 +39,7 @@ export function resolveBundledJjPath({
 	arch = process.arch,
 	resolvePackage = require.resolve,
 	fileExists = existsSync,
+	fileExecutable = isJjExecutable,
 } = {}) {
 	const pkg = BUNDLED_PACKAGES[`${platform}-${arch}`];
 	if (!pkg) return null;
@@ -44,7 +47,9 @@ export function resolveBundledJjPath({
 	try {
 		const manifest = resolvePackage(`${pkg}/package.json`);
 		const candidate = join(manifest, "..", "bin", binary);
-		return fileExists(candidate) ? candidate : null;
+		return fileExists(candidate) && fileExecutable(candidate, { platform })
+			? candidate
+			: null;
 	} catch {
 		return null;
 	}
@@ -54,8 +59,11 @@ export function resolveBundledJjPath({
  * Resolve the `jj` executable Smithers should spawn.
  *
  * Order of preference:
- *   1. `SMITHERS_JJ_PATH` — an explicit override pointing at a real file.
- *   2. A binary bundled via `@smithers-orchestrator/jj-<platform>`.
+ *   1. `SMITHERS_JJ_PATH` — an explicit override pointing at a real file. An
+ *      existing override remains authoritative so a bad explicit path is
+ *      reported instead of silently running a different binary.
+ *   2. An executable binary bundled via
+ *      `@smithers-orchestrator/jj-<platform>` (`.exe` existence on Windows).
  *   3. The bare `"jj"`, left for the OS to resolve against `PATH`.
  *
  * Always returns a spawnable command. When jj is genuinely absent the bare
@@ -65,12 +73,8 @@ export function resolveBundledJjPath({
  * @returns {import("./ResolvedBinary.js").ResolvedBinary}
  */
 export function resolveJjBinary() {
-	const override = process.env.SMITHERS_JJ_PATH;
-	if (override && existsSync(override)) return { path: override, source: "env" };
-	const bundled = resolveBundledJjPath();
-	if (bundled) {
-		ensureJjExecutable(bundled);
-		return { path: bundled, source: "bundled" };
-	}
-	return { path: "jj", source: "path" };
+	return selectJjBinary({
+		override: process.env.SMITHERS_JJ_PATH,
+		bundled: resolveBundledJjPath(),
+	});
 }

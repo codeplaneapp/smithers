@@ -9,6 +9,9 @@
   "cpu": [
     "x64"
   ],
+  "bin": {
+    "jj": "bin/jj"
+  },
   "files": [
     "bin/"
   ],
@@ -16,6 +19,7 @@
     "access": "public"
   },
   "scripts": {
+    "prepack": "node -e \"const fs=require('fs');const p=__dirname+'/bin/jj';if(!fs.existsSync(p))throw new Error('jj missing — run pnpm fetch:jj before releasing');fs.chmodSync(p,0o755)\"",
     "postinstall": "node -e \"const fs=require('fs');const p=__dirname+'/bin/jj';if(fs.existsSync(p))fs.chmodSync(p,0o755)\"",
     "prepublishOnly": "node -e \"if(!require('fs').existsSync(__dirname+'/bin/jj'))throw new Error('jj missing — run pnpm fetch:jj before releasing')\""
   }

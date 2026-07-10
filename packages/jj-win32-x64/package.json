@@ -9,6 +9,9 @@
   "cpu": [
     "x64"
   ],
+  "bin": {
+    "jj": "bin/jj.exe"
+  },
   "files": [
     "bin/"
   ],

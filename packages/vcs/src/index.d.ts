@@ -1,6 +1,6 @@
 import * as _effect_platform_CommandExecutor from '@effect/platform/CommandExecutor';
 import { Effect } from 'effect';
-import { existsSync } from 'node:fs';
+import { accessSync, existsSync } from 'node:fs';
 
 /**
  * Walk up from `startDir` to find the nearest directory containing `.jj` or `.git`.
@@ -180,25 +180,49 @@ type ResolvedBinary = {
 declare function resolveGitBinary(): ResolvedBinary;
 
 /**
+ * Whether the operating system can execute a bundled `jj` candidate.
+ *
+ * POSIX requires the executable bit; Windows selects the vendored `.exe` and
+ * does not use POSIX mode bits, so existence/readability is sufficient there.
+ * This is deliberately a probe, not a chmod: an unusable automatic bundle must
+ * not shadow a working `jj` on PATH.
+ *
+ * Internal: intentionally NOT re-exported from the package barrel.
+ *
+ * @param {string} binaryPath
+ * @param {{ platform?: NodeJS.Platform, accessFile?: typeof accessSync }} [options]
+ * @returns {boolean}
+ */
+declare function isJjExecutable(binaryPath: string, { platform, accessFile, }?: {
+    platform?: NodeJS.Platform;
+    accessFile?: typeof accessSync;
+}): boolean;
+
+/**
  * Locate the bundled `jj` binary for the current host, or null when no platform
- * package is installed (unsupported target, `--no-optional` install, or not yet
- * published). Resolution goes through the package's `package.json` so it works
- * regardless of hoisting layout.
+ * package is installed and executable (unsupported target, `--no-optional`
+ * install, not yet published, or stripped POSIX execute bits). Resolution goes
+ * through the package's `package.json` so it works regardless of hoisting
+ * layout.
  *
  * @returns {string | null}
  */
-declare function resolveBundledJjPath({ platform, arch, resolvePackage, fileExists, }?: {
+declare function resolveBundledJjPath({ platform, arch, resolvePackage, fileExists, fileExecutable, }?: {
     platform?: NodeJS.Platform | undefined;
     arch?: NodeJS.Architecture | undefined;
     resolvePackage?: NodeJS.RequireResolve | undefined;
     fileExists?: typeof existsSync | undefined;
+    fileExecutable?: typeof isJjExecutable | undefined;
 }): string | null;
 /**
  * Resolve the `jj` executable Smithers should spawn.
  *
  * Order of preference:
- *   1. `SMITHERS_JJ_PATH` — an explicit override pointing at a real file.
- *   2. A binary bundled via `@smithers-orchestrator/jj-<platform>`.
+ *   1. `SMITHERS_JJ_PATH` — an explicit override pointing at a real file. An
+ *      existing override remains authoritative so a bad explicit path is
+ *      reported instead of silently running a different binary.
+ *   2. An executable binary bundled via
+ *      `@smithers-orchestrator/jj-<platform>` (`.exe` existence on Windows).
  *   3. The bare `"jj"`, left for the OS to resolve against `PATH`.
  *
  * Always returns a spawnable command. When jj is genuinely absent the bare

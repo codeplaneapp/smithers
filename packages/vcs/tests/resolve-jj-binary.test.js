@@ -4,9 +4,10 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { Effect } from "effect";
 import * as BunContext from "@effect/platform-bun/BunContext";
-import { accessSync, constants as fsConstants } from "node:fs";
+import { constants as fsConstants, existsSync } from "node:fs";
 import { resolveBundledJjPath, resolveJjBinary } from "../src/resolveJjBinary.js";
-import { ensureJjExecutable } from "../src/ensureJjExecutable.js";
+import { isJjExecutable } from "../src/isJjExecutable.js";
+import { selectJjBinary } from "../src/selectJjBinary.js";
 import { runJj } from "../src/jj.js";
 
 const ENV_KEY = "SMITHERS_JJ_PATH";
@@ -43,6 +44,17 @@ describe("resolveJjBinary", () => {
 		expect(resolveJjBinary()).toEqual({ path: fake, source: "env" });
 	});
 
+	test.skipIf(process.platform === "win32")(
+		"keeps an existing explicit SMITHERS_JJ_PATH authoritative even when it is not executable",
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jj-explicit-mode-"));
+			const binary = path.join(dir, "jj");
+			await fs.writeFile(binary, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+			process.env[ENV_KEY] = binary;
+			expect(resolveJjBinary()).toEqual({ path: binary, source: "env" });
+		},
+	);
+
 	test("ignores SMITHERS_JJ_PATH when the file does not exist", () => {
 		process.env[ENV_KEY] = path.join(os.tmpdir(), "definitely-not-here-jj");
 		const resolved = resolveJjBinary();
@@ -67,9 +79,52 @@ describe("resolveJjBinary", () => {
 			arch: "x64",
 			resolvePackage: () => manifest,
 			fileExists: (file) => String(file).endsWith(path.join("bin", "jj")),
+			fileExecutable: () => true,
 		});
 		expect(resolved).toBe(path.join(manifest, "..", "bin", "jj"));
 	});
+
+	test.skipIf(process.platform === "win32")(
+		"rejects a non-executable bundle so resolution can fall back to jj on PATH",
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jj-bundle-mode-"));
+			const manifest = path.join(dir, "package.json");
+			const binary = path.join(dir, "bin", "jj");
+			await fs.mkdir(path.dirname(binary), { recursive: true });
+			await fs.writeFile(manifest, "{}\n");
+			await fs.writeFile(binary, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+
+			const bundled = resolveBundledJjPath({
+				platform: "darwin",
+				arch: "arm64",
+				resolvePackage: () => manifest,
+				fileExists: existsSync,
+			});
+			expect(bundled).toBeNull();
+			expect(selectJjBinary({ bundled })).toEqual({ path: "jj", source: "path" });
+		},
+	);
+
+	test.skipIf(process.platform === "win32")(
+		"keeps a valid executable bundle ahead of jj on PATH",
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jj-bundle-mode-"));
+			const manifest = path.join(dir, "package.json");
+			const binary = path.join(dir, "bin", "jj");
+			await fs.mkdir(path.dirname(binary), { recursive: true });
+			await fs.writeFile(manifest, "{}\n");
+			await fs.writeFile(binary, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+			const bundled = resolveBundledJjPath({
+				platform: "darwin",
+				arch: "arm64",
+				resolvePackage: () => manifest,
+				fileExists: existsSync,
+			});
+			expect(bundled).toBe(binary);
+			expect(selectJjBinary({ bundled })).toEqual({ path: binary, source: "bundled" });
+		},
+	);
 
 	test("returns null when bundled package resolution throws", () => {
 		const resolved = resolveBundledJjPath({
@@ -86,34 +141,20 @@ describe("resolveJjBinary", () => {
 		expect(resolveBundledJjPath({ platform: "freebsd", arch: "x64" })).toBeNull();
 	});
 
-	test.skipIf(process.platform === "win32")(
-		"ensureJjExecutable adds the exec bit to a non-executable bundled binary",
-		async () => {
-			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jj-execbit-"));
-			const file = path.join(dir, "jj");
-			// Simulate a binary installed WITHOUT its exec bit (the bun/pnpm
-			// postinstall-skipped case that produced EACCES in the wild).
-			await fs.writeFile(file, "#!/usr/bin/env bash\necho ok\n", { mode: 0o644 });
-			expect(() => accessSync(file, fsConstants.X_OK)).toThrow();
-			ensureJjExecutable(file);
-			expect(() => accessSync(file, fsConstants.X_OK)).not.toThrow();
-		},
-	);
-
-	test.skipIf(process.platform === "win32")(
-		"ensureJjExecutable leaves an already-executable binary untouched",
-		async () => {
-			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jj-execbit-ok-"));
-			const file = path.join(dir, "jj");
-			await fs.writeFile(file, "#!/usr/bin/env bash\necho ok\n", { mode: 0o755 });
-			// Must not throw even though nothing needs repair.
-			ensureJjExecutable(file);
-			expect(() => accessSync(file, fsConstants.X_OK)).not.toThrow();
-		},
-	);
-
-	test("ensureJjExecutable is a no-op (does not throw) for a missing path", () => {
-		expect(() => ensureJjExecutable(path.join(os.tmpdir(), "definitely-missing-jj-xyz"))).not.toThrow();
+	test("isJjExecutable uses POSIX execute access and Windows file access", () => {
+		const calls = [];
+		expect(isJjExecutable("/tmp/jj", {
+			platform: "linux",
+			accessFile: (file, mode) => calls.push([file, mode]),
+		})).toBe(true);
+		expect(isJjExecutable("C:\\jj.exe", {
+			platform: "win32",
+			accessFile: (file, mode) => calls.push([file, mode]),
+		})).toBe(true);
+		expect(calls).toEqual([
+			["/tmp/jj", fsConstants.X_OK],
+			["C:\\jj.exe", fsConstants.F_OK],
+		]);
 	});
 
 	test("runJj spawns the resolved binary (override branch)", async () => {
