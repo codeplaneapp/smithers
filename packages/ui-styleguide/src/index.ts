@@ -8,7 +8,13 @@ export const workflowUiThemeCss = [
     " --brand:#6d56d8; --success:#0f8f78; --danger:#e5484d; --warning:#bf7100; --shadow-rgb:10 10 10;" +
     " --panel:var(--surface); --card:var(--surface); --line:var(--border-solid); --muted:var(--text-muted);" +
     " --primary:var(--brand); --accent:var(--brand); --ok:var(--success); --warn:var(--warning); --warning-color:var(--warning); --bad:var(--danger); --err:var(--danger); --error:var(--danger);" +
-    " --blue:var(--brand); --run:var(--brand); --crit:var(--danger); --major:var(--warning); --minor:var(--warning); --nit:var(--muted); --me:color-mix(in srgb,var(--brand) 12%,var(--surface)); --ink:var(--inverse-bg); }",
+    " --blue:var(--brand); --run:var(--brand); --crit:var(--danger); --major:var(--warning); --minor:var(--warning); --nit:var(--muted); --me:color-mix(in srgb,var(--brand) 12%,var(--surface)); --ink:var(--inverse-bg);" +
+    // Geometry tokens (theme-invariant): spacing scale, type scale, radii, and
+    // the one control height buttons/chips/inputs/selects should share. Use
+    // these instead of bare pixel values in workflow-UI CSS.
+    " --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px;" +
+    " --fs-1:11px; --fs-2:12px; --fs-3:13px; --fs-4:15px; --lh-tight:1.35; --lh-body:1.5;" +
+    " --r-1:6px; --r-2:9px; --r-3:12px; --r-full:999px; --ctl-h:28px; }",
   "@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) { color-scheme:dark;" +
     " --bg:#0b0b0d; --text:#f4f4f5; --text-muted:#a1a1aa; --text-faint:#b0b0b8; --text-placeholder:#83838d;" +
     " --surface:#18181b; --surface-glass:rgba(24,24,27,0.72); --surface-glass-strong:rgba(24,24,27,0.85);" +
@@ -24,9 +30,11 @@ export const workflowUiThemeCss = [
     " --code-bg:#09090b; --code-text:#e4e4e7; --inline-code-bg:rgba(255,255,255,0.1);" +
     " --brand:#8b78e6; --success:#2ec9a8; --danger:#f2555a; --warning:#e0a23a; --shadow-rgb:0 0 0; }",
   "* { box-sizing:border-box; }",
-  "body { min-width:320px; min-height:100vh; margin:0; background:var(--bg); color:var(--text); font-size:13px; font-synthesis:none; text-rendering:optimizeLegibility; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }",
+  "body { min-width:320px; min-height:100vh; margin:0; background:var(--bg); color:var(--text); font-size:var(--fs-3); line-height:var(--lh-body); font-synthesis:none; text-rendering:optimizeLegibility; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }",
   "button,input,textarea,select { font:inherit; }",
-  "button { color:inherit; }",
+  "button { color:inherit; cursor:pointer; }",
+  "button:disabled { cursor:not-allowed; }",
+  "pre { margin:0; max-width:100%; overflow:auto; }",
   "h1,h2,h3,p { margin:0; }",
   "h1 { color:var(--text); font-size:15px; font-weight:650; letter-spacing:0; }",
   "h2 { color:var(--text); font-size:14px; font-weight:700; letter-spacing:0; }",
