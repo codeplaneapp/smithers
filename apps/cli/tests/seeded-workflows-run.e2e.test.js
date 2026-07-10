@@ -303,12 +303,15 @@ for (const id of SEEDED_WORKFLOW_IDS) {
     );
     const status = result.json?.status;
     if (!isValidSmokeOutcome(id, status, result.exitCode)) {
+      const structuredDetail = JSON.stringify(result.json?.error ?? result.json ?? {});
       const detail = `${result.stdout}\n${result.stderr}`
         .split("\n")
         .slice(-30)
         .join(" ")
         .slice(0, 2000);
-      throw new Error(`${id} exited ${result.exitCode} with status ${String(status)}: ${detail}`);
+      throw new Error(
+        `${id} exited ${result.exitCode} with status ${String(status)}: ${structuredDetail} ${detail}`,
+      );
     }
   }, SMOKE_TEST_TIMEOUT_MS);
 }

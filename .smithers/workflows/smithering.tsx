@@ -1116,24 +1116,26 @@ export default smithers((ctx) => {
         ) : null}
 
         {/* ── 3. PRD + end-user interface artifacts (PROMPT.md step 3) ── */}
-        <Task
-          id="prd"
-          output={outputs.prd}
-          agent={sol}
-          heartbeatTimeoutMs={900_000}
-          deps={{ answers: outputs.humanAnswers }}
-        >
-          {(deps) => (
-            <>
-              <PrdPrompt
-                answers={JSON.stringify(deps.answers.answers ?? [])}
-                additionalContext={deps.answers.additionalContext}
-                productType={intake?.productType ?? "other"}
-              />
-              <Rules />
-            </>
-          )}
-        </Task>
+        {questions ? (
+          <Task
+            id="prd"
+            output={outputs.prd}
+            agent={sol}
+            heartbeatTimeoutMs={900_000}
+            deps={{ answers: outputs.humanAnswers }}
+          >
+            {(deps) => (
+              <>
+                <PrdPrompt
+                  answers={JSON.stringify(deps.answers.answers ?? [])}
+                  additionalContext={deps.answers.additionalContext}
+                  productType={intake?.productType ?? "other"}
+                />
+                <Rules />
+              </>
+            )}
+          </Task>
+        ) : null}
 
         {prd && review && !gateRow("gate:prd") ? (
           <Approval
@@ -1585,21 +1587,23 @@ export default smithers((ctx) => {
           </Task>
         ) : null}
 
-        <Task
-          id="report:final"
-          output={outputs.finalReport}
-          agent={sol}
-          heartbeatTimeoutMs={900_000}
-          needs={{ gather: "report:gather" }}
-          deps={{ gather: outputs.reportGather }}
-        >
-          <ReportFinalPrompt
-            reviewSynth={JSON.stringify(reviewSynth ?? {}, null, 2)}
-            implRunId={implRunId}
-            parentRunId={ctx.runId}
-          />
-          <Rules />
-        </Task>
+        {reviewSynth && polishDone ? (
+          <Task
+            id="report:final"
+            output={outputs.finalReport}
+            agent={sol}
+            heartbeatTimeoutMs={900_000}
+            needs={{ gather: "report:gather" }}
+            deps={{ gather: outputs.reportGather }}
+          >
+            <ReportFinalPrompt
+              reviewSynth={JSON.stringify(reviewSynth ?? {}, null, 2)}
+              implRunId={implRunId}
+              parentRunId={ctx.runId}
+            />
+            <Rules />
+          </Task>
+        ) : null}
 
         {finalReport && review && !gateRow("gate:delivery") ? (
           <Approval
