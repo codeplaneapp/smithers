@@ -348,6 +348,16 @@ curl http://localhost:8080/health
 
 `Gateway` is Smithers' headless control plane. Reach for it (instead of [`startServer()`](/integrations/server)) when long-lived clients (bots, dashboards, schedulers, and custom UIs) need to authenticate once, stream events over WebSocket with resilient reconnection, decide [approvals](/components/approval), inject [signals](/runtime/events), access metrics, and manage cron schedules across many registered workflows. Custom UIs, whether using the vanilla SDK or React hooks, rely on the Gateway to provide pushed updates and a stale-data-free model. For the single-workflow Hono-based HTTP surface, see [Serve Mode](/integrations/serve) (`createServeApp()` / `bunx smithers-orchestrator up --serve`).
 
+<Warning>
+  **Gateway-first client contract:** controllers, Bun cron jobs, monitors, bots,
+  and custom clients must use this Gateway API. Do not open `smithers.db`,
+  `.smithers/pg`, or Postgres directly; do not query `_smithers_*`; do not import
+  `openSmithersStore` or CLI-internal `findAndOpenDb`; and do not pass
+  `--backend` to read/control commands to hunt for runs. Direct backend access
+  exists for runtime implementation, `smithers migrate`, backend integration
+  tests, and maintainer diagnostics only. It is not a control-plane API.
+</Warning>
+
 <Note>API reference: [Server & Gateway](/reference/server-gateway) and [Gateway Client](/reference/gateway-client) list every gateway and client export, its options, and links to source and tests.</Note>
 
 ## Quick start
@@ -418,6 +428,49 @@ Gateway client exports:
 |---|---|
 | `smithers-orchestrator/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createSmithersCollections`, `createSmithersDataClient`, `WorkspaceMode`, `SmithersCollections`, `SmithersDataClient`, collection row types, `gatewayKeys`, `smithersCollectionKeys`, `smithersLocalCollectionOptions`, `smithersElectricCollectionOptions`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes` |
 | `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider`, `SmithersCollectionsProvider`, `createGatewayReactRoot`, `useSmithersCollections`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `useGatewayRunTree`, `useGatewayConnectionStatus`, `useGatewayCrons`, `useGatewayMemoryFacts`, `useGatewayScores`, `useGatewayTickets`, `useGatewayPrompts` |
+
+## Bun controllers and cron jobs
+
+Run one Gateway singleton per workspace. Discover its verified URL with the
+public `gateway status` command rather than reading the runtime state file or
+assuming port 7331 (the preferred port may already be occupied):
+
+```ts
+import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+
+const statusProcess = Bun.spawnSync([
+  "bunx", "smithers-orchestrator", "gateway", "status", "--format", "json",
+], {
+  cwd: process.cwd(),
+  stdout: "pipe",
+  stderr: "pipe",
+});
+
+if (!statusProcess.success) {
+  throw new Error(new TextDecoder().decode(statusProcess.stderr));
+}
+
+const status = JSON.parse(new TextDecoder().decode(statusProcess.stdout));
+if (!status.running || typeof status.url !== "string") {
+  throw new Error("No healthy workspace Gateway is running");
+}
+
+const gateway = new SmithersGatewayClient({
+  baseUrl: status.url,
+  token: process.env.SMITHERS_API_KEY,
+  client: { id: "local-health-cron", platform: "bun" },
+});
+
+const runs = await gateway.listRuns({ filter: { limit: 50 } });
+```
+
+Start `bunx smithers-orchestrator gateway` under your service manager when
+`status.running` is false. A health cron should report the missing Gateway and
+restart that singleton; it should not fall back to opening a store. Once it has
+a run ID, use `getRun` for snapshots and `streamRunEventsResilient` for a live
+cursor. Use `launchRun`, `resumeRun`, `cancelRun`, `submitApproval`, and
+`submitSignal` for mutations so authentication, ownership, idempotency,
+invalidation, and event emission stay intact.
 
 <Note>
   **Bundling in Next.js / webpack:** in published versions up to and including

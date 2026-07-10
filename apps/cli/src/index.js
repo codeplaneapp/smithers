@@ -1623,7 +1623,7 @@ const upOptions = z.object({
     authToken: z.string().optional().describe("Bearer token for HTTP auth (or set SMITHERS_API_KEY); required to bind a non-loopback --host"),
     insecure: z.boolean().default(false).describe("Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run — dangerous)"),
     metrics: z.boolean().default(true).describe("Expose /metrics endpoint (with --serve)"),
-    backend: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Storage backend for workflows using openSmithersBackend"),
+    backend: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Bootstrap storage selection for a workflow owner or workspace Gateway; not a run-discovery/control flag"),
     postFailure: z.boolean().default(true).describe("Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)"),
     verbose: z.boolean().default(false).describe("Show engine info logs (run lifecycle, agent sessions) on interactive runs; the default keeps progress lines + warnings only. Non-TTY/structured output always gets full logs."),
     report: z.boolean().default(true).describe("On an interactive run, narrate the result with a cheap/fast agent and open an HTML summary in the browser when it finishes (disable with --no-report or SMITHERS_NO_REPORT=1)."),
@@ -1666,8 +1666,8 @@ const gatewayArgs = z.object({
 });
 const gatewayOptions = z.object({
     host: z.string().default("127.0.0.1").describe("Gateway bind address"),
-    port: z.number().int().min(1).max(65535).default(7331).describe("Preferred gateway port (falls back to an ephemeral port when taken; clients discover the real port from the runtime state file)"),
-    backend: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Workspace storage backend"),
+    port: z.number().int().min(1).max(65535).default(7331).describe("Preferred gateway port (falls back to an ephemeral port when taken; clients discover the verified URL with gateway status)"),
+    backend: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Storage behind this workspace Gateway; a boot/deployment choice, not a client run-lookup flag"),
     authToken: z.string().optional().describe("Bearer token for HTTP/WS auth (or set SMITHERS_API_KEY); required to bind a non-loopback --host"),
     mintToken: z.boolean().default(false).describe("Mint a random bearer token, require it on every request, and record it only in the 0600 runtime state file"),
     insecure: z.boolean().default(false).describe("Allow binding a non-loopback --host with NO auth (exposes a full-control, unauthenticated control plane — dangerous)"),
@@ -4862,7 +4862,7 @@ const cli = Cli.create({
     // smithers gateway
     // =========================================================================
     .command("gateway", {
-    description: "Serve the multi-run Gateway RPC/WS control plane for the workspace DB; unlike up --serve, this is not tied to one run. `smithers gateway status|stop` manages the workspace's running singleton.",
+    description: "Serve the multi-run Gateway RPC/WS control plane for workspace run state; unlike up --serve, this is not tied to one run. `smithers gateway status|stop` manages the workspace's running singleton.",
     args: gatewayArgs,
     options: gatewayOptions,
     alias: { host: "H", port: "p" },

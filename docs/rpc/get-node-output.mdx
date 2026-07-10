@@ -11,8 +11,8 @@ apiVersion: v1
 - Request: `{ runId, nodeId, iteration? }`
 - Response: `NodeOutputResponse`
 
-A `failed` response carries `error` — why the node failed, from the latest
-attempt's stored error: `{ name?, code?, message, attempt? }` (message capped
+A `failed` response carries `error` (why the node failed, from the latest
+attempt's stored error): `{ name?, code?, message, attempt? }` (message capped
 at 4000 chars). It is `null` when no attempt error was recorded.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `NodeNotFound`, `IterationNotFound`, `NodeHasNoOutput`, `PayloadTooLarge`, and `Internal`.

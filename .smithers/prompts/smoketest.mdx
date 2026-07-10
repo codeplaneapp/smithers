@@ -48,8 +48,8 @@ Pin it on EVERY invocation — run commands as `bunx smithers-orchestrator@VERSI
   `smithers-orchestrator/src/bin/smithers.js` (use `readlink`).
 - `workflow list` prints the seeded workflows (hello, implement, review, plan,
   ralph, debug, audit, ...) without crashing.
-- The default backend is SQLite: after `init`, runs must be visible to
-  `ps`/`inspect` with NO `--backend` flag.
+- After `init`, runs must be visible through the normal `ps`/`inspect` CLI and
+  through a workspace Gateway with no client-side backend selection.
 
 ## The ranked feature checklist — verify each, oldest-fix-still-holds
 
@@ -57,19 +57,22 @@ For each, run the command and record `pass | fail | skipped` with the exact
 command and the key output line. A changelog bullet that claims "X now works"
 but X still fails is a smoke-test **failure**.
 
-1. **`features.backend-default-sqlite`** (0.25.2, HIGH) — The default backend
-   flipped pglite to sqlite and CLI reads route through the resolved backend.
-   After `init`, runs must be visible to `ps`/`inspect`/`output` with no
-   `--backend` flag (the 0.25.0/0.25.1 defect: `ps` returned `[]`, `inspect`
-   NOT_FOUND).
+1. **`features.workspace-control-plane`** (HIGH) — After `init`, runs must be
+   visible to the normal `ps`/`inspect`/`output` CLI with no `--backend` flag,
+   and to Gateway `listRuns`/`getRun`. Treat SQLite/PGlite/Postgres as opaque
+   storage behind the Gateway; never query a store to prove visibility.
 2. **`features.migrate`** (0.25.x, HIGH) — `migrate --to pglite` copies runs
-   forward with per-table progress and writes `migrated.json`; then
-   `--backend pglite ps` shows them. `migrate --to sqlite` reverses it (new in
-   0.25.2) and default `ps` still shows them. `migrate --to postgres` with no
-   `--url` fails fast reporting the missing url requirement (exit 4), NOT a
-   masked source-store error.
-3. **`features.backend-flag-on-reads`** (0.25.0, HIGH) — `ps --backend sqlite`
-   and `inspect RUNID --backend sqlite` must NOT reject `--backend` as unknown.
+   forward with per-table progress and writes `migrated.json`; restart the
+   workspace Gateway and prove the copied run through `listRuns`/`getRun`.
+   `migrate --to sqlite` reverses it (new in 0.25.2) and the restarted Gateway
+   still exposes the run. `migrate --to postgres` with no `--url` fails fast
+   reporting the missing url requirement (exit 4), NOT a masked source-store
+   error.
+3. **`features.gateway-client-control`** (HIGH) — boot one workspace Gateway,
+   discover its verified URL with `gateway status --format json`, and prove
+   list/get/launch/cancel through Gateway RPC. Client code must not parse the
+   runtime state file, assume port 7331, import a store opener, or use
+   `--backend` on a read/control command.
 4. **`features.gateway-root-routing`** (0.25.2, MEDIUM) — boot `gateway` on a
    free port in the background; `GET /` returns 302 (Location to the console) OR
    200 text/html (a landing page), never a bare `404` NOT_FOUND JSON. `GET

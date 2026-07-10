@@ -13,10 +13,10 @@ This page is the long answer.
 
 Forget orchestration for a minute. Here is everything Smithers does:
 
-- **State lives in SQLite.** Every task output, every frame, every approval, every signal, all persisted as rows in a local database.
+- **State lives in a durable store.** Every task output, every frame, every approval, and every signal is persisted through Smithers' storage adapter (SQLite, PGlite, or Postgres).
 - **Workflows return a React tree.** The tree describes which tasks should run and in what order. It is not a UI; the host elements are `smithers:task`, `smithers:sequence`, `smithers:parallel`, `smithers:branch`, and `smithers:ralph`, exposed to workflow authors as the React components `<Task>`, `<Sequence>`, `<Parallel>`, `<Branch>`, and `<Loop>` (`<Loop>` is an alias for `<Ralph>`).
-- **As tasks finish, React rerenders.** The next render reads the updated rows from SQLite, and the tree comes back different. Branches that were missing before now mount. Loops grow another iteration. Conditionals flip.
-- **Every frame is stored back in SQLite.** Each render produces a snapshot of the workflow plan, indexed by frame number, alongside the outputs that triggered it.
+- **As tasks finish, React rerenders.** The next render reads the updated durable state, and the tree comes back different. Branches that were missing before now mount. Loops grow another iteration. Conditionals flip.
+- **Every frame is stored durably.** Each render produces a snapshot of the workflow plan, indexed by frame number, alongside the outputs that triggered it.
 
 That's it. Render → execute → persist → render. The render is pure. The persistence is durable. The loop is the program.
 
@@ -28,11 +28,15 @@ That's it. Render → execute → persist → render. The render is pure. The pe
 
 Once the runtime has that shape, a stack of useful properties just *appear*:
 
-**Agents inspect state easily, because the state is SQLite.** Agents are very good at writing SQL. Ask the agent what happened on frame 17 of run `abc123` and it writes a `SELECT`. No bespoke tracing API to learn.
+**Agents inspect state easily through one control plane.** Ask what happened on
+frame 17 of run `abc123` and the agent uses Gateway `getDevToolsSnapshot`,
+`getNodeOutput`, or the public `tree`/`inspect` CLI. It does not need to know
+which storage backend the workspace uses, and it must not query runtime tables
+directly.
 
-**Time travel is real, because every frame is a snapshot.** Smithers records a snapshot of each frame (nodes, outputs, and the jj pointer that was active when the frame ran) as a row in SQLite. When you rewind to frame 5, Smithers calls revertToJjPointer to restore the working tree to that recorded jj state, then replays the workflow forward against the exact source code that ran the original. Not "logs of what happened," but the actual state.
+**Time travel is real, because every frame is a snapshot.** Smithers records a snapshot of each frame (nodes, outputs, and the jj pointer that was active when the frame ran) in the durable store. When you rewind to frame 5, Smithers calls revertToJjPointer to restore the working tree to that recorded jj state, then replays the workflow forward against the exact source code that ran the original. Not "logs of what happened," but the actual state.
 
-<Frame caption="Because every frame is a row, forking a run from an earlier frame is just SQL. The original timeline stays intact while the fork explores a different path.">
+<Frame caption="Because every frame is durable, the Gateway can fork a run from an earlier snapshot while the original timeline stays intact.">
   <img src="/images/why/task-fork.gif" alt="A Smithers run rewinds to an earlier frame and forks into a second branch that retries the work a different way" />
 </Frame>
 

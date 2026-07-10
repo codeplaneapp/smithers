@@ -12,11 +12,14 @@ The `smithers --mcp` server surface.
   `allowedTools` allowlist and the `readOnly` filter (keeps only tools with
   `annotations.readOnlyHint === true`).
 - `semantic-tools.js` — defines the 21 semantic tools (`SEMANTIC_TOOL_NAMES`)
-  with zod input/output schemas and handlers that open the workspace DB
-  directly via `findAndOpenDb` — no gateway in the path. Every handler funnels
-  through `executeSemanticTool` → `toolSuccess`/`toolFailure`, so results are
-  always the `{ ok, data?, error? }` envelope (also serialized into the text
-  content block); errors are normalized with `toSmithersError`.
+  with zod input/output schemas. Its current in-process implementation reaches
+  the store through CLI-internal `findAndOpenDb`; that is a tracked internal
+  compatibility path, not an example for controllers or MCP clients to copy.
+  External controllers, monitors, cron jobs, and clients use the workspace
+  Gateway. Every handler funnels through `executeSemanticTool` →
+  `toolSuccess`/`toolFailure`, so results are always the
+  `{ ok, data?, error? }` envelope (also serialized into the text content
+  block); errors are normalized with `toSmithersError`.
 
 The `Semantic*.ts` files (`SemanticToolName`, `SemanticToolDefinition`,
 `SemanticToolCallResult`, `SemanticToolError`, `SemanticToolContext`,

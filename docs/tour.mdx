@@ -67,7 +67,7 @@ export default smithers((ctx) => (
 ));
 ```
 
-`createSmithers` registers Zod schemas; each becomes a SQLite table. `outputs.greeting` is the typed reference for the `greeting` schema; using it as the `output` prop gives compile-time checks (typo `outputs.greting` is a type error).
+`createSmithers` registers Zod schemas; each becomes a durable output relation managed by the runtime. `outputs.greeting` is the typed reference for the `greeting` schema; using it as the `output` prop gives compile-time checks (typo `outputs.greting` is a type error).
 
 The `input` key is special: its schema types `ctx.input` (so `ctx.input.name` is a checked `string`, not `unknown`). Every other key is an output table. Omit `input` and `ctx.input` is untyped, forcing a defensive guard on each field (`ctx.input?.name ?? "world"`). Input fields also arrive as supplied, with no Zod defaults applied, so coalesce any field you do not require. The other schemas (`greeting` here) are the workflow's outputs.
 
@@ -82,8 +82,12 @@ Inspect:
 ```bash
 bunx smithers-orchestrator ps                  # find the run id
 bunx smithers-orchestrator inspect RUN_ID    # structured state
-sqlite3 smithers.db "SELECT * FROM greeting;"  # the persisted output
+bunx smithers-orchestrator output RUN_ID greet --pretty  # typed node output
 ```
+
+For a controller or custom monitor, read the same output through Gateway
+`getNodeOutput({ runId, nodeId: "greet" })`. Do not query the backing store;
+SQLite/PGlite/Postgres are interchangeable runtime details.
 
 ## 3. Add an agent task
 

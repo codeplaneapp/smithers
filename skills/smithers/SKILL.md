@@ -7,9 +7,9 @@ description: Drive Smithers, a durable control plane for long-running coding age
 
 Smithers is a durable control plane for long-running coding agents. Workflows are
 TypeScript (JSX), run for minutes or days, and survive crashes. Every finished
-step is persisted to SQLite, so a restart resumes from the last completed node
-instead of starting over. Retries, human approvals, replay, evals, and sandbox
-review all live in one place.
+step is persisted in the workspace's durable run store, so a restart resumes
+from the last completed node instead of starting over. Retries, human approvals,
+replay, evals, and sandbox review all live in one place.
 
 ## You drive it, not the human
 
@@ -60,6 +60,32 @@ Two specific traps:
    wait to be handed.** If a `smithers-*` tool isn't already loaded in your
    harness, just run the `smithers` command in a shell. Never let "I don't see a
    smithers tool" become "so I'll explain it instead."
+
+### ⚠️ Gateway is the control plane — never drive the database
+
+**This is a hard operator rule.** The workspace Gateway owns run discovery and
+control. Long-lived controllers, Bun cron jobs, health monitors, bots, and
+custom clients must use `smithers-orchestrator/gateway-client` (or the Gateway
+RPC/REST surface) for `listRuns`, `getRun`, event streaming, launch, resume,
+cancel, approvals, signals, cron, scores, and node output. One-shot operator
+actions through the public `smithers ps` / `inspect` / `why` / `approve` CLI are
+also fine; those commands are the abstraction boundary.
+
+Never import `openSmithersStore` or CLI-internal `findAndOpenDb`, instantiate
+SQLite/PGlite/Postgres in an operator script, query `_smithers_*` tables, inspect
+`.smithers/pg` or `smithers.db`, or parse the Gateway runtime state file. Those
+are runtime, migration, and maintainer-diagnostic internals, not a client API.
+Do not pass `--backend` to `ps`, `inspect`, or any other run-control command to
+hunt for a run in a different store. Backend selection belongs at Gateway boot
+or an explicit `smithers migrate` operation; all clients then talk to that one
+workspace Gateway.
+
+For a local controller, ensure the singleton exists with `smithers gateway`,
+discover its verified URL with `smithers gateway status --format json`, and
+construct `SmithersGatewayClient({ baseUrl, token })`. Do not assume port 7331:
+the singleton may select another port and reports the real URL through `gateway
+status`. The Gateway's health identity is the authority for workspace, version,
+and backend.
 
 ### ⚠️ Orchestrator-only: Smithers does the work, your subagents do not
 
@@ -132,6 +158,12 @@ before every workflow you build, and the rest of this skill assumes them.
    user. See [Authoring new workflows](#authoring-new-workflows).
 3. **Proactively offer to visualize, every time.** Whenever a workflow or run is
    in play, suggest ways to *see* it instead of leaving the user with prose:
+   - **Open the Smithers Monitor proactively.** Whenever you start or attach to
+     a run, immediately run `smithers monitor <run-id>` so the live web UI
+     (status, execution tree, per-node live output, events, approvals) opens in
+     the user's browser without being asked. `smithers up` and
+     `smithers workflow run` also do this by default now; pass `--no-open`
+     (or set SMITHERS_NO_OPEN=1) only for CI or when the user says not to.
    - `smithers graph <file>.tsx` renders the workflow graph without executing
      (also your pre-run sanity check; it must exit 0).
    - `smithers tree <run-id>` prints the run's live node tree, and
@@ -243,13 +275,13 @@ crash, resume, fork, and inspect, all from the CLI you already live in.
 When you start a run in the background (`up --detach`, `run --detach`, or the MCP
 `run_workflow` tool), the user can't see its progress. The CLI hands you a
 `monitoring` block telling you to offer them one of three ways to watch it, then
-set up whichever they pick: (1) a status-report cron that runs `smithers inspect
-<run-id> --format json` every 5 minutes, (2) a live custom UI (`smithers ui
-<run-id>`, authoring `.smithers/ui/<workflow>.tsx` first if none exists), or (3)
-a quick static HTML page you write from `smithers inspect <run-id>` and refresh
-every ~5 minutes. Surface these instead of leaving the user blind, and offer the
-other visualizations too (`smithers graph`, `smithers tree <run-id>`, the
-`--interactive` TUI); see
+set up whichever they pick: (1) a status-report cron that polls `getRun` through
+`SmithersGatewayClient` and streams run events when awake, (2) a live custom UI
+(`smithers ui <run-id>`, authoring `.smithers/ui/<workflow>.tsx` first if none
+exists), or (3) a quick static HTML page populated from the Gateway `getRun` and
+`getDevToolsSnapshot` RPCs and refreshed every ~5 minutes. Surface these instead
+of leaving the user blind, and offer the other visualizations too (`smithers
+graph`, `smithers tree <run-id>`, the `--interactive` TUI); see
 [How to guide the user](#how-to-guide-the-user-after-every-command).
 
 Two verbs start a run, split by what you hand them. `smithers up <file>.tsx`
@@ -462,7 +494,7 @@ and components**) from runtime state, which is gitignored.
 │   # ── runtime state (gitignored; don't author here) ──
 ├── executions/  runs/   # per-run event logs and persisted frames
 ├── sandboxes/           # sandboxed review checkouts
-├── state/  tmp/  *.db   # SQLite + scratch
+├── state/  tmp/  *.db   # opaque runtime state; clients use Gateway
 └── node_modules/
 ```
 

@@ -34,6 +34,19 @@ And one more rule that is just as important:
 > build/fix/research this in the background," that is the signal to run a
 > workflow instead.
 
+And one rule about the operator boundary:
+
+> **The workspace Gateway is the run control plane.** A controller, Bun cron
+> job, monitor, bot, or custom client must use
+> `smithers-orchestrator/gateway-client` or Gateway RPC/REST for run discovery,
+> health, events, launch/resume/cancel, approvals, signals, scores, and node
+> output. Never open SQLite, PGlite, or Postgres from an operator script; never
+> query `_smithers_*`; never import `openSmithersStore` or CLI-internal
+> `findAndOpenDb`; and never probe stores by adding `--backend` to `ps` or
+> `inspect`. Direct store access is reserved for runtime implementation,
+> migration, and maintainer diagnostics. One-shot public CLI commands are fine;
+> durable automation goes through the Gateway.
+
 And a rule about how hard to push before involving the human:
 
 > **Drive workflows to completion; fix what you can yourself.** When a run is
@@ -203,22 +216,28 @@ bunx smithers-orchestrator scores RUN_ID
 bunx smithers-orchestrator why RUN_ID
 ```
 
-If `ps` or `inspect` fail with `SMITHERS_MIGRATION_REQUIRED` and
-`resolvedBackend=pglite`, the repo has a legacy SQLite store but the CLI now
-defaults to PGlite. The read commands refuse on purpose until you migrate, yet
-`up` still launches and runs in SQLite, so a launched run can be invisible to
-`inspect` until you fix the backend. Pin the backend before you try to observe a
-run on such a repo:
+For any long-lived observer or controller, start from the workspace singleton
+and use its typed API:
 
-```ts
-// .smithers/smithers.config.ts
-export default { repoCommands, backend: "sqlite" as const };
+```bash
+bunx smithers-orchestrator gateway status --format json
 ```
 
-Then `ps`, `inspect`, `output`, and `approve` all use SQLite and see the run.
-The alternative is `smithers migrate` to move history to PGlite. Do this as part
-of step 5 (validate the workflow shape) so you are never blind once the run is
-live.
+The status response provides the verified `url` for the current workspace. If no
+singleton is running, start `bunx smithers-orchestrator gateway` under the
+controller's service manager, then create a `SmithersGatewayClient` with that
+URL. Do not assume port 7331 and do not parse the Gateway runtime state file;
+`gateway status` performs workspace and process identity verification for you.
+Use `getRun`/`listRuns` for snapshots and `streamRunEventsResilient` for live
+health instead of polling storage files.
+
+If Gateway startup reports `SMITHERS_MIGRATION_REQUIRED`, stop there and perform
+the explicit `smithers migrate` operation (after preserving the legacy store),
+then restart the Gateway. Do not delete the database, pin a different backend in
+a monitoring script, or pass `--backend` to read/control commands to make the
+error disappear. Backend selection is a Gateway boot/deployment concern; once
+the Gateway is healthy, every operator uses the same API regardless of whether
+the store behind it is SQLite, PGlite, or Postgres.
 
 Use serve mode when you need HTTP status, SSE events, remote approvals, or
 Prometheus metrics:

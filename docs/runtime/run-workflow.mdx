@@ -30,13 +30,13 @@ Both `RunOptions` and `RunResult` are defined in [Types](/reference/types).
 
 ## Resume
 
-Pass the original `runId` plus `resume: true`. State loads from SQLite, completed tasks are skipped, in-progress attempts older than 15 minutes are abandoned and retried.
+Pass the original `runId` plus `resume: true`. State loads from the configured durable store, completed tasks are skipped, in-progress attempts older than 15 minutes are abandoned and retried.
 
 ```ts
 await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "my-run-123", resume: true }));
 ```
 
-The original input row is loaded from the DB; pass `{}` for `input`. The workflow file hash and VCS root must match the original run.
+The original input row is loaded from durable state; pass `{}` for `input`. The workflow file hash and VCS root must match the original run.
 
 ## Cancel via AbortSignal
 
@@ -56,13 +56,27 @@ If a CLI hijack happens mid-run (`bunx smithers-orchestrator hijack RUN_ID`), th
 
 ## `result.output`
 
-Populated only when the schema passed to `createSmithers()` has a key literally named `output`. Other schema rows live in their own SQLite tables, so query them directly:
+Populated only when the schema passed to `createSmithers()` has a key literally named `output`. Inside a workflow, consume other typed rows through `ctx.output`, `ctx.latest`, or `ctx.outputs`. Outside the workflow, expose the run through the workspace Gateway and fetch a node's typed output through `getNodeOutput`:
 
 ```ts
-import { Database } from "bun:sqlite";
-const db = new Database("smithers.db", { readonly: true });
-const rows = db.query("SELECT * FROM page WHERE run_id = ? ORDER BY iteration DESC").all(result.runId);
+import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+
+const gateway = new SmithersGatewayClient({
+  baseUrl: process.env.SMITHERS_GATEWAY_URL,
+  token: process.env.SMITHERS_API_KEY,
+});
+
+const page = await gateway.getNodeOutput({
+  runId: result.runId,
+  nodeId: "render-page",
+});
 ```
+
+Controllers and monitors must not open SQLite/PGlite/Postgres or query output and
+`_smithers_*` tables directly. The Gateway preserves auth, ownership,
+invalidation, event emission, and backend independence. Direct storage access is
+reserved for runtime implementation, migration, backend tests, and maintainer
+diagnostics.
 
 ## Notes
 

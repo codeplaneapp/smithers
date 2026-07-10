@@ -7,8 +7,9 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 
 ## Conventions
 
-- Persisted state lives in the nearest `smithers.db` (walk up from the working directory). Most read commands fail with a friendly message if no DB is found.
-- Task root: tools run from the project root (the nearest directory containing a `.smithers/`, walking up from the working directory), the same anchor as `smithers.db`. `up`, `workflow run`, `graph`, and `eval` all resolve the root this way, so the launch form never changes where tasks run. Override with `--root`; a resume without `--root` reuses the root the run was originally launched with.
+- Run control is workspace-scoped. The workspace Gateway is the default control plane for controllers, Bun cron jobs, monitors, bots, and custom clients; use `smithers-orchestrator/gateway-client` or Gateway RPC/REST rather than opening SQLite/PGlite/Postgres or querying `_smithers_*` tables. One-shot CLI commands are also a supported abstraction boundary. Direct stores are runtime/migration/maintainer-diagnostic internals.
+- `smithers gateway status --format json` discovers the verified singleton URL for the current workspace. Do not parse its runtime state file, assume port 7331, or pass `--backend` to `ps`/`inspect`/other control commands to search another store. `--backend` is for Gateway/workflow bootstrap and explicit migration diagnostics only.
+- Task root: tools run from the project root (the nearest directory containing a `.smithers/`, walking up from the working directory). `up`, `workflow run`, `graph`, and `eval` all resolve the root this way, so the launch form never changes where tasks run. Override with `--root`; a resume without `--root` reuses the root the run was originally launched with.
 - Boolean flags accept either bare form (`--watch`) or explicit `--watch true|false`.
 - Global options: `--format toon|json|yaml|md|jsonl`, `--filter-output <key.path>`, `--full-output`, `--token-count`, `--token-limit N`, `--token-offset N`, `--schema`, `--llms`, `--llms-full`, `--mcp`, `--help`, `--version`.
 - MCP stdio mode: pass `--mcp` to start Smithers as an MCP server. Add `--surface semantic|raw|both` to choose the exposed tool surface. Add `--allowed-tools name,name` and/or `--read-only` to scope the semantic toolset exposed to outbound MCP clients.
@@ -44,7 +45,7 @@ Read each row as two comma-separated fields declared by the `{command,descriptio
 
 `bunx smithers-orchestrator up` exits when a run reaches a durable wait state (`waiting-approval`, `waiting-event`, or `waiting-timer`), even in foreground mode. `bunx smithers-orchestrator up --detach` starts a background owner and returns its `runId`, but that owner also exits when the run pauses. This is expected: the persisted run is waiting for an external decision, signal, or timer rather than burning a process.
 
-To drive a run to completion across pauses, use a keeper loop around the persisted run state: inspect with `bunx smithers-orchestrator ps`, `bunx smithers-orchestrator why RUN_ID`, `bunx smithers-orchestrator inspect RUN_ID`, and `bunx smithers-orchestrator logs RUN_ID -f`; clear gates with `bunx smithers-orchestrator approve RUN_ID` or `bunx smithers-orchestrator deny RUN_ID`; send signals with `bunx smithers-orchestrator signal RUN_ID ...`; then resume the same run with `bunx smithers-orchestrator up <workflow.tsx> --resume RUN_ID`. Use `--force` only after confirming the previous owner is gone or intentionally replacing it.
+To drive a run to completion across pauses, use the Gateway (`getRun`, `streamRunEventsResilient`, `submitApproval`, `submitSignal`, and `resumeRun`) for an automated keeper. For ad-hoc operation, the equivalent public CLI commands are `ps`, `why RUN_ID`, `inspect RUN_ID`, `logs RUN_ID -f`, `approve`/`deny`, `signal`, and `up <workflow.tsx> --resume RUN_ID`. Use `--force` only after confirming the previous owner is gone or intentionally replacing it. Never implement the keeper by querying the run store.
 
 If resume fails with `RESUME_METADATA_MISMATCH`, the workflow file changed after the run started. Resume validates the original workflow metadata and source hash; it is not a hot-reload mechanism for stopped runs. Start a fresh run instead, for example with a new `--run-id`, or overwrite an existing planned id with `--force` when that command supports it. When iterating on a workflow definition, expect each edit to require a fresh run rather than `--resume`.
 
@@ -82,9 +83,9 @@ The status header shrinks to a compact one-liner on terminals narrower than 100 
 A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` background launch both execute where the user has no live view of progress. To close that gap, the CLI returns a `monitoring` block with the run and prints agent-directed guidance in the "Next steps" CTA: offer the user one of these ways to watch the run, then set up whichever they pick.
 
 1. **Smithers Monitor (live, zero setup):** run `bunx smithers-orchestrator monitor RUN_ID` to open the gateway's live web UI over every run in the workspace, focused on this one (status, execution tree, events, approvals), no code required. See [the Smithers Monitor](/guides/monitor).
-2. **Status-report cron (hands-off):** a job that every 5 minutes reads `bunx smithers-orchestrator inspect RUN_ID --format json` and reports the status.
+2. **Status-report cron (hands-off):** a Bun job that every 5 minutes calls Gateway `getRun` and reports the status; use `streamRunEventsResilient` while the process is awake.
 3. **Live custom UI (richest, most work):** run `bunx smithers-orchestrator ui RUN_ID` when the workflow declares a `.smithers/ui/<workflow>.tsx` UI with `<UI entry="../ui/<workflow>.tsx" />`, otherwise author the UI source and declaration first. See [custom workflow UIs](/guides/custom-workflow-ui).
-4. **Quick HTML page (fastest):** write a static status page from `bunx smithers-orchestrator inspect RUN_ID`, open it, and refresh it about every 5 minutes.
+4. **Quick HTML page (fastest):** write a static status page from Gateway `getRun` / `getDevToolsSnapshot`, open it, and refresh it about every 5 minutes.
 
 The same `monitoring` object (its `text` plus structured `options`) is in the `run_workflow` MCP result for background launches, and is `null` when `waitForTerminal` is set (the run already finished).
 
@@ -96,7 +97,7 @@ Open a run's custom browser UI with:
 bunx smithers-orchestrator ui RUN_ID
 ```
 
-`bunx smithers-orchestrator ui` finds the workspace's gateway through its runtime state file (written under the OS temp dir when `smithers gateway` starts) and verifies the answering process serves this workspace before using it. State-file discovery refuses gateways that advertise another workspace; the legacy `127.0.0.1:7331` fallback still trusts pre-identity gateways that advertise no workspace, so use `--gateway <url>` or `--no-autostart` when you need to be explicit. When none is running it starts `smithers gateway` automatically (one per workspace: concurrent autostarts race on a lock and share the winner) and then opens the UI. `smithers gateway` serves the workspace DB and workflow-owned `<UI>` declarations, with entry files resolved relative to the workflow that declared them. A workspace with no local `.smithers` pack and no existing `smithers.db` still boots: the gateway creates the DB at the working directory and serves the global pack alone. That is the headless sandbox shape: provision a VM with `bunx smithers-orchestrator init --global --yes --no-skill` (the default `bun install` inside `~/.smithers` is required for pack workflows to import) and `smithers gateway` serves the full pack, UIs included, from any bare cloned repo. Manage the daemon with `smithers gateway status` and `smithers gateway stop`. Use `bunx smithers-orchestrator ui RUN_ID --no-autostart` to fail fast when no Gateway is already running, or `--gateway <url>` for a remote Gateway.
+`bunx smithers-orchestrator ui` discovers the workspace singleton, verifies that the answering process serves this workspace, and uses its advertised URL. Discovery refuses gateways that advertise another workspace; use `--gateway <url>` or `--no-autostart` when you need to be explicit. When none is running it starts `smithers gateway` automatically (one per workspace: concurrent autostarts race on a lock and share the winner) and then opens the UI. `smithers gateway` serves workspace run state and workflow-owned `<UI>` declarations, with entry files resolved relative to the workflow that declared them. A workspace with no local `.smithers` pack and no prior run store still boots and serves the global pack alone. That is the headless sandbox shape: provision a VM with `bunx smithers-orchestrator init --global --yes --no-skill` (the default `bun install` inside `~/.smithers` is required for pack workflows to import) and `smithers gateway` serves the full pack, UIs included, from any bare cloned repo. Manage the daemon with `smithers gateway status` and `smithers gateway stop`. Use `bunx smithers-orchestrator ui RUN_ID --no-autostart` to fail fast when no Gateway is already running, or `--gateway <url>` for a remote Gateway.
 
 ## Troubleshooting
 
@@ -160,7 +161,7 @@ commands[88]:
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       insecure,,boolean,false,Allow unauthenticated non-loopback HTTP binding; dangerous
       metrics,,boolean,true,Expose /metrics endpoint when --serve
-      backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
+      backend,,enum,,Bootstrap storage selection for a workflow owner or workspace Gateway; not a run-discovery/control flag (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
       verbose,,boolean,false,Show engine info logs (run lifecycle, agent sessions) on interactive runs
       report,,boolean,true,Narrate the result with a cheap agent and open an HTML summary on interactive runs (disable with --no-report or SMITHERS_NO_REPORT=1)
@@ -212,7 +213,7 @@ commands[88]:
       insecure,,boolean,false,Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run; dangerous)
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (no silent fallback: fails with TUI_MONITOR_UNAVAILABLE if the tui package is missing, leaving the detached run running)
-      backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
+      backend,,enum,,Bootstrap storage selection for a workflow owner or workspace Gateway; not a run-discovery/control flag (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
       verbose,,boolean,false,Show engine info logs (run lifecycle, agent sessions) on interactive runs
       report,,boolean,true,Narrate the result with a cheap agent and open an HTML summary on interactive runs (disable with --no-report or SMITHERS_NO_REPORT=1)
@@ -273,13 +274,13 @@ commands[88]:
       stale-threshold,t,string,30s,Heartbeat staleness threshold before resume
       max-concurrent,c,number,3,Max runs resumed per poll
   - name: gateway
-    purpose: Serve the multi-run Gateway RPC/WS control plane for the workspace DB (one singleton per workspace; a second start refuses); unlike up --serve, this is not tied to one run
+    purpose: Serve the multi-run Gateway RPC/WS control plane for workspace run state (one singleton per workspace; a second start refuses); unlike up --serve, this is not tied to one run
     args[1]{name,type,required,desc}:
       action,enum,false,Manage the running singleton instead of serving: status | stop
     flags[7]{name,short,type,default,desc}:
       host,H,string,127.0.0.1,Gateway bind address
-      port,p,number,7331,Preferred port (falls back to an ephemeral port when taken; clients discover the real port from the runtime state file)
-      backend,,enum,,Workspace storage backend (sqlite|pglite|postgres)
+      port,p,number,7331,Preferred port (falls back to an ephemeral port when taken; clients discover the verified URL with gateway status)
+      backend,,enum,,Storage behind this workspace Gateway; a boot/deployment choice, not a client run-lookup flag (sqlite|pglite|postgres)
       auth-token,,string,,Bearer token for HTTP/WS auth (or SMITHERS_API_KEY); required for a non-loopback host
       mint-token,,boolean,false,Mint a random bearer; require it on every request and record it only in the 0600 runtime state file
       insecure,,boolean,false,Allow a non-loopback host with NO auth (dangerous)
@@ -461,7 +462,7 @@ commands[88]:
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID
   - name: down
-    purpose: Cancel all active runs in the nearest smithers.db
+    purpose: Cancel all active runs in the current Smithers workspace
     flags[1]{name,short,type,default,desc}:
       force,,boolean,false,Cancel runs even if they still appear live; without this only stale runs are cancelled
   - name: graph
@@ -726,7 +727,7 @@ commands[88]:
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       insecure,,boolean,false,Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run; dangerous)
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
-      backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
+      backend,,enum,,Bootstrap storage selection for a workflow owner or workspace Gateway; not a run-discovery/control flag (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
       verbose,,boolean,false,Show engine info logs on interactive runs; the default keeps progress + warnings only (non-TTY/structured output always gets full logs)
       report,,boolean,true,Narrate an interactive run's result with a cheap/fast agent and open an HTML summary in the browser (disable with --no-report or SMITHERS_NO_REPORT=1)
