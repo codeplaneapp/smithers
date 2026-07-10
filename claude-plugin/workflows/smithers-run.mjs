@@ -125,11 +125,14 @@ const knownPhases = new Set(['Run'])
 const mirrored = new Set() // `${runId}:${nodeId}` -> already has (or will get) a row
 const loggedGates = new Set()
 const pendingRows = [] // fired watcher/echo promises, awaited before returning
+const stateByNode = new Map() // `${runId}:${nodeId}` -> last seen state, for delta narration
 let live = 0
 let spawned = 0
 let seq = 0
 let ticks = 0
 let lastStatus = ''
+let currentPhase = 'Run' // phase of the furthest active node; groups the tick pollers
+let deltasSeeded = !attached // attach mode seeds silently: the first tick is history, not news
 let collapsed = false
 let budgetLogged = false
 let finalStatus = 'unknown'
@@ -177,6 +180,40 @@ function ensurePhase(title) {
   }
 }
 
+function idList(ids) {
+  const MAX_IDS = 6
+  return ids.length > MAX_IDS
+    ? `${ids.slice(0, MAX_IDS).join(', ')} +${ids.length - MAX_IDS} more`
+    : ids.join(', ')
+}
+
+// Compact per-tick narration: one line for notable node transitions only
+// (started / finished / failed), nothing on heartbeat ticks.
+function narrateNodeDeltas(nodes) {
+  const started = []
+  const finished = []
+  const failed = []
+  for (const node of nodes) {
+    if (!node || typeof node.nodeId !== 'string') continue
+    const key = rowKey(node.nodeId)
+    const prev = stateByNode.get(key)
+    if (prev === node.state) continue
+    stateByNode.set(key, node.state)
+    if (node.state === 'in-progress') started.push(node.nodeId)
+    else if (node.state === 'finished') finished.push(node.nodeId)
+    else if (node.state === 'failed') failed.push(node.nodeId)
+  }
+  if (!deltasSeeded) {
+    deltasSeeded = true // first attach tick is pre-existing state, not a delta
+    return
+  }
+  const parts = []
+  if (started.length) parts.push(`started ${idList(started)}`)
+  if (finished.length) parts.push(`finished ${idList(finished)}`)
+  if (failed.length) parts.push(`failed ${idList(failed)}`)
+  if (parts.length) log(`Run ${runId} tick #${ticks}: ${parts.join(' · ')}`)
+}
+
 function underBudget() {
   if (spawned < BUDGET) return true
   if (!budgetLogged) {
@@ -200,7 +237,13 @@ while (ticks < MAX_TICKS) {
     `RUN-EXACTLY: ${CLI} claude tick ${shellQuote(runId)} --after-seq ${seq}${waitFlag} --format json\n` +
     'Copy the JSON fields verbatim. Do not run anything else. If the command fails or prints an error instead of a tick, ' +
     `return {"contract": -1, "runId": "${runId}", "status": "error", "seq": 0, "phases": [], "nodes": []} and put the error message in a top-level "error" string field. Never invent tick data.`,
-    { label: 'sync', phase: 'Run', schema: TICK_SCHEMA, effort: 'low', model: 'haiku' },
+    {
+      label: `tick #${ticks} · ${lastStatus || 'starting'}`,
+      phase: currentPhase,
+      schema: TICK_SCHEMA,
+      effort: 'low',
+      model: 'haiku',
+    },
   )
   if (!tick) {
     log(`Mirror sync failed for run ${runId}; stopping the mirror (the Smithers run itself is unaffected).`)
@@ -237,21 +280,34 @@ while (ticks < MAX_TICKS) {
     log(`Run has ${nodes.length} nodes (> ${COLLAPSE_AT}); collapsing to per-phase summaries to respect /workflows caps.`)
   }
 
+  narrateNodeDeltas(nodes)
+
+  // File the next tick poller under the phase the run is actually in: the
+  // furthest node still active this tick (fall back to the last known phase).
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i]
+    if (node && ACTIVE_NODE_STATES.has(node.state) && typeof node.phase === 'string' && knownPhases.has(node.phase)) {
+      currentPhase = node.phase
+      break
+    }
+  }
+
   if (!collapsed) {
     const outputs = tick.outputs && typeof tick.outputs === 'object' ? tick.outputs : {}
     for (const node of nodes) {
       if (!node || mirrored.has(rowKey(node.nodeId)) || !shouldMirror(node)) continue
-      ensurePhase(node.phase)
+      const nodePhase = typeof node.phase === 'string' && node.phase.length > 0 ? node.phase : 'Run'
+      ensurePhase(nodePhase)
       if (ACTIVE_NODE_STATES.has(node.state) && live < MAX_LIVE && underBudget()) {
         mirrored.add(rowKey(node.nodeId))
         live += 1
-        fireRow(watcherPrompt(node.nodeId), node.label || node.nodeId, node.phase).finally(() => { live -= 1 })
+        fireRow(watcherPrompt(node.nodeId), `watch ${node.nodeId}`, nodePhase).finally(() => { live -= 1 })
       } else if (TERMINAL_NODE_STATES.has(node.state) && underBudget()) {
         mirrored.add(rowKey(node.nodeId))
         const text = typeof outputs[node.nodeId] === 'string' && outputs[node.nodeId].length > 0
           ? outputs[node.nodeId]
           : `[${node.state}]`
-        fireRow(echoPrompt(text), node.label || node.nodeId, node.phase)
+        fireRow(echoPrompt(text), node.label || node.nodeId, nodePhase)
       }
     }
   }
@@ -276,6 +332,8 @@ while (ticks < MAX_TICKS) {
     runId = tick.continuedAs
     seq = 0
     lastStatus = ''
+    currentPhase = 'Run'
+    deltasSeeded = false // the new run's first tick is history, not news
     continue
   }
 
@@ -285,9 +343,10 @@ while (ticks < MAX_TICKS) {
       // all the data, so each summary is a single 1-turn echo agent.
       const byPhase = new Map()
       for (const node of nodes) {
-        const list = byPhase.get(node.phase) || []
+        const nodePhase = typeof node.phase === 'string' && node.phase.length > 0 ? node.phase : 'Run'
+        const list = byPhase.get(nodePhase) || []
         list.push(`${node.label || node.nodeId}: ${node.state}`)
-        byPhase.set(node.phase, list)
+        byPhase.set(nodePhase, list)
       }
       for (const [phaseTitle, lines] of byPhase) {
         ensurePhase(phaseTitle)
