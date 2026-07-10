@@ -6,8 +6,8 @@ import {
   useGatewayApprovals,
   useGatewayNodeOutput,
   useGatewayRun,
-  useGatewayRunEvents,
   useGatewayRuns,
+  useGatewayRunTree,
 } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 
@@ -52,32 +52,28 @@ function asBool(value: unknown): boolean {
 }
 
 /**
- * Normalize a GatewayEventFrame to {type, nodeId}. Frames are
- * { type: "event", event: <lifecycle name>, payload: { nodeId, ... }, seq } —
- * but tolerate older top-level shapes too.
+ * Per-node lifecycle from the state-enriched run tree (getDevToolsSnapshot +
+ * streamDevTools). The tree is authoritative for the WHOLE run — unlike the
+ * bounded event ring, which only holds the newest ~1000 events and silently
+ * forgets early node completions on long runs.
  */
-function normalizeEvent(raw: unknown): { type: string; nodeId: string } | null {
-  if (!isRecord(raw)) return null;
-  const payload = isRecord(raw.payload) ? raw.payload : undefined;
-  const inner = payload && isRecord(payload.payload) ? payload.payload : undefined;
-  const topType = asString(raw.type);
-  const type = asString(raw.event) ?? (topType && topType !== "event" ? topType : undefined) ?? asString(payload?.event) ?? "";
-  const nodeId = asString(payload?.nodeId) ?? asString(inner?.nodeId) ?? asString(raw.nodeId) ?? "";
-  if (!type || !nodeId) return null;
-  return { type, nodeId };
-}
-function buildNodeStatus(events: unknown[]): Map<string, NodeStatus> {
+function buildNodeStatus(treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown; kind?: unknown }>): Map<string, NodeStatus> {
   const map = new Map<string, NodeStatus>();
-  for (const raw of events) {
-    const ev = normalizeEvent(raw);
-    if (!ev) continue;
-    if (ev.type === "NodeFinished") map.set(ev.nodeId, "done");
-    else if (ev.type === "NodeFailed" || ev.type === "NodeCancelled") map.set(ev.nodeId, "failed");
-    else if (ev.type === "NodeSkipped") map.set(ev.nodeId, "skipped");
-    else if (ev.type === "NodeWaitingApproval") map.set(ev.nodeId, "waiting");
-    else if (ev.type === "NodeStarted" || ev.type === "NodeRetrying" || ev.type === "TaskHeartbeat") {
-      if (map.get(ev.nodeId) !== "done") map.set(ev.nodeId, "running");
-    }
+  const rank: Record<NodeStatus, number> = { pending: 0, skipped: 1, waiting: 2, done: 3, failed: 4, running: 5 };
+  for (const node of treeNodes) {
+    const id = asString(node.id);
+    if (!id) continue;
+    const tone = asString(node.status);
+    const status: NodeStatus =
+      tone === "ok" ? "done"
+      : tone === "running" ? "running"
+      : tone === "failed" ? "failed"
+      : tone === "waiting" ? "waiting"
+      : tone === "cancelled" ? "skipped"
+      : "pending";
+    // Loop iterations share a logical id; keep the most "active" status.
+    const existing = map.get(id);
+    if (!existing || rank[status] >= rank[existing]) map.set(id, status);
   }
   return map;
 }
@@ -250,17 +246,21 @@ function IssueDetail({ runId, issueNumber }: { runId: string; issueNumber: numbe
 
 function Dashboard({ runId }: { runId: string }) {
   const run = useGatewayRun(runId);
-  const { events } = useGatewayRunEvents(runId);
+  const tree = useGatewayRunTree(runId);
   const approvals = useGatewayApprovals();
   const actions = useGatewayActions();
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
 
-  const nodeStatus = useMemo(() => buildNodeStatus(Array.isArray(events) ? events : []), [events]);
+  const nodeStatus = useMemo(() => buildNodeStatus(tree.nodes ?? []), [tree.nodes]);
   const lanes = useMemo(() => buildIssueLanes(nodeStatus), [nodeStatus]);
   const doneCount = useMemo(() => [...nodeStatus.values()].filter((s) => s === "done").length, [nodeStatus]);
   const remountKey = String(doneCount);
 
-  const failedNodes = [...nodeStatus.entries()].filter(([, s]) => s === "failed").map(([nodeId]) => nodeId);
+  // Structural containers (numeric snapshot keys) roll up to failed too; the
+  // attention strip only names real task nodes.
+  const failedNodes = [...nodeStatus.entries()]
+    .filter(([nodeId, s]) => s === "failed" && !/^\d+$/.test(nodeId))
+    .map(([nodeId]) => nodeId);
   const guardFailures = failedNodes.filter((nodeId) => nodeId.startsWith("guard:") || /:(queue-)?guard$/.test(nodeId));
   const otherFailures = failedNodes.filter((nodeId) => !guardFailures.includes(nodeId));
   const sweep = sweepStats(nodeStatus);

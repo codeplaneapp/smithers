@@ -17,6 +17,7 @@ import {
   useGatewayRunEvents,
   useGatewayRuns,
   useGatewayRunTree,
+  useGatewayWorkflows,
 } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 import {
@@ -37,6 +38,7 @@ import {
   labelForStatus,
   nodeErrorOf,
   pick,
+  quotaInfoOf,
   rowOf,
   runProgress,
   shortRunId,
@@ -94,6 +96,15 @@ function Elapsed({ startMs, endMs }: { startMs: number | undefined; endMs: numbe
 function Ago({ ms }: { ms: number | undefined }) {
   const now = useNowMs();
   return <>{timeAgo(ms, now)}</>;
+}
+
+function Countdown({ untilMs }: { untilMs: number }) {
+  const now = useNowMs();
+  const remaining = Math.max(0, untilMs - now);
+  if (remaining === 0) return <>due now</>;
+  const mins = Math.floor(remaining / 60_000);
+  const secs = Math.floor((remaining % 60_000) / 1_000);
+  return <>in {mins}m {String(secs).padStart(2, "0")}s</>;
 }
 
 function ApprovalWait({ requestedAtMs }: { requestedAtMs: number | undefined }) {
@@ -705,7 +716,9 @@ function RunDetail({
 }) {
   const runQuery = useGatewayRun(runId);
   const actions = useGatewayActions();
+  const workflowsQuery = useGatewayWorkflows();
   const [busyAction, setBusyAction] = useState<"cancel" | "resume" | null>(null);
+  const [showCustomUi, setShowCustomUi] = useState(false);
   const run = isRecord(runQuery.data) ? runQuery.data : null;
 
   if (!run && runQuery.loading) return <div className="mon-empty">Loading run…</div>;
@@ -724,6 +737,11 @@ function RunDetail({
   const finishedAtMs = asNumber(pick(run, "finishedAtMs", "finished_at_ms"));
   const runState = isRecord(run.runState) ? run.runState : null;
   const healthState = runState ? asString(runState.state) : undefined;
+  const quota = quotaInfoOf(run);
+  const workflowRows = (Array.isArray(workflowsQuery.data) ? workflowsQuery.data : []).filter(isRecord);
+  const workflowRow = workflowRows.find((row) => asString(row.key) === workflowKey);
+  const customUiPath = workflowRow && workflowRow.hasUi === true ? asString(workflowRow.uiPath) : undefined;
+  const customUiUrl = customUiPath ? `${customUiPath}?runId=${encodeURIComponent(runId)}` : undefined;
   const unhealthy =
     healthState !== undefined &&
     healthState !== labelForStatus(status) &&
@@ -772,6 +790,11 @@ function RunDetail({
           </div>
         ) : null}
         <div className="mon-detail-actions">
+          {customUiUrl ? (
+            <button type="button" className="mon-btn" onClick={() => setShowCustomUi(true)} title={`Open this workflow's custom UI (${customUiPath})`}>
+              Open UI
+            </button>
+          ) : null}
           {isResumable(status) ? (
             <button type="button" className="mon-btn" disabled={busyAction !== null} onClick={() => void act("resume")}>
               Resume
@@ -789,6 +812,53 @@ function RunDetail({
           ) : null}
         </div>
       </header>
+
+      {quota ? (
+        <div className="mon-banner tone-waiting mon-quota" data-testid="monitor-quota-banner">
+          <div>
+            <b>Waiting on provider quota</b> — {quota.blockedCount} task(s) blocked
+            {quota.resetAtMs ? (
+              <>
+                {" · resumes ~"}
+                {new Date(quota.resetAtMs).toLocaleTimeString()} (<Countdown untilMs={quota.resetAtMs} />)
+              </>
+            ) : (
+              " · no reset time reported; the run stays parked until resumed"
+            )}
+          </div>
+          {quota.blocked.length ? (
+            <ul className="mon-quota-list">
+              {quota.blocked.map((entry) => (
+                <li key={entry.nodeId}>
+                  <span className="mon-mono">{entry.nodeId}</span>
+                  {entry.message ? <span className="mon-dim"> — {entry.message}</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="mon-dim">
+              Select a failed/blocked node in the tree for the exact agent and limit message.
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {showCustomUi && customUiUrl ? (
+        <div className="mon-modal-backdrop" onClick={() => setShowCustomUi(false)} data-testid="monitor-ui-modal">
+          <div className="mon-modal" onClick={(event) => event.stopPropagation()}>
+            <header className="mon-modal-head">
+              <span className="mon-kicker">{workflowKey} UI</span>
+              <a className="mon-chip" href={customUiUrl} target="_blank" rel="noreferrer">
+                Open in new tab
+              </a>
+              <button type="button" className="mon-chip" onClick={() => setShowCustomUi(false)}>
+                Close
+              </button>
+            </header>
+            <iframe className="mon-modal-frame" src={customUiUrl} title={`${workflowKey} custom UI`} />
+          </div>
+        </div>
+      ) : null}
 
       <section className="mon-panel mon-tree-panel">
         <header className="mon-panel-head">
@@ -1067,6 +1137,14 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 .mon-toolcall { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); }
 .mon-output { margin: 6px 0 0; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; max-height: 45vh; overflow-y: auto; }
 .mon-failure { border-color: color-mix(in srgb, var(--failed, #f87171) 45%, var(--border)); }
+.mon-quota { flex-direction: column; align-items: flex-start; }
+.mon-quota-list { margin: 4px 0 0; padding-left: 18px; font-weight: 400; font-size: 11px; }
+.mon-quota-list li { margin: 2px 0; overflow-wrap: anywhere; }
+.mon-modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.mon-modal { width: min(1280px, 96vw); height: min(860px, 92vh); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: 0 18px 60px rgba(0,0,0,0.45); }
+.mon-modal-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.mon-modal-head .mon-kicker { flex: 1; }
+.mon-modal-frame { flex: 1; border: 0; width: 100%; background: white; }
 
 .mon-empty { color: var(--muted); text-align: center; padding: 28px 12px; display: flex; flex-direction: column; gap: 6px; }
 .mon-empty-hero { padding-top: 18vh; }

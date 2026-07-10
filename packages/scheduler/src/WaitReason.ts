@@ -10,4 +10,13 @@ export type WaitReason =
       readonly _tag: "Quota";
       readonly quotaBlockedCount: number;
       readonly resetAtMs?: number;
+      /**
+       * The quota-blocked tasks (capped sample): which node hit which
+       * provider limit, so operators see WHO is waiting, not just a count.
+       */
+      readonly blocked?: ReadonlyArray<{
+        readonly nodeId: string;
+        readonly resetAtMs?: number;
+        readonly message?: string;
+      }>;
     };

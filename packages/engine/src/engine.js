@@ -5699,6 +5699,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
                     quotaMetadataJson: JSON.stringify({
                         quotaBlockedCount: reason.quotaBlockedCount,
                         ...(reason.resetAtMs != null ? { resetAtMs: reason.resetAtMs } : {}),
+                        // Which tasks are blocked and why (provider/model live in the
+                        // message) so operators see WHO is waiting, not just a count.
+                        ...(Array.isArray(reason.blocked) && reason.blocked.length
+                            ? { blocked: reason.blocked }
+                            : {}),
                     }),
                 });
             case "HotReload":

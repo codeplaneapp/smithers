@@ -87,6 +87,9 @@ function findWaitingReason(state, currentTimeMs) {
     let primaryReason;
     let quotaBlockedCount = 0;
     let earliestQuotaResetAtMs;
+    /** @type {Array<{ nodeId: string; resetAtMs?: number; message?: string }>} */
+    const quotaBlocked = [];
+    const QUOTA_BLOCKED_SAMPLE_MAX = 10;
     for (const descriptor of state.descriptors.values()) {
         const taskState = state.states.get(stateKeyFor(descriptor));
         if (taskState === "waiting-approval" && !primaryReason) {
@@ -108,11 +111,23 @@ function findWaitingReason(state, currentTimeMs) {
         }
         else if (taskState === "waiting-quota") {
             quotaBlockedCount += 1;
-            const resetAtMs = state.quotaResetTimes.get(stateKeyFor(descriptor));
+            const key = stateKeyFor(descriptor);
+            const resetAtMs = state.quotaResetTimes.get(key);
             if (resetAtMs != null) {
                 earliestQuotaResetAtMs = earliestQuotaResetAtMs == null
                     ? resetAtMs
                     : Math.min(earliestQuotaResetAtMs, resetAtMs);
+            }
+            if (quotaBlocked.length < QUOTA_BLOCKED_SAMPLE_MAX) {
+                const failure = state.failures.get(key);
+                const message = failure && typeof (/** @type {{ message?: unknown }} */ (failure).message) === "string"
+                    ? String((/** @type {{ message?: unknown }} */ (failure).message)).slice(0, 300)
+                    : undefined;
+                quotaBlocked.push({
+                    nodeId: descriptor.nodeId,
+                    ...(resetAtMs != null ? { resetAtMs } : {}),
+                    ...(message ? { message } : {}),
+                });
             }
         }
     }
@@ -124,6 +139,7 @@ function findWaitingReason(state, currentTimeMs) {
             _tag: "Quota",
             quotaBlockedCount,
             ...(earliestQuotaResetAtMs != null ? { resetAtMs: earliestQuotaResetAtMs } : {}),
+            ...(quotaBlocked.length ? { blocked: quotaBlocked } : {}),
         };
     }
     return undefined;

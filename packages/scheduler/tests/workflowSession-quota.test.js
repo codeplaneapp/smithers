@@ -55,6 +55,28 @@ describe("quota-aware pause & resume", () => {
     expect(d1.reason.quotaBlockedCount).toBe(1);
   });
 
+  test("quota wait carries the blocked tasks with their limit messages", () => {
+    const session = makeWorkflowSession({ nowMs: () => 1_000 });
+    const descriptor = makeAgentDescriptor();
+    Effect.runSync(session.submitGraph(makeGraph(descriptor)));
+
+    const d = Effect.runSync(session.taskFailed({
+      nodeId: descriptor.nodeId,
+      iteration: descriptor.iteration,
+      error: quotaError,
+    }));
+
+    expect(d._tag).toBe("Wait");
+    expect(d.reason._tag).toBe("Quota");
+    expect(d.reason.blocked).toEqual([
+      {
+        nodeId: descriptor.nodeId,
+        resetAtMs: 9_999_999,
+        message: quotaError.message,
+      },
+    ]);
+  });
+
   test("quota wait carries reset time when present", () => {
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
     const descriptor = makeAgentDescriptor();

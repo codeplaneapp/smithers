@@ -67,6 +67,42 @@ export function nodeErrorOf(
 }
 
 /**
+ * Quota-park details from a run row's `errorJson` — the engine writes
+ * `{quotaBlockedCount, resetAtMs?, blocked?: [{nodeId, resetAtMs?, message?}]}`
+ * there when it parks a run as waiting-quota. `blocked` is absent on runs
+ * parked by older engines.
+ */
+export function quotaInfoOf(row: Record<string, unknown>): {
+  blockedCount: number;
+  resetAtMs?: number;
+  blocked: Array<{ nodeId: string; message?: string }>;
+} | null {
+  if (asString(row.status) !== "waiting-quota") return null;
+  const raw = asString(pick(row, "errorJson", "error_json"));
+  const empty = { blockedCount: 0, blocked: [] as Array<{ nodeId: string; message?: string }> };
+  if (!raw) return empty;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return empty;
+  }
+  if (!isRecord(parsed)) return empty;
+  const blocked = asArray(parsed.blocked)
+    .filter(isRecord)
+    .map((entry) => ({
+      nodeId: asString(entry.nodeId) ?? "(unknown node)",
+      ...(asString(entry.message) ? { message: asString(entry.message) } : {}),
+    }));
+  const resetAtMs = asNumber(parsed.resetAtMs);
+  return {
+    blockedCount: asNumber(parsed.quotaBlockedCount) ?? blocked.length,
+    ...(resetAtMs !== undefined ? { resetAtMs } : {}),
+    blocked,
+  };
+}
+
+/**
  * The events worth a human's attention: node/run lifecycle transitions,
  * approvals, human requests, signals, and quota parks. Everything else
  * (agent chatter, heartbeats, frames, per-token traces) is volume, not
