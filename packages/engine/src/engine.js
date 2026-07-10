@@ -84,6 +84,32 @@ import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
  */
 const createdWorktrees = new Set();
 /**
+ * Serialize worktree creation per VCS root. Concurrent `jj workspace add` /
+ * `git worktree add` calls all mutate the repo's shared `.git/index` and ref
+ * state, and jj gives up after ONE lock attempt — so parallel lanes
+ * deterministically kill each other (issue #935: 38 of 50 lanes lost the
+ * race in one run). Creation takes seconds while lanes run for minutes, so a
+ * per-repo queue is invisible in wall-clock terms.
+ * @type {Map<string, Promise<void>>}
+ */
+const worktreeCreationQueues = new Map();
+/**
+ * Wait for every earlier creation on this root to finish, then return a
+ * release function the caller MUST invoke (finally) to unblock successors.
+ * @param {string} root
+ * @returns {Promise<() => void>}
+ */
+function acquireWorktreeCreationSlot(root) {
+    const prev = worktreeCreationQueues.get(root) ?? Promise.resolve();
+    /** @type {() => void} */
+    let release = () => { };
+    const gate = new Promise((resolve) => {
+        release = () => resolve(undefined);
+    });
+    worktreeCreationQueues.set(root, prev.then(() => gate));
+    return prev.then(() => release);
+}
+/**
  * @param {string} cmd
  * @returns {string | null}
  */
@@ -885,6 +911,10 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch) {
     if (vcs.type === "git") {
         await runGitCommand(vcs.root, ["fetch", "origin"]);
     }
+    // One creation at a time per repo: every branch below mutates shared
+    // .git state (index, refs), which is exactly what #935 raced on.
+    const releaseCreationSlot = await acquireWorktreeCreationSlot(vcs.root);
+    try {
     if (vcs.type === "jj") {
         const name = worktreePath.split("/").pop() ?? "worktree";
         const wsResult = await Effect.runPromise(workspaceAdd(name, worktreePath, { cwd: vcs.root, atRev: baseBranch }).pipe(Effect.provide(getPlatformLayer())));
@@ -949,6 +979,10 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch) {
                 throw new SmithersError("WORKTREE_CREATE_FAILED", `Failed to create git worktree at ${worktreePath}. Tried ${baseRefs.join(", ")}. ${failures.join(" | ")}`, { worktreePath, vcsType: "git" });
             }
         }
+    }
+    }
+    finally {
+        releaseCreationSlot();
     }
     createdWorktrees.add(worktreePath);
 }

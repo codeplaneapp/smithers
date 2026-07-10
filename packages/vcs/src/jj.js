@@ -211,6 +211,10 @@ export function isJjRepo(cwd) {
  * @param {WorkspaceAddOptions} [opts]
  * @returns {Effect.Effect<WorkspaceResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
  */
+/** Transient shared-lock failures worth retrying (holders live for ms–s). */
+const LOCK_CONTENTION_PATTERN = /could not be obtained|Could not acquire lock|index\.lock|packed-refs\.lock|lock file already exists/i;
+const LOCK_CONTENTION_RETRIES = 8;
+
 export function workspaceAdd(name, path, opts = {}) {
     const attempts = [];
     const revTail = opts.atRev ? ["-r", opts.atRev] : [];
@@ -241,8 +245,17 @@ export function workspaceAdd(name, path, opts = {}) {
             yield* Effect.logWarning(`jj workspace pre-create cleanup failed at ${path}: ${error instanceof Error ? error.message : String(error)}`);
         }
         const errors = [];
+        // Shared .git lock contention (index.lock, packed-refs.lock) is always
+        // transient: some other git/jj process holds it for milliseconds to
+        // seconds. jj itself gives up after ONE acquisition attempt, so retry
+        // the same invocation with jittered backoff before falling down the
+        // syntax ladder (issue #935: 38 of 50 parallel lanes lost this race).
         for (const args of attempts) {
-            const res = yield* runJj(args, { cwd: opts.cwd });
+            let res = yield* runJj(args, { cwd: opts.cwd });
+            for (let retry = 0; res.code !== 0 && LOCK_CONTENTION_PATTERN.test(jjError(res)) && retry < LOCK_CONTENTION_RETRIES; retry += 1) {
+                yield* Effect.sleep(`${150 + Math.floor(Math.random() * 600)} millis`);
+                res = yield* runJj(args, { cwd: opts.cwd });
+            }
             if (res.code === 0) {
                 return { success: true };
             }
