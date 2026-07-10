@@ -10,6 +10,7 @@ import {
   createSmithers,
 } from "smithers-orchestrator";
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
@@ -667,7 +668,11 @@ function scanLocalTickets(): z.infer<typeof localScanSchema> {
       const titleMatch = body.match(/^#\s+(.+)$/m);
       tickets.push({
         ticketPath: rel,
-        slug: slugify(rel.replace(/\.md$/, "")),
+        // slugify truncates to 50 chars, and long mirrored/decomposed ticket
+        // names collide there (DUPLICATE_ID kills the run once the backlog
+        // holds hundreds of files) — a short path hash keeps node ids unique
+        // AND stable across resumes.
+        slug: slugify(rel.replace(/\.md$/, "")) + "-" + createHash("sha1").update(rel).digest("hex").slice(0, 6),
         title: titleMatch?.[1]?.trim() ?? basename(rel, ".md"),
         linkedIssue: linkMatch ? Number(linkMatch[1]) : 0,
         isEpicDir: epicDir,
