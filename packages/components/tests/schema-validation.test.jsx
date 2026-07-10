@@ -215,7 +215,13 @@ describe("schema validation", () => {
             },
         };
         const workflow = smithers(() => (<Workflow name="schema-no-burn-retry">
-        <Task id="t" output={outputs.out} agent={agent} retries={1}>
+        <Task
+          id="t"
+          output={outputs.out}
+          agent={agent}
+          retries={1}
+          retryPolicy={{ backoff: "fixed", initialDelayMs: 0 }}
+        >
           Return val.
         </Task>
       </Workflow>));
