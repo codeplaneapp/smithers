@@ -32,8 +32,11 @@ function runIdFromUrl(): string | undefined {
 function unwrapRow(value: unknown): Record<string, unknown> | null {
   const response = isRecord(value) ? value : {};
   const data = isRecord(response.data) ? response.data : response;
-  const row = isRecord(data.row) ? data.row : isRecord(data) ? data : null;
-  return row;
+  if (isRecord(data.row)) return data.row;
+  // A {status, row: null, schema} envelope means the node has produced no
+  // output yet — never render the envelope itself as if it were the row.
+  if ("row" in data || "schema" in data || "status" in data) return null;
+  return isRecord(data) && Object.keys(data).length ? data : null;
 }
 /** Output columns store arrays/objects as JSON strings — parse defensively. */
 function parseMaybeJson(value: unknown): unknown {
@@ -125,7 +128,29 @@ function buildIssueLanes(nodeStatus: Map<string, NodeStatus>): IssueLane[] {
     .sort((a, b) => a.issueNumber - b.issueNumber);
 }
 
+function sweepStats(nodeStatus: Map<string, NodeStatus>) {
+  const stat = (match: (id: string) => boolean) => {
+    let done = 0, running = 0, failed = 0, total = 0;
+    for (const [nodeId, status] of nodeStatus) {
+      if (!match(nodeId)) continue;
+      total++;
+      if (status === "done") done++;
+      else if (status === "running") running++;
+      else if (status === "failed") failed++;
+    }
+    return { done, running, failed, total };
+  };
+  return {
+    local: stat((id) => id.startsWith("t:") && id.endsWith(":verdict")),
+    gh: stat((id) => /^i\d+:gh-verdict$/.test(id)),
+    triage: stat((id) => /^i\d+:triage$/.test(id)),
+    steps: (["local-scan", "gh-scan", "ci-status", "sync-apply", "triage-apply"] as const)
+      .map((id) => ({ id, status: nodeStatus.get(id) ?? "pending" })),
+  };
+}
+
 const STAGE_COLUMNS: Array<{ stage: Stage; label: string }> = [
+  { stage: "sync", label: "Sync check" },
   { stage: "triage", label: "Triage" },
   { stage: "research", label: "Research" },
   { stage: "poc", label: "POC" },
@@ -152,6 +177,7 @@ const styles = [
   ".pill.warn{color:var(--warn);border-color:var(--warn);}",
   "select{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;}",
   ".banner{background:#3b0d0d;border:1px solid var(--err);color:#fecaca;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-weight:600;}",
+  ".banner.amber{background:#3a2a0a;border-color:var(--warn);color:#fde68a;}",
   ".cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:16px;}",
   ".card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px;}",
   ".card h3{margin:0 0 8px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}",
@@ -234,8 +260,10 @@ function Dashboard({ runId }: { runId: string }) {
   const doneCount = useMemo(() => [...nodeStatus.values()].filter((s) => s === "done").length, [nodeStatus]);
   const remountKey = String(doneCount);
 
-  const guardFailures = [...nodeStatus.entries()].filter(([nodeId, status]) =>
-    status === "failed" && (nodeId.startsWith("guard:") || /:(queue-)?guard$/.test(nodeId)));
+  const failedNodes = [...nodeStatus.entries()].filter(([, s]) => s === "failed").map(([nodeId]) => nodeId);
+  const guardFailures = failedNodes.filter((nodeId) => nodeId.startsWith("guard:") || /:(queue-)?guard$/.test(nodeId));
+  const otherFailures = failedNodes.filter((nodeId) => !guardFailures.includes(nodeId));
+  const sweep = sweepStats(nodeStatus);
   const status = String((run.data as any)?.status ?? "");
   const runApprovals = (Array.isArray(approvals.data) ? approvals.data : []).filter((a: any) => a?.runId === runId);
 
@@ -243,12 +271,28 @@ function Dashboard({ runId }: { runId: string }) {
     <div>
       {guardFailures.length ? (
         <div className="banner">
-          MAIN GUARD TRIPPED — {guardFailures.map(([nodeId]) => nodeId).join(", ")}. The run stops itself when the repo root
+          MAIN GUARD TRIPPED — {guardFailures.join(", ")}. The run stops itself when the repo root
           leaves main or an agent writes outside its worktree. Inspect with `smithers node` before resuming anything.
+        </div>
+      ) : null}
+      {otherFailures.length ? (
+        <div className="banner amber">
+          {otherFailures.length} node(s) failed (retries exhausted): {otherFailures.slice(0, 6).join(", ")}
+          {otherFailures.length > 6 ? " …" : ""} — inspect with `smithers node {"<runId> <nodeId>"}`, recover with `smithers retry-task`.
         </div>
       ) : null}
 
       <div className="cards">
+        <div className="card">
+          <h3>Sweep progress</h3>
+          <span className="big">{sweep.local.done}/{sweep.local.total} tickets · {sweep.gh.done}/{sweep.gh.total} issues</span>
+          <p>
+            {sweep.triage.total ? "triage " + sweep.triage.done + "/" + sweep.triage.total + " · " : ""}
+            {sweep.local.running + sweep.gh.running + sweep.triage.running} agent(s) running
+            {"\n"}
+            {sweep.steps.map((s) => s.id + ": " + s.status).join(" · ")}
+          </p>
+        </div>
         <OutputCard runId={runId} nodeId="sync-apply" title="Two-way sync" remountKey={remountKey}
           render={(row) => (
             <div>
