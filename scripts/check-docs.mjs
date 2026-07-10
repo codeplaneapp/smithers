@@ -3629,7 +3629,7 @@ function checkCliAgentHijackDocsMatchLauncher() {
     [CLI_AGENTS_INTEGRATION, "| `KimiAgent` | `kimi --session` |"],
     [CLI_AGENTS_INTEGRATION, "| `ForgeAgent` | `forge --conversation-id` |"],
     [CLI_AGENTS_INTEGRATION, "| `AmpAgent` | `amp threads continue` |"],
-    [CLI_AGENTS_INTEGRATION, "native `bunx smithers-orchestrator hijack` support for Vibe, OpenCode, and OpenClaw is not shipped yet"],
+    [CLI_AGENTS_INTEGRATION, "native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet"],
   ];
   const forbidden = [
     [CLI_AGENTS_INTEGRATION, "| `GeminiAgent` | `gemini --resume` |"],
