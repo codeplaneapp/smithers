@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,13 +19,25 @@ import {
   parseWatchdogArgs,
   progressSnapshot,
   releaseLeaseLock,
+  retryTaskBrokerArgs,
   runSmithersJson,
   shouldEscalate,
   stateKeyForRunId,
   validateReplacementRun,
+  validateRetryTaskProposal,
 } from "../scripts/codex-issue-merge-watchdog";
 
 const watchdogScript = fileURLToPath(new URL("../scripts/codex-issue-merge-watchdog.ts", import.meta.url));
+
+function compileFixture(sourcePath: string, outputPath: string): void {
+  const result = Bun.spawnSync([process.execPath, "build", "--compile", sourcePath, `--outfile=${outputPath}`], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(new TextDecoder().decode(result.stderr) || new TextDecoder().decode(result.stdout) || "Fixture compilation failed.");
+  }
+}
 
 async function runWatchdogProcess(
   runId: string,
@@ -33,7 +45,8 @@ async function runWatchdogProcess(
   ticks = 1,
 ): Promise<{ status: number | null; stdout: string; stderr: string }> {
   const root = mkdtempSync(join(tmpdir(), "smithers-watchdog-process-"));
-  const binary = join(root, "smithers-fixture");
+  const fixtureSource = join(root, "smithers-fixture.ts");
+  const binary = join(root, process.platform === "win32" ? "smithers-fixture.exe" : "smithers-fixture");
   const runner = join(root, "watchdog-runner.ts");
   const stateDir = join(root, "state");
   const source = [
@@ -45,23 +58,24 @@ async function runWatchdogProcess(
     "",
   ].join("\n");
   try {
-    writeFileSync(binary, source, { mode: 0o700 });
+    writeFileSync(fixtureSource, source);
+    compileFixture(fixtureSource, binary);
     writeFileSync(
       runner,
       `import { watchdogMain } from ${JSON.stringify(pathToFileURL(watchdogScript).href)};\nawait watchdogMain();\n`,
     );
-    chmodSync(binary, 0o700);
     let result: { status: number; stdout: string; stderr: string } | undefined;
     for (let index = 0; index < ticks; index += 1) {
       const stdoutPath = join(root, `watchdog-${index}.stdout`);
       const stderrPath = join(root, `watchdog-${index}.stderr`);
-      const child = Bun.spawn(["/usr/bin/env", "bun",
+      const child = Bun.spawn([process.execPath,
         runner,
         "--run-id", runId,
         "--root", root,
         "--state-dir", stateDir,
       ], {
         env: {
+          ...process.env,
           PATH: process.env.PATH ?? "",
           HOME: process.env.HOME ?? root,
           TMPDIR: process.env.TMPDIR ?? tmpdir(),
@@ -89,25 +103,44 @@ async function runWatchdogProcess(
 
 describe("codex issue merge watchdog", () => {
   test("is a one-shot cron command by default", () => {
-    const options = parseWatchdogArgs(["run-123"], "/tmp/smithers-watchdog");
+    const root = join(tmpdir(), "smithers-watchdog");
+    const options = parseWatchdogArgs(["run-123"], root);
     expect(options.runId).toBe("run-123");
     expect(options.once).toBe(true);
     expect(options.intervalSeconds).toBe(300);
     expect(options.cooldownMinutes).toBe(30);
-    expect(options.stateDir).toBe("/tmp/smithers-watchdog/.smithers/state/codex-issue-merge-watchdog");
+    expect(options.stateDir).toBe(join(root, ".smithers", "state", "codex-issue-merge-watchdog"));
+    const source = readFileSync(watchdogScript, "utf8");
+    expect(source).toContain("--root /path/to/repo --run-id RUN_ID");
+  });
+
+  test("uses subscription-only sandboxed provider fallbacks for untrusted diagnostics", () => {
+    const source = readFileSync(watchdogScript, "utf8");
+    expect(source).toContain("subscriptionCodexFirst({");
+    expect(source).toContain("buildPublicIssueAgentPolicy(");
+    expect(source).not.toContain("smithersRuntimeAccess: \"write\"");
+    expect(source).not.toContain("claudeBashAllowRules");
+    expect(source).toContain("executeRepairProposal(activeRunId, repair, options.rootDir)");
+    expect(source).toContain('model: "claude-fable-5"');
+    expect(source).toContain('model: "claude-sonnet-5"');
+    expect(source).not.toContain("codexFirst({");
+    expect(source).not.toContain('sandbox: "workspace-write"');
+    expect(source).not.toContain('sandbox: "read-only"');
+    expect(source).not.toContain('permissionMode: "bypassPermissions"');
   });
 
   test("supports a foreground interval and explicit cooldown", () => {
+    const root = join(tmpdir(), "repo");
     const options = parseWatchdogArgs([
       "--run-id", "run-456",
       "--interval-seconds", "60",
       "--cooldown-minutes", "45",
-      "--root", "/tmp/repo",
+      "--root", root,
     ]);
     expect(options.once).toBe(false);
     expect(options.intervalSeconds).toBe(60);
     expect(options.cooldownMinutes).toBe(45);
-    expect(options.rootDir).toBe("/tmp/repo");
+    expect(options.rootDir).toBe(root);
   });
 
   test("recognizes durable waits, terminal success, failures, and intentional cancellation", () => {
@@ -224,10 +257,16 @@ describe("codex issue merge watchdog", () => {
         runState: { state: "failed" },
         steps: [
           { id: "i1:sync-pr", state: "failed", attempt: 1 },
-          { id: "i2:queue-rebase", state: "in-progress", attempt: 1 },
-          { id: "i3:land-prepare", state: "cancelled", attempt: 1 },
+          { id: "i2:queue-publish", state: "in-progress", attempt: 1 },
+          { id: "i3:land-publish", state: "cancelled", attempt: 1 },
           { id: "i4:land-local-main", state: "pending", attempt: 0 },
           { id: "i5:research", state: "failed", attempt: 1 },
+          { id: "publish-main", state: "failed", attempt: 1 },
+          { id: "i7:close-issue", state: "failed", attempt: 1 },
+          { id: "i8:queue-rebase", state: "failed", attempt: 1 },
+          { id: "i9:land-rebase", state: "failed", attempt: 1 },
+          { id: "i10:queue-resolve", state: "failed", attempt: 1 },
+          { id: "i11:land-resolve", state: "failed", attempt: 1 },
         ],
       },
     };
@@ -237,22 +276,59 @@ describe("codex issue merge watchdog", () => {
     ].join("\n"));
     expect(ambiguousSideEffectNodes(inspect, events!)).toEqual([
       "i1:sync-pr",
-      "i2:queue-rebase",
-      "i3:land-prepare",
+      "i2:queue-publish",
+      "i3:land-publish",
       "i4:land-local-main",
+      "i8:queue-rebase",
+      "i9:land-rebase",
+      "publish-main",
     ]);
   });
 
-  test("accepts only exact structured Sol repair results and verifies replacement lineage", () => {
-    const raw = JSON.stringify({ outcome: "repaired", replacementRunId: "run-replacement", summary: "forked cleanly" });
+  test("accepts only exact brokered Sol repair proposals", () => {
+    const raw = JSON.stringify({
+      outcome: "repair-requested",
+      action: { kind: "retry-task", nodeId: "i7:review-panel-sol", iteration: 2 },
+      summary: "retry the failed read-only reviewer",
+    });
     expect(parseSolRepairResult(raw, "run-current")).toEqual({
-      outcome: "repaired",
-      replacementRunId: "run-replacement",
-      summary: "forked cleanly",
+      outcome: "repair-requested",
+      action: { kind: "retry-task", nodeId: "i7:review-panel-sol", iteration: 2 },
+      summary: "retry the failed read-only reviewer",
     });
     expect(parseSolRepairResult(`report:\n${raw}`, "run-current")).toBeNull();
-    expect(parseSolRepairResult(JSON.stringify({ outcome: "repaired", replacementRunId: "../unsafe", summary: "bad" }), "run-current")).toBeNull();
-    expect(parseSolRepairResult(JSON.stringify({ outcome: "no-change", replacementRunId: "run-other", summary: "bad" }), "run-current")).toBeNull();
+    expect(parseSolRepairResult(JSON.stringify({ outcome: "repair-requested", action: { kind: "retry-task", nodeId: "i7:sync-pr", iteration: 0 }, summary: "unsafe" }), "run-current")).toBeNull();
+    expect(parseSolRepairResult(JSON.stringify({ outcome: "repair-requested", action: { kind: "none" }, summary: "contradictory" }), "run-current")).toBeNull();
+    expect(parseSolRepairResult(JSON.stringify({ outcome: "no-change", action: { kind: "none" }, summary: "healthy" }), "run-current")).toEqual({
+      outcome: "no-change",
+      action: { kind: "none" },
+      summary: "healthy",
+    });
+  });
+
+  test("brokers only an exact failed non-side-effect node without resetting dependents", () => {
+    const action = { kind: "retry-task" as const, nodeId: "i7:review-panel-sol", iteration: 2 };
+    const inspect = { data: { run: { id: "run-current" }, steps: [
+      { id: action.nodeId, iteration: 2, state: "failed" },
+      { id: "i7:sync-pr", iteration: 0, state: "finished" },
+    ] } };
+    expect(validateRetryTaskProposal(inspect, "run-current", action)).toEqual({ ok: true });
+    expect(validateRetryTaskProposal(inspect, "run-other", action)).toMatchObject({ ok: false });
+    expect(validateRetryTaskProposal(inspect, "run-current", { ...action, iteration: 1 })).toMatchObject({ ok: false });
+    expect(validateRetryTaskProposal(inspect, "run-current", { ...action, nodeId: "i7:sync-pr" })).toMatchObject({ ok: false });
+    const args = retryTaskBrokerArgs("run-current", action);
+    expect(args).toEqual([
+      "retry-task", "codex-issue-merge-queue",
+      "--run-id", "run-current",
+      "--node-id", action.nodeId,
+      "--iteration", "2",
+      "--no-deps",
+      "--format", "json",
+    ]);
+    expect(args).not.toContain("--force");
+  });
+
+  test("verifies replacement lineage for externally supervised handoffs", () => {
 
     const current = { data: { run: { id: "run-current", workflow: "Codex Issue Merge Queue", started: "2026-07-09T10:00:00.000Z" }, runState: { state: "failed" }, steps: [] } };
     const linked = { data: { run: { id: "run-replacement", workflow: "Codex Issue Merge Queue", parentRunId: "run-current", started: "2026-07-09T10:01:00.000Z" }, runState: { state: "running" }, steps: [] } };
@@ -267,7 +343,7 @@ describe("codex issue merge watchdog", () => {
     const unhealthy = { healthy: false, repairRequired: true, state: "failed", reason: "failed", recommendedAction: "repair" };
     expect(decisionAfterSolRepair(unhealthy, {
       outcome: "human-required",
-      replacementRunId: null,
+      action: { kind: "none" },
       summary: "reconcile the PR branch",
     })).toMatchObject({
       manualInterventionRequired: true,
@@ -279,9 +355,9 @@ describe("codex issue merge watchdog", () => {
       },
     });
     expect(decisionAfterSolRepair(unhealthy, {
-      outcome: "repaired",
-      replacementRunId: null,
-      summary: "resumed",
+      outcome: "repair-requested",
+      action: { kind: "retry-task", nodeId: "i1:research", iteration: 0 },
+      summary: "retry requested",
     })).toEqual({ decision: unhealthy, manualInterventionRequired: false });
   });
 
@@ -487,10 +563,11 @@ describe("codex issue merge watchdog", () => {
 
   test("terminates a stuck Smithers command at its deadline", () => {
     const root = mkdtempSync(join(tmpdir(), "smithers-watchdog-command-"));
-    const binary = join(root, "stuck-smithers");
+    const source = join(root, "stuck-smithers.ts");
+    const binary = join(root, process.platform === "win32" ? "stuck-smithers.exe" : "stuck-smithers");
     try {
-      writeFileSync(binary, "#!/bin/sh\nwhile :; do :; done\n", { mode: 0o700 });
-      chmodSync(binary, 0o700);
+      writeFileSync(source, "while (true) await Bun.sleep(1_000);\n");
+      compileFixture(source, binary);
       const startedAt = Date.now();
       const result = runSmithersJson("inspect", "run-stuck", root, { binary, timeoutMs: 50 });
       expect(result.ok).toBe(false);

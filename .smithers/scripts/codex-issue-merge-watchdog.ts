@@ -12,11 +12,12 @@
  * owner recovery. This watchdog asks Terra to diagnose semantic progress and
  * only invokes Sol when repair is actually required.
  */
-// crontab: */5 * * * * PATH=/usr/local/bin:/usr/bin:/bin SMITHERS_BIN=/absolute/path/to/smithers /absolute/path/to/bun /path/to/repo/.smithers/scripts/codex-issue-merge-watchdog.ts --root /path/to/repo RUN_ID
+// crontab: */5 * * * * PATH=/usr/local/bin:/usr/bin:/bin SMITHERS_BIN=/absolute/path/to/smithers /absolute/path/to/bun /path/to/repo/.smithers/scripts/codex-issue-merge-watchdog.ts --root /path/to/repo --run-id RUN_ID
 import { ClaudeCodeAgent, type AgentLike } from "smithers-orchestrator";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -25,9 +26,14 @@ import {
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
-import { codexFirst } from "../lib/codexAccounts";
+import { subscriptionCodexFirst } from "../lib/codexAccounts";
+import {
+  buildPublicIssueAgentPolicy,
+  resolvePublicIssueToolchainReadPaths,
+} from "../lib/publicIssueAgentPolicy";
 
 export type WatchdogOptions = {
   runId: string;
@@ -125,8 +131,10 @@ export type ProgressComparison = {
 };
 
 export type SolRepairResult = {
-  outcome: "repaired" | "no-change" | "human-required";
-  replacementRunId: string | null;
+  outcome: "repair-requested" | "no-change" | "human-required";
+  action:
+    | { kind: "none" }
+    | { kind: "retry-task"; nodeId: string; iteration: number };
   summary: string;
 };
 
@@ -138,7 +146,15 @@ export const DEFAULT_LOCK_STALE_TTL_MS = 2 * 60 * 60_000;
 const MAX_RUN_KEY_PREFIX = 48;
 const MAX_EVENT_HISTORY = 100_000;
 const EVENT_CURSOR_OVERLAP_MS = 60_000;
-const SIDE_EFFECT_NODE_NAMES = new Set(["sync-pr", "queue-rebase", "land-prepare", "land-local-main"]);
+const SIDE_EFFECT_NODE_NAMES = new Set([
+  "sync-pr",
+  "queue-rebase",
+  "queue-publish",
+  "land-rebase",
+  "land-publish",
+  "land-local-main",
+  "publish-main",
+]);
 const AMBIGUOUS_NODE_STATES = new Set(["in-progress", "failed", "cancelled", "canceled", "error", "stale"]);
 const NODE_LIFECYCLE_EVENTS = new Set(["NodeStarted", "NodeFinished", "NodeFailed", "NodeCancelled", "NodeSkipped"]);
 
@@ -447,17 +463,36 @@ export function ambiguousSideEffectNodes(
 
 export function parseSolRepairResult(text: string, currentRunId: string): SolRepairResult | null {
   try {
-    const value = JSON.parse(text.trim()) as Partial<SolRepairResult>;
-    if (!value || typeof value !== "object") return null;
-    if (!(["repaired", "no-change", "human-required"] as const).includes(value.outcome as any)) return null;
-    if (typeof value.summary !== "string" || value.summary.trim().length === 0) return null;
-    if (value.replacementRunId !== null && typeof value.replacementRunId !== "string") return null;
-    if (typeof value.replacementRunId === "string") {
-      if (!isSafeRunId(value.replacementRunId) || value.replacementRunId === currentRunId || value.outcome !== "repaired") return null;
+    if (!isSafeRunId(currentRunId)) return null;
+    const value = JSON.parse(text.trim()) as Partial<SolRepairResult> & { action?: Record<string, unknown> };
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (Object.keys(value).sort().join(",") !== "action,outcome,summary") return null;
+    if (!(value.outcome === "repair-requested" || value.outcome === "no-change" || value.outcome === "human-required")) return null;
+    if (typeof value.summary !== "string" || value.summary.trim().length === 0 || !value.action || typeof value.action !== "object") return null;
+    const kind = value.action.kind;
+    let action: SolRepairResult["action"];
+    if (kind === "none") {
+      if (Object.keys(value.action).join(",") !== "kind" || value.outcome === "repair-requested") return null;
+      action = { kind: "none" };
+    } else if (kind === "retry-task") {
+      if (Object.keys(value.action).sort().join(",") !== "iteration,kind,nodeId" || value.outcome !== "repair-requested") return null;
+      const nodeId = value.action.nodeId;
+      const iteration = value.action.iteration;
+      if (
+        typeof nodeId !== "string"
+        || !/^i\d+:[a-zA-Z0-9][a-zA-Z0-9:._-]{0,299}$/.test(nodeId)
+        || typeof iteration !== "number"
+        || !Number.isInteger(iteration)
+        || iteration < 0
+        || isSideEffectNode(nodeId)
+      ) return null;
+      action = { kind: "retry-task", nodeId, iteration };
+    } else {
+      return null;
     }
     return {
-      outcome: value.outcome as SolRepairResult["outcome"],
-      replacementRunId: value.replacementRunId ?? null,
+      outcome: value.outcome,
+      action,
       summary: value.summary.trim(),
     };
   } catch {
@@ -482,6 +517,27 @@ export function decisionAfterSolRepair(
     },
     manualInterventionRequired: true,
   };
+}
+
+export function validateRetryTaskProposal(
+  inspect: unknown,
+  runId: string,
+  action: Extract<SolRepairResult["action"], { kind: "retry-task" }>,
+): { ok: true } | { ok: false; reason: string } {
+  const value = inspectValue(inspect);
+  if (value?.run?.id !== runId || !isSafeRunId(runId)) return { ok: false, reason: "Live inspect does not belong to the requested run." };
+  if (!/^i\d+:[a-zA-Z0-9][a-zA-Z0-9:._-]{0,299}$/.test(action.nodeId) || isSideEffectNode(action.nodeId)) {
+    return { ok: false, reason: "Requested retry node is unsafe or side-effecting." };
+  }
+  const matches = (Array.isArray(value.steps) ? value.steps : []).filter((step: any) =>
+    step?.id === action.nodeId && Number(step?.iteration ?? 0) === action.iteration
+  );
+  if (matches.length !== 1) return { ok: false, reason: "Requested retry node/iteration is missing or ambiguous in live state." };
+  const state = String(matches[0]?.state ?? "").toLowerCase();
+  if (!(state === "failed" || state === "error" || state === "cancelled" || state === "canceled" || state === "stale")) {
+    return { ok: false, reason: `Requested retry node is ${state || "unknown"}, not failed.` };
+  }
+  return { ok: true };
 }
 
 function inspectRun(inspect: unknown): any {
@@ -711,33 +767,133 @@ export function runSmithersJson(
   }
 }
 
+export function retryTaskBrokerArgs(
+  runId: string,
+  action: Extract<SolRepairResult["action"], { kind: "retry-task" }>,
+): string[] {
+  if (
+    !isSafeRunId(runId)
+    || !/^i\d+:[a-zA-Z0-9][a-zA-Z0-9:._-]{0,299}$/.test(action.nodeId)
+    || isSideEffectNode(action.nodeId)
+    || !Number.isInteger(action.iteration)
+    || action.iteration < 0
+  ) throw new Error("Unsafe deterministic retry request.");
+  return [
+    "retry-task",
+    "codex-issue-merge-queue",
+    "--run-id", runId,
+    "--node-id", action.nodeId,
+    "--iteration", String(action.iteration),
+    "--no-deps",
+    "--format", "json",
+  ];
+}
+
+function executeRepairProposal(
+  runId: string,
+  repair: SolRepairResult,
+  rootDir: string,
+): HealthDecision | null {
+  if (repair.outcome !== "repair-requested" || repair.action.kind !== "retry-task") return null;
+  const liveInspectResult = runSmithersJson("inspect", runId, rootDir);
+  const liveEventsResult = runSmithersJson("events", runId, rootDir);
+  const liveInspect = liveInspectResult.ok ? parsedJson(liveInspectResult.output) : null;
+  const liveEvents = liveEventsResult.ok ? parseEventEvidence(liveEventsResult.output) : null;
+  if (!liveInspect || !liveEvents) throw new Error("Deterministic repair broker could not refresh valid live run evidence.");
+  const ambiguous = ambiguousSideEffectNodes(liveInspect, liveEvents);
+  if (ambiguous.length > 0) {
+    throw new Error(`Deterministic repair broker found ambiguous side effects: ${ambiguous.join(", ")}.`);
+  }
+  const validation = validateRetryTaskProposal(liveInspect, runId, repair.action);
+  if (!validation.ok) throw new Error(`Deterministic repair broker rejected the proposal: ${validation.reason}`);
+
+  const binary = process.env.SMITHERS_BIN?.trim() || "smithers";
+  execFileSync(binary, retryTaskBrokerArgs(runId, repair.action), {
+    cwd: rootDir,
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+    timeout: 45 * 60_000,
+    killSignal: "SIGTERM",
+  });
+
+  const postResult = runSmithersJson("inspect", runId, rootDir);
+  const postInspect = postResult.ok ? parsedJson(postResult.output) : null;
+  if (!postInspect) throw new Error("Retry command returned, but post-repair inspect was invalid.");
+  return knownStateDecision(postInspect, Date.now(), null) ?? {
+    healthy: true,
+    repairRequired: false,
+    state: inspectState(postInspect),
+    reason: `Deterministic broker retried ${repair.action.nodeId} iteration ${repair.action.iteration} without resetting dependents.`,
+    recommendedAction: "continue monitoring durable progress",
+  };
+}
+
+function watchdogAgentRuntime(rootDir: string, repair: boolean) {
+  const parent = join(rootDir, ".smithers", "sandboxes", "codex-issue-merge-watchdog");
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const runtimeRoot = mkdtempSync(join(parent, "tick-"));
+  const safeTmp = join(runtimeRoot, "tmp");
+  const safeHome = join(safeTmp, "home");
+  mkdirSync(safeHome, { recursive: true, mode: 0o700 });
+  const envSource = {
+    ...process.env,
+    HOME: safeHome,
+    USERPROFILE: safeHome,
+    TMPDIR: safeTmp,
+    TMP: safeTmp,
+    TEMP: safeTmp,
+  };
+  const smithersBinary = process.env.SMITHERS_BIN?.trim();
+  const policy = buildPublicIssueAgentPolicy(repair ? "write" : "read", envSource, {
+    safeHome,
+    hostHome: homedir(),
+    toolchainReadPaths: [
+      ...resolvePublicIssueToolchainReadPaths(process.env, ["bash", "git", "jj", "rg", "node", "bun", "pnpm", "smithers"]),
+      ...(smithersBinary ? [dirname(resolve(smithersBinary))] : []),
+    ],
+  });
+  return {
+    policy,
+    claudeConfigDir: process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), ".claude"),
+    cleanup: () => rmSync(runtimeRoot, { recursive: true, force: true }),
+  };
+}
+
 async function askTerra(runId: string, inspect: string, why: string, rootDir: string): Promise<HealthDecision | null> {
-  const terra = codexFirst({
-    model: "gpt-5.6-terra",
-    config: { model_reasoning_effort: "medium" },
-    sandbox: "read-only",
-    yolo: false,
-    skipGitRepoCheck: true,
-  }, [
-    new ClaudeCodeAgent({
-      model: "claude-sonnet-5",
-      systemPrompt: "You are the Sonnet fallback for Terra's read-only Smithers health-check role.",
-      permissionMode: "plan",
-    }),
-  ]);
-  const text = await generateWithAgentFallback(terra, {
-    rootDir,
-    timeout: { totalMs: 10 * 60_000, idleMs: 2 * 60_000 },
-    prompt: [
-      `You are serving the Terra read-only health-check role for Smithers run ${runId}.`,
-      "Judge whether the workflow is making healthy durable progress. Waiting for an explicit approval, signal, timer, or known quota reset is healthy. Running with no recent progress, stale/orphaned owners, dependency deadlocks, repeated gate failures, and failed nodes are unhealthy.",
-      "The inspect context includes a persisted PROGRESS COMPARISON derived only from durable event sequence and node-state transitions. Use unchangedTicks and changedAt to distinguish a quiet healthy interval from a genuinely stalled running run.",
-      "Do not edit files, mutate the run, approve anything, merge, or push.",
-      "Return ONLY one JSON object: {\"healthy\":boolean,\"repairRequired\":boolean,\"state\":string,\"reason\":string,\"recommendedAction\":string}.",
-      "", "SMITHERS INSPECT:", boundedContext(inspect), "", "SMITHERS WHY:", boundedContext(why),
-    ].join("\n"),
-  }, (candidate) => parseHealthDecision(candidate) !== null);
-  return parseHealthDecision(text);
+  const runtime = watchdogAgentRuntime(rootDir, false);
+  try {
+    const terra = subscriptionCodexFirst({
+      ...runtime.policy.codex,
+      model: "gpt-5.6-terra",
+      config: [
+        ...runtime.policy.codex.config,
+        'model_reasoning_effort="medium"',
+      ],
+      skipGitRepoCheck: true,
+    }, [
+      new ClaudeCodeAgent({
+        ...runtime.policy.claude,
+        configDir: runtime.claudeConfigDir,
+        model: "claude-sonnet-5",
+        systemPrompt: "You are the Sonnet fallback for Terra's read-only Smithers health-check role.",
+      }),
+    ]);
+    const text = await generateWithAgentFallback(terra, {
+      rootDir,
+      timeout: { totalMs: 10 * 60_000, idleMs: 2 * 60_000 },
+      prompt: [
+        `You are serving the Terra read-only health-check role for Smithers run ${runId}.`,
+        "Judge whether the workflow is making healthy durable progress. Waiting for an explicit approval, signal, timer, or known quota reset is healthy. Running with no recent progress, stale/orphaned owners, dependency deadlocks, repeated gate failures, and failed nodes are unhealthy.",
+        "The inspect context includes a persisted PROGRESS COMPARISON derived only from durable event sequence and node-state transitions. Use unchangedTicks and changedAt to distinguish a quiet healthy interval from a genuinely stalled running run.",
+        "Do not edit files, mutate the run, approve anything, integrate code, or publish remote refs.",
+        "Return ONLY one JSON object: {\"healthy\":boolean,\"repairRequired\":boolean,\"state\":string,\"reason\":string,\"recommendedAction\":string}.",
+        "", "SMITHERS INSPECT:", boundedContext(inspect), "", "SMITHERS WHY:", boundedContext(why),
+      ].join("\n"),
+    }, (candidate) => parseHealthDecision(candidate) !== null);
+    return parseHealthDecision(text);
+  } finally {
+    runtime.cleanup();
+  }
 }
 
 /**
@@ -772,35 +928,43 @@ async function askSolToRepair(
   why: string,
   rootDir: string,
 ): Promise<string> {
-  const sol = codexFirst({
-    model: "gpt-5.6-sol",
-    config: { model_reasoning_effort: "xhigh" },
-    sandbox: "workspace-write",
-    fullAuto: true,
-    yolo: false,
-    skipGitRepoCheck: true,
-  }, [
-    new ClaudeCodeAgent({
-      model: "claude-fable-5",
-      systemPrompt: "You are the Fable fallback for the Sol Smithers-repair role. Preserve Sol's safety constraints and return the exact requested JSON shape.",
-      permissionMode: "bypassPermissions",
-    }),
-  ]);
-  return generateWithAgentFallback(sol, {
-    rootDir,
-    timeout: { totalMs: 45 * 60_000, idleMs: 10 * 60_000 },
-    prompt: [
-      `You are serving the Sol repair role for unhealthy Smithers run ${runId} in ${rootDir}.`,
-      `Terra diagnosis: ${JSON.stringify(decision)}`,
-      "Use Smithers run-control commands first: inspect, why, logs/events, supervise/resume, retry-task, or fork as appropriate. Make the smallest safe repair and verify that durable progress resumes.",
-      "Never auto-approve or deny a human gate. Never merge, land, or push branches/main. Never expose credentials.",
-      "Never retry, resume through, or fork from a side-effecting sync-pr, queue-rebase, land-prepare, or land-local-main node. If one of those nodes was in flight or may have completed without persisting output, stop and require a human to reconcile VCS state.",
-      "Editing a workflow changes its durability hash: if source code truly needs repair, verify the change, then use a Smithers fork/replay that durably records parentRunId or continuedFrom. Do NOT blindly resume an old run against changed source, and do not report an unlinked run as the replacement.",
-      "Preserve unrelated working-copy changes. Do not commit.",
-      `Return ONLY one JSON object: {"outcome":"repaired"|"no-change"|"human-required","replacementRunId":string|null,"summary":string}. replacementRunId must be null unless you actually created or selected a different active run from ${runId}; when non-null it must be that exact run id.`,
-      "", "SMITHERS INSPECT:", boundedContext(inspect), "", "SMITHERS WHY:", boundedContext(why),
-    ].join("\n"),
-  }, (candidate) => parseSolRepairResult(candidate, runId) !== null);
+  const runtime = watchdogAgentRuntime(rootDir, true);
+  try {
+    const sol = subscriptionCodexFirst({
+      ...runtime.policy.codex,
+      model: "gpt-5.6-sol",
+      config: [
+        ...runtime.policy.codex.config,
+        'model_reasoning_effort="xhigh"',
+      ],
+      skipGitRepoCheck: true,
+    }, [
+      new ClaudeCodeAgent({
+        ...runtime.policy.claude,
+        configDir: runtime.claudeConfigDir,
+        model: "claude-fable-5",
+        systemPrompt: "You are the Fable fallback for the Sol Smithers-repair role. Preserve Sol's safety constraints and return the exact requested JSON shape.",
+      }),
+    ]);
+    return generateWithAgentFallback(sol, {
+      rootDir,
+      timeout: { totalMs: 45 * 60_000, idleMs: 10 * 60_000 },
+      prompt: [
+        `You are serving the Sol repair role for unhealthy Smithers run ${runId} in ${rootDir}.`,
+        `Terra diagnosis: ${JSON.stringify(decision)}`,
+        "You cannot mutate Smithers durable state. Diagnose only from the supplied evidence and ordinary source files, then either request one exact retry-task action or require a human.",
+        "Never auto-approve or deny a human gate. Never merge, land, or publish branches/main. Never expose credentials.",
+        "Never request retry of sync-pr, queue-rebase, queue-publish, land-rebase, land-publish, land-local-main, or publish-main. If any such node was in flight or may have completed without persisted output, require a human to reconcile VCS state.",
+        "A deterministic broker validates the current run, exact failed node, iteration, and side-effect fences before executing retry-task with --no-deps. Do not output shell commands or request resume, fork, replay, rewind, approve, deny, or force.",
+        "Editing a workflow changes its durability hash. If source code truly needs repair, make the smallest source edit if appropriate but return human-required so a person can review and start a linked replacement safely.",
+        "Preserve unrelated working-copy changes. Do not commit.",
+        "Return ONLY one JSON object: {\"outcome\":\"repair-requested\"|\"no-change\"|\"human-required\",\"action\":{\"kind\":\"none\"}|{\"kind\":\"retry-task\",\"nodeId\":string,\"iteration\":nonnegative_integer},\"summary\":string}. Use repair-requested iff action.kind=retry-task; all other outcomes require action.kind=none.",
+        "", "SMITHERS INSPECT:", boundedContext(inspect), "", "SMITHERS WHY:", boundedContext(why),
+      ].join("\n"),
+    }, (candidate) => parseSolRepairResult(candidate, runId) !== null);
+  } finally {
+    runtime.cleanup();
+  }
 }
 
 function diagnosticFailureDecision(state: string, reason: string): HealthDecision {
@@ -984,28 +1148,15 @@ export async function watchdogTick(options: WatchdogOptions, now = Date.now()): 
           if (!repair) throw new Error("Sol returned malformed or unsafe repair JSON.");
           next.lastSolResult = boundedContext(JSON.stringify(repair));
           next.lastSolStatus = "succeeded";
-          const repairDecision = decisionAfterSolRepair(decision, repair);
-          decision = repairDecision.decision;
-          manualInterventionRequired ||= repairDecision.manualInterventionRequired;
-          next.lastDecision = decision;
-          replacementRunId = repair.replacementRunId;
-          if (replacementRunId) {
-            const replacementInspectResult = runSmithersJson("inspect", replacementRunId, options.rootDir);
-            const replacementInspect = replacementInspectResult.ok
-              ? parsedJson(replacementInspectResult.output)
-              : null;
-            const validation = replacementInspect
-              ? validateReplacementRun(inspectJson, replacementInspect, activeRunId, replacementRunId)
-              : { ok: false as const, reason: "Replacement inspect command failed or returned malformed JSON." };
-            if (!validation.ok) throw new Error(`Unsafe replacement run: ${validation.reason}`);
-            next.activeRunId = replacementRunId;
-            next.lastReplacement = {
-              fromRunId: activeRunId,
-              toRunId: replacementRunId,
-              followedAt: Date.now(),
-            };
-            next.progress = undefined;
+          const brokerDecision = executeRepairProposal(activeRunId, repair, options.rootDir);
+          if (brokerDecision) {
+            decision = brokerDecision;
+          } else {
+            const repairDecision = decisionAfterSolRepair(decision, repair);
+            decision = repairDecision.decision;
+            manualInterventionRequired ||= repairDecision.manualInterventionRequired;
           }
+          next.lastDecision = decision;
         } catch (error) {
           next.lastSolStatus = "failed";
           next.lastSolResult = boundedContext(`Sol repair failed: ${errorText(error)}`);
