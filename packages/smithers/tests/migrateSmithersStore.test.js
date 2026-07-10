@@ -11,7 +11,7 @@ import { openSmithersBackend } from "../src/openSmithersBackend.js";
 import { createSmithersPostgres } from "../src/create.js";
 import { openSmithersStore } from "../src/openSmithersStore.js";
 import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -766,6 +766,99 @@ describe("migrateSmithersStore", () => {
     expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
   });
 
+  test("a non-empty uninitialized PGlite target is preserved without invoking initdb", async () => {
+    const cwd = makeWorkspace("smithers-migrate-nonempty-uninitialized-pglite-target");
+    const dbPath = seedSqliteStore(cwd);
+    const sqliteBefore = readFileSync(dbPath);
+    const dataDir = join(cwd, ".smithers", "pg");
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "preserve-me"), "unknown target contents\n", "utf8");
+    const markerPath = join(cwd, ".smithers", "migrated.json");
+    const existingReceipt = "existing receipt must survive\n";
+    writeFileSync(markerPath, existingReceipt, "utf8");
+
+    let caught;
+    try {
+      await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite", env: {} });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(SmithersError);
+    expect(caught.code).toBe("DB_WRITE_FAILED");
+    expect(caught.message).toContain(dataDir);
+    expect(caught.message).toContain("non-empty but has no PG_VERSION");
+    expect(caught.message).toContain("contents are unknown");
+    expect(caught.message).toContain("Back up and move");
+    expect(caught.message).toContain("repair the PGlite store in place");
+    expect(caught.message).not.toContain("contains data or is not writable");
+    expect(caught.details).toMatchObject({
+      failure: "pglite-target-nonempty-uninitialized",
+      targetBackend: "pglite",
+      dataDir,
+      targetContents: "unknown",
+      entryCount: 1,
+    });
+
+    expect(readFileSync(join(dataDir, "preserve-me"), "utf8")).toBe("unknown target contents\n");
+    expect(existsSync(join(dataDir, "PG_VERSION"))).toBe(false);
+    expect(readFileSync(markerPath, "utf8")).toBe(existingReceipt);
+    expect(readFileSync(dbPath)).toEqual(sqliteBefore);
+    expect(sqliteRunIds(dbPath)).toEqual(["run-migrate-1"]);
+    expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
+  });
+
+  test("an unreadable initialized PGlite target reports unknown contents and preserves all stores and receipts", async () => {
+    const cwd = makeWorkspace("smithers-migrate-unreadable-pglite-target");
+    const dbPath = seedSqliteStore(cwd);
+    const dataDir = join(cwd, ".smithers", "pg");
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "PG_VERSION"), "18\n", "utf8");
+    writeFileSync(join(dataDir, "postgresql.conf"), "not valid PostgreSQL configuration\n", "utf8");
+    writeFileSync(join(dataDir, "preserve-me"), "target sentinel\n", "utf8");
+    const sqliteBefore = readFileSync(dbPath);
+    const markerPath = join(cwd, ".smithers", "migrated.json");
+    const existingReceipt = `${JSON.stringify({
+      migratedAt: "2026-01-01T00:00:00.000Z",
+      source: { backend: "sqlite", dbPath, runCount: 1 },
+      target: { backend: "pglite", dataDir },
+    }, null, 2)}\n`;
+    writeFileSync(markerPath, existingReceipt, "utf8");
+
+    let caught;
+    try {
+      await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite", env: {} });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(SmithersError);
+    expect(caught.code).toBe("DB_WRITE_FAILED");
+    expect(caught.message).toContain(dataDir);
+    expect(caught.message).toContain("contents are unknown");
+    expect(caught.message).toContain("Back up and move");
+    expect(caught.message).toContain("repair the PGlite store in place");
+    expect(caught.message).toContain("Do not blindly remove");
+    expect(caught.message).toContain("retry migration against the same directory");
+    expect(caught.message).not.toContain("contains data or is not writable");
+    expect(caught.details).toMatchObject({
+      failure: "pglite-target-open",
+      targetBackend: "pglite",
+      dataDir,
+      targetContents: "unknown",
+    });
+    expect(typeof caught.details.originalError).toBe("string");
+    expect(caught.cause).toBeInstanceOf(Error);
+
+    expect(readFileSync(join(dataDir, "PG_VERSION"), "utf8")).toBe("18\n");
+    expect(readFileSync(join(dataDir, "postgresql.conf"), "utf8")).toBe("not valid PostgreSQL configuration\n");
+    expect(readFileSync(join(dataDir, "preserve-me"), "utf8")).toBe("target sentinel\n");
+    expect(readFileSync(markerPath, "utf8")).toBe(existingReceipt);
+    expect(readFileSync(dbPath)).toEqual(sqliteBefore);
+    expect(sqliteRunIds(dbPath)).toEqual(["run-migrate-1"]);
+    expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
+  });
+
   test("unsupported or degenerate migration directions fail without writing local receipts", async () => {
     for (const entry of [
       { from: "pglite", to: "postgres", url: "postgres://user:pass@127.0.0.1:1/db", message: "not implemented yet" },
@@ -951,6 +1044,67 @@ describe("migrateSmithersStore", () => {
     expect(caught.message).toContain("Agent-assisted repair is tracked as a follow-up");
     // Should tell the operator to inspect or remove the conflicting target.
     expect(caught.message.toLowerCase()).toContain("target store");
+  });
+
+  test("a real PGlite target with missing WAL reports the recovery failure without rewriting successful receipts", async () => {
+    const cwd = makeWorkspace("smithers-migrate-real-pglite-missing-wal");
+    const dbPath = await seedPgliteStoreWithReceipt(cwd, { keepSqlite: true });
+    const dataDir = join(cwd, ".smithers", "pg");
+    const markerPath = join(cwd, ".smithers", "migrated.json");
+    const backendMarkerPath = join(cwd, ".smithers", "backend.json");
+    const markerBefore = readFileSync(markerPath, "utf8");
+    const backendMarkerBefore = readFileSync(backendMarkerPath, "utf8");
+    const sqliteBefore = readFileSync(dbPath);
+    const pgControlPath = join(dataDir, "global", "pg_control");
+    const pgControlBefore = readFileSync(pgControlPath);
+    const pgVersionBefore = readFileSync(join(dataDir, "PG_VERSION"), "utf8");
+    writeFileSync(join(dataDir, "preserve-me"), "real target sentinel\n", "utf8");
+
+    const walDir = join(dataDir, "pg_wal");
+    const walSegments = readdirSync(walDir).filter((name) => /^[0-9A-F]{24}$/.test(name));
+    expect(walSegments.length).toBeGreaterThan(0);
+    for (const segment of walSegments) {
+      rmSync(join(walDir, segment));
+    }
+
+    const previousExitCode = process.exitCode;
+    let caught;
+    try {
+      await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite", env: {} });
+    } catch (error) {
+      caught = error;
+    } finally {
+      // Emscripten marks the host process failed when Postgres PANICs even though
+      // PGlite exposes the RuntimeError to our caller and the test handles it.
+      process.exitCode = previousExitCode;
+    }
+
+    expect(caught).toBeInstanceOf(SmithersError);
+    expect(caught.code).toBe("DB_WRITE_FAILED");
+    expect(caught.message).toContain(dataDir);
+    expect(caught.message).toContain("contents are unknown");
+    expect(caught.message).toContain("Back up and move");
+    expect(caught.message).toContain("repair the PGlite store in place");
+    expect(caught.message).toContain("Original PGlite error");
+    expect(caught.message).not.toBe("Aborted(). Build with -sASSERTIONS for more info.");
+    expect(caught.message).not.toContain("contains data or is not writable");
+    expect(caught.details).toMatchObject({
+      failure: "pglite-target-open",
+      targetBackend: "pglite",
+      dataDir,
+      targetContents: "unknown",
+      originalError: "Aborted(). Build with -sASSERTIONS for more info.",
+    });
+    expect(caught.cause).toBeInstanceOf(Error);
+    expect(caught.cause.message).toBe("Aborted(). Build with -sASSERTIONS for more info.");
+
+    expect(readFileSync(join(dataDir, "preserve-me"), "utf8")).toBe("real target sentinel\n");
+    expect(readFileSync(join(dataDir, "PG_VERSION"), "utf8")).toBe(pgVersionBefore);
+    expect(readFileSync(pgControlPath)).toEqual(pgControlBefore);
+    expect(readFileSync(markerPath, "utf8")).toBe(markerBefore);
+    expect(readFileSync(backendMarkerPath, "utf8")).toBe(backendMarkerBefore);
+    expect(readFileSync(dbPath)).toEqual(sqliteBefore);
+    expect(sqliteRunIds(dbPath)).toEqual(["run-migrate-1"]);
   });
 });
 

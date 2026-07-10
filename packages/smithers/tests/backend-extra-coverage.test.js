@@ -123,7 +123,7 @@ describe("resolveSmithersBackendChoice — postgres + marker edge cases", () => 
     expect(choice).toMatchObject({ backend: "sqlite", source: "default", migratedMarker: false });
   });
 
-  test("a corrupt initialized PGlite store surfaces its probe error instead of crashing", async () => {
+  test("a corrupt initialized PGlite store surfaces its probe error without poisoning process exit status", async () => {
     const cwd = makeWorkspace("resolver-corrupt-pglite");
     const dataDir = join(cwd, ".smithers", "pg");
     mkdirSync(dataDir, { recursive: true });
@@ -132,9 +132,51 @@ describe("resolveSmithersBackendChoice — postgres + marker edge cases", () => 
     writeFileSync(join(dataDir, "PG_VERSION"), "not-a-version\n");
     writeFileSync(join(dataDir, "postgresql.conf"), "garbage");
 
+    const exitCodeBefore = process.exitCode ?? 0;
     const choice = await resolveSmithersBackendChoice({ cwd, backend: "pglite", env: {} });
-    expect(choice.pglite).toMatchObject({ exists: true, initialized: true, runCount: 0 });
+    expect(choice.pglite).toMatchObject({ exists: true, initialized: true, probed: true, runCount: 0 });
     expect(typeof choice.pglite.error).toBe("string");
+    expect(process.exitCode ?? 0).toBe(exitCodeBefore);
+  });
+
+  test("an unreadable migrated PGlite target is unknown data, not a missing target", async () => {
+    const cwd = makeWorkspace("resolver-unreadable-migrated-pglite");
+    const sqlite = new (await import("bun:sqlite")).Database(join(cwd, "smithers.db"));
+    sqlite.exec(
+      `CREATE TABLE _smithers_runs (run_id TEXT PRIMARY KEY, workflow_name TEXT NOT NULL, status TEXT NOT NULL, created_at_ms INTEGER NOT NULL);
+       INSERT INTO _smithers_runs VALUES ('kept-source','wf','finished',1);`,
+    );
+    sqlite.close();
+
+    const dataDir = join(cwd, ".smithers", "pg");
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "PG_VERSION"), "not-a-version\n");
+    writeFileSync(join(dataDir, "postgresql.conf"), "garbage");
+    writeFileSync(
+      join(cwd, ".smithers", "migrated.json"),
+      JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }),
+    );
+
+    const exitCodeBefore = process.exitCode ?? 0;
+    let caught;
+    try {
+      await resolveSmithersBackendChoice({ cwd, env: {} });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({
+      code: "DB_QUERY_FAILED",
+      details: {
+        targetBackend: "pglite",
+        targetLocation: dataDir,
+        contentsKnown: false,
+      },
+    });
+    expect(caught.message).toContain("contents are unknown");
+    expect(caught.message).toContain("restore it from a known-good backup");
+    expect(caught.message).not.toContain("rerun migration");
+    expect(process.exitCode ?? 0).toBe(exitCodeBefore);
   });
 
   test("a migration receipt for pglite still refuses a stray populated non-target store", async () => {

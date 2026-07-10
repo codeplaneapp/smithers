@@ -208,7 +208,7 @@ describe("resolveSmithersBackendChoice", () => {
     });
   });
 
-  test("explicit sqlite pin (config/env/option) keeps the legacy store instead of conflicting with a stray pglite store", async () => {
+  test("explicit sqlite pin (config/env/option) keeps the legacy store without probing a stray pglite store", async () => {
     // Regression: a workspace that pins backend:"sqlite" to keep its legacy run
     // history must NOT trip the multi-store conflict guard just because a stray
     // pglite store also exists. Pinning sqlite IS the disambiguation the guard
@@ -230,8 +230,11 @@ describe("resolveSmithersBackendChoice", () => {
         backend: "sqlite",
         source: pin.source,
         sqlite: { runCount: 1 },
-        pglite: { runCount: 1 },
+        pglite: { dataDir: join(cwd, ".smithers", "pg"), exists: true, initialized: true, probed: false },
       });
+      expect(choice.pglite.runCount).toBeUndefined();
+      expect(choice.pglite.schemaVersion).toBeUndefined();
+      expect(choice.pglite.error).toBeUndefined();
     }
   });
 

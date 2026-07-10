@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { Effect } from "effect";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { POSTGRES, quoteIdentifier, translateDdl } from "@smithers-orchestrator/db/dialect";
@@ -477,6 +477,12 @@ function withAgentFallback(error, from, to) {
     if (message.includes("Agent-assisted repair is tracked as a follow-up")) {
         return error;
     }
+    // An existing initialized PGlite target that cannot be opened is neither a
+    // retryable copy failure nor a target we can safely classify as empty. Keep
+    // the precise recovery guidance and the original PGlite failure intact.
+    if (error instanceof SmithersError && error.code === "DB_WRITE_FAILED" && error.details?.targetBackend === "pglite" && error.details?.targetContents === "unknown") {
+        return error;
+    }
     // DB_WRITE_FAILED means the target already has data or is corrupt — retrying
     // the same command will hit the same guard. Guide the operator to inspect or
     // remove the conflicting target instead of suggesting a futile retry.
@@ -488,6 +494,53 @@ function withAgentFallback(error, from, to) {
         return new SmithersError(error.code, `${message}${suffix}`, error.details, { cause: error });
     }
     return new SmithersError("DB_WRITE_FAILED", `${message}${suffix}`, {}, { cause: error });
+}
+
+/**
+ * @param {unknown} error
+ * @param {string} dataDir
+ * @returns {SmithersError}
+ */
+function existingPgliteTargetOpenError(error, dataDir) {
+    const originalError = error instanceof Error ? error.message : String(error);
+    return new SmithersError("DB_WRITE_FAILED", `Could not open the existing initialized PGlite migration target at ${dataDir}. Its contents are unknown and may include run history, so Smithers will not delete or replace it. Back up and move the target directory aside before migrating only after confirming the SQLite source is authoritative, or repair the PGlite store in place. Do not blindly remove the target or retry migration against the same directory. Original PGlite error: ${originalError}`, {
+        failure: "pglite-target-open",
+        targetBackend: "pglite",
+        dataDir,
+        targetContents: "unknown",
+        originalError,
+    }, { cause: error });
+}
+
+/**
+ * @param {string} dataDir
+ * @param {number} entryCount
+ * @returns {SmithersError}
+ */
+function nonemptyUninitializedPgliteTargetError(dataDir, entryCount) {
+    return new SmithersError("DB_WRITE_FAILED", `Refusing to initialize the PGlite migration target at ${dataDir} because the existing directory is non-empty but has no PG_VERSION marker. Its contents are unknown and may include unrelated data or incomplete PGlite run history, so Smithers will not initialize, delete, or replace it. Back up and move the target directory aside before migrating only after confirming the SQLite source is authoritative, or repair the PGlite store in place. Do not blindly remove the target or retry migration against the same directory.`, {
+        failure: "pglite-target-nonempty-uninitialized",
+        targetBackend: "pglite",
+        dataDir,
+        targetContents: "unknown",
+        entryCount,
+    });
+}
+
+/**
+ * @param {unknown} error
+ * @param {string} dataDir
+ * @returns {SmithersError}
+ */
+function uninspectablePgliteTargetError(error, dataDir) {
+    const originalError = error instanceof Error ? error.message : String(error);
+    return new SmithersError("DB_WRITE_FAILED", `Could not inspect the existing PGlite migration target path at ${dataDir}. Its contents are unknown and may include run history, so Smithers will not initialize, delete, or replace it. Back up and move the target path aside before migrating only after confirming the SQLite source is authoritative, or repair its permissions or PGlite contents in place. Do not blindly remove the target or retry migration against the same path. Original filesystem error: ${originalError}`, {
+        failure: "pglite-target-inspection",
+        targetBackend: "pglite",
+        dataDir,
+        targetContents: "unknown",
+        originalError,
+    }, { cause: error });
 }
 
 // bun:sqlite surfaces a corrupt, encrypted, or non-SQLite source file with one
@@ -1175,11 +1228,33 @@ export async function migrateSmithersStore(opts = {}) {
         }
         else {
             const dataDir = resolve(cwd, opts.pgliteDataDir ?? join(workspaceRoot, ".smithers", "pg"));
+            const targetExists = existsSync(dataDir);
+            const existingInitializedTarget = targetExists && existsSync(join(dataDir, "PG_VERSION"));
+            if (targetExists && !existingInitializedTarget) {
+                let entries;
+                try {
+                    entries = readdirSync(dataDir);
+                }
+                catch (error) {
+                    throw uninspectablePgliteTargetError(error, dataDir);
+                }
+                if (entries.length > 0) {
+                    throw nonemptyUninitializedPgliteTargetError(dataDir, entries.length);
+                }
+            }
             mkdirSync(dirname(dataDir), { recursive: true });
-            targetApi = await createSmithersPostgres({}, {
-                provider: "pglite",
-                dataDir,
-            });
+            try {
+                targetApi = await createSmithersPostgres({}, {
+                    provider: "pglite",
+                    dataDir,
+                });
+            }
+            catch (error) {
+                if (existingInitializedTarget) {
+                    throw existingPgliteTargetOpenError(error, dataDir);
+                }
+                throw error;
+            }
         }
         const pgConn = /** @type {{ query: (config: { text: string; values?: readonly unknown[] }) => Promise<{ rows?: readonly Record<string, unknown>[] } | unknown> }} */ (targetApi.db.connection);
         await prepareTargetTables(pgConn, tables);

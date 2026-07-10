@@ -167,19 +167,39 @@ function readMigratedMarker(workspaceRoot) {
 /**
  * @param {{ dataDir: string }} details
  */
-async function inspectPgliteStore(details) {
+function describePgliteStore(details) {
     const { dataDir } = details;
-    const initialized = existsSync(join(dataDir, "PG_VERSION"));
-    if (!existsSync(dataDir)) {
-        return { dataDir, exists: false, initialized: false, runCount: 0, schemaVersion: DEFAULT_PG_SCHEMA_VERSION };
+    const exists = existsSync(dataDir);
+    const initialized = exists && existsSync(join(dataDir, "PG_VERSION"));
+    return {
+        dataDir,
+        exists,
+        initialized,
+        probed: false,
+        ...(!initialized
+            ? { hasRunsTable: false, runCount: 0, schemaVersion: DEFAULT_PG_SCHEMA_VERSION }
+            : {}),
+    };
+}
+
+/**
+ * @param {{ dataDir: string }} details
+ */
+async function inspectPgliteStore(details) {
+    const physical = describePgliteStore(details);
+    if (!physical.exists || !physical.initialized) {
+        return physical;
     }
-    if (!initialized) {
-        return { dataDir, exists: true, initialized: false, runCount: 0, schemaVersion: DEFAULT_PG_SCHEMA_VERSION };
-    }
+    // Emscripten-backed PGlite can set the host process exitCode before throwing
+    // from a corrupt/unreadable data directory. This is a best-effort discovery
+    // probe, not the command itself, so contain that side effect even when the
+    // exception is caught and returned as probe metadata. Bun does not clear an
+    // already-set exitCode when assigned undefined, hence the explicit 0.
+    const exitCodeBeforeProbe = process.exitCode;
     let pglite;
     try {
         const { PGlite } = await import("@electric-sql/pglite");
-        pglite = await PGlite.create(dataDir);
+        pglite = await PGlite.create(physical.dataDir);
         const runsTable = await pglite.query("SELECT to_regclass('_smithers_runs') AS table_name");
         const hasRuns = Boolean(runsTable.rows?.[0]?.table_name);
         const runCount = hasRuns
@@ -193,13 +213,12 @@ async function inspectPgliteStore(details) {
         const schemaVersion = typeof headId === "string"
             ? (headId.match(/^\d+/)?.[0] ?? headId)
             : DEFAULT_PG_SCHEMA_VERSION;
-        return { dataDir, exists: true, initialized: true, hasRunsTable: hasRuns, runCount, schemaVersion };
+        return { ...physical, probed: true, hasRunsTable: hasRuns, runCount, schemaVersion };
     }
     catch (error) {
         return {
-            dataDir,
-            exists: true,
-            initialized: true,
+            ...physical,
+            probed: true,
             runCount: 0,
             schemaVersion: DEFAULT_PG_SCHEMA_VERSION,
             error: probeErrorMessage(error),
@@ -211,6 +230,9 @@ async function inspectPgliteStore(details) {
         }
         catch {
             // best-effort read-only probe cleanup
+        }
+        if (process.exitCode !== exitCodeBeforeProbe) {
+            process.exitCode = exitCodeBeforeProbe ?? 0;
         }
     }
 }
@@ -326,6 +348,19 @@ function missingMigratedTargetError(details) {
 }
 
 /**
+ * @param {{ targetBackend: "pglite" | "postgres"; targetLocation: string; probeError: string }} details
+ */
+function unreadableMigratedTargetError(details) {
+    const targetLabel = backendLabel(details.targetBackend);
+    return new SmithersError("DB_QUERY_FAILED", `Found a migration receipt for ${targetLabel}, but Smithers could not read the migrated target at ${details.targetLocation}. The target's contents are unknown, so Smithers will not treat it as empty or recommend another migration. Repair the target in place, restore it from a known-good backup, or point Smithers at the correct target before retrying. Original probe error: ${details.probeError}`, {
+        targetBackend: details.targetBackend,
+        targetLocation: details.targetLocation,
+        contentsKnown: false,
+        probeError: details.probeError,
+    });
+}
+
+/**
  * @param {ReturnType<typeof migrationRequiredError>} error
  */
 async function emitMigrationRequired(error) {
@@ -363,9 +398,17 @@ export async function resolveSmithersBackendChoice(opts = {}) {
     const markerBackend = explicitBackend || envBackend || configBackend ? undefined : (readBackendMarker(workspaceRoot) ?? migratedMarker.backend);
     const backend = explicitBackend ?? envBackend ?? configBackend ?? markerBackend ?? "sqlite";
     const source = explicitBackend ? "options" : envBackend ? "env" : configBackend ? "config" : markerBackend ? "marker" : "default";
+    // An option/env/config SQLite pin is an authoritative operator choice. Do
+    // not boot a leftover PGlite store merely to describe the backend we are
+    // explicitly not using: a locked or corrupt store can abort the process,
+    // and its logical contents are irrelevant to the selected SQLite path.
+    const explicitSqliteOverride = backend === "sqlite"
+        && (explicitBackend === "sqlite" || envBackend === "sqlite" || configBackend === "sqlite");
     const sqliteStore = inspectLegacySqliteStore(dbPath, workspaceRoot, Boolean(opts.dbPath));
     const pgliteDataDir = resolve(cwd, opts.pgliteDataDir ?? join(workspaceRoot, ".smithers", "pg"));
-    const pgliteStore = await inspectPgliteStore({ dataDir: pgliteDataDir });
+    const pgliteStore = explicitSqliteOverride
+        ? describePgliteStore({ dataDir: pgliteDataDir })
+        : await inspectPgliteStore({ dataDir: pgliteDataDir });
     const explicitPostgresConnectionString = opts.connectionString;
     const shouldInspectPostgres = backend === "postgres" || Boolean(opts.connection || explicitPostgresConnectionString);
     const postgresStore = shouldInspectPostgres
@@ -392,7 +435,7 @@ export async function resolveSmithersBackendChoice(opts = {}) {
         && (migratedMarker.sourceBackend === "pglite" || migratedMarker.sourceBackend === "postgres");
     const populated = [
         ...(sqliteStore.runCount > 0 ? [{ backend: /** @type {"sqlite"} */ ("sqlite"), location: sqliteStore.dbPath, runCount: sqliteStore.runCount, schemaVersion: sqliteStore.schemaVersion }] : []),
-        ...(pgliteStore.runCount > 0 ? [{ backend: /** @type {"pglite"} */ ("pglite"), location: pgliteStore.dataDir, runCount: pgliteStore.runCount, schemaVersion: pgliteStore.schemaVersion }] : []),
+        ...(typeof pgliteStore.runCount === "number" && pgliteStore.runCount > 0 ? [{ backend: /** @type {"pglite"} */ ("pglite"), location: pgliteStore.dataDir, runCount: pgliteStore.runCount, schemaVersion: pgliteStore.schemaVersion ?? DEFAULT_PG_SCHEMA_VERSION }] : []),
         ...(postgresStore.runCount > 0 ? [{ backend: /** @type {"postgres"} */ ("postgres"), location: postgresStore.connectionString === "set" ? "postgres connection" : "postgres", runCount: postgresStore.runCount, schemaVersion: postgresStore.schemaVersion }] : []),
     ];
     // An explicit sqlite pin (--backend / SMITHERS_BACKEND / backend:"sqlite" in
@@ -402,8 +445,6 @@ export async function resolveSmithersBackendChoice(opts = {}) {
     // only. Pinning toward pglite/postgres beside a populated sqlite store still
     // falls through to the migration/conflict guards below so legacy history is
     // never silently hidden.
-    const explicitSqliteOverride = backend === "sqlite"
-        && (explicitBackend === "sqlite" || envBackend === "sqlite" || configBackend === "sqlite");
     if (!marker && !reverseMarker && !explicitSqliteOverride && populated.length > 1) {
         throw backendConflictError({ populated });
     }
@@ -418,20 +459,28 @@ export async function resolveSmithersBackendChoice(opts = {}) {
     // marker (above) already guarantees migratedMarker.backend is "pglite" | "postgres".
     const migratedTargetBackend = marker ? /** @type {"pglite" | "postgres"} */ (migratedMarker.backend) : undefined;
     if (migratedTargetBackend && !explicitSqliteOverride) {
+        const targetStore = migratedTargetBackend === "pglite" ? pgliteStore : postgresStore;
+        const targetLocation = migratedTargetBackend === "pglite"
+            ? pgliteStore.dataDir
+            : postgresStore.connectionString === "set" ? "postgres connection" : "postgres";
+        if (targetStore.error) {
+            throw unreadableMigratedTargetError({
+                targetBackend: migratedTargetBackend,
+                targetLocation,
+                probeError: targetStore.error,
+            });
+        }
         const unexpectedPopulated = populated.filter((store) => store.backend !== migratedTargetBackend && store.backend !== "sqlite");
         if (unexpectedPopulated.length > 0) {
             throw backendConflictError({ populated });
         }
         if (sqliteStore.runCount > 0) {
-            const targetStore = migratedTargetBackend === "pglite" ? pgliteStore : postgresStore;
             const targetRunCount = Number(targetStore.runCount ?? 0);
             if (targetRunCount <= 0) {
                 const error = missingMigratedTargetError({
                     targetBackend: migratedTargetBackend,
                     sqlite: sqliteStore,
-                    targetLocation: migratedTargetBackend === "pglite"
-                        ? pgliteStore.dataDir
-                        : postgresStore.connectionString === "set" ? "postgres connection" : "postgres",
+                    targetLocation,
                 });
                 await emitMigrationRequired(error);
                 throw error;
