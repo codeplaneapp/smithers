@@ -16,6 +16,7 @@ export const meta = {
 // args (object, or a JSON string of one):
 //   { runId }                            attach to an existing run
 //   { workflow, input?, cwd? }           launch a detached run, then mirror it
+//                                        (workflow = discovered ID or a .tsx/.mdx path)
 //   { mirrorAllNodes?, maxLiveWatchers?, agentBudget?, collapseAt? }
 // ---------------------------------------------------------------------------
 
@@ -30,6 +31,14 @@ if (typeof workflowArgs === 'string') {
 }
 if (!workflowArgs || (!workflowArgs.runId && !workflowArgs.workflow)) {
   throw new Error('args.runId (attach) or args.workflow (launch) is required')
+}
+// `smithers workflow run` takes a discovered workflow ID, not a file path.
+// Accept either: discovery derives IDs from the filename, so a path like
+// `.smithers/workflows/ticket-fleet.tsx` normalizes to `ticket-fleet`.
+if (workflowArgs.workflow && /[\\/]/.test(String(workflowArgs.workflow))) {
+  workflowArgs.workflow = String(workflowArgs.workflow)
+    .split(/[\\/]/).pop()
+    .replace(/\.(tsx|ts|jsx|mjs|js|mdx|md)$/, '')
 }
 
 const MAX_LIVE = clampInt(workflowArgs.maxLiveWatchers, 1, 12, 6)
