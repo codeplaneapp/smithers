@@ -32,6 +32,11 @@ function seedDb(repo) {
 function readHumanRequests(repo) {
     const sqlite = new Database(repo.path("smithers.db"));
     try {
+        // The concurrently running ask-human process briefly owns SQLite's
+        // writer lock while creating/polling the durable request. Let this
+        // real reader wait for that transaction instead of turning normal
+        // lock contention into a CI-only test failure.
+        sqlite.exec("PRAGMA busy_timeout = 5000");
         return sqlite
             .query(
                 "SELECT request_id, run_id, status, kind, options_json, schema_json, response_json, answered_by FROM _smithers_human_requests",
