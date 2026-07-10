@@ -1,88 +1,21 @@
 /**
- * Unit tests for the interactive init selection helpers.
+ * Unit tests for the init default-selection helpers.
  *
- * These test the pure option-builder functions and the selection-to-options
- * mapping without requiring a real TTY or an OpenTUI renderer.
+ * Interactive init asks one question (preferred agent — covered in
+ * init-agent-select.test.js); workflows/skills/agent docs install with these
+ * defaults. No TTY required.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-    buildAgentSetupOptions,
-    buildWorkflowOptions,
     buildSkillOptions,
-    buildAgentDocOptions,
     buildDefaultSelections,
     selectionsToPackOptions,
     withRequiredWorkflows,
-    runInteractiveInitFlow,
 } from "../src/init/interactiveInit.js";
 import { workflowManifestIds } from "../src/workflow-pack.js";
-
-// ---------------------------------------------------------------------------
-// buildWorkflowOptions
-// ---------------------------------------------------------------------------
-
-describe("buildWorkflowOptions", () => {
-    test("returns an array of workflow options", () => {
-        const opts = buildWorkflowOptions();
-        expect(Array.isArray(opts)).toBe(true);
-        expect(opts.length).toBeGreaterThan(0);
-    });
-
-    test("every option has an id and a label string", () => {
-        for (const opt of buildWorkflowOptions()) {
-            expect(typeof opt.id).toBe("string");
-            expect(opt.id.length).toBeGreaterThan(0);
-            expect(typeof opt.label).toBe("string");
-            expect(opt.label.length).toBeGreaterThan(0);
-        }
-    });
-
-    test("includes known core workflows", () => {
-        const ids = buildWorkflowOptions().map((o) => o.id);
-        expect(ids).toContain("implement");
-        expect(ids).toContain("review");
-        expect(ids).toContain("hello");
-        expect(ids).toContain("create-workflow");
-        expect(ids).toContain("smithering");
-        expect(ids).toContain("make-workflow-tutorial");
-    });
-
-    test("ids are unique", () => {
-        const ids = buildWorkflowOptions().map((o) => o.id);
-        expect(ids.length).toBe(new Set(ids).size);
-    });
-
-    test("labels are unique", () => {
-        const labels = buildWorkflowOptions().map((o) => o.label);
-        expect(labels.length).toBe(new Set(labels).size);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// buildAgentSetupOptions
-// ---------------------------------------------------------------------------
-
-describe("buildAgentSetupOptions", () => {
-    test("includes provider and custom adapter choices", () => {
-        const ids = buildAgentSetupOptions().map((o) => o.id);
-        expect(ids).toContain("openrouter");
-        expect(ids).toContain("claude");
-        expect(ids).toContain("codex");
-        expect(ids).toContain("kimi");
-        expect(ids).toContain("opencode");
-        expect(ids).toContain("custom");
-        expect(ids[0]).toBe("codex");
-    });
-
-    test("documents the AgentLike generate contract for custom adapters", () => {
-        const custom = buildAgentSetupOptions().find((o) => o.id === "custom");
-        expect(custom?.detail).toContain("generate(args)");
-        expect(custom?.detail).toContain("return");
-    });
-});
 
 // ---------------------------------------------------------------------------
 // buildSkillOptions
@@ -94,9 +27,10 @@ describe("buildSkillOptions", () => {
         expect(Array.isArray(opts)).toBe(true);
     });
 
-    test("includes the claude target", () => {
+    test("includes the claude and codex targets", () => {
         const ids = buildSkillOptions({}).map((o) => o.id);
         expect(ids).toContain("claude");
+        expect(ids).toContain("codex");
     });
 
     test("every option has an id and a displayName-derived label", () => {
@@ -110,33 +44,22 @@ describe("buildSkillOptions", () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildAgentDocOptions
-// ---------------------------------------------------------------------------
-
-describe("buildAgentDocOptions", () => {
-    test("returns CLAUDE.md and AGENTS.md as options", () => {
-        const opts = buildAgentDocOptions();
-        const filenames = opts.map((o) => o.filename);
-        expect(filenames).toContain("CLAUDE.md");
-        expect(filenames).toContain("AGENTS.md");
-    });
-
-    test("each option has matching filename and label", () => {
-        for (const opt of buildAgentDocOptions()) {
-            expect(opt.filename).toBe(opt.label);
-        }
-    });
-});
-
-// ---------------------------------------------------------------------------
 // buildDefaultSelections
 // ---------------------------------------------------------------------------
 
 describe("buildDefaultSelections", () => {
-    test("selectedWorkflows includes all workflow IDs", () => {
+    test("selectedWorkflows includes all non-system manifest workflow IDs", () => {
         const defs = buildDefaultSelections({});
-        const all = buildWorkflowOptions().map((o) => o.id);
-        expect(defs.selectedWorkflows.sort()).toEqual(all.sort());
+        expect(defs.selectedWorkflows.slice().sort()).toEqual(workflowManifestIds().slice().sort());
+    });
+
+    test("system workflows are not part of the default selections", () => {
+        const defs = buildDefaultSelections({});
+        expect(defs.selectedWorkflows).not.toContain("init");
+        expect(defs.selectedWorkflows).not.toContain("post-failure");
+        // ...but they DO exist in the full manifest (installed by the closure).
+        expect(workflowManifestIds({ includeSystem: true })).toContain("init");
+        expect(workflowManifestIds({ includeSystem: true })).toContain("post-failure");
     });
 
     test("selectedSkillTargets includes the claude target", () => {
@@ -189,47 +112,6 @@ describe("selectionsToPackOptions", () => {
         expect(packed.selectedWorkflows).toEqual([]);
         expect(packed.selectedSkillTargets).toEqual([]);
         expect(packed.selectedAgentDocs).toEqual([]);
-        expect(packed.scaffoldCustomAgent).toBe(false);
-    });
-
-    test("full selections include all workflows from buildWorkflowOptions", () => {
-        const defs = buildDefaultSelections({});
-        const packed = selectionsToPackOptions(defs);
-        const allIds = buildWorkflowOptions().map((o) => o.id);
-        expect(packed.selectedWorkflows.sort()).toEqual(allIds.sort());
-    });
-
-    test("custom agent setup maps to custom adapter scaffold option", () => {
-        const sel = {
-            selectedAgentSetup: "custom",
-            selectedWorkflows: ["implement"],
-            selectedSkillTargets: [],
-            selectedAgentDocs: [],
-        };
-        expect(selectionsToPackOptions(sel).scaffoldCustomAgent).toBe(true);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// Selection filtering (simulates user deselecting items)
-// ---------------------------------------------------------------------------
-
-describe("selection filtering", () => {
-    test("subset selection only includes chosen workflow ids", () => {
-        const defs = buildDefaultSelections({});
-        const subset = ["implement", "review", "hello"];
-        const filtered = { ...defs, selectedWorkflows: subset };
-        expect(selectionsToPackOptions(filtered).selectedWorkflows).toEqual(subset);
-    });
-
-    test("empty workflow selection produces empty selectedWorkflows", () => {
-        const sel = { selectedWorkflows: [], selectedSkillTargets: ["claude"], selectedAgentDocs: ["CLAUDE.md"] };
-        expect(selectionsToPackOptions(sel).selectedWorkflows).toHaveLength(0);
-    });
-
-    test("no skill targets produces empty selectedSkillTargets", () => {
-        const sel = { selectedWorkflows: ["implement"], selectedSkillTargets: [], selectedAgentDocs: ["CLAUDE.md"] };
-        expect(selectionsToPackOptions(sel).selectedSkillTargets).toHaveLength(0);
     });
 });
 
@@ -238,9 +120,7 @@ describe("selection filtering", () => {
 // ---------------------------------------------------------------------------
 
 describe("withRequiredWorkflows", () => {
-    test("force-includes a required workflow the wizard deselected", () => {
-        // The user unchecked create-workflow, but `init "<task>"` needs it for the
-        // post-init builder dispatch.
+    test("force-includes a required workflow missing from the selection", () => {
         const sel = { selectedWorkflows: ["hello"], selectedSkillTargets: [], selectedAgentDocs: [] };
         const out = withRequiredWorkflows(sel, ["create-workflow"]);
         expect(out.selectedWorkflows).toContain("create-workflow");
@@ -260,108 +140,11 @@ describe("withRequiredWorkflows", () => {
     });
 
     test("preserves the other selection fields", () => {
-        const sel = { selectedWorkflows: [], selectedSkillTargets: ["claude"], selectedAgentDocs: ["CLAUDE.md"], selectedAgentSetup: "custom" };
+        const sel = { selectedWorkflows: [], selectedSkillTargets: ["claude"], selectedAgentDocs: ["CLAUDE.md"] };
         const out = withRequiredWorkflows(sel, ["create-workflow"]);
         expect(out.selectedSkillTargets).toEqual(["claude"]);
         expect(out.selectedAgentDocs).toEqual(["CLAUDE.md"]);
-        expect(out.selectedAgentSetup).toBe("custom");
         expect(out.selectedWorkflows).toEqual(["create-workflow"]);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// Manifest sync guard (the wizard list must not drift from the pack manifest)
-// ---------------------------------------------------------------------------
-
-describe("wizard workflow list stays in sync with the pack manifest", () => {
-    test("buildWorkflowOptions covers exactly the manifest's non-system workflows", () => {
-        const wizardIds = buildWorkflowOptions().map((o) => o.id).sort();
-        expect(wizardIds).toEqual(workflowManifestIds().slice().sort());
-    });
-
-    test("system workflows are never offered in the wizard", () => {
-        const wizardIds = buildWorkflowOptions().map((o) => o.id);
-        expect(wizardIds).not.toContain("init");
-        expect(wizardIds).not.toContain("post-failure");
-        // ...but they DO exist in the full manifest (installed by the closure).
-        expect(workflowManifestIds({ includeSystem: true })).toContain("init");
-        expect(workflowManifestIds({ includeSystem: true })).toContain("post-failure");
-    });
-});
-
-// ---------------------------------------------------------------------------
-// runInteractiveInitFlow degradation (no PTY / broken native binding)
-// ---------------------------------------------------------------------------
-
-describe("runInteractiveInitFlow degradation", () => {
-    async function captureStderr(fn) {
-        const chunks = [];
-        const original = process.stderr.write;
-        process.stderr.write = (chunk) => {
-            chunks.push(typeof chunk === "string" ? chunk : String(chunk));
-            return true;
-        };
-        try {
-            const result = await fn();
-            return { result, stderr: chunks.join("") };
-        } finally {
-            process.stderr.write = original;
-        }
-    }
-
-    test("warns and returns defaults when the render layer fails to load", async () => {
-        const { result, stderr } = await captureStderr(() =>
-            runInteractiveInitFlow({
-                env: {},
-                loadRenderer: async () => {
-                    throw new Error("dlopen boom");
-                },
-            }),
-        );
-        const allIds = buildWorkflowOptions().map((o) => o.id).sort();
-        expect(result.selectedWorkflows.slice().sort()).toEqual(allIds);
-        expect(stderr).toContain("interactive wizard unavailable");
-        expect(stderr).toContain("dlopen boom");
-    });
-
-    test("warns and returns defaults when the renderer throws (no PTY)", async () => {
-        const { result, stderr } = await captureStderr(() =>
-            runInteractiveInitFlow({
-                env: {},
-                loadRenderer: async () => ({
-                    renderInitWizard: async () => {
-                        throw new Error("no pty");
-                    },
-                }),
-            }),
-        );
-        expect(result.selectedWorkflows.length).toBeGreaterThan(0);
-        expect(stderr).toContain("interactive wizard unavailable");
-        expect(stderr).toContain("no pty");
-    });
-});
-
-// ---------------------------------------------------------------------------
-// Wizard display order + grouping
-// ---------------------------------------------------------------------------
-
-describe("buildWorkflowOptions grouping", () => {
-    test("puts the starter workflows first under a 'Start here' header", () => {
-        const opts = buildWorkflowOptions();
-        expect(opts[0].id).toBe("hello");
-        expect(opts[0].header).toBe("Start here");
-        expect(opts[1].id).toBe("create-workflow");
-        expect(opts[1].header).toBeUndefined();
-    });
-
-    test("covers every manifest workflow exactly once despite grouping", () => {
-        const ids = buildWorkflowOptions().map((o) => o.id).sort();
-        expect(ids).toEqual(workflowManifestIds().slice().sort());
-    });
-
-    test("each group header appears at most once", () => {
-        const headers = buildWorkflowOptions().map((o) => o.header).filter(Boolean);
-        expect(headers.length).toBe(new Set(headers).size);
     });
 });
 
@@ -371,7 +154,7 @@ describe("buildWorkflowOptions grouping", () => {
 
 describe("persisted deselection seeding", () => {
     function tempPackRoot(selections) {
-        const dir = mkdtempSync(join(tmpdir(), "smithers-wizard-seed-"));
+        const dir = mkdtempSync(join(tmpdir(), "smithers-init-seed-"));
         writeFileSync(join(dir, "pack-selections.json"), JSON.stringify(selections), "utf8");
         return dir;
     }
@@ -399,7 +182,7 @@ describe("persisted deselection seeding", () => {
     });
 
     test("buildDefaultSelections drops skill targets the user opted out of", () => {
-        const home = mkdtempSync(join(tmpdir(), "smithers-wizard-home-"));
+        const home = mkdtempSync(join(tmpdir(), "smithers-init-home-"));
         try {
             mkdirSync(join(home, ".smithers"), { recursive: true });
             writeFileSync(join(home, ".smithers", "skill-deselections.json"), JSON.stringify({ optedOut: ["pi"] }), "utf8");
@@ -408,23 +191,6 @@ describe("persisted deselection seeding", () => {
             expect(sel.selectedSkillTargets).toContain("claude");
         } finally {
             rmSync(home, { recursive: true, force: true });
-        }
-    });
-
-    test("wizard degrade path honors the persisted deselections", async () => {
-        const packRoot = tempPackRoot({ deselectedWorkflows: ["ralph"], deselectedAgentDocs: [] });
-        try {
-            const result = await runInteractiveInitFlow({
-                env: {},
-                packRoot,
-                loadRenderer: async () => {
-                    throw new Error("dlopen boom");
-                },
-            });
-            expect(result.selectedWorkflows).not.toContain("ralph");
-            expect(result.selectedWorkflows).toContain("hello");
-        } finally {
-            rmSync(packRoot, { recursive: true, force: true });
         }
     });
 });

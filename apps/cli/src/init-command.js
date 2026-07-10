@@ -29,11 +29,13 @@ export const initArgs = z.object({
 });
 
 export const initOptions = z.object({
+    agent: z.string().optional().describe("Preferred coding agent id (e.g. claude, codex, pi). Skips the interactive agent question."),
+    tutorial: z.boolean().default(true).describe("After install, open a hijacked tutorial session hosted by your preferred agent (interactive init only). Use --no-tutorial to skip."),
     force: z.boolean().default(false).describe("Overwrite existing scaffold files"),
     agentsOnly: z.boolean().default(false).describe("Only create .smithers/agents/ and leave the rest of the workflow pack untouched"),
     install: z.boolean().default(true).describe("Run `bun install` inside .smithers/ after scaffolding (--no-install to skip)"),
     addAgents: z.boolean().default(false).describe("After scaffolding, launch the interactive `agents add` wizard to register one or more accounts."),
-    skill: z.boolean().default(true).describe("Install the curated `smithers` skill into your detected coding agents (Claude Code, Pi) and, if a CLAUDE.md or AGENTS.md exists, append guidance on when to use smithers.sh workflows. Use --no-skill to skip."),
+    skill: z.boolean().default(true).describe("Install the curated `smithers` skill into your detected coding agents (Claude Code, Pi, Codex, OpenCode, Kimi, Amp, Antigravity) and, if a CLAUDE.md or AGENTS.md exists, append guidance on when to use smithers.sh workflows. Use --no-skill to skip."),
     global: z.boolean().default(false).describe("Scaffold the global pack in ~/.smithers (honors SMITHERS_HOME) instead of ./.smithers. Global workflows run from any repo; a repo's local pack takes precedence."),
     updatePrompt: z.boolean().default(true).describe("In an interactive terminal, when shipped pack files differ from the latest bundled version, ask which to update (warning when a shared component is selected). Use --no-update-prompt to skip the question."),
     template: initTemplateOption,
@@ -177,6 +179,39 @@ async function runDurableReinit(options) {
 }
 
 /**
+ * Launch the hijacked tutorial: the preferred agent's first turn (seeded with
+ * what init detected and configured) runs headless, then the user's terminal
+ * attaches to that live session. Best-effort — a failed tutorial degrades to
+ * a `smithers hijack <runId>` hint, never a failed init.
+ *
+ * @param {import("./workflow-pack.js").InitResult & { preferredAgent?: any; integration?: any; detections?: any[]; selectedWorkflowCount?: number }} result
+ */
+async function launchInitTutorial(result) {
+    const { buildInitTutorialPrompt, runInitTutorial } = await import("./init/runInitTutorial.js");
+    const prompt = buildInitTutorialPrompt({
+        cwd: process.cwd(),
+        detections: result.detections ?? [],
+        preferredAgent: result.preferredAgent,
+        integration: result.integration ?? { agent: result.preferredAgent.id, kind: "none", ok: false, detail: "integration step skipped" },
+        workflowCount: result.selectedWorkflowCount ?? 0,
+        writtenCount: result.writtenFiles?.length ?? 0,
+        skippedCount: result.skippedFiles?.length ?? 0,
+    });
+    process.stderr.write(`\nStarting your Smithers tutorial with ${result.preferredAgent.displayName} — the first turn runs headless, then the session opens here…\n`);
+    const tutorial = await runInitTutorial({ agentId: result.preferredAgent.id, cwd: process.cwd(), prompt });
+    if (!tutorial.ok) {
+        process.stderr.write(`[smithers:init] tutorial session unavailable: ${tutorial.reason}\n`);
+        if (tutorial.runId) {
+            process.stderr.write(`  open it later with: smithers hijack ${tutorial.runId}\n`);
+        }
+    }
+    else if (tutorial.runId) {
+        process.stderr.write(`[smithers:init] tutorial ended — reopen it anytime with: smithers hijack ${tutorial.runId}\n`);
+    }
+    return tutorial;
+}
+
+/**
  * @param {{ options: any; format?: string; ok: (...args: any[]) => any; error: (...args: any[]) => any }} c
  * @param {(opts: { code: string; message: string; exitCode?: number; details?: Record<string, unknown> }) => any} fail
  */
@@ -201,6 +236,7 @@ export async function runInitCommand(c, fail) {
                 global: c.options.global,
                 installSkill: c.options.skill,
                 updatePrompt: c.options.updatePrompt,
+                agent: c.options.agent,
                 // `smithers init "<task>"` launches the create-workflow builder
                 // right after init, so keep it in the pack even if the wizard
                 // deselected it — otherwise the dispatch fails with RUN_NOT_FOUND.
@@ -242,6 +278,13 @@ export async function runInitCommand(c, fail) {
             // closing clack outro() (even for an empty CTA, e.g. --agents-only),
             // matching the unconditional intro() in runInitCeremony.
             renderInitNextSteps(cta ?? { commands: [] });
+            // The hijacked tutorial takes over the terminal, so it launches
+            // last, with the next steps already on screen for when it ends.
+            // Skipped for --agents-only / --global / --no-tutorial and when a
+            // "<task>" prompt is queued (that dispatches the builder instead).
+            if (!c.options.agentsOnly && !c.options.global && c.options.tutorial !== false && !c.args?.prompt && result.preferredAgent) {
+                result.tutorial = await launchInitTutorial(result);
+            }
             return c.ok(result);
         }
         return c.ok(result, cta ? { cta: { ...cta, description: "Next steps:" } } : undefined);

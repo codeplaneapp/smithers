@@ -2314,10 +2314,12 @@ Commands listed by dotted name. `human` and `alerts` use an action positional in
 ```toon
 commands[88]:
   - name: init
-    purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal a wizard first lets you pick workflows and skill targets; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
+    purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal init asks one question (your preferred coding agent), installs the pack with defaults plus that agent's plugin (or skill if no plugin), then opens a hijacked tutorial session hosted by that agent; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
       prompt,string,false,Optional plain-English task: after init, launch the create-workflow builder with this prompt pre-filled
-    flags[10]{name,short,type,default,desc}:
+    flags[12]{name,short,type,default,desc}:
+      agent,,string,,Preferred coding agent id (e.g. claude, codex, pi); skips the interactive agent question
+      tutorial,,boolean,true,After install, open a hijacked tutorial session hosted by your preferred agent (interactive init only); --no-tutorial skips
       force,,boolean,false,Overwrite existing scaffold files
       agents-only,,boolean,false,Only create .smithers/agents/ and leave workflow pack untouched
       install,,boolean,true,Run bun install inside the pack after scaffolding
@@ -2568,7 +2570,7 @@ commands[88]:
   - name: chat-create
     purpose: Create and start a one-task auto-hijacked chat run
     flags[2]{name,short,type,default,desc}:
-      agent,,enum,,claude-code|codex|antigravity
+      agent,,enum,,claude-code|codex|antigravity|pi|kimi|amp
       cwd,,string,.,Working directory for the chat session
   - name: hijack
     purpose: Hand off the latest resumable agent session or Smithers-managed conversation
@@ -3086,7 +3088,7 @@ commands[88]:
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
 - **Account commands**: `agents add|list|remove|test` manage `~/.smithers/accounts.json`; subscription providers use CLI config directories, API providers use API keys. Legacy entries with an unknown provider are preserved across `add`/`remove`; `agents remove <label>` deletes one.
 - **Output format**: all commands honour `--format toon|json|yaml|md|jsonl`; `--filter-output <key.path>` extracts a nested field from JSON output.
-- **Interactive TUI**: use `bunx smithers-orchestrator up --interactive` or `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive` for the current full-screen terminal monitor. `bunx smithers-orchestrator init` also has a human setup wizard. See Interactive TUI.
+- **Interactive TUI**: use `bunx smithers-orchestrator up --interactive` or `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive` for the current full-screen terminal monitor. `bunx smithers-orchestrator init` also has a human setup flow (one agent question, then a hijacked tutorial). See Interactive TUI.
 
 ---
 
@@ -10548,28 +10550,24 @@ The monitor replaced the retired `monitor` *workflow*, which had to launch a dur
 
 Smithers has two terminal UI surfaces:
 
-1. `bunx smithers-orchestrator init` opens an interactive setup wizard unless you pass `--yes` / `--non-interactive`.
+1. `bunx smithers-orchestrator init` asks one interactive question (your preferred coding agent) unless you pass `--yes` / `--non-interactive`.
 2. `bunx smithers-orchestrator up --interactive` and `bunx smithers-orchestrator workflow run --interactive` open the run launcher and then the full-screen monitor.
 
 The old standalone `bunx smithers-orchestrator tui` command was removed in `0.20.2`. The current TUI path is the `--interactive` mode on run commands.
 
 ## Interactive setup
 
-Run `init` in a human terminal when you want to choose which workflow-pack files and agent integrations to install:
+Run `init` in a human terminal. It shows which coding agents it detected, asks which one you prefer, installs the workflow pack with defaults plus that agent's plugin (or skill if no plugin exists), and then opens a hijacked tutorial session hosted by that agent:
 
 ```bash
 bunx smithers-orchestrator init
 ```
 
-For CI, scripts, or agent-driven setup, use the non-interactive form:
+Pass `--agent claude` (or `codex`, `pi`, ...) to skip the question, and `--no-tutorial` to skip the guided session. For CI, scripts, or agent-driven setup, use the non-interactive form:
 
 ```bash
 bunx smithers-orchestrator init --yes
 ```
-
-<Frame caption="Captured from tmux: bunx smithers-orchestrator init starts with a workflow-pack picker, so a human can decide which workflows to install.">
-  <img src="/images/tui/init-workflow-selection.svg" alt="Terminal screenshot of bunx smithers-orchestrator init showing the workflow selection checklist" />
-</Frame>
 
 ## Interactive run launcher
 
@@ -10632,7 +10630,7 @@ There is no silent fallback. If the TUI package cannot be resolved, the command 
 
 | Need | Command |
 | --- | --- |
-| Interactive setup wizard | `bunx smithers-orchestrator init` |
+| Interactive setup + tutorial | `bunx smithers-orchestrator init` |
 | Non-interactive setup | `bunx smithers-orchestrator init --yes` |
 | Pick a workflow and run it | `bunx smithers-orchestrator up --interactive` |
 | Pick a workflow ID and run it | `bunx smithers-orchestrator workflow run --interactive` |

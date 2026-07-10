@@ -14,9 +14,9 @@ From inside your project:
 bunx smithers-orchestrator init
 ```
 
-In a terminal, `init` opens a short picker: choose which workflows to install (grouped, with the **hello** starter first) and which agents get the Smithers skill. It then scaffolds `.smithers/` into your repo, installs its dependencies, and adds `smithers.db` to your `.gitignore` so the run store never lands in a commit. Piped or non-interactive callers (CI, agents, `--yes`) skip the picker and install the defaults.
+In a terminal, `init` asks exactly one question: which coding agent do you prefer? It shows what it detected (Claude Code, Codex, Pi, ...), you pick one, and it does the rest - scaffolds `.smithers/` into your repo with the default workflow pack, installs its dependencies, adds `smithers.db` to your `.gitignore`, and installs that agent's Smithers plugin (or the skill, if no plugin exists for it). Then it opens a hijacked tutorial session: your chosen agent greets you in your own terminal, narrates what was detected and configured, and walks you through your first runs. Piped or non-interactive callers (CI, agents, `--yes`) skip the question and install the defaults; `--no-tutorial` skips the guided session.
 
-The star of the scaffold is **`.smithers/prompts/hello.mdx`** - your editable hello-world workflow. Open it, change the instruction, and the next run picks it up. No TypeScript required. Re-running `init` later remembers what you picked and only offers to update files that drifted.
+The star of the scaffold is **`.smithers/prompts/hello.mdx`** - your editable hello-world workflow. Open it, change the instruction, and the next run picks it up. No TypeScript required. Re-running `init` later only offers to update files that drifted.
 
 </Step>
 
@@ -35,7 +35,7 @@ Your agent drives Smithers, so it needs the Smithers context. Two ways to get it
 | Any other agent | [Set up in your harness](/agents/setup) |
 
 <Note>
-`init` already installs the curated onboarding skill when it detects Claude Code or Pi. For everything else, or to add the deeper plugin, use the page for your harness above.
+`init` already installs the best integration for your preferred agent - the Claude Code plugin, the Hermes/OpenClaw native plugins, or the curated skill for Codex, Pi, OpenCode, Kimi, Amp, and Antigravity. Use the page for your harness above to wire additional agents or add MCP.
 </Note>
 
 </Step>

@@ -110,10 +110,12 @@ Commands listed by dotted name. `human` and `alerts` use an action positional in
 ```toon
 commands[88]:
   - name: init
-    purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal a wizard first lets you pick workflows and skill targets; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
+    purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal init asks one question (your preferred coding agent), installs the pack with defaults plus that agent's plugin (or skill if no plugin), then opens a hijacked tutorial session hosted by that agent; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
       prompt,string,false,Optional plain-English task: after init, launch the create-workflow builder with this prompt pre-filled
-    flags[10]{name,short,type,default,desc}:
+    flags[12]{name,short,type,default,desc}:
+      agent,,string,,Preferred coding agent id (e.g. claude, codex, pi); skips the interactive agent question
+      tutorial,,boolean,true,After install, open a hijacked tutorial session hosted by your preferred agent (interactive init only); --no-tutorial skips
       force,,boolean,false,Overwrite existing scaffold files
       agents-only,,boolean,false,Only create .smithers/agents/ and leave workflow pack untouched
       install,,boolean,true,Run bun install inside the pack after scaffolding
@@ -364,7 +366,7 @@ commands[88]:
   - name: chat-create
     purpose: Create and start a one-task auto-hijacked chat run
     flags[2]{name,short,type,default,desc}:
-      agent,,enum,,claude-code|codex|antigravity
+      agent,,enum,,claude-code|codex|antigravity|pi|kimi|amp
       cwd,,string,.,Working directory for the chat session
   - name: hijack
     purpose: Hand off the latest resumable agent session or Smithers-managed conversation
@@ -882,4 +884,4 @@ commands[88]:
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
 - **Account commands**: `agents add|list|remove|test` manage `~/.smithers/accounts.json`; subscription providers use CLI config directories, API providers use API keys. Legacy entries with an unknown provider are preserved across `add`/`remove`; `agents remove <label>` deletes one.
 - **Output format**: all commands honour `--format toon|json|yaml|md|jsonl`; `--filter-output <key.path>` extracts a nested field from JSON output.
-- **Interactive TUI**: use `bunx smithers-orchestrator up --interactive` or `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive` for the current full-screen terminal monitor. `bunx smithers-orchestrator init` also has a human setup wizard. See [Interactive TUI](/guides/tui).
+- **Interactive TUI**: use `bunx smithers-orchestrator up --interactive` or `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive` for the current full-screen terminal monitor. `bunx smithers-orchestrator init` also has a human setup flow (one agent question, then a hijacked tutorial). See [Interactive TUI](/guides/tui).

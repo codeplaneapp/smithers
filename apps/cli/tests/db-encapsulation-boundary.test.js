@@ -4,7 +4,9 @@ import { describe, expect, test } from "bun:test";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
 const cliSrcRoot = resolve(repoRoot, "apps/cli/src");
-const allowedDirectDatabaseOpeners = new Set(["apps/cli/src/index.js"]);
+// buildInlineChatWorkflow carved the inline auto-hijacked chat/tutorial
+// workflow (and its workspace sqlite open) out of index.js.
+const allowedDirectDatabaseOpeners = new Set(["apps/cli/src/buildInlineChatWorkflow.js"]);
 
 function repoRelative(path) {
     return relative(repoRoot, path).split(sep).join("/");

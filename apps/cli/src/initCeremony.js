@@ -4,20 +4,24 @@ import pc from "picocolors";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { detectAvailableAgents } from "./agent-detection.js";
 import { applyWorkflowPackUpdates, initWorkflowPack } from "./workflow-pack.js";
-import { runInteractiveInitFlow, buildDefaultSelections, selectionsToPackOptions, withRequiredWorkflows } from "./init/interactiveInit.js";
+import { buildDefaultSelections, selectionsToPackOptions, withRequiredWorkflows } from "./init/interactiveInit.js";
+import { installAgentIntegration } from "./init/installAgentIntegration.js";
+import { selectPreferredAgent } from "./init/selectPreferredAgent.js";
 
 /**
- * Render the human-facing `smithers init` flow: a clack ceremony that first
- * shows the OpenTUI multiselect wizard (workflow/skill selection) and then
- * narrates the scaffold → detect agents → install steps.
+ * Render the human-facing `smithers init` flow: one question (which coding
+ * agent do you prefer?), then a clack ceremony that narrates the scaffold →
+ * integration install steps. Workflows and skills install with defaults —
+ * the agent choice is the only selection init asks for.
  *
- * Returns the same {@link InitResult} as a plain {@link initWorkflowPack} call
- * so callers can attach templates/CTAs after.
+ * Returns the {@link InitResult} of the underlying {@link initWorkflowPack}
+ * call, extended with `preferredAgent`, `integration`, `detections`, and
+ * `selectedWorkflowCount` so the caller can launch the hijacked tutorial.
  *
  * Only call this in interactive TTY mode; piped/agent callers should use
  * {@link initWorkflowPack} directly so structured output is preserved.
  *
- * @param {{ force?: boolean; agentsOnly?: boolean; install?: boolean; global?: boolean; installSkill?: boolean; updatePrompt?: boolean; requiredWorkflows?: readonly string[]; env?: NodeJS.ProcessEnv; runWizard?: (opts: { env: NodeJS.ProcessEnv; packRoot?: string }) => Promise<import("./init/interactiveInit.js").InitSelections | null> }} opts
+ * @param {{ force?: boolean; agentsOnly?: boolean; install?: boolean; global?: boolean; installSkill?: boolean; updatePrompt?: boolean; agent?: string; requiredWorkflows?: readonly string[]; env?: NodeJS.ProcessEnv; detections?: import("./AgentAvailability.ts").AgentAvailability[]; selectAgent?: typeof selectPreferredAgent; installIntegration?: typeof installAgentIntegration }} opts
  * @returns {Promise<import("./workflow-pack.js").InitResult>}
  */
 export async function runInitCeremony(opts = {}) {
@@ -25,39 +29,48 @@ export async function runInitCeremony(opts = {}) {
     const agentsOnly = Boolean(opts.agentsOnly);
     const global = Boolean(opts.global);
     const installSkill = opts.installSkill !== false;
-    // Injectable so a CI test can exercise the cancel path without a real PTY.
-    const runWizard = opts.runWizard ?? runInteractiveInitFlow;
+    // Injectable so CI tests can exercise cancel/no-agent paths without a PTY.
+    const selectAgent = opts.selectAgent ?? selectPreferredAgent;
+    const installIntegration = opts.installIntegration ?? installAgentIntegration;
+
+    const packRoot = global ? accountsRoot(env) : resolve(process.cwd(), ".smithers");
+    // Defaults honor previous opt-outs (pack-selections.json + skill marker);
+    // required workflows (e.g. create-workflow for `smithers init "<task>"`)
+    // are forced back in.
+    const selections = withRequiredWorkflows(buildDefaultSelections(env, packRoot), opts.requiredWorkflows);
+
+    intro(`${pc.bgCyan(pc.black(" smithers "))} ${pc.dim(global ? "init --global" : "init")}`);
+
+    const detections = (opts.detections ?? detectAvailableAgents(env)).filter((agent) => !agent.deprecated);
+    renderAgents(detections);
 
     // ------------------------------------------------------------------
-    // Step 1: Interactive selection wizard (OpenTUI full-screen)
+    // Step 1: the ONE selection — which agent does the user prefer?
     // ------------------------------------------------------------------
-    // Skipped when --agents-only: workflows and skills are irrelevant there.
-    // The pack root seeds the wizard's checkboxes from the previous init's
-    // persisted deselections (pack-selections.json).
-    const packRoot = global ? accountsRoot(env) : resolve(process.cwd(), ".smithers");
-    let selections = buildDefaultSelections(env, packRoot);
+    // Skipped for --agents-only (no integrations or tutorial there).
+    let preferred = null;
     if (!agentsOnly) {
-        const chosen = await runWizard({ env, packRoot });
-        if (chosen === null) {
-            // User pressed Esc / Ctrl-C in the wizard. Print a visible notice
-            // (the renderer wiped the screen on shutdown, so a bare exit reads
-            // like a crash) and exit non-zero (130, the conventional Ctrl-C
-            // code) so wrapping scripts don't treat a cancelled run as success.
+        const choice = await selectAgent({ env, preselect: opts.agent, detections });
+        if (choice === "cancelled") {
             process.stderr.write(`${pc.yellow("✗")} init cancelled — nothing was installed\n`);
             process.exit(130);
         }
-        // Force any required workflows back into the selection even if the wizard
-        // deselected them (e.g. `smithers init "<task>"` needs create-workflow so
-        // the post-init builder dispatch can find it). N/A for --agents-only,
-        // which installs no workflows.
-        selections = withRequiredWorkflows(chosen, opts.requiredWorkflows);
+        if (choice === null) {
+            log.warn([
+                "No usable coding agent detected — installing the pack with defaults.",
+                pc.dim("Install codex (`npm i -g @openai/codex` + `codex login`) or Claude Code (`claude` + `/login`), then re-run `smithers init`."),
+            ].join("\n"));
+        }
+        else {
+            preferred = choice.detection;
+            const how = choice.source === "flag" ? " (from --agent)" : choice.source === "auto" ? " (only usable agent)" : "";
+            log.success(`Preferred agent: ${pc.cyan(preferred.displayName)}${pc.dim(how)}`);
+        }
     }
 
     // ------------------------------------------------------------------
-    // Step 2: Clack ceremony — narrate the actual work
+    // Step 2: install the workflow pack with defaults, narrated
     // ------------------------------------------------------------------
-    intro(`${pc.bgCyan(pc.black(" smithers "))} ${pc.dim(global ? "init --global" : "init")}`);
-
     const reporter = {
         scaffolded({ writtenCount, skippedCount }) {
             const base = global ? "~/.smithers/" : ".smithers/";
@@ -67,7 +80,6 @@ export async function runInitCeremony(opts = {}) {
             if (writtenCount > 0) parts.push(`${pc.bold(String(writtenCount))} ${pc.dim(`file${writtenCount === 1 ? "" : "s"} created`)}`);
             if (skippedCount > 0) parts.push(`${pc.bold(String(skippedCount))} ${pc.dim("preserved")}`);
             log.message(parts.length > 0 ? parts.join(pc.dim("  ·  ")) : pc.dim("nothing to write (pack already present)"));
-            renderAgents(env);
             if (!agentsOnly) {
                 const wfCount = selections.selectedWorkflows.length;
                 log.message(`${pc.dim("→")} Installing ${pc.bold(String(wfCount))} workflow${wfCount === 1 ? "" : "s"}`);
@@ -112,9 +124,31 @@ export async function runInitCeremony(opts = {}) {
         selectedWorkflows: agentsOnly ? undefined : selectedOptions.selectedWorkflows,
         selectedSkillTargets: agentsOnly ? undefined : selectedOptions.selectedSkillTargets,
         selectedAgentDocs: agentsOnly ? undefined : selectedOptions.selectedAgentDocs,
-        scaffoldCustomAgent: agentsOnly ? undefined : selectedOptions.scaffoldCustomAgent,
         reporter,
     });
+
+    // ------------------------------------------------------------------
+    // Step 3: best-tier integration (plugin, or skill if no plugin) for the
+    // preferred agent
+    // ------------------------------------------------------------------
+    if (preferred) {
+        log.step(`Configuring ${preferred.displayName} ${pc.dim("(plugin, or skill if no plugin)")}`);
+        const integration = installIntegration({ agentId: preferred.id, env, detections });
+        if (integration.kind === "plugin" && integration.ok) {
+            log.success(`Installed the smithers plugin for ${pc.cyan(preferred.displayName)} ${pc.dim("(" + integration.detail + ")")}`);
+        }
+        else if (integration.kind === "skill" && integration.ok) {
+            const note = integration.fallback ? " (no plugin available here)" : "";
+            log.success(`Installed the smithers skill for ${pc.cyan(preferred.displayName)}${pc.dim(note)}`);
+        }
+        else {
+            log.warn(`Could not configure ${preferred.displayName}: ${integration.detail}`);
+        }
+        result.integration = integration;
+    }
+    result.preferredAgent = preferred;
+    result.detections = detections;
+    result.selectedWorkflowCount = selections.selectedWorkflows.length;
 
     // Offer to update any shipped pack files that drifted from the latest
     // bundled version (a default run preserves existing files). Skipped with
@@ -184,13 +218,12 @@ async function promptPackUpdates(changedFiles) {
 }
 
 /**
- * Show which coding agents Smithers found on this machine, so it's obvious what
- * `agents.ts` was wired up to and what's missing.
+ * Show which coding agents Smithers found on this machine, so it's obvious
+ * what the agent picker offers and what's missing.
  *
- * @param {NodeJS.ProcessEnv} env
+ * @param {import("./AgentAvailability.ts").AgentAvailability[]} detections Non-deprecated detections.
  */
-function renderAgents(env) {
-    const detections = detectAvailableAgents(env).filter((agent) => !agent.deprecated);
+function renderAgents(detections) {
     if (detections.length === 0) return;
     const usable = detections.filter((agent) => agent.usable);
     const lines = detections

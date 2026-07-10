@@ -2,6 +2,8 @@
 import { setJsonMode } from "./util/logger.ts";
 import { ensureCuratedSkillsFresh, formatRefreshNotice } from "./refreshCuratedSkills.js";
 import { extractBackendFlag, findFirstPositionalIndex, rewriteBareResumeFlagArgv } from "./argv-utils.js";
+import { CHAT_CREATE_PROMPT, INLINE_CHAT_ENGINES, buildInlineChatWorkflow } from "./buildInlineChatWorkflow.js";
+import { readBackendMarkerForCwd } from "./readBackendMarkerForCwd.js";
 import { parseJsonArgument, tryParseJsonInput } from "./json-args.js";
 import { wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
 import { resolve, dirname, basename, relative } from "node:path";
@@ -179,45 +181,6 @@ function readPackageVersion() {
     }
     catch {
         return "unknown";
-    }
-}
-/**
- * Read the backend marker from the nearest .smithers anchor above `cwd`.
- * Returns the backend string (e.g. "pglite") or undefined if there is no marker
- * or it cannot be parsed. Used by executeUpCommand to redirect workflow.db to
- * the correct store after a `smithers migrate` has moved runs to pglite.
- * @param {string} cwd
- * @returns {string | undefined}
- */
-function readBackendMarkerForCwd(cwd) {
-    let dir = resolve(cwd);
-    const fsRoot = resolve("/");
-    const home = process.env.HOME ? resolve(process.env.HOME) : undefined;
-    while (true) {
-        // Check this directory before deciding whether to stop. This ensures
-        // workspaces in /tmp (outside $HOME) and workspaces AT $HOME both find
-        // their .smithers markers on the first iteration.
-        const backendMarkerPath = `${dir}/.smithers/backend.json`;
-        const migratedMarkerPath = `${dir}/.smithers/migrated.json`;
-        for (const markerPath of [backendMarkerPath, migratedMarkerPath]) {
-            if (!existsSync(markerPath)) continue;
-            try {
-                const parsed = JSON.parse(readFileSync(markerPath, "utf8"));
-                const backend = parsed?.backend ?? parsed?.target?.backend;
-                return typeof backend === "string" && backend.length > 0 ? backend.toLowerCase() : undefined;
-            }
-            catch {
-                return undefined;
-            }
-        }
-        if (dir === fsRoot) return undefined;
-        // Don't traverse above HOME — stop after checking HOME itself so we
-        // never pick up a backend.json belonging to a different workspace that
-        // is an ancestor of the user's home directory.
-        if (home && dir === home) return undefined;
-        const next = dirname(dir);
-        if (next === dir) return undefined;
-        dir = next;
     }
 }
 // DB poll cadence for --follow loops (logs, chat): fast enough to feel live,
@@ -1762,7 +1725,7 @@ const chatOptions = z.object({
     stderr: z.boolean().default(true).describe("Include agent stderr output"),
 });
 const chatCreateOptions = z.object({
-    agent: z.enum(["claude-code", "codex", "antigravity"]).describe("CLI agent engine to launch"),
+    agent: z.enum(INLINE_CHAT_ENGINES).describe("CLI agent engine to launch"),
     cwd: z.string().optional().describe("Working directory for the chat session (default: current directory)"),
 });
 const inspectArgs = z.object({
@@ -5702,7 +5665,7 @@ const cli = Cli.create({
             });
         }
         try {
-            const workflow = await buildInlineChatWorkflow(c.options.agent, chatCwd);
+            const workflow = await buildInlineChatWorkflow({ engine: c.options.agent, cwd: chatCwd, prompt: CHAT_CREATE_PROMPT });
             setupSqliteCleanup(workflow);
             const result = await Effect.runPromise(runWorkflow(workflow, {
                 input: {},
@@ -8429,108 +8392,6 @@ function normalizeResumeOption(value) {
         return { resume: true, resumeRunId: undefined };
     }
     return { resume: true, resumeRunId: normalized };
-}
-const CHAT_CREATE_PROMPT = [
-    "Start an interactive chat session with the user and help them directly.",
-    "Stay in this conversation until the user is done.",
-    'When you are completely finished and want to hand control back to Smithers, return ONLY this raw JSON object with no prose, markdown, or code fence: {}.',
-].join("\n\n");
-/**
- * @param {"claude-code" | "codex" | "antigravity"} agentId
- * @param {string} cwd
- */
-async function createChatAgent(agentId, cwd) {
-    switch (agentId) {
-        case "claude-code": {
-            const { ClaudeCodeAgent } = await import("@smithers-orchestrator/agents/ClaudeCodeAgent");
-            return new ClaudeCodeAgent({
-                cwd,
-                model: "claude-fable-5",
-            });
-        }
-        case "codex": {
-            const { CodexAgent } = await import("@smithers-orchestrator/agents/CodexAgent");
-            return new CodexAgent({
-                cwd,
-                model: "gpt-5.6-luna",
-                config: { model_reasoning_effort: "medium" },
-                skipGitRepoCheck: true,
-            });
-        }
-        case "antigravity": {
-            const { AntigravityAgent } = await import("@smithers-orchestrator/agents/AntigravityAgent");
-            return new AntigravityAgent({
-                cwd,
-            });
-        }
-    }
-}
-/**
- * @param {"claude-code" | "codex" | "antigravity"} agentId
- * @param {string} cwd
- * @returns {Promise<import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>>}
- */
-async function buildInlineChatWorkflow(agentId, cwd) {
-    const [
-        { Database },
-        { drizzle },
-        { sqliteTable, text },
-        { Workflow, Task },
-        { zodToTable },
-        { syncZodTableSchema },
-        { camelToSnake },
-        { z: zod },
-    ] = await Promise.all([
-        import("bun:sqlite"),
-        import("drizzle-orm/bun-sqlite"),
-        import("drizzle-orm/sqlite-core"),
-        import("@smithers-orchestrator/components"),
-        import("@smithers-orchestrator/db/zodToTable"),
-        import("@smithers-orchestrator/db/zodToCreateTableSQL"),
-        import("@smithers-orchestrator/db/utils/camelToSnake"),
-        import("zod"),
-    ]);
-    const agent = await createChatAgent(agentId, cwd);
-    const chatSchema = zod.object({});
-    const inputTable = sqliteTable("input", {
-        runId: text("run_id").primaryKey(),
-        payload: text("payload", { mode: "json" }).$type(),
-    });
-    const chatTableName = camelToSnake("chat");
-    const chatTable = zodToTable(chatTableName, chatSchema);
-    // Use the workspace store, not a stray ./smithers.db in whatever
-    // subdirectory chat was launched from: same anchor rule as createSmithers,
-    // same fail-loud guard for non-sqlite workspaces (this inline workflow is
-    // bun:sqlite-only).
-    const { findSmithersAnchorDir } = await import("smithers-orchestrator/findSmithersAnchorDir");
-    const anchorDir = findSmithersAnchorDir(cwd);
-    const workspaceBackend = readBackendMarkerForCwd(cwd);
-    if (workspaceBackend && workspaceBackend !== "sqlite") {
-        throw new SmithersError("BACKEND_MISMATCH", `This workspace's store is ${workspaceBackend}, but \`smithers chat create\` currently supports only the sqlite backend. Run it in a sqlite workspace or migrate with \`smithers migrate --to sqlite\`.`, { backend: workspaceBackend });
-    }
-    const sqlite = new Database(resolve(anchorDir ?? cwd, "smithers.db"));
-    sqlite.run("PRAGMA journal_mode = WAL");
-    sqlite.run("PRAGMA busy_timeout = 30000");
-    sqlite.run("PRAGMA synchronous = NORMAL");
-    sqlite.run("PRAGMA locking_mode = NORMAL");
-    sqlite.run("PRAGMA foreign_keys = ON");
-    sqlite.exec(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
-    syncZodTableSchema(sqlite, chatTableName, chatSchema);
-    const db = drizzle(sqlite, { schema: { input: inputTable, chat: chatTable } });
-    const schemaRegistry = new Map([["chat", { table: chatTable, zodSchema: chatSchema }]]);
-    const zodToKeyName = new Map([[chatSchema, "chat"]]);
-    return {
-        db,
-        build: () => React.createElement(Workflow, { name: "chat" }, React.createElement(Task, {
-            id: "chat",
-            output: chatSchema,
-            agent,
-            hijack: true,
-        }, CHAT_CREATE_PROMPT)),
-        opts: {},
-        schemaRegistry,
-        zodToKeyName,
-    };
 }
 /**
  * @param {string[]} argv

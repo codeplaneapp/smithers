@@ -20,11 +20,14 @@ export const RETIRED_SKILL_NAMES = ["smithers-orchestrator"];
 /**
  * Coding agents that read skills from a directory we know how to target. Each
  * entry's `base` is the agent's config root (used as a presence signal) and
- * `skillsDir` is where per-skill folders live.
+ * `skillsDir` is where per-skill folders live. Directories follow each agent's
+ * own convention (matching the incur registry): Kimi and Amp read the shared
+ * canonical `~/.config/agents/skills`, Antigravity reads the Gemini home.
  *
  * @param {string} homeDir
  */
 export function skillTargets(homeDir) {
+  const configHome = join(homeDir, ".config");
   return [
     {
       id: "claude",
@@ -37,6 +40,36 @@ export function skillTargets(homeDir) {
       displayName: "Pi",
       base: join(homeDir, ".pi"),
       skillsDir: join(homeDir, ".pi", "agent", "skills"),
+    },
+    {
+      id: "codex",
+      displayName: "Codex",
+      base: join(homeDir, ".codex"),
+      skillsDir: join(homeDir, ".codex", "skills"),
+    },
+    {
+      id: "opencode",
+      displayName: "OpenCode",
+      base: join(configHome, "opencode"),
+      skillsDir: join(configHome, "opencode", "skills"),
+    },
+    {
+      id: "kimi",
+      displayName: "Kimi",
+      base: join(homeDir, ".kimi"),
+      skillsDir: join(configHome, "agents", "skills"),
+    },
+    {
+      id: "amp",
+      displayName: "Amp",
+      base: join(homeDir, ".amp"),
+      skillsDir: join(configHome, "agents", "skills"),
+    },
+    {
+      id: "antigravity",
+      displayName: "Antigravity",
+      base: join(homeDir, ".gemini"),
+      skillsDir: join(homeDir, ".gemini", "skills"),
     },
   ];
 }

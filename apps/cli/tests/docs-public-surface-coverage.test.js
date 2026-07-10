@@ -133,7 +133,6 @@ test("TUI guide documents the current interactive commands", () => {
     expect(tuiGuide).toContain("bunx smithers-orchestrator init");
     expect(tuiGuide).toContain("bunx smithers-orchestrator up --interactive");
     expect(tuiGuide).toContain("bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive");
-    expect(tuiGuide).toContain("/images/tui/init-workflow-selection.svg");
     expect(tuiGuide).toContain("/images/tui/interactive-monitor-hello.svg");
 });
 
