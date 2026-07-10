@@ -16,7 +16,8 @@ agent drives the rest.
 
 ![Live workflow runs: some succeeded, some running, some paused on an approval gate, every run resumable and rewindable.](https://raw.githubusercontent.com/smithersai/smithers/main/marketing/0.22.0/assets/runs-live.gif)
 
-*A workflow run is a list of steps you can watch, pause, approve, and rewind. The run above shows several in flight at once.*
+*Watch every step of a workflow run, pause execution, approve gates, and rewind to an
+earlier checkpoint. Independent steps can run at the same time.*
 
 ## What you get
 
