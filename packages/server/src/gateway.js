@@ -2109,6 +2109,37 @@ export class Gateway {
         };
     }
     /**
+   * A workflow's UI: the one it declared, or — by convention — a sibling
+   * `ui/<key>.tsx` next to its entry file's `workflows/` directory. The
+   * convention is resolved on every call (a cheap existsSync) so a UI file
+   * created while the gateway is running becomes servable immediately, with
+   * no workflow edit (which would break parked runs' resume hashes) and no
+   * gateway restart.
+   *
+   * @param {string} key
+   * @param {RegisteredWorkflow} entry
+   * @returns {GatewayUiConfig | null}
+   */
+    resolvedUiFor(key, entry) {
+        if (entry.ui) {
+            return entry.ui;
+        }
+        if (!entry.entryFile) {
+            return null;
+        }
+        const conventionEntry = join(dirname(entry.entryFile), "..", "ui", `${key}.tsx`);
+        if (!existsSync(conventionEntry)) {
+            return null;
+        }
+        const fallbackPath = `/workflows/${encodeURIComponent(key)}`;
+        return {
+            entry: conventionEntry,
+            path: normalizeUiMountPath(undefined, fallbackPath),
+            ...(entry.workflow.readableName ? { title: entry.workflow.readableName } : {}),
+            props: {},
+        };
+    }
+    /**
    * @returns {GatewayUiMount[]}
    */
     getUiMounts() {
@@ -2124,8 +2155,9 @@ export class Gateway {
             mounts.push({ kind: "operator", workflowKey: null, config: this.operatorUi });
         }
         for (const [workflowKey, entry] of this.workflows.entries()) {
-            if (entry.ui) {
-                mounts.push({ kind: "workflow", workflowKey, config: entry.ui });
+            const ui = this.resolvedUiFor(workflowKey, entry);
+            if (ui) {
+                mounts.push({ kind: "workflow", workflowKey, config: ui });
             }
         }
         return mounts.sort((left, right) => right.config.path.length - left.config.path.length);
@@ -2315,12 +2347,13 @@ a { color: var(--brand); }</style>
    * @param {RegisteredWorkflow} entry
    */
     workflowSummary(key, entry) {
+        const ui = this.resolvedUiFor(key, entry);
         return {
             key,
             ...(entry.workflow.readableName ? { readableName: entry.workflow.readableName } : {}),
             ...(entry.workflow.description ? { description: entry.workflow.description } : {}),
-            hasUi: Boolean(entry.ui),
-            uiPath: entry.ui?.path ?? null,
+            hasUi: Boolean(ui),
+            uiPath: ui?.path ?? null,
             system: Boolean(entry.system),
         };
     }
