@@ -233,6 +233,7 @@ export async function getNodeOutputRoute(params) {
                 row: null,
                 schema: descriptor,
                 partial: parsePartialHeartbeat(latestAttempt?.heartbeatDataJson),
+                error: parseAttemptError(latestAttempt),
             };
         }
 
@@ -442,6 +443,44 @@ function normalizeOutputRow(row) {
         return r.payload ?? null;
     }
     return stripAutoColumns(r);
+}
+
+const ATTEMPT_ERROR_MESSAGE_MAX = 4_000;
+
+/**
+ * Surface WHY a node failed from the latest attempt's stored `errorJson`.
+ * The run-level failure wrapper hides the real cause; this is the honest one.
+ *
+ * @param {{ errorJson?: unknown; attempt?: unknown } | undefined} attempt
+ * @returns {{ name?: string; code?: string; message: string; attempt?: number } | null}
+ */
+function parseAttemptError(attempt) {
+    const raw = asString(attempt?.errorJson);
+    if (!raw) {
+        return null;
+    }
+    const attemptNo = typeof attempt?.attempt === "number" && Number.isFinite(attempt.attempt)
+        ? { attempt: attempt.attempt }
+        : {};
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch {
+        return { message: raw.slice(0, ATTEMPT_ERROR_MESSAGE_MAX), ...attemptNo };
+    }
+    if (!isPlainObject(parsed)) {
+        return { message: String(parsed).slice(0, ATTEMPT_ERROR_MESSAGE_MAX), ...attemptNo };
+    }
+    const name = asString(parsed.name);
+    const code = asString(parsed.code);
+    const message = asString(parsed.message) ?? asString(parsed.summary) ?? raw;
+    return {
+        ...(name ? { name } : {}),
+        ...(code ? { code } : {}),
+        message: message.slice(0, ATTEMPT_ERROR_MESSAGE_MAX),
+        ...attemptNo,
+    };
 }
 
 /**

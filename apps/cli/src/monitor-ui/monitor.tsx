@@ -31,9 +31,11 @@ import {
   groupRuns,
   hasFailedDescendant,
   isCancellable,
+  isNotableEvent,
   isRecord,
   isResumable,
   labelForStatus,
+  nodeErrorOf,
   pick,
   rowOf,
   runProgress,
@@ -529,9 +531,16 @@ function ExecutionTree({
 const FOLLOW_THRESHOLD_PX = 80;
 
 function EventLog({ runId }: { runId: string }) {
-  const { events, streaming, error } = useGatewayRunEvents(runId, { maxEvents: 500 });
+  const { events: allEvents, streaming, error } = useGatewayRunEvents(runId, { maxEvents: 500 });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
+  // Default to the transitions a human acts on; agent chatter and heartbeats
+  // stay one click away instead of drowning the log.
+  const [showAll, setShowAll] = useState(false);
+  const events = useMemo(
+    () => (showAll ? allEvents : allEvents.filter((frame) => isNotableEvent(asString(frame.event) ?? ""))),
+    [allEvents, showAll],
+  );
 
   useEffect(() => {
     if (!following) return;
@@ -553,8 +562,24 @@ function EventLog({ runId }: { runId: string }) {
     <section className="mon-panel mon-events-panel">
       <header className="mon-panel-head">
         <h2 className="mon-kicker">
-          Events <span className="mon-count">{events.length}</span>
+          Events <span className="mon-count">{events.length}{showAll ? "" : `/${allEvents.length}`}</span>
         </h2>
+        <button
+          type="button"
+          className={`mon-chip${showAll ? "" : " is-on"}`}
+          onClick={() => setShowAll(false)}
+          title="Node/run lifecycle, approvals, human requests"
+        >
+          Notable
+        </button>
+        <button
+          type="button"
+          className={`mon-chip${showAll ? " is-on" : ""}`}
+          onClick={() => setShowAll(true)}
+          title="Every event, including agent chatter and heartbeats"
+        >
+          All
+        </button>
         <button
           type="button"
           className={`mon-chip mon-follow${following ? " is-on" : ""}`}
@@ -570,7 +595,9 @@ function EventLog({ runId }: { runId: string }) {
       </header>
       {error ? <div className="mon-banner tone-failed">{error.message}</div> : null}
       <div className="mon-events" ref={containerRef} onScroll={onScroll} data-testid="monitor-events">
-        {events.length === 0 ? <div className="mon-empty">No events yet.</div> : null}
+        {events.length === 0 ? (
+          <div className="mon-empty">{allEvents.length === 0 ? "No events yet." : "No notable events yet."}</div>
+        ) : null}
         {events.map((frame) => {
           const line = formatEventLine(frame);
           return (
@@ -594,6 +621,7 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
   const nodeId = node.id ?? treeNodeKey(node);
   const output = useGatewayNodeOutput({ runId, nodeId, iteration: node.iteration ?? 0 });
   const row = rowOf(output.data);
+  const failure = nodeErrorOf(output.data);
   const toolCalls = asArray(node.toolCalls).filter(isRecord);
   const agentName = isRecord(node.agent) ? asString(node.agent.name) : asString(node.agent);
   return (
@@ -634,11 +662,23 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
           </div>
         </>
       ) : null}
+      {failure ? (
+        <>
+          <h3 className="mon-kicker">Failure</h3>
+          <div className="mon-banner tone-failed">
+            {[failure.name, failure.code].filter(Boolean).join(" · ")}
+            {typeof failure.attempt === "number" ? ` · attempt ${failure.attempt}` : ""}
+          </div>
+          <pre className="mon-output mon-failure">{failure.message}</pre>
+        </>
+      ) : null}
       <h3 className="mon-kicker">Output</h3>
       {row ? (
         <pre className="mon-output">{formatOutputValue(row)}</pre>
       ) : (
-        <div className="mon-empty mon-dim">No output recorded for this node.</div>
+        <div className="mon-empty mon-dim">
+          {failure ? "The node failed before producing output." : "No output recorded for this node."}
+        </div>
       )}
     </aside>
   );
@@ -1026,6 +1066,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 .mon-toolcalls { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 12px; }
 .mon-toolcall { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); }
 .mon-output { margin: 6px 0 0; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; max-height: 45vh; overflow-y: auto; }
+.mon-failure { border-color: color-mix(in srgb, var(--failed, #f87171) 45%, var(--border)); }
 
 .mon-empty { color: var(--muted); text-align: center; padding: 28px 12px; display: flex; flex-direction: column; gap: 6px; }
 .mon-empty-hero { padding-top: 18vh; }

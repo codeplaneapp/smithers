@@ -53,7 +53,9 @@ describe("snapshotToGatewayRunNode", () => {
       status: "waiting",
     });
     const sequence = tree?.children?.[0];
-    expect(sequence).toMatchObject({ id: "2", kind: "compute", status: "queued" });
+    // Containers roll up from their children: the gate below is waiting, so
+    // the sequence reads waiting rather than a meaningless neutral queued.
+    expect(sequence).toMatchObject({ id: "2", kind: "compute", status: "waiting" });
     const [plan, gate] = sequence?.children ?? [];
     // Logical task nodes key on task.nodeId and prefer task.label for the name.
     expect(plan).toMatchObject({ id: "plan", name: "Plan the work", kind: "agent", status: "queued" });
@@ -88,6 +90,33 @@ describe("snapshotToGatewayRunNode", () => {
     expect(d).toMatchObject({ id: "d", status: "queued" });
     // blockedNodeId still outranks the raw state for the gate the run waits on.
     expect(e).toMatchObject({ id: "e", status: "waiting" });
+  });
+
+  test("containers roll their status up from their children", () => {
+    const container = (id: number, name: string, children: unknown[]) =>
+      ({ id, name, type: "sequence", children }) as never;
+    const task = (id: number, nodeId: string, state?: string) =>
+      ({ id, name: nodeId, type: "task", task: { nodeId, kind: "agent", ...(state ? { state } : {}) }, children: [] }) as never;
+    const tree = snapshotToGatewayRunNode({
+      root: {
+        id: 1,
+        name: "Workflow",
+        type: "workflow",
+        children: [
+          container(10, "busy", [task(11, "a", "finished"), task(12, "b", "in-progress")]),
+          container(20, "done", [task(21, "c", "finished"), task(22, "d", "finished")]),
+          container(30, "broken", [task(31, "e", "finished"), task(32, "f", "failed")]),
+          container(40, "mixed", [task(41, "g", "finished"), task(42, "h")]),
+        ],
+      },
+      runState: { state: "running" },
+    });
+    const [busy, done, broken, mixed] = tree?.children ?? [];
+    expect(busy).toMatchObject({ status: "running" });
+    expect(done).toMatchObject({ status: "ok" });
+    expect(broken).toMatchObject({ status: "failed" });
+    // A stateless child means work may still be coming: stay neutral.
+    expect(mixed).toMatchObject({ status: "queued" });
   });
 
   test("a finished run still renders stateless and unknown-state nodes ok", () => {

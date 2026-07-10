@@ -184,6 +184,50 @@ function nodeStatus(
   return "queued";
 }
 
+/**
+ * Roll a container's status up from its children: containers (workflow,
+ * sequence, parallel, worktree, …) have no node rows of their own, so their
+ * honest tone is the aggregate of what is happening beneath them. Any running
+ * child wins, then waiting, then "all terminal" resolves to failed (if any
+ * child failed) or ok; a mix of terminal and queued children stays queued.
+ */
+function rollupStatus(own: string, children: GatewayRunNode[]): string {
+  if (own !== "queued" || children.length === 0) {
+    return own;
+  }
+  let sawFailed = false;
+  let sawCancelled = false;
+  let allTerminal = true;
+  for (const child of children) {
+    switch (child.status) {
+      case "running":
+        return "running";
+      case "waiting":
+        return "waiting";
+      case "failed":
+        sawFailed = true;
+        break;
+      case "cancelled":
+        sawCancelled = true;
+        break;
+      case "ok":
+        break;
+      default:
+        allTerminal = false;
+    }
+  }
+  if (!allTerminal) {
+    return "queued";
+  }
+  if (sawFailed) {
+    return "failed";
+  }
+  if (sawCancelled) {
+    return "cancelled";
+  }
+  return "ok";
+}
+
 function mapNode(
   node: DevToolsSnapshotNode,
   isRoot: boolean,
@@ -191,6 +235,10 @@ function mapNode(
   blockedNodeId: string | undefined,
 ): GatewayRunNode {
   const iteration = node.task?.iteration;
+  const children = (node.children ?? []).map((child) =>
+    mapNode(child, false, runStatus, blockedNodeId),
+  );
+  const ownStatus = nodeStatus(node, isRoot, runStatus, blockedNodeId);
   return {
     // The snapshot's structural `node.id` is assigned uniquely per position in
     // the tree (`assignId` in getDevToolsSnapshot), so it is the stable, unique
@@ -200,11 +248,9 @@ function mapNode(
     id: nodeId(node),
     name: nodeName(node),
     kind: nodeKind(node),
-    status: nodeStatus(node, isRoot, runStatus, blockedNodeId),
+    status: isRoot || node.task ? ownStatus : rollupStatus(ownStatus, children),
     ...(typeof iteration === "number" ? { iteration } : {}),
-    children: (node.children ?? []).map((child) =>
-      mapNode(child, false, runStatus, blockedNodeId),
-    ),
+    children,
   };
 }
 

@@ -19,4 +19,14 @@ export type NodeOutputResponse = {
     }>;
   } | null;
   partial?: Record<string, unknown> | null;
+  /**
+   * Why the node failed (from the latest attempt's stored error), present only
+   * when `status` is "failed" and an error was recorded.
+   */
+  error?: {
+    name?: string;
+    code?: string;
+    message: string;
+    attempt?: number;
+  } | null;
 };

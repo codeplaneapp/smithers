@@ -141,6 +141,57 @@ describe("getNodeOutputRoute status", () => {
     expect(response.status).toBe("failed");
     expect(response.row).toBeNull();
     expect(response.partial).toBeNull();
+    // The failure reason travels with the response so UIs can show WHY.
+    expect(response.error).toEqual({ message: "boom", attempt: 1 });
+  });
+
+  test("failed response surfaces structured attempt error with name and code", async () => {
+    const response = await invokeRoute({
+      resolvedRun: createResolvedRun({
+        nodeState: "failed",
+        attempts: [
+          {
+            attempt: 3,
+            state: "failed",
+            errorJson: JSON.stringify({
+              name: "SmithersError",
+              code: "VALIDATION_ERROR",
+              message: "Output failed schema validation after retries.",
+            }),
+            heartbeatDataJson: null,
+          },
+        ],
+      }),
+      selectOutputRowImpl: async () => undefined,
+    });
+
+    expect(response.status).toBe("failed");
+    expect(response.error).toEqual({
+      name: "SmithersError",
+      code: "VALIDATION_ERROR",
+      message: "Output failed schema validation after retries.",
+      attempt: 3,
+    });
+  });
+
+  test("failed response with unparseable errorJson still carries the raw message", async () => {
+    const response = await invokeRoute({
+      resolvedRun: createResolvedRun({
+        nodeState: "failed",
+        attempts: [
+          {
+            attempt: 1,
+            state: "failed",
+            errorJson: "raw non-json crash text",
+            heartbeatDataJson: null,
+          },
+        ],
+      }),
+      selectOutputRowImpl: async () => undefined,
+    });
+
+    expect(response.status).toBe("failed");
+    expect(response.error).toEqual({ message: "raw non-json crash text", attempt: 1 });
   });
 
   test("status failed with partial heartbeat payload", async () => {

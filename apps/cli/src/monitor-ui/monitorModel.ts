@@ -43,7 +43,40 @@ export function asArray(value: unknown): unknown[] {
 export function rowOf(value: unknown): Record<string, unknown> | null {
   if (!isRecord(value)) return null;
   if (isRecord(value.row)) return value.row;
+  // A {status, row: null, schema} envelope means the node produced no output —
+  // never render the envelope itself as if it were the row.
+  if ("row" in value || "schema" in value) return null;
   return value;
+}
+
+/** Why a failed node failed, from the getNodeOutput envelope's `error` field. */
+export function nodeErrorOf(
+  value: unknown,
+): { name?: string; code?: string; message: string; attempt?: number } | null {
+  if (!isRecord(value) || !isRecord(value.error)) return null;
+  const message = asString(value.error.message);
+  if (!message) return null;
+  const name = asString(value.error.name);
+  const code = asString(value.error.code);
+  return {
+    ...(name ? { name } : {}),
+    ...(code ? { code } : {}),
+    message,
+    ...(typeof value.error.attempt === "number" ? { attempt: value.error.attempt } : {}),
+  };
+}
+
+/**
+ * The events worth a human's attention: node/run lifecycle transitions,
+ * approvals, human requests, signals, and quota parks. Everything else
+ * (agent chatter, heartbeats, frames, per-token traces) is volume, not
+ * signal — the event log defaults to this filter with an "all" escape hatch.
+ */
+const NOTABLE_EVENT_PATTERN =
+  /^(Node(Started|Finished|Failed|Retrying|Skipped|Cancelled|WaitingApproval)|Run[A-Z]|Approval|Human|Signal|Quota)/;
+
+export function isNotableEvent(name: string): boolean {
+  return NOTABLE_EVENT_PATTERN.test(name);
 }
 
 /** Read a field by camelCase or snake_case (gateway rows vary by backend). */
