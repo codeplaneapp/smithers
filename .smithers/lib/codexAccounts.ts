@@ -98,3 +98,38 @@ export function codexFirst(
 
   return [new CodexAgent(options), ...registered, ...fallbacks];
 }
+
+/**
+ * Build a Codex-first chain without ambient auth or API-key credentials.
+ *
+ * Public, untrusted work must use subscription config directories explicitly:
+ * the Codex CLI can read its auth before entering the command sandbox, while
+ * model-spawned commands remain unable to read the real config directory.
+ */
+export function subscriptionCodexFirst(
+  options: CodexOptions,
+  fallbacks: AgentLike[] = [],
+  env: NodeJS.ProcessEnv = process.env,
+): AgentLike[] {
+  if (options.apiKey) {
+    throw new Error("subscriptionCodexFirst does not accept API-key credentials");
+  }
+
+  const configDirs = [
+    options.configDir?.trim(),
+    ...registeredCodexCredentials(env)
+      .filter((credential): credential is Extract<RegisteredCodexCredential, { provider: "codex" }> =>
+        credential.provider === "codex"
+      )
+      .map((credential) => credential.configDir),
+  ].filter((configDir): configDir is string => Boolean(configDir));
+
+  const seen = new Set<string>();
+  const subscriptions = configDirs.flatMap((configDir) => {
+    if (seen.has(configDir)) return [];
+    seen.add(configDir);
+    return [new CodexAgent({ ...options, configDir, apiKey: undefined })];
+  });
+
+  return [...subscriptions, ...fallbacks];
+}
