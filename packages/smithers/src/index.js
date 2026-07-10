@@ -98,6 +98,7 @@
 /** @typedef {import("@smithers-orchestrator/agents").PiExtensionUiRequest} PiExtensionUiRequest */
 /** @typedef {import("@smithers-orchestrator/agents").PiExtensionUiResponse} PiExtensionUiResponse */
 /** @typedef {import("@smithers-orchestrator/agents").OpenCodeAgentOptions} OpenCodeAgentOptions */
+/** @typedef {import("@smithers-orchestrator/agents").PoolAgentOptions} PoolAgentOptions */
 /** @typedef {import("@smithers-orchestrator/agents").VibeAgentOptions} VibeAgentOptions */
 /** @typedef {import("@smithers-orchestrator/components").PollerProps} PollerProps */
 /** @typedef {import("@smithers-orchestrator/server/gateway").RequestFrame} RequestFrame */
@@ -190,7 +191,7 @@ export { Approval, ApprovalGate, Aspects, Branch, CheckSuite, ClassifyAndRoute, 
 // Delegation chain
 export { BackpressurePlanning, DelegationChain, DelegationEditListener, DelegationExecution, DelegationPlanning, DelegationPreview, DelegationScoring, DeriskLoop, GoalRefinement, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_TIER_ORDER, captureWorkingCopyCommit, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, devPreviewKindSchema, estimateSchema, gateSchema, tierSchema, withCommitRange, } from "@smithers-orchestrator/components";
 // Agents
-export { AnthropicAgent, OpenAIAgent, HermesAgent, HermesCliAgent, OpenClawAgent, AmpAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent, KimiAgent, ForgeAgent, VibeAgent, OpenCodeAgent, createHttpTool, } from "@smithers-orchestrator/agents";
+export { AnthropicAgent, OpenAIAgent, HermesAgent, HermesCliAgent, OpenClawAgent, AmpAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent, KimiAgent, ForgeAgent, VibeAgent, OpenCodeAgent, PoolAgent, createHttpTool, } from "@smithers-orchestrator/agents";
 // VCS
 export { runJj, getJjPointer, revertToJjPointer, isJjRepo, workspaceAdd, workspaceList, workspaceClose, } from "@smithers-orchestrator/vcs/jj";
 // Core API
