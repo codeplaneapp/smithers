@@ -1,3 +1,5 @@
+/// <reference path="../types/bun-test-shim.d.ts" />
+
 import type { Sim } from "./simulate.ts";
 
 type MatcherContext = {
@@ -111,7 +113,7 @@ declare module "bun:test" {
 // is what makes the type augmentation gated rather than silently ship-or-not.
 type _Assert<T extends true> = T;
 type _AugmentationApplies = _Assert<
-  ReturnType<typeof import("bun:test").expect> extends {
+  import("bun:test").Matchers<unknown> extends {
     toHaveExecuted(ids: string[]): void;
     toHaveExecutedInOrder(ids: string[]): void;
     toHaveFinished(): void;

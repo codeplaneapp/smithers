@@ -1,3 +1,4 @@
+/// <reference path="../types/bun-test-shim.d.ts" />
 import { TaskDescriptor } from '@smithers-orchestrator/graph';
 
 type RunTaskOptions = {

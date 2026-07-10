@@ -1,3 +1,4 @@
+/// <reference path="../types/bun-test-shim.d.ts" />
 import { Sim } from './simulate.js';
 import '@smithers-orchestrator/driver/WorkflowDefinition';
 import '@smithers-orchestrator/graph';

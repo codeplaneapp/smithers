@@ -1,3 +1,4 @@
+/// <reference path="../types/bun-test-shim.d.ts" />
 type SafeParseSuccess<T> = {
     success: true;
     data: T;

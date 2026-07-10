@@ -1,3 +1,4 @@
+/// <reference path="../types/bun-test-shim.d.ts" />
 import { SmithersCtx } from '@smithers-orchestrator/driver/SmithersCtx';
 import { SmithersRenderer } from '@smithers-orchestrator/react-reconciler';
 import { WorkflowDefinition } from '@smithers-orchestrator/driver/WorkflowDefinition';

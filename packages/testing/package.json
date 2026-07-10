@@ -21,7 +21,8 @@
     }
   },
   "files": [
-    "src/"
+    "src/",
+    "types/"
   ],
   "scripts": {
     "build": "node ../../scripts/clean-dts.mjs src && tsup",

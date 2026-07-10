@@ -1,3 +1,4 @@
+/// <reference path="../types/bun-test-shim.d.ts" />
 import { WorkflowDefinition } from '@smithers-orchestrator/driver/WorkflowDefinition';
 import { TaskDescriptor } from '@smithers-orchestrator/graph';
 

@@ -15,7 +15,10 @@ export default defineConfig({
     matchers: "src/matchers.ts",
   },
   format: ["esm"],
-  dts: { resolve: false },
+  dts: {
+    resolve: false,
+    banner: '/// <reference path="../types/bun-test-shim.d.ts" />',
+  },
   outDir: "src",
   clean: false,
   splitting: false,
