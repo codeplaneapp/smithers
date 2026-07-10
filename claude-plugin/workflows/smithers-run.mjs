@@ -365,7 +365,7 @@ await Promise.all(pendingRows)
 
 const failed = finalStatus === 'failed'
 log(failed
-  ? `Run ${runId} failed. Diagnose with \`smithers autopsy ${runId}\`.`
+  ? `Run ${runId} failed. Diagnose with \`smithers inspect ${runId}\`.`
   : `Mirror complete for run ${runId}: status ${finalStatus}, ${mirrored.size} node rows.`)
 
 return { runId, status: finalStatus, mirrored: mirrored.size, ticks }

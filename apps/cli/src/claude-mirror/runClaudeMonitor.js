@@ -201,7 +201,7 @@ function buildEventEntry(kind, runId, payload) {
             kind,
             runId,
             summary: `Run ${runId} failed.`,
-            action: `Diagnose with: smithers autopsy ${runId}`,
+            action: `Diagnose with: smithers inspect ${runId} (logs: smithers logs ${runId})`,
         };
     }
     if (kind === "approval-pending") {

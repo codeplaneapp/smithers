@@ -88,7 +88,7 @@ with zero per-workflow setup:
 5. **React to what it surfaces.** When the mirror (or the background monitor)
    reports a pending approval or human request, relay it to the human in plain
    language, collect the decision, and resolve it yourself (`resolve_approval`,
-   `smithers approve`). When it reports a failure, run `smithers autopsy
+   `smithers approve`). When it reports a failure, run `smithers inspect
    <runId>` and report findings.
 
 The mirror consumes the versioned `smithers claude tick` / `smithers claude
@@ -151,7 +151,7 @@ every workflow you build:
    Smithers engine and appears live in `/workflows`; the mirror logs the runId.
 5. **`smithers ui <runId>`** — also open the custom UI in the human's browser.
 6. Watch the mirror; clear gates the moment the mirror or monitor surfaces them
-   (`resolve_approval`); feed failures back in (`smithers autopsy <runId>`);
+   (`resolve_approval`); feed failures back in (`smithers inspect <runId>`);
    report evidence from the mirror's return value.
 
 A suspend on an approval gate is **waiting**, not failure (the CLI exits non-zero,
