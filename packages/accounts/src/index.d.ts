@@ -224,6 +224,20 @@ declare const API_KEY_PROVIDERS: Set<string>;
 declare const VALID_PROVIDERS: Set<string>;
 
 /**
+ * Builds an RFC 6749 authorization-code request URL with RFC 7636 PKCE parameters.
+ */
+declare function buildAuthorizationUrl(request: {
+    authorizationEndpoint: string;
+    clientId: string;
+    redirectUri: string;
+    state: string;
+    codeChallenge: string;
+    scope?: string | readonly string[];
+    codeChallengeMethod?: "S256" | "plain";
+    extraParams?: Record<string, string>;
+}): string;
+
+/**
  * Creates an RFC 7636 PKCE code_verifier using high-entropy random bytes.
  *
  * @param {number} [byteLength]
@@ -254,4 +268,4 @@ type AccountProvider = AccountProvider$1;
 type AccountsFile = AccountsFile$1;
 type UnknownAccount = UnknownAccount$1;
 
-export { API_KEY_PROVIDERS, type Account, type AccountProvider, type AccountsFile, SUBSCRIPTION_PROVIDERS, type UnknownAccount, VALID_PROVIDERS, accountToProviderEnv, accountsFilePath, accountsRoot, addAccount, createCodeVerifier, createPkcePair, defaultConfigDir, deriveCodeChallenge, getAccount, listAccounts, parseAccountsFile, readAccounts, removeAccount, withAccountsLock, writeAccounts };
+export { API_KEY_PROVIDERS, type Account, type AccountProvider, type AccountsFile, SUBSCRIPTION_PROVIDERS, type UnknownAccount, VALID_PROVIDERS, accountToProviderEnv, accountsFilePath, accountsRoot, addAccount, buildAuthorizationUrl, createCodeVerifier, createPkcePair, defaultConfigDir, deriveCodeChallenge, getAccount, listAccounts, parseAccountsFile, readAccounts, removeAccount, withAccountsLock, writeAccounts };
