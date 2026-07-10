@@ -242,14 +242,36 @@ const DETECTORS = [
         },
         setupHint: "Install OpenClaw and finish onboarding with `openclaw configure` or the first-run wizard.",
     },
+    {
+        id: "pool",
+        displayName: "Pool",
+        binary: "pool",
+        authSignals: (homeDir) => [
+            join(homeDir, ".config", "poolside", "settings.yaml"),
+            join(homeDir, ".config", "poolside"),
+        ],
+        apiKeys: [],
+        availabilityProbe: (_homeDir, env) => {
+            const status = runProbeCommand("pool", ["--version"], env);
+            if (status.status === 0 && /pool|v\d+\./.test(status.output)) {
+                return passProbe("Pool CLI is installed and executable");
+            }
+            const settings = join(_homeDir, ".config", "poolside", "settings.yaml");
+            if (existsSync(settings)) {
+                return passProbe("Pool settings file is present");
+            }
+            return failProbe(status.output || "Pool CLI not verified");
+        },
+        setupHint: "Install the Pool CLI and run `pool login` to authenticate.",
+    },
 ];
 const ROLE_PREFERENCES = {
-    spec: ["codex", "claude", "opencode", "openclaw"],
-    research: ["codex", "kimi", "antigravity", "opencode", "claude", "openclaw"],
-    plan: ["codex", "claude", "opencode", "antigravity", "kimi", "openclaw"],
-    implement: ["codex", "opencode", "amp", "antigravity", "openclaw", "claude", "kimi"],
-    validate: ["codex", "opencode", "amp", "antigravity", "openclaw", "claude", "kimi"],
-    review: ["codex", "claude", "amp", "opencode", "openclaw", "kimi"],
+    spec: ["codex", "claude", "opencode", "pool", "openclaw"],
+    research: ["codex", "kimi", "antigravity", "opencode", "pool", "claude", "openclaw"],
+    plan: ["codex", "claude", "opencode", "pool", "antigravity", "kimi", "openclaw"],
+    implement: ["codex", "opencode", "amp", "pool", "antigravity", "openclaw", "claude", "kimi"],
+    validate: ["codex", "opencode", "amp", "pool", "antigravity", "openclaw", "claude", "kimi"],
+    review: ["codex", "claude", "amp", "opencode", "pool", "openclaw", "kimi"],
 };
 const AGENT_VARIANTS = [
     {
@@ -303,12 +325,14 @@ const SCAFFOLDED_PROVIDERS = {
     codex: "CodexAgent",
     opencode: "OpenCodeAgent",
     antigravity: "AntigravityAgent",
+    pool: "PoolAgent",
 };
 const SCAFFOLDED_PROVIDER_FILES = {
     claude: "claude-code",
     codex: "codex",
     opencode: "opencode",
     antigravity: "antigravity",
+    pool: "pool",
 };
 const LEGACY_SCAFFOLDED_PROVIDERS = {};
 const LOCAL_SCAFFOLDED_PROVIDERS = {
@@ -381,6 +405,10 @@ const CONSTRUCTORS = {
     openclaw: {
         importName: "OpenClawAgent",
         expr: "new SmithersOpenClawAgent()",
+    },
+    pool: {
+        importName: "PoolAgent",
+        expr: "new SmithersPoolAgent()",
     },
 };
 /**

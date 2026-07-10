@@ -24,6 +24,7 @@
 /** @typedef {import("./BaseCliAgent/PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
 /** @typedef {import("./BaseCliAgent/PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
 /** @typedef {import("./OpenCodeAgentOptions.ts").OpenCodeAgentOptions} OpenCodeAgentOptions */
+/** @typedef {import("./PoolAgentOptions.ts").PoolAgentOptions} PoolAgentOptions */
 /** @typedef {import("./VibeAgentOptions.ts").VibeAgentOptions} VibeAgentOptions */
 /** @typedef {import("./agent-contract/SmithersAgentContract.ts").SmithersAgentContract} SmithersAgentContract */
 /** @typedef {import("./agent-contract/SmithersAgentContractTool.ts").SmithersAgentContractTool} SmithersAgentContractTool */
@@ -56,6 +57,7 @@ export { OpenAIAgent } from "./OpenAIAgent.js";
 export { HermesAgent } from "./HermesAgent.js";
 export { HermesCliAgent, createHermesCliCapabilityRegistry } from "./HermesCliAgent.js";
 export { OpenClawAgent, createOpenClawCapabilityRegistry } from "./OpenClawAgent.js";
+export { PoolAgent, createPoolCapabilityRegistry } from "./PoolAgent.js";
 export { AmpAgent } from "./AmpAgent.js";
 export { AntigravityAgent } from "./AntigravityAgent.js";
 export { ClaudeCodeAgent } from "./ClaudeCodeAgent.js";
