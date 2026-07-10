@@ -901,11 +901,57 @@ function HealthStrip({
 // Node inspector.
 // ---------------------------------------------------------------------------
 
+/**
+ * Live transcript for an in-flight node: the run event stream already carries
+ * the agent's chat/output/tool events per node — tail them here so clicking a
+ * running node shows what the agent is doing right now, updating live.
+ */
+function NodeLiveOutput({ runId, nodeId }: { runId: string; nodeId: string }) {
+  const { events, streaming } = useGatewayRunEvents(runId, { maxEvents: 500 });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const lines = useMemo(() => {
+    const out: Array<{ seq: number; text: string }> = [];
+    for (const frame of events) {
+      const payload = isRecord(frame.payload) ? frame.payload : {};
+      if (asString(pick(payload, "nodeId", "node_id")) !== nodeId) continue;
+      const name = String(frame.event ?? "");
+      if (!/AgentEvent|AgentTraceEvent|NodeOutput|ToolCall|task\.output|agent\./i.test(name)) continue;
+      const line = formatEventLine(frame);
+      const text = line.detail.startsWith(`${nodeId} · `) ? line.detail.slice(nodeId.length + 3) : line.detail;
+      if (text) out.push({ seq: line.seq, text });
+    }
+    return out.slice(-80);
+  }, [events, nodeId]);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lines.length]);
+  if (lines.length === 0) {
+    return (
+      <div className="mon-empty mon-dim">
+        {streaming ? "No live output yet — agent events stream here as they arrive." : "Event stream is not connected."}
+      </div>
+    );
+  }
+  return (
+    <div className="mon-output mon-live-output" ref={containerRef} data-testid="monitor-live-output">
+      {lines.map((line) => (
+        <div key={line.seq} className="mon-live-line">
+          {line.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const TERMINAL_NODE_TONES = new Set(["ok", "failed", "cancelled"]);
+
 function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
   const nodeId = node.id ?? treeNodeKey(node);
   const output = useGatewayNodeOutput({ runId, nodeId, iteration: node.iteration ?? 0 });
   const row = rowOf(output.data);
   const failure = nodeErrorOf(output.data);
+  const isLive = !TERMINAL_NODE_TONES.has(String(node.status ?? ""));
   const toolCalls = asArray(node.toolCalls).filter(isRecord);
   const agentName = isRecord(node.agent) ? asString(node.agent.name) : asString(node.agent);
   return (
@@ -956,12 +1002,22 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
           <pre className="mon-output mon-failure">{failure.message}</pre>
         </>
       ) : null}
+      {isLive ? (
+        <>
+          <h3 className="mon-kicker">Live output</h3>
+          <NodeLiveOutput runId={runId} nodeId={nodeId} />
+        </>
+      ) : null}
       <h3 className="mon-kicker">Output</h3>
       {row ? (
         <pre className="mon-output">{formatOutputValue(row)}</pre>
       ) : (
         <div className="mon-empty mon-dim">
-          {failure ? "The node failed before producing output." : "No output recorded for this node."}
+          {failure
+            ? "The node failed before producing output."
+            : isLive
+              ? "No structured output yet — it lands here when the node finishes."
+              : "No output recorded for this node."}
         </div>
       )}
     </aside>
@@ -992,6 +1048,18 @@ function RunDetail({
   const workflowsQuery = useGatewayWorkflows();
   const [busyAction, setBusyAction] = useState<"cancel" | "resume" | null>(null);
   const [showCustomUi, setShowCustomUi] = useState(false);
+  const [creatingUi, setCreatingUi] = useState(false);
+  const workflowsRefetch = workflowsQuery.refetch;
+  // While a create-ui run is authoring this workflow's UI, poll the workflow
+  // list so the Open UI button appears the moment the file lands (the gateway
+  // resolves .smithers/ui/<key>.tsx by convention with no restart).
+  useEffect(() => {
+    if (!creatingUi) return;
+    const timer = setInterval(() => {
+      void workflowsRefetch();
+    }, 8_000);
+    return () => clearInterval(timer);
+  }, [creatingUi, workflowsRefetch]);
   const run = isRecord(runQuery.data) ? runQuery.data : null;
 
   if (!run && runQuery.loading) return <div className="mon-empty">Loading run…</div>;
@@ -1066,6 +1134,30 @@ function RunDetail({
           {customUiUrl ? (
             <button type="button" className="mon-btn" onClick={() => setShowCustomUi(true)} title={`Open this workflow's custom UI (${customUiPath})`}>
               Open UI
+            </button>
+          ) : workflowRow && workflowKey !== "create-ui" ? (
+            <button
+              type="button"
+              className="mon-btn"
+              disabled={creatingUi}
+              title="Launch the create-ui workflow: one agent writes .smithers/ui/<key>.tsx and verifies it against this gateway"
+              onClick={() => {
+                setCreatingUi(true);
+                void actions
+                  .launchRun({
+                    workflow: "create-ui",
+                    input: { targetWorkflow: workflowKey, gatewayUrl: location.origin, exampleRunId: runId },
+                  })
+                  .then(() => {
+                    onResult("ok", `Creating a UI for ${workflowKey} — the Open UI button appears here when it's ready (a few minutes).`);
+                  })
+                  .catch((error) => {
+                    setCreatingUi(false);
+                    onResult("err", `Create UI failed to launch: ${error instanceof Error ? error.message : String(error)}`);
+                  });
+              }}
+            >
+              {creatingUi ? "Creating UI…" : "Create UI"}
             </button>
           ) : null}
           {isResumable(status) ? (
@@ -1380,6 +1472,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 .mon-toolcall { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); }
 .mon-output { margin: 6px 0 0; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; max-height: 45vh; overflow-y: auto; }
 .mon-failure { border-color: color-mix(in srgb, var(--failed, #f87171) 45%, var(--border)); }
+.mon-live-output { max-height: 32vh; }
+.mon-live-line { padding: 1px 0; border-bottom: 1px dashed color-mix(in srgb, var(--border) 55%, transparent); }
+.mon-live-line:last-child { border-bottom: 0; }
 .mon-quota { flex-direction: column; align-items: flex-start; }
 .mon-health { flex-direction: column; align-items: flex-start; gap: 4px; }
 .mon-health-headline { display: flex; align-items: center; gap: 8px; }
