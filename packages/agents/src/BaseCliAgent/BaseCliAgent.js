@@ -824,6 +824,7 @@ export class BaseCliAgent {
     systemPrompt;
     cwd;
     env;
+    inheritEnv;
     yolo;
     timeoutMs;
     idleTimeoutMs;
@@ -838,6 +839,7 @@ export class BaseCliAgent {
         this.systemPrompt = opts.systemPrompt ?? opts.instructions;
         this.cwd = opts.cwd;
         this.env = opts.env;
+        this.inheritEnv = opts.inheritEnv ?? true;
         this.yolo = opts.yolo ?? true;
         this.timeoutMs = opts.timeoutMs;
         this.idleTimeoutMs = opts.idleTimeoutMs;
@@ -858,7 +860,7 @@ export class BaseCliAgent {
         });
         const cwd = this.cwd ?? options?.rootDir ?? process.cwd();
         const env = {
-            ...process.env,
+            ...(this.inheritEnv ? process.env : {}),
             ...this.env,
             ...taskContextEnv(options?.taskContext),
         };
@@ -1243,7 +1245,7 @@ export class BaseCliAgent {
     async preflight(options) {
         const cwd = this.cwd ?? options?.rootDir ?? process.cwd();
         const env = {
-            ...process.env,
+            ...(this.inheritEnv ? process.env : {}),
             ...this.env,
             ...taskContextEnv(options?.taskContext),
         };
