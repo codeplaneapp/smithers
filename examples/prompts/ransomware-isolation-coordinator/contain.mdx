@@ -3,7 +3,15 @@ export default function Prompt(props) {
     <>
       {"Example prompt: ransomware isolation coordinator contain"}
       {"\n\n"}
-      {JSON.stringify(props ?? {}, null, 2)}
+      {JSON.stringify(
+        {
+          hostId: props.hostId,
+          severity: props.severity,
+          approvedBy: props.approvedBy,
+        },
+        null,
+        2,
+      )}
     </>
   );
 }

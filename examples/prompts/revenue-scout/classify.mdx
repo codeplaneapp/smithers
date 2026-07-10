@@ -3,7 +3,15 @@ export default function Prompt(props) {
     <>
       {"Example prompt: revenue scout classify"}
       {"\n\n"}
-      {JSON.stringify(props ?? {}, null, 2)}
+      {JSON.stringify(
+        {
+          source: props.source,
+          conversations: props.conversations,
+          fetchCmd: props.fetchCmd,
+        },
+        null,
+        2,
+      )}
     </>
   );
 }
