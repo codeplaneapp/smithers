@@ -12,6 +12,15 @@ type DevToolsNode = {
         label?: string;
         outputTableName?: string;
         iteration?: number;
+        /**
+         * Current lifecycle state from the run's node rows (latest iteration wins),
+         * e.g. "pending" | "in-progress" | "finished" | "failed" | "skipped" |
+         * "waiting-approval". Absent when the node has no row yet or the snapshot
+         * producer predates state enrichment.
+         */
+        state?: string;
+        /** Last attempt number for the state-bearing iteration. */
+        attempt?: number;
     };
     children: DevToolsNode[];
     depth: number;
@@ -71,13 +80,21 @@ type DevToolsEvent = {
 /** @typedef {import("./devtools/DevToolsSnapshot.ts").DevToolsSnapshot} DevToolsSnapshot */
 declare const DEVTOOLS_PROTOCOL_VERSION: 1;
 
+type NodeOutputErrorCode = "InvalidRunId" | "InvalidNodeId" | "InvalidIteration" | "RunNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "SchemaConversionError" | "MalformedOutputRow" | "PayloadTooLarge";
+
+type NodeDiffErrorCode = "InvalidRunId" | "InvalidNodeId" | "InvalidIteration" | "RunNotFound" | "NodeNotFound" | "AttemptNotFound" | "AttemptNotFinished" | "VcsError" | "WorkingTreeDirty" | "DiffTooLarge";
+
+type JumpToFrameErrorCode = "InvalidRunId" | "InvalidFrameNo" | "RunNotFound" | "FrameOutOfRange" | "ConfirmationRequired" | "Busy" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "RateLimited" | "Unauthorized";
+
+type DevToolsErrorCode = "RunNotFound" | "InvalidRunId" | "FrameOutOfRange" | "SeqOutOfRange" | "BackpressureDisconnect" | "Unauthorized" | "InvalidDelta";
+
+/** @typedef {import("./DevToolsErrorCode.ts").DevToolsErrorCode} DevToolsErrorCode */
+/** @typedef {import("./JumpToFrameErrorCode.ts").JumpToFrameErrorCode} JumpToFrameErrorCode */
+/** @typedef {import("./NodeDiffErrorCode.ts").NodeDiffErrorCode} NodeDiffErrorCode */
+/** @typedef {import("./NodeOutputErrorCode.ts").NodeOutputErrorCode} NodeOutputErrorCode */
 declare const DEVTOOLS_ERROR_CODES: readonly ["RunNotFound", "InvalidRunId", "FrameOutOfRange", "SeqOutOfRange", "BackpressureDisconnect", "Unauthorized", "InvalidDelta"];
-type DevToolsErrorCode = (typeof DEVTOOLS_ERROR_CODES)[number];
 declare const NODE_OUTPUT_ERROR_CODES: readonly ["InvalidRunId", "InvalidNodeId", "InvalidIteration", "RunNotFound", "NodeNotFound", "IterationNotFound", "NodeHasNoOutput", "SchemaConversionError", "MalformedOutputRow", "PayloadTooLarge"];
-type NodeOutputErrorCode = (typeof NODE_OUTPUT_ERROR_CODES)[number];
 declare const NODE_DIFF_ERROR_CODES: readonly ["InvalidRunId", "InvalidNodeId", "InvalidIteration", "RunNotFound", "NodeNotFound", "AttemptNotFound", "AttemptNotFinished", "VcsError", "WorkingTreeDirty", "DiffTooLarge"];
-type NodeDiffErrorCode = (typeof NODE_DIFF_ERROR_CODES)[number];
 declare const JUMP_TO_FRAME_ERROR_CODES: readonly ["InvalidRunId", "InvalidFrameNo", "RunNotFound", "FrameOutOfRange", "ConfirmationRequired", "Busy", "UnsupportedSandbox", "VcsError", "RewindFailed", "RateLimited", "Unauthorized"];
-type JumpToFrameErrorCode = (typeof JUMP_TO_FRAME_ERROR_CODES)[number];
 
 export { DEVTOOLS_ERROR_CODES, DEVTOOLS_PROTOCOL_VERSION, type DevToolsDelta, type DevToolsDeltaOp, type DevToolsErrorCode, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, type DevToolsSnapshot, JUMP_TO_FRAME_ERROR_CODES, type JumpToFrameErrorCode, NODE_DIFF_ERROR_CODES, NODE_OUTPUT_ERROR_CODES, type NodeDiffErrorCode, type NodeOutputErrorCode };

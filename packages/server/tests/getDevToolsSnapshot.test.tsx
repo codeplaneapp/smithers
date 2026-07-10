@@ -182,6 +182,76 @@ describe("getDevToolsSnapshotRoute", () => {
     sqlite.close();
   });
 
+  test("attaches per-node lifecycle state from node rows, latest iteration wins", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "run-node-states";
+    await adapter.insertRun({
+      runId,
+      workflowName: "wf",
+      status: "running",
+      createdAtMs: now(),
+    });
+    await adapter.insertFrame({
+      runId,
+      frameNo: 0,
+      createdAtMs: now(),
+      xmlJson: canonicalizeXml({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "states" },
+        children: [
+          { kind: "element", tag: "smithers:task", props: { id: "done-task::0" }, children: [] },
+          { kind: "element", tag: "smithers:task", props: { id: "busy-task::0" }, children: [] },
+          { kind: "element", tag: "smithers:task", props: { id: "future-task::0" }, children: [] },
+        ],
+      }),
+      xmlHash: "hash-states",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: "[]",
+      note: "states",
+    });
+    await adapter.insertNode({
+      runId,
+      nodeId: "done-task",
+      iteration: 0,
+      state: "finished",
+      lastAttempt: 1,
+      updatedAtMs: now(),
+      outputTable: "",
+      label: null,
+    });
+    // Loop-style node: iteration 0 finished, iteration 1 in flight — the
+    // snapshot must surface the LATEST iteration's state.
+    await adapter.insertNode({
+      runId,
+      nodeId: "busy-task",
+      iteration: 0,
+      state: "finished",
+      lastAttempt: 1,
+      updatedAtMs: now(),
+      outputTable: "",
+      label: null,
+    });
+    await adapter.insertNode({
+      runId,
+      nodeId: "busy-task",
+      iteration: 1,
+      state: "in-progress",
+      lastAttempt: 2,
+      updatedAtMs: now(),
+      outputTable: "",
+      label: null,
+    });
+
+    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId });
+    const byNodeId = new Map(snapshot.root.children.map((child) => [child.task?.nodeId, child.task]));
+    expect(byNodeId.get("done-task")).toMatchObject({ state: "finished", attempt: 1 });
+    expect(byNodeId.get("busy-task")).toMatchObject({ state: "in-progress", attempt: 2 });
+    // A frame-mounted task with no node row yet carries no state at all.
+    expect(byNodeId.get("future-task")?.state).toBeUndefined();
+    sqlite.close();
+  });
+
   test("preserves durable human task kind from frame props", async () => {
     const { adapter, sqlite } = createAdapter();
     const runId = "run-human-kind";

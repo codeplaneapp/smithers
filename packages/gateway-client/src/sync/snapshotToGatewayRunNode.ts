@@ -25,6 +25,9 @@ export type DevToolsSnapshotNode = {
     kind?: string;
     label?: string;
     iteration?: number;
+    /** Current lifecycle state from the run's node rows (latest iteration wins). */
+    state?: string;
+    attempt?: number;
   };
   children?: DevToolsSnapshotNode[];
 };
@@ -118,6 +121,8 @@ function nodeKind(node: DevToolsSnapshotNode): string {
 function toRunStatus(state: string | undefined): string {
   switch (state) {
     case "running":
+    case "in-progress":
+    case "retrying":
       return "running";
     case "succeeded":
     case "finished":
@@ -137,16 +142,20 @@ function toRunStatus(state: string | undefined): string {
     case "blocked":
       return "waiting";
     default:
-      return "queued";
+      // Any other waiting-* variant (waiting-quota, future park states) is
+      // still a wait, not an unknown.
+      return state?.startsWith("waiting") ? "waiting" : "queued";
   }
 }
 
 /**
- * Derive a per-node status. The snapshot tree carries no per-node lifecycle, so
- * the honest signals are the run-level state and the blocked node a paused run
- * waits on: the blocked node is `waiting`, the root mirrors the run, and when a
- * run has finished every node is `ok`. Otherwise leave it `queued` (neutral)
- * rather than inventing a state we do not have.
+ * Derive a per-node status. Snapshots now carry each task node's current
+ * lifecycle on `task.state` (attached server-side from the run's node rows),
+ * so a task with a known state renders it directly. The remaining fallbacks
+ * cover container nodes and older gateways whose snapshots predate state
+ * enrichment: the blocked node is `waiting`, the root mirrors the run, a
+ * finished run renders everything `ok`, and everything else stays a neutral
+ * `queued` rather than inventing a state we do not have.
  */
 function nodeStatus(
   node: DevToolsSnapshotNode,
@@ -159,6 +168,15 @@ function nodeStatus(
   }
   if (isRoot) {
     return runStatus;
+  }
+  const taskState = node.task?.state;
+  if (taskState) {
+    const mapped = toRunStatus(taskState);
+    // "queued" is toRunStatus's unknown-state fallback; let unknown states
+    // fall through so a finished run still renders them `ok`.
+    if (mapped !== "queued") {
+      return mapped;
+    }
   }
   if (runStatus === "ok") {
     return "ok";

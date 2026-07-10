@@ -61,6 +61,55 @@ describe("snapshotToGatewayRunNode", () => {
     expect(gate).toMatchObject({ id: "approve", name: "approve", kind: "approval", status: "waiting" });
   });
 
+  test("renders task.state as the node status when the snapshot carries it", () => {
+    // A live run whose snapshot carries per-node lifecycle (attached by the
+    // server from node rows, #817): finished renders ok, in-progress renders
+    // running, failed renders failed — while a stateless sibling stays queued
+    // and the blocked node still wins as waiting.
+    const tree = snapshotToGatewayRunNode({
+      root: {
+        id: 1,
+        name: "Workflow",
+        type: "workflow",
+        children: [
+          { id: 2, name: "A", type: "task", task: { nodeId: "a", kind: "compute", state: "finished", attempt: 1 }, children: [] },
+          { id: 3, name: "B", type: "task", task: { nodeId: "b", kind: "agent", state: "in-progress", attempt: 2 }, children: [] },
+          { id: 4, name: "C", type: "task", task: { nodeId: "c", kind: "agent", state: "failed", attempt: 3 }, children: [] },
+          { id: 5, name: "D", type: "task", task: { nodeId: "d", kind: "agent" }, children: [] },
+          { id: 6, name: "E", type: "approval", task: { nodeId: "e", kind: "static", state: "in-progress" }, children: [] },
+        ],
+      },
+      runState: { state: "running", blocked: { nodeId: "e" } },
+    });
+    const [a, b, c, d, e] = tree?.children ?? [];
+    expect(a).toMatchObject({ id: "a", status: "ok" });
+    expect(b).toMatchObject({ id: "b", status: "running" });
+    expect(c).toMatchObject({ id: "c", status: "failed" });
+    expect(d).toMatchObject({ id: "d", status: "queued" });
+    // blockedNodeId still outranks the raw state for the gate the run waits on.
+    expect(e).toMatchObject({ id: "e", status: "waiting" });
+  });
+
+  test("a finished run still renders stateless and unknown-state nodes ok", () => {
+    const tree = snapshotToGatewayRunNode({
+      root: {
+        id: 1,
+        name: "Workflow",
+        type: "workflow",
+        children: [
+          { id: 2, name: "A", type: "task", task: { nodeId: "a", kind: "compute", state: "finished" }, children: [] },
+          { id: 3, name: "B", type: "task", task: { nodeId: "b", kind: "agent", state: "someday-new-state" }, children: [] },
+          { id: 4, name: "C", type: "task", task: { nodeId: "c", kind: "agent" }, children: [] },
+        ],
+      },
+      runState: { state: "finished" },
+    });
+    const [a, b, c] = tree?.children ?? [];
+    expect(a).toMatchObject({ status: "ok" });
+    expect(b).toMatchObject({ status: "ok" });
+    expect(c).toMatchObject({ status: "ok" });
+  });
+
   test("gives each node a unique structural key while exposing the logical id", () => {
     // A loop whose body renders the same logical task (`plan`) at two distinct
     // structural positions (ids 3 and 4), differing only by iteration. The

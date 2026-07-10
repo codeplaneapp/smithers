@@ -11,4 +11,10 @@ apiVersion: v1
 - Request: `{ runId, frameNo? }`
 - Response: DevTools snapshot payload.
 
+Each task node's `task` descriptor carries `state` and `attempt` — the node's
+current lifecycle from the run's node rows (latest iteration wins), e.g.
+`pending`, `in-progress`, `finished`, `failed`, `skipped`, `waiting-approval`.
+Frame-mounted tasks that have not been scheduled yet omit `state`. `streamDevTools`
+frames diff the same enriched snapshots, so state changes arrive as node updates.
+
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `FrameOutOfRange`, `PayloadTooLarge`, and `Internal`.

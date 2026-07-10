@@ -424,6 +424,56 @@ export function validateFromSeqInput(fromSeq) {
 }
 
 /**
+ * Attach each task node's CURRENT lifecycle state (latest iteration wins) from
+ * the run's `_smithers_nodes` rows. The frame tree is pure structure; without
+ * this, every consumer of the snapshot renders live runs as all-queued (#817).
+ * Nodes with no row yet (never scheduled) keep an absent `state`.
+ *
+ * @param {DevToolsNode} root
+ * @param {Array<Record<string, unknown>>} nodeRows
+ * @returns {void}
+ */
+export function attachNodeStatesToDevToolsRoot(root, nodeRows) {
+    /** @type {Map<string, { iteration: number; state: string; attempt: number }>} */
+    const latest = new Map();
+    for (const row of Array.isArray(nodeRows) ? nodeRows : []) {
+        if (!asObject(row) || typeof row.nodeId !== "string" || typeof row.state !== "string" || row.state.length === 0) {
+            continue;
+        }
+        const iteration = typeof row.iteration === "number" && Number.isFinite(row.iteration) ? row.iteration : 0;
+        const existing = latest.get(row.nodeId);
+        if (!existing || iteration > existing.iteration) {
+            latest.set(row.nodeId, {
+                iteration,
+                state: row.state,
+                attempt: typeof row.lastAttempt === "number" && Number.isFinite(row.lastAttempt) ? row.lastAttempt : 0,
+            });
+        }
+    }
+    if (latest.size === 0) {
+        return;
+    }
+    /** @type {DevToolsNode[]} */
+    const stack = [root];
+    while (stack.length > 0) {
+        const node = stack.pop();
+        if (!node) {
+            continue;
+        }
+        if (node.task?.nodeId) {
+            const row = latest.get(node.task.nodeId);
+            if (row) {
+                node.task.state = row.state;
+                node.task.attempt = row.attempt;
+            }
+        }
+        for (const child of node.children) {
+            stack.push(child);
+        }
+    }
+}
+
+/**
  * @param {{
  *   adapter: SmithersDb;
  *   runId: string;
@@ -475,5 +525,8 @@ export async function getDevToolsSnapshotRoute(input) {
         taskIndexJson: frame.taskIndexJson,
         onWarning: input.onWarning,
     });
+    // RunnableEffect is thenable but has no .catch; assimilate via Promise.resolve.
+    const nodeRows = await Promise.resolve(input.adapter.listNodes(runId)).catch(() => []);
+    attachNodeStatesToDevToolsRoot(snapshot.root, Array.isArray(nodeRows) ? nodeRows : []);
     return runState ? { ...snapshot, runState } : snapshot;
 }
