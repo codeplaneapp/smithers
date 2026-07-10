@@ -323,6 +323,8 @@ export type RunRow = {
   createdAtMs?: number;
   startedAtMs?: number;
   finishedAtMs?: number;
+  /** Node-state summary; getRun attaches it, plain listRuns rows omit it. */
+  summary?: unknown;
 };
 
 export type RunGroup = "attention" | "active" | "completed" | "failed" | "cancelled";

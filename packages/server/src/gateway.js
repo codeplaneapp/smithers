@@ -3339,6 +3339,7 @@ a { color: var(--brand); }</style>
                 direct: "events",
                 params: {
                     runId: runEvents ? decodeURIComponent(runEvents[1]) : queryString(url.searchParams, "runId"),
+                    nodeId: queryString(url.searchParams, "nodeId"),
                     afterSeq: queryNonNegativeInt(url.searchParams, "afterSeq"),
                     limit: queryPositiveInt(url.searchParams, "limit"),
                 },
@@ -3459,11 +3460,47 @@ a { color: var(--brand); }</style>
         if (!resolved) {
             throw new SmithersError("NOT_FOUND", `Run not found: ${runId}`);
         }
-        const rows = await resolved.adapter.listEventHistory(runId, {
-            afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
-            limit: asOptionalPositiveInt(params.limit, "limit") ?? 100,
-        });
-        return rows.map((row) => serializeRunEventRow(row));
+        const nodeId = asString(params.nodeId);
+        const limit = asOptionalPositiveInt(params.limit, "limit") ?? 100;
+        if (!nodeId) {
+            const rows = await resolved.adapter.listEventHistory(runId, {
+                afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+                limit,
+            });
+            return rows.map((row) => serializeRunEventRow(row));
+        }
+        // Per-node tail: a busy run's shared event window drowns any single
+        // node, so page forward and keep the newest `limit` events whose
+        // payload names this node. Cheap string probe before any JSON parse;
+        // callers poll incrementally with afterSeq so only the first read
+        // scans history.
+        const needle = `"nodeId":"${nodeId}"`;
+        let cursor = asOptionalNonNegativeInt(params.afterSeq, "afterSeq") ?? 0;
+        /** @type {Record<string, unknown>[]} */
+        const matches = [];
+        for (let page = 0; page < 80; page += 1) {
+            const rows = await resolved.adapter.listEventHistory(runId, { afterSeq: cursor, limit: 500 });
+            if (!Array.isArray(rows) || rows.length === 0) {
+                break;
+            }
+            for (const row of rows) {
+                const seq = Number(row.seq ?? 0);
+                if (seq > cursor) {
+                    cursor = seq;
+                }
+                const payloadJson = typeof row.payloadJson === "string" ? row.payloadJson : "";
+                if (payloadJson.includes(needle)) {
+                    matches.push(row);
+                }
+            }
+            if (matches.length > limit) {
+                matches.splice(0, matches.length - limit);
+            }
+            if (rows.length < 500) {
+                break;
+            }
+        }
+        return matches.map((row) => serializeRunEventRow(row));
     }
     /**
      * @param {IncomingMessage} req

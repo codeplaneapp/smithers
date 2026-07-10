@@ -1035,26 +1035,55 @@ function HealthStrip({
 // ---------------------------------------------------------------------------
 
 /**
- * Live transcript for an in-flight node: the run event stream already carries
- * the agent's chat/output/tool events per node — tail them here so clicking a
- * running node shows what the agent is doing right now, updating live.
+ * Live transcript for an in-flight node. The shared run-event ring drowns any
+ * single node on a busy run (16 streaming agents rotate 500 events in
+ * seconds), so this polls the gateway's per-node event filter incrementally:
+ * the first poll returns a bounded tail of this node's history, and each
+ * subsequent poll reads only past the last seen seq.
  */
 function NodeLiveOutput({ runId, nodeId }: { runId: string; nodeId: string }) {
-  const { events, streaming } = useGatewayRunEvents(runId, { maxEvents: 500 });
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const lines = useMemo(() => {
-    const out: Array<{ seq: number; text: string }> = [];
-    for (const frame of events) {
-      const payload = isRecord(frame.payload) ? frame.payload : {};
-      if (asString(pick(payload, "nodeId", "node_id")) !== nodeId) continue;
-      const name = String(frame.event ?? "");
-      if (!/AgentEvent|AgentTraceEvent|NodeOutput|ToolCall|task\.output|agent\./i.test(name)) continue;
-      const line = formatEventLine(frame);
-      const text = line.detail.startsWith(`${nodeId} · `) ? line.detail.slice(nodeId.length + 3) : line.detail;
-      if (text) out.push({ seq: line.seq, text });
-    }
-    return out.slice(-80);
-  }, [events, nodeId]);
+  const [lines, setLines] = useState<Array<{ seq: number; text: string }>>([]);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setLines([]);
+    setFailed(false);
+    let cancelled = false;
+    let afterSeq = 0;
+    const poll = async () => {
+      try {
+        const search = new URLSearchParams({ nodeId, limit: "120" });
+        if (afterSeq > 0) search.set("afterSeq", String(afterSeq));
+        const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/events?${search}`);
+        if (!response.ok) throw new Error(`events ${response.status}`);
+        const body = (await response.json()) as { data?: unknown[] };
+        const rows = Array.isArray(body.data) ? body.data : [];
+        const fresh: Array<{ seq: number; text: string }> = [];
+        for (const raw of rows) {
+          if (!isRecord(raw)) continue;
+          const name = String(raw.event ?? "");
+          const seq = asNumber(raw.seq) ?? 0;
+          if (seq > afterSeq) afterSeq = seq;
+          if (!/AgentEvent|AgentTraceEvent|NodeOutput|ToolCall|task\.output|agent\.|NodeStarted|NodeFinished|NodeFailed|NodeRetrying/i.test(name)) continue;
+          const line = formatEventLine({ event: name, seq, payload: raw.payload });
+          const text = line.detail.startsWith(`${nodeId} · `) ? line.detail.slice(nodeId.length + 3) : line.detail;
+          fresh.push({ seq, text: text || name });
+        }
+        if (!cancelled && fresh.length) {
+          setLines((previous) => [...previous, ...fresh].slice(-120));
+        }
+        if (!cancelled) setFailed(false);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 2_500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [runId, nodeId]);
   useEffect(() => {
     const el = containerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -1062,7 +1091,7 @@ function NodeLiveOutput({ runId, nodeId }: { runId: string; nodeId: string }) {
   if (lines.length === 0) {
     return (
       <div className="mon-empty mon-dim">
-        {streaming ? "No live output yet — agent events stream here as they arrive." : "Event stream is not connected."}
+        {failed ? "Could not load this node's events." : "No output from this node yet — its events land here as they arrive."}
       </div>
     );
   }
