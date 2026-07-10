@@ -13,27 +13,31 @@ import {
   useGatewayApprovals,
   useGatewayConnectionStatus,
   useGatewayNodeOutput,
+  useGatewayRpc,
   useGatewayRun,
   useGatewayRunEvents,
   useGatewayRuns,
   useGatewayRunTree,
   useGatewayWorkflows,
 } from "smithers-orchestrator/gateway-react";
+import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smithers-orchestrator/gateway-client";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 import {
   asArray,
   asNumber,
   asString,
   autoExpandKeys,
+  clampFrameNo,
   diagnoseRun,
+  eventViewFor,
   filterRuns,
   formatElapsed,
   formatEventLine,
   formatOutputValue,
+  frameScrubBounds,
   groupRuns,
   hasFailedDescendant,
   isCancellable,
-  isNotableEvent,
   isRecord,
   isResumable,
   labelForStatus,
@@ -408,6 +412,7 @@ function TreeRow({
   selectedNodeKey,
   onToggle,
   onSelect,
+  selectDisabled,
 }: {
   node: TreeNode;
   depth: number;
@@ -416,6 +421,7 @@ function TreeRow({
   selectedNodeKey: string | undefined;
   onToggle: (key: string) => void;
   onSelect: (node: TreeNode) => void;
+  selectDisabled?: boolean;
 }) {
   const key = treeNodeKey(node);
   const children = (node.children ?? []) as TreeNode[];
@@ -440,7 +446,13 @@ function TreeRow({
             ·
           </span>
         )}
-        <button type="button" className="mon-tree-main" onClick={() => onSelect(node)}>
+        <button
+          type="button"
+          className="mon-tree-main"
+          onClick={selectDisabled ? undefined : () => onSelect(node)}
+          title={selectDisabled ? "Node selection is disabled while scrubbing frames" : undefined}
+          aria-disabled={selectDisabled || undefined}
+        >
           <span className="mon-tree-glyph mon-dim" aria-hidden>
             {glyph}
           </span>
@@ -464,6 +476,7 @@ function TreeRow({
               selectedNodeKey={selectedNodeKey}
               onToggle={onToggle}
               onSelect={onSelect}
+              selectDisabled={selectDisabled}
             />
           ))
         : null}
@@ -477,17 +490,27 @@ function ExecutionTree({
   onSelectNode,
   autoSelectNodeId,
   onAutoSelected,
+  frameOverride,
 }: {
   runId: string;
   selectedNodeKey: string | undefined;
   onSelectNode: (node: TreeNode) => void;
   autoSelectNodeId?: string;
   onAutoSelected?: () => void;
+  /**
+   * Frame-scrubber override: when set, render this static tree instead of the
+   * live one and disable node selection. `root: null` means the frame maps to
+   * an empty tree; `loading` keeps the empty state honest while a frame fetch
+   * is in flight. Absent = live mode, unchanged.
+   */
+  frameOverride?: { root: TreeNode | null; loading: boolean };
 }) {
-  const { root, nodes, isLoading, error } = useGatewayRunTree(runId);
-  // ?nodeId= deep link: select the node once it exists in the tree.
+  const { root: liveRoot, nodes, isLoading, error } = useGatewayRunTree(runId);
+  const isStatic = frameOverride !== undefined;
+  const root = isStatic ? frameOverride.root : (liveRoot as TreeNode | null);
+  // ?nodeId= deep link: select the node once it exists in the live tree.
   useEffect(() => {
-    if (!autoSelectNodeId || nodes.length === 0) return;
+    if (isStatic || !autoSelectNodeId || nodes.length === 0) return;
     const match = (nodes as TreeNode[]).find(
       (candidate) => candidate.id === autoSelectNodeId || treeNodeKey(candidate) === autoSelectNodeId,
     );
@@ -495,7 +518,7 @@ function ExecutionTree({
       onSelectNode(match);
       onAutoSelected?.();
     }
-  }, [autoSelectNodeId, nodes.length]);
+  }, [autoSelectNodeId, nodes.length, isStatic]);
   const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
   // Reset user toggles when switching runs.
   const lastRunId = useRef(runId);
@@ -504,19 +527,25 @@ function ExecutionTree({
     if (overrides.size > 0) setOverrides(new Map());
   }
   const defaults = useMemo(() => autoExpandKeys(root as TreeNodeLike | null), [root]);
-  if (error) {
+  if (!isStatic && error) {
     return (
       <div className="mon-empty">
         Failed to load the execution tree. <span className="mon-dim">{error.message}</span>
       </div>
     );
   }
-  if (isLoading) return <div className="mon-empty">Loading execution tree…</div>;
-  if (!root) return <div className="mon-empty">No nodes recorded yet.</div>;
+  if (!isStatic && isLoading) return <div className="mon-empty">Loading execution tree…</div>;
+  if (!root) {
+    return (
+      <div className="mon-empty">
+        {isStatic ? (frameOverride.loading ? "Loading frame…" : "No nodes in this frame.") : "No nodes recorded yet."}
+      </div>
+    );
+  }
   return (
-    <div role="tree" className="mon-tree" data-testid="monitor-tree">
+    <div role="tree" className={`mon-tree${isStatic ? " is-static" : ""}`} data-testid="monitor-tree">
       <TreeRow
-        node={root as TreeNode}
+        node={root}
         depth={0}
         expandedOverrides={overrides}
         defaults={defaults}
@@ -530,8 +559,167 @@ function ExecutionTree({
           })
         }
         onSelect={onSelectNode}
+        selectDisabled={isStatic}
       />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Execution panel with a frame-by-frame scrubber (time-travel view). The
+// "Frames" chip toggles scrub mode: prev/next buttons and a range input over
+// the run's committed frames fetch getDevToolsSnapshot({ runId, frameNo }) and
+// render THAT tree statically (via snapshotToGatewayRunNode) instead of the
+// live one; "Live" (or toggling the chip off) returns to the live tree.
+// ---------------------------------------------------------------------------
+
+const SCRUB_DEBOUNCE_MS = 150;
+
+/** Trail a fast-changing value (the range input) so fetches fire ~150ms after rest. */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
+function ExecutionPanel({
+  runId,
+  selectedNode,
+  onSelectNode,
+  autoSelectNodeId,
+  onAutoSelected,
+}: {
+  runId: string;
+  selectedNode: TreeNode | undefined;
+  onSelectNode: (node: TreeNode | undefined) => void;
+  autoSelectNodeId?: string;
+  onAutoSelected?: () => void;
+}) {
+  const [scrubbing, setScrubbing] = useState(false);
+  // null = pinned to the latest frame until the user actually scrubs.
+  const [frame, setFrame] = useState<number | null>(null);
+  // Reset scrub state when switching runs.
+  const lastRunId = useRef(runId);
+  if (lastRunId.current !== runId) {
+    lastRunId.current = runId;
+    if (scrubbing) setScrubbing(false);
+    if (frame !== null) setFrame(null);
+  }
+  // The latest committed frameNo, fetched only while scrub mode is on. The run
+  // may commit more frames while scrubbing; the range simply spans what
+  // existed when scrub mode opened.
+  const latestQuery = useGatewayRpc("getDevToolsSnapshot", { runId }, { enabled: scrubbing });
+  const latestFrameNo = asNumber(isRecord(latestQuery.data) ? latestQuery.data.frameNo : undefined);
+  const bounds = frameScrubBounds(latestFrameNo ?? 0);
+  const shownFrame = clampFrameNo(frame ?? bounds.max, latestFrameNo ?? 0);
+  const debouncedFrame = useDebouncedValue(shownFrame, SCRUB_DEBOUNCE_MS);
+  const frameEnabled = scrubbing && latestFrameNo !== undefined;
+  const frameQuery = useGatewayRpc(
+    "getDevToolsSnapshot",
+    { runId, frameNo: clampFrameNo(debouncedFrame, latestFrameNo ?? 0) },
+    { enabled: frameEnabled },
+  );
+  // Keep the previous frame's tree on screen while the next fetch is in
+  // flight, so scrubbing reads as motion instead of blink-to-empty.
+  const [scrubTree, setScrubTree] = useState<TreeNode | null>(null);
+  useEffect(() => {
+    if (!frameEnabled) {
+      setScrubTree(null);
+      return;
+    }
+    if (frameQuery.data === undefined) return;
+    setScrubTree(snapshotToGatewayRunNode(frameQuery.data as DevToolsSnapshot) as TreeNode | null);
+  }, [frameEnabled, frameQuery.data]);
+  const scrubLoading =
+    scrubbing && (latestQuery.loading || frameQuery.loading || debouncedFrame !== shownFrame);
+  const scrubError = scrubbing ? (latestQuery.error ?? frameQuery.error) : undefined;
+  const goLive = () => {
+    setScrubbing(false);
+    setFrame(null);
+  };
+  const step = (delta: number) => {
+    if (latestFrameNo === undefined) return;
+    setFrame(clampFrameNo(shownFrame + delta, latestFrameNo));
+  };
+  return (
+    <section className="mon-panel mon-tree-panel">
+      <header className="mon-panel-head">
+        <h2 className="mon-kicker">Execution</h2>
+        {selectedNode && !scrubbing ? (
+          <button type="button" className="mon-chip" onClick={() => onSelectNode(undefined)}>
+            Clear selection
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={`mon-chip${scrubbing ? " is-on" : ""}`}
+          data-testid="monitor-frames-chip"
+          onClick={() => (scrubbing ? goLive() : setScrubbing(true))}
+          title="Scrub the execution tree frame by frame instead of following it live"
+        >
+          Frames
+        </button>
+      </header>
+      {scrubbing ? (
+        <div className="mon-scrub" data-testid="monitor-scrub">
+          <button
+            type="button"
+            className="mon-chip"
+            onClick={() => step(-1)}
+            disabled={latestFrameNo === undefined || shownFrame <= bounds.min}
+            aria-label="Previous frame"
+          >
+            ◀
+          </button>
+          <input
+            className="mon-scrub-range"
+            type="range"
+            min={bounds.min}
+            max={bounds.max}
+            step={1}
+            value={shownFrame}
+            disabled={latestFrameNo === undefined}
+            onChange={(event) => {
+              if (latestFrameNo === undefined) return;
+              setFrame(clampFrameNo(Number(event.currentTarget.value), latestFrameNo));
+            }}
+            aria-label="Frame"
+          />
+          <button
+            type="button"
+            className="mon-chip"
+            onClick={() => step(1)}
+            disabled={latestFrameNo === undefined || shownFrame >= bounds.max}
+            aria-label="Next frame"
+          >
+            ▶
+          </button>
+          <span className="mon-mono mon-dim mon-scrub-note">
+            frame {latestFrameNo === undefined ? "… / …" : `${shownFrame} / ${bounds.max}`}
+          </span>
+          {scrubLoading ? <span className="mon-dim mon-scrub-loading">loading…</span> : null}
+          {scrubError && !scrubLoading ? (
+            <span className="mon-dim mon-scrub-note" title={scrubError.message}>
+              frame unavailable
+            </span>
+          ) : null}
+          <button type="button" className="mon-chip" onClick={goLive} title="Return to the live tree">
+            Live
+          </button>
+        </div>
+      ) : null}
+      <ExecutionTree
+        runId={runId}
+        selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
+        onSelectNode={onSelectNode}
+        autoSelectNodeId={autoSelectNodeId}
+        onAutoSelected={onAutoSelected}
+        frameOverride={scrubbing ? { root: scrubTree, loading: scrubLoading } : undefined}
+      />
+    </section>
   );
 }
 
@@ -542,17 +730,23 @@ function ExecutionTree({
 
 const FOLLOW_THRESHOLD_PX = 80;
 
+type EventView = "notable" | "activity" | "all";
+
 function EventLog({ runId }: { runId: string }) {
   const { events: allEvents, streaming, error } = useGatewayRunEvents(runId, { maxEvents: 500 });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
-  // Default to the transitions a human acts on; agent chatter and heartbeats
-  // stay one click away instead of drowning the log.
-  const [showAll, setShowAll] = useState(false);
-  const events = useMemo(
-    () => (showAll ? allEvents : allEvents.filter((frame) => isNotableEvent(asString(frame.event) ?? ""))),
-    [allEvents, showAll],
-  );
+  // Default to Activity: lifecycle transitions plus the agent's visible work
+  // (tool calls, chat output, frames, token usage). Heartbeats and session
+  // bookkeeping stay one click away instead of drowning the log.
+  const [view, setView] = useState<EventView>("activity");
+  const events = useMemo(() => {
+    if (view === "all") return allEvents;
+    return allEvents.filter((frame) => {
+      const kind = eventViewFor(asString(frame.event) ?? "");
+      return view === "notable" ? kind === "notable" : kind !== "chatter";
+    });
+  }, [allEvents, view]);
 
   useEffect(() => {
     if (!following) return;
@@ -574,21 +768,29 @@ function EventLog({ runId }: { runId: string }) {
     <section className="mon-panel mon-events-panel">
       <header className="mon-panel-head">
         <h2 className="mon-kicker">
-          Events <span className="mon-count">{events.length}{showAll ? "" : `/${allEvents.length}`}</span>
+          Events <span className="mon-count">{events.length}{view === "all" ? "" : `/${allEvents.length}`}</span>
         </h2>
         <button
           type="button"
-          className={`mon-chip${showAll ? "" : " is-on"}`}
-          onClick={() => setShowAll(false)}
+          className={`mon-chip${view === "notable" ? " is-on" : ""}`}
+          onClick={() => setView("notable")}
           title="Node/run lifecycle, approvals, human requests"
         >
           Notable
         </button>
         <button
           type="button"
-          className={`mon-chip${showAll ? " is-on" : ""}`}
-          onClick={() => setShowAll(true)}
-          title="Every event, including agent chatter and heartbeats"
+          className={`mon-chip${view === "activity" ? " is-on" : ""}`}
+          onClick={() => setView("activity")}
+          title="Notable plus tool calls, agent output, frames, and token usage"
+        >
+          Activity
+        </button>
+        <button
+          type="button"
+          className={`mon-chip${view === "all" ? " is-on" : ""}`}
+          onClick={() => setView("all")}
+          title="Every event, including heartbeats and session bookkeeping"
         >
           All
         </button>
@@ -608,7 +810,9 @@ function EventLog({ runId }: { runId: string }) {
       {error ? <div className="mon-banner tone-failed">{error.message}</div> : null}
       <div className="mon-events" ref={containerRef} onScroll={onScroll} data-testid="monitor-events">
         {events.length === 0 ? (
-          <div className="mon-empty">{allEvents.length === 0 ? "No events yet." : "No notable events yet."}</div>
+          <div className="mon-empty">
+            {allEvents.length === 0 ? "No events yet." : view === "notable" ? "No notable events yet." : "No activity yet."}
+          </div>
         ) : null}
         {events.map((frame) => {
           const line = formatEventLine(frame);
@@ -901,23 +1105,13 @@ function RunDetail({
         </div>
       ) : null}
 
-      <section className="mon-panel mon-tree-panel">
-        <header className="mon-panel-head">
-          <h2 className="mon-kicker">Execution</h2>
-          {selectedNode ? (
-            <button type="button" className="mon-chip" onClick={() => onSelectNode(undefined)}>
-              Clear selection
-            </button>
-          ) : null}
-        </header>
-        <ExecutionTree
-          runId={runId}
-          selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
-          onSelectNode={onSelectNode}
-          autoSelectNodeId={autoSelectNodeId}
-          onAutoSelected={onAutoSelected}
-        />
-      </section>
+      <ExecutionPanel
+        runId={runId}
+        selectedNode={selectedNode}
+        onSelectNode={onSelectNode}
+        autoSelectNodeId={autoSelectNodeId}
+        onAutoSelected={onAutoSelected}
+      />
 
       <EventLog runId={runId} />
     </div>
@@ -1109,7 +1303,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 .mon-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--tone); background: color-mix(in srgb, var(--tone) 10%, transparent); border: 1px solid color-mix(in srgb, var(--tone) 30%, transparent); white-space: nowrap; }
 .mon-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; }
 .mon-chip:hover { background: var(--hover); }
-.mon-follow.is-on { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
+.mon-chip.is-on { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
 
 .mon-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 16px 0; padding: 8px 12px; border-radius: 9px; font-weight: 600; font-size: 12px; color: var(--tone); background: color-mix(in srgb, var(--tone) 8%, var(--surface)); border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--border)); animation: mon-in 140ms ease-out; }
 
@@ -1162,6 +1356,14 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 .mon-tree-glyph { flex: none; width: 14px; text-align: center; }
 .mon-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mon-tree-main .mon-pill { margin-left: auto; }
+.mon-tree.is-static .mon-tree-main { cursor: default; }
+.mon-tree.is-static { opacity: 0.92; }
+
+.mon-scrub { display: flex; align-items: center; gap: 8px; padding: 2px 0 10px; }
+.mon-scrub-range { flex: 1; min-width: 120px; accent-color: var(--brand); }
+.mon-scrub-range:disabled { opacity: 0.45; }
+.mon-scrub-note { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mon-scrub-loading { font-size: 11px; white-space: nowrap; animation: mon-pulse 1.2s ease-in-out infinite; }
 
 .mon-events-panel { display: flex; flex-direction: column; }
 .mon-events { max-height: 300px; overflow-y: auto; font-size: 11px; }

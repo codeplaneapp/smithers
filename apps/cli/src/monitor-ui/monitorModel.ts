@@ -256,8 +256,28 @@ export function diagnoseRun(input: {
 const NOTABLE_EVENT_PATTERN =
   /^(Node(Started|Finished|Failed|Retrying|Skipped|Cancelled|WaitingApproval)|Run[A-Z]|Approval|Human|Signal|Quota)/;
 
+/**
+ * The agent's actual work, on top of the notable set: tool calls, agent
+ * chat/output, node output, committed frames, trace summaries, and token
+ * usage. Covers both the persisted SmithersEvent names (PascalCase) and the
+ * gateway's mapped wire names (dotted) — the event collection carries both.
+ */
+const ACTIVITY_EVENT_PATTERN =
+  /^(NodeOutput|FrameCommitted|AgentTraceSummary|TokenUsageReported|AgentEvent|AgentTraceEvent|ToolCall|node\.(started|finished|failed|retrying|skipped|cancelled|waiting_approval|waiting_timer)|run\.(completed|time_travel_jumped)|approval\.|task\.output|agent\.(event|trace|trace_summary))/;
+
+/**
+ * Classify an event name into the log's three views. "notable" is the
+ * human-decision set above; "activity" adds the agent's visible work;
+ * "chatter" is the rest (heartbeats, session bookkeeping, snapshots).
+ */
+export function eventViewFor(name: string): "notable" | "activity" | "chatter" {
+  if (NOTABLE_EVENT_PATTERN.test(name)) return "notable";
+  if (ACTIVITY_EVENT_PATTERN.test(name)) return "activity";
+  return "chatter";
+}
+
 export function isNotableEvent(name: string): boolean {
-  return NOTABLE_EVENT_PATTERN.test(name);
+  return eventViewFor(name) === "notable";
 }
 
 /** Read a field by camelCase or snake_case (gateway rows vary by backend). */
@@ -461,7 +481,107 @@ export function waitTone(waitedMs: number): "idle" | "waiting" | "failed" {
 
 export type EventLine = { seq: number; name: string; detail: string };
 
-const EVENT_DETAIL_MAX = 160;
+/** Snippets stay single-line and about this long so the log reads as a column. */
+const EVENT_SNIPPET_MAX = 120;
+
+/** Collapse any value to a one-line, ~120-char snippet (undefined when empty). */
+function snippet(value: unknown): string | undefined {
+  let text: string | undefined;
+  if (typeof value === "string") text = value;
+  else if (value !== undefined && value !== null) {
+    try {
+      text = JSON.stringify(value);
+    } catch {
+      text = String(value);
+    }
+  }
+  const oneLine = text?.replace(/\s+/g, " ").trim();
+  if (!oneLine) return undefined;
+  return oneLine.length > EVENT_SNIPPET_MAX ? `${oneLine.slice(0, EVENT_SNIPPET_MAX)}…` : oneLine;
+}
+
+/** Human-readable error text from an event's `error` field (object or string). */
+function errorSnippet(error: unknown): string | undefined {
+  if (isRecord(error)) return snippet(asString(error.message) ?? error);
+  return typeof error === "string" ? snippet(error) : undefined;
+}
+
+/**
+ * Per-event extra detail parts. Payloads arrive in two shapes: persisted
+ * SmithersEvent rows (PascalCase name, the whole event as payload) and the
+ * gateway's mapped wire frames (dotted name, trimmed payload) — each branch
+ * accepts both.
+ */
+function eventDetailParts(name: string, payload: Record<string, unknown>): Array<string | undefined> {
+  // Tool-call lifecycle: the tool's name is the story.
+  if (name === "ToolCallStarted" || name === "ToolCallFinished") {
+    return [asString(payload.toolName) ?? "tool"];
+  }
+  // Canonical agent trace: tool name + compact args/result hint, or a text snippet.
+  if (name === "AgentTraceEvent" || name === "agent.trace") {
+    const trace = isRecord(payload.trace) ? payload.trace : {};
+    const kind = isRecord(trace.event) ? asString(trace.event.kind) : undefined;
+    const tracePayload = isRecord(trace.payload) ? trace.payload : {};
+    const toolName = asString(tracePayload.toolName);
+    if (toolName) {
+      const hint = snippet(tracePayload.argsPreview) ?? snippet(tracePayload.resultPreview);
+      return [kind, toolName, tracePayload.isError === true ? "error" : undefined, hint];
+    }
+    return [kind, snippet(tracePayload.text)];
+  }
+  // Raw agent CLI stream: started/action/completed with titles and answers.
+  if (name === "AgentEvent" || name === "agent.event") {
+    const inner = isRecord(payload.event) ? payload.event : {};
+    const type = asString(inner.type);
+    const engine = asString(payload.engine) ?? asString(inner.engine);
+    if (type === "action") {
+      const action = isRecord(inner.action) ? inner.action : {};
+      const label = [asString(inner.phase), asString(action.kind)].filter(Boolean).join(" ");
+      return [engine, label || "action", snippet(action.title) ?? snippet(inner.message)];
+    }
+    if (type === "completed") {
+      return [engine, inner.ok === false ? "failed" : "completed", snippet(inner.answer) ?? errorSnippet(inner.error)];
+    }
+    if (type === "started") return [engine, "started", snippet(inner.title)];
+    return [engine, type];
+  }
+  // Session transcript bookkeeping: just say which transcript row arrived.
+  if (name === "AgentSessionEvent" || name === "agent.session") {
+    const transcript = isRecord(payload.transcript) ? payload.transcript : {};
+    const rowType = isRecord(transcript.event) ? asString(transcript.event.rowType) : undefined;
+    return ["transcript", rowType];
+  }
+  // End-of-attempt trace summary: which agent/model and how well we captured it.
+  if (name === "AgentTraceSummary" || name === "agent.trace_summary") {
+    const summary = isRecord(payload.summary) ? payload.summary : {};
+    return [
+      asString(summary.model) ?? asString(summary.agentFamily),
+      asString(summary.captureMode),
+      asString(summary.traceCompleteness),
+    ];
+  }
+  if (name === "TokenUsageReported") {
+    const cacheRead = asNumber(payload.cacheReadTokens);
+    return [
+      asString(payload.model),
+      `in ${asNumber(payload.inputTokens) ?? 0}`,
+      `out ${asNumber(payload.outputTokens) ?? 0}`,
+      cacheRead !== undefined ? `cache ${cacheRead}` : undefined,
+    ];
+  }
+  if (name === "FrameCommitted") {
+    return [`frame ${asNumber(payload.frameNo) ?? "?"}`, asString(payload.trigger)];
+  }
+  // Agent stdout/stderr chunks. Persisted rows carry `text`, wire frames `output`.
+  if (name === "NodeOutput" || name === "task.output") {
+    const stream = asString(payload.stream);
+    return [stream === "stderr" ? "stderr" : undefined, snippet(payload.text ?? payload.output)];
+  }
+  if (name === "NodeFailed" || name === "node.failed" || name === "RunFailed" || name === "run.completed") {
+    return [errorSnippet(payload.error)];
+  }
+  return [];
+}
 
 /** Compact one-line rendering for a gateway event frame. */
 export function formatEventLine(frame: { event?: string; seq?: number; payload?: unknown }): EventLine {
@@ -473,17 +593,8 @@ export function formatEventLine(frame: { event?: string; seq?: number; payload?:
   if (nodeId) parts.push(nodeId);
   const state = asString(payload.state) ?? asString(payload.status);
   if (state) parts.push(state);
-  if (name === "task.output" || name.startsWith("agent.")) {
-    const text =
-      asString(payload.text) ??
-      asString(payload.message) ??
-      asString(payload.summary) ??
-      (payload.output !== undefined ? JSON.stringify(payload.output) : undefined);
-    if (text) parts.push(text.length > EVENT_DETAIL_MAX ? `${text.slice(0, EVENT_DETAIL_MAX)}…` : text);
-  }
-  if (name === "run.completed") {
-    const status = asString(payload.status);
-    if (status && !parts.includes(status)) parts.push(status);
+  for (const part of eventDetailParts(name, payload)) {
+    if (part && !parts.includes(part)) parts.push(part);
   }
   return { seq, name, detail: parts.join(" · ") };
 }
@@ -537,6 +648,33 @@ export function hasFailedDescendant(node: TreeNodeLike): boolean {
     if (toneForStatus(child.status) === "failed" || hasFailedDescendant(child)) return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Frame scrubber (the Execution panel's time-travel view).
+// ---------------------------------------------------------------------------
+
+/**
+ * The valid scrub range for a run whose latest committed frame is
+ * `latestFrameNo`. Engine frames are numbered from 1 (`persistDriverFrame`
+ * pre-increments), so a run with frames scrubs 1..latest; only a zero-frame
+ * run has the sentinel frame 0 (`getDevToolsSnapshot` rejects frame 0 once
+ * real frames exist).
+ */
+export function frameScrubBounds(latestFrameNo: number): { min: number; max: number } {
+  const max = Number.isFinite(latestFrameNo) ? Math.max(0, Math.floor(latestFrameNo)) : 0;
+  return { min: max > 0 ? 1 : 0, max };
+}
+
+/**
+ * Clamp a scrubber frame number into the valid range for `latestFrameNo`, so
+ * prev/next buttons and the range input can never request a frame the gateway
+ * cannot serve. Non-finite input falls back to the latest frame.
+ */
+export function clampFrameNo(frameNo: number, latestFrameNo: number): number {
+  const { min, max } = frameScrubBounds(latestFrameNo);
+  if (!Number.isFinite(frameNo)) return max;
+  return Math.min(Math.max(min, Math.floor(frameNo)), max);
 }
 
 // ---------------------------------------------------------------------------

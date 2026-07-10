@@ -2,15 +2,19 @@ import { describe, expect, test } from "bun:test";
 import {
   asArray,
   autoExpandKeys,
+  clampFrameNo,
   diagnoseRun,
+  eventViewFor,
   filterRuns,
   formatElapsed,
   formatEventLine,
   formatOutputValue,
+  frameScrubBounds,
   groupForStatus,
   groupRuns,
   hasFailedDescendant,
   isCancellable,
+  isNotableEvent,
   isResumable,
   labelForStatus,
   pick,
@@ -186,6 +190,225 @@ describe("event lines", () => {
     expect(line.detail.length).toBeLessThan(200);
     expect(line.detail.endsWith("…")).toBe(true);
   });
+
+  test("NodeOutput (persisted shape) collapses multiline agent output to one line", () => {
+    const line = formatEventLine({
+      event: "NodeOutput",
+      seq: 11,
+      payload: {
+        type: "NodeOutput",
+        runId: "r1",
+        nodeId: "implement",
+        iteration: 0,
+        attempt: 1,
+        text: "Running tests...\nAll 42 tests green",
+        stream: "stdout",
+        timestampMs: 1,
+      },
+    });
+    expect(line.detail).toBe("implement · Running tests... All 42 tests green");
+    expect(line.detail).not.toContain("\n");
+  });
+
+  test("stderr NodeOutput is labeled", () => {
+    const line = formatEventLine({
+      event: "NodeOutput",
+      seq: 12,
+      payload: { nodeId: "implement", text: "boom", stream: "stderr" },
+    });
+    expect(line.detail).toBe("implement · stderr · boom");
+  });
+
+  test("AgentTraceEvent shows the tool name plus a compact args hint", () => {
+    const line = formatEventLine({
+      event: "AgentTraceEvent",
+      seq: 13,
+      payload: {
+        type: "AgentTraceEvent",
+        runId: "r1",
+        nodeId: "implement",
+        iteration: 0,
+        attempt: 1,
+        trace: {
+          traceVersion: "1",
+          event: { sequence: 3, kind: "tool.execution.start", phase: "tool" },
+          payload: {
+            toolCallId: "call-1",
+            toolName: "Bash",
+            argsPreview: { command: "bun test tests/monitor-ui-model.test.ts" },
+            isError: false,
+          },
+        },
+        timestampMs: 2,
+      },
+    });
+    expect(line.detail).toContain("implement");
+    expect(line.detail).toContain("tool.execution.start");
+    expect(line.detail).toContain("Bash");
+    expect(line.detail).toContain("bun test");
+  });
+
+  test("AgentTraceEvent text kinds show a chat snippet", () => {
+    const line = formatEventLine({
+      event: "agent.trace",
+      seq: 14,
+      payload: {
+        nodeId: "implement",
+        trace: {
+          event: { sequence: 9, kind: "assistant.message.final", phase: "message" },
+          payload: { text: "The fix is in monitorModel.ts; all tests pass." },
+        },
+      },
+    });
+    expect(line.detail).toContain("assistant.message.final");
+    expect(line.detail).toContain("The fix is in monitorModel.ts");
+  });
+
+  test("AgentEvent completed shows the engine and answer snippet", () => {
+    const line = formatEventLine({
+      event: "AgentEvent",
+      seq: 15,
+      payload: {
+        type: "AgentEvent",
+        runId: "r1",
+        nodeId: "implement",
+        iteration: 0,
+        attempt: 1,
+        engine: "claude",
+        event: { type: "completed", engine: "claude", ok: true, answer: "All tests pass; committed the fix.", resume: "sess-1" },
+        timestampMs: 3,
+      },
+    });
+    expect(line.detail).toContain("claude");
+    expect(line.detail).toContain("completed");
+    expect(line.detail).toContain("All tests pass");
+  });
+
+  test("AgentEvent action shows phase, kind, and title", () => {
+    const line = formatEventLine({
+      event: "AgentEvent",
+      seq: 16,
+      payload: {
+        nodeId: "implement",
+        engine: "codex",
+        event: {
+          type: "action",
+          engine: "codex",
+          phase: "started",
+          action: { id: "a1", kind: "command", title: "bun test" },
+        },
+      },
+    });
+    expect(line.detail).toContain("codex");
+    expect(line.detail).toContain("started command");
+    expect(line.detail).toContain("bun test");
+  });
+
+  test("FrameCommitted shows the frame number and trigger", () => {
+    const line = formatEventLine({
+      event: "FrameCommitted",
+      seq: 17,
+      payload: { type: "FrameCommitted", runId: "r1", frameNo: 12, xmlHash: "abc123", trigger: "node-finished", timestampMs: 4 },
+    });
+    expect(line.detail).toBe("frame 12 · node-finished");
+  });
+
+  test("TokenUsageReported shows the model and token totals", () => {
+    const line = formatEventLine({
+      event: "TokenUsageReported",
+      seq: 18,
+      payload: {
+        type: "TokenUsageReported",
+        runId: "r1",
+        nodeId: "implement",
+        iteration: 0,
+        attempt: 1,
+        model: "claude-fable-5",
+        agent: "claude",
+        inputTokens: 1200,
+        outputTokens: 300,
+        cacheReadTokens: 800,
+        timestampMs: 5,
+      },
+    });
+    expect(line.detail).toContain("claude-fable-5");
+    expect(line.detail).toContain("in 1200");
+    expect(line.detail).toContain("out 300");
+    expect(line.detail).toContain("cache 800");
+  });
+
+  test("AgentTraceSummary shows model, capture mode, and completeness", () => {
+    const line = formatEventLine({
+      event: "AgentTraceSummary",
+      seq: 19,
+      payload: {
+        nodeId: "implement",
+        summary: {
+          traceVersion: "1",
+          agentFamily: "claude-code",
+          model: "claude-fable-5",
+          captureMode: "cli-json-stream",
+          traceCompleteness: "full-observed",
+        },
+      },
+    });
+    expect(line.detail).toBe("implement · claude-fable-5 · cli-json-stream · full-observed");
+  });
+
+  test("failure events surface the error message", () => {
+    const line = formatEventLine({
+      event: "node.failed",
+      seq: 20,
+      payload: { nodeId: "verify", state: "failed", error: { message: "expected 2 to be 3" } },
+    });
+    expect(line.detail).toBe("verify · failed · expected 2 to be 3");
+  });
+});
+
+describe("event views", () => {
+  test("notable keeps the human-decision set", () => {
+    expect(eventViewFor("NodeStarted")).toBe("notable");
+    expect(eventViewFor("NodeFailed")).toBe("notable");
+    expect(eventViewFor("RunFinished")).toBe("notable");
+    expect(eventViewFor("ApprovalRequested")).toBe("notable");
+    expect(eventViewFor("HumanRequestCreated")).toBe("notable");
+    expect(eventViewFor("SignalDelivered")).toBe("notable");
+  });
+
+  test("activity adds the agent's visible work", () => {
+    expect(eventViewFor("AgentEvent")).toBe("activity");
+    expect(eventViewFor("AgentTraceEvent")).toBe("activity");
+    expect(eventViewFor("AgentTraceSummary")).toBe("activity");
+    expect(eventViewFor("TokenUsageReported")).toBe("activity");
+    expect(eventViewFor("FrameCommitted")).toBe("activity");
+    expect(eventViewFor("NodeOutput")).toBe("activity");
+    expect(eventViewFor("ToolCallStarted")).toBe("activity");
+    expect(eventViewFor("ToolCallFinished")).toBe("activity");
+    // Gateway wire names classify the same as their persisted twins.
+    expect(eventViewFor("task.output")).toBe("activity");
+    expect(eventViewFor("agent.event")).toBe("activity");
+    expect(eventViewFor("agent.trace")).toBe("activity");
+    expect(eventViewFor("agent.trace_summary")).toBe("activity");
+    expect(eventViewFor("node.started")).toBe("activity");
+    expect(eventViewFor("run.completed")).toBe("activity");
+  });
+
+  test("heartbeats and session bookkeeping are chatter", () => {
+    expect(eventViewFor("TaskHeartbeat")).toBe("chatter");
+    expect(eventViewFor("run.heartbeat")).toBe("chatter");
+    expect(eventViewFor("task.heartbeat")).toBe("chatter");
+    expect(eventViewFor("AgentSessionEvent")).toBe("chatter");
+    expect(eventViewFor("agent.session")).toBe("chatter");
+    expect(eventViewFor("SnapshotCaptured")).toBe("chatter");
+    expect(eventViewFor("NodePending")).toBe("chatter");
+  });
+
+  test("isNotableEvent delegates to eventViewFor", () => {
+    expect(isNotableEvent("NodeStarted")).toBe(true);
+    expect(isNotableEvent("QuotaExceeded")).toBe(true);
+    expect(isNotableEvent("AgentEvent")).toBe(false);
+    expect(isNotableEvent("FrameCommitted")).toBe(false);
+  });
 });
 
 describe("tree expansion", () => {
@@ -251,6 +474,36 @@ describe("tree expansion", () => {
   test("hasFailedDescendant rolls up through collapsed branches", () => {
     expect(hasFailedDescendant(tree)).toBe(true);
     expect(hasFailedDescendant({ key: "leaf", status: "failed" })).toBe(false);
+  });
+});
+
+describe("frame scrubber", () => {
+  test("frames are numbered from 1, so a run with frames scrubs 1..latest", () => {
+    expect(frameScrubBounds(7)).toEqual({ min: 1, max: 7 });
+    expect(frameScrubBounds(1)).toEqual({ min: 1, max: 1 });
+  });
+
+  test("a zero-frame run only has the sentinel frame 0", () => {
+    expect(frameScrubBounds(0)).toEqual({ min: 0, max: 0 });
+  });
+
+  test("garbage latest collapses to the empty range", () => {
+    expect(frameScrubBounds(Number.NaN)).toEqual({ min: 0, max: 0 });
+    expect(frameScrubBounds(-3)).toEqual({ min: 0, max: 0 });
+  });
+
+  test("clampFrameNo pins prev/next stepping inside the valid range", () => {
+    expect(clampFrameNo(4, 7)).toBe(4);
+    expect(clampFrameNo(0, 7)).toBe(1);
+    expect(clampFrameNo(-1, 7)).toBe(1);
+    expect(clampFrameNo(8, 7)).toBe(7);
+    expect(clampFrameNo(3.7, 7)).toBe(3);
+  });
+
+  test("clampFrameNo falls back to the latest frame on non-finite input", () => {
+    expect(clampFrameNo(Number.NaN, 7)).toBe(7);
+    expect(clampFrameNo(Number.POSITIVE_INFINITY, 7)).toBe(7);
+    expect(clampFrameNo(Number.NaN, 0)).toBe(0);
   });
 });
 
