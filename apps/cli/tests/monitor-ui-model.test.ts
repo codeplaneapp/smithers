@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   asArray,
   autoExpandKeys,
+  diagnoseRun,
   filterRuns,
   formatElapsed,
   formatEventLine,
@@ -276,5 +277,92 @@ describe("tolerant readers", () => {
     expect(formatOutputValue({ a: 1 })).toBe('{\n  "a": 1\n}');
     expect(formatOutputValue("plain text")).toBe("plain text");
     expect(formatOutputValue(undefined)).toBe("");
+  });
+});
+
+describe("diagnoseRun", () => {
+  const base = {
+    runId: "run-x",
+    quota: null,
+    approvalsCount: 0,
+    treeNodes: [] as Array<{ id?: unknown; status?: unknown }>,
+  };
+  const nodes = (...pairs: Array<[string, string]>) => pairs.map(([id, status]) => ({ id, status }));
+
+  test("healthy running run is green with progress", () => {
+    const d = diagnoseRun({
+      ...base,
+      status: "running",
+      treeNodes: nodes(["a", "ok"], ["b", "running"], ["c", "queued"], ["12345", "running"]),
+    });
+    expect(d.tone).toBe("ok");
+    expect(d.headline).toContain("Healthy");
+    expect(d.detail).toContain("1/3 tasks done");
+    expect(d.detail).toContain("b");
+  });
+
+  test("quota park is yellow with who and how to fix", () => {
+    const d = diagnoseRun({
+      ...base,
+      status: "waiting-quota",
+      quota: {
+        blockedCount: 2,
+        resetAtMs: 999,
+        blocked: [{ nodeId: "i9:verdict", message: "claude-sonnet-5 hit a provider usage/quota limit" }],
+      },
+      treeNodes: nodes(["a", "ok"]),
+    });
+    expect(d.tone).toBe("warn");
+    expect(d.headline).toContain("quota");
+    expect(d.detail).toContain("i9:verdict");
+    expect(d.detail).toContain("usage/quota limit");
+    expect(d.fix).toContain("--resume run-x");
+  });
+
+  test("guard trip is red and forbids resuming blindly", () => {
+    const d = diagnoseRun({
+      ...base,
+      status: "running",
+      treeNodes: nodes(["guard:start", "failed"], ["a", "ok"]),
+    });
+    expect(d.tone).toBe("crit");
+    expect(d.headline).toContain("guard");
+    expect(d.fix).toContain("Do NOT resume");
+  });
+
+  test("failed tasks on a live run are yellow with the failure sample", () => {
+    const d = diagnoseRun({
+      ...base,
+      status: "running",
+      treeNodes: nodes(["a", "failed"], ["b", "running"]),
+      failureSample: { nodeId: "a", message: "AGENT_QUOTA_EXCEEDED: limit hit" },
+    });
+    expect(d.tone).toBe("warn");
+    expect(d.headline).toContain("1 failed");
+    expect(d.detail).toContain("AGENT_QUOTA_EXCEEDED");
+  });
+
+  test("pending approvals are yellow pointing at the panel", () => {
+    const d = diagnoseRun({ ...base, status: "running", approvalsCount: 2, treeNodes: nodes(["a", "ok"]) });
+    expect(d.tone).toBe("warn");
+    expect(d.headline).toContain("2 approval(s)");
+  });
+
+  test("clean finish is green, finish with failures is yellow", () => {
+    expect(diagnoseRun({ ...base, status: "finished", treeNodes: nodes(["a", "ok"]) }).tone).toBe("ok");
+    expect(diagnoseRun({ ...base, status: "finished", treeNodes: nodes(["a", "failed"]) }).tone).toBe("warn");
+  });
+
+  test("loop iterations dedupe to the busiest status per logical id", () => {
+    const d = diagnoseRun({
+      ...base,
+      status: "running",
+      treeNodes: [
+        { id: "loop-task", status: "ok" },
+        { id: "loop-task", status: "running" },
+      ],
+    });
+    expect(d.detail).toContain("0/1 tasks done");
+    expect(d.detail).toContain("loop-task");
   });
 });

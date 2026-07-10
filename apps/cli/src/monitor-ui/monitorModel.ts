@@ -102,6 +102,151 @@ export function quotaInfoOf(row: Record<string, unknown>): {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Run health diagnosis. One always-on verdict per run — green/yellow/red, what
+// the run is doing right now, and the concrete fix — recomputed live from
+// gateway state. Deterministic on purpose: it must keep working during the
+// exact provider outages and quota walls it reports on.
+// ---------------------------------------------------------------------------
+
+export type RunDiagnosis = {
+  tone: "ok" | "warn" | "crit";
+  headline: string;
+  detail: string;
+  fix: string;
+};
+
+/** Logical task rows only — structural containers carry numeric snapshot keys. */
+function taskRows(
+  treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown }>,
+): Array<{ id: string; status: string }> {
+  const seen = new Map<string, string>();
+  for (const node of treeNodes) {
+    const id = asString(node.id);
+    const status = asString(node.status) ?? "queued";
+    if (!id || /^\d+$/.test(id)) continue;
+    // Loop iterations repeat the logical id; the busiest status wins.
+    const rank: Record<string, number> = { queued: 0, cancelled: 1, waiting: 2, ok: 3, failed: 4, running: 5 };
+    const existing = seen.get(id);
+    if (!existing || (rank[status] ?? 0) >= (rank[existing] ?? 0)) seen.set(id, status);
+  }
+  return [...seen.entries()].map(([id, status]) => ({ id, status }));
+}
+
+export function diagnoseRun(input: {
+  runId: string;
+  status: string | undefined;
+  healthState?: string;
+  quota: ReturnType<typeof quotaInfoOf>;
+  approvalsCount: number;
+  treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown }>;
+  failureSample?: { nodeId: string; message: string } | null;
+}): RunDiagnosis {
+  const status = input.status ?? "";
+  const tasks = taskRows(input.treeNodes);
+  const failed = tasks.filter((task) => task.status === "failed");
+  const running = tasks.filter((task) => task.status === "running");
+  const done = tasks.filter((task) => task.status === "ok").length;
+  const total = tasks.length;
+  const guardTrips = failed.filter((task) => task.id.startsWith("guard:") || /:(queue-)?guard$/.test(task.id));
+  const sample = input.failureSample?.message
+    ? ` Latest failure (${input.failureSample.nodeId}): ${input.failureSample.message.slice(0, 220)}`
+    : "";
+  const progress = total ? `${done}/${total} tasks done` : "no tasks yet";
+
+  if (guardTrips.length) {
+    return {
+      tone: "crit",
+      headline: "Main guard tripped — the run stopped itself",
+      detail: `${guardTrips.map((task) => task.id).join(", ")} failed: the repo root left main or an agent wrote outside its worktree.${sample}`,
+      fix: `Do NOT resume yet. Inspect with \`smithers node ${input.runId} <nodeId>\`, fix the checkout, then \`smithers up --resume ${input.runId}\`.`,
+    };
+  }
+  if (status === "failed" || status === "errored") {
+    return {
+      tone: "crit",
+      headline: "Run failed",
+      detail: `${failed.length} task(s) exhausted retries; ${progress}.${sample}`,
+      fix: `\`smithers inspect ${input.runId}\` for the cause, \`smithers retry-task\` to recover a node, then resume.`,
+    };
+  }
+  if (status === "cancelled" || status === "canceled") {
+    return {
+      tone: "warn",
+      headline: "Run cancelled",
+      detail: `Stopped deliberately at ${progress}.`,
+      fix: `Start a fresh run, or \`smithers replay\` from a checkpoint if the work should continue.`,
+    };
+  }
+  if (status === "waiting-quota") {
+    const blocked = input.quota?.blocked ?? [];
+    const who = blocked.length
+      ? ` Blocked: ${blocked.slice(0, 3).map((entry) => entry.nodeId).join(", ")}${blocked.length > 3 ? "…" : ""}.`
+      : "";
+    const why = blocked[0]?.message ? ` ${blocked[0].message.slice(0, 220)}` : sample;
+    return {
+      tone: "warn",
+      headline: "Parked on provider quota — nothing is wrong",
+      detail: `${input.quota?.blockedCount ?? 0} task(s) hit a usage limit; ${progress}.${who}${why}`,
+      fix: `It auto-resumes when the window resets. To go sooner: add capacity (\`smithers agents add\`) then \`smithers up --resume ${input.runId}\`.`,
+    };
+  }
+  if (status === "waiting-approval" || input.approvalsCount > 0) {
+    return {
+      tone: "warn",
+      headline: `Waiting on you — ${Math.max(input.approvalsCount, 1)} approval(s) pending`,
+      detail: `The run is parked until a human decides; ${progress}.`,
+      fix: "Approve or deny in the approvals panel (or `smithers approve <runId> --node <id>`).",
+    };
+  }
+  if (input.healthState === "stale" || input.healthState === "orphaned" || input.healthState === "recovering") {
+    return {
+      tone: "warn",
+      headline: "Engine heartbeat is stale",
+      detail: `The run claims to be ${status || "active"} but its engine has gone quiet; ${progress}.`,
+      fix: `\`smithers up --resume ${input.runId}\` re-attaches an engine (or \`smithers supervise\` to auto-heal).`,
+    };
+  }
+  if (failed.length && (status === "running" || status.startsWith("waiting"))) {
+    return {
+      tone: "warn",
+      headline: `Running with ${failed.length} failed task(s)`,
+      detail: `${progress}; ${running.length} running. Failed: ${failed.slice(0, 4).map((task) => task.id).join(", ")}${failed.length > 4 ? "…" : ""}.${sample}`,
+      fix: `Failed tasks were continue-on-fail or await retry. \`smithers retry-task\` recovers one; the run keeps going meanwhile.`,
+    };
+  }
+  if (status === "running") {
+    const active = running.slice(0, 3).map((task) => task.id).join(", ");
+    return {
+      tone: "ok",
+      headline: "Healthy — running",
+      detail: `${progress}; ${running.length} task(s) in flight${active ? ` (${active}${running.length > 3 ? "…" : ""})` : ""}.`,
+      fix: "No action needed.",
+    };
+  }
+  if (status === "finished" || status === "succeeded" || status === "completed") {
+    return failed.length
+      ? {
+          tone: "warn",
+          headline: "Finished with failures",
+          detail: `${progress}; ${failed.length} task(s) failed: ${failed.slice(0, 4).map((task) => task.id).join(", ")}.${sample}`,
+          fix: `Review the failed nodes; \`smithers retry-task\` + resume if they should complete.`,
+        }
+      : {
+          tone: "ok",
+          headline: "Completed",
+          detail: `${progress}.`,
+          fix: "No action needed.",
+        };
+  }
+  return {
+    tone: "warn",
+    headline: status ? `Status: ${status}` : "Status unknown",
+    detail: progress + ".",
+    fix: `\`smithers why ${input.runId}\` explains what it is waiting for.`,
+  };
+}
+
 /**
  * The events worth a human's attention: node/run lifecycle transitions,
  * approvals, human requests, signals, and quota parks. Everything else

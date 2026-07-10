@@ -25,6 +25,7 @@ import {
   asNumber,
   asString,
   autoExpandKeys,
+  diagnoseRun,
   filterRuns,
   formatElapsed,
   formatEventLine,
@@ -625,6 +626,74 @@ function EventLog({ runId }: { runId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Health strip: one always-on green/yellow/red verdict per run — what it is
+// doing right now and the concrete fix — recomputed live from gateway state.
+// ---------------------------------------------------------------------------
+
+function HealthStrip({
+  runId,
+  status,
+  healthState,
+  quota,
+}: {
+  runId: string;
+  status: string | undefined;
+  healthState: string | undefined;
+  quota: ReturnType<typeof quotaInfoOf>;
+}) {
+  const tree = useGatewayRunTree(runId);
+  const approvalsQuery = useGatewayApprovals();
+  const treeNodes = tree.nodes ?? [];
+  const approvalsCount = (Array.isArray(approvalsQuery.data) ? approvalsQuery.data : []).filter(
+    (approval: unknown) => isRecord(approval) && approval.runId === runId,
+  ).length;
+  // One representative failure, so the strip can say WHY without a click.
+  const failedTask = treeNodes.find(
+    (node) => asString(node.status) === "failed" && !/^\d+$/.test(asString(node.id) ?? ""),
+  );
+  const failedNodeId = failedTask ? asString(failedTask.id) : undefined;
+  const failedIteration = failedTask && typeof failedTask.iteration === "number" ? failedTask.iteration : 0;
+  const sampleQuery = useGatewayNodeOutput({ runId, nodeId: failedNodeId, iteration: failedIteration });
+  const sampleError = nodeErrorOf(sampleQuery.data);
+  const diagnosis = diagnoseRun({
+    runId,
+    status,
+    healthState,
+    quota,
+    approvalsCount,
+    treeNodes,
+    failureSample: failedNodeId && sampleError ? { nodeId: failedNodeId, message: sampleError.message } : null,
+  });
+  const tone = diagnosis.tone === "ok" ? "tone-ok" : diagnosis.tone === "crit" ? "tone-failed" : "tone-waiting";
+  return (
+    <div className={`mon-banner ${tone} mon-health`} data-testid="monitor-health-strip">
+      <div className="mon-health-headline">
+        <span className={`mon-health-dot ${tone}`} />
+        <b>{diagnosis.headline}</b>
+        {status === "waiting-quota" && quota?.resetAtMs ? (
+          <span>
+            {" · resumes ~"}
+            {new Date(quota.resetAtMs).toLocaleTimeString()} (<Countdown untilMs={quota.resetAtMs} />)
+          </span>
+        ) : null}
+      </div>
+      <div className="mon-health-detail">{diagnosis.detail}</div>
+      {quota?.blocked.length ? (
+        <ul className="mon-quota-list">
+          {quota.blocked.map((entry) => (
+            <li key={entry.nodeId}>
+              <span className="mon-mono">{entry.nodeId}</span>
+              {entry.message ? <span className="mon-dim"> — {entry.message}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="mon-health-fix mon-dim">{diagnosis.fix}</div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Node inspector.
 // ---------------------------------------------------------------------------
 
@@ -813,35 +882,7 @@ function RunDetail({
         </div>
       </header>
 
-      {quota ? (
-        <div className="mon-banner tone-waiting mon-quota" data-testid="monitor-quota-banner">
-          <div>
-            <b>Waiting on provider quota</b> — {quota.blockedCount} task(s) blocked
-            {quota.resetAtMs ? (
-              <>
-                {" · resumes ~"}
-                {new Date(quota.resetAtMs).toLocaleTimeString()} (<Countdown untilMs={quota.resetAtMs} />)
-              </>
-            ) : (
-              " · no reset time reported; the run stays parked until resumed"
-            )}
-          </div>
-          {quota.blocked.length ? (
-            <ul className="mon-quota-list">
-              {quota.blocked.map((entry) => (
-                <li key={entry.nodeId}>
-                  <span className="mon-mono">{entry.nodeId}</span>
-                  {entry.message ? <span className="mon-dim"> — {entry.message}</span> : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="mon-dim">
-              Select a failed/blocked node in the tree for the exact agent and limit message.
-            </div>
-          )}
-        </div>
-      ) : null}
+      <HealthStrip runId={runId} status={status} healthState={healthState} quota={quota} />
 
       {showCustomUi && customUiUrl ? (
         <div className="mon-modal-backdrop" onClick={() => setShowCustomUi(false)} data-testid="monitor-ui-modal">
@@ -1138,6 +1179,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 .mon-output { margin: 6px 0 0; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; max-height: 45vh; overflow-y: auto; }
 .mon-failure { border-color: color-mix(in srgb, var(--failed, #f87171) 45%, var(--border)); }
 .mon-quota { flex-direction: column; align-items: flex-start; }
+.mon-health { flex-direction: column; align-items: flex-start; gap: 4px; }
+.mon-health-headline { display: flex; align-items: center; gap: 8px; }
+.mon-health-dot { width: 9px; height: 9px; border-radius: 999px; background: var(--tone); box-shadow: 0 0 6px color-mix(in srgb, var(--tone) 60%, transparent); }
+.mon-health-detail { font-weight: 400; overflow-wrap: anywhere; }
+.mon-health-fix { font-weight: 400; font-size: 11px; }
 .mon-quota-list { margin: 4px 0 0; padding-left: 18px; font-weight: 400; font-size: 11px; }
 .mon-quota-list li { margin: 2px 0; overflow-wrap: anywhere; }
 .mon-modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px; }
