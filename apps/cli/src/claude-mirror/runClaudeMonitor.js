@@ -12,6 +12,13 @@ const NOTABLE_EVENT_KINDS = new Map([
     ["RunContinuedAsNew", "run-continued"],
 ]);
 
+const TERMINAL_STATUS_KINDS = new Map([
+    ["failed", "run-failed"],
+    ["finished", "run-finished"],
+    ["cancelled", "run-cancelled"],
+    ["continued", "run-continued"],
+]);
+
 /**
  * NDJSON follower behind the Claude Code plugin's background monitor: one line
  * per notable transition across local runs (approval pending, human request,
@@ -61,12 +68,18 @@ export async function runClaudeMonitor(adapter, options = {}) {
                 // First sight: skip history, but surface anything already waiting.
                 const newest = await Promise.resolve(adapter.getLastEventSeq(runId)).catch(() => undefined);
                 cursors.set(runId, typeof newest === "number" ? newest : 0);
-                if (!isTerminalClaudeMirrorRunStatus(run.status)) {
+                if (isTerminalClaudeMirrorRunStatus(run.status)) {
+                    // Already over when we first saw it: pure pre-monitor history,
+                    // never replayed and never synthesized below.
+                    finalScanned.add(runId);
+                }
+                else {
                     await emitPendingGates(adapter, runId, emitOnce);
                 }
                 continue;
             }
-            if (isTerminalClaudeMirrorRunStatus(run.status)) {
+            const finalScan = isTerminalClaudeMirrorRunStatus(run.status);
+            if (finalScan) {
                 // One final scan so the RunFinished/RunFailed line is not lost
                 // to the race between the status flip and the last event read.
                 if (finalScanned.has(runId)) {
@@ -75,31 +88,55 @@ export async function runClaudeMonitor(adapter, options = {}) {
                 finalScanned.add(runId);
             }
             let cursor = cursors.get(runId) ?? 0;
-            const rows = await Promise.resolve(adapter.listEventHistory(runId, { afterSeq: cursor, limit: EVENT_PAGE_SIZE })).catch(() => []);
-            for (const row of rows) {
-                const seq = Number(row.seq ?? 0);
-                if (seq > cursor) {
-                    cursor = seq;
+            let sawTerminalEvent = false;
+            // Live runs read one page per tick (the cursor catches up next tick).
+            // The final scan of a terminal run must drain every remaining page:
+            // a failing run can flush a >EVENT_PAGE_SIZE burst of trailing events
+            // in one polling window, hiding the RunFailed row past the first page
+            // of the only read this run will ever get again.
+            for (;;) {
+                const pageStart = cursor;
+                const rows = await Promise.resolve(adapter.listEventHistory(runId, { afterSeq: cursor, limit: EVENT_PAGE_SIZE })).catch(() => []);
+                for (const row of rows) {
+                    const seq = Number(row.seq ?? 0);
+                    if (seq > cursor) {
+                        cursor = seq;
+                    }
+                    const type = String(row.type ?? "");
+                    const kind = NOTABLE_EVENT_KINDS.get(type);
+                    if (!kind) {
+                        continue;
+                    }
+                    const payload = parsePayload(row.payloadJson);
+                    if (kind === "approval-pending") {
+                        // Dedupe against emitPendingGates (below), which surfaces the
+                        // same still-pending gate each tick. Use the identical key so a
+                        // gate requested while we are watching a run is announced once,
+                        // not twice (event-log line + pending-gates line).
+                        const nodeId = typeof payload?.nodeId === "string" ? payload.nodeId : "";
+                        const iteration = typeof payload?.iteration === "number" ? payload.iteration : 0;
+                        emitOnce(`approval:${runId}:${nodeId}:${iteration}`, buildEventEntry(kind, runId, payload));
+                        continue;
+                    }
+                    sawTerminalEvent = true;
+                    emit(buildEventEntry(kind, runId, payload));
                 }
-                const type = String(row.type ?? "");
-                const kind = NOTABLE_EVENT_KINDS.get(type);
-                if (!kind) {
-                    continue;
+                if (!finalScan || rows.length < EVENT_PAGE_SIZE || cursor <= pageStart) {
+                    break;
                 }
-                const payload = parsePayload(row.payloadJson);
-                if (kind === "approval-pending") {
-                    // Dedupe against emitPendingGates (below), which surfaces the
-                    // same still-pending gate each tick. Use the identical key so a
-                    // gate requested while we are watching a run is announced once,
-                    // not twice (event-log line + pending-gates line).
-                    const nodeId = typeof payload?.nodeId === "string" ? payload.nodeId : "";
-                    const iteration = typeof payload?.iteration === "number" ? payload.iteration : 0;
-                    emitOnce(`approval:${runId}:${nodeId}:${iteration}`, buildEventEntry(kind, runId, payload));
-                    continue;
-                }
-                emit(buildEventEntry(kind, runId, payload));
             }
             cursors.set(runId, cursor);
+            if (finalScan && !sawTerminalEvent) {
+                // The engine commits the terminal run status BEFORE it persists the
+                // RunFailed/RunFinished event row, so this one-shot final scan can
+                // land inside that gap (or the event read can fail) and the line
+                // would be lost forever. Synthesize it from the status we watched
+                // flip; the event log is never read again for this run.
+                const kind = TERMINAL_STATUS_KINDS.get(String(run.status ?? ""));
+                if (kind) {
+                    emit(buildEventEntry(kind, runId, undefined));
+                }
+            }
             await emitPendingGates(adapter, runId, emitOnce);
             trackStall(run, stalledAfterMs, stalledRuns, emit, now);
         }
