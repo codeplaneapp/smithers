@@ -19,8 +19,8 @@ import { subscriptionCodexFirst } from "../lib/codexAccounts";
 import { protectedAutomationPaths } from "../lib/codexIssueMergeQueue";
 
 const DEFAULT_REPO = "smithersai/smithers";
-const SWEEP_CONCURRENCY = 16;
-const LANE_CONCURRENCY = 12;
+const SWEEP_CONCURRENCY = 64;
+const LANE_CONCURRENCY = 24;
 const LANDING_GATE_COMMAND = "pnpm typecheck && pnpm lint && pnpm test";
 const MAX_REVIEW_DIFF_BYTES = 200_000;
 const AGENT_RETRIES = 2;
@@ -57,7 +57,7 @@ const inputSchema = z.object({
   repo: z.string().default(DEFAULT_REPO),
   maxImplement: z.number().int().min(1).max(200).default(50),
   maxTriage: z.number().int().min(1).max(1_000).default(500),
-  laneConcurrency: z.number().int().min(1).max(32).default(LANE_CONCURRENCY),
+  laneConcurrency: z.number().int().min(1).max(64).default(LANE_CONCURRENCY),
   reviewIterations: z.number().int().min(1).max(8).default(4),
   issueNumbers: z.array(z.number().int()).default([]),
   excludeNumbers: z.array(z.number().int()).default([]),
