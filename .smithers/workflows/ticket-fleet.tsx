@@ -560,16 +560,17 @@ function assertRootOnMain(phase: string): { gitRef: string; jjBookmarks: string 
   if (gitRef.startsWith("refs/heads/") && gitRef !== "refs/heads/main") {
     throw new Error("MAIN-GUARD(" + phase + "): root checkout is on branch " + gitRef + ", not main. Stopping the run.");
   }
+  // jj bookmark context is informational only: concurrent sessions park
+  // worktree-* bookmarks between main and @ all the time, so "main is not the
+  // nearest bookmarked ancestor" is NOT evidence of a wrong checkout. The git
+  // symbolic-ref check above plus the guarded-path drift check are the
+  // enforcers.
   let jjBookmarks = "";
   try {
     jjBookmarks = execFileSync("jj", ["log", "--no-graph", "-r", "heads(::@ & bookmarks())", "-T", "local_bookmarks"], {
       cwd: repoRoot, encoding: "utf8", timeout: 20_000,
     }).trim();
-    if (jjBookmarks && !/\bmain\b/.test(jjBookmarks)) {
-      throw new Error("MAIN-GUARD(" + phase + "): jj working copy sits on '" + jjBookmarks + "', not main. Stopping the run.");
-    }
   } catch (error) {
-    if (String(error).includes("MAIN-GUARD")) throw error;
     jjBookmarks = "(jj unavailable: " + String(error).slice(0, 120) + ")";
   }
   return { gitRef, jjBookmarks };
