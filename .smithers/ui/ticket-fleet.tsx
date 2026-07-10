@@ -220,6 +220,29 @@ function OutputCardInner({ runId, nodeId, title, render }: {
   );
 }
 
+/**
+ * Root-drift warnings: guard tasks no longer fail the run for guarded-path
+ * drift — they complete with an ok:false row (driftPaths filled). Surface
+ * those rows as amber warnings; only branch-checkout violations still fail
+ * the guard node itself (red banner).
+ */
+function GuardDriftNotice({ runId, nodeId, remountKey }: { runId: string; nodeId: string; remountKey: string }) {
+  return <GuardDriftNoticeInner key={remountKey + ":" + nodeId} runId={runId} nodeId={nodeId} />;
+}
+function GuardDriftNoticeInner({ runId, nodeId }: { runId: string; nodeId: string }) {
+  const output = useGatewayNodeOutput({ runId, nodeId, iteration: 0 });
+  const row = unwrapRow(output.data);
+  if (!row || asBool(row.ok)) return null;
+  const drift = parseMaybeJson(row.driftPaths);
+  const paths = Array.isArray(drift) ? drift.map(String) : [];
+  return (
+    <div className="banner amber">
+      ROOT DRIFT WARNING — {nodeId}: {asString(row.summary) ?? paths.slice(0, 8).join(", ")}
+      {" "}(run continues; fleet lanes are unaffected)
+    </div>
+  );
+}
+
 function IssueDetail({ runId, issueNumber }: { runId: string; issueNumber: number }) {
   const triage = useGatewayNodeOutput({ runId, nodeId: "i" + issueNumber + ":triage", iteration: 0 });
   const readiness = useGatewayNodeOutput({ runId, nodeId: "i" + issueNumber + ":ready", iteration: 0 });
@@ -261,8 +284,14 @@ function Dashboard({ runId }: { runId: string }) {
   const failedNodes = [...nodeStatus.entries()]
     .filter(([nodeId, s]) => s === "failed" && !/^\d+$/.test(nodeId))
     .map(([nodeId]) => nodeId);
+  // A FAILED guard node now means only a branch-checkout violation (the root
+  // left main); guarded-path drift completes the node with an ok:false row
+  // instead, surfaced below as an amber warning.
   const guardFailures = failedNodes.filter((nodeId) => nodeId.startsWith("guard:") || /:(queue-)?guard$/.test(nodeId));
   const otherFailures = failedNodes.filter((nodeId) => !guardFailures.includes(nodeId));
+  const finishedGuards = [...nodeStatus.entries()]
+    .filter(([nodeId, s]) => s === "done" && (nodeId.startsWith("guard:") || /:(queue-)?guard$/.test(nodeId)))
+    .map(([nodeId]) => nodeId);
   const sweep = sweepStats(nodeStatus);
   const status = String((run.data as any)?.status ?? "");
   const runApprovals = (Array.isArray(approvals.data) ? approvals.data : []).filter((a: any) => a?.runId === runId);
@@ -271,10 +300,14 @@ function Dashboard({ runId }: { runId: string }) {
     <div>
       {guardFailures.length ? (
         <div className="banner">
-          MAIN GUARD TRIPPED — {guardFailures.join(", ")}. The run stops itself when the repo root
-          leaves main or an agent writes outside its worktree. Inspect with `smithers node` before resuming anything.
+          MAIN GUARD TRIPPED — {guardFailures.join(", ")}. A failed guard means the repo root is
+          checked out on a non-main branch; the run stops itself. (Root-path drift no longer fails
+          the run — it surfaces below as an amber warning.) Inspect with `smithers node` before resuming anything.
         </div>
       ) : null}
+      {finishedGuards.map((nodeId) => (
+        <GuardDriftNotice key={nodeId} runId={runId} nodeId={nodeId} remountKey={remountKey} />
+      ))}
       {otherFailures.length ? (
         <div className="banner amber">
           {otherFailures.length} node(s) failed (retries exhausted): {otherFailures.slice(0, 6).join(", ")}

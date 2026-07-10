@@ -27,9 +27,14 @@ const HEARTBEAT_MS = 10 * 60_000;
 const AGENT_TIMEOUT_MS = 60 * 60_000;
 const DIFFICULTY_ORDER = ["trivial", "easy", "medium", "hard", "xhard"] as const;
 const DIFFICULTY_LABELS = DIFFICULTY_ORDER.map((d) => "difficulty:" + d);
-// Root-checkout paths that no agent lane may ever touch: any drift here during
-// the implement/queue phases means an agent wrote outside its worktree, which
-// is a run-stopping bug (see guard tasks below).
+// Root-checkout paths that no agent lane may ever touch. Drift here is
+// reported as a WARNING guard row (ok:false + driftPaths), not a run-stopping
+// failure: the guard cannot attribute writes, so a human maintainer or a
+// concurrent session legitimately editing the shared checkout would otherwise
+// false-red the run. Merge-queue integrity does not depend on this check
+// (candidate capture diffs each lane's own worktree; landing re-verifies
+// exact heads). Only a root checkout on a non-main branch stays fatal (see
+// the guard tasks below).
 const GUARDED_ROOT_PATHS = ["packages", "apps", "docs", "scripts", "e2e", "skills", "evals", "examples", "benchmarks", "poc"];
 
 const repoRoot = (() => {
@@ -539,7 +544,12 @@ async function pushMain(dryRun: boolean): Promise<{ pushed: boolean; remoteSha: 
   return { pushed: upToDate, remoteSha, summary: upToDate ? "Pushed " + localSha : "Remote does not contain local main after push." };
 }
 
-// --- Main-guard: the root of the repo must always be a jj change on main. ---
+// --- Main-guard: two tiers. FATAL: the root checkout sitting on a non-main
+// git branch (assertRootOnMain throws and stops the run). WARNING: drift in
+// GUARDED_ROOT_PATHS relative to the run-start baseline — runGuard returns an
+// ok:false row with driftPaths instead of throwing, because it cannot tell an
+// agent's stray write from a concurrent human/session edit, and the merge
+// queue's integrity never depended on it. ---
 
 function guardedRootStatus(): string[] {
   const existing = GUARDED_ROOT_PATHS.filter((p) => existsSync(join(repoRoot, p)));
@@ -559,8 +569,8 @@ function assertRootOnMain(phase: string): { gitRef: string; jjBookmarks: string 
   // jj bookmark context is informational only: concurrent sessions park
   // worktree-* bookmarks between main and @ all the time, so "main is not the
   // nearest bookmarked ancestor" is NOT evidence of a wrong checkout. The git
-  // symbolic-ref check above plus the guarded-path drift check are the
-  // enforcers.
+  // symbolic-ref check above is the only fatal enforcer; guarded-path drift
+  // is reported as a warning row by runGuard.
   let jjBookmarks = "";
   try {
     jjBookmarks = execFileSync("jj", ["log", "--no-graph", "-r", "heads(::@ & bookmarks())", "-T", "local_bookmarks"], {
@@ -577,11 +587,14 @@ function runGuard(ctx: any, phase: string): z.infer<typeof guardSchema> {
   const baselineEntries = new Set(asStrArray(baseline?.entries));
   const drift = guardedRootStatus().filter((entry) => !baselineEntries.has(entry));
   if (drift.length) {
-    throw new Error(
-      "MAIN-GUARD(" + phase + "): WRONG-WORKTREE WRITE DETECTED — the root checkout drifted in guarded paths: "
-      + drift.slice(0, 40).join(", ")
-      + ". An agent wrote outside its worktree; the run is stopped so this can be fixed at the source.",
-    );
+    // Drift is a warning, not a failure: the guard cannot attribute writes, so
+    // this is most often a concurrent session editing the shared checkout. The
+    // run continues; merge-queue integrity is enforced elsewhere.
+    return {
+      phase, ok: false, gitRef, jjBookmarks, driftPaths: drift,
+      summary: "root checkout drifted (likely a concurrent session): " + drift.slice(0, 40).join(", ")
+        + " — fleet lanes are unaffected; verify no lane wrote these paths",
+    };
   }
   return { phase, ok: true, gitRef, jjBookmarks, driftPaths: [], summary: "Root is a jj change on main; no guarded-path drift." };
 }
