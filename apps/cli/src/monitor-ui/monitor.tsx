@@ -42,10 +42,12 @@ import {
   isResumable,
   labelForStatus,
   nodeErrorOf,
+  paginateRuns,
   pick,
   quotaInfoOf,
   rowOf,
   runProgress,
+  RUNS_PAGE_SIZE,
   shortRunId,
   statusOptions,
   timeAgo,
@@ -373,6 +375,137 @@ function RunsRail({
         </section>
       ))}
     </nav>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Landing runs table: every run this gateway owns, paginated, shown in the
+// main area while no run is selected. The gateway's listRuns filter has no
+// offset/cursor, so pagination is client-side over the fetched window (see
+// paginateRuns in ./monitorModel.ts). Same rows, same filters, same select
+// handler as the rail — a scannable overview instead of an empty hero.
+// ---------------------------------------------------------------------------
+
+/** Compact `done+failed/total` from a run row's node-state summary (getRun
+ * attaches it; plain listRuns rows without one render an em dash). */
+function RunProgressCell({ run }: { run: RunRow }) {
+  const progress = isRecord(run) ? runProgress(run.summary) : null;
+  if (!progress) return <span className="mon-dim">—</span>;
+  return (
+    <span className="mon-mono" title={`${progress.done} done · ${progress.failed} failed · ${progress.total} nodes`}>
+      {progress.done + progress.failed}/{progress.total}
+      {progress.failed > 0 ? <span className="tone-failed mon-table-failed"> · {progress.failed} failed</span> : null}
+    </span>
+  );
+}
+
+function RunsTable({
+  runs,
+  loading,
+  page,
+  onPageChange,
+  onSelect,
+}: {
+  runs: RunRow[];
+  loading: boolean;
+  page: number;
+  onPageChange: (page: number) => void;
+  onSelect: (runId: string) => void;
+}) {
+  const { pageRows, page: shownPage, pageCount, total } = paginateRuns(runs, page, RUNS_PAGE_SIZE);
+  if (total === 0) {
+    return (
+      <div className="mon-empty mon-empty-hero" data-testid="monitor-empty-detail">
+        <div>{loading ? "Loading runs…" : "No runs match."}</div>
+        <div className="mon-dim">
+          {loading ? (
+            "Live status, execution tree, node outputs, events, and approvals — for every run this gateway owns."
+          ) : (
+            <>
+              Launch one with <code>smithers up &lt;workflow&gt;</code> or <code>smithers workflow run &lt;id&gt;</code>.
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+  const firstRow = (shownPage - 1) * RUNS_PAGE_SIZE + 1;
+  const lastRow = Math.min(shownPage * RUNS_PAGE_SIZE, total);
+  return (
+    <section className="mon-panel mon-runs-table-panel">
+      <header className="mon-panel-head">
+        <h2 className="mon-kicker">
+          All runs <span className="mon-count">{total}</span>
+        </h2>
+      </header>
+      <div className="mon-runs-scroll">
+        <table className="mon-runs-table" data-testid="monitor-runs-table">
+          <thead>
+            <tr>
+              <th scope="col">Status</th>
+              <th scope="col">Run</th>
+              <th scope="col">Workflow</th>
+              <th scope="col">Progress</th>
+              <th scope="col">Started</th>
+              <th scope="col">Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageRows.map((run) => (
+              <tr
+                key={run.runId}
+                className="mon-runs-table-row"
+                data-run-id={run.runId}
+                onClick={() => onSelect(run.runId)}
+              >
+                <td>
+                  <StatusTag status={run.status} />
+                </td>
+                <td className="mon-mono">{shortRunId(run.runId)}</td>
+                <td className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
+                  {run.workflowKey ?? "unknown"}
+                </td>
+                <td>
+                  <RunProgressCell run={run} />
+                </td>
+                <td className="mon-dim">
+                  <Ago ms={run.startedAtMs ?? run.createdAtMs} />
+                </td>
+                <td className="mon-dim mon-mono">
+                  <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={run.finishedAtMs} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <footer className="mon-runs-pagination" data-testid="monitor-runs-pagination">
+        <span className="mon-dim mon-count-note">
+          Showing {firstRow}–{lastRow} of {total}
+        </span>
+        <span className="mon-runs-pagination-controls">
+          <button
+            type="button"
+            className="mon-btn"
+            disabled={shownPage <= 1}
+            onClick={() => onPageChange(shownPage - 1)}
+          >
+            Prev
+          </button>
+          <span className="mon-dim mon-count-note">
+            Page {shownPage} / {pageCount}
+          </span>
+          <button
+            type="button"
+            className="mon-btn"
+            disabled={shownPage >= pageCount}
+            onClick={() => onPageChange(shownPage + 1)}
+          >
+            Next
+          </button>
+        </span>
+      </footer>
+    </section>
   );
 }
 
@@ -1225,8 +1358,11 @@ function App() {
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const runsQuery = useGatewayRuns({ filter: { limit: 200 } });
+  // No offset/cursor in the gateway's ListRunsRequest filter, so fetch a wide
+  // window and let the landing table paginate client-side (RUNS_PAGE_SIZE).
+  const runsQuery = useGatewayRuns({ filter: { limit: 1000 } });
   const allRuns = (runsQuery.data ?? []) as RunRow[];
+  const [runsPage, setRunsPage] = useState(1);
 
   // Resolve ?runId=&nodeId= once, when runs first arrive. An unknown id still
   // selects (RunDetail renders an honest "Run not found" state).
@@ -1262,6 +1398,10 @@ function App() {
     () => filterRuns(allRuns, { text: filterText, status: statusFilter, workflow: workflowFilter }),
     [allRuns, filterText, statusFilter, workflowFilter],
   );
+  // A changed filter means a new result set: land back on its first page.
+  useEffect(() => {
+    setRunsPage(1);
+  }, [filterText, statusFilter, workflowFilter]);
   const workflows = useMemo(() => workflowOptions(allRuns), [allRuns]);
   const statuses = useMemo(() => statusOptions(allRuns), [allRuns]);
 
@@ -1336,12 +1476,13 @@ function App() {
               }}
             />
           ) : (
-            <div className="mon-empty mon-empty-hero" data-testid="monitor-empty-detail">
-              <div>Select a run to inspect it.</div>
-              <div className="mon-dim">
-                Live status, execution tree, node outputs, events, and approvals — for every run this gateway owns.
-              </div>
-            </div>
+            <RunsTable
+              runs={visibleRuns}
+              loading={runsQuery.loading ?? false}
+              page={runsPage}
+              onPageChange={setRunsPage}
+              onSelect={selectRun}
+            />
           )}
         </div>
 
@@ -1446,6 +1587,22 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-run-row.is-active { background: color-mix(in srgb, var(--brand) 9%, transparent); box-shadow: inset 2px 0 0 var(--brand); }
 .mon-run-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mon-run-when { margin-left: auto; font-size: var(--fs-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Landing runs table: fills the main column; the table body scrolls inside the
+   panel (sticky header), never the page. */
+.mon-runs-table-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: 0; }
+.mon-runs-table-panel .mon-panel-head { margin-bottom: var(--sp-2); }
+.mon-runs-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-2); }
+.mon-runs-table { width: 100%; border-collapse: collapse; font-size: var(--fs-2); }
+.mon-runs-table th { position: sticky; top: 0; z-index: 1; background: var(--surface); text-align: left; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-1); line-height: var(--lh-tight); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.mon-runs-table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mon-runs-table tbody tr:last-child td { border-bottom: 0; }
+.mon-runs-table-row { cursor: pointer; }
+.mon-runs-table-row:hover { background: var(--hover); }
+.mon-table-workflow { font-weight: 600; max-width: 0; width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.mon-table-failed { color: var(--tone); font-weight: 600; }
+.mon-runs-pagination { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding-top: var(--sp-3); flex-wrap: wrap; }
+.mon-runs-pagination-controls { display: inline-flex; align-items: center; gap: var(--sp-2); }
 
 /* All panels share one padding, radius, and stacking rhythm. */
 .mon-panel { border: 1px solid var(--border); border-radius: var(--r-3); background: var(--surface); padding: var(--panel-pad); margin: 0 0 var(--sp-4); animation: mon-in 140ms ease-out; }

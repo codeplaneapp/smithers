@@ -395,6 +395,31 @@ export function statusOptions(runs: readonly RunRow[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Landing-view runs table pagination. The gateway's listRuns filter has no
+// offset/cursor (see ListRunsRequest in packages/gateway), so the table
+// paginates client-side over the fetched window.
+// ---------------------------------------------------------------------------
+
+export const RUNS_PAGE_SIZE = 100;
+
+export type PaginatedRuns<T> = { pageRows: T[]; page: number; pageCount: number; total: number };
+
+/**
+ * Slice `rows` into 1-based pages of `pageSize`, clamping `page` into range so
+ * a stale page (filters shrank the list) still renders a real page. An empty
+ * list is a single empty page.
+ */
+export function paginateRuns<T>(rows: readonly T[], page: number, pageSize: number): PaginatedRuns<T> {
+  const size = Math.max(1, Math.floor(pageSize));
+  const total = rows.length;
+  const pageCount = Math.max(1, Math.ceil(total / size));
+  const requested = Number.isFinite(page) ? Math.floor(page) : 1;
+  const clamped = Math.min(Math.max(1, requested), pageCount);
+  const start = (clamped - 1) * size;
+  return { pageRows: rows.slice(start, start + size), page: clamped, pageCount, total };
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle predicates + progress.
 // ---------------------------------------------------------------------------
 

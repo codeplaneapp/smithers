@@ -17,9 +17,11 @@ import {
   isNotableEvent,
   isResumable,
   labelForStatus,
+  paginateRuns,
   pick,
   rowOf,
   runProgress,
+  RUNS_PAGE_SIZE,
   shortRunId,
   statusOptions,
   timeAgo,
@@ -142,6 +144,42 @@ describe("progress", () => {
     expect(runProgress({})).toBeNull();
     expect(runProgress(undefined)).toBeNull();
     expect(runProgress("nope")).toBeNull();
+  });
+});
+
+describe("runs table pagination", () => {
+  const rows = (count: number) => Array.from({ length: count }, (_, index) => `run-${index}`);
+
+  test("empty list is a single empty page", () => {
+    expect(paginateRuns([], 1, RUNS_PAGE_SIZE)).toEqual({ pageRows: [], page: 1, pageCount: 1, total: 0 });
+    // Even an out-of-range request clamps back to the one empty page.
+    expect(paginateRuns([], 9, RUNS_PAGE_SIZE).page).toBe(1);
+  });
+
+  test("an exact multiple of the page size has no trailing empty page", () => {
+    const paged = paginateRuns(rows(200), 2, 100);
+    expect(paged.pageCount).toBe(2);
+    expect(paged.total).toBe(200);
+    expect(paged.pageRows).toHaveLength(100);
+    expect(paged.pageRows[0]).toBe("run-100");
+    expect(paged.pageRows[99]).toBe("run-199");
+  });
+
+  test("overflowing page numbers clamp into range (both directions)", () => {
+    const list = rows(150);
+    const past = paginateRuns(list, 99, 100);
+    expect(past.page).toBe(2);
+    expect(past.pageRows).toHaveLength(50);
+    expect(past.pageRows[0]).toBe("run-100");
+    expect(paginateRuns(list, 0, 100).page).toBe(1);
+    expect(paginateRuns(list, Number.NaN, 100).page).toBe(1);
+  });
+
+  test("a middle page slices the right window", () => {
+    const paged = paginateRuns(rows(250), 2, RUNS_PAGE_SIZE);
+    expect(paged).toMatchObject({ page: 2, pageCount: 3, total: 250 });
+    expect(paged.pageRows[0]).toBe("run-100");
+    expect(paged.pageRows.at(-1)).toBe("run-199");
   });
 });
 
