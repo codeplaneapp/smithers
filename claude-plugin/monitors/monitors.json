@@ -2,6 +2,6 @@
   {
     "name": "smithers-runs",
     "command": "bunx smithers-orchestrator claude monitor",
-    "description": "Streams notable Smithers run transitions (approval pending, human request, finished/failed/stalled) into the session as notifications. Exits silently in projects without a Smithers store."
+    "description": "Streams actionable Smithers run transitions (approval pending, human request, failed, stalled) into the session as notifications; finished/cancelled runs are not broadcast (the /workflows mirror reports the runs this session follows). Exits silently in projects without a Smithers store."
   }
 ]

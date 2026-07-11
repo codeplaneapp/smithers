@@ -3726,6 +3726,7 @@ const claudeMonitorOptions = z.object({
     intervalMs: z.number().int().min(250).default(2000).describe("Poll interval in ms"),
     stalledAfterMs: z.number().int().min(5000).default(120000).describe("Heartbeat age that flags a running run as stalled"),
     ticks: z.number().int().min(1).optional().describe("Stop after N polls (default: run until killed)"),
+    transitions: z.enum(["actionable", "all"]).default("actionable").describe("Which transitions stream: actionable (approvals, human requests, failures, stalls) or all (also finished/cancelled/continued)"),
 });
 const claudeCli = Cli.create({
     name: "claude",
@@ -3835,7 +3836,7 @@ const claudeCli = Cli.create({
     },
 })
     .command("monitor", {
-    description: "Follow local runs and print one NDJSON line per notable transition (approval pending, human request, finished/failed/cancelled/continued, stalled). Backs the plugin's background monitor.",
+    description: "Follow local runs and print one NDJSON line per actionable transition (approval pending, human request, failed, stalled); --transitions all adds finished/cancelled/continued. Backs the plugin's background monitor.",
     options: claudeMonitorOptions,
     alias: {
         intervalMs: "interval-ms",
@@ -3856,6 +3857,7 @@ const claudeCli = Cli.create({
                 intervalMs: c.options.intervalMs,
                 stalledAfterMs: c.options.stalledAfterMs,
                 ticks: c.options.ticks,
+                transitions: c.options.transitions,
             });
             return c.ok(undefined);
         }

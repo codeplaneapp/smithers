@@ -790,11 +790,12 @@ commands[89]:
       interval-ms,,number,1000,Poll interval in ms
       max-output-chars,,number,2000,Truncate the node output to this many chars
   - name: claude.monitor
-    purpose: Follow local runs and print one NDJSON line per notable transition (approval pending, human request, finished/failed/cancelled/continued, stalled); backs the plugin's background monitor
-    flags[3]{name,short,type,default,desc}:
+    purpose: Follow local runs and print one NDJSON line per actionable transition (approval pending, human request, failed, stalled); --transitions all adds finished/cancelled/continued; backs the plugin's background monitor
+    flags[4]{name,short,type,default,desc}:
       interval-ms,,number,2000,Poll interval in ms
       stalled-after-ms,,number,120000,Heartbeat age that flags a running run as stalled
       ticks,,number,,Stop after N polls (default run until killed)
+      transitions,,string,actionable,Which transitions stream: actionable or all
   - name: cron.start
     purpose: Start the background scheduler loop in the current terminal
   - name: cron.add

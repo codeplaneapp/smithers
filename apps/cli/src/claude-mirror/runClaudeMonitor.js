@@ -19,19 +19,28 @@ const TERMINAL_STATUS_KINDS = new Map([
     ["continued", "run-continued"],
 ]);
 
+// FYI-only transitions. The store is shared by every session in a workspace,
+// so broadcasting these wakes every session for every other session's runs;
+// a run this session actually follows already reports completion through its
+// /workflows mirror. Suppressed unless `transitions: "all"`.
+const FYI_KINDS = new Set(["run-finished", "run-cancelled", "run-continued"]);
+
 /**
  * NDJSON follower behind the Claude Code plugin's background monitor: one line
- * per notable transition across local runs (approval pending, human request,
- * run finished/failed/cancelled/continued, stalled heartbeat), each with the
- * resolving command. History before the monitor started is not replayed;
- * already-pending approvals and human requests are surfaced once at startup.
+ * per notable transition across local runs, each with the resolving command.
+ * By default only actionable transitions stream (approval pending, human
+ * request, run failed, stalled heartbeat); pass `transitions: "all"` to also
+ * stream the FYI ones (finished, cancelled, continued). History before the
+ * monitor started is not replayed; already-pending approvals and human
+ * requests are surfaced once at startup.
  *
  * @param {any} adapter
- * @param {{ intervalMs?: number; stalledAfterMs?: number; ticks?: number; write?: (line: string) => void; now?: () => number }} [options]
+ * @param {{ intervalMs?: number; stalledAfterMs?: number; ticks?: number; transitions?: "actionable" | "all"; write?: (line: string) => void; now?: () => number }} [options]
  */
 export async function runClaudeMonitor(adapter, options = {}) {
     const intervalMs = Math.max(250, Math.floor(options.intervalMs ?? 2000));
     const stalledAfterMs = Math.max(5000, Math.floor(options.stalledAfterMs ?? 120000));
+    const allTransitions = options.transitions === "all";
     const write = options.write ?? ((line) => process.stdout.write(`${line}\n`));
     const now = options.now ?? Date.now;
 
@@ -119,6 +128,9 @@ export async function runClaudeMonitor(adapter, options = {}) {
                         continue;
                     }
                     sawTerminalEvent = true;
+                    if (!allTransitions && FYI_KINDS.has(kind)) {
+                        continue;
+                    }
                     emit(buildEventEntry(kind, runId, payload));
                 }
                 if (!finalScan || rows.length < EVENT_PAGE_SIZE || cursor <= pageStart) {
@@ -133,7 +145,7 @@ export async function runClaudeMonitor(adapter, options = {}) {
                 // would be lost forever. Synthesize it from the status we watched
                 // flip; the event log is never read again for this run.
                 const kind = TERMINAL_STATUS_KINDS.get(String(run.status ?? ""));
-                if (kind) {
+                if (kind && (allTransitions || !FYI_KINDS.has(kind))) {
                     emit(buildEventEntry(kind, runId, undefined));
                 }
             }

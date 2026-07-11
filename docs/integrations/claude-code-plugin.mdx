@@ -8,7 +8,7 @@ The repository ships a first-party Claude Code plugin at `claude-plugin/`. Insta
 1. **The `smithers` MCP server** (`bunx smithers-orchestrator --mcp`): `list_workflows`, `run_workflow`, `watch_run`, `resolve_approval`, `ask_human`, and the rest of the semantic tool surface.
 2. **The `smithers` skill**: teaches Claude to run durable, multi-step, or background work through Smithers instead of hand-rolled subagent trees, and to consult `https://smithers.sh/llms-full.txt` before writing any workflow code.
 3. **The `/workflows` mirror**: a generic Workflow-tool script, `workflows/smithers-run.mjs`, that launches or attaches to a Smithers run and mirrors it live into Claude Code's `/workflows` progress tree. Works for every workflow with zero per-workflow setup.
-4. **A background monitor** (experimental Claude Code component): `smithers claude monitor` streams approval requests, human-input requests, failures, completions, and stalled-heartbeat warnings into the session as notifications, so Claude reacts even when no mirror is running.
+4. **A background monitor** (experimental Claude Code component): `smithers claude monitor` streams approval requests, human-input requests, failures, and stalled-heartbeat warnings into the session as notifications, so Claude reacts even when no mirror is running. Finished and cancelled runs are not broadcast by default: the workspace store is shared by every session, so those FYI lines would wake each session for every other session's runs, and a run this session follows already reports completion through its `/workflows` mirror. Pass `--transitions all` to stream them anyway.
 
 ## The /workflows mirror
 
