@@ -22,7 +22,11 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 
-const tests = spawnSync("bun", ["test", "scripts/sota.test.ts"], { cwd: root, stdio: "inherit" });
+const tests = spawnSync(
+  "bun",
+  ["test", "scripts/sota.test.ts", "scripts/sota-maintenance-artifact.test.ts"],
+  { cwd: root, stdio: "inherit" },
+);
 if (tests.status !== 0) {
   process.exit(tests.status ?? 1);
 }

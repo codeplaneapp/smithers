@@ -5,10 +5,11 @@
  * and if so rewrite docs/data/sota-models.json and every surface generated or
  * pinned from it.
  *
- * Run by .github/workflows/sota-research.yml (cron) and by hand via
- * `pnpm sota:research`. The script only mutates the working tree; committing
- * and opening the PR is the workflow's job. Exit code 0 always means "the tree
- * now reflects the latest research" (possibly unchanged).
+ * Run manually from a credential-controlled developer environment via
+ * `pnpm sota:research`. Scheduled maintenance intentionally excludes
+ * credentialed, web-enabled research. The script only mutates the working
+ * tree. Exit code 0 means the tree now reflects the latest research (possibly
+ * unchanged).
  *
  * The agent proposes a full replacement registry as strict JSON. We never
  * trust it blindly: the proposal must pass the same validation as the
