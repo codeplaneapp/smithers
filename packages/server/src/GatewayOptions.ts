@@ -72,6 +72,19 @@ export type GatewayOptions = {
    * @default { path: "/console" }
    */
   operatorUi?: GatewayOperatorUiConfig | false;
+  /**
+   * Host-injected PTY hijack launcher for the `/v1/pty/hijack` websocket
+   * channel. Given a run (and optionally the node whose agent session should
+   * be handed off), return the argv to spawn inside a real PTY — the smithers
+   * CLI wires `smithers hijack <runId> [--target <nodeId>]` here. Omit to
+   * disable the channel (upgrades answer 501). The Gateway itself never
+   * guesses how to resume an agent CLI session.
+   */
+  hijackPty?: (params: { runId: string; nodeId?: string }) => {
+    command: string[];
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+  } | null;
   defaults?: GatewayDefaults;
   maxBodyBytes?: number;
   maxPayload?: number;

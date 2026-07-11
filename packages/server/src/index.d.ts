@@ -1,4 +1,3 @@
-import * as _smithers_orchestrator_db_adapter_RunRow from '@smithers-orchestrator/db/adapter/RunRow';
 import * as node_http from 'node:http';
 import { IncomingMessage as IncomingMessage$1, ServerResponse as ServerResponse$2 } from 'node:http';
 import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
@@ -6,6 +5,9 @@ import * as _smithers_orchestrator_components_SmithersWorkflow from '@smithers-o
 import { SmithersWorkflow as SmithersWorkflow$1 } from '@smithers-orchestrator/components/SmithersWorkflow';
 import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
 import { SmithersDb as SmithersDb$4 } from '@smithers-orchestrator/db/adapter';
+import * as ws from 'ws';
+import { WebSocketServer } from 'ws';
+import * as node_stream from 'node:stream';
 import * as _smithers_orchestrator_db_runState from '@smithers-orchestrator/db/runState';
 import * as hono from 'hono';
 import { Hono } from 'hono';
@@ -307,6 +309,22 @@ type GatewayOptions$1 = {
      * @default { path: "/console" }
      */
     operatorUi?: GatewayOperatorUiConfig$1 | false;
+    /**
+     * Host-injected PTY hijack launcher for the `/v1/pty/hijack` websocket
+     * channel. Given a run (and optionally the node whose agent session should
+     * be handed off), return the argv to spawn inside a real PTY — the smithers
+     * CLI wires `smithers hijack <runId> [--target <nodeId>]` here. Omit to
+     * disable the channel (upgrades answer 501). The Gateway itself never
+     * guesses how to resume an agent CLI session.
+     */
+    hijackPty?: (params: {
+        runId: string;
+        nodeId?: string;
+    }) => {
+        command: string[];
+        cwd?: string;
+        env?: Record<string, string | undefined>;
+    } | null;
     defaults?: GatewayDefaults$1;
     maxBodyBytes?: number;
     maxPayload?: number;
@@ -455,7 +473,6 @@ declare const EXTENSION_BACKPRESSURE_DISCONNECT_CODE: "BackpressureDisconnect";
 declare class GatewayExtensions {
     /** @type {Map<string, GatewayExtensionDefinition>} */
     namespaces: Map<string, GatewayExtensionDefinition>;
-    /** Track resource + action keys per namespace so namespaced collisions are caught at register time. */
     /** @type {Map<string, Set<string>>} */
     invocableKeys: Map<string, Set<string>>;
     /** @type {Map<string, Set<string>>} */
@@ -491,7 +508,6 @@ declare class GatewayExtensions {
         streams: string[];
     }[];
 }
-type GatewayScope = "run:read" | "run:write" | "run:admin" | "approval:submit" | "signal:submit" | "cron:read" | "cron:write" | "observability:read";
 type GatewayExtensionContext = {
     namespace: string;
     key: string;
@@ -588,6 +604,7 @@ type ResolvedExtension = {
     scope: GatewayScope;
     entry: GatewayExtensionResource | GatewayExtensionAction | GatewayExtensionStream;
 };
+type GatewayScope = "run:read" | "run:write" | "run:admin" | "approval:submit" | "signal:submit" | "cron:read" | "cron:write" | "observability:read";
 declare const EXTENSION_METHOD_PREFIX: "ext.";
 declare const EXTENSION_STREAM_METHOD_PREFIX: "ext.stream.";
 
@@ -614,7 +631,7 @@ declare function assertGatewayInputDepthWithinBounds(value: unknown, maxDepth?: 
 /**
  * @param {string | undefined} code
  */
-declare function statusForRpcError(code: string | undefined): 400 | 401 | 403 | 404 | 409 | 429 | 413 | 501 | 500;
+declare function statusForRpcError(code: string | undefined): 401 | 403 | 404 | 400 | 409 | 413 | 429 | 501 | 500;
 declare const GATEWAY_RPC_MAX_PAYLOAD_BYTES: 1048576;
 declare const GATEWAY_RPC_MAX_DEPTH: 32;
 declare const GATEWAY_RPC_MAX_ARRAY_LENGTH: 256;
@@ -734,6 +751,23 @@ declare class Gateway {
     hasActiveCrons: boolean;
     hasPendingTimers: boolean;
     trustAnyHost: boolean;
+    whatHappenedNarrator: any;
+    /** @type {Map<string, { payload: Record<string, unknown> }>} */
+    whatHappenedCache: Map<string, {
+        payload: Record<string, unknown>;
+    }>;
+    hijackPty: ((params: {
+        runId: string;
+        nodeId?: string;
+    }) => {
+        command: string[];
+        cwd?: string;
+        env?: Record<string, string | undefined>;
+    } | null) | null;
+    /** @type {Set<{ dispose: () => void }>} */
+    ptySessions: Set<{
+        dispose: () => void;
+    }>;
     identity: {
         backend?: string;
         version?: string;
@@ -750,6 +784,19 @@ declare class Gateway {
         pid: number;
         startedAtMs: number;
     };
+    /**
+   * A workflow's UI: the one it declared, or — by convention — a sibling
+   * `ui/<key>.tsx` next to its entry file's `workflows/` directory. The
+   * convention is resolved on every call (a cheap existsSync) so a UI file
+   * created while the gateway is running becomes servable immediately, with
+   * no workflow edit (which would break parked runs' resume hashes) and no
+   * gateway restart.
+   *
+   * @param {string} key
+   * @param {RegisteredWorkflow} entry
+   * @returns {GatewayUiConfig | null}
+   */
+    resolvedUiFor(key: string, entry: RegisteredWorkflow): GatewayUiConfig | null;
     /**
    * @returns {GatewayUiMount[]}
    */
@@ -813,7 +860,7 @@ declare class Gateway {
    */
     workflowSummary(key: string, entry: RegisteredWorkflow): {
         hasUi: boolean;
-        uiPath: string | null;
+        uiPath: any;
         system: boolean;
         description?: string | undefined;
         readableName?: string | undefined;
@@ -825,7 +872,7 @@ declare class Gateway {
    */
     listWorkflowSummaries(hasUi: boolean | undefined, includeSystem?: boolean | undefined): {
         hasUi: boolean;
-        uiPath: string | null;
+        uiPath: any;
         system: boolean;
         description?: string | undefined;
         readableName?: string | undefined;
@@ -1000,6 +1047,7 @@ declare class Gateway {
         heartbeatAtMs: number | null;
         runtimeOwnerId: string | null;
         cancelRequestedAtMs: number | null;
+        pauseRequestedAtMs?: number | null;
         hijackRequestedAtMs: number | null;
         hijackTarget: string | null;
         vcsType: string | null;
@@ -1101,6 +1149,8 @@ declare class Gateway {
      * @returns {Promise<Record<string, unknown>[]>}
      */
     listApiRunEvents(params: Record<string, unknown>): Promise<Record<string, unknown>[]>;
+    /** @type {Map<string, number>} */
+    runEventSeqHints: Map<string, number> | undefined;
     /**
      * @param {IncomingMessage} req
      * @param {ServerResponse} res
@@ -1152,6 +1202,37 @@ declare class Gateway {
      * @returns {this}
      */
     register(key: string, workflow: SmithersWorkflow, options?: GatewayRegisterOptions): this;
+    /**
+   * Gate a `/v1/pty/hijack` websocket upgrade: authenticate the request (same
+   * token/Host/Origin semantics as the HTTP API, token also accepted as a
+   * `?token=` query param since browsers cannot set websocket headers), check
+   * the hijack scope, validate the target run, then hand the socket to
+   * `startPtyHijackSession`. The Origin/Host allow-list already ran in the
+   * shared `upgrade` handler before this method is reached.
+   *
+   * @param {IncomingMessage} req
+   * @param {import("node:stream").Duplex} socket
+   * @param {Buffer} head
+   * @param {WebSocketServer} wsServer
+   * @param {URL} url
+   */
+    handlePtyHijackUpgrade(req: IncomingMessage, socket: node_stream.Duplex, head: Buffer, wsServer: WebSocketServer, url: URL): Promise<void>;
+    /**
+   * Run the host-provided hijack command inside a real PTY and pipe it over an
+   * accepted websocket. Mirrors the terminal transport smithers cloud UIs use:
+   * binary frames are raw PTY bytes in both directions; text frames are JSON
+   * control messages (client sends `{"type":"resize","cols","rows"}`, the
+   * server sends `{"type":"exit","code"}` before a clean close).
+   *
+   * @param {import("ws").WebSocket} ws
+   * @param {{ runId: string; nodeId?: string; cols: number; rows: number }} params
+   */
+    startPtyHijackSession(ws: ws.WebSocket, params: {
+        runId: string;
+        nodeId?: string;
+        cols: number;
+        rows: number;
+    }): void;
     /**
    * @param {{ port?: number; host?: string; path?: string }} [options]
    */
@@ -1358,13 +1439,17 @@ declare class Gateway {
             nodeId: string;
             iteration: number;
             requestTitle: any;
-            requestSummary: any;
+            requestSummary: string | null;
             requestedAtMs: number | null;
-            approvalMode: any;
-            options: any;
-            allowedScopes: any;
-            allowedUsers: any;
-            autoApprove: any;
+            approvalMode: "gate" | "decision" | "select" | "rank";
+            options: {
+                key: string;
+                label: string;
+                summary?: string;
+            }[];
+            allowedScopes: string[];
+            allowedUsers: string[];
+            autoApprove: Record<string, unknown> | null;
         }[];
         stateVersion: number;
     }>;
@@ -1536,13 +1621,17 @@ declare class Gateway {
         nodeId: string;
         iteration: number;
         requestTitle: any;
-        requestSummary: any;
+        requestSummary: string | null;
         requestedAtMs: number | null;
-        approvalMode: any;
-        options: any;
-        allowedScopes: any;
-        allowedUsers: any;
-        autoApprove: any;
+        approvalMode: "gate" | "decision" | "select" | "rank";
+        options: {
+            key: string;
+            label: string;
+            summary?: string;
+        }[];
+        allowedScopes: string[];
+        allowedUsers: string[];
+        autoApprove: Record<string, unknown> | null;
     }[]>;
     /**
    * @param {{ kind?: string; includeDeleted?: boolean; updatedAfterMs?: number; limit?: number }} [options]
@@ -1662,6 +1751,22 @@ declare class Gateway {
      */
     cleanupExtensionSubscriptions(connection: GatewayRequestContext): Promise<void>;
 }
+/**
+ * Normalized approval request stored in an approval row's requestJson.
+ */
+type ApprovalRequestRecord = {
+    mode: "gate" | "select" | "rank" | "decision";
+    title: string | null;
+    summary: string | null;
+    options: Array<{
+        key: string;
+        label: string;
+        summary?: string;
+    }>;
+    allowedScopes: string[];
+    allowedUsers: string[];
+    autoApprove: Record<string, unknown> | null;
+};
 type EventFrame = EventFrame$1;
 type GatewayDefaults = GatewayDefaults$1;
 type GatewayRegisterOptions = GatewayRegisterOptions$1;
@@ -1720,12 +1825,13 @@ type RunStartAuthContext = {
 };
 type RegisteredWorkflow = {
     workflow: SmithersWorkflow;
-    adapter: SmithersDb$4;
     key: string;
     schedule?: string;
     webhook?: GatewayWebhookConfig;
     ui?: ResolvedGatewayUiConfig | null;
+    tui?: ResolvedWorkflowTuiConfig | null;
     system?: boolean;
+    entryFile?: string;
 };
 type ResolvedRun = {
     runId: string;
@@ -1739,6 +1845,30 @@ type ResolvedGatewayUiConfig = {
     title?: string;
     props?: Record<string, unknown>;
     builtin?: "operator";
+    inline?: {
+        kind: "literal";
+        tree: unknown;
+    } | {
+        kind: "component";
+        source: string;
+        exportName?: string;
+    };
+};
+type ResolvedWorkflowTuiConfig = {
+    kind: "tui";
+    title?: string;
+    props?: Record<string, unknown>;
+    entry?: string;
+    source?: string;
+    exportName?: string;
+    inline?: {
+        kind: "literal";
+        tree: unknown;
+    } | {
+        kind: "component";
+        source: string;
+        exportName?: string;
+    };
 };
 type GatewayUiMount = {
     kind: "gateway" | "workflow" | "operator";
@@ -1860,6 +1990,17 @@ declare function validateFrameNoInput(frameNo: unknown): void;
  * @returns {void}
  */
 declare function validateFromSeqInput(fromSeq: unknown): void;
+/**
+ * Attach each task node's CURRENT lifecycle state (latest iteration wins) from
+ * the run's `_smithers_nodes` rows. The frame tree is pure structure; without
+ * this, every consumer of the snapshot renders live runs as all-queued (#817).
+ * Nodes with no row yet (never scheduled) keep an absent `state`.
+ *
+ * @param {DevToolsNode} root
+ * @param {Array<Record<string, unknown>>} nodeRows
+ * @returns {void}
+ */
+declare function attachNodeStatesToDevToolsRoot(root: DevToolsNode, nodeRows: Array<Record<string, unknown>>): void;
 /**
  * @param {{
  *   adapter: SmithersDb;
@@ -1998,6 +2139,16 @@ type NodeOutputResponse$1 = {
         }>;
     } | null;
     partial?: Record<string, unknown> | null;
+    /**
+     * Why the node failed (from the latest attempt's stored error), present only
+     * when `status` is "failed" and an error was recorded.
+     */
+    error?: {
+        name?: string;
+        code?: string;
+        message: string;
+        attempt?: number;
+    } | null;
 };
 
 /**
@@ -2043,6 +2194,7 @@ type NodeOutputResponse = NodeOutputResponse$1;
  *   runId: unknown;
  *   frameNo: unknown;
  *   confirm?: unknown;
+ *   force?: unknown;
  *   caller?: string;
  *   pauseRunLoop?: () => Promise<void> | void;
  *   resumeRunLoop?: () => Promise<void> | void;
@@ -2059,6 +2211,7 @@ declare function jumpToFrameRoute(input: {
     runId: unknown;
     frameNo: unknown;
     confirm?: unknown;
+    force?: unknown;
     caller?: string;
     pauseRunLoop?: () => Promise<void> | void;
     resumeRunLoop?: () => Promise<void> | void;
@@ -2133,8 +2286,44 @@ declare function startServerEffect(opts?: ServerOptions): Effect.Effect<node_htt
  */
 declare function startServer(opts?: ServerOptions): node_http.Server<typeof node_http.IncomingMessage, typeof node_http.ServerResponse>;
 
-type RunRow = _smithers_orchestrator_db_adapter_RunRow.RunRow;
+declare namespace __serverTestInternals {
+    export { buildMirrorOnProgress };
+    export { getDbIdentity };
+    export { isSameDb };
+    export { scheduleRunCleanup };
+    export { clearRunCleanupTimer };
+    export { runs };
+}
 type ServerResponse = node_http.ServerResponse;
 type ServerOptions = ServerOptions$1;
 
-export { type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResponseFrame, type RunEventStreamState, type RunRow, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, assertGatewayInputDepthWithinBounds, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
+/**
+ * @param {SmithersDb | null} adapter
+ * @param {string} runId
+ * @param {string} workflowName
+ * @param {string} workflowPath
+ * @param {string} configJson
+ */
+declare function buildMirrorOnProgress(adapter: SmithersDb$4 | null, runId: string, workflowName: string, workflowPath: string, configJson: string): ((event: any) => void) | undefined;
+/**
+ * @param {unknown} db
+ * @returns {string | undefined}
+ */
+declare function getDbIdentity(db: unknown): string | undefined;
+/**
+ * @param {unknown | null} serverDb
+ * @param {unknown} workflowDb
+ * @returns {boolean}
+ */
+declare function isSameDb(serverDb: unknown | null, workflowDb: unknown): boolean;
+/**
+ * @param {string} runId
+ */
+declare function scheduleRunCleanup(runId: string): void;
+/**
+ * @param {RunRecord | undefined} record
+ */
+declare function clearRunCleanupTimer(record: RunRecord | undefined): void;
+declare const runs: Map<any, any>;
+
+export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, __serverTestInternals, assertGatewayInputDepthWithinBounds, attachNodeStatesToDevToolsRoot, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };

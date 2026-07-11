@@ -47,6 +47,7 @@ import { apiCollectionNames, serializeAccountRow, serializeApprovalRow, serializ
 import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
 import { EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, GatewayExtensions, isExtensionMethod, } from "./GatewayExtensions.js";
 import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { hijackCandidatesFromAttempts } from "./hijackCandidates.js";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
 import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
 import { authorizeGatewayUiRequest } from "./gatewayUi/auth.js";
@@ -177,6 +178,46 @@ const DEVTOOLS_STREAM_OUTBOUND_QUEUE_LIMIT = 1_000;
 const DEVTOOLS_STREAM_WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
 const RUN_EVENT_WINDOW_RETAINED_RUN_LIMIT = 1_000;
 const RUN_EVENT_TERMINAL_WINDOW_GRACE_MS = 1_000;
+/**
+ * Websocket path for the PTY hijack channel (`/v1/pty/hijack?runId=…&nodeId=…`).
+ * Binary frames carry raw PTY bytes both ways; text frames are JSON control
+ * messages (`{"type":"resize","cols":…,"rows":…}` client → server,
+ * `{"type":"exit","code":…}` / `{"type":"error","message":…}` server → client).
+ */
+const PTY_HIJACK_PATH = "/v1/pty/hijack";
+const PTY_MIN_DIMENSION = 2;
+const PTY_MAX_DIMENSION = 1_000;
+/**
+ * @param {string | null} value
+ * @param {number} fallback
+ * @returns {number}
+ */
+function clampPtyDimension(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return fallback;
+    }
+    return Math.min(PTY_MAX_DIMENSION, Math.max(PTY_MIN_DIMENSION, Math.floor(parsed)));
+}
+/**
+ * Refuse a websocket upgrade with a flushed HTTP error response. `end()` (not
+ * `write()`+`destroy()`) so the status reaches the peer before the socket
+ * closes — a bare destroy can RST away the unsent bytes.
+ *
+ * @param {import("node:stream").Duplex} socket
+ * @param {number} status
+ * @param {string} statusText
+ * @param {string} body
+ */
+function endUpgradeWithHttpError(socket, status, statusText, body) {
+    socket.end(`HTTP/1.1 ${status} ${statusText}\r\n`
+        + "Connection: close\r\n"
+        + "Content-Type: text/plain; charset=utf-8\r\n"
+        + `X-Smithers-API-Version: ${SMITHERS_API_VERSION}\r\n`
+        + `Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n`
+        + "\r\n"
+        + body);
+}
 const API_STREAM_COALESCE_MS = 50;
 const API_STREAM_HEARTBEAT_MS = 15_000;
 const API_STREAM_REPLAY_LIMIT = 256;
@@ -2084,6 +2125,13 @@ export class Gateway {
         this.whatHappenedNarrator = typeof options.whatHappened === "function" ? options.whatHappened : null;
         /** @type {Map<string, { payload: Record<string, unknown> }>} */
         this.whatHappenedCache = new Map();
+        // Host-injected PTY hijack launcher (the smithers CLI wires `smithers
+        // hijack <runId> [--target <nodeId>]` here). Null disables the
+        // /v1/pty/hijack websocket channel — the Gateway itself never guesses
+        // how to resume an agent CLI session.
+        this.hijackPty = typeof options.hijackPty === "function" ? options.hijackPty : null;
+        /** @type {Set<{ dispose: () => void }>} */
+        this.ptySessions = new Set();
         this.ui = resolveGatewayUiConfig(options.ui, "/");
         this.operatorUi = resolveDefaultOperatorUiConfig(options.operatorUi);
         this.uiApp = createGatewayUiApp({
@@ -3329,6 +3377,16 @@ a { color: var(--brand); }</style>
                 mutation: true,
             };
         }
+        const runHijackCandidates = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/hijack-candidates$/);
+        if (httpMethod === "GET" && runHijackCandidates) {
+            // HTTP-API-only read (no RPC method): which nodes of a run have a
+            // resumable agent session, so UIs can gate their hijack affordance.
+            return {
+                method: "listHijackCandidates",
+                direct: "hijackCandidates",
+                params: { runId: decodeURIComponent(runHijackCandidates[1]) },
+            };
+        }
         const runTree = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(?:tree|devtools)$/);
         if (httpMethod === "GET" && runTree) {
             return {
@@ -3555,6 +3613,18 @@ a { color: var(--brand); }</style>
                 }
                 if (route.direct === "events") {
                     return responseOk(requestId, await this.listApiRunEvents(route.params));
+                }
+                if (route.direct === "hijackCandidates") {
+                    const runId = asString(route.params.runId);
+                    if (!runId) {
+                        return responseError(requestId, "InvalidRunId", "runId is required");
+                    }
+                    const resolved = await this.resolveRun(runId);
+                    if (!resolved) {
+                        return responseError(requestId, "RunNotFound", `Run not found: ${runId}`);
+                    }
+                    const attempts = await resolved.adapter.listAttemptsForRun(runId);
+                    return responseOk(requestId, { runId, candidates: hijackCandidatesFromAttempts(attempts) });
                 }
                 return this.routeRequest(context, frame);
             });
@@ -3878,6 +3948,179 @@ a { color: var(--brand); }</style>
         return this;
     }
     /**
+   * Gate a `/v1/pty/hijack` websocket upgrade: authenticate the request (same
+   * token/Host/Origin semantics as the HTTP API, token also accepted as a
+   * `?token=` query param since browsers cannot set websocket headers), check
+   * the hijack scope, validate the target run, then hand the socket to
+   * `startPtyHijackSession`. The Origin/Host allow-list already ran in the
+   * shared `upgrade` handler before this method is reached.
+   *
+   * @param {IncomingMessage} req
+   * @param {import("node:stream").Duplex} socket
+   * @param {Buffer} head
+   * @param {WebSocketServer} wsServer
+   * @param {URL} url
+   */
+    async handlePtyHijackUpgrade(req, socket, head, wsServer, url) {
+        const token = url.searchParams.get("token") ?? bearerTokenFromHeaders(req);
+        const authResult = await this.authenticateRequest(req, token);
+        if (authResult.ok === false) {
+            emitGatewayLog("warning", "Gateway PTY hijack upgrade rejected: unauthorized", {
+                remoteAddress: req.socket.remoteAddress ?? null,
+                authCode: authResult.code,
+            }, "gateway:pty-hijack");
+            endUpgradeWithHttpError(socket, statusForRpcError(authResult.code), "Unauthorized", `${authResult.message}\n`);
+            return;
+        }
+        if (!hasScope([...authResult.scopes], "hijackRun", this.extensions)) {
+            endUpgradeWithHttpError(socket, 403, "Forbidden", "Missing scope for hijackRun\n");
+            return;
+        }
+        if (!this.hijackPty) {
+            endUpgradeWithHttpError(socket, 501, "Not Implemented", "PTY hijack is not configured on this gateway\n");
+            return;
+        }
+        if (typeof Bun === "undefined" || typeof Bun.Terminal !== "function") {
+            endUpgradeWithHttpError(socket, 501, "Not Implemented", "PTY hijack requires the gateway to run under Bun\n");
+            return;
+        }
+        const runId = url.searchParams.get("runId")?.trim();
+        if (!runId) {
+            endUpgradeWithHttpError(socket, 400, "Bad Request", "runId query parameter is required\n");
+            return;
+        }
+        const resolved = await this.resolveRun(runId);
+        if (!resolved) {
+            endUpgradeWithHttpError(socket, 404, "Not Found", `Run not found: ${runId}\n`);
+            return;
+        }
+        const nodeId = url.searchParams.get("nodeId")?.trim() || undefined;
+        const cols = clampPtyDimension(url.searchParams.get("cols"), 80);
+        const rows = clampPtyDimension(url.searchParams.get("rows"), 24);
+        wsServer.handleUpgrade(req, socket, head, (ws) => {
+            this.startPtyHijackSession(ws, { runId, nodeId, cols, rows });
+        });
+    }
+    /**
+   * Run the host-provided hijack command inside a real PTY and pipe it over an
+   * accepted websocket. Mirrors the terminal transport smithers cloud UIs use:
+   * binary frames are raw PTY bytes in both directions; text frames are JSON
+   * control messages (client sends `{"type":"resize","cols","rows"}`, the
+   * server sends `{"type":"exit","code"}` before a clean close).
+   *
+   * @param {import("ws").WebSocket} ws
+   * @param {{ runId: string; nodeId?: string; cols: number; rows: number }} params
+   */
+    startPtyHijackSession(ws, params) {
+        /** @type {(message: string) => void} */
+        const failClose = (message) => {
+            try {
+                ws.send(JSON.stringify({ type: "error", message }));
+            }
+            catch { }
+            try {
+                ws.close(1011, "pty launch failed");
+            }
+            catch { }
+        };
+        let spec;
+        try {
+            spec = this.hijackPty?.({ runId: params.runId, ...(params.nodeId ? { nodeId: params.nodeId } : {}) });
+        }
+        catch (error) {
+            failClose(`PTY hijack launcher failed: ${error instanceof Error ? error.message : String(error)}`);
+            return;
+        }
+        const command = spec && Array.isArray(spec.command) ? spec.command.filter((part) => typeof part === "string") : [];
+        if (command.length === 0) {
+            failClose("PTY hijack launcher returned no command");
+            return;
+        }
+        const terminal = new Bun.Terminal({
+            cols: params.cols,
+            rows: params.rows,
+            data: (_terminal, chunk) => {
+                if (ws.readyState === ws.OPEN) {
+                    ws.send(chunk);
+                }
+            },
+        });
+        let proc;
+        try {
+            proc = Bun.spawn(command, {
+                terminal,
+                cwd: spec?.cwd ?? process.cwd(),
+                env: spec?.env ?? process.env,
+            });
+        }
+        catch (error) {
+            try {
+                terminal.close();
+            }
+            catch { }
+            failClose(`PTY hijack spawn failed: ${error instanceof Error ? error.message : String(error)}`);
+            return;
+        }
+        const session = {
+            dispose: () => {
+                try {
+                    proc.kill();
+                }
+                catch { }
+                try {
+                    terminal.close();
+                }
+                catch { }
+            },
+        };
+        this.ptySessions.add(session);
+        emitGatewayLog("info", "Gateway PTY hijack session started", {
+            runId: params.runId,
+            nodeId: params.nodeId ?? null,
+            pid: proc.pid,
+        }, "gateway:pty-hijack");
+        void proc.exited.then((code) => {
+            if (ws.readyState === ws.OPEN) {
+                try {
+                    ws.send(JSON.stringify({ type: "exit", code }));
+                }
+                catch { }
+                try {
+                    ws.close(1000, "process exited");
+                }
+                catch { }
+            }
+        });
+        ws.on("message", (data, isBinary) => {
+            if (isBinary) {
+                terminal.write(new Uint8Array(Buffer.isBuffer(data) ? data : Buffer.from(/** @type {ArrayBuffer} */ (data))));
+                return;
+            }
+            // Text frames are JSON control messages; unknown types are ignored
+            // for forward compatibility (mirrors the cloud terminal client).
+            try {
+                const message = JSON.parse(String(data));
+                if (message && message.type === "resize") {
+                    const cols = clampPtyDimension(String(message.cols), 0);
+                    const rows = clampPtyDimension(String(message.rows), 0);
+                    if (cols >= PTY_MIN_DIMENSION && rows >= PTY_MIN_DIMENSION) {
+                        terminal.resize(cols, rows);
+                    }
+                }
+            }
+            catch { }
+        });
+        const teardown = () => {
+            if (!this.ptySessions.has(session)) {
+                return;
+            }
+            this.ptySessions.delete(session);
+            session.dispose();
+        };
+        ws.on("close", teardown);
+        ws.on("error", teardown);
+    }
+    /**
    * @param {{ port?: number; host?: string; path?: string }} [options]
    */
     async listen(options = {}) {
@@ -3992,6 +4235,22 @@ a { color: var(--brand); }</style>
                     + body);
                 return;
             }
+            // PTY hijack channel: same listener, same Origin/Host rejection as
+            // the RPC websocket above (a drive-by page must never reach a
+            // shell), then its own auth + spawn path instead of the RPC loop.
+            const upgradeUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+            if (upgradeUrl.pathname === PTY_HIJACK_PATH) {
+                void this.handlePtyHijackUpgrade(req, socket, head, wsServer, upgradeUrl).catch((error) => {
+                    emitGatewayLog("warning", "Gateway PTY hijack upgrade failed", {
+                        ...gatewayErrorAnnotations(error),
+                    }, "gateway:pty-hijack");
+                    try {
+                        socket.destroy();
+                    }
+                    catch { }
+                });
+                return;
+            }
             wsServer.handleUpgrade(req, socket, head, (ws) => {
                 this.handleSocket(ws, req);
             });
@@ -4043,6 +4302,10 @@ a { color: var(--brand); }</style>
     }
     async close() {
         this.stopIdleMonitor();
+        for (const session of this.ptySessions) {
+            session.dispose();
+        }
+        this.ptySessions.clear();
         const activeRuns = [...this.activeRuns.values()];
         for (const activeRun of activeRuns) {
             activeRun.abort.abort();
