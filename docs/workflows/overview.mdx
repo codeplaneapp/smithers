@@ -1,11 +1,11 @@
 ---
-title: Default Workflows
+title: Curated Workflows
 description: The workflow pack scaffolded by bunx smithers-orchestrator init.
 ---
 
 `bunx smithers-orchestrator init` creates a focused `.smithers/workflows/` directory containing `create-workflow`, `create-skill`, and `docs-driven-development`. Hidden system workflows support init, failure autopsies, and upgrades. The former starter suite is retained under `examples/init-pack/`; monitoring remains `smithers monitor` and Gateway `/monitor`.
 
-Run any default workflow by ID:
+Run any curated workflow by ID:
 
 ```bash
 bunx smithers-orchestrator workflow run WORKFLOW_ID --prompt "..."
@@ -25,7 +25,7 @@ Former defaults are preserved as copyable examples in `examples/init-pack/`.
 
 ## Operational Notes
 
-- Default workflow files are user-owned after scaffold. `bunx smithers-orchestrator init` will not overwrite edited files unless you pass `--force`.
+- Curated workflow files are user-owned after scaffold. `bunx smithers-orchestrator init` will not overwrite edited files unless you pass `--force`.
 - Agent pools are defined in `.smithers/agents.ts`; edit that file to change which models each workflow uses.
 - Run `bunx smithers-orchestrator workflow list` to see the workflows in the current repo, `bunx smithers-orchestrator workflow inspect WORKFLOW_ID` to see metadata and the workflow input schema, and `bunx smithers-orchestrator workflow skills` to generate agent-facing docs under `.smithers/skills/`.
 - Workflows can carry optional metadata comments (`smithers-display-name`, `smithers-description`, `smithers-tags`, `smithers-aliases`) that `bunx smithers-orchestrator workflow list` and `workflow-skill` use for display and discovery.

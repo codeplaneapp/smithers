@@ -3,7 +3,7 @@ title: Starters
 description: Choose a plain-English outcome and the command your agent runs for it.
 ---
 
-Smithers ships with starter workflows for when you want a result before your agent writes any workflow code. The commands on this page are what the coding agent runs: a human picks the outcome and asks their agent (or names the starter); the agent runs the matching command. Reading this as an agent? Run them yourself; never hand them to the human. Browse the starter gallery from any repo:
+Smithers ships with starter requests for when you want to describe an outcome before your agent writes workflow code. `init --template` installs the curated pack and returns a create-workflow request; it never installs an archived starter workflow. Browse the request gallery from any repo:
 
 ```bash
 bunx smithers-orchestrator starters
@@ -23,19 +23,19 @@ bunx smithers-orchestrator init --template idea-to-tickets
 
 Template IDs:
 
-Pass any ID from this table to `init --template <id>` to scaffold that starter.
+Pass any ID from this table to `init --template <id>` to receive a create-workflow request for that outcome.
 
 | Starter | Best for | Workflow | Command |
 | --- | --- | --- | --- |
-| `idea-to-tickets` | founders, product, operations, engineering | `tickets-create` | `bunx smithers-orchestrator init --template idea-to-tickets` |
-| `launch-checklist` | launch owners and operators | `plan` | `bunx smithers-orchestrator init --template launch-checklist` |
-| `customer-incident` | support escalations | `debug` | `bunx smithers-orchestrator init --template customer-incident` |
-| `nontechnical-research` | before-build decisions | `research` | `bunx smithers-orchestrator init --template nontechnical-research` |
-| `requirements-interview` | vague stakeholder requests | `grill-me` | `bunx smithers-orchestrator init --template requirements-interview` |
-| `quality-audit` | release readiness | `audit` | `bunx smithers-orchestrator init --template quality-audit` |
-| `test-coverage` | regression prevention | `improve-test-coverage` | `bunx smithers-orchestrator init --template test-coverage` |
-| `ship-a-change` | focused product improvements | `research-plan-implement` | `bunx smithers-orchestrator init --template ship-a-change` |
-| `mission-mode` | larger approved milestones | `mission` | `bunx smithers-orchestrator init --template mission-mode` |
+| `idea-to-tickets` | founders, product, operations, engineering | `create-workflow` | `bunx smithers-orchestrator init --template idea-to-tickets` |
+| `launch-checklist` | launch owners and operators | `create-workflow` | `bunx smithers-orchestrator init --template launch-checklist` |
+| `customer-incident` | support escalations | `create-workflow` | `bunx smithers-orchestrator init --template customer-incident` |
+| `nontechnical-research` | before-build decisions | `create-workflow` | `bunx smithers-orchestrator init --template nontechnical-research` |
+| `requirements-interview` | vague stakeholder requests | `create-workflow` | `bunx smithers-orchestrator init --template requirements-interview` |
+| `quality-audit` | release readiness | `create-workflow` | `bunx smithers-orchestrator init --template quality-audit` |
+| `test-coverage` | regression prevention | `create-workflow` | `bunx smithers-orchestrator init --template test-coverage` |
+| `ship-a-change` | focused product improvements | `create-workflow` | `bunx smithers-orchestrator init --template ship-a-change` |
+| `mission-mode` | larger approved milestones | `create-workflow` | `bunx smithers-orchestrator init --template mission-mode` |
 
 Each detailed starter prints:
 
@@ -50,7 +50,7 @@ Filter by audience or goal:
 ```bash
 bunx smithers-orchestrator starters --audience product
 bunx smithers-orchestrator starters --goal quality
-bunx smithers-orchestrator starters --workflow debug
+bunx smithers-orchestrator starters --workflow create-workflow
 ```
 
 Use JSON when another tool needs the catalog:

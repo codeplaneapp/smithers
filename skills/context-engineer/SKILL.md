@@ -5,10 +5,11 @@ description: The concierge proxy — turn a vague user script ("I need the agent
 
 # Context Engineer
 
-`context-engineer` is the flagship Smithers **concierge**: a proxy agent that
-takes a user's half-formed request and produces an executable, durable,
-observable run. It is a real seeded workflow
-(`.smithers/workflows/context-engineer.tsx`), not a planning doc.
+`context-engineer` is an archived Smithers **concierge** example: a proxy agent
+that takes a user's half-formed request and produces an executable, durable,
+observable run. It is not installed by `init`; copy
+`examples/init-pack/context-engineer.tsx` and its dependency closure into a
+project, or ask the seeded `create-workflow` workflow to build an equivalent.
 
 ## The job
 

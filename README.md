@@ -13,6 +13,10 @@ days: watch every step live, gate the risky ones behind human approvals, and rew
 fork, or replay any run. The same workflow runs across Claude Code, Codex, Pi, AI SDK
 models, and remote sandboxes.
 
+**Zero config: you never write a workflow by hand.** Describe the outcome in plain
+English and your coding agent builds the workflow for you, from the same primitives the
+built-in pack uses. Prompting *is* the authoring step.
+
 *Time travel: fork a run from any earlier frame and branch an alternate timeline. Every
 step is a database row, so live watching, rewind, and replay are built in.*
 
@@ -20,6 +24,8 @@ step is a database row, so live watching, rewind, and replay are built in.*
 
 ## What you get
 
+- ✍️ **Zero-config agent workflows**: you don't hand-write workflow files. Describe what
+  you want in plain English and your coding agent authors the workflow, then runs it.
 - ⏪ **Full observability and time travel**: watch every step live, then rewind, fork, or
   replay any run from any point.
 - 🛡️ **Durable runs that survive crashes**: every completed step is persisted the moment it
@@ -249,7 +255,7 @@ bunx smithers-orchestrator workflow run create-workflow --prompt "add rate limit
 ```
 
 See [`docs/workflows/`](./docs/workflows/overview.mdx) for the curated pack and
-`examples/init-pack/` for former starter workflows.
+`examples/init-pack/` for the archived, copyable workflow patterns.
 
 ## Examples
 

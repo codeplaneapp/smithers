@@ -437,9 +437,8 @@ More ship in the box (`<CheckSuite>`, `<DecisionTable>`, `<Poller>`,
 `<Runbook>`, `<DriftDetector>`, `<ContentPipeline>`, `<TryCatchFinally>`,
 `<ContinueAsNew>`) and the catalog grows; check the docs for the current set.
 Each is ~20–40 lines of JSX over the substrate, so read, fork, or copy them.
-Seeded local-pack components, such as `<LoopUntilScored>`, live under
-`.smithers/components/` after `smithers init`. ~90 more ready-to-edit recipes
-live in `examples/` (listed below).
+Ready-to-edit workflow and component recipes live in `examples/` (listed
+below); copy the complete dependency closure for the pattern you choose.
 
 ## Beyond control flow: the production surface
 

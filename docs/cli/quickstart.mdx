@@ -15,7 +15,7 @@ description: Short operational cheatsheet. The full catalog lives in CLI.
 
 ```bash
 bunx smithers-orchestrator init                                       # scaffold .smithers/
-bunx smithers-orchestrator init --template idea-to-tickets            # scaffold with guided template next steps
+bunx smithers-orchestrator init --template idea-to-tickets            # return a create-workflow starter request
 bunx smithers-orchestrator starters                                   # browse template IDs
 ```
 
@@ -50,10 +50,10 @@ packs[2]:
       exists: true
   - scope: global
     ...
-workflows[46]:
-  - id: audit
-  - id: implement
-  - ...
+workflows[3]:
+  - id: create-workflow
+  - id: create-skill
+  - id: docs-driven-development
 ```
 
 `ok: true` under `vcs` means jj or git resolved; if it is `false`, install one (see [Installation](/installation)). A non-empty `workflows[...]` count means the pack is in place. `workflow list` prints the same workflow entries with full metadata.
@@ -61,7 +61,7 @@ workflows[46]:
 **Run**
 
 ```bash
-bunx smithers-orchestrator workflow run implement --prompt "…"        # launch a seeded workflow
+bunx smithers-orchestrator workflow run create-workflow --prompt "…"  # build a new workflow from a plain-English ask
 bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true   # resume a paused run
 ```
 

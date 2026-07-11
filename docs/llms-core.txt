@@ -152,9 +152,10 @@ That scaffolds `.smithers/` with files such as:
 
 | Directory / File | Contents |
 |---|---|
-| `.smithers/workflows/` | Pre-built workflows (`implement`, `review`, `plan`, `ralph`, `debug`, ...) |
-| `.smithers/prompts/` | Shared MDX prompt templates |
-| `.smithers/components/` | Reusable TSX components (`Review`, `ValidationLoop`, ...) |
+| `.smithers/workflows/` | Public `create-workflow`, `create-skill`, and `docs-driven-development`, plus hidden system `init`, `post-failure`, and `upgrade` |
+| `.smithers/prompts/` | Prompt templates required by the curated authoring workflows |
+| `.smithers/lib/ddd/` | Portable helpers for the docs-driven-development workflow |
+| `.smithers/ui/` | Workflow-owned UIs and their complete local module closure |
 | `.smithers/package.json` | Local workflow project manifest with `smithers-orchestrator` dependency |
 | `.smithers/tsconfig.json` | TypeScript config for JSX workflow authoring |
 | `.smithers/bunfig.toml` | Bun preload config for MDX workflow prompts |
@@ -165,6 +166,9 @@ That scaffolds `.smithers/` with files such as:
 | `.smithers/tickets/` | Ticket workspace used by ticket-oriented workflows |
 | `.smithers/executions/` | Execution artifacts directory preserved across re-inits |
 | `.smithers/.gitignore` | Ignore rules for generated workflow state |
+
+The 29 former defaults are not installed. They remain complete, copyable graph
+and UI examples under `examples/init-pack/` in the source repository.
 
 To overwrite an existing scaffold:
 
@@ -180,7 +184,7 @@ runs, watching them, and clearing approvals. The `smithers` skill makes your age
 fluent in that without making it read the whole docs site first, so you reach the
 aha moment faster.
 
-`init` auto-installs the curated onboarding skill into detected agents whose
+`init` auto-installs the curated Smithers skill into detected agents whose
 skill directory Smithers can write directly today: Claude Code and Pi (no
 `mkdir`, no `curl`). For other agents, use the MCP server plus standing
 instructions, or point the agent at `docs-full` below.
@@ -277,8 +281,9 @@ If the bundled jj exists but fails with `EACCES`, its executable bit was strippe
 <Steps>
   <Step title="Scaffold a project">
     `init` creates `.smithers/` (the focused authoring workflows, DDD spec/UI closure, and agent config). Add
-    `--template <id>` when you want the result to include a starter command and
-    follow-up notes; run `bunx smithers-orchestrator starters` to browse template IDs.
+    `--template <id>` when you want a create-workflow-driven starter request and
+    follow-up notes; it does not install an archived workflow. Run
+    `bunx smithers-orchestrator starters` to browse template IDs.
 
     ```bash
     bunx smithers-orchestrator init
@@ -325,7 +330,7 @@ For a full worked example, see the [Tour](/tour). For every CLI command see the 
 
 > Choose a plain-English outcome and the command your agent runs for it.
 
-Smithers ships with starter workflows for when you want a result before your agent writes any workflow code. The commands on this page are what the coding agent runs: a human picks the outcome and asks their agent (or names the starter); the agent runs the matching command. Reading this as an agent? Run them yourself; never hand them to the human. Browse the starter gallery from any repo:
+Smithers ships with starter requests for when you want to describe an outcome before your agent writes workflow code. `init --template` installs the curated pack and returns a create-workflow request; it never installs an archived starter workflow. Browse the request gallery from any repo:
 
 ```bash
 bunx smithers-orchestrator starters
@@ -345,19 +350,19 @@ bunx smithers-orchestrator init --template idea-to-tickets
 
 Template IDs:
 
-Pass any ID from this table to `init --template <id>` to scaffold that starter.
+Pass any ID from this table to `init --template <id>` to receive a create-workflow request for that outcome.
 
 | Starter | Best for | Workflow | Command |
 | --- | --- | --- | --- |
-| `idea-to-tickets` | founders, product, operations, engineering | `tickets-create` | `bunx smithers-orchestrator init --template idea-to-tickets` |
-| `launch-checklist` | launch owners and operators | `plan` | `bunx smithers-orchestrator init --template launch-checklist` |
-| `customer-incident` | support escalations | `debug` | `bunx smithers-orchestrator init --template customer-incident` |
-| `nontechnical-research` | before-build decisions | `research` | `bunx smithers-orchestrator init --template nontechnical-research` |
-| `requirements-interview` | vague stakeholder requests | `grill-me` | `bunx smithers-orchestrator init --template requirements-interview` |
-| `quality-audit` | release readiness | `audit` | `bunx smithers-orchestrator init --template quality-audit` |
-| `test-coverage` | regression prevention | `improve-test-coverage` | `bunx smithers-orchestrator init --template test-coverage` |
-| `ship-a-change` | focused product improvements | `research-plan-implement` | `bunx smithers-orchestrator init --template ship-a-change` |
-| `mission-mode` | larger approved milestones | `mission` | `bunx smithers-orchestrator init --template mission-mode` |
+| `idea-to-tickets` | founders, product, operations, engineering | `create-workflow` | `bunx smithers-orchestrator init --template idea-to-tickets` |
+| `launch-checklist` | launch owners and operators | `create-workflow` | `bunx smithers-orchestrator init --template launch-checklist` |
+| `customer-incident` | support escalations | `create-workflow` | `bunx smithers-orchestrator init --template customer-incident` |
+| `nontechnical-research` | before-build decisions | `create-workflow` | `bunx smithers-orchestrator init --template nontechnical-research` |
+| `requirements-interview` | vague stakeholder requests | `create-workflow` | `bunx smithers-orchestrator init --template requirements-interview` |
+| `quality-audit` | release readiness | `create-workflow` | `bunx smithers-orchestrator init --template quality-audit` |
+| `test-coverage` | regression prevention | `create-workflow` | `bunx smithers-orchestrator init --template test-coverage` |
+| `ship-a-change` | focused product improvements | `create-workflow` | `bunx smithers-orchestrator init --template ship-a-change` |
+| `mission-mode` | larger approved milestones | `create-workflow` | `bunx smithers-orchestrator init --template mission-mode` |
 
 Each detailed starter prints:
 
@@ -372,7 +377,7 @@ Filter by audience or goal:
 ```bash
 bunx smithers-orchestrator starters --audience product
 bunx smithers-orchestrator starters --goal quality
-bunx smithers-orchestrator starters --workflow debug
+bunx smithers-orchestrator starters --workflow create-workflow
 ```
 
 Use JSON when another tool needs the catalog:
@@ -3131,7 +3136,7 @@ commands[91]:
 
 ```bash
 bunx smithers-orchestrator init                                       # scaffold .smithers/
-bunx smithers-orchestrator init --template idea-to-tickets            # scaffold with guided template next steps
+bunx smithers-orchestrator init --template idea-to-tickets            # return a create-workflow starter request
 bunx smithers-orchestrator starters                                   # browse template IDs
 ```
 
@@ -3166,10 +3171,10 @@ packs[2]:
       exists: true
   - scope: global
     ...
-workflows[46]:
-  - id: audit
-  - id: implement
-  - ...
+workflows[3]:
+  - id: create-workflow
+  - id: create-skill
+  - id: docs-driven-development
 ```
 
 `ok: true` under `vcs` means jj or git resolved; if it is `false`, install one (see [Installation](/installation)). A non-empty `workflows[...]` count means the pack is in place. `workflow list` prints the same workflow entries with full metadata.
@@ -3177,7 +3182,7 @@ workflows[46]:
 **Run**
 
 ```bash
-bunx smithers-orchestrator workflow run implement --prompt "…"        # launch a seeded workflow
+bunx smithers-orchestrator workflow run create-workflow --prompt "…"  # build a new workflow from a plain-English ask
 bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true   # resume a paused run
 ```
 
@@ -10655,8 +10660,8 @@ bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive
 
 Passing a workflow ID skips the picker and goes straight to the input prompts for that workflow:
 
-<Frame caption="Captured from tmux: workflow run hello --interactive preselects hello and prompts for its input schema.">
-  <img src="/images/tui/workflow-run-interactive-input.svg" alt="Terminal screenshot of workflow run hello --interactive prompting for the name input" />
+<Frame caption="Passing an installed workflow id preselects it and prompts for its input schema.">
+  <img src="/images/tui/workflow-run-interactive-input.svg" alt="Terminal screenshot of the interactive workflow input prompt" />
 </Frame>
 
 ## Full-screen monitor
@@ -10664,11 +10669,11 @@ Passing a workflow ID skips the picker and goes straight to the input prompts fo
 After the launcher starts the run, Smithers detaches the workflow process and hands your terminal to the full-screen monitor from `@smithers-orchestrator/tui`. The monitor connects to the workspace Gateway, starts one if needed, and streams the run tree, output, logs, diffs, timeline, and hijack state.
 
 ```bash
-bunx smithers-orchestrator workflow run hello --interactive
+bunx smithers-orchestrator workflow run create-workflow --interactive
 ```
 
-<Frame caption="Captured from tmux: after a real hello run finishes, the monitor still shows the run tree and selected node details.">
-  <img src="/images/tui/interactive-monitor-hello.svg" alt="Terminal screenshot of the full-screen Smithers TUI monitor showing a finished hello run" />
+<Frame caption="After a run finishes, the monitor still shows its run tree and selected node details.">
+  <img src="/images/tui/interactive-monitor-hello.svg" alt="Terminal screenshot of the full-screen Smithers TUI monitor showing a finished run" />
 </Frame>
 
 Useful keys:
@@ -10694,7 +10699,7 @@ There is no silent fallback. If the TUI package cannot be resolved, the command 
 | Pick a workflow and run it | `bunx smithers-orchestrator up --interactive` |
 | Pick a workflow ID and run it | `bunx smithers-orchestrator workflow run --interactive` |
 | Run a known workflow ID interactively | `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive` |
-| Run a known workflow file interactively | `bunx smithers-orchestrator up .smithers/workflows/hello.tsx --interactive` |
+| Run a known workflow file interactively | `bunx smithers-orchestrator up .smithers/workflows/create-workflow.tsx --interactive` |
 | Run the upgrade workflow with the monitor | `bunx smithers-orchestrator upgrade --interactive` |
 | Scripted or CI run | `bunx smithers-orchestrator up WORKFLOW -d` |
 

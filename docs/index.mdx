@@ -23,9 +23,10 @@ mode: "custom"
       </h1>
 
       <p className="mt-6 text-lg leading-relaxed" style={{ maxWidth: "34rem" }}>
-        Compose multi-agent workflows, watch every step stream live, and
-        rewind, fork, or replay any run from any point. Durable by default:
-        kill the process, pick up where it left off. Any model, any harness.
+        Zero config: describe the workflow in plain English and your coding
+        agent builds it &mdash; no files written by hand. Then watch every step
+        stream live, and rewind, fork, or replay any run from any point. Durable
+        by default: kill the process, pick up where it left off. Any model, any harness.
       </p>
 
       <div className="flex flex-wrap gap-3 mt-9">
@@ -62,6 +63,8 @@ mode: "custom"
         <p className="mt-3" style={{ fontSize: "0.85rem" }}>
           Creates an editable <code>hello.mdx</code> workflow you can run
           immediately, then installs the <code>smithers</code> skill into your agents.
+          From there, just describe any new workflow and your agent builds it &mdash;
+          zero config.
         </p>
       </div>
     </div>
@@ -301,23 +304,17 @@ mode: "custom"
       Built-in recipes for everyday agent work.
     </h2>
     <p className="mt-6" style={{ maxWidth: "38rem", marginInline: "auto" }}>
-      Smithers ships dozens of recipes. Say what you want in chat; your coding
-      agent picks and runs the right one. You never name the recipe.
+      Smithers ships a focused authoring pack plus a large archive of copyable
+      examples. Describe the outcome and your coding agent can build the right
+      workflow with create-workflow.
     </p>
   </div>
 
-  {/* Clickable recipe chips - the nerdsnipe. Each opens the real workflow on GitHub. */}
+  {/* Curated authoring workflows; archived examples live under examples/init-pack. */}
   <div className="flex flex-wrap justify-center gap-2 mb-8" style={{ maxWidth: "42rem", marginInline: "auto" }}>
-    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/hello.tsx" target="_blank" rel="noopener noreferrer">hello</a>
-    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/implement.tsx" target="_blank" rel="noopener noreferrer">implement</a>
-    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/mission.tsx" target="_blank" rel="noopener noreferrer">mission</a>
-    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/debug.tsx" target="_blank" rel="noopener noreferrer">debug</a>
-    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/audit.tsx" target="_blank" rel="noopener noreferrer">audit</a>
-    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/review.tsx" target="_blank" rel="noopener noreferrer">review</a>
-    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/research-plan-implement.tsx" target="_blank" rel="noopener noreferrer">research-plan-implement</a>
-    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/kanban.tsx" target="_blank" rel="noopener noreferrer">kanban</a>
-    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/ralph.tsx" target="_blank" rel="noopener noreferrer">ralph</a>
-    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/improve-test-coverage.tsx" target="_blank" rel="noopener noreferrer">improve-test-coverage</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/create-workflow.tsx" target="_blank" rel="noopener noreferrer">create-workflow</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/create-skill.tsx" target="_blank" rel="noopener noreferrer">create-skill</a>
+    <a className="landing-recipe-chip" href="https://github.com/smithersai/smithers/blob/main/.smithers/workflows/docs-driven-development.tsx" target="_blank" rel="noopener noreferrer">docs-driven-development</a>
   </div>
 
   <div className="flex flex-col gap-3" style={{ maxWidth: "40rem", marginInline: "auto" }}>

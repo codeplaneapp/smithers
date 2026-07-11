@@ -3,7 +3,10 @@ title: delegation-chain
 description: Hand an ambiguous ask to a recursive, tiered delegation tree with risk probes, per-node backpressure, live-editable outputs, cost forecasts, and full scoring.
 ---
 
-`delegation-chain` runs the whole arc from an ambiguous ask to gated, scored
+`delegation-chain` is an archived example and is not installed by `init`. Copy
+`examples/init-pack/delegation-chain.tsx` and its dependency closure into your
+project, or ask `create-workflow` to build an equivalent. Once installed, it
+runs the whole arc from an ambiguous ask to gated, scored
 delivery. Strong models refine the goal and decompose it into tiered chunks,
 cheap models render previews and research probes, and every node declares its
 own backpressure (reviews, checks, developer previews, optional approvals)
@@ -48,7 +51,7 @@ bunx smithers-orchestrator workflow run delegation-chain \
 ## Tiers
 
 Work flows down a ladder of intelligence tiers. The tiers are labels
-(`fable`, `opus`, `sonnet`, `haiku` by default), not model ids: the seeded
+(`fable`, `opus`, `sonnet`, `haiku` by default), not model ids: the copied
 workflow maps each label to an agent (or failover chain) from
 `.smithers/agents.ts`, so you can swap any tier without touching the workflow
 body. By default the strongest tier plans the root and reviews, the second

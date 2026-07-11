@@ -6,7 +6,11 @@ description: "Say the outcome you want. Your agent picks a proven Smithers workf
 
 Say the outcome you want. Your agent picks a proven recipe and runs it.
 
-You don't write workflows or run the CLI by hand. You talk to your coding agent, and it reaches for one of the built-in Smithers workflows (durable recipes that render → execute → persist) and drives it through to a validated, reviewed result. Any agent, any model, any machine.
+You don't write workflows or run the CLI by hand. You talk to your coding agent,
+and it uses `create-workflow` to author the durable recipe you need or copies a
+matching pattern from `examples/init-pack/`, then drives it through to a
+validated result. The rows below describe those copyable patterns; they are not
+installed by `init`.
 
 This page is the catalog. Each row is an outcome you want, the exact words you say to your agent, and what Smithers does under the hood.
 
@@ -127,7 +131,10 @@ Smithers treats having your agent author new workflows as a first-class path. On
 
 > "Write skill docs for all the Smithers workflows in this repo so any agent can find and run them."
 
-Your agent runs [`workflow-skill`](/workflows/workflow-skill): it reads every local workflow's metadata and source, then writes concise agent-facing skill docs under `.smithers/skills/`. That directory is Smithers-owned generated output; common coding harnesses such as Claude Code and Codex do not auto-scan it without per-harness wiring. After generation, follow the printed next steps to bridge the generated docs into the harness-discoverable skill location, typically `.agents/skills`.
+Your agent can copy the archived [`workflow-skill`](/workflows/workflow-skill)
+example, or ask `create-workflow` for the same behavior. It reads local workflow
+metadata and source, then writes concise agent-facing skill docs under
+`.smithers/skills/`.
 
 <Frame caption="workflow-skill turns your local workflows into agent-facing skill docs, so the next agent on the repo can drive them by name without reading the source.">
   <img src="/images/workflow-ui/workflow-skill.png" alt="Smithers workflow UI showing workflow-skill reading local workflows and emitting skill documentation" />

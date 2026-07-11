@@ -27,8 +27,10 @@ earlier checkpoint. Independent steps can run at the same time.*
   through the AI SDK. Swap the harness without rewriting the workflow.
 - 🛠️ **Higher-quality output**: review loops, human approvals, and evals give agents the
   structure that real work demands.
-- 🧩 **Dozens of ready-to-run workflows**: planning, implementation, review, debugging,
-  tickets, audits, and long-horizon missions. Your agent can author new ones.
+- 🧩 **A workflow builder, not a fixed library**: `init` installs a focused authoring
+  pack (`create-workflow`, `create-skill`, `docs-driven-development`); your agent
+  designs, scaffolds, and documents new workflows — planning, implementation, review,
+  debugging, tickets, audits, long-horizon missions — from a plain-English ask.
 
 ## When to use Smithers
 
@@ -55,8 +57,11 @@ bunx smithers-orchestrator init
 
 - **Installs the `smithers` skill** into the coding agents on your machine (Claude Code,
   Pi, and more), so your agent knows how and when to use Smithers. No `mkdir`, no `curl`.
-- **Scaffolds `.smithers/`** with ready-made workflows (`hello`, `implement`, `plan`,
-  `review`, `debug`, and more) your agent can pick from.
+- **Scaffolds `.smithers/`** with a focused authoring pack — `create-workflow`,
+  `create-skill`, and `docs-driven-development` — so your agent builds the exact
+  workflow you need instead of picking from a fixed library. Former starter
+  workflows (`hello`, `plan`, `review`, `debug`, and more) are preserved as
+  copyable patterns under `examples/init-pack/`.
 
 Then just ask:
 
@@ -75,16 +80,16 @@ for the full per-agent matrix.
 
 ## Drive it yourself
 
-Prefer the CLI? The seeded `hello` workflow is the smallest possible run; its entire prompt
-is an editable Markdown file at `.smithers/prompts/hello.mdx`:
+Prefer the CLI? Ask `create-workflow` to build something for you:
 
 ```bash
-# run your first workflow (edit .smithers/prompts/hello.mdx to change it)
-bunx smithers-orchestrator workflow run hello
-
-# turn a request into a practical implementation plan
-bunx smithers-orchestrator workflow run plan --prompt "add rate limiting, audit logging, and API key rotation"
+# describe the workflow you want; create-workflow clarifies, scaffolds, and documents it
+bunx smithers-orchestrator workflow run create-workflow --prompt "add rate limiting, audit logging, and API key rotation"
 ```
+
+Or copy one of the 29 archived starter patterns (`hello`, `plan`, `review`, `debug`, and
+more) from `examples/init-pack/` into `.smithers/workflows/` and run it directly — see
+`examples/init-pack/README.md` for the full inventory.
 
 Watch what's happening, whether your agent started the run or you did:
 
@@ -123,9 +128,10 @@ bunx smithers-orchestrator replay abc123                                    # re
 
 ## Author your own
 
-The built-in workflows are normal Smithers TSX files: run them as-is, have your agent adapt
-them to your repo, or have it write new ones from the same primitives. A workflow is a JSX
-tree of tasks, each with a Zod-validated output:
+The curated init workflows are normal Smithers TSX files, and the archived starter catalog
+under `examples/init-pack/` remains available to copy or adapt. Run `create-workflow` to
+author a repository-specific workflow from the same primitives. A workflow is a JSX tree of
+tasks, each with a Zod-validated output:
 
 ```tsx
 import { createSmithers, Sequence } from "smithers-orchestrator";

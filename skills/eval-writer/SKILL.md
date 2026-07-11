@@ -113,9 +113,12 @@ getting better or worse).
 
 ## The automated path: the `eval-author` workflow
 
-You don't have to hand-write the suite. The seeded `eval-author` workflow turns
-plain-English acceptance criteria into a JSONL fixture (`id`, `input`, `expected`,
-`rubric`) under `.smithers/evals/`, then reports the exact `smithers eval` command:
+You don't have to hand-write the suite. Copy the archived `eval-author` workflow
+from `examples/init-pack/` with its dependency closure, or ask the seeded
+`create-workflow` workflow to build an equivalent. Once installed, it turns
+plain-English acceptance criteria into a JSONL fixture (`id`, `input`,
+`expected`, `rubric`) under `.smithers/evals/`, then reports the exact
+`smithers eval` command:
 
 ```bash
 bunx smithers-orchestrator workflow run eval-author \

@@ -13,8 +13,9 @@ description: Scaffold and run a Smithers workflow in two commands.
 <Steps>
   <Step title="Scaffold a project">
     `init` creates `.smithers/` (the focused authoring workflows, DDD spec/UI closure, and agent config). Add
-    `--template <id>` when you want the result to include a starter command and
-    follow-up notes; run `bunx smithers-orchestrator starters` to browse template IDs.
+    `--template <id>` when you want a create-workflow-driven starter request and
+    follow-up notes; it does not install an archived workflow. Run
+    `bunx smithers-orchestrator starters` to browse template IDs.
 
     ```bash
     bunx smithers-orchestrator init

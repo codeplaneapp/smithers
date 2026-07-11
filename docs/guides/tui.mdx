@@ -51,8 +51,8 @@ bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive
 
 Passing a workflow ID skips the picker and goes straight to the input prompts for that workflow:
 
-<Frame caption="Captured from tmux: workflow run hello --interactive preselects hello and prompts for its input schema.">
-  <img src="/images/tui/workflow-run-interactive-input.svg" alt="Terminal screenshot of workflow run hello --interactive prompting for the name input" />
+<Frame caption="Passing an installed workflow id preselects it and prompts for its input schema.">
+  <img src="/images/tui/workflow-run-interactive-input.svg" alt="Terminal screenshot of the interactive workflow input prompt" />
 </Frame>
 
 ## Full-screen monitor
@@ -60,11 +60,11 @@ Passing a workflow ID skips the picker and goes straight to the input prompts fo
 After the launcher starts the run, Smithers detaches the workflow process and hands your terminal to the full-screen monitor from `@smithers-orchestrator/tui`. The monitor connects to the workspace Gateway, starts one if needed, and streams the run tree, output, logs, diffs, timeline, and hijack state.
 
 ```bash
-bunx smithers-orchestrator workflow run hello --interactive
+bunx smithers-orchestrator workflow run create-workflow --interactive
 ```
 
-<Frame caption="Captured from tmux: after a real hello run finishes, the monitor still shows the run tree and selected node details.">
-  <img src="/images/tui/interactive-monitor-hello.svg" alt="Terminal screenshot of the full-screen Smithers TUI monitor showing a finished hello run" />
+<Frame caption="After a run finishes, the monitor still shows its run tree and selected node details.">
+  <img src="/images/tui/interactive-monitor-hello.svg" alt="Terminal screenshot of the full-screen Smithers TUI monitor showing a finished run" />
 </Frame>
 
 Useful keys:
@@ -90,7 +90,7 @@ There is no silent fallback. If the TUI package cannot be resolved, the command 
 | Pick a workflow and run it | `bunx smithers-orchestrator up --interactive` |
 | Pick a workflow ID and run it | `bunx smithers-orchestrator workflow run --interactive` |
 | Run a known workflow ID interactively | `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive` |
-| Run a known workflow file interactively | `bunx smithers-orchestrator up .smithers/workflows/hello.tsx --interactive` |
+| Run a known workflow file interactively | `bunx smithers-orchestrator up .smithers/workflows/create-workflow.tsx --interactive` |
 | Run the upgrade workflow with the monitor | `bunx smithers-orchestrator upgrade --interactive` |
 | Scripted or CI run | `bunx smithers-orchestrator up WORKFLOW -d` |
 

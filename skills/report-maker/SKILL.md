@@ -59,9 +59,10 @@ bunx smithers-orchestrator diff <run-id> <node-id>    # a node's DiffBundle for 
 
 ## The automated path: the `report-slideshow` workflow
 
-You don't have to hand-build the deck. The seeded **`report-slideshow`** workflow
-takes a run, reads its persisted state, and emits the self-contained HTML
-slideshow for you:
+You don't have to hand-build the deck. The archived **`report-slideshow`**
+workflow under `examples/init-pack/` can be copied with its dependency closure;
+once installed, it reads a run's persisted state and emits the self-contained
+HTML slideshow for you:
 
 ```bash
 bunx smithers-orchestrator workflow run report-slideshow --input '{"targetRunId":"<run-id>"}'
