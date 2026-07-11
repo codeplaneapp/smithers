@@ -4,11 +4,13 @@ import {
   appendFileSync,
   closeSync,
   constants,
+  fchmodSync,
   fstatSync,
+  linkSync,
   mkdtempSync,
   openSync,
   readFileSync,
-  renameSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,6 +22,7 @@ import { startInferenceBroker } from "./inferenceBroker";
 import { resolveInferenceEnv } from "./resolveInferenceEnv";
 import { reviewCredentialPolicy } from "./reviewTrustPolicy";
 import { runReview } from "./runReview";
+import { readWalkthroughFile, uploadWalkthrough } from "../../src/cli/publishWalkthrough";
 import { runGh } from "../../src/github/runGh";
 import { resolvePullRequest, type PullRequestTarget } from "../../src/github/resolvePullRequest";
 
@@ -54,6 +57,48 @@ function setOutput(key: string, value: string): void {
   if (path) appendFileSync(path, `${key}=${value}\n`);
 }
 
+export function writeReviewArtifact(path: string, value: unknown): void {
+  const json = JSON.stringify(value);
+  if (Buffer.byteLength(json) > 1_000_000) throw new Error("review artifact exceeds 1 MB");
+  const temporaryPath = `${path}.${crypto.randomUUID()}.tmp`;
+  const fd = openSync(
+    temporaryPath,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  let closed = false;
+  let published = false;
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error("review artifact destination is not a regular file");
+    fchmodSync(fd, 0o600);
+    // This is the action's single intentional network-derived artifact sink.
+    // Its temporary sibling is exclusive/no-follow, private, bounded, and
+    // atomically linked only after the complete JSON document is closed. The
+    // no-replace link also rejects every pre-existing final path or symlink.
+    // codeql[js/http-to-file-access]
+    writeFileSync(fd, json);
+    closeSync(fd);
+    closed = true;
+    linkSync(temporaryPath, path);
+    published = true;
+    try {
+      unlinkSync(temporaryPath);
+    } catch {
+      // The complete private final artifact is already published. A leftover
+      // private sibling is preferable to turning success into ambiguity.
+    }
+  } finally {
+    if (!closed) closeSync(fd);
+    if (!published) {
+      try {
+        unlinkSync(temporaryPath);
+      } catch {
+        // Preserve the primary validation/write failure.
+      }
+    }
+  }
+}
+
 function requireSameHttpsOrigin(value: string, expectedOrigin: string, label: string): URL {
   let url: URL;
   try {
@@ -67,42 +112,7 @@ function requireSameHttpsOrigin(value: string, expectedOrigin: string, label: st
   return url;
 }
 
-export function readWalkthroughFile(htmlPath: string): Buffer {
-  const fd = openSync(htmlPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile()) throw new Error("walkthrough is not a regular file");
-    if (stat.size > 25 * 1024 * 1024) throw new Error("walkthrough exceeds 25 MB publish limit");
-    return readFileSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-}
-
-async function publishWalkthroughAfterAgents(
-  html: Buffer,
-  publishUrl: string,
-  token: string,
-): Promise<string> {
-  const base = new URL(publishUrl);
-  if (base.protocol !== "https:") throw new Error("publish URL must use HTTPS");
-  const endpoint = new URL("api/walkthroughs", `${base.toString().replace(/\/$/, "")}/`);
-  const response = await fetch(endpoint, {
-    method: "POST",
-    redirect: "error",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "text/html; charset=utf-8",
-    },
-    body: html,
-  });
-  if (!response.ok) throw new Error(`publish failed: HTTP ${response.status}`);
-  const data = obj(await response.json());
-  if (typeof data?.url !== "string") throw new Error("publish response is missing URL");
-  const result = new URL(data.url);
-  if (result.protocol !== "https:") throw new Error("publish response URL must use HTTPS");
-  return result.toString();
-}
+export { readWalkthroughFile };
 
 function eventPullRequestTarget(payload: unknown, repository: string): PullRequestTarget | null {
   const pr = obj(obj(payload)?.pull_request);
@@ -372,13 +382,14 @@ async function main(): Promise<void> {
   if (summary) delete summary.walkthroughPath;
   if (producedWalkthrough) {
     try {
-      walkthroughUrl = await publishWalkthroughAfterAgents(
+      walkthroughUrl = await uploadWalkthrough(
         // Never dereference a path selected by the untrusted child. The only
         // upload candidate is the exact output path declared before launch,
         // opened without following symlinks after the sandbox UID exits.
         readWalkthroughFile(join(sandboxRoot, "walkthrough.html")),
         session.publishUrl,
         session.token,
+        { expectedOrigin: serviceOrigin },
       );
       if (summary) summary.walkthroughUrl = walkthroughUrl;
     } catch (error) {
@@ -409,9 +420,7 @@ async function main(): Promise<void> {
     review,
     summary,
   };
-  const tmp = `${artifactPath}.tmp`;
-  writeFileSync(tmp, JSON.stringify(envelope), { mode: 0o600 });
-  renameSync(tmp, artifactPath);
+  writeReviewArtifact(artifactPath, envelope);
 
   const artifactName = `smithers-review-${repository.replace(/[^A-Za-z0-9_.-]+/g, "-")}-${decision.prNumber}-${target.headSha}`;
   setOutput("has-review", "true");

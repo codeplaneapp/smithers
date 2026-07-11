@@ -28,7 +28,10 @@ describe("publishWalkthrough", () => {
     let fetchCalled = false;
     globalThis.fetch = (() => {
       fetchCalled = true;
-      return Promise.resolve(new Response(JSON.stringify({ url: "https://example.test/w/abc" }), { status: 201 }));
+      return Promise.resolve(new Response(JSON.stringify({
+        id: "abcde012345a",
+        url: "https://example.test/w/abcde012345a",
+      }), { status: 201 }));
     }) as unknown as typeof fetch;
 
     try {

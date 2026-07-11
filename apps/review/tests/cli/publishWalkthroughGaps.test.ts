@@ -42,11 +42,11 @@ describe("publishWalkthrough config + upload", () => {
       seen.url = String(url);
       seen.auth = (init.headers as Record<string, string>).authorization;
       seen.redirect = init.redirect;
-      return new Response(JSON.stringify({ url: "https://share.test/w/xyz" }), { status: 201 });
+      return new Response(JSON.stringify({ id: "abcde012345a", url: "https://share.test/w/abcde012345a" }), { status: 201 });
     }) as unknown as typeof fetch;
 
     const shareUrl = await publishWalkthrough(htmlPath, { homeDir });
-    expect(shareUrl).toBe("https://share.test/w/xyz");
+    expect(shareUrl).toBe("https://share.test/w/abcde012345a");
     // Trailing slash on the configured URL is stripped before appending the path.
     expect(seen.url).toBe("https://share.test/api/walkthroughs");
     expect(seen.auth).toBe("Bearer cfg-token");
@@ -89,7 +89,24 @@ describe("publishWalkthrough config + upload", () => {
     process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
     process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({}), { status: 201 })) as unknown as typeof fetch;
+      new Response(JSON.stringify({ id: "abcde012345a" }), { status: 201 })) as unknown as typeof fetch;
     await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("response had no url");
+  });
+
+  test("accepts a separate HTTPS public origin but rejects a non-canonical id path", async () => {
+    const { htmlPath, homeDir } = tempSetup();
+    process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
+    process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      id: "abcde012345a",
+      url: "https://public.test/w/abcde012345a",
+    }), { status: 201 })) as unknown as typeof fetch;
+    await expect(publishWalkthrough(htmlPath, { homeDir })).resolves.toBe("https://public.test/w/abcde012345a");
+
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      id: "abcde012345a",
+      url: "https://public.test/w/different-id",
+    }), { status: 201 })) as unknown as typeof fetch;
+    await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("not a canonical HTTPS walkthrough URL");
   });
 });

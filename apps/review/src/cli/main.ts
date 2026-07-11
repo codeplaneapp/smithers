@@ -1,6 +1,14 @@
 #!/usr/bin/env bun
 import { execFileSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { loadOutputs } from "@smithers-orchestrator/db/snapshot";
 import { runWorkflow } from "@smithers-orchestrator/engine";
@@ -19,6 +27,26 @@ import { createProgressReporter } from "./createProgressReporter";
 import { parseJsonColumn } from "./parseJsonColumn";
 import { parseReviewArgs, type ReviewArgs } from "./parseReviewArgs";
 import { publishWalkthrough } from "./publishWalkthrough";
+
+export function writeReviewSummary(path: string, value: unknown): void {
+  const json = JSON.stringify(value);
+  if (Buffer.byteLength(json) > 64 * 1024) throw new Error("review summary exceeds 64 KB");
+  const fd = openSync(
+    path,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error("review summary destination is not a regular file");
+    fchmodSync(fd, 0o600);
+    // This is the CLI's single intentional run-summary sink. The operator
+    // selects the path; no final symlink is followed and content is bounded.
+    // codeql[js/http-to-file-access]
+    writeFileSync(fd, json);
+  } finally {
+    closeSync(fd);
+  }
+}
 
 function refExists(repoDir: string, ref: string): boolean {
   try {
@@ -384,9 +412,9 @@ export async function runReviewCli(
   const summaryPath = process.env.SMITHERS_REVIEW_SUMMARY_PATH?.trim();
   if (summaryPath) {
     try {
-      writeFileSync(
+      writeReviewSummary(
         summaryPath,
-        JSON.stringify({
+        {
           status: result.status,
           reviewStatus,
           files: filesChanged,
@@ -399,7 +427,7 @@ export async function runReviewCli(
           failedFileReviews,
           impact: impactLevel,
           questions: questionCount,
-        }),
+        },
       );
     } catch (error) {
       console.error(`smithers-review: could not write summary file: ${(error as Error).message}`);

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import {
   prCheckoutEnvironment,
   pullRequestReference,
   readWalkthroughFile,
+  writeReviewArtifact,
 } from "../../action/src/runAction";
 
 const RUN_ACTION = fileURLToPath(new URL("../../action/src/runAction.ts", import.meta.url));
@@ -107,6 +108,30 @@ describe("runAction analysis boundary (subprocess)", () => {
     await symlink(walkthrough, link);
     expect(readWalkthroughFile(walkthrough).toString()).toBe("<html>safe</html>");
     expect(() => readWalkthroughFile(link)).toThrow();
+  });
+
+  test("writes a complete bounded review artifact through an atomic private file", async () => {
+    const artifact = join(tmp, "review-artifact.json");
+    writeReviewArtifact(artifact, { schemaVersion: 1, review: { body: "safe" } });
+    expect(JSON.parse(await readFile(artifact, "utf8"))).toEqual({
+      schemaVersion: 1,
+      review: { body: "safe" },
+    });
+    if (process.platform !== "win32") expect((await lstat(artifact)).mode & 0o077).toBe(0);
+    expect(() => writeReviewArtifact(join(tmp, "oversized.json"), "x".repeat(1_000_001))).toThrow(/1 MB/);
+
+    const existing = join(tmp, "existing.json");
+    await writeFile(existing, "keep-existing");
+    expect(() => writeReviewArtifact(existing, { replace: true })).toThrow();
+    expect(await readFile(existing, "utf8")).toBe("keep-existing");
+
+    const target = join(tmp, "artifact-target.json");
+    const link = join(tmp, "artifact-link.json");
+    await writeFile(target, "keep-target");
+    await symlink(target, link);
+    expect(() => writeReviewArtifact(link, { replace: true })).toThrow();
+    expect(await readFile(target, "utf8")).toBe("keep-target");
+    expect((await readdir(tmp)).some((name) => name.endsWith(".tmp"))).toBe(false);
   });
 
   test("trusted-collaborator fork PRs continue into the metered/OIDC path", async () => {

@@ -115,8 +115,14 @@ export function validateReviewPayload(
 async function githubJson(path: string, token: string, init: RequestInit = {}): Promise<Response> {
   const api = process.env.GITHUB_API_URL ?? "https://api.github.com";
   const base = new URL(api);
-  if (base.protocol !== "https:") throw new Error("GITHUB_API_URL must use HTTPS");
+  if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash) {
+    throw new Error("GITHUB_API_URL must be a credential-free HTTPS base URL");
+  }
   const endpoint = new URL(path.replace(/^\//, ""), `${base.toString().replace(/\/$/, "")}/`);
+  if (endpoint.origin !== base.origin) throw new Error("GitHub endpoint escaped the configured API origin");
+  // This publisher intentionally sends one schema/binding/size-validated
+  // review artifact to the immutable GitHub PR endpoint. Redirects are denied.
+  // codeql[js/file-access-to-http]
   const response = await fetch(endpoint, {
     ...init,
     redirect: "error",
@@ -208,6 +214,9 @@ async function main(): Promise<void> {
   const eventPath = process.env.GITHUB_EVENT_PATH;
   const directory = process.env.SMITHERS_REVIEW_ARTIFACT_DIR;
   if (!token || !repository || !eventPath || !directory) throw new Error("publisher environment is incomplete");
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+    throw new Error("GITHUB_REPOSITORY is invalid");
+  }
 
   const event = obj(JSON.parse(readFileSync(eventPath, "utf8")));
   const artifact = obj(JSON.parse(readFileSync(artifactFile(directory), "utf8")));

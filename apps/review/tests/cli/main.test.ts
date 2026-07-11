@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseQuizColumn, runReviewCli } from "../../src/cli/main";
+import { parseQuizColumn, runReviewCli, writeReviewSummary } from "../../src/cli/main";
 
 const MAIN_TS = fileURLToPath(new URL("../../src/cli/main.ts", import.meta.url));
 const PKG_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -174,6 +183,25 @@ function tempRepo(): string {
   writeFileSync(join(dir, "src/app.ts"), "export const value = 1;\nexport const next = 2;\n");
   return dir;
 }
+
+describe("review summary output policy", () => {
+  test("writes bounded private JSON and refuses a final symlink", () => {
+    const dir = mkdtempSync(join(tmpdir(), "review-summary-policy-"));
+    tempDirs.push(dir);
+    const summaryPath = join(dir, "summary.json");
+    writeReviewSummary(summaryPath, { status: "finished", findings: 2 });
+    expect(JSON.parse(readFileSync(summaryPath, "utf8"))).toEqual({ status: "finished", findings: 2 });
+    if (process.platform !== "win32") expect(lstatSync(summaryPath).mode & 0o077).toBe(0);
+    expect(() => writeReviewSummary(join(dir, "oversized.json"), "x".repeat(64 * 1024))).toThrow(/64 KB/);
+
+    const target = join(dir, "target.json");
+    const link = join(dir, "summary-link.json");
+    writeFileSync(target, "keep-target");
+    symlinkSync(target, link);
+    expect(() => writeReviewSummary(link, { replace: true })).toThrow();
+    expect(readFileSync(target, "utf8")).toBe("keep-target");
+  });
+});
 
 describe("main (agentless full run, subprocess)", () => {
   test(
