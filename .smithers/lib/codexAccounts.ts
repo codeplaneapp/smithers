@@ -69,6 +69,43 @@ export function registeredCodexCredentials(
 }
 
 /**
+ * True when Codex is operator-paused, which flips every codex-first chain to
+ * its fallbacks (Sonnet fills the Luna/Terra seats, Fable fills the Sol
+ * seats). Set it while the Codex subscription is rate limited so new runs
+ * never burn attempts on a dead provider or park at waiting-quota.
+ *
+ * Two switches, either works:
+ *   - env `SMITHERS_CODEX_PAUSED` (truthy pauses; `0`/`false`/`off`/`no`
+ *     force-unpauses even when the marker file exists);
+ *   - marker file `<SMITHERS_HOME>/codex-paused.json`. An optional ISO-8601
+ *     `until` field auto-unpauses the chains once the quota window resets; a
+ *     marker without `until` (or with a malformed body) pauses until deleted.
+ */
+export function codexPaused(env: NodeJS.ProcessEnv = process.env): boolean {
+  const envFlag = env.SMITHERS_CODEX_PAUSED?.trim().toLowerCase();
+  if (envFlag) {
+    return !["0", "false", "off", "no"].includes(envFlag);
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(join(smithersHome(env), "codex-paused.json"), "utf8");
+  } catch {
+    return false;
+  }
+  try {
+    const marker = JSON.parse(raw) as { until?: unknown };
+    if (typeof marker?.until === "string") {
+      const until = Date.parse(marker.until);
+      if (Number.isFinite(until)) return Date.now() < until;
+    }
+    return true;
+  } catch {
+    // The operator created the file; a body we cannot parse still means pause.
+    return true;
+  }
+}
+
+/**
  * Build one sequential failover chain:
  *
  * 1. ambient/default Codex auth;
@@ -76,13 +113,18 @@ export function registeredCodexCredentials(
  * 3. the supplied non-Codex backups.
  *
  * Engine agent arrays are sequential, so a successful Codex attempt prevents
- * Claude, Kimi, and other providers from running.
+ * Claude, Kimi, and other providers from running. While `codexPaused` and a
+ * fallback exists, the chain is the fallbacks alone; a chain with no fallback
+ * keeps Codex rather than going empty.
  */
 export function codexFirst(
   options: CodexOptions,
   fallbacks: AgentLike[] = [],
   env: NodeJS.ProcessEnv = process.env,
 ): AgentLike[] {
+  if (fallbacks.length > 0 && codexPaused(env)) {
+    return [...fallbacks];
+  }
   const registered = registeredCodexCredentials(env)
     .filter((credential) => {
       if (credential.provider === "codex") {
@@ -113,6 +155,9 @@ export function subscriptionCodexFirst(
 ): AgentLike[] {
   if (options.apiKey) {
     throw new Error("subscriptionCodexFirst does not accept API-key credentials");
+  }
+  if (fallbacks.length > 0 && codexPaused(env)) {
+    return [...fallbacks];
   }
 
   const configDirs = [
