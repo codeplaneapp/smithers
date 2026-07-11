@@ -85,6 +85,8 @@ function linkRepoRuntimeDeps(repoDir) {
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "@xyflow"), join(nodeModulesDir, "@xyflow"));
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "@milkdown"), join(nodeModulesDir, "@milkdown"));
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "dagre"), join(nodeModulesDir, "dagre"));
+    // create-workflow parses the skill doc it writes as real YAML frontmatter.
+    symlinkIfMissing(resolve(ROOT_NODE_MODULES, "yaml"), join(nodeModulesDir, "yaml"));
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "typescript", "bin", "tsc"), join(binDir, "tsc"), "file");
 }
 /**

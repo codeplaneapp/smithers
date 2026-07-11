@@ -8,6 +8,7 @@ import { UI } from "smithers-orchestrator";
 import { $ } from "bun";
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
+import { parse as parseYaml } from "yaml";
 import { agents } from "../agents";
 import ClarifyPrompt from "../prompts/create-workflow-clarify.mdx";
 import ProvisionPrompt from "../prompts/create-workflow-provision.mdx";
@@ -21,15 +22,22 @@ const PROMPTS_DIR = ".smithers/prompts";
 const SKILLS_DIR = ".smithers/skills";
 const UI_DIR = ".smithers/ui";
 
+// Requires REAL YAML frontmatter (parsed, not line-matched) with `name` and
+// `workflow` fields that exactly equal the workflow id — a hand-rolled
+// line-by-line regex would accept malformed YAML (bad indentation, unclosed
+// quotes, duplicate keys) that a real parser correctly rejects.
 function validSkillDocument(contents: string, workflowName: string) {
   const match = contents.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
   if (!match) return false;
-  const fields = new Map<string, string>();
-  for (const line of match[1].split(/\r?\n/)) {
-    const field = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
-    if (field) fields.set(field[1], field[2].trim());
+  let frontmatter: unknown;
+  try {
+    frontmatter = parseYaml(match[1]);
+  } catch {
+    return false;
   }
-  return fields.get("name") === workflowName && fields.get("workflow") === workflowName;
+  if (frontmatter === null || typeof frontmatter !== "object" || Array.isArray(frontmatter)) return false;
+  const fields = frontmatter as Record<string, unknown>;
+  return fields.name === workflowName && fields.workflow === workflowName;
 }
 
 const inputSchema = z.object({
