@@ -88,9 +88,9 @@ export const agents = {
   research: [
     providers.codexLuna,
     providers.codex1Luna,
+    providers.claudeSonnet,
     providers.kimi1,
     providers.opencode,
-    providers.claudeSonnet,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,

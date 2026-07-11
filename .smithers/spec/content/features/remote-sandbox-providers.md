@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P1 | **Owner:** smithers-maintainers | **Group:** Isolate execution | **Tier:** Platform
 
-Cloudflare, Vercel, AWS, GCP, and Daytona packages register provider-backed Sandbox runtimes that ship request bundles to remote containers/jobs and return result bundles with secret redaction.
+Cloudflare, Vercel, AWS, GCP, and Daytona packages register provider-backed Sandbox runtimes that ship request bundles to remote `containers/jobs` and return result bundles with secret redaction.
 
 ## What you can do
 
@@ -12,7 +12,7 @@ Run full-OS workflow boundaries on managed infrastructure while keeping the Smit
 
 ### Provider kit
 
-Shared sandbox provider contracts cover create, run, heartbeat, cleanup, request/result paths, and error normalization.
+Shared sandbox provider contracts cover create, run, heartbeat, cleanup, `request/result` paths, and error normalization.
 
 ### Cloudflare Sandbox SDK
 
@@ -20,11 +20,11 @@ createCloudflareSandboxProvider runs Smithers sandbox requests through Cloudflar
 
 ### Vercel Sandbox
 
-createVercelSandboxProvider supports OIDC/access-token auth, domains, duration caps, cleanup keep/persist/destroy, and secret scrubbing.
+createVercelSandboxProvider supports `OIDC/access-token` auth, domains, duration caps, cleanup `keep/persist/destroy`, and secret scrubbing.
 
 ### AWS/GCP/Daytona providers
 
-AWS ECS/Fargate or CodeBuild, GCP Cloud Run Jobs/GCS, and Daytona workspace providers use injected clients and mocks for deterministic tests.
+AWS `ECS/Fargate` or CodeBuild, GCP Cloud Run `Jobs/GCS`, and Daytona workspace providers use injected clients and mocks for deterministic tests.
 
 ## Endpoints and commands
 
@@ -56,7 +56,7 @@ AWS ECS/Fargate or CodeBuild, GCP Cloud Run Jobs/GCS, and Daytona workspace prov
 
 ## Observability
 
-- Provider implementations surface remote ids and heartbeat metadata so gateway/CLI views can correlate a Smithers sandbox with provider resources.
+- Provider implementations surface remote ids and heartbeat metadata so `gateway/CLI` views can correlate a Smithers sandbox with provider resources.
 - Sandbox metrics from `packages/sandbox` apply to remote providers as the runtime boundary.
 
 ## Debugging

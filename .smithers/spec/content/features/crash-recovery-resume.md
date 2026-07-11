@@ -12,7 +12,7 @@ Kill the process, close a laptop, exhaust quota, or pause for approval, then con
 
 ### Resume
 
-`smithers up`/resume restores in-flight runs from the store.
+`smithers up/resume` restores in-flight runs from the store.
 
 ### Quota recovery
 
@@ -32,7 +32,7 @@ AGENT\_QUOTA\_EXCEEDED pauses without burning retry attempts and carries reset m
 
 ### Detached pause model
 
-Foreground and detached owners exit at waiting-approval/event/timer states while persisted state records the blocker.
+Foreground and detached owners exit at `waiting-approval/event/timer` states while persisted state records the blocker.
 
 ## Endpoints and commands
 
@@ -59,7 +59,7 @@ Foreground and detached owners exit at waiting-approval/event/timer states while
 ## Observability
 
 - Supervisor metrics include supervisorStaleDetected and supervisorPollDuration.
-- Heartbeat freshness, owner claims, run state, and waiting reason appear in ps/inspect/why output.
+- Heartbeat freshness, owner claims, run state, and waiting reason appear in `ps/inspect/why` output.
 
 ## Debugging
 
@@ -69,7 +69,7 @@ Foreground and detached owners exit at waiting-approval/event/timer states while
 ## Architecture
 
 - `apps/cli/src/supervisor.js` and resume-detached.js own stale-run polling and detached resume paths.
-- `packages/engine/src/runtime-owner.js` and isRunHeartbeatFresh record/process owner state.
+- `packages/engine/src/runtime-owner.js` and isRunHeartbeatFresh `record/process` owner state.
 - `docs/how-it-works.mdx` documents stable task IDs and resume hash validation.
 
 ## Fixes and diffs

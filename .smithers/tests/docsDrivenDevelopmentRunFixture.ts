@@ -54,12 +54,12 @@ export function dddFixtureFeature(overrides: Record<string, unknown> = {}) {
   return {
     id: "docs-driven-development",
     title: "Docs driven development",
-    summary: "Maintain the Smithers product spec.",
+    summary: "Maintain the target product spec.",
     status: "fixed",
     priority: "p0",
     owner: "product",
     tier: "feature",
-    group: "Ship & review",
+    group: "Operate",
     userValue: "Keep docs and implementation work connected.",
     capabilities: [{ title: "Audit loop", detail: "Runs a bounded audit and triage loop.", status: "fixed" }],
     endpoints: [{ method: "POST", path: "/runs", doc: "overview.md#runs", note: "launch workflow runs" }],
@@ -90,7 +90,7 @@ export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFi
   writeFileSync(join(root, ".smithers/spec/features.json"), `${JSON.stringify(options.features ?? [dddFixtureFeature()], null, 2)}\n`);
   writeFileSync(join(root, ".smithers/spec/content/overview.md"), "# Overview\n\nInitial DDD overview.\n");
   writeFileSync(join(root, ".smithers/specs/docs-driven-development.md"), "# Docs Driven Development\n");
-  const providersImport = `import { providers } from "../lib/ddd/dddAgents.ts";`;
+  const providersImport = `import { agents } from "../agents";`;
   const rawWorkflowSource = readFileSync(workflowPath, "utf8");
   if (!rawWorkflowSource.includes(providersImport)) {
     throw new Error(
@@ -145,7 +145,7 @@ function pickPayload(engine: FixtureEngine, prompt: string): string {
   } catch {}
   const pairs = [
     ["audit", "Audit the current docs-driven-development spec state"],
-    ["spec-update", "Update the smithers product spec"],
+    ["spec-update", "Update this repository's product spec"],
     ["triage", "Plan the next docs-driven-development round"],
     ["work:1", "Implement or execute triage slot 1"],
     ["work:1", "No triage item selected for slot 1"],
@@ -212,6 +212,7 @@ export const agents = {
   planning: providers.sol,
   review: providers.sol,
   implement: providers.luna,
+  research: providers.luna,
 } as const satisfies Record<string, AgentLike[]>;
 `;
 }
@@ -228,7 +229,7 @@ function writeFakeAgents(binDir: string) {
     `  let byNode = {};`,
     `  try { byNode = JSON.parse(process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE ?? "{}"); } catch {}`,
     `  const prompt = promptText();`,
-    `  const pairs = [["audit", "Audit the current docs-driven-development spec state"], ["spec-update", "Update the smithers product spec"], ["triage", "Plan the next docs-driven-development round"], ["work:1", "Implement or execute triage slot 1"], ["work:1", "No triage item selected for slot 1"], ["cycle-review", "Review this entire docs-driven-development cycle"]];`,
+    `  const pairs = [["audit", "Audit the current docs-driven-development spec state"], ["spec-update", "Update this repository's product spec"], ["triage", "Plan the next docs-driven-development round"], ["work:1", "Implement or execute triage slot 1"], ["work:1", "No triage item selected for slot 1"], ["cycle-review", "Review this entire docs-driven-development cycle"]];`,
     `  for (const [node, marker] of pairs) if (prompt.includes(marker) && byNode[node]) return typeof byNode[node] === "string" ? byNode[node] : JSON.stringify(byNode[node]);`,
     `  return fallback;`,
     `}`,
@@ -249,7 +250,7 @@ function writeFakeAgents(binDir: string) {
     `  let byNode = {};`,
     `  try { byNode = JSON.parse(process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE ?? "{}"); } catch {}`,
     `  const prompt = promptText();`,
-    `  const pairs = [["audit", "Audit the current docs-driven-development spec state"], ["spec-update", "Update the smithers product spec"], ["triage", "Plan the next docs-driven-development round"], ["work:1", "Implement or execute triage slot 1"], ["work:1", "No triage item selected for slot 1"], ["cycle-review", "Review this entire docs-driven-development cycle"]];`,
+    `  const pairs = [["audit", "Audit the current docs-driven-development spec state"], ["spec-update", "Update this repository's product spec"], ["triage", "Plan the next docs-driven-development round"], ["work:1", "Implement or execute triage slot 1"], ["work:1", "No triage item selected for slot 1"], ["cycle-review", "Review this entire docs-driven-development cycle"]];`,
     `  for (const [node, marker] of pairs) if (prompt.includes(marker) && byNode[node]) return typeof byNode[node] === "string" ? byNode[node] : JSON.stringify(byNode[node]);`,
     `  return fallback;`,
     `}`,
@@ -280,7 +281,7 @@ export function fakeAgentResponse(summary: string, overrides: Record<string, unk
         slot: 1,
         featureId: "docs-driven-development",
         title: "Prove DDD workflow execution",
-        agent: "sonnet",
+        agent: "implementation",
         taskType: "e2e",
         reason: `${summary} selected a DDD proof task.`,
         files: [".smithers/workflows/docs-driven-development.tsx"],
@@ -323,8 +324,8 @@ export async function withDddFixtureExecutionEnv<T>(
     process.chdir(repo.root);
     process.env.PATH = pathWithBin(repo.binDir, process.env.PATH);
     process.env.SMITHERS_TEST_AGENT_PATH = process.env.PATH;
-    process.env.SMITHERS_FAKE_CODEX_RESPONSE = fakeAgentResponse("codex fake output");
-    process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = fakeAgentResponse("claude fake output");
+    process.env.SMITHERS_FAKE_CODEX_RESPONSE = fakeAgentResponse("fake agent output");
+    process.env.SMITHERS_FAKE_CLAUDE_RESPONSE = fakeAgentResponse("fake agent output");
     const byNode = serializeFakeResponsesByNode(options.agentResponsesByNode);
     if (byNode) process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE = byNode;
     else delete process.env.SMITHERS_FAKE_AGENT_RESPONSES_BY_NODE;

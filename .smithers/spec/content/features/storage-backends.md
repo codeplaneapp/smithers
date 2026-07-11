@@ -2,11 +2,11 @@
 
 > **Status:** Partial | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Platform & delivery | **Tier:** Platform
 
-Smithers stores run-of-record data in SQLite by default and supports PGlite/Postgres through openSmithersBackend, createSmithersPostgres, dialect descriptors, and a CLI migration path from legacy smithers.db.
+Smithers stores run-of-record data in SQLite by default and supports `PGlite/Postgres` through openSmithersBackend, createSmithersPostgres, dialect descriptors, and a CLI migration path from legacy smithers.db.
 
 ## What you can do
 
-Run locally with SQLite/PGlite, migrate safely, or use managed Postgres for durable multi-connection deployments.
+Run locally with `SQLite/PGlite`, migrate safely, or use managed Postgres for durable multi-connection deployments.
 
 ## Capabilities
 
@@ -16,7 +16,7 @@ openSmithersBackend resolves explicit opts, SMITHERS\_BACKEND, .smithers config,
 
 ### Migration command
 
-`smithers migrate` copies legacy SQLite rows to PGlite/Postgres in bounded batches, verifies counts, and writes `.smithers/migrated.json`.
+`smithers migrate` copies legacy SQLite rows to `PGlite/Postgres` in bounded batches, verifies counts, and writes `.smithers/migrated.json`.
 
 ### Postgres factory
 
@@ -24,7 +24,7 @@ createSmithersPostgres returns the same createSmithers API against pg or embedde
 
 ### Schema signatures
 
-DB schema signatures and input bounds protect gateway/client assumptions around table shape and payload size.
+DB schema signatures and input bounds protect `gateway/client` assumptions around table shape and payload size.
 
 ## Endpoints and commands
 
@@ -59,11 +59,11 @@ DB schema signatures and input bounds protect gateway/client assumptions around 
 ## Debugging
 
 - If a legacy smithers.db has data and no migration marker, backend open should fail with SMITHERS\_MIGRATION\_REQUIRED instead of creating an empty backend.
-- Use `smithers migrate` --to pglite or --to postgres, then pglite/postgres roundtrip e2e tests to verify parity.
+- Use `smithers migrate` --to pglite or --to postgres, then `pglite/postgres` roundtrip e2e tests to verify parity.
 
 ## Architecture
 
-- `packages/db/src/index.js` exports adapter, dialect, ensure, input bounds, schema signature, snapshots, output/input helpers, and write-retry logic.
+- `packages/db/src/index.js` exports adapter, dialect, ensure, input bounds, schema signature, snapshots, `output/input` helpers, and write-retry logic.
 - `packages/smithers/src/index.js` exports openSmithersBackend, openSmithersStore, migrateSmithersStore, and createSmithersPostgres.
 - `docs/deployment/production-hardening.mdx` explains SQLite, PGlite, Postgres, Electric Cloud Sync, and D1 limitations.
 
@@ -80,4 +80,4 @@ DB schema signatures and input bounds protect gateway/client assumptions around 
 ## Open gaps
 
 - Electric Cloud Sync is documented for managed Postgres but needs deployment-level proof in the target hosted environment.
-- Cloudflare D1 descriptor is read-mostly/non-atomic by design and should not be presented as durable run-of-record storage.
+- Cloudflare D1 descriptor is `read-mostly/non-atomic` by design and should not be presented as durable run-of-record storage.

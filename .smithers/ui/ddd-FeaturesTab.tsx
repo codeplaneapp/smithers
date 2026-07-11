@@ -21,7 +21,7 @@ export type FeaturesTabProps = {
 };
 
 const TIER_SECTIONS: { tier: string; label: string; blurb: string }[] = [
-  { tier: "feature", label: "End-user features", blurb: "What you can do with smithers, grouped by journey. Each links down to the shared docs and endpoints it relies on." },
+  { tier: "feature", label: "End-user features", blurb: "What people can do with the product, grouped by journey. Each links to the docs and endpoints it relies on." },
   { tier: "platform", label: "Platform", blurb: "Infrastructure that gates production confidence rather than being a feature itself." },
   { tier: "reference", label: "Reference", blurb: "Shared, cross-cutting docs (architecture, API catalog, backend services) that many features link into." },
 ];

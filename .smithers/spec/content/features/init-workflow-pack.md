@@ -44,7 +44,6 @@ smithers starters maps plain-English intents to copy-paste workflow run commands
 - `apps/cli/tests/init.e2e.test.js`
 - `apps/cli/tests/init-durable.e2e.test.js`
 - `apps/cli/tests/init-installed-layout.test.js`
-- `apps/cli/tests/init-pack-updates.test.js`
 - `apps/cli/tests/seeded-pack-fresh.test.js`
 - `apps/cli/tests/seeded-workflows-run.e2e.test.js`
 - `apps/cli/tests/starter-gallery.test.js`
@@ -53,16 +52,16 @@ smithers starters maps plain-English intents to copy-paste workflow run commands
 ## Observability
 
 - Init emits installed-layout and next-step output; seeded workflow smoke tests launch fake-agent runs and assert valid states.
-- Workflow discovery records displayName, description, tags, aliases, sourceType, scope, and UI descriptors for CLI/Gateway consumers.
+- Workflow discovery records displayName, description, tags, aliases, sourceType, scope, and UI descriptors for `CLI/Gateway` consumers.
 
 ## Debugging
 
 - Run `smithers workflow list` --format json to verify discovery scope and metadata.
-- Run pnpm run generate:init-pack when source .`smithers workflow`s or UIs change, then `apps/cli/tests/seeded-pack-fresh.test.js` verifies the generated pack.
+- Run `pnpm run generate`:init-pack when source .`smithers workflow`s or UIs change, then `apps/cli/tests/seeded-pack-fresh.test.js` verifies the generated pack.
 
 ## Architecture
 
-- `apps/cli/src/init-command.js` and `apps/cli/src/workflow-pack.js` own install/update behavior.
+- `apps/cli/src/init-command.js` and `apps/cli/src/workflow-pack.js` own `install/update` behavior.
 - `scripts/generate-workflow-pack.ts` seeds the built-in pack from committed .smithers sources.
 - README.md and `docs/workflows/overview.mdx` describe the ready-to-run workflow families.
 
@@ -79,5 +78,5 @@ smithers starters maps plain-English intents to copy-paste workflow run commands
 
 ## Open gaps
 
-- 2026-07-06 review: `apps/cli/tests/workflow-pack-subset.test.js` fails because subset install includes unexpected upgrade workflow in addition to selected workflow plus init/post-failure.
+- 2026-07-06 review: `apps/cli/tests/workflow-pack-subset.test.js` fails because subset install includes unexpected upgrade workflow in addition to selected workflow plus `init/post-failure`.
 - 2026-07-06 review: `apps/cli/tests/init.e2e.test.js` workflow-pack smoke typecheck fails because seeded workflows import UI from smithers-orchestrator, but that facade export is missing.

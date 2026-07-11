@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P1 | **Owner:** smithers-maintainers | **Group:** Isolate execution | **Tier:** Platform
 
-Smithers isolates risky work through tool sandboxes, explicit <Sandbox> boundaries, per-task worktrees, jj-first/git-fallback VCS helpers, diff bundles, and path/network/output limits.
+Smithers isolates risky work through tool sandboxes, explicit <Sandbox> boundaries, per-task worktrees, `jj-first/git-fallback` VCS helpers, diff bundles, and `path/network/output` limits.
 
 ## What you can do
 
@@ -20,7 +20,7 @@ Cloudflare sandbox backend for remote execution.
 
 ### Tool sandbox
 
-Built-in read/write/edit/grep/bash tools are jailed to rootDir with symlink, network, timeout, and output-size controls.
+Built-in `read/write/edit/grep/bash` tools are jailed to rootDir with symlink, network, timeout, and output-size controls.
 
 ### Worktree boundary
 
@@ -28,7 +28,7 @@ Built-in read/write/edit/grep/bash tools are jailed to rootDir with symlink, net
 
 ### Transport sandbox
 
-<Sandbox> bundles requests/results through local, bubblewrap, docker, codeplane, cloud, or provider-backed runtimes.
+<Sandbox> bundles `requests/results` through local, bubblewrap, docker, codeplane, cloud, or provider-backed runtimes.
 
 ### jj/git pointer capture
 
@@ -65,7 +65,7 @@ VCS helpers detect jj and git, capture stable pointers, and restore files for ti
 
 ## Debugging
 
-- Run `smithers workflow` doctor or vcsToolingStatus to verify jj/git availability before worktree workflows.
+- Run `smithers workflow` doctor or vcsToolingStatus to verify `jj/git` availability before worktree workflows.
 - Use sandbox transport tests when changing env redaction, network policy, bundle path checks, or provider selection.
 
 ## Architecture

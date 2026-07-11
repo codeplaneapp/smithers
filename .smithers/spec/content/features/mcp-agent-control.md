@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Connect agents
 
-Smithers can run as a Model Context Protocol stdio server with semantic and raw tool surfaces, and the CLI wires MCP/skill/install instructions into supported coding agents.
+Smithers can run as a Model Context Protocol stdio server with semantic and raw tool surfaces, and the CLI wires `MCP/skill/install` instructions into supported coding agents.
 
 ## What you can do
 
@@ -24,7 +24,7 @@ Structured tools return { ok, data, error } envelopes with zod schemas and MCP a
 
 ### Agent config writers
 
-mcp add, skills add, and agent-specific supplementary wiring update supported agent configs without hand-editing JSON/TOML/YAML.
+mcp add, skills add, and agent-specific supplementary wiring update supported agent configs without hand-editing `JSON/TOML/YAML`.
 
 ## Endpoints and commands
 

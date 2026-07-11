@@ -177,7 +177,7 @@ describe("docs-driven-development workflow guards", () => {
       slot: 2,
       featureId: "docs-driven-development",
       title: "Prove DDD",
-      agent: "sonnet",
+      agent: "review",
       task_type: "e2e",
       reason: "Missing browser proof.",
       files: [".smithers/ui/docs-driven-development.tsx"],
@@ -197,7 +197,7 @@ describe("docs-driven-development workflow guards", () => {
           slot: 2,
           featureId: "docs-driven-development",
           title: "Prove DDD",
-          agent: "codex",
+          agent: "implementation",
           taskType: "fix",
           reason: "Need proof.",
           acceptance: ["Ticket is written."],
@@ -223,7 +223,7 @@ describe("docs-driven-development workflow guards", () => {
           slot: 1,
           featureId: "docs-driven-development",
           title: "",
-          agent: "codex",
+          agent: "implementation",
           taskType: "e2e",
           reason: "Materialized and gateway tickets must dedupe to one row.",
         },
@@ -232,7 +232,7 @@ describe("docs-driven-development workflow guards", () => {
           feature_id: "",
           feature_title: "Snake Case Feature",
           title: "",
-          agent: "sonnet",
+          agent: "review",
           task_type: "fix",
           reason: "Empty feature id and title still produce a stable ticket.",
         },
@@ -260,7 +260,7 @@ describe("docs-driven-development workflow guards", () => {
     expect(materialized).toContain("Materialized and gateway tickets must dedupe");
   });
 
-  test("agent routing caps max agents and remains Codex-first regardless of the legacy Claude toggle", async () => {
+  test("agent routing caps max agents and selects generic configured roles", async () => {
     const mod = await importWorkflow(tempRoot());
 
     expect(mod.resolvedMaxAgents(undefined)).toBe(1);
@@ -273,17 +273,16 @@ describe("docs-driven-development workflow guards", () => {
     expect(mod.resolvedMaxRounds(0)).toBe(100000);
     expect(mod.resolvedMaxRounds(7)).toBe(7);
 
-    const ctx = (useClaudeForPlanning: boolean) => ({
-      input: { useClaudeForPlanning },
-      outputMaybe: () => ({ selected: [{ slot: 1, agent: "opus" }, { slot: 2, agent: "sonnet" }] }),
+    const ctx = () => ({
+      input: {},
+      outputMaybe: () => ({ selected: [{ slot: 1, agent: "review" }, { slot: 2, agent: "implementation" }] }),
     });
-    const primaryEngine = (agent: any) => (Array.isArray(agent) ? agent[0] : agent).cliEngine;
-    expect(primaryEngine(mod.agentForSlot(ctx(false), 1))).toBe("codex");
-    expect(primaryEngine(mod.agentForSlot(ctx(false), 2))).toBe("codex");
-    expect(primaryEngine(mod.planningAgent(ctx(false)))).toBe("codex");
-    expect(primaryEngine(mod.auditAgent(ctx(false)))).toBe("codex");
-    expect(primaryEngine(mod.agentForSlot(ctx(true), 1))).toBe("codex");
-    expect(primaryEngine(mod.agentForSlot(ctx(true), 3))).toBe("codex");
+    expect(Array.isArray(mod.agentForSlot(ctx(), 1))).toBe(true);
+    expect(Array.isArray(mod.agentForSlot(ctx(), 2))).toBe(true);
+    expect(Array.isArray(mod.planningAgent(ctx()))).toBe(true);
+    expect(Array.isArray(mod.auditAgent(ctx()))).toBe(true);
+    expect(mod.agentForSlot(ctx(), 1)).not.toBe(mod.agentForSlot(ctx(), 2));
+    expect(mod.agentForSlot(ctx(), 3)).toBe(mod.agentForSlot(ctx(), 2));
   });
 
   test("productComplete trusts round-summary done only when features.json has zero incomplete records", async () => {
@@ -345,12 +344,12 @@ describe("docs-driven-development workflow guards", () => {
 
     expect(source).toContain('Start with "bun .smithers/lib/ddd/auditInputs.ts"');
     expect(source).toContain("Do not recursively read .smithers/executions or .smithers/pg");
-    expect(source).toContain("PRESERVE the organization fields on every record");
-    expect(source).toContain("tier, group, userValue, capabilities, endpoints, links");
-    expect(source).toContain("every link href must resolve to an existing content file");
-    expect(source).toContain("do not recursively start another docs-driven-development workflow");
-    expect(source).toContain("OFF-LIMITS: never edit the DDD pack machinery itself");
-    expect(source).toContain("NEVER edit the DDD pack machinery");
-    expect(source).toContain("record it precisely in your summary");
+    expect(source).toContain("Preserve tier, group, userValue, capabilities, endpoints, and links on every record");
+    expect(source).toContain("group is an end-user journey discovered from this product");
+    expect(source).toContain("Every link href must resolve to an existing content file");
+    expect(source).toContain("do not recursively start another run");
+    expect(source).toContain("OFF-LIMITS during a run");
+    expect(source).toContain("NEVER edit the live DDD machinery");
+    expect(source).toContain("Record pack defects in the summary");
   });
 });

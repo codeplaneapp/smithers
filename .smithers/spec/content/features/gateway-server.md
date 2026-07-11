@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Run & observe | **Tier:** Platform
 
-The Gateway and server expose versioned run/workflow/approval/memory/ticket/cron/devtools RPCs, HTTP routes, WebSocket event streams, scoped bearer auth, local workspace daemon discovery, and serverless resume/cron entry points.
+The Gateway and server expose versioned `run/workflow/approval/memory/ticket/cron/devtools` RPCs, HTTP routes, WebSocket event streams, scoped bearer auth, local workspace daemon discovery, and serverless `resume/cron` entry points.
 
 ## What you can do
 
@@ -16,7 +16,7 @@ WebSocket run events power live UIs, including detached runs.
 
 ### Serverless tick
 
-Resume/cron tick plus run-lease claims for serverless deployment.
+`Resume/cron` tick plus run-lease claims for serverless deployment.
 
 ### Stable RPC contract
 
@@ -67,13 +67,13 @@ Server integrations can verify signed webhooks, enqueue external events, and dri
 
 ## Debugging
 
-- Use `smithers gateway` status/stop and the runtime state file identity checks to diagnose local daemon discovery.
+- Use `smithers gateway` `status/stop` and the runtime state file identity checks to diagnose local daemon discovery.
 - Use `packages/gateway/tests/rpc-contract.test.ts` when changing RPC schemas, scopes, or examples.
 - Use e2e websocket drop and bounded subscriber fault cases for stream regressions.
 
 ## Architecture
 
-- `packages/gateway/src/rpc/index.ts` defines the stable v1 method union, request/response types, schemas, scopes, and errors.
+- `packages/gateway/src/rpc/index.ts` defines the stable v1 method union, `request/response` types, schemas, scopes, and errors.
 - `packages/server/src/index.js` implements node:http routes, request bounds, webhook verification, metrics, and workflow loading.
 - `packages/gateway-client` and `packages/gateway-react` consume the same RPC contract for non-React and React clients.
 
@@ -88,5 +88,5 @@ Server integrations can verify signed webhooks, enqueue external events, and dri
 
 ## Open gaps
 
-- Serverless resume/cron tick and run-lease claims need broader end-to-end proof beyond unit/RPC contract tests.
+- Serverless `resume/cron` tick and run-lease claims need broader end-to-end proof beyond `unit/RPC` contract tests.
 - Hosted gateway deployments still need explicit production hardening around TLS, token rotation, and multi-tenant boundaries.

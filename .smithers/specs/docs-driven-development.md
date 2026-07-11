@@ -1,11 +1,8 @@
-# Docs Driven Development (DDD) — smithers-native rebuild
+# Docs Driven Development (DDD)
 
-A port-and-rebuild of `../multi`'s `docs-driven-development` workflow + custom UI
-into this repo, generalized so it maintains a living spec for the smithers
-product itself. The original is the reference implementation
-(`/Users/williamcory/multi/.smithers/{workflows,ui}` and
-`scripts/docs-driven-development/`); this rebuild keeps its proven loop shape and
-hard-won fixes while removing every multi-specific hardcode.
+A portable workflow and custom UI for maintaining a living spec in any target
+repository. It discovers the repository's product, ecosystem, commands, and
+layout instead of assuming this monorepo or a particular package manager.
 
 ## What it is
 
@@ -30,25 +27,24 @@ A long-running improvement loop over a structured product spec:
   round-summary (compute). Loop exits only when round-summary says done AND
   features.json corroborates (0 open features).
 
-## Improvements over the multi version
+## Portability rules
 
 1. **No hardcoded machine paths** — everything relative to the repo root
-   (`process.cwd()` at workflow load); agents come from `.smithers/agents.ts`
-   providers (no per-repo cwd pinning, so `<Worktree>` stays usable later).
+   (`process.cwd()` at workflow load); agents come from the standard role pools
+   in `.smithers/agents.ts` (no per-repo cwd pinning).
 2. **No product-specific helper commands** in prompts (`pnpm docs:*` is gone).
    One build entry: `bun .smithers/lib/ddd/build.ts` = validate → generate
    derived feature docs → regenerate UI content modules. Bounded audit inputs
-   come from `bun .smithers/lib/ddd/audit-inputs.ts` (prints the file list an
-   auditor may read) and `bun .smithers/lib/ddd/triage-candidates.ts --max N`
+   come from `bun .smithers/lib/ddd/auditInputs.ts` (prints the file list an
+   auditor may read) and `bun .smithers/lib/ddd/triageCandidates.ts --max N`
    (ranked open gaps from features.json).
 3. **Kept hard-won fixes** (with their comments): `needs` remap on
    round-summary, maxRounds Number(null) bulletproofing, work-wave always
    materializing as a direct Task, featuresStillIncomplete() corroboration,
    never-edit-the-running-workflow rule in work prompts, bounded metaTicket
    fields with artifact spill.
-4. **Lighter UI deps**: reuse the repo's existing `crepeTheme.generated.ts`;
-   replace `@pierre/trees` with a small built-in tree list; mermaid preview is
-   dropped for v1 (recorded as an open gap in the workflow's own feature entry).
+4. **Portable UI deps**: use the installed Crepe theme, a small built-in tree
+   list, gateway-react hooks, and Mermaid for fenced diagrams.
 5. **Ticket materialization stays a compute node** writing
    `.smithers/tickets/docs-driven-development--<run>--<slot>-<id>.md`.
 
@@ -70,21 +66,19 @@ existing `./crepeTheme.generated`.
 
 ## Workflow contract
 
-Same output schemas as multi (bootstrap, audit, spec, metaTicket, triage,
+Output schemas are bootstrap, audit, spec, metaTicket, triage,
 materializedTickets, work, review, summary) via `createSmithers`. Node ids the
 UI binds to: `bootstrap`, `metaTicket`, `audit`, `spec-update`, `triage`,
 `materialize-tickets`, `work:1`, `cycle-review`, `round-summary`.
-Input: `maxAgents` (1..8, default 1), `maxRounds` (default 100000),
+Input: `maxAgents` (currently capped at 1), `maxRounds` (default 100000),
 `runImplementation`, `requireImplementationApproval`, `implementationApproved`,
-`useClaudeForPlanning`, optional `metaTicket` payload from the Docs editor.
-Agent routing: codex = implementation default; claude (fable) = planning/review;
-claudeSonnet = trivial bounded edits; when `useClaudeForPlanning=false` those
-slots route to codex.
+and an optional `metaTicket` payload from the Docs editor. Triage chooses the
+generic `implementation` or `review` role; installed agent configuration decides
+which provider serves each role.
 
 ## Open gaps (v1)
 
-- Mermaid diagram preview in the Docs tab.
 - Image upload target: Crepe's ImageBlock upload needs an asset server; v1 wires
   `?assetBaseUrl` passthrough but ships no asset server (uploads disabled when
   absent).
-- Only `work:1` (single-agent wave), matching multi's SQLite-fanout caution.
+- Only `work:1` (single-agent wave) is enabled today.

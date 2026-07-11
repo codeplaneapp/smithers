@@ -20,7 +20,7 @@ jj-based durability snapshots (phase 1) behind SMITHERS\_DURABILITY\_SNAPSHOTS.
 
 ### Snapshot and diff
 
-captureSnapshot/listSnapshots/loadSnapshot plus diffSnapshots power CLI snapshots, diff, and timeline views.
+`captureSnapshot/listSnapshots/loadSnapshot` plus diffSnapshots power CLI snapshots, diff, and timeline views.
 
 ### Rewind and restore
 
@@ -32,7 +32,7 @@ forkRun, replayFromCheckpoint, and branch metadata create alternate timelines.
 
 ### VCS tags
 
-time-travel can tag snapshots to git/jj revisions and rerun at a revision when the VCS plumbing is available.
+time-travel can tag snapshots to `git/jj` revisions and rerun at a revision when the VCS plumbing is available.
 
 ## Endpoints and commands
 
@@ -74,7 +74,7 @@ time-travel can tag snapshots to git/jj revisions and rerun at a revision when t
 
 - `packages/time-travel/src/index.js` exports snapshot, diff, fork, replay, timeline, VCS tag, jump, lock, rate-limit, and audit helpers.
 - `apps/cli/src/rewind.js`, restore.js, reportReplayResult.js, and command handlers expose the APIs to operators.
-- `packages/vcs` supplies jj/git pointer capture and restore for filesystem-aware rewind.
+- `packages/vcs` supplies `jj/git` pointer capture and restore for filesystem-aware rewind.
 
 ## Fixes and diffs
 

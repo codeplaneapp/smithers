@@ -100,11 +100,12 @@ function commandPipeReplacements(value: string): InlineReplacement[] {
 function codeRanges(value: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
   const patterns = [
-    /\bbun\s+test\b(?:\s+(?:(?:\.{0,2}\/|\.smithers\/|apps\/|packages\/|docs\/|e2e\/|scripts\/|skills\/)[^\s,;)]+))*|(?:\bbun\s+(?:\.{0,2}\/)?[A-Za-z0-9._/-]+\.(?:ts|tsx|js|mjs|cjs))/g,
-    /\bpnpm\s+-C\s+[^\s,;:)]+\s+[A-Za-z][A-Za-z0-9:_-]*(?:\s+(?:(?:\.{0,2}\/|\.smithers\/|apps\/|packages\/|docs\/|e2e\/|scripts\/|skills\/)[^\s,;)]+))*|\bpnpm\s+(?:typecheck|test(?::[A-Za-z0-9_-]+)?|docs:llms|docs:[A-Za-z0-9_-]+|check-[A-Za-z0-9-]+)\b(?:\s+(?:(?:\.{0,2}\/|\.smithers\/|apps\/|packages\/|docs\/|e2e\/|scripts\/|skills\/)[^\s,;)]+))*/g,
+    /\b(?:bun|npm|pnpm|yarn|deno|cargo|go|pytest|mvn|gradle|dotnet|make|just)\s+(?:-[A-Za-z]\s+[^\s,;:)]+\s+)?[A-Za-z0-9:_./-]+(?:\s+(?:--?[A-Za-z0-9_-]+|[A-Za-z0-9._/-]+))*/g,
+    /\bpython\s+-m\s+pytest(?:\s+[A-Za-z0-9._/-]+)*/g,
     /\bsmithers\s+workflow\s+run\s+[A-Za-z0-9._~:/?#@!$&'*+=-]+/g,
     /\bsmithers(?:\s+(?:init|workflow|list|run|up|ps|inspect|output|monitor|migrate|gateway|ui|agent|add|remove|retry-task|resume|approve|deny|alerts|cron|memory|usage|down|cancel|hijack|logs|events|openapi|optimize|eval|scores|snapshot|snapshots|restore|replay|fork|rewind|signal|why|human|ask|chat|token|tree|docs|docs-full))+/g,
-    /(?:^|(?<=[\s(]))(?:\.smithers|apps|packages|docs|e2e|scripts|skills)\/[A-Za-z0-9._~:/?#@!$&'*+=-]+/g,
+    /(?:^|(?<=[\s(]))(?:\.{0,2}\/)?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._~:/?#@!$&'*+=-]+)+/g,
+    /\b(?:package\.json|pyproject\.toml|Cargo\.toml|go\.mod|pom\.xml|Makefile|Justfile|Dockerfile)\b/g,
     /\bfeatures\.json\b/g,
   ];
   for (const pattern of patterns) {

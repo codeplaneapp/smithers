@@ -138,7 +138,6 @@ describe("the checked-in registry", () => {
     }
 
     expect(workflow("tanstack-db-sync-engine.tsx")).toMatch(/review-sonnet[^\n]+agent=\{secondaryReviewAgent\}/);
-    expect(workflow("ddd-generate-docs.tsx")).toMatch(/id="draft-spec"[\s\S]+?agent=\{providers\.luna\}/);
     expect(workflow("smithering.tsx")).toMatch(/id="route"[^>]+agent=\{sol\}/);
     expect(workflow("smithering.tsx")).toMatch(/id="design:draft"[^>]+agent=\{sol\}/);
     const sweep = workflow("sweep.tsx");
@@ -172,9 +171,7 @@ describe("the checked-in registry", () => {
     try {
       const nonce = `${Date.now()}-${Math.random()}`;
       const roles = await import(`${pathToFileURL(resolve(import.meta.dir, "../.smithers/components/roles.ts")).href}?case=${nonce}`);
-      const ddd = await import(`${pathToFileURL(resolve(import.meta.dir, "../.smithers/lib/ddd/dddAgents.ts")).href}?case=${nonce}`);
-
-      for (const chain of [roles.implementer, roles.validator, ddd.providers.sol, ddd.providers.terra, ddd.providers.luna]) {
+      for (const chain of [roles.implementer, roles.validator]) {
         expect(chain[0].cliEngine).toBe("codex");
         expect(chain[1].cliEngine).toBe("codex");
         expect(chain[1].opts.configDir).toBe(configDir);

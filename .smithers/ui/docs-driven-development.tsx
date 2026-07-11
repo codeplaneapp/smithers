@@ -200,39 +200,19 @@ export function workflowKeyFromPathname(pathname: string = typeof window === "un
 }
 
 function slugForWorkflowName(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "app";
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "workflow";
 }
 
 export function builderWorkflowName(description: string): string {
   return `build-${slugForWorkflowName(description)}`;
 }
 
-export function createWorkflowPromptForApp(description: string): string {
+export function createWorkflowPrompt(description: string): string {
   const workflowName = builderWorkflowName(description);
   return (
-    `Create a workflow named ${workflowName} that scaffolds and iteratively builds this new app, docs-first: ${description}\n` +
-    `The workflow id and file slug must be exactly ${workflowName}.\n` +
-    "The workflow must maintain .smithers/spec/features.json for the new app as it builds (honest statuses, " +
-    "gaps recorded in missing[]), so docs-driven-development can run over it from day one."
+    `Create a workflow named ${workflowName} for this durable process: ${description}\n` +
+    `The workflow id and file slug must be exactly ${workflowName}. Include suitable verification and a companion skill.`
   );
-}
-
-// Whether to keep polling the generate-docs run's kickoff-bug-scan node output.
-// Kickoff output is immutable once produced, so a single successful read is
-// final: stop as soon as the bug-scan run id is known, the kickoff row has
-// arrived (launched:false, gate-blocked, or a launch that never parsed a run
-// id), or the generate run itself reached a terminal status.
-export function shouldPollKickoffNode(params: {
-  generateRunId: string | null | undefined;
-  bugScanRunId: string;
-  kickoffReady: boolean;
-  generateRunStatus: string | undefined;
-}): boolean {
-  if (!params.generateRunId) return false;
-  if (params.bugScanRunId) return false;
-  if (params.kickoffReady) return false;
-  if (isTerminalRunStatus(params.generateRunStatus)) return false;
-  return true;
 }
 
 export type AppProps = {
@@ -300,10 +280,6 @@ export function App({
   const triageOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "triage", iteration: 0 });
   const materializedTicketsOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "materialize-tickets", iteration: 0 });
   const roundSummaryOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "round-summary", iteration: 0 });
-  // Follows the Start pane's generate-docs run: its kickoff node reports the
-  // detached bug-scan run id.
-  const kickoffOut = useGatewayNodeOutput({ runId: generateRun.runId ?? undefined, nodeId: "round-summary", iteration: 0 });
-
   const runsState = useGatewayRuns({ filter: { limit: 100 } });
   const runDetail = useGatewayRun(liveRunId);
   const createRunDetail = useGatewayRun(createRun.runId ?? undefined);
@@ -320,9 +296,6 @@ export function App({
     }, 10_000);
     return () => window.clearInterval(id);
   }, [refetchRuns]);
-
-  const kickoffRow = rowOf(kickoffOut.data);
-  const bugScanRunId = asString(kickoffRow?.bugScanRunId ?? kickoffRow?.bug_scan_run_id);
 
   useEffect(() => {
     saveSpecDrafts(drafts);
@@ -345,7 +318,6 @@ export function App({
   const summary = rowOf(roundSummaryOut.data);
   const triage = extractTriage(triageOut.data);
   const materializedTickets = extractMaterializedTickets(materializedTicketsOut.data);
-  const bugScanSummary = bugScanRunId ? "" : asString(kickoffRow?.summary);
 
   const runDetailRow = rowOf(runDetail.data);
   const createRunRow = rowOf(createRunDetail.data);
@@ -354,7 +326,6 @@ export function App({
   const activeRunWorkflowKey =
     asString(runDetailRow?.workflowKey ?? runDetailRow?.workflowName ?? runDetailRow?.workflow) ||
     (generateRun.runId && liveRunId === generateRun.runId ? "docs-driven-development" : "") ||
-    (bugScanRunId && liveRunId === bugScanRunId ? "docs-driven-development" : "") ||
     (DDD_WORKFLOW_KEYS.has(pageWorkflowKey) ? pageWorkflowKey : "") ||
     "docs-driven-development";
   const runs =
@@ -416,17 +387,6 @@ export function App({
   }, [liveRunId, expectsDddNodeOutputs, bootstrapReady, roundSummaryReady, refetchDddNodeOutputs]);
   const createRunStatus = asString(createRunRow?.status) || (createRun.runId ? "running" : undefined);
   const generateRunStatus = asString(generateRunRow?.status) || (generateRun.runId ? "running" : undefined);
-  const kickoffReady = Boolean(kickoffRow);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!shouldPollKickoffNode({ generateRunId: generateRun.runId, bugScanRunId, kickoffReady, generateRunStatus })) {
-      return;
-    }
-    const id = window.setInterval(() => {
-      void kickoffOut.refetch();
-    }, 1_000);
-    return () => window.clearInterval(id);
-  }, [generateRun.runId, bugScanRunId, kickoffReady, generateRunStatus, kickoffOut.refetch]);
   const createRunLiveState: LaunchState = {
     ...createRun,
     status: createRunStatus,
@@ -638,7 +598,7 @@ export function App({
       });
   }
 
-  function launchCreateApp(description: string) {
+  function launchCreateWorkflow(description: string) {
     if (createLaunchInFlight.current) return;
     createLaunchInFlight.current = true;
     setCreateRun({ runId: null, error: null, pending: true });
@@ -646,7 +606,7 @@ export function App({
       .launchRun({
         workflow: "create-workflow",
         input: {
-          prompt: createWorkflowPromptForApp(description),
+          prompt: createWorkflowPrompt(description),
         },
       })
       .then((result: unknown) => {
@@ -753,12 +713,10 @@ export function App({
             <NewEntryMenu
               open={newMenuOpen}
               onOpenChange={setNewMenuOpen}
-              onCreateApp={launchCreateApp}
+              onCreateWorkflow={launchCreateWorkflow}
               onGenerateDocs={launchGenerateDocs}
               createState={createRunLiveState}
               generateState={generateRunLiveState}
-              bugScanRunId={bugScanRunId}
-              bugScanSummary={bugScanSummary}
               workflowUiHref={workflowUiHref}
             />
           )}
@@ -838,12 +796,10 @@ export function App({
           <StartPane
             stub={stub}
             onClose={stub ? null : () => setShowStart(false)}
-            onCreateApp={launchCreateApp}
+            onCreateWorkflow={launchCreateWorkflow}
             onGenerateDocs={launchGenerateDocs}
             createState={createRunLiveState}
             generateState={generateRunLiveState}
-            bugScanRunId={bugScanRunId}
-            bugScanSummary={bugScanSummary}
             workflowUiHref={workflowUiHref}
             onReload={reloadDocsUi}
           />

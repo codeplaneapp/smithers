@@ -6,7 +6,7 @@ The control-plane package stores organizations, teams, projects, billing account
 
 ## What you can do
 
-Build hosted or multi-tenant Smithers services on durable org/project/usage/audit primitives without storing secret values in Smithers rows.
+Build hosted or multi-tenant Smithers services on durable `org/project/usage/audit` primitives without storing secret values in Smithers rows.
 
 ## Capabilities
 
@@ -16,7 +16,7 @@ Create orgs, teams, project grants, billing accounts, and identity providers in 
 
 ### Usage and limits
 
-Record usage, summarize usage, set quotas, and check daily/weekly/monthly rolling limit windows.
+Record usage, summarize usage, set quotas, and check `daily/weekly/monthly` rolling limit windows.
 
 ### Secret references
 
@@ -45,7 +45,7 @@ Record audit events and export org data, usage summaries, secret refs, and audit
 
 ## Observability
 
-- Usage events and audit events are durable rows intended for hosted export and billing/reporting layers.
+- Usage events and audit events are durable rows intended for hosted export and `billing/reporting` layers.
 - Token-store tests persist action-token use audits without printing bearer secrets.
 
 ## Debugging
@@ -69,4 +69,4 @@ Record audit events and export org data, usage summaries, secret refs, and audit
 ## Open gaps
 
 - This is a data-contract package, not a complete hosted control plane: SSO enforcement, billing checkout, tenant-isolated gateway deployment, object storage, and compliance operations live outside this repo.
-- Usage command covers account/provider usage, not a full multi-tenant billing UI.
+- Usage command covers `account/provider` usage, not a full multi-tenant billing UI.

@@ -16,14 +16,10 @@ export type StartPaneProps = {
   /** True when the spec is missing or the seeded stub: the pane is the landing view and cannot be dismissed. */
   stub: boolean;
   onClose: (() => void) | null;
-  onCreateApp: (description: string) => void;
+  onCreateWorkflow: (description: string) => void;
   onGenerateDocs: () => void;
   createState: LaunchState;
   generateState: LaunchState;
-  /** Detached follow-up run id reported by the docs audit. */
-  bugScanRunId: string;
-  /** Kickoff summary when the scan was blocked or failed instead of launched. */
-  bugScanSummary?: string;
   /** Same-origin href to another workflow's run UI (e.g. create-workflow). */
   workflowUiHref: (workflowKey: string, runId: string) => string;
   /** Reloads the current DDD UI after generated modules have changed. */
@@ -33,12 +29,10 @@ export type StartPaneProps = {
 export type NewEntryMenuProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreateApp: (description: string) => void;
+  onCreateWorkflow: (description: string) => void;
   onGenerateDocs: () => void;
   createState: LaunchState;
   generateState: LaunchState;
-  bugScanRunId: string;
-  bugScanSummary?: string;
   workflowUiHref: (workflowKey: string, runId: string) => string;
 };
 
@@ -82,32 +76,6 @@ function LaunchStatus({ state, label, href, testId = "ddd-start-launched" }: { s
   );
 }
 
-function BugScanStatus({ runId, summary, href }: { runId: string; summary?: string; href?: string }) {
-  if (runId) {
-    return (
-      <p className="start-status" data-testid="ddd-start-bug-scan">
-        <span className="badge ok">Bug scan</span> Async scan running{" "}
-        {href ? (
-          <a className="doc-link" href={href} target="_blank" rel="noreferrer">
-            {runId}
-          </a>
-        ) : (
-          <span className="pill">{runId}</span>
-        )}{" "}
-        confirmed findings appear in Tickets.
-      </p>
-    );
-  }
-  if (!summary) return null;
-  const failed = /failed|blocked|not approved/i.test(summary);
-  return (
-    <p className="start-status" data-testid="ddd-start-bug-scan-blocked">
-      <span className={`badge ${failed ? "bad" : "warn"}`}>{failed ? "Bug scan blocked" : "Bug scan"}</span>
-      {summary}
-    </p>
-  );
-}
-
 export function NewEntryMenu(props: NewEntryMenuProps) {
   const [description, setDescription] = useState("");
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -116,9 +84,6 @@ export function NewEntryMenu(props: NewEntryMenuProps) {
   const generateDisabled = !!props.generateState.pending || launchIsActive(props.generateState);
   const generatedDocsRunHref = props.generateState.runId
     ? props.workflowUiHref("docs-driven-development", props.generateState.runId)
-    : undefined;
-  const bugScanRunHref = props.bugScanRunId
-    ? props.workflowUiHref("docs-driven-development", props.bugScanRunId)
     : undefined;
 
   useEffect(() => {
@@ -160,7 +125,7 @@ export function NewEntryMenu(props: NewEntryMenuProps) {
             </button>
           </div>
           <label className="filter-field">
-            <span>New app</span>
+            <span>New workflow</span>
             <textarea
               className="search-input start-textarea"
               data-testid="ddd-new-description"
@@ -176,13 +141,13 @@ export function NewEntryMenu(props: NewEntryMenuProps) {
             className="button primary"
             data-testid="ddd-new-create-launch"
             disabled={createDisabled}
-            onClick={() => props.onCreateApp(description.trim())}
+            onClick={() => props.onCreateWorkflow(description.trim())}
           >
-            {props.createState.pending ? "Launching builder..." : "Create app + builder workflow"}
+            {props.createState.pending ? "Launching authoring..." : "Create workflow"}
           </button>
           <LaunchStatus
             state={props.createState}
-            label="create-workflow is designing the builder."
+            label="create-workflow is designing your workflow."
             href={props.createState.runId ? props.workflowUiHref("create-workflow", props.createState.runId) : undefined}
             testId="ddd-new-create-run"
           />
@@ -202,7 +167,6 @@ export function NewEntryMenu(props: NewEntryMenuProps) {
             href={generatedDocsRunHref}
             testId="ddd-new-generate-run"
           />
-          <BugScanStatus runId={props.bugScanRunId} summary={props.bugScanSummary} href={bugScanRunHref} />
         </section>
       ) : null}
     </div>
@@ -210,8 +174,8 @@ export function NewEntryMenu(props: NewEntryMenuProps) {
 }
 
 /**
- * The way in. Two honest entries: scaffold a brand-new app (via the
- * create-workflow authoring workflow, which builds the app's builder workflow)
+ * The way in. Two honest entries: scaffold a brand-new workflow (via the
+ * create-workflow authoring workflow, which builds the workflow's builder plan)
  * or generate the spec from the code that already exists.
  */
 export function StartPane(props: StartPaneProps) {
@@ -224,9 +188,6 @@ export function StartPane(props: StartPaneProps) {
   const updateDescription = (event: FormEvent<HTMLTextAreaElement>) => setDescription(event.currentTarget.value);
   const generatedDocsRunHref = props.generateState.runId
     ? props.workflowUiHref("docs-driven-development", props.generateState.runId)
-    : undefined;
-  const bugScanRunHref = props.bugScanRunId
-    ? props.workflowUiHref("docs-driven-development", props.bugScanRunId)
     : undefined;
   const reloadGeneratedDocs = () => {
     if (props.onReload) {
@@ -249,18 +210,17 @@ export function StartPane(props: StartPaneProps) {
         </div>
         <p>
           Docs-driven development keeps a living spec of your product and puts agents to work closing the gaps
-          in it. Start from a brand-new app idea, or point it at the code you already have.
+          in it. Start from a brand-new workflow idea, or point it at the code you already have.
         </p>
       </section>
 
       <div className="grid2 start-options">
         <section className="card" data-testid="ddd-start-create">
-          <span className="eyebrow">New app</span>
-          <h2>Create a new app</h2>
+          <span className="eyebrow">New workflow</span>
+          <h2>Create a new workflow</h2>
           <p>
-            Describe the app. Smithers authors a dedicated builder workflow for it (clarify, design, scaffold,
-            verify), then that workflow builds the app docs-first: its spec stays the source of truth while the
-            code grows to match.
+            Describe the durable process you want. The authoring workflow clarifies it, designs the graph, scaffolds
+            its files, verifies the graph and UI, and writes its companion skill.
           </p>
           <textarea
             className="search-input start-textarea"
@@ -277,14 +237,14 @@ export function StartPane(props: StartPaneProps) {
               className="button primary"
               data-testid="ddd-start-create-launch"
               disabled={createDisabled}
-              onClick={() => props.onCreateApp(description.trim())}
+              onClick={() => props.onCreateWorkflow(description.trim())}
             >
-              {props.createState.pending ? "Launching builder..." : createAgain ? "Create another app + builder workflow" : "Create app + builder workflow"}
+              {props.createState.pending ? "Launching authoring..." : createAgain ? "Create another workflow" : "Create workflow"}
             </button>
           </div>
           <LaunchStatus
             state={props.createState}
-            label="create-workflow is designing the builder."
+            label="create-workflow is designing your workflow."
             href={props.createState.runId ? props.workflowUiHref("create-workflow", props.createState.runId) : undefined}
           />
         </section>
@@ -293,9 +253,8 @@ export function StartPane(props: StartPaneProps) {
           <span className="eyebrow">Existing code</span>
           <h2>Generate docs from this repo</h2>
           <p>
-            Agents read your README, docs, and code, then write the feature spec with honest statuses: proven
-            things are fixed, everything else is recorded as a gap. When the spec lands, an async bug scan
-            starts hunting your code and files tickets for what it can verify.
+            The workflow reads your README, docs, manifests, and code, then writes the feature spec with honest
+            statuses: proven behavior is fixed and everything else remains an explicit gap or ticket.
           </p>
           <div className="start-actions">
             <button
@@ -314,7 +273,6 @@ export function StartPane(props: StartPaneProps) {
             href={generatedDocsRunHref}
             testId="ddd-start-generate-run"
           />
-          <BugScanStatus runId={props.bugScanRunId} summary={props.bugScanSummary} href={bugScanRunHref} />
           {props.generateState.runId ? (
             isTerminalRunStatus(props.generateState.status) ? (
               <div className="start-reload" data-testid="ddd-start-reload-path">

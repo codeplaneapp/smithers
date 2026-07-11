@@ -174,7 +174,6 @@ export const featuresData = [
       "apps/cli/tests/init.e2e.test.js",
       "apps/cli/tests/init-durable.e2e.test.js",
       "apps/cli/tests/init-installed-layout.test.js",
-      "apps/cli/tests/init-pack-updates.test.js",
       "apps/cli/tests/seeded-pack-fresh.test.js",
       "apps/cli/tests/seeded-workflows-run.e2e.test.js",
       "apps/cli/tests/starter-gallery.test.js",
@@ -827,7 +826,6 @@ export const featuresData = [
       "apps/cli/tests/local-ui-gateway-csrf.test.js",
       "apps/cli/tests/workflow-ui-all.e2e.test.js",
       "apps/cli/tests/workflow-pack-ui-coverage.test.js",
-      ".smithers/tests/docs-driven-development-ui.e2e.test.tsx",
       ".smithers/tests/open-code-review-ui.e2e.test.ts"
     ],
     "observability": [
@@ -2214,13 +2212,9 @@ export const featuresData = [
       }
     ],
     "tests": [
-      ".smithers/tests/ddd-bug-scan-run.e2e.test.ts",
-      ".smithers/tests/ddd-generate-bug-scan.test.ts",
-      ".smithers/tests/ddd-generate-docs-run.e2e.test.ts",
       ".smithers/tests/ddd-scripts.test.ts",
       ".smithers/tests/ddd-ui-parsers.test.ts",
       ".smithers/tests/docs-driven-development-run.e2e.test.ts",
-      ".smithers/tests/docs-driven-development-ui.e2e.test.tsx",
       ".smithers/tests/docs-driven-development-workflow.test.ts",
       ".smithers/ui/ddd-tabs.test.tsx",
       "bun .smithers/lib/ddd/build.ts"

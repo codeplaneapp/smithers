@@ -12,7 +12,7 @@ Keep an honest, code-backed product spec and turn open gaps into prioritized age
 
 ### Build gate
 
-`bun .smithers/lib/ddd/build.ts` validates `features.json` and regenerates derived docs and UI modules.
+`bun .smithers/lib/ddd/build.ts validates features.json and regenerates derived docs and UI modules`.
 
 ### Improvement loop
 
@@ -47,13 +47,9 @@ docs-driven-development.tsx runs bootstrap, metaTicket, audit, spec update, tria
 
 ## Test cases
 
-- `.smithers/tests/ddd-bug-scan-run.e2e.test.ts`
-- `.smithers/tests/ddd-generate-bug-scan.test.ts`
-- `.smithers/tests/ddd-generate-docs-run.e2e.test.ts`
 - `.smithers/tests/ddd-scripts.test.ts`
 - `.smithers/tests/ddd-ui-parsers.test.ts`
 - `.smithers/tests/docs-driven-development-run.e2e.test.ts`
-- `.smithers/tests/docs-driven-development-ui.e2e.test.tsx`
 - `.smithers/tests/docs-driven-development-workflow.test.ts`
 - `.smithers/ui/ddd-tabs.test.tsx`
 - `bun .smithers/lib/ddd/build.ts`
@@ -65,9 +61,9 @@ docs-driven-development.tsx runs bootstrap, metaTicket, audit, spec update, tria
 
 ## Debugging
 
-- Run `bun .smithers/lib/ddd/build.ts` after any `features.json` or overview.md change; fix schema errors before committing.
+- Run `bun .smithers/lib/ddd/build.ts after any features.json or overview.md change`; fix schema errors before committing.
 - Do not hand-edit `.smithers/spec/content/features/`<id>.md or `.smithers/ui/ddd-*.generated.ts`; regenerate them.
-- Do not edit running orchestration workflow files while using this generation task; record workflow/script bugs in feature missing\[\] instead.
+- Do not edit running orchestration workflow files while using this generation task; record `workflow/script` bugs in feature missing\[\] instead.
 
 ## Architecture
 
@@ -78,7 +74,7 @@ docs-driven-development.tsx runs bootstrap, metaTicket, audit, spec update, tria
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
-- 2026-07-06 adversarial review: reran `bun .smithers/lib/ddd/build.ts` after spec corrections; it validated 22 features and regenerated derived `docs/UI` modules.
+- 2026-07-06 adversarial review: reran `bun .smithers/lib/ddd/build.ts after spec corrections`; it validated 22 features and regenerated derived `docs/UI` modules.
 - `.smithers/spec/features.json`
 - `.smithers/spec/content/overview.md`
 - `.smithers/lib/ddd/*.ts`
@@ -88,4 +84,4 @@ docs-driven-development.tsx runs bootstrap, metaTicket, audit, spec update, tria
 ## Open gaps
 
 - Image upload target: Crepe ImageBlock needs an asset server; v1 wires ?assetBaseUrl passthrough but ships no asset server, so uploads are disabled when absent.
-- Spec statuses can drift if refresh tasks do not run the package/e2e tests they cite; keep missing\[\] explicit when proof is absent.
+- Spec statuses can drift if refresh tasks do not run the `package/e2e` tests they cite; keep missing\[\] explicit when proof is absent.

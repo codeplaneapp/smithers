@@ -29,7 +29,7 @@ const { AuditTab } = await import("./ddd-AuditTab");
 const { TicketsTab } = await import("./ddd-TicketsTab");
 const { LiveTab } = await import("./ddd-LiveTab");
 const { NewEntryMenu, StartPane } = await import("./ddd-StartPane");
-const { App, builderWorkflowName, createWorkflowPromptForApp, shouldPollKickoffNode } = await import("./docs-driven-development");
+const { App, builderWorkflowName, createWorkflowPrompt } = await import("./docs-driven-development");
 type AppProps = Parameters<typeof App>[0];
 const {
   Tutorial,
@@ -280,7 +280,7 @@ function makeStaticWorkflow(name: string, dbPath: string, delayMs = 0) {
             slot: 1,
             featureId: "docs-driven-development",
             title: "Top-level App test",
-            agent: "codex",
+            agent: "implementation",
             taskType: "e2e",
             reason: "Exercise App launch state.",
           }],
@@ -322,20 +322,10 @@ async function mountAppWithGateway(
     ui: { entry: "docs-driven-development.tsx", title: "Docs Driven Development" },
   });
   gateway.register("create-workflow", makeStaticWorkflow("create-workflow", join(root, "create.db")) as Parameters<typeof gateway.register>[1]);
-  gateway.register("ddd-generate-docs", makeStaticWorkflow("ddd-generate-docs", join(root, "generate.db")) as Parameters<typeof gateway.register>[1]);
-  gateway.register("ddd-bug-scan", makeStaticWorkflow("ddd-bug-scan", join(root, "bug.db")) as Parameters<typeof gateway.register>[1]);
   gateway.register("other-workflow", makeStaticWorkflow("other-workflow", join(root, "other.db")) as Parameters<typeof gateway.register>[1]);
   if (pathname.includes("url-run")) {
     await gateway.startRun("docs-driven-development", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "url-run", { resume: false });
     await gateway.inflightRuns.get("url-run");
-  }
-  if (pathname.includes("generate-run")) {
-    await gateway.startRun("ddd-generate-docs", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "generate-run", { resume: false });
-    await gateway.inflightRuns.get("generate-run");
-  }
-  if (pathname.includes("bug-run")) {
-    await gateway.startRun("ddd-bug-scan", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "bug-run", { resume: false });
-    await gateway.inflightRuns.get("bug-run");
   }
   if (pathname.includes("other-run")) {
     await gateway.startRun("other-workflow", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "other-run", { resume: false });
@@ -394,13 +384,13 @@ describe("DDD tabs and components", () => {
 
     const createButton = app.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement;
     expect(createButton.disabled).toBe(true);
-    await act(async () => setInputValue(app.container.querySelector('[data-testid="ddd-start-description"]') as HTMLTextAreaElement, "Build a stub-mode app"));
+    await act(async () => setInputValue(app.container.querySelector('[data-testid="ddd-start-description"]') as HTMLTextAreaElement, "Build a stub-mode workflow"));
     expect(createButton.disabled).toBe(false);
     await act(async () => createButton.click());
     await waitFor(() => expect(text(app.container.querySelector('[data-testid="ddd-start-launched"]') as HTMLElement)).toContain("create-workflow"), 10_000);
 
     await act(async () => (app.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).click());
-    await waitFor(() => expect(text(app.container.querySelector('[data-testid="ddd-start-generate-run"]') as HTMLElement)).toContain("ddd-generate-docs"), 10_000);
+    await waitFor(() => expect(text(app.container.querySelector('[data-testid="ddd-start-generate-run"]') as HTMLElement)).toContain("docs audit"), 10_000);
     expect(app.container.querySelector('[data-testid="ddd-start-pane"]')).toBeTruthy();
     expect(app.container.querySelector('[data-testid="ddd-subhead"]')?.hasAttribute("hidden")).toBe(true);
   }, 60_000);
@@ -502,20 +492,15 @@ describe("DDD tabs and components", () => {
     }
   }, 120_000);
 
-  test("App includes the active non-DDD URL run and falls back to sibling DDD workflow source", async () => {
+  test("App includes the active non-DDD URL run and shows the installed DDD workflow source", async () => {
     const other = await mountAppWithGateway("/workflows/other-workflow?runId=other-run&tutorial=off");
     await act(async () => (other.container.querySelector('[data-testid="ddd-tab-live"]') as HTMLButtonElement).click());
     await waitFor(() => expect(text(other.container.querySelector('[data-testid="ddd-live-tab"]') as HTMLElement)).toContain("other-run"));
 
     await other.unmount();
-    const generate = await mountAppWithGateway("/workflows/ddd-generate-docs?runId=generate-run&tutorial=off");
-    await act(async () => (generate.container.querySelector('[data-testid="ddd-tab-live"]') as HTMLButtonElement).click());
-    await waitFor(() => expect(text(generate.container.querySelector('[data-testid="ddd-workflow-source"]') as HTMLElement)).toContain("DDD Generate Docs"));
-
-    await generate.unmount();
-    const bug = await mountAppWithGateway("/workflows/ddd-bug-scan?runId=bug-run&tutorial=off");
-    await act(async () => (bug.container.querySelector('[data-testid="ddd-tab-live"]') as HTMLButtonElement).click());
-    await waitFor(() => expect(text(bug.container.querySelector('[data-testid="ddd-workflow-source"]') as HTMLElement)).toContain("DDD Bug Scan"));
+    const ddd = await mountAppWithGateway("/workflows/docs-driven-development?runId=url-run&tutorial=off");
+    await act(async () => (ddd.container.querySelector('[data-testid="ddd-tab-live"]') as HTMLButtonElement).click());
+    await waitFor(() => expect(text(ddd.container.querySelector('[data-testid="ddd-workflow-source"]') as HTMLElement)).toContain("docs-driven-development"));
   }, 60_000);
 
   test("FeaturesTab renders real feature tiers, counts, and opens a feature", async () => {
@@ -592,7 +577,7 @@ describe("DDD tabs and components", () => {
       status: "partial",
       priority: "p0",
       owner: "qa",
-      group: "Run & observe",
+      group: "Operate",
       userValue: "Inspect a real DDD surface.",
       capabilities: [{ title: "Inspect", detail: "Shows details.", status: "fixed" }],
       endpoints: [{ method: "POST", path: "/runs", doc: "reference/api.md#runs", note: "launch" }],
@@ -603,7 +588,7 @@ describe("DDD tabs and components", () => {
       architecture: ["gateway"],
       evidence: ["screenshot"],
       changes: ["change note"],
-      diffHints: ["packages/server/src/index.ts"],
+      diffHints: ["src/server/index.ts"],
       missing: ["browser proof"],
     };
 
@@ -1550,14 +1535,14 @@ describe("DDD tabs and components", () => {
         spec={{ status: "ready", summary: "spec updated" }}
         metaTicket={{ summary: "meta ticket" }}
         summary={{ status: "partial", summary: "summary" }}
-        triage={[{ slot: 1, title: "Triage DDD", agent: "codex", reason: "reason", taskType: "e2e" }]}
+        triage={[{ slot: 1, title: "Triage docs", agent: "implementation", reason: "reason", taskType: "e2e" }]}
         onOpenFeature={(next, note) => opened.push({ feature: next, note })}
       />,
     );
 
     expect(harness.container.querySelectorAll('[data-testid="ddd-finding"]').length).toBe(2);
     expect(text(harness.container)).toContain("bootstrap passed");
-    expect(text(harness.container)).toContain("Triage DDD");
+    expect(text(harness.container)).toContain("Triage docs");
 
     await act(async () => (harness.container.querySelector('[data-testid="ddd-finding"]') as HTMLButtonElement).click());
     expect(opened[0]?.feature.id).toBe(feature.id);
@@ -1618,7 +1603,7 @@ describe("DDD tabs and components", () => {
         updatedAtMs: 1,
         featureId: "feature-one",
         featureTitle: "Feature One",
-        content: "# First ticket\n\nRun: run-1\nSlot: 1\nAgent: codex\nTask type: e2e\nSeverity: major\nFile: packages/core/src/index.ts\n\n## Gap\n\nBody",
+        content: "# First ticket\n\nRun: run-1\nSlot: 1\nAgent: implementation\nTask type: e2e\nSeverity: major\nFile: src/core/index.ts\n\n## Gap\n\nBody",
       },
       { path: "tickets/two.md", kind: "issue", status: null, updatedAtMs: 0, content: "No heading" },
       { path: "tickets/snake.md", kind: "ticket", status: "todo", feature_id: "snake-feature", feature_title: "Snake Feature", content: "# Snake ticket" },
@@ -1643,8 +1628,8 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain("Body");
     expect(text(harness.container)).toContain("Feature One");
     expect(text(harness.container)).toContain("run-1");
-    expect(text(harness.container)).toContain("codex");
-    expect(text(harness.container)).toContain("packages/core/src/index.ts");
+    expect(text(harness.container)).toContain("implementation");
+    expect(text(harness.container)).toContain("src/core/index.ts");
 
     await act(async () => ticketClose.click());
     expect(harness.container.querySelector('[data-testid="ddd-ticket-detail"]')).toBeFalsy();
@@ -1665,7 +1650,7 @@ describe("DDD tabs and components", () => {
       "",
       "Feature: Docs driven development (docs-driven-development)",
       "Status: todo · Kind: e2e · Priority: P0 · Severity: major · Feature status: partial",
-      "Run: run-1 · Slot: 2 · Agent: codex · Task type: e2e",
+      "Run: run-1 · Slot: 2 · Agent: implementation · Task type: e2e",
       "File: .smithers/tests/docs-driven-development-run.e2e.test.ts",
       "",
       "## Gap",
@@ -1695,13 +1680,13 @@ describe("DDD tabs and components", () => {
         priority: "p2",
         updatedAtMs: 0,
         featureId: "cli",
-        featureTitle: "smithers CLI",
+        featureTitle: "Sample CLI",
         content: [
           "# Repair CLI read path",
           "",
-          "Feature: smithers CLI (cli)",
+          "Feature: Sample CLI (cli)",
           "Status: in-progress · Kind: fix · Priority: P2 · Feature status: partial",
-          "File: apps/cli/src/index.ts",
+          "File: src/cli/index.ts",
           "",
           "## Gap",
           "",
@@ -1825,21 +1810,20 @@ describe("DDD tabs and components", () => {
       <NewEntryMenu
         open={open}
         onOpenChange={(next) => { open = next; }}
-        onCreateApp={(description) => created.push(description)}
+        onCreateWorkflow={(description) => created.push(description)}
         onGenerateDocs={() => { generateCount += 1; }}
         createState={{ runId: null, error: null }}
         generateState={{ runId: null, error: null }}
-        bugScanRunId=""
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
       />,
     );
 
     expect(harness.container.querySelector('[data-testid="ddd-new-menu"]')).toBeTruthy();
     expect((harness.container.querySelector('[data-testid="ddd-new-create-launch"]') as HTMLButtonElement).disabled).toBe(true);
-    await act(async () => setInputValue(harness.container.querySelector('[data-testid="ddd-new-description"]') as HTMLTextAreaElement, "  Build a compact app  "));
+    await act(async () => setInputValue(harness.container.querySelector('[data-testid="ddd-new-description"]') as HTMLTextAreaElement, "  Build a compact workflow  "));
     await act(async () => (harness.container.querySelector('[data-testid="ddd-new-create-launch"]') as HTMLButtonElement).click());
     await act(async () => (harness.container.querySelector('[data-testid="ddd-new-generate-launch"]') as HTMLButtonElement).click());
-    expect(created).toEqual(["Build a compact app"]);
+    expect(created).toEqual(["Build a compact workflow"]);
     expect(generateCount).toBe(1);
 
     await act(async () => (harness.container.querySelector('button[aria-label="Close new menu"]') as HTMLButtonElement).click());
@@ -1847,28 +1831,11 @@ describe("DDD tabs and components", () => {
   });
 
   test("builderWorkflowName creates deterministic build workflow names from descriptions", () => {
-    expect(builderWorkflowName("A markdown notes search app")).toBe("build-a-markdown-notes-search-app");
-    expect(builderWorkflowName("!!!")).toBe("build-app");
+    expect(builderWorkflowName("A markdown search workflow")).toBe("build-a-markdown-search-workflow");
+    expect(builderWorkflowName("!!!")).toBe("build-workflow");
     expect(builderWorkflowName("x".repeat(80))).toBe(`build-${"x".repeat(48)}`);
-    expect(createWorkflowPromptForApp("A markdown notes search app")).toContain("workflow named build-a-markdown-notes-search-app");
-    expect(createWorkflowPromptForApp("A markdown notes search app")).toContain("file slug must be exactly build-a-markdown-notes-search-app");
-  });
-
-  test("shouldPollKickoffNode stops polling once the kickoff row lands, the bug-scan id is known, or the generate run is terminal", () => {
-    const base = { generateRunId: "gen-1", bugScanRunId: "", kickoffReady: false, generateRunStatus: "running" as string | undefined };
-    // Poll while the generate run is live and no kickoff output has arrived.
-    expect(shouldPollKickoffNode(base)).toBe(true);
-    // No generate run to follow yet.
-    expect(shouldPollKickoffNode({ ...base, generateRunId: null })).toBe(false);
-    expect(shouldPollKickoffNode({ ...base, generateRunId: undefined })).toBe(false);
-    // Bug-scan run id resolved (launched:true path).
-    expect(shouldPollKickoffNode({ ...base, bugScanRunId: "scan-2" })).toBe(false);
-    // Kickoff row produced with no run id (launched:false, gate-blocked, or an
-    // unparsed launch) — the immutable output has been read once, so stop.
-    expect(shouldPollKickoffNode({ ...base, kickoffReady: true })).toBe(false);
-    // Generate run failed before the kickoff node ever ran.
-    expect(shouldPollKickoffNode({ ...base, generateRunStatus: "failed" })).toBe(false);
-    expect(shouldPollKickoffNode({ ...base, generateRunStatus: "finished" })).toBe(false);
+    expect(createWorkflowPrompt("A markdown search workflow")).toContain("workflow named build-a-markdown-search-workflow");
+    expect(createWorkflowPrompt("A markdown search workflow")).toContain("file slug must be exactly build-a-markdown-search-workflow");
   });
 
   test("StartPane validates trimmed descriptions, hides close in stub mode, and launches with trimmed text", async () => {
@@ -1879,11 +1846,10 @@ describe("DDD tabs and components", () => {
       <StartPane
         stub
         onClose={null}
-        onCreateApp={(description) => created.push(description)}
+        onCreateWorkflow={(description) => created.push(description)}
         onGenerateDocs={() => { generateCount += 1; }}
         createState={{ runId: null, error: null }}
         generateState={{ runId: null, error: null }}
-        bugScanRunId=""
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
       />,
     );
@@ -1896,10 +1862,10 @@ describe("DDD tabs and components", () => {
     await act(async () => setInputValue(textarea, "   short  "));
     expect(launch.disabled).toBe(true);
 
-    await act(async () => setInputValue(textarea, "   Build a docs-first app   "));
+    await act(async () => setInputValue(textarea, "   Build a docs-first workflow   "));
     expect(launch.disabled).toBe(false);
     await act(async () => launch.click());
-    expect(created).toEqual(["Build a docs-first app"]);
+    expect(created).toEqual(["Build a docs-first workflow"]);
 
     await act(async () => (harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).click());
     expect(generateCount).toBe(1);
@@ -1908,11 +1874,10 @@ describe("DDD tabs and components", () => {
       <StartPane
         stub={false}
         onClose={() => { closed += 1; }}
-        onCreateApp={(description) => created.push(description)}
+        onCreateWorkflow={(description) => created.push(description)}
         onGenerateDocs={() => { generateCount += 1; }}
         createState={{ runId: null, error: null }}
         generateState={{ runId: null, error: null }}
-        bugScanRunId=""
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
       />,
     );
@@ -1922,18 +1887,16 @@ describe("DDD tabs and components", () => {
     expect(closed).toBe(1);
   });
 
-  test("StartPane launch states disable buttons and render errors, run links, and bug-scan status", async () => {
+  test("StartPane launch states disable buttons and render errors and run links", async () => {
     let reloads = 0;
     const harness = await mount(
       <StartPane
         stub={false}
         onClose={() => undefined}
-        onCreateApp={() => undefined}
+        onCreateWorkflow={() => undefined}
         onGenerateDocs={() => undefined}
         createState={{ runId: "create-run-1", error: null }}
         generateState={{ runId: "generate-run-1", error: null }}
-        bugScanRunId="bug-run-1"
-        bugScanSummary=""
         workflowUiHref={(workflow, runId) => `/workflows/${encodeURIComponent(workflow)}?runId=${encodeURIComponent(runId)}`}
         onReload={() => { reloads += 1; }}
       />,
@@ -1941,15 +1904,12 @@ describe("DDD tabs and components", () => {
 
     expect((harness.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement).disabled).toBe(true);
     expect((harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).disabled).toBe(true);
-    expect(text(harness.container)).toContain("create-workflow is designing the builder.");
-    expect(text(harness.container)).toContain("ddd-generate-docs is reading your repo.");
-    expect(text(harness.container)).toContain("bug-run-1");
+    expect(text(harness.container)).toContain("create-workflow is designing your workflow.");
+    expect(text(harness.container)).toContain("The docs audit is reading your repository.");
     const link = harness.container.querySelector('[data-testid="ddd-start-launched"] a') as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/workflows/create-workflow?runId=create-run-1");
     const generateLink = harness.container.querySelector('[data-testid="ddd-start-generate-run"] a') as HTMLAnchorElement;
-    expect(generateLink.getAttribute("href")).toBe("/workflows/ddd-generate-docs?runId=generate-run-1");
-    const bugScanLink = harness.container.querySelector('[data-testid="ddd-start-bug-scan"] a') as HTMLAnchorElement;
-    expect(bugScanLink.getAttribute("href")).toBe("/workflows/ddd-bug-scan?runId=bug-run-1");
+    expect(generateLink.getAttribute("href")).toBe("/workflows/docs-driven-development?runId=generate-run-1");
     // The generate run has no terminal status yet: reload is gated behind a
     // "working" note rather than offered prematurely.
     expect(harness.container.querySelector('[data-testid="ddd-start-reload-path"]')).toBeFalsy();
@@ -1959,23 +1919,21 @@ describe("DDD tabs and components", () => {
       <StartPane
         stub={false}
         onClose={() => undefined}
-        onCreateApp={() => undefined}
+        onCreateWorkflow={() => undefined}
         onGenerateDocs={() => undefined}
         createState={{ runId: "create-run-1", error: null, status: "finished" }}
         generateState={{ runId: "generate-run-1", error: null, status: "failed" }}
-        bugScanRunId=""
-        bugScanSummary=""
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
         onReload={() => { reloads += 1; }}
       />,
     );
-    await act(async () => setInputValue(harness.container.querySelector('[data-testid="ddd-start-description"]') as HTMLTextAreaElement, "Build another app"));
+    await act(async () => setInputValue(harness.container.querySelector('[data-testid="ddd-start-description"]') as HTMLTextAreaElement, "Build another workflow"));
     expect((harness.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement).disabled).toBe(false);
     expect((harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).disabled).toBe(false);
     expect(text(harness.container)).toContain("Finished");
     expect(text(harness.container)).toContain("Failed");
     expect(text(harness.container)).toContain("Ready for another launch");
-    expect(text(harness.container)).toContain("Create another app + builder workflow");
+    expect(text(harness.container)).toContain("Create another workflow");
     expect(text(harness.container)).toContain("Generate docs again");
     // The generate run is now terminal ("failed"), so reload is offered and works.
     expect(text(harness.container.querySelector('[data-testid="ddd-start-reload-path"]') as HTMLElement)).toContain("Reload this UI");
@@ -1986,19 +1944,17 @@ describe("DDD tabs and components", () => {
       <StartPane
         stub={false}
         onClose={() => undefined}
-        onCreateApp={() => undefined}
+        onCreateWorkflow={() => undefined}
         onGenerateDocs={() => undefined}
         createState={{ runId: null, error: null, pending: true }}
         generateState={{ runId: null, error: null, pending: true }}
-        bugScanRunId=""
-        bugScanSummary=""
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
         onReload={() => { reloads += 1; }}
       />,
     );
     expect((harness.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement).disabled).toBe(true);
     expect((harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).disabled).toBe(true);
-    expect(text(harness.container)).toContain("Launching builder");
+    expect(text(harness.container)).toContain("Launching authoring");
     expect(text(harness.container)).toContain("Launching docs");
     expect(harness.container.querySelector('[data-testid="ddd-start-launched-launching"]')).toBeTruthy();
     expect(harness.container.querySelector('[data-testid="ddd-start-generate-run-launching"]')).toBeTruthy();
@@ -2007,12 +1963,10 @@ describe("DDD tabs and components", () => {
       <StartPane
         stub={false}
         onClose={() => undefined}
-        onCreateApp={() => undefined}
+        onCreateWorkflow={() => undefined}
         onGenerateDocs={() => undefined}
         createState={{ runId: null, error: "create failed" }}
         generateState={{ runId: null, error: "generate failed" }}
-        bugScanRunId=""
-        bugScanSummary="Bug scan blocked because the generated spec build failed."
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
         onReload={() => { reloads += 1; }}
       />,
@@ -2020,8 +1974,6 @@ describe("DDD tabs and components", () => {
     expect(harness.container.querySelectorAll('[data-testid="ddd-start-error"]').length).toBe(2);
     expect(text(harness.container)).toContain("create failed");
     expect(text(harness.container)).toContain("generate failed");
-    expect(harness.container.querySelector('[data-testid="ddd-start-bug-scan-blocked"]')).toBeTruthy();
-    expect(text(harness.container)).toContain("generated spec build failed");
   });
 
   test("Tutorial storage helpers cover available storage, unavailable storage, URL suppression, and completion", () => {
@@ -2149,8 +2101,8 @@ describe("DDD tabs and components", () => {
       <LiveTab
         runs={[
           { runId: "docs-run-alpha-1234567890", workflowKey: "docs-driven-development", status: "finished", createdAtMs: Date.UTC(2026, 0, 2, 3, 4) },
-          { runId: "generate-run-beta-1234567890", workflowKey: "ddd-generate-docs", status: "running", createdAtMs: Date.UTC(2026, 0, 3, 3, 4) },
-          { runId: "bug-run-gamma-1234567890", workflowKey: "ddd-bug-scan", status: "failed", createdAtMs: Date.UTC(2026, 0, 4, 3, 4) },
+          { runId: "docs-run-beta-1234567890", workflowKey: "docs-driven-development", status: "running", createdAtMs: Date.UTC(2026, 0, 3, 3, 4) },
+          { runId: "docs-run-gamma-1234567890", workflowKey: "docs-driven-development", status: "failed", createdAtMs: Date.UTC(2026, 0, 4, 3, 4) },
         ]}
         runsLoading={false}
         selectedRunId={undefined}
@@ -2171,10 +2123,10 @@ describe("DDD tabs and components", () => {
     expect(text(runList)).toContain("docs-run-alp...34567890");
 
     const search = harness.container.querySelector('[data-testid="ddd-run-search"]') as HTMLInputElement;
-    await act(async () => setInputValue(search, "generate"));
+    await act(async () => setInputValue(search, "beta"));
     expect(runList.querySelectorAll(".run-row").length).toBe(1);
     expect(text(runList)).toContain("1 run of 3 runs");
-    expect(text(runList)).toContain("ddd-generate-docs");
+    expect(text(runList)).toContain("docs-driven-development");
 
     await act(async () => setInputValue(search, "no matching run"));
     expect(runList.querySelectorAll(".run-row").length).toBe(0);
@@ -2302,7 +2254,7 @@ describe("DDD tabs and components", () => {
                 id: "child",
                 name: "work:1",
                 status: "running",
-                agent: "codex",
+                agent: "implementation",
                 children: [{ id: "grandchild", name: "round-summary", status: "pending" }],
               },
             ],
@@ -2417,13 +2369,13 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain("No events yet for this run.");
   });
 
-  test("LiveTab shows the bundled source for the selected DDD workflow", async () => {
+  test("LiveTab shows the bundled source for docs-driven-development", async () => {
     const harness = await mount(
       <LiveTab
-        runs={[{ runId: "generate-run", workflowKey: "ddd-generate-docs", status: "running" }]}
+        runs={[{ runId: "docs-run", workflowKey: "docs-driven-development", status: "running" }]}
         runsLoading={false}
-        selectedRunId="generate-run"
-        selectedWorkflowKey="ddd-generate-docs"
+        selectedRunId="docs-run"
+        selectedWorkflowKey="docs-driven-development"
         onSelectRun={() => undefined}
         runStatus="running"
         runTree={{ root: null, nodes: [], status: "running", isLoading: false, error: undefined }}
@@ -2436,7 +2388,7 @@ describe("DDD tabs and components", () => {
 
     const source = harness.container.querySelector('[data-testid="ddd-workflow-source"]') as HTMLElement;
     expect(source).toBeTruthy();
-    expect(text(source)).toContain(".smithers/workflows/ddd-generate-docs.tsx");
-    expect(text(source)).toContain("DDD Generate Docs");
+    expect(text(source)).toContain(".smithers/workflows/docs-driven-development.tsx");
+    expect(text(source)).toContain("Docs Driven Development");
   });
 });

@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Approve & steer
 
-Smithers supports approval gates, typed Approval decision nodes, HumanTask requests, ask-human CLI/MCP waits, signals, timers, denial policies, and resume from waiting states.
+Smithers supports approval gates, typed Approval decision nodes, HumanTask requests, ask-human `CLI/MCP` waits, signals, timers, denial policies, and resume from waiting states.
 
 ## What you can do
 
@@ -12,7 +12,7 @@ Pause risky steps for a human decision, collect structured answers, resume later
 
 ### Approval gates
 
-Task needsApproval pauses before execution; approve/deny resolves the gate and resume continues the run.
+Task needsApproval pauses before execution; `approve/deny` resolves the gate and resume continues the run.
 
 ### Typed approval nodes
 
@@ -56,13 +56,13 @@ Signal, WaitForEvent, and Timer persist waits so foreground and detached owners 
 
 ## Observability
 
-- Approval request/decision rows are exposed through listApprovals, workflow UIs, CLI ps/why/inspect, and approval metrics.
+- Approval `request/decision` rows are exposed through listApprovals, workflow UIs, CLI `ps/why/inspect`, and approval metrics.
 - e2e faults verify waits survive owner restart for approvals, external events, and timers.
 
 ## Debugging
 
 - Run `smithers ps` --status waiting-approval, `smithers why` <runId>, then `smithers approve` or deny <runId> before resuming.
-- Use listApprovals/submitApproval RPC when debugging UI-side decision flows.
+- Use `listApprovals/submitApproval` RPC when debugging UI-side decision flows.
 
 ## Architecture
 

@@ -192,7 +192,7 @@ describe("DDD scripts and build gate", () => {
         title: "Rich feature",
         status: "missing-tests",
         priority: "p2",
-        group: "Run & observe",
+        group: "Operate",
         tier: "platform",
         userValue: "Run a real workflow.",
         capabilities: [{ title: "Launch", detail: "Launches runs.", status: "partial" }],
@@ -203,7 +203,7 @@ describe("DDD scripts and build gate", () => {
         debug: ["smithers inspect"],
         architecture: ["gateway"],
         changes: ["changed feature matrix"],
-        diffHints: ["packages/server/src/index.ts"],
+        diffHints: ["src/server/index.ts"],
         missing: ["Add browser e2e proof"],
       }),
     ]);
@@ -234,9 +234,9 @@ describe("DDD scripts and build gate", () => {
         id: "escaping",
         title: "# [Escaped]_`Title`",
         owner: "docs_[owner]",
-        summary: "Run smithers workflow run ddd-generate-docs, pnpm -C e2e test, pnpm -C .smithers test, and open .smithers/spec/features.json. Then use smithers agent add|list|remove, keep packages/server, packages/gateway-client aligned, and run pnpm docs:llms after editing docs.",
+        summary: "Run cargo test, python -m pytest tests/unit, npm test, and open .smithers/spec/features.json. Then keep src/server/index.ts and web/client.ts aligned.",
         userValue: "Use `literal` and [brackets]_safely.",
-        capabilities: [{ title: "# Cap_[A]", detail: "Fix packages/server/src/index.ts.", status: "partial" }],
+        capabilities: [{ title: "# Cap_[A]", detail: "Fix src/server/index.ts.", status: "partial" }],
         endpoints: [{ method: "GET", path: "/runs", doc: "reference/api docs).md#runs", note: "call /v1/api/runs" }],
         links: [{ label: "Read [API]", href: "reference/api docs).md#runs" }],
         missing: ["Heading # stays text with [link]_markers"],
@@ -248,16 +248,14 @@ describe("DDD scripts and build gate", () => {
     const doc = readFileSync(join(root, ".smithers/spec/content/features/escaping.md"), "utf8");
     expect(doc).toContain("# \\[Escaped\\]\\_\\`Title\\`");
     expect(doc).toContain("**Owner:** docs\\_\\[owner\\]");
-    expect(doc).toContain("`smithers workflow run ddd-generate-docs`");
-    expect(doc).toContain("`pnpm -C e2e test`");
-    expect(doc).toContain("`pnpm -C .smithers test`");
+    expect(doc).toContain("`cargo test`");
+    expect(doc).toContain("`python -m pytest tests/unit`");
+    expect(doc).toContain("`npm test`");
     expect(doc).toContain("`.smithers/spec/features.json`");
-    expect(doc).toContain("`smithers agent add` | `smithers agent list` | `smithers agent remove`");
-    expect(doc).toContain("keep `packages/server`, `packages/gateway-client` aligned");
-    expect(doc).toContain("run `pnpm docs:llms` after editing docs");
+    expect(doc).toContain("keep `src/server/index.ts` and `web/client.ts` aligned");
     expect(doc).toContain("Use \\`literal\\` and \\[brackets\\]\\_safely.");
     expect(doc).toContain("### Cap\\_\\[A\\] (Partial)");
-    expect(doc).toContain("- `GET /runs` - call /v1/api/runs ([docs](reference/api%20docs%29.md#runs))");
+    expect(doc).toContain("- `GET /runs` - call `/v1/api/runs` ([docs](reference/api%20docs%29.md#runs))");
     expect(doc).toContain("- [Read \\[API\\]](reference/api%20docs%29.md#runs)");
     expect(doc).toContain("- Heading # stays text with \\[link\\]\\_markers");
   });
@@ -274,7 +272,7 @@ describe("DDD scripts and build gate", () => {
         title: "Broken P0",
         status: "broken",
         priority: "p0",
-        missing: ["Fix crash in packages/server/src/index.ts"],
+        missing: ["Fix crash in src/server/index.ts"],
       }),
       feature({
         id: "review-gap",
@@ -423,37 +421,27 @@ describe("DDD scripts and build gate", () => {
     expect(workflowModule).toContain("export const workflow = true");
   });
 
-  test("generateUiModules emits all present DDD workflow sources and omits missing secondary workflows", () => {
+  test("generateUiModules emits the single DDD workflow source and omits it entirely when missing", () => {
     const root = tempRoot();
     mkdirSync(join(root, ".smithers/workflows"), { recursive: true });
     writeFileSync(join(root, ".smithers/workflows/docs-driven-development.tsx"), "export const primary = 'docs-driven-development';\n");
-    writeFileSync(join(root, ".smithers/workflows/ddd-generate-docs.tsx"), "export const generated = 'ddd-generate-docs';\n");
-    writeFileSync(join(root, ".smithers/workflows/ddd-bug-scan.tsx"), "export const scanned = 'ddd-bug-scan';\n");
     writeFeatures(root, [feature({ id: "workflow-source", title: "Workflow Source", status: "fixed", missing: [] })]);
     generateSpecDocs(root);
 
     expect(generateUiModules(root)).toEqual({ docs: 2, tickets: 0 });
     let workflowModule = readFileSync(join(root, ".smithers/ui/ddd-workflowSource.generated.ts"), "utf8");
     expect(workflowModule).toContain('"docs-driven-development"');
-    expect(workflowModule).toContain('"ddd-generate-docs"');
-    expect(workflowModule).toContain('"ddd-bug-scan"');
     expect(workflowModule).toContain('"path": ".smithers/workflows/docs-driven-development.tsx"');
-    expect(workflowModule).toContain('"path": ".smithers/workflows/ddd-generate-docs.tsx"');
-    expect(workflowModule).toContain('"path": ".smithers/workflows/ddd-bug-scan.tsx"');
     expect(workflowModule).toContain("export const primary = 'docs-driven-development';");
-    expect(workflowModule).toContain("export const generated = 'ddd-generate-docs';");
-    expect(workflowModule).toContain("export const scanned = 'ddd-bug-scan';");
     expect(workflowModule).toContain('export const workflowSourcePath = ".smithers/workflows/docs-driven-development.tsx";');
     expect(workflowModule).toContain("export const workflowSource = \"export const primary");
 
-    rmSync(join(root, ".smithers/workflows/ddd-bug-scan.tsx"));
+    rmSync(join(root, ".smithers/workflows/docs-driven-development.tsx"));
     generateUiModules(root);
     workflowModule = readFileSync(join(root, ".smithers/ui/ddd-workflowSource.generated.ts"), "utf8");
-    expect(workflowModule).toContain('"docs-driven-development"');
-    expect(workflowModule).toContain('"ddd-generate-docs"');
-    expect(workflowModule).not.toContain('"ddd-bug-scan"');
-    expect(workflowModule).not.toContain('"source": ""');
-    expect(workflowModule).toContain('export const workflowSourcePath = ".smithers/workflows/docs-driven-development.tsx";');
+    expect(workflowModule).not.toContain('"docs-driven-development"');
+    expect(workflowModule).toContain('export const workflowSourcePath = "";');
+    expect(workflowModule).toContain('export const workflowSource = "";');
   });
 
   test("collectAuditInputs is sorted, deduped, and omits files over the 256KB cap", () => {
@@ -466,10 +454,7 @@ describe("DDD scripts and build gate", () => {
     mkdirSync(join(root, ".smithers/workflows"), { recursive: true });
     mkdirSync(join(root, ".smithers/ui"), { recursive: true });
     writeFileSync(join(root, ".smithers/specs/docs-driven-development.md"), "# DDD\n");
-    writeFileSync(join(root, ".smithers/specs/ddd-app-v2.md"), "# DDD app v2\n");
     writeFileSync(join(root, ".smithers/workflows/docs-driven-development.tsx"), "workflow\n");
-    writeFileSync(join(root, ".smithers/workflows/ddd-generate-docs.tsx"), "generate\n");
-    writeFileSync(join(root, ".smithers/workflows/ddd-bug-scan.tsx"), "scan\n");
     writeFileSync(join(root, ".smithers/ui/docs-driven-development.tsx"), "ui shell\n");
     writeFileSync(join(root, ".smithers/ui/ddd-shared.tsx"), "shared\n");
     writeFileSync(join(root, ".smithers/ui/ddd-StartPane.tsx"), "start\n");
@@ -482,10 +467,8 @@ describe("DDD scripts and build gate", () => {
 
     expect(inputs).toEqual([...new Set(inputs)]);
     expect(inputs).toContain(".smithers/spec/features.json");
-    expect(inputs).toContain(".smithers/specs/ddd-app-v2.md");
     expect(inputs).not.toContain(".smithers/specs/docs-driven-development.md");
-    expect(inputs).toContain(".smithers/workflows/ddd-generate-docs.tsx");
-    expect(inputs).toContain(".smithers/workflows/ddd-bug-scan.tsx");
+    expect(inputs).toContain(".smithers/workflows/docs-driven-development.tsx");
     expect(inputs).toContain(".smithers/ui/docs-driven-development.tsx");
     expect(inputs).toContain(".smithers/ui/ddd-shared.tsx");
     expect(inputs).toContain(".smithers/ui/ddd-StartPane.tsx");
@@ -526,7 +509,7 @@ describe("DDD scripts and build gate", () => {
 
   test("triageCandidates ranks by status, priority, tie-breaker, file hints, acceptance, and max", () => {
     const candidates = triageCandidates([
-      feature({ id: "partial-a", title: "Partial A", status: "partial", priority: "p0", diffHints: ["touch packages/a/src/a.ts, docs/a.md"] }) as any,
+      feature({ id: "partial-a", title: "Partial A", status: "partial", priority: "p0", diffHints: ["touch crates/core/src/lib.rs, docs/a.md"] }) as any,
       feature({ id: "broken-b", title: "Broken B", status: "broken", priority: "p0", missing: ["Fix B"] }) as any,
       feature({ id: "alpha", title: "Alpha", status: "missing-tests", priority: "p1" }) as any,
       feature({ id: "beta", title: "Beta", status: "missing-tests", priority: "p1" }) as any,
@@ -536,7 +519,7 @@ describe("DDD scripts and build gate", () => {
     expect(candidates.map((item) => item.featureId)).toEqual(["broken-b", "partial-a", "alpha", "beta"]);
     expect(candidates[0]?.taskType).toBe("fix");
     expect(candidates[1]?.taskType).toBe("e2e");
-    expect(candidates[1]?.files).toEqual(["packages/a/src/a.ts", "docs/a.md"]);
+    expect(candidates[1]?.files).toEqual(["crates/core/src/lib.rs", "docs/a.md"]);
     expect(candidates[2]?.acceptance).toEqual(["Move alpha from missing-tests only after direct proof is attached."]);
   });
 
@@ -547,11 +530,11 @@ describe("DDD scripts and build gate", () => {
         title: "Punctuation",
         status: "broken",
         priority: "p0",
-        diffHints: ['See "packages/a/src/a.ts", (.smithers/ui/x.tsx); docs/a.md. not/a/path'],
+        diffHints: ['See "src/a.ts", (.smithers/ui/x.tsx); tests/a_test.py. not/a/path'],
       }) as any,
     ], 1);
 
-    expect(candidates[0]?.files).toEqual(["packages/a/src/a.ts", ".smithers/ui/x.tsx", "docs/a.md"]);
+    expect(candidates[0]?.files).toEqual(["src/a.ts", ".smithers/ui/x.tsx", "tests/a_test.py"]);
     expect(parseMax([])).toBe(8);
     expect(parseMax(["--", "--max", "3"])).toBe(3);
     expect(parseMax(["--max", "0"])).toBe(8);
@@ -624,8 +607,8 @@ describe("DDD scripts and build gate", () => {
         expect(resolvesLocalDoc(href)).toBe(true);
       }
       for (const command of feature.tests ?? []) {
-        const knownGate = /\b(pnpm\s+(typecheck|test|docs:llms)|pnpm\s+-C\s+\S+\s+test|check-docs|check-llms|check-dependency-boundaries|check-single-effect-version)\b/.test(command);
-        const explicitTestPaths = [...command.matchAll(/(?:^|\s)(\.smithers\/tests\/[^\s]+|tests\/[^\s]+|\.smithers\/ui\/[^\s]+|ui\/[^\s]+|\.smithers\/lib\/ddd\/[^\s]+|lib\/ddd\/[^\s]+|e2e\/[^\s]+|apps\/[^\s]+|packages\/[^\s]+)/g)]
+        const knownGate = /\b(bun|npm|pnpm|yarn|deno|cargo|go|pytest|python\s+-m\s+pytest|mvn|gradle|dotnet|make|just)\b/.test(command);
+        const explicitTestPaths = [...command.matchAll(/(?:^|\s)(\.smithers\/tests\/[^\s]+|tests\/[^\s]+|\.smithers\/ui\/[^\s]+|ui\/[^\s]+|\.smithers\/lib\/ddd\/[^\s]+|lib\/ddd\/[^\s]+|e2e\/[^\s]+|apps\/[^\s]+|packages\/[^\s]+|scripts\/[^\s]+)/g)]
           .map((match) => (match[1] ?? "").replace(/[),.;]+$/, ""));
         if (explicitTestPaths.length === 0) {
           expect(knownGate).toBe(true);
@@ -658,13 +641,9 @@ describe("DDD scripts and build gate", () => {
   test("docs-driven-development feature evidence lists the DDD test suite in data and generated docs", () => {
     const root = resolve(here, "../..");
     const expectedTestPaths = [
-      ".smithers/tests/ddd-bug-scan-run.e2e.test.ts",
-      ".smithers/tests/ddd-generate-bug-scan.test.ts",
-      ".smithers/tests/ddd-generate-docs-run.e2e.test.ts",
       ".smithers/tests/ddd-scripts.test.ts",
       ".smithers/tests/ddd-ui-parsers.test.ts",
       ".smithers/tests/docs-driven-development-run.e2e.test.ts",
-      ".smithers/tests/docs-driven-development-ui.e2e.test.tsx",
       ".smithers/tests/docs-driven-development-workflow.test.ts",
       ".smithers/ui/ddd-tabs.test.tsx",
     ];

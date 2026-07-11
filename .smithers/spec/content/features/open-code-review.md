@@ -44,18 +44,18 @@ Review publish tests cover local service paths and artifact output; cloud deploy
 
 ## Observability
 
-- Review outputs include structured findings and generated walkthrough artifacts that can be inspected from workflow output/UI state.
+- Review outputs include structured findings and generated walkthrough artifacts that can be inspected from workflow `output/UI` state.
 - Publish service e2e tests exercise the local artifact publication path.
 
 ## Debugging
 
-- Run `apps/review` tests for rendering/publishing regressions and .smithers open-code-review tests for workflow/UI regressions.
+- Run `apps/review` tests for `rendering/publishing` regressions and .smithers open-code-review tests for `workflow/UI` regressions.
 - Use smithers review or workflow run review against a known diff before changing review prompts or finding verification.
 
 ## Architecture
 
 - `apps/review` backs the review-specific artifact generation and publishing code.
-- .`smithers workflow`s/tests cover the Smithers workflow and UI wrapper around the review app.
+- .`smithers workflows/tests` cover the Smithers workflow and UI wrapper around the review app.
 
 ## Fixes and diffs
 
@@ -67,5 +67,5 @@ Review publish tests cover local service paths and artifact output; cloud deploy
 
 ## Open gaps
 
-- Hosted/cloud review path is blocked on funded provider credentials and deployment-specific verification.
+- `Hosted/cloud` review path is blocked on funded provider credentials and deployment-specific verification.
 - Review quality still depends on live agent behavior; CI can prove structure and local paths but not every model-quality regression.

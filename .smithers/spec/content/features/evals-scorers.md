@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P1 | **Owner:** smithers-maintainers | **Group:** Improve quality
 
-The eval command runs workflows over JSON/JSONL cases, writes regression reports, scorers grade outputs and delegation runs, and optimize applies GEPA-style prompt patches from failed-case hints.
+The eval command runs workflows over `JSON/JSONL` cases, writes regression reports, scorers grade outputs and delegation runs, and optimize applies GEPA-style prompt patches from failed-case hints.
 
 ## What you can do
 
@@ -12,7 +12,7 @@ Protect important workflows with repeatable cases, score outputs, and optimize p
 
 ### Eval command
 
-`smithers eval` plans stable run IDs, executes cases, checks status/output/error expectations, and writes JSON reports.
+`smithers eval` plans stable run IDs, executes cases, checks `status/output/error` expectations, and writes JSON reports.
 
 ### Built-in scorers
 
@@ -56,7 +56,7 @@ smithersScorers table and listScores RPC expose stored score rows to UIs.
 ## Debugging
 
 - Run `smithers eval` <workflow> --cases <file> --suite <id> --dry-run to inspect planned IDs before launching.
-- Use --no-include-output for sensitive/large outputs and --force only when intentionally replacing a report.
+- Use --no-include-output for `sensitive/large` outputs and --force only when intentionally replacing a report.
 
 ## Architecture
 
@@ -74,5 +74,5 @@ smithersScorers table and listScores RPC expose stored score rows to UIs.
 
 ## Open gaps
 
-- Optimizer tests prove helper behavior but production provider quality/cost needs suite-specific monitoring.
+- Optimizer tests prove helper behavior but production provider `quality/cost` needs suite-specific monitoring.
 - More seeded workflows should ship checked-in eval suites for their intended behavior.

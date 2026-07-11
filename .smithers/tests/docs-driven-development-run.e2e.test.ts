@@ -54,7 +54,6 @@ describe("docs-driven-development real workflow run", () => {
     const gateway = await runDddWorkflow(repo, runId, {
       maxAgents: 1,
       maxRounds: 1,
-      useClaudeForPlanning: false,
       runImplementation: true,
       implementationApproved: true,
     });
@@ -74,18 +73,18 @@ describe("docs-driven-development real workflow run", () => {
 
     const audit = await nodeOutput(gateway, connection, runId, "audit");
     expect(audit.row.generatedSiteBuilds).toBe(true);
-    expect(audit.row.notes).toEqual(["codex fake output audit note"]);
+    expect(audit.row.notes).toEqual(["fake agent output audit note"]);
 
     const spec = await nodeOutput(gateway, connection, runId, "spec-update");
     expect(spec.row.status).toBe("partial");
-    expect(spec.row.summary).toBe("codex fake output");
+    expect(spec.row.summary).toBe("fake agent output");
 
     const triage = await nodeOutput(gateway, connection, runId, "triage");
-    expect(triage.row.summary).toBe("codex fake output");
+    expect(triage.row.summary).toBe("fake agent output");
     expect(triage.row.selected[0]).toMatchObject({
       slot: 1,
       featureId: "docs-driven-development",
-      agent: "sonnet",
+      agent: "implementation",
       taskType: "e2e",
     });
 
@@ -103,16 +102,16 @@ describe("docs-driven-development real workflow run", () => {
     expect(readFileSync(ticketPath, "utf8")).toContain("Feature title: Docs driven development");
 
     const work = await nodeOutput(gateway, connection, runId, "work:1");
-    expect(work.row.summary).toBe("codex fake output");
+    expect(work.row.summary).toBe("fake agent output");
     expect(work.row.testsRun).toContain("bun test tests/docs-driven-development-run.e2e.test.ts");
 
     const review = await nodeOutput(gateway, connection, runId, "cycle-review");
     expect(review.row.approved).toBe(true);
-    expect(review.row.summary).toBe("codex fake output");
+    expect(review.row.summary).toBe("fake agent output");
 
     const summary = await nodeOutput(gateway, connection, runId, "round-summary");
     expect(summary.row.status).toBe("partial");
-    expect(summary.row.remaining).toContain("partial: docs-driven-development - codex fake output");
+    expect(summary.row.remaining).toContain("partial: docs-driven-development - fake agent output");
 
     const run = await gatewayRequest(gateway, connection, "runs.get", { runId });
     expect(run.ok).toBe(true);
@@ -127,7 +126,6 @@ describe("docs-driven-development real workflow run", () => {
     const gateway = await runDddWorkflow(repo, runId, {
       maxAgents: 1,
       maxRounds: null,
-      useClaudeForPlanning: true,
       runImplementation: true,
       requireImplementationApproval: true,
       implementationApproved: false,
@@ -158,7 +156,7 @@ describe("docs-driven-development real workflow run", () => {
     expect(metaTicket.row.changedFiles[0].afterMarkdown).toContain("Edited from e2e");
 
     const triage = await nodeOutput(gateway, connection, runId, "triage");
-    expect(triage.row.summary).toBe("codex fake output");
+    expect(triage.row.summary).toBe("fake agent output");
 
     const materialized = await nodeOutput(gateway, connection, runId, "materialize-tickets");
     expect(materialized.row.created).toBe(1);
@@ -185,7 +183,6 @@ describe("docs-driven-development real workflow run", () => {
     const gateway = await runDddWorkflow(repo, runId, {
       maxAgents: 1,
       maxRounds: 1,
-      useClaudeForPlanning: false,
       runImplementation: true,
       requireImplementationApproval: true,
       implementationApproved: false,
@@ -224,7 +221,7 @@ describe("docs-driven-development real workflow run", () => {
 
     const work = await nodeOutput(gateway, connection, runId, "work:1");
     expect(work.status).toBe("produced");
-    expect(work.row.summary).toBe("codex fake output");
+    expect(work.row.summary).toBe("fake agent output");
     expect(work.row.testsRun).toContain("bun test tests/docs-driven-development-run.e2e.test.ts");
 
     const review = await nodeOutput(gateway, connection, runId, "cycle-review");
@@ -248,7 +245,6 @@ describe("docs-driven-development real workflow run", () => {
     const gateway = await runDddWorkflow(repo, runId, {
       maxAgents: 1,
       maxRounds: 1,
-      useClaudeForPlanning: false,
       runImplementation: true,
       requireImplementationApproval: true,
       implementationApproved: false,
@@ -302,7 +298,6 @@ describe("docs-driven-development real workflow run", () => {
       {
         maxAgents: 1,
         maxRounds: 2,
-        useClaudeForPlanning: false,
         runImplementation: true,
         implementationApproved: true,
       },
@@ -355,7 +350,6 @@ describe("docs-driven-development real workflow run", () => {
       {
         maxAgents: 1,
         maxRounds: 5,
-        useClaudeForPlanning: false,
         runImplementation: true,
         implementationApproved: true,
       },
@@ -409,7 +403,6 @@ describe("docs-driven-development real workflow run", () => {
       {
         maxAgents: 1,
         maxRounds: 1,
-        useClaudeForPlanning: false,
         runImplementation: true,
         implementationApproved: true,
       },
@@ -470,7 +463,6 @@ describe("docs-driven-development real workflow run", () => {
     const gateway = await runDddWorkflow(repo, runId, {
       maxAgents: 1,
       maxRounds: 1,
-      useClaudeForPlanning: false,
       runImplementation: false,
       implementationApproved: false,
       metaTicket: {
@@ -522,11 +514,11 @@ describe("docs-driven-development real workflow run", () => {
     const repo = createDddFixtureRepo();
     repos.push(repo);
 
-    mkdirSync(join(repo.root, "packages/core/src"), { recursive: true });
-    writeFileSync(join(repo.root, "packages/core/src/index.ts"), "export const value = 1;\n");
-    execFileSync("git", ["add", "packages/core/src/index.ts"], { cwd: repo.root, stdio: "pipe" });
+    mkdirSync(join(repo.root, "src/core"), { recursive: true });
+    writeFileSync(join(repo.root, "src/core/index.ts"), "export const value = 1;\n");
+    execFileSync("git", ["add", "src/core/index.ts"], { cwd: repo.root, stdio: "pipe" });
     execFileSync("git", ["commit", "-m", "track code fixture"], { cwd: repo.root, stdio: "pipe" });
-    writeFileSync(join(repo.root, "packages/core/src/index.ts"), "export const value = 2;\n");
+    writeFileSync(join(repo.root, "src/core/index.ts"), "export const value = 2;\n");
 
     const truncationMarker = "TRUNCATION_MARKER_END";
     writeFileSync(
@@ -543,7 +535,6 @@ describe("docs-driven-development real workflow run", () => {
     const gateway = await runDddWorkflow(repo, runId, {
       maxAgents: 1,
       maxRounds: 1,
-      useClaudeForPlanning: false,
       runImplementation: false,
       implementationApproved: false,
       metaTicket: {
@@ -578,8 +569,8 @@ describe("docs-driven-development real workflow run", () => {
     const metaTicket = await nodeOutput(gateway, connection, runId, "metaTicket");
     expect(metaTicket.row.created).toBe(true);
     expect(metaTicket.row.gitStatus).toContain(".smithers/spec/features.json");
-    expect(metaTicket.row.gitStatus).toContain("packages/core/src/index.ts");
-    expect(metaTicket.row.codeDiffFiles).toEqual(["packages/core/src/index.ts"]);
+    expect(metaTicket.row.gitStatus).toContain("src/core/index.ts");
+    expect(metaTicket.row.codeDiffFiles).toEqual(["src/core/index.ts"]);
     expect(metaTicket.row.docsDiffTruncated).toBe(true);
     expect(metaTicket.row.docsDiff).toContain("...[truncated ");
     expect(metaTicket.row.docsDiff).not.toContain(truncationMarker);

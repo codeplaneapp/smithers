@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P2 | **Owner:** smithers-maintainers | **Group:** Remember context
 
-The memory package persists namespaced facts, threads, and messages, provides Effect service layers, TTL/token/summarizer processors, metrics, a CLI, and Gateway memory fact listings.
+The memory package persists namespaced facts, threads, and messages, provides Effect service layers, `TTL/token/summarizer` processors, metrics, a CLI, and Gateway memory fact listings.
 
 ## What you can do
 
@@ -12,7 +12,7 @@ Carry durable lessons, facts, and conversation history between workflow runs wit
 
 ### Working memory facts
 
-set/get/delete/list facts by workflow, agent, user, or global namespace with TTL support.
+`set/get/delete/list` facts by workflow, agent, user, or global namespace with TTL support.
 
 ### Threaded messages
 
@@ -59,7 +59,7 @@ TtlGarbageCollector removes expired facts, TokenLimiter trims old messages, and 
 ## Architecture
 
 - `packages/memory/src/index.js` exports schema, createMemoryStore, processors, MemoryService, createMemoryLayer, namespace codecs, and metrics.
-- `docs/concepts/memory.mdx` and `docs/llms-memory.txt` are the human/agent references.
+- `docs/concepts/memory.mdx` and `docs/llms-memory.txt` are the `human/agent` references.
 
 ## Fixes and diffs
 

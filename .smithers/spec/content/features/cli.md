@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Run & observe
 
-The smithers binary in `apps/cli` drives init, workflow run/list/create, up, ps, logs, events, inspect, node, why, approvals, signals, memory, eval, optimize, openapi, gateway, monitor, ui, MCP, migration, tokens, and agent account management.
+The smithers binary in `apps/cli` drives init, workflow `run/list/create`, up, ps, logs, events, inspect, node, why, approvals, signals, memory, eval, optimize, openapi, gateway, monitor, ui, MCP, migration, tokens, and agent account management.
 
 ## What you can do
 
@@ -63,18 +63,18 @@ gateway, monitor, ui, migrate, eval, optimize, openapi, memory, usage, token, ag
 ## Debugging
 
 - Start with `smithers ps`, then `smithers why` <runId>, `smithers inspect` <runId>, `smithers logs` <runId> -f, and `smithers output` <runId> <nodeId>.
-- Use --format json and --full-output for machine-readable debugging; use --root to make launch roots explicit.
+- Use --format json and --full-output for machine-readable debugging; use --root to `make launch roots explicit`.
 
 ## Architecture
 
 - `apps/cli/src/index.js` registers 80+ commands through incur Cli and delegates to engine, db, server, time-travel, memory, openapi, agents, and observability packages.
-- `docs/cli/overview.mdx` is generated/covered by tests as the command catalog of record.
+- `docs/cli/overview.mdx` is `generated/covered` by tests as the command catalog of record.
 - `apps/cli/package.json` declares the CLI as Smithers command-line interface, MCP server, and local workflow tools.
 
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
-- 2026-07-06 review: `bun test` --timeout=120000 --max-concurrency=1 for the six listed workflow-authoring test files passed.
+- 2026-07-06 review: `bun test --timeout`=120000 --max-concurrency=1 for the six listed workflow-authoring test files passed.
 - `apps/cli/src/index.js`
 - `apps/cli/src/*.js`
 - `apps/cli/tests/*.test.js`
@@ -82,5 +82,5 @@ gateway, monitor, ui, migrate, eval, optimize, openapi, memory, usage, token, ag
 
 ## Open gaps
 
-- The CLI surface is broad; keep pglite/postgres parity covered for every read and mutation command, not just launch/read round-trips.
-- Some agent- or browser-dependent commands necessarily skip in CI; document and test their fake-agent/no-browser behavior.
+- The CLI surface is broad; keep `pglite/postgres` parity covered for every read and mutation command, not `just launch/read round-trips`.
+- Some agent- or browser-dependent commands necessarily skip in CI; document and test their `fake-agent/no-browser` behavior.

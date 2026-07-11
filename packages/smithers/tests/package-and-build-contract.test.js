@@ -335,7 +335,6 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expectText("scripts/generate-component-source.mjs", ["Composite", "GENERATED:COMPONENT-SOURCE START", "GENERATED:COMPONENT-SOURCE END", "--check"]);
     expectText("scripts/generate-workflow-pack.ts", ["SEEDED_WORKFLOW_IDS", "// smithers-source: seeded", "GENERATED_SEEDED_FILES"]);
     expectText("scripts/generate-ui-themes.ts", ["crepeTheme.generated.ts", "xyflowTheme.generated.ts", "@xyflow/react/dist/style.css"]);
-    expectText("scripts/install-ddd-pack.ts", ["ddd-generate-docs.tsx", "docs-driven-development.tsx", "dddAgents.ts"]);
     expectText("scripts/publish.mjs", ["pnpm check:llms", "pnpm -r build", "pnpm test", "pnpm fetch:jj", "--skip-gh-release"]);
     expectText("scripts/fetch-jj-binaries.mjs", ["jj-vcs/jj", "JJ_VERSION", "--force", "jj-darwin-arm64", "jj-win32-x64", "commit nothing"]);
     expectText("scripts/coverage.mjs", ["thresholdProfiles", "packageProfiles", "coverageUnsupported", "SMITHERS_COVERAGE_PACKAGES"]);

@@ -2,7 +2,7 @@
 
 > **Status:** Fixed | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Run & observe | **Tier:** Platform
 
-The core control plane renders workflow frames, schedules ready nodes, executes agent/compute/static tasks, validates structured outputs, persists every state transition, and resumes from durable state after failures.
+The core control plane renders workflow frames, schedules ready nodes, executes `agent/compute/static` tasks, validates structured outputs, persists every state transition, and resumes from durable state after failures.
 
 ## What you can do
 
@@ -16,7 +16,7 @@ Per-task retries, timeoutMs, heartbeatTimeoutMs.
 
 ### Deadlock detection
 
-DEPENDENCY\_DEADLOCK instead of silent hangs on bad deps/needs keys.
+DEPENDENCY\_DEADLOCK instead of silent hangs on bad `deps/needs` keys.
 
 ### Frame persistence
 
@@ -59,13 +59,13 @@ createSmithersPostgres and the SQL dialect layer run the same engine against man
 
 ## Observability
 
-- Engine metrics include runsTotal, nodesStarted, nodesFinished, nodesFailed, nodeDuration, attemptDuration, cacheHits/cacheMisses, and tool duration.
-- Persisted events and frame snapshots back CLI logs/events/tree, Gateway streamRunEvents, DevTools snapshots, and time-travel timeline views.
+- Engine metrics include runsTotal, nodesStarted, nodesFinished, nodesFailed, nodeDuration, attemptDuration, `cacheHits/cacheMisses`, and tool duration.
+- Persisted events and frame snapshots back CLI `logs/events/tree`, Gateway streamRunEvents, DevTools snapshots, and time-travel timeline views.
 
 ## Debugging
 
 - Use `smithers inspect`, events, tree, and node to inspect frame state and attempts.
-- Use e2e fault cases for process-kill, approval/event/timer restart, websocket reconnect, and rewind regression reproduction.
+- Use e2e fault cases for process-kill, `approval/event/timer` restart, websocket reconnect, and rewind regression reproduction.
 
 ## Architecture
 
@@ -76,7 +76,7 @@ createSmithersPostgres and the SQL dialect layer run the same engine against man
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
-- 2026-07-06 review: `bun test` --timeout=120000 --max-concurrency=1 for the eight listed durable-engine test files passed.
+- 2026-07-06 review: `bun test --timeout`=120000 --max-concurrency=1 for the eight listed durable-engine test files passed.
 - `packages/engine/src/engine.js`
 - `packages/driver/src/WorkflowDriver.js`
 - `packages/scheduler/src/makeWorkflowSession.js`

@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P0 | **Owner:** smithers-maintainers | **Group:** Connect agents
 
-Smithers runs tasks through SDK agents, CLI harnesses, provider pools, accounts, capability registries, tool contracts, image/audio/web-search/http tools, and native session hijack where adapters support it.
+Smithers runs tasks through SDK agents, CLI harnesses, provider pools, accounts, capability registries, tool contracts, `image/audio/web-search/http` tools, and native session hijack where adapters support it.
 
 ## What you can do
 
@@ -12,7 +12,7 @@ Choose the best model or harness per step, mix providers in one workflow, and fa
 
 ### Provider pools
 
-planning/review/implement pools with ordered failover in `.smithers/agents.ts`.
+`planning/review/implement` pools with ordered failover in `.smithers/agents.ts`.
 
 ### Accounts
 
@@ -32,7 +32,7 @@ Adapters expose structured-output, tool, image, transcription, web-search, and s
 
 ### Account management
 
-`smithers agent`s add/list/remove/test and usage commands manage local account config and quota visibility.
+`smithers agent`s `add/list/remove/test` and usage commands manage local account config and quota visibility.
 
 ## Endpoints and commands
 
@@ -64,7 +64,7 @@ Adapters expose structured-output, tool, image, transcription, web-search, and s
 ## Observability
 
 - Agent traces are collected into structured events and OTLP logs where supported.
-- Usage and token reports expose provider/account consumption without printing credentials.
+- Usage and token reports expose `provider/account` consumption without printing credentials.
 
 ## Debugging
 
@@ -73,8 +73,8 @@ Adapters expose structured-output, tool, image, transcription, web-search, and s
 
 ## Architecture
 
-- `packages/agents/src/index.js` exports SDK and CLI agents, BaseCliAgent, capability reports, agent contracts, HTTP/image/transcription/web-search tools, and schema sanitizers.
-- `apps/cli/src/agent-commands` owns account add/list/remove/test flows and generated agents.ts refresh.
+- `packages/agents/src/index.js` exports SDK and CLI agents, BaseCliAgent, capability reports, agent contracts, `HTTP/image/transcription/web-search` tools, and schema sanitizers.
+- `apps/cli/src/agent-commands` owns account `add/list/remove/test` flows and generated agents.ts refresh.
 - `docs/concepts/execution-model.mdx` documents in-process SDK vs subprocess CLI vs Sandbox execution.
 
 ## Fixes and diffs
@@ -89,4 +89,4 @@ Adapters expose structured-output, tool, image, transcription, web-search, and s
 ## Open gaps
 
 - Kimi auth-setup errors should fail over to the next pool agent instead of failing the run.
-- Many vendor CLI behaviors depend on locally installed binaries and subscription/API-key modes that cannot all be covered in clean CI.
+- Many vendor CLI behaviors depend on locally installed binaries and `subscription/API-key` modes that cannot all be covered in clean CI.

@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P1 | **Owner:** smithers-maintainers | **Group:** Run & observe
 
-Workflow-owned `.smithers/ui/*.tsx` browser dashboards are declared with <UI>, served by `smithers ui`/gateway, backed by gateway-client/gateway-react hooks, and complemented by monitor/gui/TUI run inspectors.
+Workflow-owned `.smithers/ui/*.tsx` browser dashboards are declared with <UI>, served by `smithers ui/gateway`, backed by `gateway-client/gateway-react` hooks, and complemented by `monitor/gui/TUI` run inspectors.
 
 ## What you can do
 
@@ -28,7 +28,7 @@ gateway-react provides hooks for runs, events, approvals, workflows, prompts, me
 
 ### Resilient clients
 
-gateway-client handles typed RPC, abortable calls, reconnect/resume streams, backoff, extension streams, and local/electric collection options.
+gateway-client handles typed RPC, abortable calls, `reconnect/resume` streams, backoff, extension streams, and `local/electric` collection options.
 
 ### Operator monitors
 
@@ -60,12 +60,11 @@ gateway-client handles typed RPC, abortable calls, reconnect/resume streams, bac
 - `apps/cli/tests/local-ui-gateway-csrf.test.js`
 - `apps/cli/tests/workflow-ui-all.e2e.test.js`
 - `apps/cli/tests/workflow-pack-ui-coverage.test.js`
-- `.smithers/tests/docs-driven-development-ui.e2e.test.tsx`
 - `.smithers/tests/open-code-review-ui.e2e.test.ts`
 
 ## Observability
 
-- Custom UIs receive pushed run events, approval rows, node outputs, diffs, scores, memory facts, tickets, and workflow metadata through gateway streams/RPC.
+- Custom UIs receive pushed run events, approval rows, node outputs, diffs, scores, memory facts, tickets, and workflow metadata through gateway `streams/RPC`.
 - CLI monitor modes expose tree, graph, logs, timeline, and hijack views over the same backend state.
 
 ## Debugging
@@ -82,7 +81,7 @@ gateway-client handles typed RPC, abortable calls, reconnect/resume streams, bac
 ## Fixes and diffs
 
 - 2026-07-06 refresh: read README.md, package exports, selected package entry points, `docs/how-it-works.mdx`, `docs/cli/overview.mdx`, `docs/agents/overview.mdx`, `docs/integrations/custom-ui.mdx`, `docs/integrations/mcp-server.mdx`, `docs/deployment/production-hardening.mdx`, `docs/deployment/control-plane.mdx`, and targeted test inventories.
-- 2026-07-06 adversarial review: downgraded from fixed to partial after cited UI/graph proof failed.
+- 2026-07-06 adversarial review: downgraded from fixed to partial after cited `UI/graph` proof failed.
 - `packages/gateway-react/src`
 - `packages/gateway-client/src`
 - `apps/cli/src/localUiServer.js`
@@ -91,5 +90,5 @@ gateway-client handles typed RPC, abortable calls, reconnect/resume streams, bac
 
 ## Open gaps
 
-- 2026-07-06 review: `bun test` --timeout=120000 --max-concurrency=1 `apps/cli/tests/ui-command.test.js` fails; the `smithers ui` autostart case times out waiting for the local Gateway.
-- 2026-07-06 review: `bun test` --timeout=120000 --max-concurrency=1 `apps/cli/tests/docs-examples-smoke.test.js` fails for `docs/examples/workflow-ui-react.mdx#2` with GRAPH\_FAILED/Object.entries on undefined input.
+- 2026-07-06 review: `bun test --timeout`=120000 --max-concurrency=1 `apps/cli/tests/ui-command.test.js` fails; the `smithers ui` autostart case times out waiting for the local Gateway.
+- 2026-07-06 review: `bun test --timeout`=120000 --max-concurrency=1 `apps/cli/tests/docs-examples-smoke.test.js` fails for `docs/examples/workflow-ui-react.mdx#2` with `GRAPH_FAILED/Object.entries` on undefined input.

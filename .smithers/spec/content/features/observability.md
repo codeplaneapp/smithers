@@ -2,11 +2,11 @@
 
 > **Status:** Partial | **Priority:** P2 | **Owner:** smithers-maintainers | **Group:** Operate deployments | **Tier:** Platform
 
-`apps/observability` exports Smithers metrics, structured logging, trace/span helpers, OTLP layers, Prometheus rendering, agent-trace normalization, correlation context, and a local Docker observability stack.
+`apps/observability` exports Smithers metrics, structured logging, `trace/span` helpers, OTLP layers, Prometheus rendering, agent-trace normalization, correlation context, and a local Docker observability stack.
 
 ## What you can do
 
-See run, node, agent, gateway, sandbox, scorer, DB, memory, VCS, and OpenAPI behavior in the same metrics/logging/tracing stack as the rest of production.
+See run, node, agent, gateway, sandbox, scorer, DB, memory, VCS, and OpenAPI behavior in the same `metrics/logging/tracing` stack as the rest of production.
 
 ## Capabilities
 
@@ -20,11 +20,11 @@ createSmithersObservabilityLayer, createSmithersOtelLayer, and runtime layers in
 
 ### Agent trace normalization
 
-Agent session events are normalized/redacted into Smithers events and OTLP log records.
+Agent session events are `normalized/redacted` into Smithers events and OTLP log records.
 
 ### Local stack
 
-smithers observability can start Prometheus/Grafana/Tempo/OTLP Collector assets from `apps/observability`.
+smithers observability can start `Prometheus/Grafana/Tempo/OTLP` Collector assets from `apps/observability`.
 
 ## Endpoints and commands
 
@@ -62,7 +62,7 @@ smithers observability can start Prometheus/Grafana/Tempo/OTLP Collector assets 
 
 - `apps/observability/src/index.js` exports observability layers, metrics, logging, tracing, Prometheus helpers, agent trace helpers, and correlation utilities.
 - `apps/observability/docker-compose.otel.yml`, prometheus, tempo, loki, and collector configs ship the local stack assets.
-- `packages/smithers/src/index.js` re-exports observability through smithers-orchestrator/observability.
+- `packages/smithers/src/index.js` re-exports observability through `smithers-orchestrator/observability`.
 
 ## Fixes and diffs
 
@@ -76,4 +76,4 @@ smithers observability can start Prometheus/Grafana/Tempo/OTLP Collector assets 
 ## Open gaps
 
 - OTLP exporter installation into real reference deployments is uneven; prove a production export path per deployment target.
-- Metrics coverage exists, but dashboards/alerts are not a fully versioned product surface in this repo.
+- Metrics coverage exists, but `dashboards/alerts` are not a fully versioned product surface in this repo.

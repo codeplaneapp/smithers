@@ -2,7 +2,7 @@
 
 > **Status:** Partial | **Priority:** P1 | **Owner:** smithers-maintainers | **Group:** Learn & integrate | **Tier:** Reference
 
-Mintlify docs, generated API/reference material, llms-\*.txt bundles, docs checks, and public-surface coverage tests keep human and agent documentation in sync with the published packages.
+Mintlify docs, generated `API/reference` material, llms-\*.txt bundles, docs checks, and public-surface coverage tests keep human and agent documentation in sync with the published packages.
 
 ## What you can do
 
@@ -51,12 +51,12 @@ check-docs, check-llms, docs-public-surface-coverage, docs-cli-overview-coverage
 
 ## Debugging
 
-- After docs changes, run `pnpm docs:llms`, then `pnpm test` or the specific check-docs/check-llms scripts.
+- After docs changes, run `pnpm docs:llms`, then `pnpm test or the specific check-docs/check-llms scripts`.
 - Use docs-public-surface-coverage tests when adding package exports or CLI commands.
 
 ## Architecture
 
-- package.json test script gates check-docs, check-llms, check-sota, check-dts, and pnpm -r test.
+- `package.json` test script gates check-docs, check-llms, check-sota, check-dts, and `pnpm -r test`.
 - docs/ contains the source docs; package `docs/llms` bundles and skills copies are generated artifacts.
 - `apps/cli/src/docs-command.js` resolves bundled docs for `smithers docs/docs-full`.
 
@@ -73,5 +73,5 @@ check-docs, check-llms, docs-public-surface-coverage, docs-cli-overview-coverage
 
 ## Open gaps
 
-- 2026-07-06 review: `bun test` --timeout=120000 --max-concurrency=1 `apps/cli/tests/docs-examples-smoke.test.js` fails for `docs/examples/workflow-ui-react.mdx#2` with GRAPH\_FAILED/Object.entries on undefined input.
-- Keep docs-pipeline partial until the docs examples smoke gate passes together with check-docs/check-llms and CLI overview coverage.
+- 2026-07-06 review: `bun test --timeout`=120000 --max-concurrency=1 `apps/cli/tests/docs-examples-smoke.test.js` fails for `docs/examples/workflow-ui-react.mdx#2` with `GRAPH_FAILED/Object.entries` on undefined input.
+- Keep docs-pipeline partial until the docs examples smoke gate passes together with `check-docs/check-llms` and CLI overview coverage.

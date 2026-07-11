@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod/v4";
-import { providers } from "../lib/ddd/dddAgents.ts";
+import { agents } from "../agents";
 import { dddRootOrCwd } from "../lib/ddd/dddRoot.ts";
 import { validateFeatures } from "../lib/ddd/validateFeatures.ts";
 
@@ -17,9 +17,10 @@ import { validateFeatures } from "../lib/ddd/validateFeatures.ts";
 // workflow works in any repository, regardless of language or package manager.
 const ROOT = dddRootOrCwd();
 
-const planner = providers.sol;
-const trivialEditor = providers.luna;
-const codex = providers.codex;
+const planningAgents = agents.planning;
+const researchAgents = agents.research;
+const implementationAgents = agents.implement;
+const reviewAgents = agents.review;
 
 // One changed-file shape, shared by the editor-submitted input ticket and the
 // metaTicket node output so the two can never drift apart.
@@ -35,7 +36,6 @@ const inputSchema = z.object({
   implementationApproved: z.preprocess((value) => value ?? undefined, z.boolean().default(true)),
   requireImplementationApproval: z.preprocess((value) => value ?? undefined, z.boolean().default(false)),
   runImplementation: z.preprocess((value) => value ?? undefined, z.boolean().default(true)),
-  useClaudeForPlanning: z.preprocess((value) => value ?? undefined, z.boolean().default(true)),
   metaTicket: z.object({
     title: z.string().default("Docs change triage"),
     source: z.string().default("manual"),
@@ -103,7 +103,7 @@ const triageSchema = z.object({
     slot: z.number().int().min(1).max(1),
     featureId: z.string(),
     title: z.string(),
-    agent: z.enum(["codex", "sonnet", "opus"]),
+    agent: z.enum(["implementation", "review"]),
     taskType: z.enum(["fix", "feature", "e2e", "review", "issue"]),
     reason: z.string(),
     files: z.array(z.string()).default([]),
@@ -169,17 +169,17 @@ export const CONTEXT = `
 This workflow is called docs-driven-development.
 
 Goal:
-- Maintain a living spec for THE PRODUCT THE TARGET REPOSITORY BUILDS — not a spec for this docs-driven-development workflow (that workflow is itself just one feature in the matrix). Discover what the product is from the target repository: read .smithers/spec/overview.md / .smithers/spec/content/overview.md if present, then README, the design docs the survey found, and the existing .smithers/spec/features.json. Do NOT assume the product is any particular tool. The spec renders inside the workflow UI from .smithers/spec/features.json (structured source of truth) plus derived per-feature spec docs and an overview under .smithers/spec/content, edited with a Milkdown Crepe WYSIWYG editor.
+- Maintain a living spec for the product the installed repository builds, not a spec for this workflow. Discover that product from the installed repository: read its existing overview, README, design docs, and feature data when present; do not assume a product, language, package manager, or monorepo layout. The spec renders from .smithers/spec/features.json and derived content in .smithers/spec/content; edit the structured source and run the installed pack's documented build gate. The spec UI is the installed workflow UI.
 - Track feature status, test cases, observability, debugging instructions, architecture docs, fixes, and commit diff hints.
 - Audit the spec for broken, missing, partial, or untested features.
 - Pick up to the configured maxAgents best next work items every round. Prefer fixing broken P0 features, then partial P0 proof gaps, then missing e2e tests, then high-impact reviews/issues, then new features.
-- Use Codex Luna for research and every implementation, Codex Sol for planning/review, and Codex Terra for routine validation. Claude is an automatic fallback only when Codex cannot run. The legacy useClaudeForPlanning input is accepted but no longer changes routing.
+- Route work by repository-independent role: research, planning, implementation, and review. Use the agent pools configured by the installed pack; do not select a vendor or model in feature data or prompts.
 - This workflow is long-running by design. It should continue round after round until the product spec is fully honest, tested, reviewed, documented, and the only remaining triage items are explicitly low-value/no-op issues.
 
 Architecture constraints:
 - No fake success. If a feature cannot be proven, keep it partial/broken/missing-tests.
 - Spec source: .smithers/spec/features.json (structured source of truth — the feature matrix, validated by .smithers/lib/ddd/featuresSchema.ts). .smithers/spec/content/features/<id>.md are DERIVED from features.json by bun .smithers/lib/ddd/build.ts (regenerated each build — do not hand-edit; change features.json instead). .smithers/spec/content/overview.md is the editable product overview. The spec UI is .smithers/ui/docs-driven-development.tsx.
-- OFF-LIMITS: never edit the DDD pack machinery itself — .smithers/workflows/ddd-*.tsx, .smithers/workflows/docs-driven-development.tsx, everything under .smithers/lib/ddd/, and the pack UI modules (.smithers/ui/docs-driven-development.tsx, .smithers/ui/ddd-*.tsx). If this repo already has ANOTHER docs-driven-development system (e.g. docs/spec/features.json, scripts/docs-driven-development/), do not merge or convert it; keep this pack's spec at .smithers/spec/ only.
+- OFF-LIMITS during a run: the installed DDD machinery — .smithers/workflows/docs-driven-development.tsx, everything under .smithers/lib/ddd/, and the pack UI modules (.smithers/ui/docs-driven-development.tsx, .smithers/ui/ddd-*.tsx). Keep this pack's spec at .smithers/spec/ even if the repository has another documentation system.
 - Reproducible build/gate command: bun .smithers/lib/ddd/build.ts (run from the repo root). It validates features.json against the zod schema, regenerates the derived feature docs, and regenerates the UI content modules (.smithers/ui/ddd-*.generated.ts).
 - maxAgents is capped at 1 until the graph renders matching implementation slots. This avoids triage materializing work that never runs.
 - To avoid wasting context, start audits/reviews with "bun .smithers/lib/ddd/auditInputs.ts" and inspect only the listed files plus exact current-run outputs when needed. Do not recursively read .smithers/executions or .smithers/pg.
@@ -404,17 +404,15 @@ export function resolveMaxIterations(value: unknown, runImplementation: boolean)
 export function agentForSlot(ctx: any, slot: number) {
   const triage = ctx.outputMaybe("triage", { nodeId: "triage" });
   const selected = triage?.selected?.find((item: any) => item.slot === slot);
-  if (selected?.agent === "opus") return planner;
-  if (selected?.agent === "sonnet") return trivialEditor;
-  return codex;
+  return selected?.agent === "review" ? reviewAgents : implementationAgents;
 }
 
 export function planningAgent(_ctx: any) {
-  return planner;
+  return planningAgents;
 }
 
 export function auditAgent(_ctx: any) {
-  return providers.luna;
+  return researchAgents;
 }
 
 // The loop must NOT exit on a single round-summary "done" — a flaky/empty audit
@@ -449,12 +447,12 @@ Selected item:
 ${JSON.stringify(selected, null, 2)}
 
 Requirements:
-- Operate on the target repository discovered from the installed workflow pack. Implementation selections run on Codex Luna; planning/review selections run on Codex Sol. Claude is failover-only. The legacy useClaudeForPlanning input does not alter routing.
+- Operate on the target repository discovered from the installed workflow pack. Use the configured implementation pool for implementation work and the configured review pool for review work.
 - Make the feature status in .smithers/spec/features.json more true, not more optimistic.
 - Update the spec if tests, observability, debug instructions, architecture, fixes, or diffs changed, then run bun .smithers/lib/ddd/build.ts and keep features.json valid.
 - Run the selected tests where feasible and list the exact commands discovered for the target repository.
-- If the selected item is docs-driven-development itself, do not recursively start another docs-driven-development workflow from inside work:${slot}; use the current run's upstream node outputs as proof and return partial if downstream round-summary readback cannot be proven until this work node finishes.
-- NEVER edit the DDD pack machinery: .smithers/workflows/ddd-*.tsx, .smithers/workflows/docs-driven-development.tsx, everything under .smithers/lib/ddd/*.ts, and the pack UI modules (.smithers/ui/docs-driven-development.tsx, .smithers/ui/ddd-*.tsx, .smithers/ui/crepeTheme.generated.ts) are ALL OFF-LIMITS. Editing them mid-run corrupts the live run — it has caused dependency-deadlock deaths, module-hash drift, and premature single-round exits. The only thing you write is the rendered spec content under .smithers/spec (features.json + content/*), which the build regenerates from. If you find a real bug in the workflow/scripts/UI, DO NOT fix it here — record it precisely in your summary so a human can apply it between runs.
+- If the selected item is docs-driven-development itself, do not recursively start another run from inside work:${slot}; use the current run's upstream node outputs as proof and return partial when downstream evidence is not available yet.
+- NEVER edit the live DDD machinery: .smithers/workflows/docs-driven-development.tsx, everything under .smithers/lib/ddd/*.ts, and the pack UI modules (.smithers/ui/docs-driven-development.tsx, .smithers/ui/ddd-*.tsx, .smithers/ui/crepeTheme.generated.ts). Write product spec content under .smithers/spec and target-repository source/tests only. Record pack defects in the summary for a later maintenance pass.
 - If this is a review/issue task, create concrete issue records in the spec metadata (features.json missing[]) or report blocked with exact findings.
 - Do not print secrets or tokens.
 
@@ -561,7 +559,7 @@ export default smithers((ctx) => {
               );
               const codeDiffResult = runCommandResult(
                 "git",
-                ["diff", "--name-only", "--"],
+                ["diff", "--name-only", "--", ".", ":(exclude).smithers/spec"],
                 "code-diff",
               );
               const gitStatus = gitStatusResult.ok ? gitStatusResult.output : "";
@@ -614,8 +612,8 @@ export default smithers((ctx) => {
             {`Audit the current docs-driven-development spec state. Start with "bun .smithers/lib/ddd/auditInputs.ts" and read only the listed bounded inputs unless a specific gap requires one more file. Read .smithers/spec/features.json and the derived content. Inspect the meta-ticket output first; if it was created from the docs editor, include that requested docs delta in your audit. The workflow already ran "bun .smithers/lib/ddd/build.ts"; check the bootstrap node output (or .smithers/docs-driven-development/bootstrap-latest.json) before deciding generatedSiteBuilds, which means "the ddd build gate passed". Return only JSON matching the audit schema. ${CONTEXT}`}
           </Task>
 
-          <Task id="spec-update" output={outputs.spec} agent={codex} retries={1} timeoutMs={40 * 60 * 1000} dependsOn={["audit", "metaTicket"]} deps={{ audit: outputs.audit, metaTicket: outputs.metaTicket }}>
-            {(deps: any) => `Update THIS repo's product spec so it reflects the audit honestly. The source of truth is .smithers/spec/features.json — edit it (feature status, summary, tests, observability, debug, architecture, changes/diffHints, missing) for the real product features. PRESERVE the organization fields on every record — tier, group, userValue, capabilities, endpoints, links — never drop them. tier is "feature" (end-user-facing), "platform" (infra that gates production confidence), or "reference" (a shared doc surfaced as a record). group is an END-USER JOURNEY (e.g. "Author workflows", "Run & observe", "Recover & replay", "Ship & review", "Platform & delivery") — it is NOT an owner/team name. Keep userValue (one end-user sentence), capabilities (drill-down), endpoints, and links; every link href must resolve to an existing content file (reference/<doc>.md#anchor or features/<id>.md) or a full URL. .smithers/spec/content/features/<id>.md are DERIVED from features.json (regenerated by bun .smithers/lib/ddd/build.ts — never hand-edit them); .smithers/spec/content/overview.md is the editable product overview. If the meta-ticket was created by the docs editor, apply that intent to features.json (or overview.md) only where it is supported by the current codebase/diffs; otherwise record it as a missing or broken gap. Keep the spec about THIS repo's product, not about this workflow (which is just the docs-driven-development feature). After editing, run bun .smithers/lib/ddd/build.ts and keep features.json valid. Return only JSON matching the spec schema.
+          <Task id="spec-update" output={outputs.spec} agent={implementationAgents} retries={1} timeoutMs={40 * 60 * 1000} dependsOn={["audit", "metaTicket"]} deps={{ audit: outputs.audit, metaTicket: outputs.metaTicket }}>
+            {(deps: any) => `Update this repository's product spec so it reflects the audit honestly. The source of truth is .smithers/spec/features.json — edit it (feature status, summary, tests, observability, debug, architecture, changes/diffHints, missing) for the real product features. Preserve tier, group, userValue, capabilities, endpoints, and links on every record. tier is "feature" (end-user-facing), "platform" (infrastructure that gates production confidence), or "reference" (shared documentation surfaced as a record). group is an end-user journey discovered from this product (for example "Discover", "Create", "Manage", "Measure", or "Operate"), not an owner/team name and not a Smithers-specific catalog. Every link href must resolve to an existing content file (reference/<doc>.md#anchor or features/<id>.md) or a full URL. .smithers/spec/content/features/<id>.md are derived from features.json (regenerated by bun .smithers/lib/ddd/build.ts — never hand-edit them); .smithers/spec/content/overview.md is the editable product overview. If the meta-ticket was created by the docs editor, apply that intent only where it is supported by the current codebase/diffs; otherwise record it as a missing or broken gap. Keep the spec about this repository's product. After editing, run bun .smithers/lib/ddd/build.ts and keep features.json valid. Return only JSON matching the spec schema.
 
 Audit:
 ${JSON.stringify(deps.audit, null, 2)}
@@ -627,7 +625,7 @@ ${CONTEXT}`}
           </Task>
 
           <Task id="triage" output={outputs.triage} agent={planningAgent(ctx)} retries={1} timeoutMs={30 * 60 * 1000} dependsOn={["spec-update"]}>
-            {`Plan the next docs-driven-development round. First run "bun .smithers/lib/ddd/triageCandidates.ts --max ${Math.max(maxAgents * 4, 4)}" and use that bounded ranked list instead of re-auditing the entire repo. Read the meta-ticket output before selecting slots. If it contains a docs-editor change, triage tickets based on that latest docs delta, the recorded docs diff, and the current codebase state. Pick at most ${maxAgents} work items. Slots must be numbered 1..${maxAgents}. Prefer broken P0 fixes, then partial P0 proof gaps, then missing e2e tests, then high-impact reviews/issues, then new features. Choose "codex" or "sonnet" for implementation tasks (both route to Codex Luna for compatibility), and "opus" only when planning/review judgment is the work item (routed to Codex Sol). Claude is failover-only. Never select pointless issues unless the product is otherwise fully built, tested, documented, and reviewed. Return only JSON matching the triage schema. ${CONTEXT}`}
+            {`Plan the next docs-driven-development round. First run "bun .smithers/lib/ddd/triageCandidates.ts --max ${Math.max(maxAgents * 4, 4)}" and use that bounded ranked list instead of re-auditing the entire repo. Read the meta-ticket output before selecting slots. If it contains a docs-editor change, triage tickets based on that latest docs delta, the recorded docs diff, and the current codebase state. Pick at most ${maxAgents} work items. Slots must be numbered 1..${maxAgents}. Prefer broken P0 fixes, then partial P0 proof gaps, then missing e2e tests, then high-impact reviews/issues, then new features. Set agent to "implementation" for code/docs/test changes and "review" only when independent review judgment is the work item. Never select pointless issues unless the product is otherwise fully built, tested, documented, and reviewed. Return only JSON matching the triage schema. ${CONTEXT}`}
           </Task>
 
           <Task

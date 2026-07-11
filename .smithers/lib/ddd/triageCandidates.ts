@@ -58,13 +58,19 @@ function taskTypeFor(status: string, gapText = ""): TriageCandidate["taskType"] 
   return "e2e";
 }
 
+// Matches a relative repo file path (one or more `/`-separated segments ending
+// in a file extension), not any particular target repo's top-level layout —
+// this DDD workflow is installed into arbitrary target repos, not just this
+// monorepo, so it cannot assume directory names like `packages/` or `apps/`.
+const RELATIVE_FILE_PATH_RE = /^(?:\.{1,2}\/)?[\w.-]+(?:\/[\w.-]+)*\.[A-Za-z0-9]{1,8}$/;
+
 function filesFromDiffHints(diffHints: string[] = []): string[] {
   return Array.from(
     new Set(
       diffHints
         .flatMap((hint) => hint.split(/\s+/))
         .map((part) => part.replace(/^[("'`]+/, "").replace(/[",.;:)`]+$/, ""))
-        .filter((part) => /^(packages|apps|docs|e2e|scripts|skills|\.smithers|package\.json)/.test(part))
+        .filter((part) => RELATIVE_FILE_PATH_RE.test(part))
     ),
   );
 }
