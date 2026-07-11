@@ -174,6 +174,81 @@ async function runAgentPreflightOnce(agent, options, cache) {
     await promise;
     return { cached: false };
 }
+// Random adapter ids (BaseCliAgent defaults `id` to randomUUID()) are noise as
+// display labels; only user-chosen ids survive into the agent summary.
+const AGENT_SUMMARY_UUID_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * Safe, display-only summary of ONE agent adapter for the frame task index:
+ * whitelisted string fields only (label/engine/model) — never the adapter
+ * object itself, which carries callbacks, options, and credentials.
+ *
+ * Mirrors `DevToolsAgentRef` in `@smithers-orchestrator/protocol/devtools`.
+ *
+ * @param {unknown} agent
+ * @returns {{ label?: string; engine?: string; model?: string } | undefined}
+ */
+function summarizeAgentLikeForIndex(agent) {
+    if (!agent || typeof agent !== "object") {
+        return undefined;
+    }
+    const raw = /** @type {Record<string, unknown>} */ (agent);
+    const capabilities = raw.capabilities && typeof raw.capabilities === "object" && !Array.isArray(raw.capabilities)
+        ? /** @type {Record<string, unknown>} */ (raw.capabilities)
+        : undefined;
+    const constructorName = typeof raw.constructor?.name === "string" && raw.constructor.name !== "Object"
+        ? raw.constructor.name
+        : undefined;
+    const engine = typeof raw.cliEngine === "string" && raw.cliEngine
+        ? raw.cliEngine
+        : typeof raw.hijackEngine === "string" && raw.hijackEngine
+            ? raw.hijackEngine
+            : typeof capabilities?.engine === "string" && capabilities.engine
+                ? capabilities.engine
+                : constructorName;
+    const model = typeof raw.model === "string" && raw.model
+        ? raw.model
+        : typeof raw.modelId === "string" && raw.modelId
+            ? raw.modelId
+            : undefined;
+    const label = typeof raw.label === "string" && raw.label
+        ? raw.label
+        : typeof raw.name === "string" && raw.name
+            ? raw.name
+            : typeof raw.id === "string" && raw.id && !AGENT_SUMMARY_UUID_ID.test(raw.id)
+                ? raw.id
+                : undefined;
+    if (!engine && !model && !label) {
+        return undefined;
+    }
+    return {
+        ...(label ? { label } : {}),
+        ...(engine ? { engine } : {}),
+        ...(model ? { model } : {}),
+    };
+}
+/**
+ * Summarize a task's declared `agent` prop (single adapter or failover list)
+ * for the frame task index, so devtools snapshots can show the assignment even
+ * for QUEUED nodes. For a list, the top-level fields describe the primary and
+ * `chain` preserves every declared entry in order.
+ *
+ * Mirrors `DevToolsAgentSummary` in `@smithers-orchestrator/protocol/devtools`.
+ *
+ * @param {unknown} agent
+ * @returns {{ label?: string; engine?: string; model?: string; chain?: Array<{ label?: string; engine?: string; model?: string }> } | undefined}
+ */
+function summarizeTaskAgentForIndex(agent) {
+    if (Array.isArray(agent)) {
+        const chain = agent
+            .map((entry) => summarizeAgentLikeForIndex(entry))
+            .filter((entry) => entry !== undefined);
+        if (chain.length === 0) {
+            return undefined;
+        }
+        return { ...chain[0], ...(chain.length > 1 ? { chain } : {}) };
+    }
+    return summarizeAgentLikeForIndex(agent);
+}
 /**
  * @param {AgentCliActionKind} kind
  * @returns {boolean}
@@ -5846,6 +5921,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 // would drop timer/wait/subflow/sandbox to "unknown" and a
                 // childless approval gate to "static".
                 kind: classifyClaudeWorkflowNodeKind(task),
+                // Declared agent assignment + attempt budget, so snapshot
+                // consumers can show WHO will run a task before it executes.
+                // JSON.stringify drops the undefineds for agentless tasks.
+                agent: summarizeTaskAgentForIndex(task.agent),
+                maxAttempts: typeof task.retries === "number" && Number.isFinite(task.retries)
+                    ? task.retries + 1
+                    : undefined,
             }))),
             note: "react-driver",
         };
