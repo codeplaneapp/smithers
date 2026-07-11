@@ -196,7 +196,9 @@ describe("smithers-run.mjs mirror script (harness, real run)", () => {
         expect(state.phases).toContain("Plan");
         expect(state.phases).toContain("Audit");
         const labels = state.calls.map((call) => call.label);
-        expect(labels).toContain("sync");
+        // The run-level tick row (labeled `sync` before mirror 0.2.2, now
+        // `tick #N · <status>`) plus one mirrored row per workflow node.
+        expect(labels.some((label) => /^tick #\d+ · /.test(String(label)))).toBe(true);
         expect(labels).toContain("seed");
         expect(labels).toContain("audit-alpha");
         expect(labels).toContain("audit-beta");
