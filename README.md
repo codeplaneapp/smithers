@@ -102,53 +102,10 @@ A workflow is a JSX tree of tasks. You usually don't write these by hand: you pr
 agent, and it writes them from the same primitives the built-in pack uses. Each example
 below starts with the prompt that produces it.
 
-### 1. Two tasks, typed and persisted
-
-> *"make me a smithers workflow that analyzes a bug report, then fixes it"*
-
-```tsx
-import { createSmithers, Sequence, OpenAIAgent } from "smithers-orchestrator";
-import { z } from "zod";
-
-const { Workflow, Task, smithers, outputs } = createSmithers({
-  input: z.object({ description: z.string() }),
-  analyze: z.object({
-    summary: z.string(),
-    severity: z.enum(["low", "medium", "high"]),
-  }),
-  fix: z.object({
-    patch: z.string(),
-    explanation: z.string(),
-  }),
-});
-
-const analyzer = new OpenAIAgent({ model: "gpt-5.6-terra" });
-const fixer = new OpenAIAgent({ model: "gpt-5.6-luna" });
-
-export default smithers((ctx) => (
-  <Workflow name="bugfix">
-    <Sequence>
-      <Task id="analyze" output={outputs.analyze} agent={analyzer}>
-        {`Analyze the bug: ${ctx.input.description}`}
-      </Task>
-
-      <Task id="fix" output={outputs.fix} agent={fixer} deps={{ analyze: outputs.analyze }}>
-        {(deps) => `Fix this issue: ${deps.analyze.summary}`}
-      </Task>
-    </Sequence>
-  </Workflow>
-));
-```
-
-Each task output is validated against its Zod schema and persisted to SQLite the moment it
-completes. `deps` gives the fix task typed access to the analysis and mounts it only after
-`analyze` finishes. If the process crashes, the run resumes without re-running finished
-work.
-
 This page is the 90-second version. The **[Tour](https://smithers.sh/tour)** is the
 15-minute version: it builds a real code-review workflow one capability at a time.
 
-### 2. Loop until a reviewer approves
+### Loop until a reviewer approves
 
 > *"implement this request and keep iterating until a reviewer signs off"*
 
@@ -193,97 +150,10 @@ This is the loop a one-shot agent call can't give you: implement, review, feed t
 feedback back in, repeat until approved. Every iteration is persisted, so a crash mid-loop
 resumes at the current iteration instead of iteration one.
 
-### 3. A small engineering team in one file
-
-> *"split this request into tickets, implement them in parallel worktrees with review
-> loops, and after I sign off merge the approved branches one at a time"*
-
-```tsx
-import {
-  createSmithers, Sequence, Parallel, Loop, Worktree, MergeQueue,
-  Approval, CodexAgent, approvalDecisionSchema,
-} from "smithers-orchestrator";
-import { z } from "zod";
-
-const { Workflow, Task, smithers, outputs } = createSmithers({
-  input: z.object({ request: z.string() }),
-  triage: z.object({
-    tickets: z.array(z.object({ id: z.string(), description: z.string() })),
-  }),
-  impl: z.object({ ticketId: z.string(), summary: z.string() }),
-  review: z.object({ ticketId: z.string(), approved: z.boolean(), feedback: z.string() }),
-  shipApproval: approvalDecisionSchema,
-  merge: z.object({ ticketId: z.string(), status: z.enum(["merged", "conflict"]) }),
-});
-
-const planner = new CodexAgent({
-  model: "gpt-5.6-sol",
-  config: { model_reasoning_effort: "xhigh" },
-  sandbox: "read-only",
-});
-const coder = new CodexAgent({
-  model: "gpt-5.6-luna",
-  config: { model_reasoning_effort: "medium" },
-});
-const reviewer = new CodexAgent({
-  model: "gpt-5.6-sol",
-  config: { model_reasoning_effort: "xhigh" },
-  sandbox: "read-only",
-});
-
-export default smithers((ctx) => {
-  const plan = ctx.outputMaybe(outputs.triage, { nodeId: "triage" });
-  return (
-    <Workflow name="ship-tickets">
-      <Sequence>
-        <Task id="triage" output={outputs.triage} agent={planner}>
-          {`Split this request into independent tickets: ${ctx.input.request}`}
-        </Task>
-
-        <Parallel maxConcurrency={4}>
-          {plan?.tickets.map((t) => (
-            <Worktree key={t.id} path={`.worktrees/${t.id}`} branch={`ticket/${t.id}`}>
-              <Loop until={ctx.latest(outputs.review, `review-${t.id}`)?.approved} maxIterations={4}>
-                <Task id={`implement-${t.id}`} output={outputs.impl} agent={coder}>
-                  {`Implement ticket ${t.id}: ${t.description}
-Reviewer feedback: ${ctx.latest(outputs.review, `review-${t.id}`)?.feedback ?? "none yet"}`}
-                </Task>
-                <Task id={`review-${t.id}`} output={outputs.review} agent={reviewer}>
-                  {`Review the work for ticket ${t.id}. Approve only when correct and tested.`}
-                </Task>
-              </Loop>
-            </Worktree>
-          ))}
-        </Parallel>
-
-        <Approval
-          id="ship"
-          output={outputs.shipApproval}
-          request={{ title: `Merge ${plan?.tickets.length ?? 0} reviewed branches?` }}
-          onDeny="fail"
-        >
-          <MergeQueue id="merge" maxConcurrency={1}>
-            {plan?.tickets.map((t) => (
-              <Task key={t.id} id={`merge-${t.id}`} output={outputs.merge} agent={coder}>
-                {`Rebase ticket/${t.id} onto main, run the test gate, and merge.`}
-              </Task>
-            ))}
-          </MergeQueue>
-        </Approval>
-      </Sequence>
-    </Workflow>
-  );
-});
-```
-
-Triage fans the request into tickets. Each ticket gets its own git worktree and its own
-implement-review loop, with a frontier model planning, a fast model implementing, and a
-different lab's model reviewing. Nothing merges until a human approves, and the merge
-queue then lands branches one at a time. Kill the process at any point and resume:
-finished tickets are skipped, in-flight ones re-run.
-
-The full version of this pattern (dependency-ordered waves, a researcher agent for blocked
-implementers) is [`examples/parallel-tickets.jsx`](./examples/parallel-tickets.jsx).
+The bigger version of this idea (split a request into tickets, implement them in
+parallel worktrees, gate on your approval, land through a merge queue) is
+[`examples/parallel-tickets.jsx`](./examples/parallel-tickets.jsx): a small engineering
+team in one file.
 
 ## Durable by default
 
@@ -317,11 +187,6 @@ bunx smithers-orchestrator replay abc123                                    # re
 
 Prefer the CLI? The seeded workflows run directly, and whether your agent started a run or
 you did, you can see exactly what's happening:
-
-*Watch every step of a workflow run, pause execution, approve gates, and rewind to an
-earlier checkpoint. Independent steps can run at the same time.*
-
-<img width="1032" height="434" alt="The Smithers run UI: live workflow steps with pause, approval, and rewind controls" src="https://github.com/user-attachments/assets/13b57654-ecd7-458f-bca5-15bbfa9bb323" />
 
 ```bash
 bunx smithers-orchestrator workflow run hello   # smallest possible run; prompt lives at .smithers/prompts/hello.mdx
@@ -360,17 +225,9 @@ harness can do the edits.
 | Antigravity | CLI harness |
 | Any [AI SDK](./docs/integrations/sdk-agents.mdx) model | SDK agent, with tools, structured output, and MCP |
 
-**Sandboxes that isolate them**
-
-The same `<Sandbox>` primitive runs an agent locally or on a remote provider with no change
-to the workflow:
-
-| Target | Notes |
-| --- | --- |
-| Local | default; syscall-isolated via Bubblewrap or Docker |
-| Docker | containerized execution on your machine or CI |
-| [Freestyle](https://freestyle.sh) | managed remote sandbox (see the [example provider](./docs/examples/freestyle-sandbox-provider.mdx)) |
-| Bring-your-own | implement the `SandboxProvider` interface for any backend ([gVisor](https://gvisor.dev), Kubernetes, [Daytona](https://daytona.io), [Cloudflare](https://workers.cloudflare.com), …) |
+The same `<Sandbox>` primitive runs an agent locally (Bubblewrap, Docker) or on a
+remote provider like [Freestyle](https://freestyle.sh) with no change to the workflow,
+and the `SandboxProvider` interface accepts any backend you bring.
 
 Beyond [`init`](#get-started), `bunx smithers-orchestrator mcp add` also wires the MCP
 server into Cursor, Copilot, Hermes, OpenClaw, and ~20 more coding agents.
@@ -395,58 +252,22 @@ pattern. Copy one as a starting point:
 
 [![Every orchestration pattern we could find: 100+ real, runnable Smithers workflows in one folder.](./marketing/examples/examples-folder.png)](./examples)
 
-| Example | Pattern |
-| --- | --- |
-| [`code-review-loop`](./examples/code-review-loop.jsx) | Implement → review → fix, looped until approved. |
-| [`parallel-tickets`](./examples/parallel-tickets.jsx) | Triage, run waves of work in parallel, merge-queue the results. |
-| [`supervisor`](./examples/supervisor.jsx) | A boss agent plans and delegates to workers dynamically. |
-| [`playwright-test-agent`](./examples/playwright-test-agent.jsx) | Plan E2E flows, generate Playwright tests, run/heal until stable. |
-| [`sql-analyst-dashboard`](./examples/sql-analyst-dashboard.jsx) | Discover schema, check read-only SQL, execute, summarize with a chart. |
-
-The folder also covers panels, debates, migrations, RAG citation loops, canary judging,
-SLO-breach explainers, repo janitors, and dozens more. Browse the full set in
-[`examples/`](./examples).
-
-## Components
-
-The examples above use a handful of primitives from a much larger set:
-
-| Component    | Purpose                         |
-| ------------ | ------------------------------- |
-| `<Workflow>` | Root container                  |
-| `<Task>`     | AI or static task node          |
-| `<Sequence>` | Ordered execution               |
-| `<Parallel>` | Concurrent execution            |
-| `<Branch>`   | Conditional execution           |
-| `<Loop>`     | Repeat tasks until a condition is met  |
-
-There are many more: approvals, worktrees, merge queues, sub-workflows, signals, timers,
-sagas, and composite patterns. See [Components](https://smithers.sh/components/workflow).
+Review loops, parallel ticket fleets, supervisors, panels, debates, migrations, RAG
+citation loops, repo janitors, and dozens more, each a runnable starting point.
 
 ## Also in the box
 
-Smithers is built for agents that modify real repositories, so control is wired into the
-runtime:
+Smithers is built for agents that modify real repositories, so control is wired into
+the runtime:
 
-- **Approvals**: gate destructive or risky steps behind a human `approve` / `deny` before
-  they run.
-- **Inspectable and reversible**: every step, tool call, and output is persisted and
-  replayable; `rewind`, `fork`, or `replay` any run from a checkpoint instead of living
-  with whatever the agent left behind.
-- **Isolated**: run agents in a [sandbox](#any-agent-any-model) (Bubblewrap, Docker, or a
-  bring-your-own remote provider) so edits never touch your host.
-- **Observability**: every run emits Prometheus metrics and OpenTelemetry traces. Bring up
-  the local stack with `bunx smithers-orchestrator observability --detach` (Grafana, Prometheus, Tempo, OTLP
-  collector) and serve metrics with `bunx smithers-orchestrator up workflow.tsx --serve --metrics`.
-- **Evals**: run repeatable workflow regressions from JSON/JSONL cases with
-  `bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke`; the command exits
-  non-zero when any case fails.
-- **Prompt optimization**: run GEPA-style optimization against an eval suite with
-  `bunx smithers-orchestrator optimize`, which writes an optimized prompt artifact only when the score
-  improves.
-- **Hot reload**: edit prompts, config, agent settings, or JSX structure mid-run with
-  `bunx smithers-orchestrator up workflow.tsx --hot`. In-flight tasks finish on their original code; only
-  newly scheduled tasks pick up changes.
+- **Approvals**: gate risky steps behind a human approve or deny before they run.
+- **Isolation**: sandbox agents so edits never touch your host.
+- **Observability**: Prometheus metrics and OpenTelemetry traces out of the box, plus a
+  one-command local Grafana stack (`bunx smithers-orchestrator observability`).
+- **Evals and prompt optimization**: repeatable regression suites, and GEPA-style tuning
+  that rewrites prompts only when the score improves.
+- **Hot reload**: edit prompts, config, or JSX mid-run; newly scheduled tasks pick up the
+  changes.
 
 ## Read next
 
