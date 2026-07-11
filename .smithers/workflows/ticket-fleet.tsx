@@ -19,7 +19,7 @@ import { subscriptionCodexFirst } from "../lib/codexAccounts";
 import { protectedAutomationPaths } from "../lib/codexIssueMergeQueue";
 
 const DEFAULT_REPO = "smithersai/smithers";
-const SWEEP_CONCURRENCY = 64;
+const SWEEP_CONCURRENCY = 16;
 const LANE_CONCURRENCY = 24;
 const LANDING_GATE_COMMAND = "pnpm typecheck && pnpm lint && pnpm test";
 const MAX_REVIEW_DIFF_BYTES = 200_000;
@@ -184,8 +184,8 @@ const planFields = {
   tests: z.array(z.string()).default([]),
   risks: z.array(z.string()).default([]),
 };
-const planSeatSchema = z.object({ ...planFields, planner: z.enum(["sol", "fable"]) });
-const planSchema = z.object({ ...planFields, plannedBy: z.enum(["sol", "fable", "panel"]).default("sol") });
+const planSeatSchema = z.object({ ...planFields, planner: z.enum(["sol", "luna"]) });
+const planSchema = z.object({ ...planFields, plannedBy: z.enum(["sol", "luna", "panel"]).default("sol") });
 type Plan = z.infer<typeof planSchema>;
 const setupSchema = z.object({
   issueNumber: z.number().int(),
@@ -358,8 +358,9 @@ const {
 
 // ---------------------------------------------------------------------------
 // Agents. luna/terra/sol are Codex GPT-5.6 variants; fable is Claude Fable 5.
-// Codex chains fan out across every registered Codex subscription; only sol
-// falls back to Claude Fable 5, matching .smithers/agents.ts conventions.
+// Role split: sol plans, luna implements, fable reviews and polishes; terra
+// moderates and resolves. Codex chains fan out across every registered Codex
+// subscription; sol/fable keep a cross-provider fallback for resilience.
 // ---------------------------------------------------------------------------
 
 function codexOptions(model: string, effort: "medium" | "high" | "xhigh", cwd?: string) {
@@ -391,8 +392,8 @@ function moderatorAgent(cwd?: string) {
   return terraAgent(cwd);
 }
 function implementerFor(difficulty: Triage["difficulty"]) {
-  if (difficulty === "hard") return terraAgent();
-  if (difficulty === "xhard") return solAgent();
+  if (difficulty === "xhard") return lunaAgent("xhigh");
+  if (difficulty === "hard") return lunaAgent("high");
   return lunaAgent("medium");
 }
 
@@ -1622,7 +1623,7 @@ export default smithers((ctx) => {
 
                     {setup?.ready && needsPlan && triage.difficulty !== "xhard" ? (
                       <Task id={"i" + n + ":plan"} output={outputs.tfPlan}
-                        agent={triage.difficulty === "medium" ? solAgent() : fableAgent()} {...agentTaskProps}>
+                        agent={solAgent()} {...agentTaskProps}>
                         {planPrompt(issue, triage, research)}
                       </Task>
                     ) : null}
@@ -1630,7 +1631,7 @@ export default smithers((ctx) => {
                       <Panel id={"i" + n + ":plan-panel"}
                         panelists={[
                           { agent: solAgent(), label: "sol", role: "Sol planner" },
-                          { agent: fableAgent(), label: "fable", role: "Fable planner" },
+                          { agent: lunaAgent("high"), label: "luna", role: "Luna planner" },
                         ]}
                         moderator={moderatorAgent()} panelistOutput={outputs.tfPlanSeat} moderatorOutput={outputs.tfPlan}
                         strategy="synthesize" maxConcurrency={2}
@@ -1682,8 +1683,8 @@ export default smithers((ctx) => {
                               {hardTier ? (
                                 <Panel id={"i" + n + ":review-panel"}
                                   panelists={[
-                                    { agent: solAgent(cwd), label: "sol", role: "Sol reviewer" },
                                     { agent: fableAgent(cwd), label: "fable", role: "Fable reviewer" },
+                                    { agent: solAgent(cwd), label: "sol", role: "Sol reviewer" },
                                   ]}
                                   moderator={moderatorAgent(cwd)} panelistOutput={outputs.tfReviewSeat} moderatorOutput={outputs.tfReview}
                                   strategy="consensus" minAgree={2} maxConcurrency={2}
@@ -1691,7 +1692,7 @@ export default smithers((ctx) => {
                                   {reviewPrompt(issue, { headSha: candidate.headSha, changedPaths: asStrArray(candidate.changedPaths), reviewDiff: candidate.reviewDiff }, "candidate")}
                                 </Panel>
                               ) : (
-                                <Task id={"i" + n + ":review"} output={outputs.tfReview} agent={solAgent(cwd)} {...agentTaskProps}>
+                                <Task id={"i" + n + ":review"} output={outputs.tfReview} agent={fableAgent(cwd)} {...agentTaskProps}>
                                   {reviewPrompt(issue, { headSha: candidate.headSha, changedPaths: asStrArray(candidate.changedPaths), reviewDiff: candidate.reviewDiff }, "candidate")}
                                 </Task>
                               )}
@@ -1763,8 +1764,8 @@ export default smithers((ctx) => {
                           hardTier ? (
                             <Panel id={"i" + n + ":queue-review-panel"}
                               panelists={[
-                                { agent: solAgent(cwd), label: "sol", role: "Sol final reviewer" },
                                 { agent: fableAgent(cwd), label: "fable", role: "Fable final reviewer" },
+                                { agent: solAgent(cwd), label: "sol", role: "Sol final reviewer" },
                               ]}
                               moderator={moderatorAgent(cwd)} panelistOutput={outputs.tfReviewSeat} moderatorOutput={outputs.tfReview}
                               strategy="consensus" minAgree={2} maxConcurrency={2}
@@ -1772,7 +1773,7 @@ export default smithers((ctx) => {
                               {reviewPrompt(issue, { headSha: prep.headSha, changedPaths: asStrArray(prep.changedPaths), reviewDiff: prep.reviewDiff }, "rebased landing head")}
                             </Panel>
                           ) : (
-                            <Task id={"i" + n + ":queue-review"} output={outputs.tfReview} agent={solAgent(cwd)} {...agentTaskProps}>
+                            <Task id={"i" + n + ":queue-review"} output={outputs.tfReview} agent={fableAgent(cwd)} {...agentTaskProps}>
                               {reviewPrompt(issue, { headSha: prep.headSha, changedPaths: asStrArray(prep.changedPaths), reviewDiff: prep.reviewDiff }, "rebased landing head")}
                             </Task>
                           )
