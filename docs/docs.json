@@ -36,10 +36,6 @@
       }
     }
   },
-  "banner": {
-    "content": "🌈 The Smithers UI preview is live — [sign up for early access →](https://ui-preview.smithers.sh)",
-    "dismissible": true
-  },
   "search": {
     "prompt": "Search or ask the docs..."
   },

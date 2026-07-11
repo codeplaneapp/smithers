@@ -28,6 +28,14 @@ You never memorize the commands; you drive it through your agent. Anything `wait
 
 The default watch path is still the agent-driven CLI loop above, not a GUI you click through. When you want one live page over *every* run (grouped run list, execution tree, event stream, and an approvals inbox), ask your agent to open the Smithers Monitor with `bunx smithers-orchestrator monitor`. It needs zero setup and only observes: opening it launches nothing. When a workflow ships a purpose-built browser view, ask your agent to open it with `bunx smithers-orchestrator ui`.
 
+<Frame caption="The Monitor's home view: every run in the workspace, grouped by what needs attention, live.">
+  <img src="/images/monitor/runs.png" alt="The Smithers Monitor listing sixteen runs grouped into needs attention, active, completed, failed, and cancelled, each with status, workflow, and duration" />
+</Frame>
+
+<Frame caption="Drill into one run: progress, the execution tree with per-node status, and the structured event stream underneath.">
+  <img src="/images/monitor/run-detail.png" alt="A finished run in the Smithers Monitor showing a completed seven-task execution tree and the live event log with agent traces and token usage" />
+</Frame>
+
 The Smithers workflow UI surface renders the browser UI that lives with that workflow, such as a kanban board, approval dashboard, or review surface. It is for the run you are steering, not a separate product console you must learn before Smithers is useful.
 
 <Note>

@@ -329,6 +329,12 @@ bunx smithers-orchestrator chat RUN_ID     # read the agent's chat output
 into a single run so you can follow each step and agent as it works. Run
 `bunx smithers-orchestrator starters` to browse plain-English starters.
 
+Prefer a live page over every run? `bunx smithers-orchestrator monitor` opens the Smithers
+Monitor: the grouped run list, each run's execution tree with per-node status, and the
+structured event stream underneath.
+
+<img src="./docs/images/monitor/run-detail.png" alt="A finished run in the Smithers Monitor: a completed execution tree with per-node status and the live event log with agent traces and token usage" width="1032" />
+
 ## Any agent, any model
 
 Smithers doesn't bet on one lab or one harness. Point a task at whichever agent is best for
