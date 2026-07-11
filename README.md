@@ -1,6 +1,6 @@
 # Smithers
 
-**Run long-horizon coding-agent work as durable workflows.**
+**Long agent jobs shouldn't die when your terminal does.**
 
 [![npm](https://img.shields.io/npm/v/smithers-orchestrator?color=2563eb&label=npm)](https://www.npmjs.com/package/smithers-orchestrator)
 [![CI](https://github.com/smithersai/smithers/actions/workflows/ci.yml/badge.svg)](https://github.com/smithersai/smithers/actions/workflows/ci.yml)
@@ -41,6 +41,24 @@ earlier checkpoint. Independent steps can run at the same time.*
 Smithers is the durable runtime for *coding-agent* work: when the unit of work is an agent
 editing a real repository over many steps, and you need that work to be inspectable,
 approvable, and recoverable.
+
+## Why not just let my agent orchestrate itself?
+
+Claude Code, Codex, and the other harnesses already fan out subagents, and for work that
+fits in one sitting they are the right tool. The fan-out is ephemeral, though: it lives
+inside one session, one vendor, and one terminal.
+
+| Built-in subagent fan-out | A Smithers run |
+| --- | --- |
+| Dies when the session ends or crashes | Persists and resumes from the last finished step |
+| One vendor per session | Claude, Codex, Gemini, and Pi share one workflow |
+| An approval blocks the terminal | An approval suspends the run durably, overnight if needed |
+| A bad decision means starting over | Rewind, fork, or replay from any step |
+| Orchestration is a prompt you retype | A workflow is a file you version, review, and rerun |
+
+When the work has to survive the session, hand the fan-out to Smithers. Your agent still
+drives everything; the run just stops being disposable. The longer argument is in
+[the open, durable version of agent workflows](https://smithers.sh/why/durable-open-orchestration).
 
 ## Get started
 

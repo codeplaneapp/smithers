@@ -1,6 +1,6 @@
 ---
 title: Smithers
-description: Durable orchestration for agentic workflows. Any model, any harness, survives a crash.
+description: Durable workflows for coding agents. Every step saved, every run resumable, rewindable, and approvable. Any model, any harness.
 mode: "custom"
 ---
 
@@ -19,13 +19,13 @@ mode: "custom"
       </span>
 
       <h1 className="landing-display mt-6" style={{ fontSize: "clamp(2.4rem, 5vw, 3.9rem)" }}>
-        Durable orchestration for <span className="landing-brass">agentic workflows.</span>
+        Long agent jobs shouldn't die <span className="landing-brass">when your terminal does.</span>
       </h1>
 
       <p className="mt-6 text-lg leading-relaxed" style={{ maxWidth: "34rem" }}>
-        Smithers runs any recipe in the background (loops, gates, retries) and
-        saves every finished step. Close your laptop. Kill the process. Pick up
-        where it left off. Any model, any harness.
+        Smithers runs agent work as durable workflows (loops, gates, retries)
+        and saves every finished step. Close your laptop. Kill the process.
+        Pick up where it left off. Any model, any harness.
       </p>
 
       <div className="flex flex-wrap gap-3 mt-9">
@@ -148,6 +148,28 @@ mode: "custom"
   </p>
 </section>
 
+{/* ─────────────────────────── Proof ─────────────────────────── */}
+<section className="max-w-4xl mx-auto px-6 py-8 text-center">
+  <div className="flex flex-wrap items-start justify-center gap-x-12 gap-y-5">
+    <div>
+      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>45k</strong>
+      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>weekly npm downloads</span>
+    </div>
+    <div>
+      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>100+</strong>
+      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>runnable example workflows</span>
+    </div>
+    <div>
+      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>6+</strong>
+      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>ecosystem projects on the runtime</span>
+    </div>
+    <div>
+      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>MIT</strong>
+      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>open source, no cloud required</span>
+    </div>
+  </div>
+</section>
+
 {/* ─────────────────────────── Why ─────────────────────────── */}
 <section className="max-w-4xl mx-auto px-6 py-16">
   <div className="text-center mb-12">
@@ -219,6 +241,50 @@ mode: "custom"
       <span style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>Score every run, then let Smithers optimize its own prompts (GEPA) against your eval suite. The system gets better, not just the answer.</span>
     </div>
   </div>
+</section>
+
+{/* ─────────────── vs. built-in orchestration ─────────────── */}
+<section className="max-w-4xl mx-auto px-6 py-16">
+  <div className="text-center mb-10">
+    <span className="landing-eyebrow">Already fanning out subagents?</span>
+    <h2 className="landing-display mt-5" style={{ fontSize: "clamp(1.8rem, 4vw, 2.6rem)" }}>
+      Your agent's built-in orchestration is ephemeral.
+    </h2>
+    <p className="mt-6" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+      Subagent fan-out inside Claude Code or Codex is the right tool for work that
+      fits in one sitting. It also lives inside one session, one vendor, and one
+      terminal. Smithers is where the fan-out goes when the work has to survive.
+    </p>
+  </div>
+
+  <div className="grid md:grid-cols-2 gap-5" style={{ maxWidth: "44rem", marginInline: "auto" }}>
+    <div className="landing-card p-6">
+      <div className="landing-eyebrow" style={{ marginBottom: "0.9rem" }}>Built-in subagents</div>
+      <div className="flex flex-col gap-2.5" style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>
+        <span>Work dies when the session ends or crashes</span>
+        <span>One vendor per session</span>
+        <span>An approval blocks the terminal</span>
+        <span>A bad decision means starting over</span>
+        <span>Orchestration is a prompt you retype</span>
+      </div>
+    </div>
+    <div className="landing-card landing-card-accent p-6">
+      <div className="landing-eyebrow" style={{ marginBottom: "0.9rem" }}>A Smithers run</div>
+      <div className="flex flex-col gap-2.5" style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink)" }}>
+        <span>Resumes from the last finished step</span>
+        <span>Claude, Codex, Gemini, and Pi in one workflow</span>
+        <span>Approvals wait overnight, durably</span>
+        <span>Rewind, fork, or replay any step</span>
+        <span>A workflow file you version, review, and rerun</span>
+      </div>
+    </div>
+  </div>
+
+  <p className="text-center mt-8">
+    <a href="/why/durable-open-orchestration" className="landing-brass" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
+      Read: the open, durable version of agent workflows →
+    </a>
+  </p>
 </section>
 
 {/* ─────────────────────── Just say this ─────────────────────── */}
