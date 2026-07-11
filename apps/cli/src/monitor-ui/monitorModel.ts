@@ -120,6 +120,8 @@ export type RunDiagnosis = {
   headline: string;
   detail: string;
   fix: string;
+  /** One-click remedy the monitor can offer (wired to a gateway RPC). */
+  action?: "resume";
 };
 
 /** Logical task rows only — structural containers carry numeric snapshot keys. */
@@ -194,7 +196,8 @@ export function diagnoseRun(input: {
       tone: "warn",
       headline: "Parked on provider quota — nothing is wrong",
       detail: `${input.quota?.blockedCount ?? 0} task(s) hit a usage limit; ${progress}.${who}${why}`,
-      fix: `It auto-resumes when the window resets. To go sooner: add capacity (\`smithers agents add\`) then \`smithers up --resume ${input.runId}\`.`,
+      fix: `It auto-resumes when the window resets. To go sooner: add capacity (\`smithers agents add\`), then resume.`,
+      action: "resume",
     };
   }
   if (status === "waiting-approval" || input.approvalsCount > 0) {
@@ -210,7 +213,8 @@ export function diagnoseRun(input: {
       tone: "warn",
       headline: "Engine heartbeat is stale",
       detail: `The run claims to be ${status || "active"} but its engine has gone quiet; ${progress}.`,
-      fix: `\`smithers up --resume ${input.runId}\` re-attaches an engine (or \`smithers supervise\` to auto-heal).`,
+      fix: `Resuming re-attaches an engine (or \`smithers supervise\` to auto-heal).`,
+      action: "resume",
     };
   }
   if (failed.length && (status === "running" || status.startsWith("waiting"))) {

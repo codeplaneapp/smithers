@@ -1853,6 +1853,25 @@ function HealthStrip({
 }) {
   const tree = useGatewayRunTree(runId);
   const approvalsQuery = useGatewayApprovals();
+  const actions = useGatewayActions();
+  const [resumeBusy, setResumeBusy] = useState(false);
+  const [resumeNote, setResumeNote] = useState<string | null>(null);
+  const requestResume = async () => {
+    setResumeBusy(true);
+    setResumeNote(null);
+    try {
+      const response = await actions.resumeRun({ runId });
+      setResumeNote(
+        response.status === "already_terminal"
+          ? "Run already reached a terminal state."
+          : "Resume requested — an engine is re-attaching.",
+      );
+    } catch (error) {
+      setResumeNote(`Resume failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setResumeBusy(false);
+    }
+  };
   const treeNodes = tree.nodes ?? [];
   const approvalsCount = (Array.isArray(approvalsQuery.data) ? approvalsQuery.data : []).filter(
     (approval: unknown) => isRecord(approval) && approval.runId === runId,
@@ -1910,6 +1929,21 @@ function HealthStrip({
         </ul>
       ) : null}
       <div className="mon-health-fix mon-dim">{diagnosis.fix}</div>
+      {diagnosis.action === "resume" ? (
+        <div className="mon-health-actions">
+          <button
+            type="button"
+            className="mon-btn mon-btn-ok"
+            data-testid="monitor-resume-run"
+            disabled={resumeBusy}
+            title="Ask the gateway to re-attach an engine and resume this run now"
+            onClick={() => void requestResume()}
+          >
+            {resumeBusy ? "Resuming…" : "Resume now"}
+          </button>
+          {resumeNote ? <span className="mon-dim">{resumeNote}</span> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -3470,6 +3504,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-quota { flex-direction: column; align-items: flex-start; }
 .mon-health { flex-direction: column; align-items: flex-start; gap: var(--sp-1); }
 .mon-health-headline { display: flex; align-items: center; gap: var(--sp-2); }
+.mon-health-actions { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); }
 .mon-health-dot { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--tone); box-shadow: 0 0 6px color-mix(in srgb, var(--tone) 60%, transparent); }
 .mon-health-detail { font-weight: 400; overflow-wrap: anywhere; }
 .mon-health-fix { font-weight: 400; font-size: var(--fs-1); }

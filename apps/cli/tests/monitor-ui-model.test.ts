@@ -641,7 +641,21 @@ describe("diagnoseRun", () => {
     expect(d.headline).toContain("quota");
     expect(d.detail).toContain("i9:verdict");
     expect(d.detail).toContain("usage/quota limit");
-    expect(d.fix).toContain("--resume run-x");
+    expect(d.fix).toContain("add capacity");
+    // The monitor renders a one-click "Resume now" button off this field.
+    expect(d.action).toBe("resume");
+  });
+
+  test("stale heartbeat offers the one-click resume action", () => {
+    const d = diagnoseRun({
+      ...base,
+      status: "running",
+      healthState: "stale",
+      treeNodes: nodes(["a", "ok"]),
+    });
+    expect(d.tone).toBe("warn");
+    expect(d.headline).toContain("heartbeat");
+    expect(d.action).toBe("resume");
   });
 
   test("guard trip is red and forbids resuming blindly", () => {
@@ -653,6 +667,8 @@ describe("diagnoseRun", () => {
     expect(d.tone).toBe("crit");
     expect(d.headline).toContain("guard");
     expect(d.fix).toContain("Do NOT resume");
+    // A tripped guard must never get a one-click resume button.
+    expect(d.action).toBeUndefined();
   });
 
   test("failed tasks on a live run are yellow with the failure sample", () => {
