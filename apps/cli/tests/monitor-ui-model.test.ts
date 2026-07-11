@@ -1,6 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import {
+  accountRowsOf,
   asArray,
+  cronRowsOf,
+  dataRowsOf,
+  formatLatencyMs,
+  formatScore,
+  histogramQuantile,
+  histogramStats,
+  metricValue,
+  nextCron,
+  nonZeroErrorCounters,
+  openTicketCount,
+  opsStats,
+  parsePrometheusText,
+  scoreRowsOf,
+  scoresForNode,
+  scoresSummary,
+  scoreTone,
   autoExpandKeys,
   buildTimeline,
   canRetryTask,
@@ -983,5 +1000,391 @@ describe("run and task controls", () => {
     expect(canRetryTask("ok", "failed")).toBe(false);
     expect(canRetryTask("running", "failed")).toBe(false);
     expect(canRetryTask(undefined, "failed")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prometheus text parsing (the /metrics scrape behind the ops strip and the
+// Metrics view).
+// ---------------------------------------------------------------------------
+
+describe("parsePrometheusText", () => {
+  test("parses counters, gauges, and the TYPE map", () => {
+    const scrape = parsePrometheusText(
+      [
+        "# HELP smithers_gateway_runs_started_total Gateway runs started",
+        "# TYPE smithers_gateway_runs_started_total counter",
+        "smithers_gateway_runs_started_total 12",
+        "# TYPE smithers_gateway_connections_active gauge",
+        "smithers_gateway_connections_active 3",
+      ].join("\n"),
+    );
+    expect(scrape.types.smithers_gateway_runs_started_total).toBe("counter");
+    expect(scrape.types.smithers_gateway_connections_active).toBe("gauge");
+    expect(scrape.samples).toEqual([
+      { name: "smithers_gateway_runs_started_total", labels: {}, value: 12 },
+      { name: "smithers_gateway_connections_active", labels: {}, value: 3 },
+    ]);
+  });
+
+  test("parses labels, +Inf, and float values", () => {
+    const scrape = parsePrometheusText(
+      [
+        'smithers_agent_duration_ms_bucket{le="100",engine="codex",model="gpt-5.3"} 2',
+        'smithers_agent_duration_ms_bucket{le="+Inf",engine="codex",model="gpt-5.3"} 5',
+        'smithers_gateway_rpc_duration_ms_sum{method="listRuns",transport="http"} 194.46',
+      ].join("\n"),
+    );
+    expect(scrape.samples[0].labels).toEqual({ le: "100", engine: "codex", model: "gpt-5.3" });
+    expect(scrape.samples[1].labels.le).toBe("+Inf");
+    expect(scrape.samples[1].value).toBe(5);
+    expect(scrape.samples[2].value).toBeCloseTo(194.46);
+  });
+
+  test("unescapes quoted label values (backslash, quote, newline)", () => {
+    const scrape = parsePrometheusText('m{path="a\\\\b",msg="say \\"hi\\"",text="line1\\nline2"} 1');
+    expect(scrape.samples[0].labels).toEqual({ path: "a\\b", msg: 'say "hi"', text: "line1\nline2" });
+  });
+
+  test("a closing brace inside a label value does not truncate parsing", () => {
+    const scrape = parsePrometheusText('m{expr="{a}"} 7');
+    expect(scrape.samples[0]).toEqual({ name: "m", labels: { expr: "{a}" }, value: 7 });
+  });
+
+  test("skips malformed lines instead of failing the whole scrape", () => {
+    const scrape = parsePrometheusText(
+      ["not a metric line", "m{unclosed=\"x} 1", "ok_metric 2", "bad_value abc", ""].join("\n"),
+    );
+    expect(scrape.samples).toEqual([{ name: "ok_metric", labels: {}, value: 2 }]);
+  });
+
+  test("drops a trailing timestamp on sample lines", () => {
+    const scrape = parsePrometheusText("m 42 1712345678000");
+    expect(scrape.samples[0].value).toBe(42);
+  });
+});
+
+describe("histogramQuantile", () => {
+  const buckets = [
+    { le: 100, count: 0 },
+    { le: 200, count: 10 },
+    { le: 400, count: 18 },
+    { le: Infinity, count: 20 },
+  ];
+
+  test("interpolates within the target bucket", () => {
+    // p50: rank 10 lands exactly at the 200ms bucket's cumulative count.
+    expect(histogramQuantile(0.5, buckets)).toBe(200);
+    // p90: rank 18 → the 400ms bucket's upper edge.
+    expect(histogramQuantile(0.9, buckets)).toBe(400);
+    // p75: rank 15 → interpolated between 200 and 400: 200 + 200*(5/8).
+    expect(histogramQuantile(0.75, buckets)).toBeCloseTo(325);
+  });
+
+  test("a quantile landing in +Inf reports the highest finite bound", () => {
+    expect(histogramQuantile(0.99, buckets)).toBe(400);
+  });
+
+  test("empty and zero-count histograms return undefined", () => {
+    expect(histogramQuantile(0.5, [])).toBeUndefined();
+    expect(
+      histogramQuantile(0.5, [
+        { le: 100, count: 0 },
+        { le: Infinity, count: 0 },
+      ]),
+    ).toBeUndefined();
+  });
+});
+
+describe("histogramStats", () => {
+  const scrape = parsePrometheusText(
+    [
+      // codex histogram split across two operations — must merge per engine·model.
+      'smithers_agent_duration_ms_bucket{le="100",engine="codex",model="gpt-5.3",operation="a"} 1',
+      'smithers_agent_duration_ms_bucket{le="+Inf",engine="codex",model="gpt-5.3",operation="a"} 2',
+      'smithers_agent_duration_ms_bucket{le="100",engine="codex",model="gpt-5.3",operation="b"} 3',
+      'smithers_agent_duration_ms_bucket{le="+Inf",engine="codex",model="gpt-5.3",operation="b"} 4',
+      // a second group with zero observations — must be dropped.
+      'smithers_agent_duration_ms_bucket{le="100",engine="claude",model="fable"} 0',
+      'smithers_agent_duration_ms_bucket{le="+Inf",engine="claude",model="fable"} 0',
+    ].join("\n"),
+  );
+
+  test("groups by the requested labels, summing across the rest", () => {
+    const stats = histogramStats(scrape, "smithers_agent_duration_ms", ["engine", "model"]);
+    expect(stats).toHaveLength(1);
+    expect(stats[0].key).toBe("codex · gpt-5.3");
+    expect(stats[0].labels).toEqual({ engine: "codex", model: "gpt-5.3" });
+    expect(stats[0].count).toBe(6);
+    // rank 3 of 6 lands inside the merged 0–100 bucket (count 4): 100 * 3/4.
+    expect(stats[0].p50).toBe(75);
+    expect(stats[0].p95).toBeDefined();
+  });
+
+  test("an all-zero histogram (fresh gateway) yields no rows", () => {
+    const empty = parsePrometheusText(
+      ['x_bucket{le="100"} 0', 'x_bucket{le="+Inf"} 0'].join("\n"),
+    );
+    expect(histogramStats(empty, "x", [])).toEqual([]);
+  });
+
+  test("sorts groups by count descending", () => {
+    const two = parsePrometheusText(
+      [
+        'd_bucket{le="+Inf",m="small"} 2',
+        'd_bucket{le="+Inf",m="big"} 9',
+        'd_bucket{le="100",m="small"} 2',
+        'd_bucket{le="100",m="big"} 9',
+      ].join("\n"),
+    );
+    expect(histogramStats(two, "d", ["m"]).map((stat) => stat.key)).toEqual(["big", "small"]);
+  });
+});
+
+describe("metricValue and error counters", () => {
+  const scrape = parsePrometheusText(
+    [
+      "smithers_gateway_runs_started_total 4",
+      'smithers_gateway_rpc_calls_total{method="listRuns"} 16',
+      'smithers_gateway_rpc_calls_total{method="getRun"} 15',
+      "smithers_agent_errors_total 0",
+      'smithers_gateway_errors_total{code="EPIPE"} 3',
+      "smithers_agent_duration_ms_sum 120",
+      "smithers_agent_duration_ms_count 2",
+    ].join("\n"),
+  );
+
+  test("metricValue sums matching samples (optionally label-filtered)", () => {
+    expect(metricValue(scrape, "smithers_gateway_runs_started_total")).toBe(4);
+    expect(metricValue(scrape, "smithers_gateway_rpc_calls_total")).toBe(31);
+    expect(metricValue(scrape, "smithers_gateway_rpc_calls_total", { method: "getRun" })).toBe(15);
+    expect(metricValue(scrape, "nope")).toBeUndefined();
+  });
+
+  test("nonZeroErrorCounters keeps only non-zero error series, excluding histogram parts", () => {
+    const errors = nonZeroErrorCounters(scrape);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].name).toBe("smithers_gateway_errors_total");
+    expect(errors[0].value).toBe(3);
+  });
+});
+
+describe("formatLatencyMs", () => {
+  test("renders ms, seconds, and minutes at honest precision", () => {
+    expect(formatLatencyMs(412)).toBe("412ms");
+    expect(formatLatencyMs(1_240)).toBe("1.2s");
+    expect(formatLatencyMs(45_000)).toBe("45s");
+    expect(formatLatencyMs(95_000)).toBe("1m 35s");
+    expect(formatLatencyMs(undefined)).toBe("—");
+    expect(formatLatencyMs(Infinity)).toBe("—");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workspace ops stats (derived client-side from the fetched runs list).
+// ---------------------------------------------------------------------------
+
+describe("opsStats", () => {
+  const noon = new Date(2026, 6, 10, 12, 0, 0).getTime();
+
+  test("counts active, attention, live engines, and today's completions", () => {
+    const stats = opsStats(
+      [
+        { status: "running", heartbeatAtMs: noon - 5_000 },
+        { status: "running", heartbeatAtMs: noon - 120_000 }, // stale engine
+        { status: "waiting-approval" },
+        { status: "paused" },
+        { status: "finished", finishedAtMs: noon - 3_600_000 },
+        { status: "finished", finishedAtMs: noon - 24 * 3_600_000 }, // yesterday
+        { status: "failed", finishedAtMs: noon - 60_000 },
+        { status: "cancelled", finishedAtMs: noon - 60_000 }, // cancelled ≠ completed/failed
+      ],
+      noon,
+    );
+    expect(stats).toEqual({ active: 2, attention: 2, enginesLive: 1, completedToday: 1, failedToday: 1 });
+  });
+
+  test("tolerates snake_case rows and missing fields", () => {
+    const stats = opsStats(
+      [
+        { status: "running", heartbeat_at_ms: noon - 1_000 },
+        { status: "finished", finished_at_ms: noon - 1_000 },
+        { status: "finished" }, // no finish time — not counted as today
+      ],
+      noon,
+    );
+    expect(stats.enginesLive).toBe(1);
+    expect(stats.completedToday).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Crons. Real cronList responses re-list each cron once per registered
+// workflow sharing the DB adapter (hundreds of duplicate rows whose
+// `workflow` field is the iterating workflow's key, not the cron's) — the
+// reader dedupes by cronId and trusts workflowPath.
+// ---------------------------------------------------------------------------
+
+describe("cronRowsOf", () => {
+  test("dedupes duplicated cron rows and derives workflow from workflowPath", () => {
+    const rows = cronRowsOf({
+      ok: true,
+      data: [
+        {
+          cronId: "c-1",
+          pattern: "*/3 * * * *",
+          workflowPath: ".smithers/workflows/test-fortress-monitor.tsx",
+          workflow: "audit", // per-workflow duplicate noise — not the truth
+          enabled: true,
+          lastRunAtMs: 100,
+          nextRunAtMs: 200,
+          errorJson: null,
+        },
+        {
+          cronId: "c-1",
+          pattern: "*/3 * * * *",
+          workflowPath: ".smithers/workflows/test-fortress-monitor.tsx",
+          workflow: "audit-burndown",
+          enabled: true,
+        },
+        {
+          cronId: "c-2",
+          pattern: "*/15 * * * *",
+          workflowPath: ".smithers/workflows/ticket-fleet.tsx",
+          enabled: 1, // sqlite boolean
+          nextRunAtMs: 150,
+          errorJson: '{"message":"spawn failed"}',
+        },
+      ],
+    });
+    expect(rows).toHaveLength(2);
+    // enabled crons sort by soonest next fire
+    expect(rows[0]).toMatchObject({ cronId: "c-2", workflow: "ticket-fleet", enabled: true, error: "spawn failed" });
+    expect(rows[1]).toMatchObject({
+      cronId: "c-1",
+      workflow: "test-fortress-monitor",
+      pattern: "*/3 * * * *",
+      lastRunAtMs: 100,
+      nextRunAtMs: 200,
+    });
+    expect(rows[1].error).toBeUndefined();
+  });
+
+  test("keeps a non-JSON errorJson string verbatim and sinks disabled crons", () => {
+    const rows = cronRowsOf([
+      { cronId: "a", pattern: "* * * * *", enabled: false, errorJson: "plain failure text", nextRunAtMs: 1 },
+      { cronId: "b", pattern: "* * * * *", enabled: true, nextRunAtMs: 500 },
+    ]);
+    expect(rows.map((row) => row.cronId)).toEqual(["b", "a"]);
+    expect(rows[1].error).toBe("plain failure text");
+  });
+
+  test("nextCron picks the soonest enabled cron with a scheduled fire", () => {
+    const crons = cronRowsOf([
+      { cronId: "a", pattern: "*", enabled: false, nextRunAtMs: 10 },
+      { cronId: "b", pattern: "*", enabled: true, nextRunAtMs: 300 },
+      { cronId: "c", pattern: "*", enabled: true, nextRunAtMs: 200 },
+      { cronId: "d", pattern: "*", enabled: true },
+    ]);
+    expect(nextCron(crons)?.cronId).toBe("c");
+    expect(nextCron([])).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scores.
+// ---------------------------------------------------------------------------
+
+describe("scores", () => {
+  const body = {
+    ok: true,
+    data: [
+      { nodeId: "verify", iteration: 0, attempt: 1, scorerId: "s1", scorerName: "tests-pass", score: 1, scoredAtMs: 100 },
+      { nodeId: "implement", iteration: 0, attempt: 0, scorerId: "s2", scorerName: "diff-quality", score: 0.62, reason: "minor nits", scoredAtMs: 300 },
+      { nodeId: "implement", iteration: 1, attempt: 0, scorerId: "s2", scorerName: "diff-quality", score: 0.31, scoredAtMs: 200 },
+    ],
+  };
+
+  test("scoreRowsOf reads the wire rows, newest first, tolerating snake_case", () => {
+    const rows = scoreRowsOf(body);
+    expect(rows.map((row) => row.scoredAtMs)).toEqual([300, 200, 100]);
+    expect(rows[0]).toMatchObject({ nodeId: "implement", scorerName: "diff-quality", score: 0.62, reason: "minor nits" });
+    const snake = scoreRowsOf([{ node_id: "n", scorer_id: "x", scorer_name: "X", score: 0.5 }]);
+    expect(snake[0]).toMatchObject({ nodeId: "n", scorerName: "X", iteration: 0, attempt: 0 });
+  });
+
+  test("rows without a nodeId or numeric score are dropped", () => {
+    expect(scoreRowsOf({ ok: true, data: [{ score: 1 }, { nodeId: "n" }, "junk"] })).toEqual([]);
+  });
+
+  test("scoreTone thresholds a normalized [0,1] score", () => {
+    expect(scoreTone(1)).toBe("ok");
+    expect(scoreTone(0.8)).toBe("ok");
+    expect(scoreTone(0.79)).toBe("waiting");
+    expect(scoreTone(0.5)).toBe("waiting");
+    expect(scoreTone(0.49)).toBe("failed");
+    expect(scoreTone(0)).toBe("failed");
+  });
+
+  test("formatScore renders two decimals for fractions, bare integers", () => {
+    expect(formatScore(0.617)).toBe("0.62");
+    expect(formatScore(1)).toBe("1");
+    expect(formatScore(0)).toBe("0");
+    expect(formatScore(NaN)).toBe("—");
+  });
+
+  test("scoresSummary averages and scoresForNode filters", () => {
+    const rows = scoreRowsOf(body);
+    const summary = scoresSummary(rows);
+    expect(summary.count).toBe(3);
+    expect(summary.avg).toBeCloseTo((1 + 0.62 + 0.31) / 3);
+    expect(scoresSummary([])).toEqual({ count: 0, avg: 0 });
+    expect(scoresForNode(rows, "implement")).toHaveLength(2);
+    expect(scoresForNode(rows, "verify")).toHaveLength(1);
+    expect(scoresForNode(rows, undefined)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Accounts / tickets / generic envelope.
+// ---------------------------------------------------------------------------
+
+describe("ops strip readers", () => {
+  test("dataRowsOf accepts {ok,data} envelopes and bare arrays", () => {
+    expect(dataRowsOf({ ok: true, data: [1, 2] })).toEqual([1, 2]);
+    expect(dataRowsOf([3])).toEqual([3]);
+    expect(dataRowsOf({ ok: false })).toEqual([]);
+    expect(dataRowsOf(null)).toEqual([]);
+  });
+
+  test("accountRowsOf marks accounts ready when a config dir or API key exists", () => {
+    const rows = accountRowsOf({
+      ok: true,
+      data: [
+        { label: "kimi-1", provider: "kimi", hasConfigDir: true, hasApiKey: false, model: null },
+        { label: "gemini-1", provider: "gemini-api", hasConfigDir: false, hasApiKey: false, model: "gemini-3.1-pro" },
+        { label: "keyed", provider: "openai", has_config_dir: false, has_api_key: true },
+        { provider: "junk-without-label" },
+      ],
+    });
+    expect(rows).toHaveLength(3);
+    expect(rows.map((row) => row.ready)).toEqual([true, false, true]);
+    expect(rows[1].model).toBe("gemini-3.1-pro");
+  });
+
+  test("openTicketCount treats done/closed/resolved as closed, unknown as open", () => {
+    expect(
+      openTicketCount({
+        ok: true,
+        data: [
+          { path: "a", status: "open" },
+          { path: "b", status: "Done" },
+          { path: "c", status: null },
+          { path: "d", status: "in-progress" },
+          { path: "e", status: "closed" },
+        ],
+      }),
+    ).toBe(3);
+    expect(openTicketCount({ ok: true, data: [] })).toBe(0);
   });
 });

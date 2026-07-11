@@ -1096,6 +1096,519 @@ export function hijackActionFor(
   return { kind: "reopen", label: "Reopen session" };
 }
 
+// ---------------------------------------------------------------------------
+// Generic API envelope reader. Every simple-read gateway route answers
+// `{ok, data: [...]}`; some tools hand the bare array around instead.
+// ---------------------------------------------------------------------------
+
+/** Rows out of a gateway list HTTP body (`{ok,data:[…]}` or a bare array). */
+export function dataRowsOf(body: unknown): unknown[] {
+  if (Array.isArray(body)) return body;
+  if (isRecord(body) && Array.isArray(body.data)) return body.data;
+  return [];
+}
+
+// ---------------------------------------------------------------------------
+// Prometheus text parsing. The gateway serves its metrics as Prometheus
+// exposition text at /metrics; the monitor computes glanceable operator stats
+// (latency percentiles, counters) from ONE scrape client-side instead of
+// shipping a charting stack.
+// ---------------------------------------------------------------------------
+
+export type PromSample = { name: string; labels: Record<string, string>; value: number };
+
+export type PromScrape = {
+  /** Metric name → declared type ("counter" | "gauge" | "histogram" | …). */
+  types: Record<string, string>;
+  samples: PromSample[];
+};
+
+/**
+ * Parse a `key="value",…` label segment (the part between `{` and `}`).
+ * Handles the exposition-format escapes inside quoted values: `\\`, `\"`,
+ * and `\n`. Returns null when the segment does not parse — the caller drops
+ * that line instead of guessing.
+ */
+function parsePromLabels(segment: string): Record<string, string> | null {
+  const labels: Record<string, string> = {};
+  let i = 0;
+  while (i < segment.length) {
+    // label name
+    let eq = segment.indexOf("=", i);
+    if (eq === -1) return null;
+    const name = segment.slice(i, eq).trim();
+    if (!name) return null;
+    if (segment[eq + 1] !== '"') return null;
+    let j = eq + 2;
+    let value = "";
+    let closed = false;
+    while (j < segment.length) {
+      const ch = segment[j];
+      if (ch === "\\") {
+        const next = segment[j + 1];
+        value += next === "n" ? "\n" : next === '"' ? '"' : next === "\\" ? "\\" : `\\${next ?? ""}`;
+        j += 2;
+        continue;
+      }
+      if (ch === '"') {
+        closed = true;
+        j += 1;
+        break;
+      }
+      value += ch;
+      j += 1;
+    }
+    if (!closed) return null;
+    labels[name] = value;
+    // skip separator comma (and stray spaces)
+    while (j < segment.length && (segment[j] === "," || segment[j] === " ")) j += 1;
+    i = j;
+  }
+  return labels;
+}
+
+function parsePromValue(raw: string): number | undefined {
+  if (raw === "+Inf" || raw === "Inf") return Infinity;
+  if (raw === "-Inf") return -Infinity;
+  if (raw === "NaN") return NaN;
+  const n = Number(raw);
+  return Number.isNaN(n) && raw !== "NaN" ? undefined : n;
+}
+
+/**
+ * Parse Prometheus exposition text into typed samples. Tolerant by design:
+ * malformed lines are skipped (an operator readout must not blank on one odd
+ * series), `# TYPE` comments feed the types map, other comments are ignored,
+ * and an optional trailing timestamp on a sample line is dropped.
+ */
+export function parsePrometheusText(text: string): PromScrape {
+  const types: Record<string, string> = {};
+  const samples: PromSample[] = [];
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith("#")) {
+      const typeMatch = /^# TYPE (\S+) (\S+)/.exec(line);
+      if (typeMatch) types[typeMatch[1]] = typeMatch[2];
+      continue;
+    }
+    let name: string;
+    let labels: Record<string, string> = {};
+    let rest: string;
+    const braceStart = line.indexOf("{");
+    if (braceStart !== -1) {
+      // Escaped quotes make a naive lastIndexOf("}") wrong only when a label
+      // VALUE contains "}" after the real close — find the true closing brace
+      // by scanning quote state instead.
+      let inQuotes = false;
+      let braceEnd = -1;
+      for (let i = braceStart + 1; i < line.length; i += 1) {
+        const ch = line[i];
+        if (inQuotes) {
+          if (ch === "\\") i += 1;
+          else if (ch === '"') inQuotes = false;
+        } else if (ch === '"') inQuotes = true;
+        else if (ch === "}") {
+          braceEnd = i;
+          break;
+        }
+      }
+      if (braceEnd === -1) continue;
+      name = line.slice(0, braceStart);
+      const parsed = parsePromLabels(line.slice(braceStart + 1, braceEnd));
+      if (parsed === null) continue;
+      labels = parsed;
+      rest = line.slice(braceEnd + 1).trim();
+    } else {
+      const space = line.indexOf(" ");
+      if (space === -1) continue;
+      name = line.slice(0, space);
+      rest = line.slice(space + 1).trim();
+    }
+    if (!name) continue;
+    const value = parsePromValue(rest.split(/\s+/)[0] ?? "");
+    if (value === undefined) continue;
+    samples.push({ name, labels, value });
+  }
+  return { types, samples };
+}
+
+/**
+ * Prometheus-style histogram quantile from cumulative `le` buckets (already
+ * sorted ascending by this function). Linear interpolation inside the target
+ * bucket; a quantile that lands in the `+Inf` bucket honestly reports the
+ * highest finite bucket bound (there is no upper edge to interpolate toward).
+ * Returns undefined when the histogram has no observations.
+ */
+export function histogramQuantile(
+  quantile: number,
+  buckets: ReadonlyArray<{ le: number; count: number }>,
+): number | undefined {
+  if (buckets.length === 0) return undefined;
+  const sorted = [...buckets].sort((a, b) => a.le - b.le);
+  const total = sorted[sorted.length - 1].count;
+  if (!Number.isFinite(total) || total <= 0) return undefined;
+  const rank = Math.min(Math.max(quantile, 0), 1) * total;
+  let prevCount = 0;
+  let prevLe = 0;
+  for (const bucket of sorted) {
+    if (bucket.count >= rank && bucket.count > prevCount) {
+      if (!Number.isFinite(bucket.le)) return prevLe;
+      const fraction = (rank - prevCount) / (bucket.count - prevCount);
+      return prevLe + (bucket.le - prevLe) * fraction;
+    }
+    prevCount = bucket.count;
+    if (Number.isFinite(bucket.le)) prevLe = bucket.le;
+  }
+  return prevLe;
+}
+
+export type HistogramStat = {
+  /** Joined group-label values, e.g. "codex · gpt-5.3-codex". */
+  key: string;
+  labels: Record<string, string>;
+  count: number;
+  p50?: number;
+  p95?: number;
+};
+
+/**
+ * Group a histogram's `_bucket` samples by the given labels (summing across
+ * every other label, e.g. operation/transport) and compute count + p50/p95
+ * per group. Groups with zero observations are dropped — an all-zero
+ * histogram (a freshly started gateway) yields []. Sorted by count desc.
+ */
+export function histogramStats(
+  scrape: PromScrape,
+  metricName: string,
+  groupLabels: readonly string[],
+): HistogramStat[] {
+  const groups = new Map<string, { labels: Record<string, string>; byLe: Map<number, number> }>();
+  for (const sample of scrape.samples) {
+    if (sample.name !== `${metricName}_bucket`) continue;
+    const leRaw = sample.labels.le;
+    if (leRaw === undefined) continue;
+    const le = parsePromValue(leRaw);
+    if (le === undefined || Number.isNaN(le)) continue;
+    const values = groupLabels.map((label) => sample.labels[label] ?? "");
+    const key = values.filter(Boolean).join(" · ") || values.join(" · ");
+    let group = groups.get(key);
+    if (!group) {
+      const labels: Record<string, string> = {};
+      for (const label of groupLabels) {
+        if (sample.labels[label] !== undefined) labels[label] = sample.labels[label];
+      }
+      group = { labels, byLe: new Map() };
+      groups.set(key, group);
+    }
+    group.byLe.set(le, (group.byLe.get(le) ?? 0) + sample.value);
+  }
+  const out: HistogramStat[] = [];
+  for (const [key, group] of groups) {
+    const buckets = [...group.byLe.entries()].map(([le, count]) => ({ le, count }));
+    const infBucket = buckets.find((bucket) => !Number.isFinite(bucket.le));
+    const count = infBucket?.count ?? (buckets.length ? Math.max(...buckets.map((b) => b.count)) : 0);
+    if (count <= 0) continue;
+    const p50 = histogramQuantile(0.5, buckets);
+    const p95 = histogramQuantile(0.95, buckets);
+    out.push({
+      key,
+      labels: group.labels,
+      count,
+      ...(p50 !== undefined ? { p50 } : {}),
+      ...(p95 !== undefined ? { p95 } : {}),
+    });
+  }
+  out.sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  return out;
+}
+
+/** Sum every sample of a counter/gauge that matches the given labels (subset match). */
+export function metricValue(
+  scrape: PromScrape,
+  name: string,
+  labels?: Record<string, string>,
+): number | undefined {
+  let sum = 0;
+  let found = false;
+  for (const sample of scrape.samples) {
+    if (sample.name !== name) continue;
+    if (labels && Object.entries(labels).some(([key, value]) => sample.labels[key] !== value)) continue;
+    sum += sample.value;
+    found = true;
+  }
+  return found ? sum : undefined;
+}
+
+/**
+ * Every error-ish counter with a non-zero value: series whose name contains
+ * "error" (plus quota/denied counters would drown signal, so just errors).
+ * Bucket/sum/count histogram components are excluded.
+ */
+export function nonZeroErrorCounters(scrape: PromScrape): PromSample[] {
+  return scrape.samples
+    .filter(
+      (sample) =>
+        /error/i.test(sample.name) &&
+        !/_bucket$|_sum$|_count$/.test(sample.name) &&
+        Number.isFinite(sample.value) &&
+        sample.value > 0,
+    )
+    .sort((a, b) => b.value - a.value);
+}
+
+/** "412ms" under a second, then "1.2s", "45s", then minutes — for latency stats. */
+export function formatLatencyMs(ms: number | undefined): string {
+  if (ms === undefined || !Number.isFinite(ms)) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const sec = ms / 1000;
+  if (sec < 10) return `${sec.toFixed(1)}s`;
+  if (sec < 60) return `${Math.round(sec)}s`;
+  const mins = Math.floor(sec / 60);
+  return `${mins}m ${String(Math.round(sec % 60)).padStart(2, "0")}s`;
+}
+
+// ---------------------------------------------------------------------------
+// Workspace ops stats — derived client-side from the runs list the monitor
+// already fetches (listRuns rows carry status/heartbeat/finish timestamps but
+// NO node summary, so anything needing per-node state is out of scope here).
+// ---------------------------------------------------------------------------
+
+export type OpsStats = {
+  /** Runs whose status is actively running. */
+  active: number;
+  /** Runs parked on a human or an external wait (waiting-* / paused). */
+  attention: number;
+  /** Active runs with a fresh engine heartbeat — engines actually attached. */
+  enginesLive: number;
+  completedToday: number;
+  failedToday: number;
+};
+
+/** A heartbeat older than this means the engine has gone quiet. */
+const HEARTBEAT_FRESH_MS = 60_000;
+
+export function opsStats(runs: ReadonlyArray<Record<string, unknown>>, nowMs: number): OpsStats {
+  const dayStart = new Date(nowMs);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayStartMs = dayStart.getTime();
+  const stats: OpsStats = { active: 0, attention: 0, enginesLive: 0, completedToday: 0, failedToday: 0 };
+  for (const run of runs) {
+    const status = normalizeStatus(asString(run.status));
+    const finishedAtMs = asNumber(pick(run, "finishedAtMs", "finished_at_ms"));
+    const heartbeatAtMs = asNumber(pick(run, "heartbeatAtMs", "heartbeat_at_ms"));
+    if (status === "running") {
+      stats.active += 1;
+      if (heartbeatAtMs !== undefined && nowMs - heartbeatAtMs < HEARTBEAT_FRESH_MS) {
+        stats.enginesLive += 1;
+      }
+    } else if (status.startsWith("waiting") || status === "paused") {
+      stats.attention += 1;
+    }
+    if (finishedAtMs !== undefined && finishedAtMs >= dayStartMs && finishedAtMs <= nowMs) {
+      if (status === "finished" || status === "succeeded") stats.completedToday += 1;
+      else if (status === "failed") stats.failedToday += 1;
+    }
+  }
+  return stats;
+}
+
+// ---------------------------------------------------------------------------
+// Crons. The gateway's cronList RPC re-lists each cron once per registered
+// workflow that shares its DB adapter (and its per-row `workflow` guess falls
+// back to the iterating workflow's key), so real responses carry hundreds of
+// duplicates with misleading workflow names. Dedupe by cronId and derive the
+// workflow label from the row's own workflowPath — the one field that is
+// authoritative.
+// ---------------------------------------------------------------------------
+
+export type CronRow = {
+  cronId: string;
+  pattern: string;
+  /** Workflow file stem from workflowPath (authoritative), e.g. "test-fortress-monitor". */
+  workflow: string;
+  workflowPath?: string;
+  enabled: boolean;
+  lastRunAtMs?: number;
+  nextRunAtMs?: number;
+  /** Human-readable message out of errorJson, when the last spawn failed. */
+  error?: string;
+};
+
+function cronErrorMessage(raw: unknown): string | undefined {
+  const text = asString(raw);
+  if (!text) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (isRecord(parsed)) {
+      return asString(parsed.message) ?? asString(parsed.error) ?? text;
+    }
+    return typeof parsed === "string" ? parsed : text;
+  } catch {
+    return text;
+  }
+}
+
+export function cronRowsOf(body: unknown): CronRow[] {
+  const seen = new Set<string>();
+  const out: CronRow[] = [];
+  for (const raw of dataRowsOf(body)) {
+    if (!isRecord(raw)) continue;
+    const cronId = asString(pick(raw, "cronId", "cron_id"));
+    const pattern = asString(raw.pattern);
+    if (!cronId || !pattern || seen.has(cronId)) continue;
+    seen.add(cronId);
+    const workflowPath = asString(pick(raw, "workflowPath", "workflow_path"));
+    const stem = workflowPath
+      ? (workflowPath.split("/").pop() ?? workflowPath).replace(/\.[jt]sx?$/, "")
+      : undefined;
+    const lastRunAtMs = asNumber(pick(raw, "lastRunAtMs", "last_run_at_ms"));
+    const nextRunAtMs = asNumber(pick(raw, "nextRunAtMs", "next_run_at_ms"));
+    const error = cronErrorMessage(pick(raw, "errorJson", "error_json"));
+    out.push({
+      cronId,
+      pattern,
+      workflow: stem ?? asString(raw.workflow) ?? "unknown",
+      ...(workflowPath ? { workflowPath } : {}),
+      enabled: raw.enabled === true || raw.enabled === 1,
+      ...(lastRunAtMs !== undefined ? { lastRunAtMs } : {}),
+      ...(nextRunAtMs !== undefined ? { nextRunAtMs } : {}),
+      ...(error ? { error } : {}),
+    });
+  }
+  // Soonest next fire first; disabled crons sink to the end.
+  out.sort((a, b) => {
+    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+    return (a.nextRunAtMs ?? Infinity) - (b.nextRunAtMs ?? Infinity);
+  });
+  return out;
+}
+
+/** The enabled cron that fires next (for the ops strip's "next cron" card). */
+export function nextCron(crons: readonly CronRow[]): CronRow | null {
+  let best: CronRow | null = null;
+  for (const cron of crons) {
+    if (!cron.enabled || cron.nextRunAtMs === undefined) continue;
+    // A nextRun in the past still counts ("due now") — the scheduler may lag.
+    if (best === null || cron.nextRunAtMs < (best.nextRunAtMs ?? Infinity)) best = cron;
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------
+// Scores. `/v1/api/scores?runId=…` returns the run's `_smithers_scorers` rows:
+// scorer results are normalized quality scores in [0, 1] (see the scorers
+// package), so tones are threshold-based rather than pass/fail booleans.
+// ---------------------------------------------------------------------------
+
+export type ScoreRow = {
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  scorerId: string;
+  scorerName: string;
+  source?: string;
+  score: number;
+  reason?: string;
+  scoredAtMs?: number;
+};
+
+export function scoreRowsOf(body: unknown): ScoreRow[] {
+  const out: ScoreRow[] = [];
+  for (const raw of dataRowsOf(body)) {
+    if (!isRecord(raw)) continue;
+    const nodeId = asString(pick(raw, "nodeId", "node_id"));
+    const score = asNumber(raw.score);
+    if (!nodeId || score === undefined) continue;
+    const scorerId = asString(pick(raw, "scorerId", "scorer_id")) ?? "scorer";
+    const scorerName = asString(pick(raw, "scorerName", "scorer_name")) ?? scorerId;
+    const source = asString(raw.source);
+    const reason = asString(raw.reason);
+    const scoredAtMs = asNumber(pick(raw, "scoredAtMs", "scored_at_ms"));
+    out.push({
+      nodeId,
+      iteration: asNumber(raw.iteration) ?? 0,
+      attempt: asNumber(raw.attempt) ?? 0,
+      scorerId,
+      scorerName,
+      ...(source ? { source } : {}),
+      score,
+      ...(reason ? { reason } : {}),
+      ...(scoredAtMs !== undefined ? { scoredAtMs } : {}),
+    });
+  }
+  // Newest first so the panel leads with the latest verdicts.
+  out.sort((a, b) => (b.scoredAtMs ?? 0) - (a.scoredAtMs ?? 0));
+  return out;
+}
+
+/** Threshold tones for a normalized [0,1] score: ≥0.8 ok, ≥0.5 warn, else failed. */
+export function scoreTone(score: number): Tone {
+  if (score >= 0.8) return "ok";
+  if (score >= 0.5) return "waiting";
+  return "failed";
+}
+
+/** "0.87" — normalized scores render with two decimals (integers stay bare). */
+export function formatScore(score: number): string {
+  if (!Number.isFinite(score)) return "—";
+  return Number.isInteger(score) ? String(score) : score.toFixed(2);
+}
+
+export function scoresSummary(rows: readonly ScoreRow[]): { count: number; avg: number } {
+  if (rows.length === 0) return { count: 0, avg: 0 };
+  const sum = rows.reduce((acc, row) => acc + row.score, 0);
+  return { count: rows.length, avg: sum / rows.length };
+}
+
+export function scoresForNode(rows: readonly ScoreRow[], nodeId: string | undefined): ScoreRow[] {
+  if (!nodeId) return [];
+  return rows.filter((row) => row.nodeId === nodeId);
+}
+
+// ---------------------------------------------------------------------------
+// Accounts / memory facts / tickets — small ops-strip aggregates.
+// ---------------------------------------------------------------------------
+
+export type AccountRow = {
+  label: string;
+  provider: string;
+  model?: string;
+  /** Usable: has a config dir or an API key registered. */
+  ready: boolean;
+};
+
+export function accountRowsOf(body: unknown): AccountRow[] {
+  const out: AccountRow[] = [];
+  for (const raw of dataRowsOf(body)) {
+    if (!isRecord(raw)) continue;
+    const label = asString(raw.label);
+    const provider = asString(raw.provider);
+    if (!label || !provider) continue;
+    const model = asString(raw.model);
+    out.push({
+      label,
+      provider,
+      ...(model ? { model } : {}),
+      ready: pick(raw, "hasConfigDir", "has_config_dir") === true || pick(raw, "hasApiKey", "has_api_key") === true,
+    });
+  }
+  return out;
+}
+
+/** Ticket statuses that mean "no longer open". Unknown/absent statuses count as open. */
+const CLOSED_TICKET_STATUSES = new Set(["done", "closed", "resolved", "cancelled", "canceled"]);
+
+export function openTicketCount(body: unknown): number {
+  let open = 0;
+  for (const raw of dataRowsOf(body)) {
+    if (!isRecord(raw)) continue;
+    const status = asString(raw.status)?.trim().toLowerCase();
+    if (!status || !CLOSED_TICKET_STATUSES.has(status)) open += 1;
+  }
+  return open;
+}
+
 /**
  * Websocket URL for the gateway's PTY hijack channel. Mirrors the transport
  * shape of smithers cloud terminals: binary frames are PTY bytes, text frames
