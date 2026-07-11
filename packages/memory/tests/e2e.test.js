@@ -8,6 +8,19 @@ import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createMemoryStore } from "../src/store/index.js";
 import { TtlGarbageCollector } from "../src/processors.js";
 const WF_NS = { kind: "workflow", id: "e2e-test" };
+
+function cleanupFileBackedTestDir(dir) {
+    try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 0 });
+    }
+    catch (error) {
+        const isWindowsHandleRace = process.platform === "win32"
+            && (error?.code === "EBUSY" || error?.code === "EPERM" || error?.code === "ENOTEMPTY");
+        if (!isWindowsHandleRace)
+            throw error;
+    }
+}
+
 describe("Memory E2E", () => {
     let store;
     beforeEach(() => {
@@ -211,17 +224,12 @@ describe("Memory E2E", () => {
             sqlite.close();
         }
         finally {
-            // Windows releases sqlite file handles asynchronously after
-            // close(), so a bare rm races EBUSY even with retries. The
-            // persistence assertions above have already run; a residual temp-dir
-            // cleanup race must not fail the test, so retry generously and treat
-            // a leftover lock as best-effort (the OS reclaims the temp dir).
-            try {
-                rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
-            }
-            catch (error) {
-                if (process.platform !== "win32" || (error?.code !== "EBUSY" && error?.code !== "EPERM" && error?.code !== "ENOTEMPTY")) throw error;
-            }
+            // Persistence assertions and both explicit close() calls happen
+            // above. Removing the temp directory is only housekeeping, and on
+            // Windows a SQLite handle can briefly outlive close(). Make one
+            // non-retrying attempt so a residual lock cannot consume the test
+            // timeout or mask the persistence result on any platform.
+            cleanupFileBackedTestDir(dir);
         }
     });
     test("deleteMessages prunes large real SQLite id sets without crossing thread boundaries", async () => {
