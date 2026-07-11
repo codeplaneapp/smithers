@@ -275,6 +275,7 @@ function Dashboard({ runId }: { runId: string }) {
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
 
   const nodeStatus = useMemo(() => buildNodeStatus(tree.nodes ?? []), [tree.nodes]);
+  const treeLoading = tree.isLoading && (tree.nodes ?? []).length === 0;
   const lanes = useMemo(() => buildIssueLanes(nodeStatus), [nodeStatus]);
   const doneCount = useMemo(() => [...nodeStatus.values()].filter((s) => s === "done").length, [nodeStatus]);
   const remountKey = String(doneCount);
@@ -315,6 +316,12 @@ function Dashboard({ runId }: { runId: string }) {
         </div>
       ) : null}
 
+      {treeLoading ? (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <h3>Loading run…</h3>
+          <p>Pulling the execution tree — counts appear in a moment.</p>
+        </div>
+      ) : null}
       <div className="cards">
         <div className="card">
           <h3>Sweep progress</h3>
