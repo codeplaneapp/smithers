@@ -50,7 +50,7 @@ describe("buildInitTutorialPrompt", () => {
         ],
         preferredAgent: det("claude", "Claude Code"),
         integration: { agent: "claude", kind: "plugin", ok: true, detail: "Claude Code plugin smithers@smithersai" },
-        workflowCount: 32,
+        workflowCount: 6,
         writtenCount: 120,
         skippedCount: 3,
     });
@@ -66,7 +66,7 @@ describe("buildInitTutorialPrompt", () => {
     });
 
     test("summarizes the pack install", () => {
-        expect(prompt).toContain("32 workflows");
+        expect(prompt).toContain("6 workflows");
         expect(prompt).toContain("120 files created");
     });
 
@@ -81,7 +81,7 @@ describe("buildInitTutorialPrompt", () => {
             detections: [det("codex", "Codex")],
             preferredAgent: det("codex", "Codex"),
             integration: { agent: "codex", kind: "skill", ok: true, detail: "smithers skill → ~/.codex/skills/smithers" },
-            workflowCount: 10,
+            workflowCount: 6,
             writtenCount: 0,
             skippedCount: 50,
         });

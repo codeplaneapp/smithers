@@ -3,7 +3,7 @@ title: Default Workflows
 description: The workflow pack scaffolded by bunx smithers-orchestrator init.
 ---
 
-`bunx smithers-orchestrator init` creates a `.smithers/workflows/` directory with ready-to-run workflows for planning, implementation, review, tickets, audits, and long-running missions. These workflows are normal Smithers TSX files: run them as-is, edit them for your repo, or use them as examples for your own workflow pack.
+`bunx smithers-orchestrator init` creates a focused `.smithers/workflows/` directory containing `create-workflow`, `create-skill`, and `docs-driven-development`. Hidden system workflows support init, failure autopsies, and upgrades. The former starter suite is retained under `examples/init-pack/`; monitoring remains `smithers monitor` and Gateway `/monitor`.
 
 Run any default workflow by ID:
 
@@ -17,40 +17,11 @@ Most prompt-driven workflows accept `--prompt` as shorthand for `--input '{"prom
 
 | Workflow | Use it for |
 | --- | --- |
-| [`hello`](/workflows/hello) | The smallest possible workflow: a single agent task that runs a Markdown prompt. |
-| [`implement`](/workflows/implement) | Implement a change with validation and review. |
-| [`research-plan-implement`](/workflows/research-plan-implement) | Research, plan, implement, validate, and review in one run. |
-| [`delegation-chain`](/workflows/delegation-chain) | Hand an ambiguous ask to a recursive, tiered delegation tree with risk probes, per-node backpressure, live-editable outputs, and scoring. |
-| [`mission`](/workflows/mission) | Run long-horizon work as approved milestones with focused workers. |
-| [`kanban`](/workflows/kanban) | Implement ticket files from `.smithers/tickets/` in worktree branches. |
-| [`ralph`](/workflows/ralph) | Keep an agent working continuously on a prompt. |
-| [`workflow-skill`](/workflows/workflow-skill) | Create or update agent-facing skill docs from local workflows. |
 | [`create-workflow`](/workflows/create-workflow) | Build a new Smithers workflow from a plain-English ask. |
 | [`create-skill`](/workflows/create-skill) | Author a new agent skill from a plain-English ask. |
-| [`context-engineer`](/workflows/context-engineer) | Turn vague work into a contract, route, backpressure, execution, and report. |
-| [`route-task`](/workflows/route-task) | Classify a plain-English script and run or recommend the right durable workflow. |
-| [`smithering`](/workflows/smithering) | Route work by size, from trivial task to full plan-build-validate-deliver pipeline. |
-| [`make-workflow-tutorial`](/workflows/make-workflow-tutorial) | Recommend, build, launch, and monitor a first project-specific workflow. |
-| [`extract-skill`](/workflows/extract-skill) | Harvest reusable skills, workflow sketches, and memory from a run or pattern. |
-| [`vcs`](/workflows/vcs) | Inspect and act on a git or jj working tree. |
-| [`review`](/workflows/review) | Review current repo changes with one or more configured agents. |
-| [`plan`](/workflows/plan) | Produce a practical implementation plan. |
-| [`research`](/workflows/research) | Gather repo and external context before planning or building. |
-| [`debug`](/workflows/debug) | Reproduce and fix a bug with validation. |
-| [`improve-test-coverage`](/workflows/improve-test-coverage) | Add missing tests and validate coverage-related changes. |
-| [`ticket-create`](/workflows/ticket-create) | Create one structured ticket from a prompt. |
-| [`tickets-create`](/workflows/tickets-create) | Break a request into multiple implementable tickets. |
-| [`grill-me`](/workflows/grill-me) | Interrogate a vague plan until requirements are clearer. |
-| [`feature-enum`](/workflows/feature-enum) | Build or refine a code-backed feature inventory. |
-| [`audit`](/workflows/audit) | Audit feature groups for gaps and follow-up work. |
-| [`context-doctor`](/workflows/context-doctor) | Lint a context contract for missing goals, inputs, verification, approvals, and reports. |
-| [`backpressure-plan`](/workflows/backpressure-plan) | Turn acceptance criteria into a gate matrix. |
-| [`triage-run`](/workflows/triage-run) | Diagnose a failed or stuck run and recommend a fix, rewind, retry, or escalation. |
-| [`report-slideshow`](/workflows/report-slideshow) | Generate a concise HTML slideshow report from run state and artifacts. |
-| [`eval-author`](/workflows/eval-author) | Turn acceptance criteria into eval fixtures and a rubric for `bunx smithers-orchestrator eval`. |
-| [`init`](/workflows/init) | System workflow behind `bunx smithers-orchestrator init`: durable pack install/refresh (hidden from default listings). |
-| [`post-failure`](/workflows/post-failure) | System workflow that investigates failed runs and recommends the next recovery action (hidden from default listings). |
-| [`upgrade`](/workflows/upgrade) | System workflow behind `bunx smithers-orchestrator upgrade`: gather update context, run the upgrade, and escalate only when needed (hidden from default listings). |
+| [`docs-driven-development`](/workflows/docs-driven-development) | Maintain a portable living product spec and improvement loop. |
+
+Former defaults are preserved as copyable examples in `examples/init-pack/`.
 
 ## Operational Notes
 

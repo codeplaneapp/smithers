@@ -2,11 +2,10 @@
 // Install the docs-driven-development pack into a target repo's .smithers/.
 //
 // DDD (ddd-generate-docs bootstraps features.json; docs-driven-development runs
-// the audit→triage→implement→review loop over it) is an AUTHORED pack in this
-// repo's .smithers/ — it is NOT in SEEDED_WORKFLOW_IDS, so `smithers init` does
-// not ship it. To run DDD on another repo, that repo needs the pack's lib
-// helpers, workflows, and (for the loop UI) the ddd UI modules. This script
-// copies a self-contained set so the pack runs anywhere.
+// the audit→triage→implement→review loop over it) is part of the default init
+// pack. This installer remains useful for older targets and for refreshing the
+// complete standalone DDD closure; it copies the same portable files that a
+// fresh `smithers init` seeds.
 //
 // The pack is agents-agnostic: the workflows import their providers from
 // lib/ddd/dddAgents.ts, so the target repo's own .smithers/agents.ts is never

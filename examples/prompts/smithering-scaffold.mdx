@@ -1,0 +1,107 @@
+# Author the implementation workflow
+
+Author the bespoke implementation workflow at .smithers/workflows/smithering-impl.tsx.
+
+First, ground yourself in the real API: run "bunx smithers-orchestrator docs", read the
+relevant fragments, and study the closest seeded examples in .smithers/workflows/
+(implement.tsx, mission.tsx, kanban.tsx, research-plan-implement.tsx). Copy structure from
+the closest one, then adapt. Do not invent API.
+
+Hard contract for the generated workflow:
+
+- Implements docs/planning/06-orchestration.md exactly (worktrees, merge policy, test
+  tiers, model assignment, concurrency, observability, fresh-context worker prompts).
+- NEVER pin an agent's `cwd` for a worker that runs inside a `<Worktree>`. The engine
+  resolves a worker's working directory as `agent.cwd ?? worktreePath ?? repoRoot`, so a
+  pinned `cwd` (e.g. `new ClaudeCodeAgent({ cwd: process.cwd() })` or `new CodexAgent({ cwd:
+  process.cwd() })`) OVERRIDES the `<Worktree>` isolation: the worker writes its code into the
+  repo root instead of its ticket's worktree branch. The branch then comes up EMPTY, the merge
+  lane lands nothing, and every ticket reports "finished" while 0% actually lands on
+  integration. Leave agent `cwd` UNSET and let `<Worktree>` own the working dir (see how
+  mission.tsx wires worktree workers; it passes no `cwd`). Helper functions that read/write
+  the evidence bundle or run git in a worktree must resolve paths through Smithers' first-class
+  worktree path API: use `ctx.worktreePath(taskOrWorktreeId)` when the worktree has already
+  rendered, or `ctx.resolveWorktreePath(worktreePathProp)` for the same string passed to
+  `<Worktree path={...}>`. NEVER guess worktree paths with `process.cwd()`, `import.meta.dir`,
+  `../..`, or candidate lists.
+- PARALLEL TRACKS ARE MANDATORY: the build must NOT be a linear ticket-by-ticket chain.
+  Compute the ticket dependency DAG from each ticket's dependsOn, group tickets into
+  topological waves for stable ordering, and run every ready antichain as parallel independent
+  tickets (each ticket = its own worker in its own git worktree so concurrent file writes
+  never collide). Only a real dependsOn edge may force sequencing; the wall-clock critical
+  path should be the DAG depth, not the ticket count.
+- LANDING IS CONTINUOUS AND PER-TICKET: do NOT put a land lane after each whole wave.
+  A ticket becomes eligible to land as soon as its own on-disk gates are green
+  (`verify.json.pass === true`, rebased/merged-tip proof is true, and for safety/security
+  tickets `challenge.json.approved === true`) AND every ticket in its dependsOn list is
+  already landed on the integration branch. Keep one depth-1 serialized `<MergeQueue>` for
+  integration safety, but feed it individual ready tickets continuously. A blocked or
+  max-iteration ticket is an isolated blocker: it may block only tickets that transitively
+  depend on it; unrelated same-wave siblings that are done and whose deps are landed must
+  still land.
+- Tickets whose instructions explicitly require a specific external credential that is absent
+  from `process.env` MUST resolve to a clean `needs-credential:<KEY>` block: do not run
+  implement/verify, do not crash/retry, block only transitive dependents, and list the exact
+  env var(s) in the final report.
+- Transient session/infra errors (`SESSION_ERROR`, stream disconnects, rate limits, OOMs,
+  timeouts) must never fail the whole run; retry them as infra and, if exhausted, block only
+  that node/ticket so unrelated verified tickets can still land.
+- Imports tickets from artifacts/smithering/tickets.json at module load; task ids derive
+  from ticket ids (stable across resume, never indexes/timestamps).
+- Input schema includes a boolean "smoke" (default false): smoke=true processes ONLY the
+  first ticket end-to-end (including its verification) with NO approval gates, and must
+  reach status finished.
+- Wires every blocking gate from docs/planning/04-backpressure.md into pre-merge checks;
+  evidence persisted under artifacts/smithering/build/ per ticket id. Evidence paths MUST be
+  run-scoped (include `ctx.runId`, e.g. `artifacts/smithering/build/${ctx.runId}/<ticket>/`)
+  OR the workflow must delete the whole evidence directory at run start before any done-check
+  can read it. A stale `verify.json` from a previous run must never satisfy a fresh run's
+  "is this ticket done?" check. Red-before-green for fixes.
+- The verifier and merge lane MUST validate the ticket as it will land: rebase the ticket
+  worktree onto the current integration branch, run the pre-merge gates on that rebased tip,
+  and write any conflict/tsc/test failure back as implementer feedback. A real merged-tip
+  failure must reopen the worker loop until maxIterations, not permanently dead-block the DAG.
+- Pre-merge command gates MUST distinguish real failures from infrastructure crashes. `tsc
+  --noEmit` is red only when it completed far enough to emit `error TS` diagnostics; a
+  nonzero exit, SIGABRT/OOM, signal kill, or timeout with zero `error TS` lines is
+  INFRA/transient, not a type error. `bun test` is red only when tests actually ran and
+  reported failed tests; a crash/OOM/signal/timeout with no failed-test report is
+  INFRA/transient, not a test failure. Infra cases must be retried up to 3 attempts with
+  `NODE_OPTIONS=--max-old-space-size=6144` (or higher), short backoff, and no concurrent
+  heavy gate work where feasible. If retries still cannot complete, surface a clear
+  retryable infra/transient gate error and never write a red verdict or land-bounce that
+  blames the ticket code.
+- Evidence filenames are contractual: every blocking gate's `redRunPath` and `greenRunPath`
+  in `gates.json` MUST equal the worktree-relative paths actually written. The independent
+  verifier MUST resolve each declared path from the real worker worktree and require a
+  real, non-empty file before writing `verify.json.pass=true`; no reconstructed names or
+  naming drift.
+- Reviewer model family ≠ implementer model family on every ticket.
+- Every loop has maxIterations; side-effecting custom tools declare sideEffect +
+  idempotency keys; no caching of side-effect tasks.
+- CAPTURE VERDICTS FROM DISK, NOT FROM AGENT RETURNS. The loop-exit / "is this ticket done?"
+  check MUST read each ticket's verdict from the on-disk evidence bundle the agents write
+  (e.g. `verify.json.pass`, advisory `review.json`, and safety `challenge.json.approved` under `artifacts/smithering/build/<runId>/<id>/`),
+  NOT from the verify/review agents' structured task-return values. Agent structured returns
+  are unreliable and frequently come back empty (they persist their verdict to the bundle and
+  emit prose); gating "done" on them deadlocks the loop: the ticket can NEVER reach done and
+  every ticket blocks. Treat the INDEPENDENT test-authority verifier's on-disk `pass` (it
+  re-runs every pre-merge gate LIVE and confirms red-before-green) as the AUTHORITATIVE landing
+  signal. Surface the cross-family reviewer's findings to the implementer as feedback, but keep
+  the review ADVISORY; it must not hard-block a ticket the independent verifier proved green
+  over evidence-log hygiene. Safety/security tickets additionally require the adversarial
+  challenge verdict to pass. Resolve that on-disk bundle from the real worktree root:
+  `join(ctx.worktreePath(verifyTaskId) ?? ctx.resolveWorktreePath(worktreePathProp), "artifacts/...", "verify.json")`;
+  do not search guessed roots.
+- Fresh runs MUST be idempotent: if `ticketLanded(ctx,id)` or `git log <base>..integration`
+  shows the ticket's land commit is already on the integration branch, treat it as DONE and
+  skip its worker. Do not rebuild already-landed tickets; only schedule remaining work.
+- `.mdx` prompt files are parsed as MDX modules. When writing prose examples that look like
+  JSX or HTML, wrap them in inline backticks or fenced code blocks (for example
+  `<Parallel maxConcurrency={N}>`) so the prompt module's default export still compiles.
+- NEVER merges to {props.baseBranch}, no exceptions: all work lands on an integration
+  branch; merging that branch is a human act after delivery.
+- Workers persist HTML decision docs for judgment calls under
+  artifacts/smithering/decisions/ (alternatives considered, example inputs/outputs, diffs).
+
+List every file you write in filesWritten.

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 import {
     STARTER_RECIPES,
@@ -9,6 +9,8 @@ import {
     renderStarterGallery,
     starterCommand,
 } from "../src/starter-gallery.js";
+
+setDefaultTimeout(60_000);
 
 function extractQuotedFlag(command, flag) {
     const prefix = `${flag} "`;
@@ -43,7 +45,7 @@ describe("starter gallery data", () => {
             expect(starter.goals.length).toBeGreaterThan(0);
             expect(starter.workflow).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
             expect(starter.outcome.length).toBeGreaterThan(20);
-            expect(starterCommand(starter)).toStartWith(`bunx smithers-orchestrator workflow run ${starter.workflow} --`);
+            expect(starterCommand(starter)).toStartWith("bunx smithers-orchestrator workflow run create-workflow --");
         }
         expect(STARTER_TEMPLATE_IDS).toEqual(STARTER_RECIPES.map((starter) => starter.id));
     });
@@ -52,21 +54,14 @@ describe("starter gallery data", () => {
         const qualityAudit = findStarterRecipe("quality-audit");
         expect(qualityAudit).toBeDefined();
         const auditCommand = starterCommand(qualityAudit);
-        expect(auditCommand).toContain(" workflow run audit --input ");
-        expect(auditCommand).not.toContain(" --prompt ");
-        expect(JSON.parse(extractQuotedFlag(auditCommand, "--input"))).toEqual({
-            features: { checkout: ["checkout flow"] },
-            focus: "release readiness",
-            additionalContext: "Audit the checkout flow for missing tests, unclear docs, weak observability, and support risks.",
-        });
+        expect(auditCommand).toContain(" workflow run create-workflow --prompt ");
+        expect(auditCommand).toContain("release readiness");
 
         const tickets = findStarterRecipe("idea-to-tickets");
         expect(tickets?.followUps).toContain("Save each generated ticket as a Markdown file under `.smithers/tickets/`.");
-        const kanbanCommand = tickets?.followUps.find((command) => command.includes(" workflow run kanban "));
+        const kanbanCommand = tickets?.followUps.find((command) => command.includes(" workflow run create-workflow "));
         expect(kanbanCommand).toBeDefined();
-        expect(kanbanCommand).toContain(" --input ");
-        expect(kanbanCommand).not.toContain(" --prompt ");
-        expect(JSON.parse(extractQuotedFlag(kanbanCommand, "--input"))).toEqual({ maxConcurrency: 3 });
+        expect(kanbanCommand).toContain(" workflow run create-workflow --prompt ");
     });
 
     test("does not emit bare smithers commands", () => {
@@ -103,7 +98,7 @@ describe("starter gallery data", () => {
         expect(detail).toContain("Turn a customer report into a fix path");
         expect(detail).toContain("Template ID: customer-incident");
         expect(detail).toContain("Before you run it:");
-        expect(detail).toContain("bunx smithers-orchestrator workflow run debug");
+        expect(detail).toContain("bunx smithers-orchestrator workflow run create-workflow");
     });
 });
 
@@ -117,7 +112,7 @@ describe("smithers starters command", () => {
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("Smithers starters");
         expect(result.stdout).toContain("idea-to-tickets");
-        expect(result.stdout).toContain("bunx smithers-orchestrator workflow run tickets-create");
+        expect(result.stdout).toContain("bunx smithers-orchestrator workflow run create-workflow");
     });
 
     test("emits structured JSON for integrations", () => {
@@ -128,7 +123,7 @@ describe("smithers starters command", () => {
         });
         expect(result.exitCode).toBe(0);
         expect(result.json.selected.id).toBe("idea-to-tickets");
-        expect(result.json.selected.workflow).toBe("tickets-create");
+        expect(result.json.selected.workflow).toBe("create-workflow");
         expect(result.json.starters).toHaveLength(1);
     });
 

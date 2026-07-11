@@ -87,8 +87,8 @@ function buildInitCta(templateResult) {
                 { command: "workflow list", description: "View all available workflows" },
             ]
             : [
-                { command: "workflow run hello", description: "Run your first workflow (edit .smithers/prompts/hello.mdx to change it)" },
-                { command: "starters", description: "Browse templates by outcome" },
+                { command: "workflow run create-workflow --prompt \"add a workflow that ...\"", description: "Create your first workflow" },
+                { command: "workflow run docs-driven-development", description: "Maintain a living product spec" },
                 { command: "workflow list", description: "View all available workflows" },
             ],
         tip: "New here? Your coding agent now has the smithers skill — just tell it what you want built (e.g. \"add rate limiting and keep iterating until the tests pass\").",

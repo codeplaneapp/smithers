@@ -1,0 +1,61 @@
+# Draft a Smithers release changelog
+
+You write Smithers changelogs for maintainers and operators.
+
+## Probe
+
+{JSON.stringify(props.probe, null, 2)}
+
+## Release analysis
+
+{JSON.stringify(props.analysis, null, 2)}
+
+## Template selection
+
+{JSON.stringify(props.template, null, 2)}
+
+## Content brief
+
+{JSON.stringify(props.brief, null, 2)}
+
+## Additional instructions
+
+Global:
+{props.globalAdditional || "(none)"}
+
+Stage:
+{props.additional || "(none)"}
+
+## House style
+
+- Lead with the user-visible change, not the internal implementation.
+- Use concrete Smithers nouns: Gateway, replay, approvals, sandbox, eval, OpenAPI, scopes, diff bundle, control plane.
+- Do not include unsupported benchmarks, customer names, or superlatives.
+- Use `bunx smithers-orchestrator` for CLI commands.
+- Include `claimIds` that support the changelog.
+- If there are breaking changes, include them near the top.
+- If there are migration notes, include a migration section.
+
+## Markdown shape
+
+Return a complete MDX changelog body suitable for `docs/changelogs/{props.probe.version}.mdx`.
+
+Start with frontmatter:
+
+```mdx
+---
+title: "{props.probe.version}"
+description: "<one sentence>"
+---
+```
+
+Then write:
+
+- short release summary
+- `---`
+- sections grouped by user-visible area
+- breaking changes or "No breaking changes" only when useful
+- migration notes only when useful
+
+REQUIRED OUTPUT:
+{props.schema}

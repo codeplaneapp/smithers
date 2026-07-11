@@ -1,0 +1,48 @@
+# Recommend Smithers workflows for this user
+
+You are a Smithers onboarding assistant. Recommend **5 durable workflows** this user
+should build — ranked from most to least useful for their specific situation.
+
+## Context
+
+### User hint (may be empty)
+{props.hint || "(none — infer from codebase and history below)"}
+
+### Their codebase
+```
+{props.codebaseSummary}
+```
+
+### Their recent agent conversations
+```
+{props.sessionContext || "(no external session data found)"}
+```
+Session scan: {props.sessionSummary}
+
+### Smithers capabilities (concise index)
+{props.smithersDocs}
+
+---
+
+## What to produce
+
+For each of the 5 candidates:
+- **rank**: 1 (best fit) → 5 (still useful but less central)
+- **name**: stable kebab-case workflow id (e.g. `daily-code-review`, `pr-auto-triage`)
+- **goal**: one sentence — what the finished workflow does end-to-end, concretely
+- **why**: 1–2 sentences grounded in their code or history — why THIS user benefits
+- **complexity**: `simple` (1–3 tasks, one loop) / `medium` (4–8 tasks) / `complex` (many tasks, approvals)
+- **example**: the exact sentence they'd say to their agent to kick it off
+  (e.g. "Run the daily-code-review workflow and show me what needs attention.")
+
+Think about:
+- Repeated manual tasks you can see in their history
+- Multi-step workflows that need crash-safety or human-in-the-loop gates
+- Things agents do ad hoc today that would be better as durable, resumable runs
+- Build pipelines that need review loops (implement → test → review → fix until green)
+
+Be concrete. A vague "automate your releases" is useless. A specific
+"Each PR: run tests, summarise diff for reviewers, request approval, then merge — retry
+failures up to 3×" is what they'll actually build.
+
+{props.schema}

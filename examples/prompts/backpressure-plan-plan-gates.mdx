@@ -1,0 +1,103 @@
+# Plan the backpressure gate matrix
+
+You are the gate-planning step of the "backpressure plan" pipeline. Take the
+extracted acceptance criteria and turn them into a **gate matrix** — a verification
+method and enforcement policy for each criterion — so a downstream workflow cannot
+just try its best and move on. Every criterion needs a way to be proven.
+
+## Original goal / criteria
+
+{props.prompt}
+
+## Extracted criteria
+
+{`\`\`\`json
+${JSON.stringify(props.criteria, null, 2)}
+\`\`\``}
+
+## Parity contract
+
+The gate matrix is compared **mechanically** against the input criteria:
+
+- Emit **exactly one gate per input criterion** — never drop, merge, or add.
+- Keep the **same order** as the input list.
+- Copy each `criterion` text **verbatim** — paraphrasing breaks the check.
+
+## How to plan each gate
+
+For **every** criterion, emit one gate object:
+
+- `criterion` — the input criterion text, copied verbatim.
+- `verificationMethod` — pick the cheapest method that actually proves it.
+  Method-selection ladder, cheapest first:
+
+  `schema` < `unit_test` < `integration_test` < `trace` < `eval` < `review` < `approval`/`manual_check`
+
+  - `schema` — the criterion is purely about output shape/format.
+  - `unit_test` — a single function/component's behavior, checkable in isolation.
+  - `integration_test` — behavior across components or against a real backend.
+  - `trace` — assert on recorded execution/telemetry (what actually ran).
+  - `eval` — quality judgments that need an LLM judge or scorer.
+  - `review` — code/diff quality assessed by a reviewer. Any criterion whose
+    check IS reviewing an artifact's content (a code review, a diff review —
+    human or agent) is `review`, even when phrased as "before merge".
+  - `approval` — a durable human decision that is not itself a content review:
+    authorizing a deploy, releasing money, accepting a risk.
+  - `manual_check` — a human eyeballs it; last resort when nothing automatable fits.
+
+  Pick the cheapest rung that actually proves the criterion. Do not climb the
+  ladder for comfort, and do not pick a cheap rung that only proves part of it.
+- `gateType` — `blocking` stops the run on failure, `warning` flags but continues,
+  `informational` only records. Default correctness and safety criteria to
+  `blocking`; reserve `warning`/`informational` for nice-to-haves.
+- `checkedBy` — who or what runs the check, in exactly one of these forms:
+  `task:<id>`, `scorer:<name>`, `human:<role>`, or `tool:<command>`
+  (e.g. `task:run-tests`, `scorer:answer-quality`, `human:maintainer`,
+  `tool:pnpm test`). No free-form prose — the field is audited.
+- `failureAction` — exactly what happens when the gate fails (retry the task, halt
+  the run, route to a human, open a follow-up, etc.).
+- `evidenceRequired` — the concrete artifacts that prove it passed: test output,
+  a diff, a coverage report, a recorded trace, an approval record. Never accept
+  "the agent said it was done" as evidence.
+- `humanApprovalRequired` — `true` only when a durable human approval is genuinely
+  needed for that criterion.
+
+## Approval mapping
+
+A criterion that requires a human decision or sign-off gets
+`verificationMethod: "approval"` **and** `humanApprovalRequired: true` — these
+always travel together. Conversely, machine-checkable criteria keep
+`humanApprovalRequired: false`.
+
+## Worked example
+
+Criterion: "The function returns its input sorted in ascending order."
+
+```json
+{
+  "criterion": "The function returns its input sorted in ascending order.",
+  "verificationMethod": "unit_test",
+  "gateType": "blocking",
+  "checkedBy": "tool:bun test sort.test.ts",
+  "failureAction": "Halt the run and retry the implementation task with the failing test output.",
+  "evidenceRequired": ["passing test output for sort.test.ts"],
+  "humanApprovalRequired": false
+}
+```
+
+A unit test is the cheapest rung that fully proves it — no integration setup,
+no judge, no human needed.
+
+## Rules
+
+- **Every blocking criterion MUST map to a real verification method** — no blocking
+  gate may be left as a bare assertion with no way to check it.
+- Prefer automatable methods (`schema`, `unit_test`, `integration_test`, `trace`,
+  `eval`, `review`) over `manual_check` and `approval`; only escalate to a human
+  when a machine genuinely cannot decide.
+
+Finish with a 2-3 sentence `summary` of the overall backpressure posture (how many
+gates are blocking, where humans are in the loop, the weakest spot).
+
+REQUIRED OUTPUT:
+{props.schema}

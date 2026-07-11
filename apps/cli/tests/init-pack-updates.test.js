@@ -59,23 +59,22 @@ test("init reports drifted pack files; applyWorkflowPackUpdates writes them", ()
   // A clean re-run finds nothing drifted.
   expect(initWorkflowPack(opts).changedFiles).toEqual([]);
 
-  // Locally edit a shared component; it should now be reported as drifted, as a
-  // shared component, with the workflows that import it.
-  const reviewPath = join(dir, ".smithers/components/Review.tsx");
-  writeFileSync(reviewPath, "// locally edited\n", "utf8");
+  // Locally edit a seeded workflow; it should be reported as drifted without
+  // bringing the removed legacy component suite back into the default pack.
+  const workflowPath = join(dir, ".smithers/workflows/create-workflow.tsx");
+  writeFileSync(workflowPath, "// locally edited\n", "utf8");
   const third = initWorkflowPack(opts);
-  const changed = third.changedFiles.find((f) => f.path === ".smithers/components/Review.tsx");
+  const changed = third.changedFiles.find((f) => f.path === ".smithers/workflows/create-workflow.tsx");
   expect(changed).toBeDefined();
-  expect(changed.isComponent).toBe(true);
-  expect(changed.importedBy).toContain("implement");
-  expect(changed.importedBy).toContain("review");
+  expect(changed.isComponent).toBe(false);
+  expect(changed.importedBy).toEqual([]);
 
   // init never auto-overwrites: the user's edit survives until applied.
-  expect(readFileSync(reviewPath, "utf8")).toContain("locally edited");
+  expect(readFileSync(workflowPath, "utf8")).toContain("locally edited");
 
   const written = applyWorkflowPackUpdates([changed]);
-  expect(written).toContain(reviewPath);
-  const after = readFileSync(reviewPath, "utf8");
+  expect(written).toContain(workflowPath);
+  const after = readFileSync(workflowPath, "utf8");
   expect(after).not.toContain("locally edited");
-  expect(after).toContain("ReviewPanel");
+  expect(after).toContain("<Workflow name=\"create-workflow\">");
 }, 30_000);

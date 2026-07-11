@@ -20,7 +20,7 @@ export type StartPaneProps = {
   onGenerateDocs: () => void;
   createState: LaunchState;
   generateState: LaunchState;
-  /** Detached bug-scan run id once ddd-generate-docs reports its kickoff. */
+  /** Detached follow-up run id reported by the docs audit. */
   bugScanRunId: string;
   /** Kickoff summary when the scan was blocked or failed instead of launched. */
   bugScanSummary?: string;
@@ -115,10 +115,10 @@ export function NewEntryMenu(props: NewEntryMenuProps) {
   const createDisabled = !canCreate || !!props.createState.pending || launchIsActive(props.createState);
   const generateDisabled = !!props.generateState.pending || launchIsActive(props.generateState);
   const generatedDocsRunHref = props.generateState.runId
-    ? props.workflowUiHref("ddd-generate-docs", props.generateState.runId)
+    ? props.workflowUiHref("docs-driven-development", props.generateState.runId)
     : undefined;
   const bugScanRunHref = props.bugScanRunId
-    ? props.workflowUiHref("ddd-bug-scan", props.bugScanRunId)
+    ? props.workflowUiHref("docs-driven-development", props.bugScanRunId)
     : undefined;
 
   useEffect(() => {
@@ -198,7 +198,7 @@ export function NewEntryMenu(props: NewEntryMenuProps) {
           </button>
           <LaunchStatus
             state={props.generateState}
-            label="ddd-generate-docs is reading your repo."
+            label="The docs audit is reading your repository."
             href={generatedDocsRunHref}
             testId="ddd-new-generate-run"
           />
@@ -212,8 +212,7 @@ export function NewEntryMenu(props: NewEntryMenuProps) {
 /**
  * The way in. Two honest entries: scaffold a brand-new app (via the
  * create-workflow authoring workflow, which builds the app's builder workflow)
- * or generate the spec from the code that already exists (ddd-generate-docs,
- * which then kicks off the async bug scan).
+ * or generate the spec from the code that already exists.
  */
 export function StartPane(props: StartPaneProps) {
   const [description, setDescription] = useState("");
@@ -224,10 +223,10 @@ export function StartPane(props: StartPaneProps) {
   const generateAgain = !!props.generateState.runId && isTerminalRunStatus(props.generateState.status);
   const updateDescription = (event: FormEvent<HTMLTextAreaElement>) => setDescription(event.currentTarget.value);
   const generatedDocsRunHref = props.generateState.runId
-    ? props.workflowUiHref("ddd-generate-docs", props.generateState.runId)
+    ? props.workflowUiHref("docs-driven-development", props.generateState.runId)
     : undefined;
   const bugScanRunHref = props.bugScanRunId
-    ? props.workflowUiHref("ddd-bug-scan", props.bugScanRunId)
+    ? props.workflowUiHref("docs-driven-development", props.bugScanRunId)
     : undefined;
   const reloadGeneratedDocs = () => {
     if (props.onReload) {
@@ -311,7 +310,7 @@ export function StartPane(props: StartPaneProps) {
           </div>
           <LaunchStatus
             state={props.generateState}
-            label="ddd-generate-docs is reading your repo."
+            label="The docs audit is reading your repository."
             href={generatedDocsRunHref}
             testId="ddd-start-generate-run"
           />

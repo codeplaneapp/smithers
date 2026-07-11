@@ -41,14 +41,62 @@ function parseMountedWorkflows(gatewaySource) {
     return workflows;
 }
 
+test("fresh default init installs only the curated workflows and complete DDD closure", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "smithers-curated-pack-"));
+    onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
+    const result = initWorkflowPack({
+        rootDir: tmpDir,
+        installSkill: false,
+        skipInstall: true,
+        env: seededAgentEnv(),
+    });
+    expect(result.writtenFiles.length).toBeGreaterThan(0);
+
+    const smithersDir = join(tmpDir, ".smithers");
+    expect(readdirSync(join(smithersDir, "workflows")).filter((f) => f.endsWith(".tsx")).sort()).toEqual([
+        "create-skill.tsx",
+        "create-workflow.tsx",
+        "docs-driven-development.tsx",
+        "init.tsx",
+        "post-failure.tsx",
+        "upgrade.tsx",
+    ]);
+    expect(workflowManifestIds()).toEqual(["create-workflow", "create-skill", "docs-driven-development"]);
+    expect(workflowManifestIds({ includeSystem: true })).toEqual([
+        "create-workflow", "create-skill", "docs-driven-development", "init", "post-failure", "upgrade",
+    ]);
+
+    const gateway = readFileSync(join(smithersDir, "gateway.ts"), "utf8");
+    expect(new Set(parseMountedWorkflows(gateway).map((w) => w.key))).toEqual(
+        new Set(["create-workflow", "create-skill", "docs-driven-development"]),
+    );
+    const uiFiles = readdirSync(join(smithersDir, "ui"));
+    const importedUiModules = new Set(uiFiles.filter((f) => f.endsWith(".tsx") || f.endsWith(".ts"))
+        .flatMap((f) => [...readFileSync(join(smithersDir, "ui", f), "utf8").matchAll(/(?:from|import\s*\()\s*["']\.\/([^"']+)/g)]
+            .map((m) => m[1].replace(/\.(tsx|ts)$/, ""))));
+    expect(new Set(uiFiles.filter((f) => f.endsWith(".tsx")).map((f) => f.replace(/\.tsx$/, ""))
+        .filter((key) => !importedUiModules.has(key)))).toEqual(
+        new Set(["create-workflow", "create-skill", "docs-driven-development"]),
+    );
+    expect(uiFiles).toContain("ddd-shared.tsx");
+    expect(uiFiles).toContain("ddd-FeaturesTab.tsx");
+    expect(readdirSync(join(smithersDir, "lib", "ddd")).sort()).toEqual([
+        "auditInputs.ts", "build.ts", "dddAgents.ts", "dddRoot.ts", "featuresSchema.ts", "generateSpecDocs.ts",
+        "generateUiModules.ts", "triageCandidates.ts", "validateFeatures.ts",
+    ]);
+    expect(readFileSync(join(smithersDir, "spec", "features.json"), "utf8")).not.toContain("workflow-authoring");
+    const createWorkflow = readFileSync(join(smithersDir, "workflows", "create-workflow.tsx"), "utf8");
+    expect(createWorkflow).toContain("id=\"document\"");
+    expect(createWorkflow).toContain("id=\"skill-verification\"");
+    expect(readFileSync(join(smithersDir, "prompts", "create-workflow-document.mdx"), "utf8"))
+        .toContain("Create `{props.skillsDir}/{props.workflowName}.md`");
+}, 30_000);
+
 test("selecting a workflow subset installs exactly that subset + transitive deps + infra", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "smithers-subset-"));
     onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
 
-    // Select just implement and plan — covers the core transitive dep chain:
-    //   implement → ValidationLoop → Review → review.mdx, implement.mdx, validate.mdx
-    //   plan → plan.mdx
-    const selected = ["implement", "plan"];
+    const selected = ["create-workflow"];
     const result = initWorkflowPack({
         rootDir: tmpDir,
         installSkill: false,
@@ -74,10 +122,8 @@ test("selecting a workflow subset installs exactly that subset + transitive deps
     const componentFiles = readdirSync(componentDir)
         .filter((f) => f.endsWith(".tsx"))
         .map((f) => f.replace(/\.tsx$/, ""));
-    // implement uses ValidationLoop which pulls in Review transitively
-    expect(componentFiles).toContain("ValidationLoop");
-    expect(componentFiles).toContain("Review");
-    // plan doesn't need GrillMe, ForEachFeature, FeatureEnum, CommandProbe
+    // The curated workflow does not pull legacy component implementations.
+    expect(componentFiles).toEqual([]);
     expect(componentFiles).not.toContain("GrillMe");
     expect(componentFiles).not.toContain("ForEachFeature");
     expect(componentFiles).not.toContain("FeatureEnum");
@@ -90,10 +136,8 @@ test("selecting a workflow subset installs exactly that subset + transitive deps
             .map((f) => f.replace(/\.mdx$/, "")),
     );
     // prompts from transitive deps of selected workflows
-    expect(promptFiles.has("implement")).toBe(true);
-    expect(promptFiles.has("validate")).toBe(true);
-    expect(promptFiles.has("review")).toBe(true);
-    expect(promptFiles.has("plan")).toBe(true);
+    expect(promptFiles.has("create-workflow-clarify")).toBe(true);
+    expect(promptFiles.has("create-workflow-document")).toBe(true);
     // NOT prompts only used by unselected workflows
     expect(promptFiles.has("mission-plan")).toBe(false);
     expect(promptFiles.has("merge-tickets")).toBe(false);
@@ -121,7 +165,9 @@ test("selecting a workflow subset installs exactly that subset + transitive deps
     expect(writtenRelative).toContain("package.json");
     expect(writtenRelative).toContain(".gitignore");
     expect(writtenRelative).toContain("gateway.ts");
-    expect(writtenRelative).toContain("lib/codexAccounts.ts");
+    // The curated authoring workflow does not depend on the legacy role
+    // component substrate; DDD owns its provider helper and installs it only
+    // with docs-driven-development.
 }, 30_000);
 
 // codexAccounts.ts is shared by hand-embedded role components as well as the
@@ -137,13 +183,7 @@ test("default selectedWorkflows (undefined) emits the same set as all-workflow s
 
     const env = seededAgentEnv();
     const allIds = [
-        "vcs", "implement", "research-plan-implement", "review", "plan", "research",
-        "ticket-create", "tickets-create", "ralph", "improve-test-coverage", "debug",
-        "grill-me", "feature-enum", "audit", "mission", "workflow-skill", "kanban",
-        "hello", "create-workflow", "context-engineer", "route-task", "create-skill",
-        "extract-skill", "triage-run", "context-doctor",
-        "backpressure-plan", "eval-author", "report-slideshow", "smithering",
-        "delegation-chain", "make-workflow-tutorial", "init", "post-failure", "upgrade",
+        "create-workflow", "create-skill", "docs-driven-development", "init", "post-failure", "upgrade",
     ];
 
     const resultAll = initWorkflowPack({ rootDir: tmpAll, installSkill: false, skipInstall: true, env, selectedWorkflows: allIds });

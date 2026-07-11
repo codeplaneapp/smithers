@@ -3,25 +3,25 @@ title: MDX Workflow Authoring
 description: Author workflows by editing plain Markdown prompt files. No TypeScript required - change the instruction, run again, see it change.
 ---
 
-`init` seeds two things side-by-side: a `.tsx` orchestration skeleton that handles execution, and an `.mdx` prompt file you edit to change what the agent does. For most workflows you never touch the `.tsx` file.
+`create-workflow` writes a `.tsx` orchestration skeleton and its prompts, then verifies and documents the result with a companion agent skill. For most workflows you describe the behavior instead of hand-editing the generated `.tsx` file.
 
 ## The two-file model
 
 | File | What it is | Who edits it |
 |---|---|---|
-| `.smithers/workflows/hello.tsx` | Durable run, agent wiring, output schema | Rarely - only when you need branching, schemas, or loops |
-| `.smithers/prompts/hello.mdx` | The agent's instruction - what you actually change | You, always |
+| `.smithers/workflows/WORKFLOW_ID.tsx` | Durable run, agent wiring, output schema | Rarely - only when you need branching, schemas, or loops |
+| `.smithers/prompts/WORKFLOW_ID.mdx` | The agent's instruction - what you actually change | You, always |
 
 The `.tsx` file imports and renders the `.mdx` file at runtime. Editing the prompt changes agent behavior on the next run - no build step, no TypeScript.
 
 ## Your first edit
 
-After `bunx smithers-orchestrator init`, open `.smithers/prompts/hello.mdx`:
+After `create-workflow` has generated a workflow, open its companion `.smithers/prompts/WORKFLOW_ID.mdx`:
 
 ```markdown
 Write a short, friendly one-sentence greeting for {props.name}.
 
-This is your hello-world workflow. Edit this file to change what the agent does -
+This is your workflow prompt. Edit this file to change what the agent does -
 it is plain Markdown, no TypeScript required. Anything in {curly braces} is a
 value passed in from the workflow (here, props.name).
 ```
@@ -35,7 +35,7 @@ Write a haiku about {props.name}.
 Run it again:
 
 ```bash
-bunx smithers-orchestrator workflow run hello --name Ada
+bunx smithers-orchestrator workflow run WORKFLOW_ID --input '{...}'
 ```
 
 The agent now writes haiku. The `.tsx` file didn't change.

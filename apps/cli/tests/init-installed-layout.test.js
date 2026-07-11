@@ -78,7 +78,6 @@ function buildFakeInstallTree() {
     );
     cpSync(join(CLI_SRC, "workflow-pack.js"), join(cliDir, "src/workflow-pack.js"));
     cpSync(join(CLI_SRC, "initPackUpdates.js"), join(cliDir, "src/initPackUpdates.js"));
-    cpSync(join(CLI_SRC, "workflowUiSources.js"), join(cliDir, "src/workflowUiSources.js"));
     cpSync(join(CLI_SRC, "agent-detection.js"), join(cliDir, "src/agent-detection.js"));
     cpSync(join(CLI_SRC, "sota-models.generated.js"), join(cliDir, "src/sota-models.generated.js"));
     cpSync(join(CLI_SRC, "installCuratedSkill.js"), join(cliDir, "src/installCuratedSkill.js"));
@@ -222,9 +221,9 @@ test("initWorkflowPack succeeds when run from a published install layout", () =>
     // And installed dep versions should be picked up via createRequire.
     expect(generated.dependencies.zod).toBe("4.99.0");
     expect(generated.devDependencies.typescript).toBe("5.99.0");
-    // dagre ships no types, so the pack must seed @types/dagre or its own
-    // `tsc --noEmit` typecheck fails TS7016 on dc-graph.tsx's `import dagre`.
-    expect(generated.devDependencies["@types/dagre"]).toBeDefined();
+    // The curated pack no longer ships the legacy dagre-backed graph UI, so
+    // the published layout has no target-specific graph dependency.
+    expect(generated.devDependencies["@types/dagre"]).toBeUndefined();
 
     // init also installed the curated skill into the detected agent (Claude Code,
     // present via the faked ~/.claude credentials) straight from the packaged

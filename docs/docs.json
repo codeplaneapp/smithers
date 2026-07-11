@@ -165,54 +165,16 @@
         ]
       },
       {
-        "group": "Default Workflows",
+        "group": "Workflow Pack",
         "pages": [
           "workflows/overview",
           {
-            "group": "Build",
+            "group": "Curated",
             "pages": [
-              "workflows/hello",
-              "workflows/implement",
-              "workflows/research-plan-implement",
-              "workflows/delegation-chain",
-              "workflows/mission",
-              "workflows/kanban",
-              "workflows/ralph",
-              "workflows/workflow-skill",
               "workflows/create-workflow",
               "workflows/create-skill",
-              "workflows/context-engineer",
-              "workflows/route-task",
-              "workflows/smithering",
-              "workflows/make-workflow-tutorial",
-              "workflows/extract-skill",
-              "workflows/vcs",
+              "workflows/docs-driven-development",
               "workflows/catalog"
-            ]
-          },
-          {
-            "group": "Plan",
-            "pages": [
-              "workflows/research",
-              "workflows/plan",
-              "workflows/grill-me",
-              "workflows/ticket-create",
-              "workflows/tickets-create"
-            ]
-          },
-          {
-            "group": "Quality",
-            "pages": [
-              "workflows/review",
-              "workflows/debug",
-              "workflows/improve-test-coverage",
-              "workflows/feature-enum",
-              "workflows/audit",
-              "workflows/context-doctor",
-              "workflows/backpressure-plan",
-              "workflows/triage-run",
-              "workflows/report-slideshow",
-              "workflows/eval-author"
             ]
           },
           {

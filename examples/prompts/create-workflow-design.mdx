@@ -1,0 +1,92 @@
+# Design the workflow graph
+
+You are the design step of the "build me a Smithers workflow" pipeline. Using the
+clarified spec and the provisioning manifest (docs pulled, examples found,
+components and skills available), produce a concrete, buildable design. Still no
+files: this is the blueprint the scaffolder will implement, and what a human may
+approve first.
+
+## Spec
+
+{JSON.stringify(props.spec, null, 2)}
+
+## Provisioning (docs, examples, components, skills, agents available)
+
+{JSON.stringify(props.provisioning, null, 2)}
+
+Workflows go in: {props.workflowsDir}
+Prompts go in: {props.promptsDir}
+Custom UIs go in: {props.uiDir}
+
+## Design rules
+
+- **Compose, don't hand-roll.** If the provisioning step found a component
+  (`<ReviewLoop>`, `<ScanFixVerify>`, `<ValidationLoop>`, ...) that fits, use it
+  instead of re-implementing the loop.
+- **One `.tsx` workflow** in `{props.workflowsDir}/<workflowName>.tsx`, importing
+  `agents` from `../agents`, with `createSmithers({ input, ...outputTables })`.
+  If the workflow has a custom UI, import `UI` from `smithers-orchestrator` and
+  declare `<UI entry="../ui/<workflowName>.tsx" title="<Title>" />` as a direct
+  child of the root `<Workflow>`.
+- **Prompts as `.mdx`.** Each substantive AI task renders an `.mdx` prompt from
+  `{props.promptsDir}` that ends with `REQUIRED OUTPUT:\n{props.schema}` so the
+  task's Zod output schema is injected automatically.
+- **Typed outputs.** Every `<Task>` gets a Zod `output={outputs.x}` schema. Keep
+  schemas minimal: a `summary` plus the few fields downstream steps actually read.
+- **Pick the control flow deliberately:** `<Sequence>` for ordered stages,
+  `<Parallel maxConcurrency>` for fan-out, `<Branch if then else>` for conditional
+  paths, `<Loop>/<Ralph until maxIterations onMaxReached>` for "repeat until done".
+- **Human gates** become `<Approval>` / `<HumanTask>` nodes only where the spec
+  asked for them.
+- **Agents per task:** use the role-specific pool from the manifest. Choose
+  `agents.planning` for GPT-5.6 Sol planning, orchestration, and review;
+  `agents.research` for GPT-5.6 Luna research; `agents.implement` for GPT-5.6
+  Luna implementation; `agents.midTier` for GPT-5.6 Terra validation and
+  tool-heavy mid-tier work; and `agents.cheapFast` for GPT-5.6 Luna low-stakes,
+  high-volume work. Implementation stays on `agents.implement` even when it
+  edits files or runs shell commands. These five pools already encode
+  sequential Codex-first fallback, so never fan out to Claude or Kimi in
+  parallel merely as a fallback. Use function tasks (no agent) for pure compute
+  / shelling out.
+- **No mocks.** Function tasks and verification steps must run real commands
+  against real files; never design a step whose output is fabricated data.
+
+## Design the custom UI (required)
+
+Every new workflow gets a matching custom run UI at
+`{props.uiDir}/<workflowName>.tsx` (rendered by `smithers ui <runId>` after the
+workflow declares `<UI entry="../ui/<workflowName>.tsx" />`), built on
+`smithers-orchestrator/gateway-react` (`createGatewayReactRoot`,
+`useGatewayRuns`, `useGatewayRunEvents`, `useGatewayNodeOutput`,
+`useGatewayActions`). Look at `{props.uiDir}/vcs.tsx` or
+`{props.uiDir}/create-workflow.tsx` for the shape. Fill the design's `ui` field:
+
+- `path`: `{props.uiDir}/<workflowName>.tsx`.
+- `summary`: what an operator sees while a run executes.
+- `panels`: each panel/section and the node output table(s) it reads (use the
+  task ids and output schemas you designed above, honoring the spec's `ui` wish).
+
+Set `ui` to null only if the spec says the user explicitly declined a UI.
+
+## Produce
+
+- `workflowName`, `summary` (2-3 sentences).
+- `inputs`: the Zod input schema fields.
+- `tasks`: each task's `id`, `purpose`, `agent`, and `outputs` (the schema fields).
+- `graphShape`: the JSX tree as an indented outline (which nodes nest where, the
+  loop/branch conditions, the human gates).
+- `components`, `prompts` (the `.mdx` files to author), `triggers`, `humanGates`.
+- `ui`: the custom UI plan described above.
+- `rationale`: why this shape, how the spec's clarifying-question assumptions
+  were honored, and any tradeoff or follow-up (e.g. a skill that was only
+  `recommended`, not installed).
+
+## Acceptance criteria
+
+- Every stage in the spec maps to a task or component in `graphShape`.
+- Every AI task has a named agent pool and a prompt file in `prompts`.
+- `ui.panels` reference only task ids that exist in `tasks`.
+- Concrete enough that the scaffolder can implement it without guessing.
+
+REQUIRED OUTPUT:
+{props.schema}

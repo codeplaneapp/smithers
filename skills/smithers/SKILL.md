@@ -248,7 +248,8 @@ bare `smithers …` below is identical to `bunx smithers-orchestrator …` if th
 is no global install, so prefer `bunx smithers-orchestrator …` when unsure:
 
 ```bash
-# 1. Scaffold .smithers/ with ready-made workflows (implement, review, plan, ralph, debug…)
+# 1. Scaffold .smithers/ with the focused authoring workflows (create-workflow,
+#    create-skill, docs-driven-development) and hidden system plumbing.
 #    Add --yes (or set SMITHERS_NONINTERACTIVE=1) when running as an agent so init
 #    never hangs waiting for interactive prompts.
 smithers init --yes
@@ -261,7 +262,7 @@ smithers workflow create my-workflow      # writes .smithers/workflows/my-workfl
 smithers graph .smithers/workflows/my-workflow.tsx   # renders without executing — must exit 0
 
 # 4. Run one. This dispatches a real coding agent to do the work, durably.
-smithers workflow run implement --prompt "Add a /health endpoint"
+smithers workflow run create-workflow --prompt "Build a workflow for a /health endpoint"
 
 # 5. Watch it
 smithers ps                 # active / paused / recent runs
@@ -511,7 +512,7 @@ Everything is a CLI verb (prefix with `bunx smithers-orchestrator` if it isn't o
 
 ```bash
 smithers up workflow.tsx --input '{"description":"Fix bug"}'   # start a run from a .tsx FILE (by path)
-smithers workflow run implement --input '{"description":"Fix bug"}' # start a run from a DISCOVERED workflow (by id)
+smithers workflow run create-workflow --prompt "Build a workflow for this change" # start a run from a DISCOVERED workflow (by id)
 smithers up workflow.tsx --run-id <id> --resume true          # resume after a crash
 smithers ps                                                   # list runs
 smithers inspect <run-id>                                     # full run state

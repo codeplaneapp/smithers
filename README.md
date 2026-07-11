@@ -28,8 +28,9 @@ step is a database row, so live watching, rewind, and replay are built in.*
   through the AI SDK. Swap the harness without rewriting the workflow.
 - 🛠️ **Higher-quality output**: review loops, human approvals, and evals give agents the
   structure that real work demands.
-- 🧩 **Dozens of ready-to-run workflows**: planning, implementation, review, debugging,
-  tickets, audits, and long-horizon missions. Your agent can author new ones.
+- 🧩 **A focused workflow pack**: create workflows, author standalone skills, and run
+  docs-driven development; former starters remain available as examples. Your
+  agent can author new ones.
 
 ## When to use Smithers
 
@@ -82,8 +83,9 @@ bunx smithers-orchestrator init
 
 - **Installs the `smithers` skill** into the coding agents on your machine (Claude Code,
   Pi, and more), so your agent knows how and when to use Smithers. No `mkdir`, no `curl`.
-- **Scaffolds `.smithers/`** with ready-made workflows (`hello`, `implement`, `plan`,
-  `review`, `debug`, and more) your agent can pick from.
+- **Scaffolds `.smithers/`** with the focused authoring workflows `create-workflow`,
+  `create-skill`, and `docs-driven-development`; former recipes remain in
+  `examples/init-pack/`.
 
 Then just ask:
 
@@ -95,6 +97,10 @@ review loops until the work is actually done.
 To wire the MCP server into every detected agent too, run `bunx smithers-orchestrator mcp
 add`. See [Agent Support](https://smithers.sh/agents/overview) for the full per-agent
 matrix, and [`skills/smithers/`](./skills/smithers) for the onboarding skill itself.
+
+| Primitive | Meaning |
+| --- | --- |
+| `<Loop>`     | Repeat tasks until a condition is met  |
 
 ## What a workflow looks like
 
@@ -189,7 +195,7 @@ Prefer the CLI? The seeded workflows run directly, and whether your agent starte
 you did, you can see exactly what's happening:
 
 ```bash
-bunx smithers-orchestrator workflow run hello   # smallest possible run; prompt lives at .smithers/prompts/hello.mdx
+bunx smithers-orchestrator workflow run create-workflow --prompt "build a small hello workflow"
 bunx smithers-orchestrator workflow run plan --prompt "add rate limiting and API key rotation"
 
 bunx smithers-orchestrator ps              # list active, paused, and recently completed runs
@@ -234,16 +240,16 @@ server into Cursor, Copilot, Hermes, OpenClaw, and ~20 more coding agents.
 
 ## Built-in workflows
 
-`bunx smithers-orchestrator init` installs a pack of ready-to-run workflows: `implement`,
-`plan`, `research`, `review`, `debug`, `tickets-create`, `kanban`, `mission`, `grill-me`,
-`improve-test-coverage`, `audit`, `research-plan-implement`, and more. Point your agent at
-one, or run it yourself:
+`bunx smithers-orchestrator init` installs a focused pack: `create-workflow`, `create-skill`,
+and `docs-driven-development`. Former starter workflows are preserved under
+`examples/init-pack/`.
 
 ```bash
-bunx smithers-orchestrator workflow run implement --prompt "add rate limiting"
+bunx smithers-orchestrator workflow run create-workflow --prompt "add rate limiting"
 ```
 
-See [`docs/workflows/`](./docs/workflows/overview.mdx) for the full pack.
+See [`docs/workflows/`](./docs/workflows/overview.mdx) for the curated pack and
+`examples/init-pack/` for former starter workflows.
 
 ## Examples
 

@@ -51,9 +51,14 @@ test("every seeded init-pack workflow renders its graph without a load-time erro
   const files = readdirSync(workflowsDir)
     .filter((f) => f.endsWith(".tsx"))
     .sort();
-  // A fresh init seeds a non-trivial set; if this ever drops to a handful the
-  // pack is broken, so assert we are actually exercising the catalog.
-  expect(files.length).toBeGreaterThan(10);
+  expect(files).toEqual([
+    "create-skill.tsx",
+    "create-workflow.tsx",
+    "docs-driven-development.tsx",
+    "init.tsx",
+    "post-failure.tsx",
+    "upgrade.tsx",
+  ]);
 
   // `graph` loads the workflow and builds one frame (running createSmithers and
   // the compute tasks needed to resolve the tree) but dispatches no agent, so it

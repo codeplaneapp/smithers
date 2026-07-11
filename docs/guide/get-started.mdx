@@ -14,9 +14,9 @@ From inside your project:
 bunx smithers-orchestrator init
 ```
 
-In a terminal, `init` asks exactly one question: which coding agent do you prefer? It shows what it detected (Claude Code, Codex, Pi, ...), you pick one, and it does the rest - scaffolds `.smithers/` into your repo with the default workflow pack, installs its dependencies, adds `smithers.db` to your `.gitignore`, and installs that agent's Smithers plugin (or the skill, if no plugin exists for it). Then it opens a hijacked tutorial session: your chosen agent greets you in your own terminal, narrates what was detected and configured, and walks you through your first runs. Piped or non-interactive callers (CI, agents, `--yes`) skip the question and install the defaults; `--no-tutorial` skips the guided session.
+In a terminal, `init` asks exactly one question: which coding agent do you prefer? It shows what it detected (Claude Code, Codex, Pi, ...), you pick one, and it does the rest - scaffolds `.smithers/` with the focused authoring pack (`create-workflow`, `create-skill`, and `docs-driven-development`), installs dependencies, and installs that agent's Smithers plugin (or skill). Former recipes are archived under `examples/init-pack/`. Piped or non-interactive callers (CI, agents, `--yes`) skip the question and install the defaults; `--no-tutorial` skips the guided session.
 
-The star of the scaffold is **`.smithers/prompts/hello.mdx`** - your editable hello-world workflow. Open it, change the instruction, and the next run picks it up. No TypeScript required. Re-running `init` later only offers to update files that drifted.
+The star of the scaffold is **`create-workflow`** - describe the workflow you want, and it writes the workflow plus a companion agent skill document. Re-running `init` later only offers to update files that drifted.
 
 </Step>
 
@@ -40,13 +40,13 @@ Your agent drives Smithers, so it needs the Smithers context. Two ways to get it
 
 </Step>
 
-<Step title="Ask your agent to run your hello-world workflow">
+<Step title="Ask your agent to create a workflow">
 
 You don't run Smithers yourself - your coding agent does. Ask it, in plain language:
 
-> **"Run the hello workflow with Smithers and show me the output."**
+> **"Use create-workflow to build a workflow that checks my API and keeps iterating until tests pass."**
 
-Your agent runs `bunx smithers-orchestrator workflow run hello`, a durable run completes, and it reports the output back to you. Edit `.smithers/prompts/hello.mdx`, ask it to run again, watch the output change.
+Your agent runs `create-workflow`, a durable run completes, and it reports the generated workflow and companion skill path back to you.
 
 When you run it yourself in a terminal, a cheap, fast model narrates the result: a short recap in the terminal plus a self-contained HTML summary that opens in your browser (written under `.smithers/reports/`). Pass `--no-report`, or set `SMITHERS_NO_REPORT=1`, to skip it.
 

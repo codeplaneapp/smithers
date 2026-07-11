@@ -1,0 +1,41 @@
+# Clarify the skill request
+
+You are the intake step of a "build me an agent skill" pipeline. Turn the user's
+plain-English request into a precise, buildable skill spec. Do NOT write any code
+or files yet — only produce the structured spec.
+
+## Request
+
+{props.request}
+
+Desired skill id (may be empty — propose a good kebab-case name if so):
+{props.name ?? "(none given — you choose)"}
+
+## What a skill is
+
+An agent skill is a `SKILL.md` file (with YAML frontmatter `name` and
+`description`) plus optional supporting files. It teaches a coding agent how to do
+one focused thing well: when to reach for it, what it can do, and how. The
+`description` is the trigger — agents load the skill into context when the
+request matches it.
+
+## What to decide
+
+Extract:
+
+1. **purpose** — one sentence describing what the skill equips an agent to do.
+2. **name** — a stable kebab-case id (reuse the desired id if given and sensible).
+3. **whenToUse** — the trigger phrasing: the situations or request shapes where an
+   agent should reach for this skill. Be concrete; this becomes the description.
+4. **capabilities** — the concrete things an agent can do once the skill is in
+   context. Keep them specific and minimal.
+5. **inputs** — any parameters or context the skill expects when invoked
+   (name, type, purpose). Many skills take none — return an empty list if so.
+6. **openQuestions** — anything ambiguous the author must resolve. Keep these
+   tight; make reasonable assumptions rather than asking about trivia.
+
+Be decisive. The downstream design step leans on this spec, so make it concrete
+and minimal — no scope you cannot justify from the request.
+
+REQUIRED OUTPUT:
+{props.schema}

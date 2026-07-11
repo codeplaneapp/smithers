@@ -196,13 +196,8 @@ test("seeded workflow docs cover current init workflow pack", () => {
     }
 });
 
-test("workflow overview, catalog, and sidebar cover every documented workflow", () => {
-    const workflowDocIds = readdirSync(resolve(REPO_ROOT, "docs/workflows"))
-        .filter((file) => file.endsWith(".mdx"))
-        .map((file) => file.replace(/\.mdx$/, ""))
-        .filter((id) => id !== "overview" && id !== "catalog")
-        .sort();
-    expect(workflowDocIds).toHaveLength(34);
+test("workflow overview, catalog, and sidebar cover the curated pack", () => {
+    const workflowDocIds = ["create-skill", "create-workflow", "docs-driven-development"];
 
     const overview = readRepoFile("docs/workflows/overview.mdx");
     const catalog = readRepoFile("docs/workflows/catalog.mdx");
@@ -211,9 +206,9 @@ test("workflow overview, catalog, and sidebar cover every documented workflow", 
     const overviewWorkflowIds = [...overview.matchAll(/\[`([a-z0-9-]+)`\]\(\/workflows\/\1\)/g)]
         .map((match) => match[1])
         .sort();
-    const catalogWorkflowIds = [...catalog.matchAll(/`([a-z0-9-]+)`/g)]
+    const catalogWorkflowIds = [...new Set([...catalog.matchAll(/`([a-z0-9-]+)`/g)]
         .map((match) => match[1])
-        .filter((id) => workflowDocIds.includes(id))
+        .filter((id) => workflowDocIds.includes(id)))]
         .sort();
     const sidebarWorkflowIds = [...docsJson.matchAll(/"workflows\/([a-z0-9-]+)"/g)]
         .map((match) => match[1])
@@ -222,7 +217,7 @@ test("workflow overview, catalog, and sidebar cover every documented workflow", 
 
     expect(overviewWorkflowIds).toEqual(workflowDocIds);
     expect(catalogWorkflowIds).toEqual(workflowDocIds);
-    expect(sidebarWorkflowIds).toEqual(workflowDocIds);
+    expect(sidebarWorkflowIds).toEqual([...workflowDocIds, "init", "post-failure", "upgrade"].sort());
 });
 
 test("error reference docs cover current Smithers error registry", () => {

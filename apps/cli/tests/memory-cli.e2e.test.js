@@ -163,7 +163,7 @@ test("memory set still accepts an explicit --workflow pointing at a pack workflo
   const { repo, env } = setupRepo();
   const opts = { cwd: repo.dir, env };
   const set = runSmithers(
-    ["memory", "set", "workflow:memcli", "k", "wf-flag-ok-9", "--workflow", ".smithers/workflows/hello.tsx"],
+    ["memory", "set", "workflow:memcli", "k", "wf-flag-ok-9", "--workflow", ".smithers/workflows/create-workflow.tsx"],
     opts,
   );
   expect(set.exitCode).toBe(0);

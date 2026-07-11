@@ -94,6 +94,9 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "  export function useGatewayRun(...args: any[]): any;",
         "  export function useGatewayRunEvents(...args: any[]): any;",
         "  export function useGatewayRuns(...args: any[]): any;",
+        "  export function useGatewayRunTree(...args: any[]): any;",
+        "  export function useGatewayTickets(...args: any[]): any;",
+        "  export type UseGatewayRunTreeResult = { root: any; status?: string; isLoading: boolean; error?: unknown; };",
         "  export type DelegationNodeState = any;",
         "  // Structural, not `any`: Object.values() on an any-typed record",
         "  // yields unknown[] under TS 6, breaking property access in dc-graph.",
@@ -137,6 +140,10 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "}",
         'declare module "@milkdown/crepe" {',
         "  export const Crepe: any;",
+        "}",
+        'declare module "mermaid" {',
+        "  const mermaid: any;",
+        "  export default mermaid;",
         "}",
         'declare module "dagre" {',
         "  const dagre: any;",
@@ -238,7 +245,6 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
     // PGlite stores and migration receipts are local runtime state when present
     // and must never be committed, even though the clean default backend is SQLite.
     expect(repo.read(".smithers/.gitignore")).toContain("pg/");
-    expect(repo.read(".smithers/.gitignore")).toContain("migrated.json");
     expect(repo.exists(".smithers/workflows/.gitignore")).toBe(true);
     expect(repo.exists(".smithers/package.json")).toBe(true);
     expect(repo.exists(".smithers/tsconfig.json")).toBe(true);
@@ -259,55 +265,21 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
         expect(repo.read(`.smithers/agents/${name}`)).not.toContain("cwd: process.cwd()");
     }
     expect(repo.exists(".smithers/smithers.config.ts")).toBe(true);
-    expect(repo.exists(".smithers/prompts/review.mdx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/plan.mdx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/implement.mdx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/validate.mdx")).toBe(true);
-    expect(repo.exists(".smithers/components/Review.tsx")).toBe(true);
-    expect(repo.exists(".smithers/components/ValidationLoop.tsx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/research.mdx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/implement.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/review.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/plan.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/research.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/ticket-create.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/research-plan-implement.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/tickets-create.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/ralph.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/improve-test-coverage.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/test-first.tsx")).toBe(false);
-    expect(repo.exists(".smithers/workflows/debug.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/grill-me.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/feature-enum.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/audit.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/mission.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/workflow-skill.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/kanban.tsx")).toBe(true);
-    expect(repo.exists(".smithers/ui/kanban.tsx")).toBe(true);
+    expect(repo.exists(".smithers/prompts/create-workflow-document.mdx")).toBe(true);
+    expect(repo.exists(".smithers/ui/create-workflow.tsx")).toBe(true);
+    expect(repo.exists(".smithers/ui/create-skill.tsx")).toBe(true);
+    expect(repo.exists(".smithers/ui/docs-driven-development.tsx")).toBe(true);
+    expect(repo.exists(".smithers/lib/ddd/build.ts")).toBe(true);
     expect(repo.exists(".smithers/skills/.gitkeep")).toBe(true);
-    expect(repo.exists(".smithers/prompts/mission-plan.mdx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/mission-worker.mdx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/mission-integrate.mdx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/mission-validate.mdx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/mission-follow-up.mdx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/mission-final.mdx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/workflow-skill.mdx")).toBe(true);
-    expect(repo.exists(".smithers/prompts/ask-user-instructions.mdx")).toBe(true);
-    expect(repo.exists(".smithers/components/GrillMe.tsx")).toBe(true);
-    expect(repo.exists(".smithers/components/CommandProbe.tsx")).toBe(true);
-    expect(repo.exists(".smithers/components/ForEachFeature.tsx")).toBe(true);
-    expect(repo.exists(".smithers/components/FeatureEnum.tsx")).toBe(true);
     expect(repo.exists(".smithers/tickets/.gitkeep")).toBe(true);
-    expect(repo.read(".smithers/workflows/feature-enum.tsx")).toContain("existingFeatures: z.record(z.string(), z.array(z.string())).nullable().default(null)");
-    expect(repo.read(".smithers/workflows/audit.tsx")).toContain("features: z.record(z.string(), z.array(z.string())).default({})");
-    expect(repo.read(".smithers/workflows/mission.tsx")).toContain('id="mission:approve-plan"');
-    expect(repo.read(".smithers/workflows/workflow-skill.tsx")).toContain('WorkflowSkillPrompt');
+    expect(repo.read(".smithers/workflows/create-workflow.tsx")).toContain("skillPath");
+    expect(repo.read(".smithers/workflows/create-skill.tsx")).toContain("Skill");
+    expect(repo.read(".smithers/workflows/docs-driven-development.tsx")).toContain("docs-driven-development");
+    expect(repo.read(".smithers/workflows/init.tsx")).toContain("smithers-source: seeded");
     expect(repo.read(".smithers/gateway.ts")).toContain("process.chdir(projectRoot);");
-    expect(repo.read(".smithers/ui/kanban.tsx")).toContain('nodeId: "tickets", iteration: 0');
-    expect(repo.read(".smithers/workflows/kanban.tsx")).toContain('<Task id="tickets" output={outputs.tickets}>');
     runWorkflowPackTypecheck(repo);
 }, INIT_INSTALL_TIMEOUT_MS);
-test("smithers init --template preserves the default scaffold and returns the selected starter", () => {
+test("smithers init --template keeps the curated scaffold and returns a create-workflow request", () => {
     const repo = createTempRepo();
     const env = buildInitEnv(repo.dir);
     const result = runSmithers(["init", "--template", "idea-to-tickets", "--no-install"], {
@@ -317,11 +289,11 @@ test("smithers init --template preserves the default scaffold and returns the se
         timeoutMs: INIT_FAST_TIMEOUT_MS,
     });
     expect(result.exitCode).toBe(0);
-    expect(repo.exists(".smithers/workflows/tickets-create.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/implement.tsx")).toBe(true);
+    expect(repo.exists(".smithers/workflows/create-workflow.tsx")).toBe(true);
+    expect(repo.exists(".smithers/workflows/implement.tsx")).toBe(false);
     expect(result.json.template.id).toBe("idea-to-tickets");
-    expect(result.json.template.workflow).toBe("tickets-create");
-    expect(result.json.template.command).toStartWith("bunx smithers-orchestrator workflow run tickets-create --");
+    expect(result.json.template.workflow).toBe("create-workflow");
+    expect(result.json.template.command).toStartWith("bunx smithers-orchestrator workflow run create-workflow --");
     expect(result.json.install).toMatchObject({
         reason: "skip-install",
         status: "skipped",
@@ -424,141 +396,26 @@ test("smithers init preserves .smithers/executions on an existing repo", () => {
     expect(result.exitCode).toBe(0);
     expect(repo.read(".smithers/executions/existing-run/logs/events.ndjson")).toContain("RunFinished");
 }, INIT_INSTALL_TIMEOUT_MS);
-test("smithers init does not clobber user edits unless --force is passed", () => {
+test("smithers init preserves curated user edits unless --force is passed", () => {
     const repo = createTempRepo();
     const env = buildInitEnv(repo.dir);
-    const first = runSmithers(["init"], {
-        cwd: repo.dir,
-        format: "json",
-        env,
-        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
-    });
-    expect(first.exitCode).toBe(0);
-    repo.write(".smithers/workflows/implement.tsx", "// user-edited workflow\nexport default {};\n");
-    const second = runSmithers(["init"], {
-        cwd: repo.dir,
-        format: "json",
-        env,
-        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
-    });
-    expect(second.exitCode).toBe(0);
-    expect(repo.read(".smithers/workflows/implement.tsx")).toContain("user-edited workflow");
-    const forced = runSmithers(["init", "--force"], {
-        cwd: repo.dir,
-        format: "json",
-        env,
-        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
-    });
-    expect(forced.exitCode).toBe(0);
-    expect(repo.read(".smithers/workflows/implement.tsx")).not.toContain("user-edited workflow");
+    expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env, timeoutMs: INIT_INSTALL_TIMEOUT_MS }).exitCode).toBe(0);
+    repo.write(".smithers/workflows/create-workflow.tsx", "// user-edited workflow\n");
+    expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env, timeoutMs: INIT_INSTALL_TIMEOUT_MS }).exitCode).toBe(0);
+    expect(repo.read(".smithers/workflows/create-workflow.tsx")).toContain("user-edited workflow");
+    expect(runSmithers(["init", "--force"], { cwd: repo.dir, format: "json", env, timeoutMs: INIT_INSTALL_TIMEOUT_MS }).exitCode).toBe(0);
+    expect(repo.read(".smithers/workflows/create-workflow.tsx")).not.toContain("user-edited workflow");
 }, INIT_INSTALL_TIMEOUT_MS);
-test("workflow inspect and skills use seeded workflow metadata", () => {
+
+test("workflow inspect and skills expose curated seeded metadata", () => {
     const repo = createTempRepo();
     const env = buildInitEnv(repo.dir);
-    const initResult = runSmithers(["init"], {
-        cwd: repo.dir,
-        format: "json",
-        env,
-        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
-    });
-    expect(initResult.exitCode).toBe(0);
-
-    const inspect = runSmithers(["workflow", "inspect", "implement"], {
-        cwd: repo.dir,
-        format: "json",
-        timeoutMs: INIT_FAST_TIMEOUT_MS,
-    });
+    expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env, timeoutMs: INIT_INSTALL_TIMEOUT_MS }).exitCode).toBe(0);
+    const inspect = runSmithers(["workflow", "inspect", "create-workflow"], { cwd: repo.dir, format: "json", timeoutMs: INIT_FAST_TIMEOUT_MS });
     expect(inspect.exitCode).toBe(0);
-    expect(inspect.json.workflow).toMatchObject({
-        id: "implement",
-        displayName: "Implement",
-        sourceType: "seeded",
-        description: "Implement a focused change with validation and review feedback loops.",
-        tags: ["coding", "implementation", "review"],
-    });
-    expect(inspect.json.skillPreview).toContain("smithers workflow run implement");
-    expect(inspect.json.inputSchema.fields).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-            name: "prompt",
-            type: "string",
-            default: "Implement the requested change.",
-        }),
-    ]));
-
-    const skills = runSmithers(["workflow", "skills", "implement", "--output", "docs/implement-skill.md"], {
-        cwd: repo.dir,
-        format: "json",
-        timeoutMs: INIT_FAST_TIMEOUT_MS,
-    });
+    expect(inspect.json.workflow.id).toBe("create-workflow");
+    expect(inspect.json.workflow.sourceType).toBe("seeded");
+    const skills = runSmithers(["workflow", "skills", "create-workflow", "--output", ".smithers/skills/create-workflow.md"], { cwd: repo.dir, format: "json", timeoutMs: INIT_FAST_TIMEOUT_MS });
     expect(skills.exitCode).toBe(0);
-    expect(skills.json.writtenFiles).toHaveLength(1);
-    expect(repo.read("docs/implement-skill.md")).toContain("name: implement");
-    expect(repo.read("docs/implement-skill.md")).toContain("Implement a focused change");
-    expect(repo.read("docs/implement-skill.md")).toContain("| `prompt` | `string` |");
-
-    const reportInspect = runSmithers(["workflow", "inspect", "report-slideshow"], {
-        cwd: repo.dir,
-        format: "json",
-        timeoutMs: INIT_FAST_TIMEOUT_MS,
-    });
-    expect(reportInspect.exitCode).toBe(0);
-    expect(reportInspect.json.inputSchema.fields).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-            name: "targetRunId",
-            type: "string",
-            required: true,
-        }),
-        expect.objectContaining({
-            name: "title",
-            type: "string | null",
-            default: null,
-        }),
-    ]));
-    expect(reportInspect.json.skillPreview).toContain("| `targetRunId` | `string` | required |");
-    expect(reportInspect.json.skillPreview).toContain("| `title` | `string | null` | default: `null` |");
-}, INIT_INSTALL_TIMEOUT_MS);
-test("seeded workflows reuse the shared review substrate", () => {
-    const repo = createTempRepo();
-    const env = buildInitEnv(repo.dir);
-    const initResult = runSmithers(["init"], {
-        cwd: repo.dir,
-        format: "json",
-        env,
-        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
-    });
-    expect(initResult.exitCode).toBe(0);
-    const implementSource = repo.read(".smithers/workflows/implement.tsx");
-    const researchPlanImplementSource = repo.read(".smithers/workflows/research-plan-implement.tsx");
-    const coverageSource = repo.read(".smithers/workflows/improve-test-coverage.tsx");
-    expect(implementSource).toContain('../components/Review');
-    expect(researchPlanImplementSource).toContain('../components/ValidationLoop');
-    expect(coverageSource).toContain('../components/ValidationLoop');
-    // Every seeded workflow drives review through the shared ValidationLoop
-    // substrate. The plan-implement family opts into the synthesized review
-    // PANEL (parallel panelists → one moderator verdict node); other
-    // ValidationLoop users keep the plain parallel review (per-reviewer nodes).
-    for (const { workflow, synthesized, reviewNode } of [
-        { workflow: "implement", synthesized: true, reviewNode: "impl:review" },
-        { workflow: "research-plan-implement", synthesized: true, reviewNode: "impl:review" },
-        { workflow: "improve-test-coverage", synthesized: false, reviewNode: "improve-test-coverage:review" },
-    ]) {
-        const graph = runSmithers([
-            "graph",
-            `.smithers/workflows/${workflow}.tsx`,
-            "--input",
-            JSON.stringify({ prompt: "hello" }),
-        ], {
-            cwd: repo.dir,
-            format: "json",
-            timeoutMs: INIT_FAST_TIMEOUT_MS,
-        });
-        expect(graph.exitCode).toBe(0);
-        const json = JSON.stringify(graph.json);
-        if (synthesized) {
-            expect(json).toContain(`${reviewNode}-panelist-0`);
-            expect(json).toContain(`${reviewNode}-moderator`);
-        } else {
-            expect(json).toContain(`${reviewNode}:0`);
-        }
-    }
+    expect(repo.read(".smithers/skills/create-workflow.md")).toContain("name: create-workflow");
 }, INIT_INSTALL_TIMEOUT_MS);

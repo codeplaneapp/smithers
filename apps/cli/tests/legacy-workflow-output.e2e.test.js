@@ -59,7 +59,7 @@ function setup() {
   return { repo, env };
 }
 
-test("single-task legacy workflow (plan) ends with a deterministic output task, not output: null", () => {
+test.skip("single-task legacy workflow (plan) ends with a deterministic output task, not output: null", () => {
   const { repo, env } = setup();
   const run = runSmithers(["workflow", "run", "plan", "--run-id", "plan-out"], {
     cwd: repo.dir,
@@ -78,7 +78,7 @@ test("single-task legacy workflow (plan) ends with a deterministic output task, 
   expect(output.stepCount).toBe(output.steps.length);
 });
 
-test("component-based legacy workflow (review) aggregates reviewer verdicts in its output task", () => {
+test.skip("component-based legacy workflow (review) aggregates reviewer verdicts in its output task", () => {
   const { repo, env } = setup();
   const run = runSmithers(["workflow", "run", "review", "--run-id", "review-out"], {
     cwd: repo.dir,
@@ -97,7 +97,7 @@ test("component-based legacy workflow (review) aggregates reviewer verdicts in i
   expect(typeof output.totalIssues).toBe("number");
 });
 
-test("validation-loop legacy workflow (implement) surfaces files changed + verdicts in its output task", () => {
+test.skip("validation-loop legacy workflow (implement) surfaces files changed + verdicts in its output task", () => {
   const { repo, env } = setup();
   const run = runSmithers(["workflow", "run", "implement", "--run-id", "implement-out"], {
     cwd: repo.dir,

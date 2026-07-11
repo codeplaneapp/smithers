@@ -151,7 +151,7 @@ export function toRunRows(data: unknown): RunSummaryRow[] {
     .filter((row): row is RunSummaryRow => row.runId.length > 0);
 }
 
-const DDD_WORKFLOW_KEYS = new Set(["docs-driven-development", "ddd-generate-docs", "ddd-bug-scan"]);
+const DDD_WORKFLOW_KEYS = new Set(["docs-driven-development"]);
 
 function isDocsDrivenRun(run: RunSummaryRow, activeRunId: string | undefined): boolean {
   const workflowKey = asString(run.workflowKey ?? run.workflowName ?? run.workflow);
@@ -302,7 +302,7 @@ export function App({
   const roundSummaryOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "round-summary", iteration: 0 });
   // Follows the Start pane's generate-docs run: its kickoff node reports the
   // detached bug-scan run id.
-  const kickoffOut = useGatewayNodeOutput({ runId: generateRun.runId ?? undefined, nodeId: "kickoff-bug-scan", iteration: 0 });
+  const kickoffOut = useGatewayNodeOutput({ runId: generateRun.runId ?? undefined, nodeId: "round-summary", iteration: 0 });
 
   const runsState = useGatewayRuns({ filter: { limit: 100 } });
   const runDetail = useGatewayRun(liveRunId);
@@ -353,8 +353,8 @@ export function App({
   const listedRuns = toRunRows(runsState.data).filter((run) => isDocsDrivenRun(run, liveRunId));
   const activeRunWorkflowKey =
     asString(runDetailRow?.workflowKey ?? runDetailRow?.workflowName ?? runDetailRow?.workflow) ||
-    (generateRun.runId && liveRunId === generateRun.runId ? "ddd-generate-docs" : "") ||
-    (bugScanRunId && liveRunId === bugScanRunId ? "ddd-bug-scan" : "") ||
+    (generateRun.runId && liveRunId === generateRun.runId ? "docs-driven-development" : "") ||
+    (bugScanRunId && liveRunId === bugScanRunId ? "docs-driven-development" : "") ||
     (DDD_WORKFLOW_KEYS.has(pageWorkflowKey) ? pageWorkflowKey : "") ||
     "docs-driven-development";
   const runs =
@@ -674,7 +674,7 @@ export function App({
     generateLaunchInFlight.current = true;
     setGenerateRun({ runId: null, error: null, pending: true });
     void actions
-      .launchRun({ workflow: "ddd-generate-docs", input: {} })
+      .launchRun({ workflow: "docs-driven-development", input: { maxAgents: 1, maxRounds: 1, runImplementation: false } })
       .then((result: unknown) => {
         const nextRunId = launchResultRunId(result);
         setGenerateRun(

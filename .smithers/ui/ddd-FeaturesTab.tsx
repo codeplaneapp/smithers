@@ -85,11 +85,11 @@ export function FeaturesTab(props: FeaturesTabProps) {
     <div className="scroll pane" data-testid="ddd-features-tab">
       <section className="card">
         <div className="card-head">
-          <h2>Smithers product spec</h2>
+          <h2>Product feature spec</h2>
           <span className="pill">{filteredFeatures.length === features.length ? formatCount(features.length, "feature") : `${formatCount(filteredFeatures.length, "feature")} of ${formatCount(features.length, "feature")}`}</span>
         </div>
         <p>
-          The smithers product, top to bottom: every end-user feature, the platform it runs on, and the
+          The target product, top to bottom: every end-user feature, the platform it runs on, and the
           shared reference docs each feature links into. Click any feature to drill into its capabilities,
           API endpoints, and related docs.
         </p>

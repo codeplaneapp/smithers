@@ -21,7 +21,7 @@ export function dddRoot(start: string = process.cwd()): string {
 /**
  * Like dddRoot, but falls back to the start directory instead of throwing.
  * Workflows use this so they can run in a repo whose spec does not exist yet
- * (ddd-generate-docs creates it) and still fail later with a task-level error
+ * and still fail later with a task-level error
  * instead of dying at module import.
  */
 export function dddRootOrCwd(start: string = process.cwd()): string {

@@ -76,7 +76,7 @@ const AGENT_RESPONSE = JSON.stringify({
   examples: [],
   graphShape: "Sequence with one task",
   tasks: [{ id: "output", purpose: "Return a deterministic result.", agent: "(none)", outputs: ["output"] }],
-  skillPath: ".smithers/skills/mock/SKILL.md",
+  skillPath: ".smithers/skills/mock-workflow.md",
   artifactPath: ".smithers/artifacts/mock.md",
   criteria: ["The run completes."],
   gates: [{
@@ -191,12 +191,12 @@ function writeFakeAgentBinaries(binDir) {
   const fixtureScript = [
     'const fs = require("node:fs");',
     'const path = require("node:path");',
+    'const invocation = process.argv.slice(2).join(" ").toLowerCase();',
     "function writeFixtureFiles() {",
     "  const root = process.cwd();",
     '  const workflowDir = path.join(root, ".smithers", "workflows");',
-    '  const skillDir = path.join(root, ".smithers", "skills", "mock-skill");',
+    '  const skillDir = path.join(root, ".smithers", "skills", "mock-workflow");',
     "  fs.mkdirSync(workflowDir, { recursive: true });",
-    "  fs.mkdirSync(skillDir, { recursive: true });",
     '  fs.writeFileSync(path.join(workflowDir, "mock-workflow.tsx"), [',
     '    "// smithers-source: generated",',
     '    "// smithers-metadata-version: 1",',
@@ -212,9 +212,9 @@ function writeFakeAgentBinaries(binDir) {
     '    "));",',
     '    "",',
     '  ].join("\\n"), "utf8");',
-    '  fs.writeFileSync(path.join(skillDir, "SKILL.md"), "---\\nname: mock-skill\\ndescription: Test fixture skill.\\n---\\n\\n# Mock Skill\\n", "utf8");',
+    '  if (invocation.includes("document") || invocation.includes("skill")) fs.writeFileSync(path.join(root, ".smithers", "skills", "mock-workflow.md"), "---\\nname: mock-workflow\\ndescription: Test fixture skill.\\nworkflow: mock-workflow\\n---\\n\\n# Mock Workflow\\n", "utf8");',
     "}",
-    "writeFixtureFiles();",
+    'if (invocation.includes("scaffold") || invocation.includes("document") || invocation.includes("skill")) writeFixtureFiles();',
   ].join("\n");
   const responseLiteral = JSON.stringify(AGENT_RESPONSE);
   writeExecutable(binDir, "claude", [
@@ -282,7 +282,9 @@ function initWorkflowPack() {
 }
 
 test("every generated init-pack workflow starts and reaches a valid smoke state with fake agents", () => {
-  expect(SEEDED_WORKFLOW_IDS.length).toBeGreaterThan(10);
+  expect(SEEDED_WORKFLOW_IDS).toEqual([
+    "create-skill", "create-workflow", "docs-driven-development", "init", "post-failure", "upgrade",
+  ]);
 });
 
 function isValidSmokeOutcome(id, status, exitCode) {
@@ -295,6 +297,21 @@ function isValidSmokeOutcome(id, status, exitCode) {
 }
 
 for (const id of SEEDED_WORKFLOW_IDS) {
+  if (id === "docs-driven-development") {
+    test(`seeded workflow ${id} runs with fake agents and writes spec artifacts`, () => {
+      const { repo, env } = initWorkflowPack();
+      const result = runSmithers(
+        ["workflow", "run", id, "--input", JSON.stringify({ runImplementation: false, maxRounds: 1, maxAgents: 1 })],
+        { cwd: repo.dir, format: "json", env, timeoutMs: SMOKE_COMMAND_TIMEOUT_MS },
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.json?.status).toBe("finished");
+      expect(repo.exists(".smithers/spec/features.json")).toBe(true);
+      expect(repo.exists(".smithers/spec/content/overview.md")).toBe(true);
+      expect(repo.exists(".smithers/docs-driven-development/bootstrap-latest.json")).toBe(true);
+    }, SMOKE_TEST_TIMEOUT_MS);
+    continue;
+  }
   test(`seeded workflow ${id} runs with fake agents`, () => {
     const { repo, env } = initWorkflowPack();
     const result = runSmithers(

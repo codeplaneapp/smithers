@@ -299,7 +299,7 @@ If the bundled jj exists but fails with `EACCES`, its executable bit was strippe
 
 <Steps>
   <Step title="Scaffold a project">
-    `init` creates `.smithers/` (workflows, prompts, components, agent config). Add
+    `init` creates `.smithers/` (the focused authoring workflows, DDD spec/UI closure, and agent config). Add
     `--template <id>` when you want the result to include a starter command and
     follow-up notes; run `bunx smithers-orchestrator starters` to browse template IDs.
 
@@ -312,7 +312,7 @@ If the bundled jj exists but fails with `EACCES`, its executable bit was strippe
     Point a seeded workflow at a prompt and Smithers starts a durable run.
 
     ```bash
-    bunx smithers-orchestrator workflow run implement --prompt "Add rate limiting"
+    bunx smithers-orchestrator workflow run create-workflow --prompt "Add a rate-limiting workflow"
     ```
   </Step>
   <Step title="Inspect the run">
@@ -329,7 +329,7 @@ If the bundled jj exists but fails with `EACCES`, its executable bit was strippe
     last checkpoint.
 
     ```bash
-    bunx smithers-orchestrator workflow run hello --run-id RUN_ID --resume true
+    bunx smithers-orchestrator workflow run create-workflow --run-id RUN_ID --resume true
     ```
   </Step>
 </Steps>

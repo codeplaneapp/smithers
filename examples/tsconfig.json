@@ -2,6 +2,9 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "paths": {
+      "mermaid": [
+        "../.smithers/node_modules/mermaid/dist/mermaid.d.ts"
+      ],
       "@smithers-orchestrator/agents": [
         "../packages/agents/src/index.js"
       ],

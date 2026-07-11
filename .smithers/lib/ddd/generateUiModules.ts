@@ -15,7 +15,7 @@ import { validateFeatures } from "./validateFeatures.ts";
  *   - .smithers/ui/ddd-workflowSource.generated.ts
  */
 const OPEN_STATUSES = new Set(["broken", "partial", "missing", "missing-tests"]);
-const DDD_WORKFLOW_SOURCE_KEYS = ["docs-driven-development", "ddd-generate-docs", "ddd-bug-scan"];
+const DDD_WORKFLOW_SOURCE_KEYS = ["docs-driven-development"];
 const MAX_MARKDOWN_DEPTH = 12;
 const MAX_MARKDOWN_FILES = 500;
 const MAX_MARKDOWN_FILE_BYTES = 1024 * 1024;

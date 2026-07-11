@@ -1,3 +1,5 @@
+// smithers-source: seeded
+// smithers-metadata-version: 1
 // smithers-display-name: Docs Driven Development
 // smithers-description: Maintain a living product spec (features.json + WYSIWYG docs) and run an audit→triage→implement→review improvement loop over it.
 /** @jsxImportSource smithers-orchestrator */
@@ -11,9 +13,8 @@ import { providers } from "../lib/ddd/dddAgents.ts";
 import { dddRootOrCwd } from "../lib/ddd/dddRoot.ts";
 import { validateFeatures } from "../lib/ddd/validateFeatures.ts";
 
-// Repo root: walk up from cwd until .smithers/spec/features.json is found, so
-// the workflow behaves the same whether launched from the repo root or from
-// .smithers/. No absolute machine paths.
+// Project root: discover the installed workflow substrate from cwd so this
+// workflow works in any repository, regardless of language or package manager.
 const ROOT = dddRootOrCwd();
 
 const planner = providers.sol;
@@ -61,11 +62,17 @@ const auditSchema = z.object({
   partial: z.array(z.string()).default([]),
   missingE2E: z.array(z.string()).default([]),
   missingDocs: z.array(z.string()).default([]),
-  notes: z.array(z.string()).default([]),
+  notes: z
+    .union([z.array(z.string()), z.string()])
+    .transform((value) => (Array.isArray(value) ? value : value ? [value] : []))
+    .default([]),
 });
 
 const specSchema = z.object({
-  status: z.enum(["ready", "partial", "blocked"]).default("partial"),
+  status: z
+    .string()
+    .transform((value) => (value === "ready" || value === "blocked" ? value : "partial"))
+    .default("partial"),
   updatedFiles: z.array(z.string()).default([]),
   commandsRun: z.array(z.string()).default([]),
   summary: z.string().default(""),
@@ -162,7 +169,7 @@ export const CONTEXT = `
 This workflow is called docs-driven-development.
 
 Goal:
-- Maintain a living spec for THE PRODUCT THIS REPO BUILDS — not a spec for this docs-driven-development workflow (that workflow is itself just one feature in the matrix). Discover what the product is from the repo itself: read .smithers/spec/overview.md / .smithers/spec/content/overview.md if present, then README, the design docs the survey found (PRODUCT_DESIGN.md, docs/, AGENTS.md), and the existing .smithers/spec/features.json. Do NOT assume the product is any particular tool. The spec renders INSIDE the workflow UI (.smithers/ui/docs-driven-development.tsx) from .smithers/spec/features.json (structured source of truth) plus derived per-feature spec docs and an overview under .smithers/spec/content, edited with a Milkdown Crepe WYSIWYG editor.
+- Maintain a living spec for THE PRODUCT THE TARGET REPOSITORY BUILDS — not a spec for this docs-driven-development workflow (that workflow is itself just one feature in the matrix). Discover what the product is from the target repository: read .smithers/spec/overview.md / .smithers/spec/content/overview.md if present, then README, the design docs the survey found, and the existing .smithers/spec/features.json. Do NOT assume the product is any particular tool. The spec renders inside the workflow UI from .smithers/spec/features.json (structured source of truth) plus derived per-feature spec docs and an overview under .smithers/spec/content, edited with a Milkdown Crepe WYSIWYG editor.
 - Track feature status, test cases, observability, debugging instructions, architecture docs, fixes, and commit diff hints.
 - Audit the spec for broken, missing, partial, or untested features.
 - Pick up to the configured maxAgents best next work items every round. Prefer fixing broken P0 features, then partial P0 proof gaps, then missing e2e tests, then high-impact reviews/issues, then new features.
@@ -178,7 +185,7 @@ Architecture constraints:
 - To avoid wasting context, start audits/reviews with "bun .smithers/lib/ddd/auditInputs.ts" and inspect only the listed files plus exact current-run outputs when needed. Do not recursively read .smithers/executions or .smithers/pg.
 - To pick next work without re-auditing the repo, start triage with "bun .smithers/lib/ddd/triageCandidates.ts --max <N>". Use it as the bounded ranked candidate list, then inspect only the selected feature's exact files.
 - To read a workflow output robustly, use "smithers output <runId> <nodeId>"; use "smithers inspect <runId>" for run-level state.
-- Verify claims against the real repo using THIS repo's own build/test gates — discover them (package.json scripts, Makefile, go/cargo/zig/pytest, CI config); do not assume pnpm/monorepo layout. A feature is only "fixed" when a real gate for it passes. Do not print secrets or tokens.
+- Verify claims against the real target repository using its own build/test gates — discover them (package.json scripts, Makefile, CI config); do not assume a particular language, package manager, or monorepo layout. A feature is only "fixed" when a real gate for it passes. Do not print secrets or tokens.
 `;
 
 const META_TICKET_FIELD_LIMIT = 12_000;
@@ -442,10 +449,10 @@ Selected item:
 ${JSON.stringify(selected, null, 2)}
 
 Requirements:
-- Operate in the smithers repo root. Implementation selections run on Codex Luna; planning/review selections run on Codex Sol. Claude is failover-only. The legacy useClaudeForPlanning input does not alter routing.
+- Operate on the target repository discovered from the installed workflow pack. Implementation selections run on Codex Luna; planning/review selections run on Codex Sol. Claude is failover-only. The legacy useClaudeForPlanning input does not alter routing.
 - Make the feature status in .smithers/spec/features.json more true, not more optimistic.
 - Update the spec if tests, observability, debug instructions, architecture, fixes, or diffs changed, then run bun .smithers/lib/ddd/build.ts and keep features.json valid.
-- Run the selected tests where feasible and list exact commands (pnpm -C packages/<pkg> test, pnpm typecheck).
+- Run the selected tests where feasible and list the exact commands discovered for the target repository.
 - If the selected item is docs-driven-development itself, do not recursively start another docs-driven-development workflow from inside work:${slot}; use the current run's upstream node outputs as proof and return partial if downstream round-summary readback cannot be proven until this work node finishes.
 - NEVER edit the DDD pack machinery: .smithers/workflows/ddd-*.tsx, .smithers/workflows/docs-driven-development.tsx, everything under .smithers/lib/ddd/*.ts, and the pack UI modules (.smithers/ui/docs-driven-development.tsx, .smithers/ui/ddd-*.tsx, .smithers/ui/crepeTheme.generated.ts) are ALL OFF-LIMITS. Editing them mid-run corrupts the live run — it has caused dependency-deadlock deaths, module-hash drift, and premature single-round exits. The only thing you write is the rendered spec content under .smithers/spec (features.json + content/*), which the build regenerates from. If you find a real bug in the workflow/scripts/UI, DO NOT fix it here — record it precisely in your summary so a human can apply it between runs.
 - If this is a review/issue task, create concrete issue records in the spec metadata (features.json missing[]) or report blocked with exact findings.
@@ -554,7 +561,7 @@ export default smithers((ctx) => {
               );
               const codeDiffResult = runCommandResult(
                 "git",
-                ["diff", "--name-only", "--", "packages", "apps", "docs", "e2e", "package.json"],
+                ["diff", "--name-only", "--"],
                 "code-diff",
               );
               const gitStatus = gitStatusResult.ok ? gitStatusResult.output : "";

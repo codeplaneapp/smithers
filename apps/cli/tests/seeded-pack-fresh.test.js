@@ -14,6 +14,12 @@ const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
 test("generated seeded pack matches canonical .smithers sources", () => {
     expect(GENERATED_SEEDED_FILES.length).toBeGreaterThan(0);
     for (const file of GENERATED_SEEDED_FILES) {
+        // DDD's generated UI/spec modules are deliberately replaced with an
+        // empty target starter by the pack generator; shipping this repo's
+        // product spec would contaminate another project's init.
+        if (file.path === ".smithers/spec/features.json" || file.path === ".smithers/spec/content/overview.md" ||
+            file.path.includes("ddd-features.generated") || file.path.includes("ddd-docsContent.generated") ||
+            file.path.includes("ddd-ticketsBacklog.generated") || file.path.includes("ddd-workflowSource.generated")) continue;
         // file.path is ".smithers/…"-prefixed, relative to the repo root.
         const source = readFileSync(resolve(REPO_ROOT, file.path), "utf8");
         expect(

@@ -21,7 +21,7 @@
  * `create-workflow`'s own scaffold step can run this for you so authoring a
  * workflow ships it to init automatically.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,40 +36,15 @@ const OUTPUT_FILE = resolve(REPO_ROOT, "apps/cli/src/seeded-workflow-pack.genera
  * here yet — they can be migrated incrementally.
  */
 const SEEDED_WORKFLOW_IDS = [
-  // The smallest possible workflow — the first thing a new user runs/edits.
-  "hello",
   "create-workflow",
-  // Concierge suite (generated from canonical .smithers sources).
-  "context-engineer",
-  "route-task",
   "create-skill",
-  "extract-skill",
-  "triage-run",
-  "context-doctor",
-  "backpressure-plan",
-  "eval-author",
-  "report-slideshow",
-  // Fable-as-operator meta-workflow (authored in fable-smithers, moved here).
-  "smithering",
-  // Recursive multi-tier delegation (goal refinement → tiered decomposition →
-  // derisk probes → gated execution), built on the packages/components
-  // delegation composites.
-  "delegation-chain",
-  // First-run tutorial that recommends and builds a project-specific workflow.
-  "make-workflow-tutorial",
+  "docs-driven-development",
   // Durable `smithers init` (system workflow — hidden from default listings).
   "init",
   // Auto-launched autopsy for failed runs (system workflow).
   "post-failure",
   // Agent-assisted CLI/plugin upgrade wrapper (system workflow).
   "upgrade",
-  // Monitoring suite (system workflows backing the /monitor UI).
-  // Cron health monitor for ticket-fleet runs.
-  "ticket-fleet-monitor",
-  // Authors .smithers/ui/<key>.tsx on demand (monitor "Create UI" button).
-  "create-ui",
-  // Agent-free event-stream liveness probe.
-  "events-probe",
 ];
 
 type TemplateFile = { path: string; contents: string; owners?: string[] };
@@ -82,7 +57,7 @@ type TemplateFile = { path: string; contents: string; owners?: string[] };
  * workflow-pack.js must skip them (SEEDED_UI_KEYS) so the two paths never
  * both emit `.smithers/ui/<id>.tsx`.
  */
-const SEEDED_UI_IDS = new Set(["delegation-chain"]);
+const SEEDED_UI_IDS = new Set(["docs-driven-development"]);
 
 /** Prompts a workflow imports from `../prompts/<name>.mdx`. */
 function promptImportsOf(source: string): string[] {
@@ -195,6 +170,14 @@ function readOrThrow(absPath: string, label: string): string {
   return readFileSync(absPath, "utf8");
 }
 
+function dddStarterUiContents(relPath: string, canonical: string): string {
+  if (relPath === "ddd-features.generated.ts") return "export const featuresData = [];\n";
+  if (relPath === "ddd-docsContent.generated.ts") return 'export const docsContent: { path: string; title: string; level: "product" | "technical"; content: string }[] = [];\nexport type DocsContentEntry = (typeof docsContent)[number];\n';
+  if (relPath === "ddd-ticketsBacklog.generated.ts") return "export const ticketsBacklog = [];\n";
+  if (relPath === "ddd-workflowSource.generated.ts") return 'export const workflowSourcePath = ".smithers/workflows/docs-driven-development.tsx";\nexport const workflowSource = "";\nexport const workflowSources = {};\n';
+  return canonical;
+}
+
 function build(): TemplateFile[] {
   const files: TemplateFile[] = [];
   const byPath = new Map<string, TemplateFile>();
@@ -240,6 +223,15 @@ function build(): TemplateFile[] {
     // a fresh init — a workflow shipped without its lib imports fails
     // `smithers graph` with a module-not-found the moment it is seeded.
     const libQueue = libImportsOf(workflowSource).map((specifier) => resolveLibFile(specifier));
+    if (id === "docs-driven-development") {
+      for (const entry of readdirSync(resolve(SMITHERS_DIR, "lib/ddd"), { withFileTypes: true })) {
+        if (entry.isFile() && !/\.test\./.test(entry.name)) {
+          libQueue.push(resolveLibFile(`ddd/${entry.name}`));
+        }
+      }
+      push(".smithers/spec/features.json", "[]\n", id);
+      push(".smithers/spec/content/overview.md", "# Product specification\n\nThis starter spec is intentionally empty. Run the docs-driven-development bootstrap to describe the target repository.\n", id);
+    }
     const visitedLibs = new Set<string>();
     while (libQueue.length > 0) {
       const { relPath, absPath } = libQueue.shift()!;
@@ -262,7 +254,7 @@ function build(): TemplateFile[] {
         const { relPath, absPath } = uiQueue.shift()!;
         if (visitedUi.has(relPath)) continue;
         visitedUi.add(relPath);
-        const uiSource = readOrThrow(absPath, `ui module ${relPath} for workflow ${id}`);
+        const uiSource = dddStarterUiContents(relPath, readOrThrow(absPath, `ui module ${relPath} for workflow ${id}`));
         push(`.smithers/ui/${relPath}`, uiSource, id);
         for (const nested of uiRelativeImportsOf(uiSource, relPath)) {
           uiQueue.push(resolveUiFile(nested));

@@ -1,7 +1,6 @@
 // Self-contained agent providers for the docs-driven-development pack.
 //
-// The DDD workflows (ddd-generate-docs, ddd-bug-scan, ddd-improve,
-// docs-driven-development) `import { providers } from "../lib/ddd/dddAgents.ts"`
+// The docs-driven-development workflow imports this module from the local ddd lib
 // — i.e. from here — instead of the repo's `../agents`. Importing from the
 // host repo's bespoke `.smithers/agents.ts` made the pack non-portable: a
 // target repo whose agents.ts exports a different shape (e.g. multi's
@@ -14,8 +13,11 @@
 // routine validation. Claude and Kimi remain dormant as no-Codex fallbacks.
 import { accessSync, constants } from "node:fs";
 import { delimiter, extname, join } from "node:path";
-import { ClaudeCodeAgent, KimiAgent } from "smithers-orchestrator";
-import { codexFirst } from "../codexAccounts";
+import { ClaudeCodeAgent, CodexAgent, KimiAgent, type AgentLike } from "smithers-orchestrator";
+
+function codexFirst(options: ConstructorParameters<typeof CodexAgent>[0], fallbacks: AgentLike[] = []): AgentLike[] {
+  return [new CodexAgent(options), ...fallbacks];
+}
 
 // Honor the e2e harness's fake-agent PATH override the same way the seeded
 // agents.ts does, so DDD tests can run without real CLIs on CI.

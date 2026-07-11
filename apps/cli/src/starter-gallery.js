@@ -13,7 +13,7 @@ function cliCommand(args) {
  * @param {string} prompt
  */
 function workflowPromptCommand(workflow, prompt) {
-    return cliCommand(`workflow run ${workflow} --prompt ${shellQuote(prompt)}`);
+    return cliCommand(`workflow run create-workflow --prompt ${shellQuote(`${workflow}: ${prompt}`)}`);
 }
 
 /**
@@ -21,7 +21,7 @@ function workflowPromptCommand(workflow, prompt) {
  * @param {Record<string, unknown>} input
  */
 function workflowInputCommand(workflow, input) {
-    return cliCommand(`workflow run ${workflow} --input ${shellQuote(JSON.stringify(input))}`);
+    return cliCommand(`workflow run create-workflow --prompt ${shellQuote(`${workflow}: ${JSON.stringify(input)}`)}`);
 }
 
 export const STARTER_AUDIENCES = [
@@ -288,9 +288,11 @@ function shellQuote(value) {
  * @param {StarterRecipe} recipe
  */
 export function starterCommand(recipe) {
-    return recipe.input
-        ? workflowInputCommand(recipe.workflow, recipe.input)
-        : workflowPromptCommand(recipe.workflow, recipe.prompt);
+    // Templates are requests for the portable create-workflow builder; they
+    // never imply that a former example workflow is installed by init.
+    return workflowPromptCommand("create-workflow", recipe.input
+        ? `${recipe.prompt} Structured guidance: ${JSON.stringify(recipe.input)}`
+        : recipe.prompt);
 }
 
 /**
@@ -302,7 +304,7 @@ function starterSummary(recipe) {
         title: recipe.title,
         audience: recipe.audience,
         goals: recipe.goals,
-        workflow: recipe.workflow,
+        workflow: "create-workflow",
         outcome: recipe.outcome,
         command: starterCommand(recipe),
         tags: recipe.tags,
@@ -361,6 +363,7 @@ export function buildStarterGallery(input = {}) {
         selected: selected
             ? {
                 ...selected,
+                workflow: "create-workflow",
                 command: starterCommand(selected),
             }
             : null,

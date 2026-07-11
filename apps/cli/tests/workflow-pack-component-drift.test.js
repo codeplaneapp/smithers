@@ -59,11 +59,7 @@ test("embedded seeded components and agents match their canonical .smithers sour
   onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
   initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true, env: seededAgentEnv() });
 
-  for (const name of EMBEDDED_COMPONENTS) {
-    const installed = readFileSync(join(tmpDir, ".smithers", "components", name), "utf8");
-    const canonical = readFileSync(join(REPO_ROOT, ".smithers", "components", name), "utf8");
-    expect(installed, `${name} embed drifted from .smithers/components/${name}`).toBe(canonical);
-  }
+  expect(readdirSync(join(tmpDir, ".smithers", "components")).filter((name) => /\.(tsx?|jsx?)$/.test(name))).toEqual([]);
 
   for (const name of EMBEDDED_AGENT_SCAFFOLDS) {
     const installed = readFileSync(join(tmpDir, ".smithers", "agents", name), "utf8");

@@ -160,12 +160,12 @@ describe("persisted deselection seeding", () => {
     }
 
     test("buildDefaultSelections drops workflows deselected in a previous init", () => {
-        const packRoot = tempPackRoot({ deselectedWorkflows: ["ralph", "kanban"], deselectedAgentDocs: [] });
+        const packRoot = tempPackRoot({ deselectedWorkflows: ["docs-driven-development"], deselectedAgentDocs: [] });
         try {
             const sel = buildDefaultSelections({}, packRoot);
-            expect(sel.selectedWorkflows).not.toContain("ralph");
-            expect(sel.selectedWorkflows).not.toContain("kanban");
-            expect(sel.selectedWorkflows).toContain("hello");
+            expect(sel.selectedWorkflows).not.toContain("docs-driven-development");
+            expect(sel.selectedWorkflows).toContain("create-workflow");
+            expect(sel.selectedWorkflows).toContain("create-skill");
         } finally {
             rmSync(packRoot, { recursive: true, force: true });
         }

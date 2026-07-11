@@ -1,0 +1,35 @@
+# Write the harvested skill
+
+The pattern is reusable as a skill. Write the proposed skill doc to disk so future
+agents can read it. You have file tools — write the file, then report its path.
+
+## Proposed skill
+
+{JSON.stringify(props.skill, null, 2)}
+
+## Write it
+
+Create `{props.skillsDir}/<name>.md` where `<name>` is the proposal's kebab-case
+`name` (create the directory if it does not exist). Use YAML frontmatter then the
+proposal's body:
+
+```
+---
+name: <name>
+description: <the proposal's one-line description>
+---
+
+<the proposal's body>
+```
+
+Keep it self-contained and practical — the body should already be ready; preserve
+it, only fixing obvious formatting. Match the style of any existing files in
+`{props.skillsDir}`, and update rather than duplicate if a skill with this name
+already covers the same ground. Do not add placeholders or `TODO` stubs.
+
+## Output
+
+Return a one-line `summary` and the `skillPath` you wrote.
+
+REQUIRED OUTPUT:
+{props.schema}

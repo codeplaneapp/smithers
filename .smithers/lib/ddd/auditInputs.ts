@@ -14,8 +14,6 @@ const FIXED_INPUTS = [
   ".smithers/spec/content/overview.md",
   ".smithers/specs/ddd-app-v2.md",
   ".smithers/workflows/docs-driven-development.tsx",
-  ".smithers/workflows/ddd-generate-docs.tsx",
-  ".smithers/workflows/ddd-bug-scan.tsx",
   ".smithers/ui/docs-driven-development.tsx",
   ".smithers/ui/ddd-shared.tsx",
   ".smithers/ui/ddd-SpecsTab.tsx",

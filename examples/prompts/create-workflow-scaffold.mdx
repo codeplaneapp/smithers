@@ -1,0 +1,110 @@
+# Scaffold the workflow files
+
+You are the scaffolder. Turn the approved design into real, runnable Smithers
+files. You have file + shell tools: **write the files to disk**, then report
+exactly what you wrote. No placeholders, no TODO stubs, no mocked data.
+
+## Design
+
+{JSON.stringify(props.design, null, 2)}
+
+## Provisioning (templates, components, skills, agents available)
+
+{JSON.stringify(props.provisioning, null, 2)}
+
+Write the workflow to {props.workflowsDir} as a `NAME.tsx` file (NAME = the
+design's kebab-case workflowName). Write each prompt to {props.promptsDir} as its
+own `.mdx` file, one per prompt named in the design. Write the custom UI to
+{props.uiDir} as `NAME.tsx`.
+
+## How to write the workflow
+
+1. **Start from the closest example** named in the provisioning manifest. Copy
+   its structure, then adapt. Don't invent API; if unsure, re-read the example or
+   `bunx smithers-orchestrator docs`.
+2. **Workflow file header**: begin with the seed comments and the JSX pragma,
+   exactly like the other workflows in `{props.workflowsDir}`:
+   ```
+   // smithers-source: seeded
+   // smithers-metadata-version: 1
+   // smithers-display-name: <Title Case Name>
+   // smithers-description: <one sentence: what the workflow does>
+   // smithers-tags: <comma-separated tags, e.g. ops, reporting>
+   /** @jsxImportSource smithers-orchestrator */
+   ```
+3. **Imports**: `import { createSmithers } from "smithers-orchestrator"` (or
+   `import { createSmithers, UI } from "smithers-orchestrator"` when writing a
+   custom UI), `import { z } from "zod/v4"`, `import { agents } from "../agents"`,
+   any components from `../components`, and each prompt from
+   `../prompts/<name>.mdx`.
+4. **Schemas**: define the Zod input schema and one schema per task output.
+   Call `createSmithers({ input: inputSchema, <table>: <schema>, ... })` and
+   destructure only the components you use (`Workflow`, `Task`, `Sequence`,
+   `Branch`, `Loop`, `Approval`, `smithers`, `outputs`).
+5. **Graph**: `export default smithers((ctx) => ( <Workflow name="<id>"> ... ))`,
+   matching the design's `graphShape`. If writing a custom UI, the first child of
+   `<Workflow>` must be `<UI entry="../ui/<workflowName>.tsx" title="<Title>" />`.
+   When a task simply consumes one upstream task's output, prefer
+   `<Task deps={{ upstreamId: outputs.table }}>` with a `(deps) => ...` prompt or
+   compute function over a manual guard. Reach for `ctx.outputMaybe("table", { nodeId })`
+   when the gate is structural instead (branches, loops, multiple siblings, or a
+   condition that inspects content, not just existence), exactly like the existing
+   workflows. Remember: `ctx.input` fields arrive null when unsupplied, so coalesce
+   (`ctx.input.x ?? default`) rather than trusting Zod defaults.
+6. **Prompts**: author each `.mdx` from the design's `prompts` list. Pass props
+   from the task and end every prompt with:
+   ```
+   REQUIRED OUTPUT:
+   {props.schema}
+   ```
+   `.mdx` prompt files are parsed as MDX modules. Wrap JSX/HTML-like prose examples
+   such as `<Parallel maxConcurrency={N}>` in inline backticks or fenced code blocks;
+   otherwise MDX treats the example as JSX and can break the default export.
+7. **Agents**: only add a new provider/pool to `../agents.ts` if the design
+   truly needs one that doesn't exist; otherwise reuse the existing pools.
+8. **Skills**: if the design relies on a worker skill the provisioning step
+   marked `recommended` (not yet installed), create a concise skill file under
+   the local skills dir so the workflow's agents have it.
+
+## Scaffold the custom UI and workflow declaration (required)
+
+Also write `{props.uiDir}/<workflowName>.tsx` implementing the design's `ui`
+plan (skip only if the design's `ui` is null because the user declined one):
+
+1. **Copy the shape of an existing UI**: read `{props.uiDir}/vcs.tsx` and/or
+   `{props.uiDir}/create-workflow.tsx` first and match their conventions.
+2. Start with `/** @jsxImportSource react */`, import React hooks from `react`,
+   and import `createGatewayReactRoot`, `useGatewayRuns`, `useGatewayRunEvents`,
+   `useGatewayNodeOutput`, and `useGatewayActions` (as needed) from
+   `smithers-orchestrator/gateway-react`.
+3. Set the workflow key constant to the workflow id and read the runId from the
+   URL (`?runId=`), like the existing UIs do.
+4. Render the design's `ui.panels` from the real node output tables (the task
+   ids and schemas you scaffolded above). Node-output hooks may return the row
+   directly or `{ row, schema, status }`, and row fields can be snake_case with
+   JSON-string arrays: parse defensively like `vcs.tsx` does.
+5. Mount with `createGatewayReactRoot(...)` at the bottom, matching the
+   existing UIs.
+6. Make sure the workflow imports `UI` and declares
+   `<UI entry="../ui/<workflowName>.tsx" title="<Title>" />` inside the root
+   `<Workflow>`. Do not register the UI in `.smithers/gateway.ts`.
+7. Verify it transpiles before you finish:
+   `bun build --no-bundle {props.uiDir}/<workflowName>.tsx > /dev/null`.
+
+## Acceptance criteria
+
+- `bunx smithers-orchestrator graph {props.workflowsDir}/<workflowName>.tsx`
+  exits 0 (run it yourself before finishing).
+- The UI file (when required) transpiles with `bun build --no-bundle`.
+- The workflow declares the UI with `<UI entry="../ui/<workflowName>.tsx" />`;
+  no `gateway.register(..., { ui })` snippet is added.
+- Every file in the design's `prompts` and `ui` lists exists on disk.
+- Style matches the neighbouring files; no dead code.
+
+## Output
+
+Return a `workflowName` and the full list of `filesWritten` (path + kind; use
+kind `ui` for the custom UI file).
+
+REQUIRED OUTPUT:
+{props.schema}
