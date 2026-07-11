@@ -1,6 +1,6 @@
 export { DEVTOOLS_PROTOCOL_VERSION } from "./devtools.js";
 export type { DevToolsNodeType } from "./devtools/DevToolsNodeType.ts";
-export type { DevToolsNode } from "./devtools/DevToolsNode.ts";
+export type { DevToolsAgentRef, DevToolsAgentSummary, DevToolsNode } from "./devtools/DevToolsNode.ts";
 export type { DevToolsSnapshot } from "./devtools/DevToolsSnapshot.ts";
 export type { DevToolsDeltaOp } from "./devtools/DevToolsDeltaOp.ts";
 export type { DevToolsDelta } from "./devtools/DevToolsDelta.ts";

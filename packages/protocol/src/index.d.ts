@@ -1,5 +1,28 @@
 type DevToolsNodeType = "workflow" | "task" | "sequence" | "parallel" | "merge-queue" | "branch" | "loop" | "worktree" | "approval" | "timer" | "subflow" | "wait-for-event" | "saga" | "try-catch" | "fragment" | "unknown";
 
+/**
+ * A safe, display-only reference to one agent adapter: whitelisted string
+ * fields only — never the adapter object itself (which carries callbacks,
+ * options, and credentials).
+ */
+type DevToolsAgentRef = {
+    /** Human-facing label (explicit `label`/`name`, or a non-UUID `id`). */
+    label?: string;
+    /** Engine tag, e.g. "claude-code" | "codex" (falls back to the adapter class name). */
+    engine?: string;
+    /** Declared model id, when the adapter carries one. */
+    model?: string;
+};
+/**
+ * Summary of the workflow's declared `<Task agent={...}>` assignment, captured
+ * by the engine into each frame's task index at render time — so it is known
+ * even for QUEUED nodes that have not executed yet. When the agent prop is a
+ * failover list, the top-level fields describe the primary and `chain` lists
+ * every declared entry in order.
+ */
+type DevToolsAgentSummary = DevToolsAgentRef & {
+    chain?: DevToolsAgentRef[];
+};
 type DevToolsNode = {
     id: number;
     type: DevToolsNodeType;
@@ -21,6 +44,25 @@ type DevToolsNode = {
         state?: string;
         /** Last attempt number for the state-bearing iteration. */
         attempt?: number;
+        /**
+         * Declared agent assignment from the task index (see
+         * {@link DevToolsAgentSummary}). Absent on frames recorded before agent
+         * capture and on tasks with no agent prop.
+         */
+        agentSummary?: DevToolsAgentSummary;
+        /**
+         * The agent that actually executed the node's LATEST attempt, read from
+         * the attempt's persisted metadata (`agentEngine` / `agentModel` /
+         * `agentId`). Absent for queued nodes and attempts that predate agent
+         * metadata.
+         */
+        agentRan?: {
+            agentId?: string;
+            engine?: string;
+            model?: string;
+        };
+        /** Attempt budget (declared retries + 1) when finite; absent for unbounded retries. */
+        maxAttempts?: number;
     };
     children: DevToolsNode[];
     depth: number;
@@ -75,6 +117,8 @@ type DevToolsEvent = {
 /** @typedef {import("./devtools/DevToolsDelta.ts").DevToolsDelta} DevToolsDelta */
 /** @typedef {import("./devtools/DevToolsDeltaOp.ts").DevToolsDeltaOp} DevToolsDeltaOp */
 /** @typedef {import("./devtools/DevToolsEvent.ts").DevToolsEvent} DevToolsEvent */
+/** @typedef {import("./devtools/DevToolsNode.ts").DevToolsAgentRef} DevToolsAgentRef */
+/** @typedef {import("./devtools/DevToolsNode.ts").DevToolsAgentSummary} DevToolsAgentSummary */
 /** @typedef {import("./devtools/DevToolsNode.ts").DevToolsNode} DevToolsNode */
 /** @typedef {import("./devtools/DevToolsNodeType.ts").DevToolsNodeType} DevToolsNodeType */
 /** @typedef {import("./devtools/DevToolsSnapshot.ts").DevToolsSnapshot} DevToolsSnapshot */
@@ -97,4 +141,4 @@ declare const NODE_OUTPUT_ERROR_CODES: readonly ["InvalidRunId", "InvalidNodeId"
 declare const NODE_DIFF_ERROR_CODES: readonly ["InvalidRunId", "InvalidNodeId", "InvalidIteration", "RunNotFound", "NodeNotFound", "AttemptNotFound", "AttemptNotFinished", "VcsError", "WorkingTreeDirty", "DiffTooLarge"];
 declare const JUMP_TO_FRAME_ERROR_CODES: readonly ["InvalidRunId", "InvalidFrameNo", "RunNotFound", "FrameOutOfRange", "ConfirmationRequired", "Busy", "UnsupportedSandbox", "VcsError", "RewindFailed", "RateLimited", "Unauthorized"];
 
-export { DEVTOOLS_ERROR_CODES, DEVTOOLS_PROTOCOL_VERSION, type DevToolsDelta, type DevToolsDeltaOp, type DevToolsErrorCode, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, type DevToolsSnapshot, JUMP_TO_FRAME_ERROR_CODES, type JumpToFrameErrorCode, NODE_DIFF_ERROR_CODES, NODE_OUTPUT_ERROR_CODES, type NodeDiffErrorCode, type NodeOutputErrorCode };
+export { DEVTOOLS_ERROR_CODES, DEVTOOLS_PROTOCOL_VERSION, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsDelta, type DevToolsDeltaOp, type DevToolsErrorCode, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, type DevToolsSnapshot, JUMP_TO_FRAME_ERROR_CODES, type JumpToFrameErrorCode, NODE_DIFF_ERROR_CODES, NODE_OUTPUT_ERROR_CODES, type NodeDiffErrorCode, type NodeOutputErrorCode };
