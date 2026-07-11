@@ -21,6 +21,17 @@ const PROMPTS_DIR = ".smithers/prompts";
 const SKILLS_DIR = ".smithers/skills";
 const UI_DIR = ".smithers/ui";
 
+function validSkillDocument(contents: string, workflowName: string) {
+  const match = contents.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+  if (!match) return false;
+  const fields = new Map<string, string>();
+  for (const line of match[1].split(/\r?\n/)) {
+    const field = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
+    if (field) fields.set(field[1], field[2].trim());
+  }
+  return fields.get("name") === workflowName && fields.get("workflow") === workflowName;
+}
+
 const inputSchema = z.object({
   prompt: z
     .string()
@@ -170,6 +181,12 @@ const documentSchema = z.looseObject({
   skillPath: z.string().nullable().default(null),
 });
 
+const skillVerificationSchema = z.object({
+  skillPath: z.string(),
+  exists: z.boolean(),
+  containsWorkflowMetadata: z.boolean(),
+});
+
 // 8. Final terminal summary — surfaced as the run's printed output so a finished
 //    run reports what it built instead of nothing. Aggregated from the steps
 //    above; nothing here is invented.
@@ -206,6 +223,7 @@ const { Workflow, Task, Sequence, Branch, Loop, Approval, smithers, outputs } = 
   scaffold: scaffoldSchema,
   verify: verifySchema,
   document: documentSchema,
+  skillVerification: skillVerificationSchema,
   output: outputSchema,
 });
 
@@ -220,6 +238,8 @@ export default smithers((ctx) => {
   const approval = ctx.outputMaybe("approval", { nodeId: "approve-design" });
   const scaffold = ctx.outputMaybe("scaffold", { nodeId: "scaffold" });
   const documentation = ctx.outputMaybe("document", { nodeId: "document" });
+  const skillVerification = ctx.outputMaybe("skillVerification", { nodeId: "skill-verification" });
+  const skillReady = skillVerification?.exists === true && skillVerification.containsWorkflowMetadata === true;
 
   const designed = design !== undefined;
   const approved = !review || approval?.approved === true;
@@ -241,7 +261,7 @@ export default smithers((ctx) => {
   // the steps above — never invented.
   const filesWritten = (scaffold?.filesWritten ?? []).map((f) => f.path);
   const terminalStatus =
-    documentation && verifyPassed
+    documentation && verifyPassed && skillVerification?.exists && skillVerification.containsWorkflowMetadata
       ? "built"
       : scaffold && verifyFailed
         ? "verify-failed"
@@ -397,17 +417,38 @@ export default smithers((ctx) => {
           </Loop>
         ) : null}
 
-        {/* 7 — Document the new workflow so future agents know how to run it. */}
+        {/* 7 — Document the new workflow so future agents know how to run it.
+            This is a bounded retry loop: a missing or malformed companion skill
+            keeps the workflow from reaching its terminal success summary. */}
         {proceed && verifyPassed ? (
-          <Task id="document" output={outputs.document} agent={agents.cheapFast}>
-            <DocumentPrompt
-              workflowName={workflowName}
-              design={design}
-              skillsDir={SKILLS_DIR}
-              workflowFile={workflowFile}
-              uiFile={uiFile}
-            />
-          </Task>
+          <Loop id="skill:loop" until={skillReady} maxIterations={3} onMaxReached="fail">
+            <Sequence>
+              <Task id="document" output={outputs.document} agent={agents.cheapFast}>
+                <DocumentPrompt
+                  workflowName={workflowName}
+                  design={design}
+                  skillsDir={SKILLS_DIR}
+                  workflowFile={workflowFile}
+                  uiFile={uiFile}
+                />
+              </Task>
+
+              <Task id="skill-verification" output={outputs.skillVerification} dependsOn={["document"]}>
+                {async () => {
+                  const latest = ctx.outputMaybe("document", { nodeId: "document" });
+                  const skillPath = latest?.skillPath ?? "";
+                  const expectedPath = `${SKILLS_DIR}/${workflowName}.md`;
+                  const exists = skillPath === expectedPath && await Bun.file(expectedPath).exists();
+                  const contents = exists ? await Bun.file(expectedPath).text() : "";
+                  return {
+                    skillPath: exists ? expectedPath : skillPath,
+                    exists,
+                    containsWorkflowMetadata: exists && validSkillDocument(contents, workflowName),
+                  };
+                }}
+              </Task>
+            </Sequence>
+          </Loop>
         ) : null}
 
         {/* 8 — Terminal summary: aggregate the useful results so the run prints
@@ -436,7 +477,7 @@ export default smithers((ctx) => {
                 filesWritten,
                 fileCount: filesWritten.length,
                 verified: verifyPassed,
-                skillPath: documentation?.skillPath ?? null,
+                skillPath: skillVerification?.containsWorkflowMetadata ? skillVerification.skillPath : null,
                 uiFile: uiWritten ? uiFile : null,
                 nextSteps,
               };

@@ -53,6 +53,11 @@ flags.
 
 ## Output
 
+The workflow verifies the reported path after this task. A missing file, an
+empty path, or a file without both `name: {props.workflowName}` and
+`workflow: {props.workflowName}` is a failed build, so do not report a path
+until the exact file exists and contains the frontmatter you wrote.
+
 Return the `skillPath` you wrote and a one-line `summary` that names the
 workflow, its file, and (if present) its custom UI file, so the run's terminal
 output tells the operator exactly what was built.
