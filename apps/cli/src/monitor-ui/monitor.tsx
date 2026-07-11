@@ -1134,7 +1134,9 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
     };
     void poll();
     // Terminal nodes get a one-shot transcript; only live nodes keep polling.
-    const timer = live ? setInterval(() => void poll(), 2_500) : null;
+    // Per-node reads are a single indexed SQL pass, so a tight cadence is
+    // cheap and the transcript reads as streaming.
+    const timer = live ? setInterval(() => void poll(), 1_200) : null;
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);
@@ -1162,6 +1164,48 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
           {line.text}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Envelope bookkeeping already shown in the inspector's meta grid. */
+const OUTPUT_RESERVED_KEYS = new Set(["runId", "nodeId", "iteration"]);
+
+/**
+ * A node's structured output, one labeled block per field instead of one raw
+ * JSON dump. Strings render verbatim (multiline intact), scalars sit inline
+ * next to their key, and nested values pretty-print on their own.
+ */
+function OutputFields({ row }: { row: unknown }) {
+  if (!isRecord(row)) {
+    return <pre className="mon-output">{formatOutputValue(row)}</pre>;
+  }
+  const entries = Object.entries(row);
+  const fields = entries.filter(([key]) => !OUTPUT_RESERVED_KEYS.has(key));
+  const shown = fields.length > 0 ? fields : entries;
+  if (shown.length === 0) {
+    return <pre className="mon-output">{formatOutputValue(row)}</pre>;
+  }
+  return (
+    <div className="mon-output mon-output-fields" data-testid="monitor-output-fields">
+      {shown.map(([key, value]) => {
+        const scalar =
+          value === null || typeof value === "number" || typeof value === "boolean"
+            ? String(value)
+            : typeof value === "string" && value.length <= 80 && !value.includes("\n")
+              ? value
+              : undefined;
+        return (
+          <div className="mon-output-field" key={key}>
+            <span className="mon-output-key mon-mono">{key}</span>
+            {scalar !== undefined ? (
+              <span className="mon-output-scalar mon-mono">{scalar}</span>
+            ) : (
+              <pre className="mon-output-val">{formatOutputValue(value)}</pre>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1258,7 +1302,7 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
       <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
       <h3 className="mon-kicker">Output</h3>
       {row ? (
-        <pre className="mon-output">{formatOutputValue(row)}</pre>
+        <OutputFields row={row} />
       ) : output.loading ? (
         <div className="mon-empty mon-dim">
           <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…</span>
@@ -1775,6 +1819,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-toolcalls { display: flex; flex-direction: column; gap: var(--sp-1); margin: 0; }
 .mon-toolcall { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-1); background: var(--panel); }
 .mon-output { margin: 0; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2); background: var(--panel); font-size: var(--fs-1); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; max-height: 45vh; overflow-y: auto; }
+.mon-output-fields { display: flex; flex-direction: column; gap: var(--sp-3); white-space: normal; }
+.mon-output-field { display: flex; flex-direction: column; gap: var(--sp-1); }
+.mon-output-field:has(.mon-output-scalar) { flex-direction: row; align-items: baseline; gap: var(--sp-2); }
+.mon-output-key { color: var(--dim); font-size: var(--fs-1); flex: none; }
+.mon-output-scalar { min-width: 0; overflow-wrap: anywhere; }
+.mon-output-val { margin: 0; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-1); background: var(--bg); font-size: var(--fs-1); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
 .mon-failure { border-color: color-mix(in srgb, var(--failed, #f87171) 45%, var(--border)); }
 .mon-live-output { max-height: 32vh; }
 .mon-live-line { border-bottom: 1px dashed color-mix(in srgb, var(--border) 55%, transparent); overflow-wrap: anywhere; }
