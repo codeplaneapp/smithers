@@ -6,7 +6,7 @@
 - `smithers why` declared it "orphaned" and suggested the unblock verbatim: `smithers up … --run-id run-1783727681742 --resume true --force true`.
 
 **Why it's wrong**
-- With 64-way concurrency the engine's event loop saturates and the heartbeat writer misses its 120s budget, so a busy run is indistinguishable from a dead one to the current check. Earlier the same night `run-1783718580190` went "stale" at the same `triage-apply` step; a human plausibly read that as hung and cancelled a healthy run.
+- With 64-way concurrency the engine's event loop saturates and the heartbeat writer misses its 120s budget, so a busy run is indistinguishable from a dead one to the current check. Earlier the same night `run-1783718580190` went "stale" at the same `triage-apply` step; a human plausibly read that as hung and cancelled a healthy run. And it happened again: `run-1783727681742` itself was cancelled at 01:34Z, ~40 minutes after this ticket documented it as alive and working.
 - The suggested remedy is dangerous: `--resume --force` against a live engine attaches a second engine to the same run (split-brain: duplicate task scheduling, double agent spend, racing writes to run state).
 
 **Acceptance criteria**
