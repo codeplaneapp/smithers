@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -12,8 +13,9 @@ const EXAMPLES_DIR = resolve(REPO_ROOT, "examples");
 // declare agents; those packages are deliberately NOT installed at the repo root
 // (see docs-examples-smoke.test.js, which stubs them the same way). Rendering a
 // workflow graph only loads the module — it never invokes an agent — so a tiny
-// stub resolvable from examples/ is enough to let every example load. We write it
-// into examples/node_modules (gitignored) and clean it up afterward.
+// stub resolvable from examples/ is enough to let every example load. Each test
+// process gets a private copy of examples/ so concurrent CLI suites cannot
+// remove another process's stubs midway through the render loop.
 const AI_STUB_PACKAGES = {
     "ai/package.json": JSON.stringify({ type: "module", exports: { ".": "./index.js" } }) + "\n",
     "ai/index.js": [
@@ -29,25 +31,31 @@ const AI_STUB_PACKAGES = {
     "@ai-sdk/openai/index.js": "export function openai(model) { return { provider: \"openai\", model }; }\n",
 };
 
-function writeAiSdkStubs() {
-    const created = [];
-    const modulesDir = resolve(EXAMPLES_DIR, "node_modules");
+function createExampleProject() {
+    const projectDir = mkdtempSync(resolve(tmpdir(), "smithers-example-graphs-"));
+    const projectExamplesDir = resolve(projectDir, "examples");
+    cpSync(EXAMPLES_DIR, projectExamplesDir, {
+        recursive: true,
+        filter(source) {
+            const pathFromExamples = relative(EXAMPLES_DIR, source);
+            return pathFromExamples !== "node_modules" && !pathFromExamples.startsWith(`node_modules${sep}`);
+        },
+    });
+
+    // Keep ordinary workspace dependencies identical to the checkout while
+    // letting the copied examples override only the intentionally absent SDKs.
+    symlinkSync(resolve(REPO_ROOT, "node_modules"), resolve(projectDir, "node_modules"), "dir");
+
+    const modulesDir = resolve(projectExamplesDir, "node_modules");
     for (const [relative, contents] of Object.entries(AI_STUB_PACKAGES)) {
         const target = resolve(modulesDir, relative);
-        // Never clobber a real install: only write (and later remove) stub files we own.
-        if (existsSync(target)) continue;
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, contents, "utf8");
-        created.push(target);
     }
-    return () => {
-        for (const packageDir of ["ai", "@ai-sdk"]) {
-            rmSync(resolve(modulesDir, packageDir), { recursive: true, force: true });
-        }
-        // Only remove examples/node_modules if we created it and nothing else landed there.
-        if (created.length > 0 && existsSync(modulesDir) && readdirSync(modulesDir).length === 0) {
-            rmSync(modulesDir, { recursive: true, force: true });
-        }
+
+    return {
+        projectDir,
+        cleanup: () => rmSync(projectDir, { recursive: true, force: true }),
     };
 }
 const GRAPH_INPUT = {
@@ -68,43 +76,44 @@ test("top-level example workflows render as graphs", () => {
     expect(examples).toContain("examples/smoketest.jsx");
     expect(examples.length).toBeGreaterThan(50);
 
-    const cleanupStubs = writeAiSdkStubs();
+    const exampleProject = createExampleProject();
     try {
-    for (const example of examples) {
-        const result = spawnSync(process.execPath, [
-            "run",
-            CLI_ENTRY,
-            "graph",
-            example,
-            "--input",
-            JSON.stringify(GRAPH_INPUT),
-            "--format",
-            "json",
-        ], {
-            cwd: REPO_ROOT,
-            env: {
-                ...process.env,
-                ANTHROPIC_API_KEY: "sk-ant-test",
-                OPENAI_API_KEY: "sk-test",
-                GEMINI_API_KEY: "",
-                GOOGLE_API_KEY: "",
-            },
-            encoding: "utf8",
-            maxBuffer: 10 * 1024 * 1024,
-        });
+        for (const example of examples) {
+            const copiedExample = resolve(exampleProject.projectDir, example);
+            const result = spawnSync(process.execPath, [
+                "run",
+                CLI_ENTRY,
+                "graph",
+                copiedExample,
+                "--input",
+                JSON.stringify(GRAPH_INPUT),
+                "--format",
+                "json",
+            ], {
+                cwd: exampleProject.projectDir,
+                env: {
+                    ...process.env,
+                    ANTHROPIC_API_KEY: "sk-ant-test",
+                    OPENAI_API_KEY: "sk-test",
+                    GEMINI_API_KEY: "",
+                    GOOGLE_API_KEY: "",
+                },
+                encoding: "utf8",
+                maxBuffer: 10 * 1024 * 1024,
+            });
 
-        if (result.status !== 0) {
-            throw new Error(`${example} failed:\nstdout:${result.stdout}\nstderr:${result.stderr}`);
+            if (result.status !== 0) {
+                throw new Error(`${example} failed:\nstdout:${result.stdout}\nstderr:${result.stderr}`);
+            }
+
+            const graph = JSON.parse(result.stdout);
+            expect(graph.xml?.kind, `${example} did not render an XML graph`).toBe("element");
+            expect(Array.isArray(graph.tasks), `${example} did not expose graph tasks`).toBe(true);
+
+            const source = readFileSync(resolve(REPO_ROOT, example), "utf8");
+            expect(source.length, `${example} should be a committed source file`).toBeGreaterThan(0);
         }
-
-        const graph = JSON.parse(result.stdout);
-        expect(graph.xml?.kind, `${example} did not render an XML graph`).toBe("element");
-        expect(Array.isArray(graph.tasks), `${example} did not expose graph tasks`).toBe(true);
-
-        const source = readFileSync(resolve(REPO_ROOT, example), "utf8");
-        expect(source.length, `${example} should be a committed source file`).toBeGreaterThan(0);
-    }
     } finally {
-        cleanupStubs();
+        exampleProject.cleanup();
     }
 }, 240_000);
