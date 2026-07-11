@@ -8313,6 +8313,467 @@ paths:
                           - observability:read
                       refresh:
                         type: string
+  /v1/rpc/whatHappened:
+    post:
+      operationId: whatHappened
+      summary: "What Happened"
+      description: "Summarize what happened in a run, or in one node when nodeId is provided. A Gateway-configured narrator agent produces a short plain-text recap; without one the Gateway answers with a deterministic fact summary."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - run:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: run:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: whatHappened
+                params:
+                  type: object
+                  properties:
+                    runId:
+                      type: string
+                      description: "Stable run identifier."
+                    nodeId:
+                      type: string
+                      description: "Workflow node id."
+                    iteration:
+                      type: integer
+                      minimum: 0
+                      description: "Node iteration."
+                  required:
+                    - runId
+                  additionalProperties: false
+            example:
+              id: whatHappened-1
+              method: whatHappened
+              params:
+                runId: run_01
+                nodeId: implement
+                iteration: 0
+      responses:
+        200:
+          description: "What Happened response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: object
+                    properties:
+                      runId:
+                        type: string
+                        description: "Stable run identifier."
+                      nodeId:
+                        type:
+                          - string
+                          - "null"
+                        description: "Node id when node-scoped, null for a run summary."
+                      iteration:
+                        type:
+                          - integer
+                          - "null"
+                        description: "Resolved node iteration, null for a run summary."
+                      scope:
+                        type: string
+                        enum:
+                          - run
+                          - node
+                      summary:
+                        type: string
+                        description: "Short plain-text recap of what happened."
+                      agentId:
+                        type:
+                          - string
+                          - "null"
+                        description: "Narrator agent id, or null for the deterministic fallback."
+                      source:
+                        type: string
+                        enum:
+                          - agent
+                          - facts
+                      cached:
+                        type: boolean
+                        description: "True when served from the Gateway summary cache."
+                      generatedAtMs:
+                        type: integer
+                        minimum: 0
+                        description: "Unix epoch milliseconds when the summary was generated."
+                    required:
+                      - runId
+                      - nodeId
+                      - iteration
+                      - scope
+                      - summary
+                      - agentId
+                      - source
+                      - cached
+                      - generatedAtMs
+                    additionalProperties: false
+              example:
+                type: res
+                id: whatHappened-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  runId: run_01
+                  nodeId: implement
+                  iteration: 0
+                  scope: node
+                  summary: "The implement step finished in 42s after one retry."
+                  agentId: codex
+                  source: agent
+                  cached: false
+                  generatedAtMs: 1751000000000
+        400:
+          description: "The request shape is invalid."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - NodeNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - NodeNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - NodeNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        404:
+          description: "The node does not exist on the run."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - NodeNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - NodeNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
   /v1/rpc/cronList:
     post:
       operationId: cronList

@@ -95,6 +95,7 @@ export type GatewayRpcMethod =
   | "getDevToolsSnapshot"
   | "getNodeOutput"
   | "getNodeDiff"
+  | "whatHappened"
   | "cronList"
   | "cronCreate"
   | "cronDelete"
@@ -314,6 +315,30 @@ export type NodeRequest = {
   runId: string;
   nodeId: string;
   iteration?: number;
+};
+
+/**
+ * `whatHappened` summarizes a run (no `nodeId`) or one node of it. The summary
+ * comes from a Gateway-configured narrator agent when one is available and
+ * otherwise from a deterministic fact recap; `source` says which one answered
+ * and `cached` whether the Gateway served it from its summary cache.
+ */
+export type WhatHappenedRequest = {
+  runId: string;
+  nodeId?: string;
+  iteration?: number;
+};
+
+export type WhatHappenedResponse = {
+  runId: string;
+  nodeId: string | null;
+  iteration: number | null;
+  scope: "run" | "node";
+  summary: string;
+  agentId: string | null;
+  source: "agent" | "facts";
+  cached: boolean;
+  generatedAtMs: number;
 };
 
 export type CronListRequest = {

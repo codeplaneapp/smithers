@@ -38,6 +38,8 @@
 /** @typedef {import("./gatewayRpcTypes.ts").GetDevToolsSnapshotRequest} GetDevToolsSnapshotRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetDevToolsSnapshotResponse} GetDevToolsSnapshotResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").NodeRequest} NodeRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").WhatHappenedRequest} WhatHappenedRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").WhatHappenedResponse} WhatHappenedResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").CronListRequest} CronListRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").CronCreateRequest} CronCreateRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").CronDeleteRequest} CronDeleteRequest */
@@ -598,6 +600,30 @@ export const GATEWAY_RPC_DEFINITIONS = [
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "NodeNotFound", "IterationNotFound", "PayloadTooLarge", "VcsError", "Internal"],
     exampleRequest: { runId: "run_01", nodeId: "task", iteration: 0 },
     exampleResponse: { summary: { filesChanged: 1 }, files: [] },
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "whatHappened",
+    title: "What Happened",
+    description: "Summarize what happened in a run, or in one node when nodeId is provided. A Gateway-configured narrator agent produces a short plain-text recap; without one the Gateway answers with a deterministic fact summary.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "run:read",
+    requestSchema: objectSchema({ runId, nodeId, iteration }, ["runId"]),
+    responseSchema: objectSchema({
+      runId,
+      nodeId: { type: ["string", "null"], description: "Node id when node-scoped, null for a run summary." },
+      iteration: { type: ["integer", "null"], description: "Resolved node iteration, null for a run summary." },
+      scope: { type: "string", enum: ["run", "node"] },
+      summary: stringSchema("Short plain-text recap of what happened."),
+      agentId: { type: ["string", "null"], description: "Narrator agent id, or null for the deterministic fallback." },
+      source: { type: "string", enum: ["agent", "facts"] },
+      cached: booleanSchema("True when served from the Gateway summary cache."),
+      generatedAtMs: integerSchema("Unix epoch milliseconds when the summary was generated.", 0),
+    }, ["runId", "nodeId", "iteration", "scope", "summary", "agentId", "source", "cached", "generatedAtMs"]),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "NodeNotFound", "Internal"],
+    exampleRequest: { runId: "run_01", nodeId: "implement", iteration: 0 },
+    exampleResponse: { runId: "run_01", nodeId: "implement", iteration: 0, scope: "node", summary: "The implement step finished in 42s after one retry.", agentId: "codex", source: "agent", cached: false, generatedAtMs: 1751000000000 },
   },
   {
     version: SMITHERS_API_VERSION,

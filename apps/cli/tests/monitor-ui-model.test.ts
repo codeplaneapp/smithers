@@ -17,6 +17,7 @@ import {
   isNotableEvent,
   isResumable,
   labelForStatus,
+  nodeSummaryEligible,
   paginateRuns,
   pick,
   rowOf,
@@ -655,5 +656,26 @@ describe("diagnoseRun", () => {
     });
     expect(d.detail).toContain("0/1 tasks done");
     expect(d.detail).toContain("loop-task");
+  });
+});
+
+describe("nodeSummaryEligible", () => {
+  test("settled nodes earn a what-happened recap", () => {
+    expect(nodeSummaryEligible("finished")).toBe(true);
+    expect(nodeSummaryEligible("succeeded")).toBe(true);
+    expect(nodeSummaryEligible("failed")).toBe(true);
+    expect(nodeSummaryEligible("error")).toBe(true);
+    expect(nodeSummaryEligible("cancelled")).toBe(true);
+    expect(nodeSummaryEligible("canceled")).toBe(true);
+  });
+
+  test("live, pending, and skipped nodes do not", () => {
+    expect(nodeSummaryEligible("running")).toBe(false);
+    expect(nodeSummaryEligible("in-progress")).toBe(false);
+    expect(nodeSummaryEligible("pending")).toBe(false);
+    expect(nodeSummaryEligible("waiting-approval")).toBe(false);
+    expect(nodeSummaryEligible("skipped")).toBe(false);
+    expect(nodeSummaryEligible(undefined)).toBe(false);
+    expect(nodeSummaryEligible("")).toBe(false);
   });
 });

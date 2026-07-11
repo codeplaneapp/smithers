@@ -51,7 +51,7 @@ type GatewayRpcDefinition$1 = {
     readonly exampleRequest: unknown;
     readonly exampleResponse: unknown;
 };
-type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket";
+type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "whatHappened" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket";
 type LaunchRunRequest$1 = {
     workflow: string;
     input?: Record<string, unknown>;
@@ -226,6 +226,28 @@ type NodeRequest$1 = {
     runId: string;
     nodeId: string;
     iteration?: number;
+};
+/**
+ * `whatHappened` summarizes a run (no `nodeId`) or one node of it. The summary
+ * comes from a Gateway-configured narrator agent when one is available and
+ * otherwise from a deterministic fact recap; `source` says which one answered
+ * and `cached` whether the Gateway served it from its summary cache.
+ */
+type WhatHappenedRequest$1 = {
+    runId: string;
+    nodeId?: string;
+    iteration?: number;
+};
+type WhatHappenedResponse$1 = {
+    runId: string;
+    nodeId: string | null;
+    iteration: number | null;
+    scope: "run" | "node";
+    summary: string;
+    agentId: string | null;
+    source: "agent" | "facts";
+    cached: boolean;
+    generatedAtMs: number;
 };
 type CronListRequest$1 = {
     filter?: {
@@ -457,6 +479,8 @@ type StreamDevToolsRequest = StreamDevToolsRequest$1;
 type GetDevToolsSnapshotRequest = GetDevToolsSnapshotRequest$1;
 type GetDevToolsSnapshotResponse = GetDevToolsSnapshotResponse$1;
 type NodeRequest = NodeRequest$1;
+type WhatHappenedRequest = WhatHappenedRequest$1;
+type WhatHappenedResponse = WhatHappenedResponse$1;
 type CronListRequest = CronListRequest$1;
 type CronCreateRequest = CronCreateRequest$1;
 type CronDeleteRequest = CronDeleteRequest$1;
@@ -482,4 +506,4 @@ type UpdateTicketRequest = UpdateTicketRequest$1;
 type DeleteTicketRequest = DeleteTicketRequest$1;
 type GatewayScope = GatewayScope$1;
 
-export { type CancelRunRequest, type CancelRunResponse, type CreateTicketRequest, type CronCreateRequest, type CronDeleteRequest, type CronListRequest, type CronRunRequest, type DeleteTicketRequest, GATEWAY_EVENT_WINDOW_DEFAULT, GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, GATEWAY_RPC_LEGACY_METHOD_ALIASES, type GatewayAccount, type GatewayApprovalSummary, type GatewayDocKind, type GatewayDocRow, type GatewayMemoryFact, type GatewayPrompt, type GatewayRpcDefinition, type GatewayRpcErrorCode, type GatewayRpcErrorDefinition, type GatewayRpcMethod, type GatewayScope, type GatewayScoreRow, type GatewayTicketRow, type GatewayWorkflowSummary, type GetDevToolsSnapshotRequest, type GetDevToolsSnapshotResponse, type GetRunRequest, type GetSchemaSignatureRequest, type GetSchemaSignatureResponse, type HijackRunRequest, type HijackRunResponse, type JsonSchema, type LaunchRunRequest, type LaunchRunResponse, type ListAccountsRequest, type ListAccountsResponse, type ListApprovalsRequest, type ListApprovalsResponse, type ListDocsRequest, type ListDocsResponse, type ListMemoryFactsRequest, type ListMemoryFactsResponse, type ListPromptsRequest, type ListPromptsResponse, type ListRunsRequest, type ListScoresRequest, type ListScoresResponse, type ListTicketsRequest, type ListTicketsResponse, type ListWorkflowsRequest, type ListWorkflowsResponse, type NodeRequest, type PauseRunRequest, type PauseRunResponse, type ResumeRunRequest, type ResumeRunResponse, type RewindRunRequest, SMITHERS_API_VERSION, type SmithersApiVersion, type StreamDevToolsRequest, type StreamRunEventsRequest, type StreamRunEventsResponse, type SubmitApprovalRequest, type SubmitApprovalResponse, type SubmitSignalRequest, type UpdateTicketRequest, anyJsonSchema, canonicalGatewayRpcMethod, getGatewayRpcDefinition, getGatewayScopeValues, getRequiredScopeForGatewayMethod, isGatewayRpcMethod, listGatewayRpcMethods };
+export { type CancelRunRequest, type CancelRunResponse, type CreateTicketRequest, type CronCreateRequest, type CronDeleteRequest, type CronListRequest, type CronRunRequest, type DeleteTicketRequest, GATEWAY_EVENT_WINDOW_DEFAULT, GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, GATEWAY_RPC_LEGACY_METHOD_ALIASES, type GatewayAccount, type GatewayApprovalSummary, type GatewayDocKind, type GatewayDocRow, type GatewayMemoryFact, type GatewayPrompt, type GatewayRpcDefinition, type GatewayRpcErrorCode, type GatewayRpcErrorDefinition, type GatewayRpcMethod, type GatewayScope, type GatewayScoreRow, type GatewayTicketRow, type GatewayWorkflowSummary, type GetDevToolsSnapshotRequest, type GetDevToolsSnapshotResponse, type GetRunRequest, type GetSchemaSignatureRequest, type GetSchemaSignatureResponse, type HijackRunRequest, type HijackRunResponse, type JsonSchema, type LaunchRunRequest, type LaunchRunResponse, type ListAccountsRequest, type ListAccountsResponse, type ListApprovalsRequest, type ListApprovalsResponse, type ListDocsRequest, type ListDocsResponse, type ListMemoryFactsRequest, type ListMemoryFactsResponse, type ListPromptsRequest, type ListPromptsResponse, type ListRunsRequest, type ListScoresRequest, type ListScoresResponse, type ListTicketsRequest, type ListTicketsResponse, type ListWorkflowsRequest, type ListWorkflowsResponse, type NodeRequest, type PauseRunRequest, type PauseRunResponse, type ResumeRunRequest, type ResumeRunResponse, type RewindRunRequest, SMITHERS_API_VERSION, type SmithersApiVersion, type StreamDevToolsRequest, type StreamRunEventsRequest, type StreamRunEventsResponse, type SubmitApprovalRequest, type SubmitApprovalResponse, type SubmitSignalRequest, type UpdateTicketRequest, type WhatHappenedRequest, type WhatHappenedResponse, anyJsonSchema, canonicalGatewayRpcMethod, getGatewayRpcDefinition, getGatewayScopeValues, getRequiredScopeForGatewayMethod, isGatewayRpcMethod, listGatewayRpcMethods };

@@ -527,6 +527,10 @@ export class SmithersGatewayClient {
     return this.rpc("getNodeDiff", params);
   }
 
+  whatHappened(params: GatewayRpcParams<"whatHappened">) {
+    return this.rpc("whatHappened", params);
+  }
+
   cronList(params: GatewayRpcParams<"cronList"> = {}) {
     return this.rpc("cronList", params);
   }

@@ -1,42 +1,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { listAccounts } from "@smithers-orchestrator/accounts";
-import { AntigravityAgent } from "@smithers-orchestrator/agents/AntigravityAgent";
-import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
-import { CodexAgent } from "@smithers-orchestrator/agents/CodexAgent";
-import { KimiAgent } from "@smithers-orchestrator/agents/KimiAgent";
-import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
-import { detectAvailableAgents } from "./agent-detection.js";
-import { SOTA_SLOTS } from "./sota-models.generated.js";
+import { listNarratorCandidates } from "./narrator-agents.js";
 
 // A human watching a run wants a friendly recap, not a scroll of engine logs.
 // A cheap/fast model reads the run transcript and narrates it: a short terminal
 // summary plus a self-contained HTML page we open in the browser. Everything
 // here is best-effort — any failure falls back to a deterministic report so the
 // run command itself never breaks.
-
-/**
- * Cheap-first agent preference. The narrator is a summarization task, so bias to
- * the fastest usable coding agent and its cheapest capable model. Each entry
- * builds a tool-less agent (no MCP): it only reads the transcript we hand it.
- */
-const REPORT_AGENTS = [
-    { id: "codex", build: (cwd, systemPrompt, account) => new CodexAgent({ cwd, model: SOTA_SLOTS.codex, config: { model_reasoning_effort: "medium" }, systemPrompt, fullAuto: true, skipGitRepoCheck: true, ...(account?.configDir ? { configDir: account.configDir } : {}), ...(account?.apiKey ? { apiKey: account.apiKey } : {}) }) },
-    { id: "claude", build: (cwd, systemPrompt) => new ClaudeCodeAgent({ cwd, model: SOTA_SLOTS.sonnet, systemPrompt, dangerouslySkipPermissions: true }) },
-    { id: "antigravity", build: (cwd, systemPrompt) => new AntigravityAgent({ cwd, model: SOTA_SLOTS.gemini, systemPrompt, dangerouslySkipPermissions: true }) },
-    { id: "kimi", build: (cwd, systemPrompt) => new KimiAgent({ cwd, model: SOTA_SLOTS.kimi, systemPrompt }) },
-    { id: "pi", build: (cwd, systemPrompt) => new PiAgent({ cwd, provider: "openai", model: SOTA_SLOTS.codex, systemPrompt }) },
-];
-
-/** @param {NodeJS.ProcessEnv} env */
-function registeredCodexAccounts(env) {
-    try {
-        return listAccounts(env).filter((account) => account.provider === "codex" || account.provider === "openai-api");
-    }
-    catch {
-        return [];
-    }
-}
 
 const TERMINAL_SENTINEL = "===SMITHERS_TERMINAL===";
 const HTML_SENTINEL = "===SMITHERS_HTML===";
@@ -241,23 +211,10 @@ export async function generateRunReport(params) {
         let narration = null;
         let agentId = null;
 
-        const detections = detectAvailableAgents(env, { cwd });
-        const usable = new Set(detections.filter((d) => !d.deprecated && d.usable).map((d) => d.id));
-        const codex = detections.find((entry) => entry.id === "codex");
-        const candidates = [];
-        const codexBuilder = REPORT_AGENTS.find((entry) => entry.id === "codex");
-        if (codexBuilder && codex?.hasBinary) {
-            if (codex.usable) candidates.push({ entry: codexBuilder, account: undefined });
-            for (const account of registeredCodexAccounts(env)) {
-                candidates.push({ entry: codexBuilder, account });
-            }
-        }
-        for (const entry of REPORT_AGENTS) {
-            if (entry.id !== "codex" && usable.has(entry.id)) candidates.push({ entry, account: undefined });
-        }
+        const candidates = listNarratorCandidates(env, cwd);
         for (const candidate of candidates) {
             try {
-                const agent = candidate.entry.build(cwd, SYSTEM_PROMPT, candidate.account);
+                const agent = candidate.build(SYSTEM_PROMPT);
                 const prompt = `Here is the run to narrate:\n\n${context}`;
                 const generated = await agent.generate({
                     prompt,
@@ -267,7 +224,7 @@ export async function generateRunReport(params) {
                 const parsed = parseNarratorResponse(responseText);
                 if (parsed.html) {
                     narration = parsed;
-                    agentId = candidate.entry.id;
+                    agentId = candidate.id;
                     break;
                 }
             } catch {

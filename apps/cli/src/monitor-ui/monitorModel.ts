@@ -425,6 +425,20 @@ export function paginateRuns<T>(rows: readonly T[], page: number, pageSize: numb
 // Lifecycle predicates + progress.
 // ---------------------------------------------------------------------------
 
+/**
+ * A node earns an AI "what happened" recap only once it is settled: finished,
+ * failed, or cancelled. Live nodes change under the narrator (and bypass the
+ * gateway summary cache), and pending/waiting nodes have nothing to narrate;
+ * skipped nodes never ran at all.
+ */
+export function nodeSummaryEligible(status: string | undefined): boolean {
+  const s = normalizeStatus(status);
+  if (s === "skipped") return false;
+  if (s === "cancelled" || s === "canceled") return true;
+  const tone = toneForStatus(status);
+  return tone === "ok" || tone === "failed";
+}
+
 export function isTerminalStatus(status: string | undefined): boolean {
   const s = normalizeStatus(status);
   return s === "finished" || s === "succeeded" || s === "failed" || s === "cancelled" || s === "canceled";

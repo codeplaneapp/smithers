@@ -109,7 +109,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[88]:
+commands[89]:
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal init asks one question (your preferred coding agent), installs the pack with defaults plus that agent's plugin (or skill if no plugin), then opens a hijacked tutorial session hosted by that agent; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -401,6 +401,15 @@ commands[88]:
       runId,string,true,Run ID
     flags[1]{name,short,type,default,desc}:
       json,,boolean,false,Structured JSON diagnosis
+  - name: what
+    purpose: Summarize what happened in a run or node with a cheap fast agent (deterministic recap without one)
+    args[1]{name,type,required,desc}:
+      runId,string,false,Run ID (default: latest run)
+    flags[4]{name,short,type,default,desc}:
+      node,n,string,,Node ID: explain one node instead of the whole run
+      iteration,i,number,,Loop iteration number (default: latest)
+      json,,boolean,false,Structured JSON (summary, agentId, source, facts)
+      timeout,,number,,Narrator agent timeout in seconds (default 60)
   - name: human
     purpose: List, answer, or cancel durable human requests
     args[2]{name,type,required,desc}:

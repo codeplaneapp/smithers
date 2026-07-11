@@ -42,6 +42,7 @@ import {
   isResumable,
   labelForStatus,
   nodeErrorOf,
+  nodeSummaryEligible,
   paginateRuns,
   pick,
   quotaInfoOf,
@@ -1046,11 +1047,10 @@ function HealthStrip({
 // ---------------------------------------------------------------------------
 
 /**
- * Live transcript for an in-flight node. The shared run-event ring drowns any
- * single node on a busy run (16 streaming agents rotate 500 events in
- * seconds), so this polls the gateway's per-node event filter incrementally:
- * the first poll returns a bounded tail of this node's history, and each
- * subsequent poll reads only past the last seen seq.
+ * Make one transcript line scannable: drop completed-command echoes (the next
+ * started line implies completion), strip the agent-name and shell-wrapper
+ * noise from commands, and classify lines so commands, chat text, and
+ * lifecycle metadata read differently.
  */
 function formatLiveTranscriptLine(
   eventName: string,
@@ -1071,6 +1071,13 @@ function formatLiveTranscriptLine(
   return { text: text.slice(0, 400), kind: "text" };
 }
 
+/**
+ * Live transcript for an in-flight node. The shared run-event ring drowns any
+ * single node on a busy run (16 streaming agents rotate 500 events in
+ * seconds), so this polls the gateway's per-node event filter incrementally:
+ * the first poll returns a bounded tail of this node's history, and each
+ * subsequent poll reads only past the last seen seq.
+ */
 function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string; live: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [lines, setLines] = useState<Array<{ seq: number; text: string; kind: "cmd" | "text" | "meta" }>>([]);
@@ -1084,6 +1091,8 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
     let afterSeq = 0;
     let inFlight = false;
     const poll = async () => {
+      // The first poll scans history and can outlive the interval; overlapping
+      // polls would both start from the same cursor and append the tail twice.
       if (inFlight) return;
       inFlight = true;
       try {
@@ -1159,6 +1168,35 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
 
 const TERMINAL_NODE_TONES = new Set(["ok", "failed", "cancelled"]);
 
+/**
+ * The AI "what happened" recap at the top of the inspector. The gateway's
+ * whatHappened RPC narrates with the host-configured cheap agent and falls
+ * back to a deterministic fact summary, so this renders something for every
+ * settled node; errors just hide the panel.
+ */
+function NodeWhatHappened({ runId, nodeId, iteration, status }: { runId: string; nodeId: string; iteration: number; status?: string }) {
+  const enabled = nodeSummaryEligible(status);
+  const summary = useGatewayRpc("whatHappened", { runId, nodeId, iteration }, { enabled });
+  if (!enabled || summary.error) return null;
+  return (
+    <div className="mon-what" data-testid="monitor-what-happened">
+      <h3 className="mon-kicker">What happened</h3>
+      {summary.data ? (
+        <>
+          <div className="mon-what-summary">{summary.data.summary}</div>
+          <div className="mon-what-source mon-dim">
+            {summary.data.source === "agent"
+              ? `narrated by ${summary.data.agentId ?? "agent"}`
+              : "recorded facts (no narrator agent)"}
+          </div>
+        </>
+      ) : (
+        <div className="mon-empty mon-dim">Summarizing what happened…</div>
+      )}
+    </div>
+  );
+}
+
 function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
   const nodeId = node.id ?? treeNodeKey(node);
   const output = useGatewayNodeOutput({ runId, nodeId, iteration: node.iteration ?? 0 });
@@ -1174,6 +1212,7 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
         <StatusTag status={node.status} />
       </header>
       <div className="mon-inspector-title">{node.cardLabel ?? node.name ?? nodeId}</div>
+      <NodeWhatHappened runId={runId} nodeId={nodeId} iteration={node.iteration ?? 0} status={node.status} />
       <dl className="mon-meta-grid">
         <dt>id</dt>
         <dd className="mon-mono">{nodeId}</dd>
@@ -1726,6 +1765,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-event-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .mon-inspector-title { font-weight: 700; font-size: var(--fs-4); line-height: var(--lh-tight); margin: var(--sp-1) 0 var(--sp-3); }
+.mon-what { margin: 0 0 var(--sp-3); }
+.mon-what-summary { white-space: pre-wrap; font-size: var(--fs-3); line-height: var(--lh-body); background: color-mix(in srgb, var(--brand) 6%, transparent); border-radius: var(--r-1); padding: var(--sp-2) var(--sp-3); }
+.mon-what-source { font-size: var(--fs-1); margin-top: var(--sp-1); }
 .mon-inspector h3.mon-kicker { margin: var(--sp-4) 0 var(--sp-2); }
 .mon-meta-grid { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-1) var(--sp-3); align-items: baseline; margin: 0 0 var(--sp-4); }
 .mon-meta-grid dt { color: var(--muted); font-size: var(--fs-1); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
@@ -1737,6 +1779,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-live-output { max-height: 32vh; }
 .mon-live-line { border-bottom: 1px dashed color-mix(in srgb, var(--border) 55%, transparent); overflow-wrap: anywhere; }
 .mon-live-cmd { font-family: ui-monospace, monospace; color: color-mix(in srgb, var(--text) 82%, transparent); }
+.mon-live-text { }
 .mon-live-meta { color: var(--muted); font-style: italic; }
 .mon-live-pending { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .mon-live-line:last-child { border-bottom: 0; }

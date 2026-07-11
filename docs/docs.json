@@ -465,6 +465,7 @@
               "rpc/stream-dev-tools",
               "rpc/get-node-output",
               "rpc/get-node-diff",
+              "rpc/what-happened",
               "rpc/get-dev-tools-snapshot",
               "rpc/list-tickets",
               "rpc/create-ticket",

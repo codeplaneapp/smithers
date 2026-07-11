@@ -57,6 +57,7 @@ import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
 import { buildAgentNextSteps } from "./agentNextSteps.js";
 import { generateRunReport } from "./runReport.js";
+import { whatHappened } from "./what-happened.js";
 import { openInBrowser } from "./openInBrowser.js";
 import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
@@ -1752,6 +1753,15 @@ const whyArgs = z.object({
 const whyOptions = z.object({
     json: z.boolean().default(false).describe("Output structured JSON diagnosis"),
 });
+const whatArgs = z.object({
+    runId: z.string().optional().describe("Run ID to explain (default: latest run)"),
+});
+const whatOptions = z.object({
+    node: z.string().optional().describe("Node ID: explain one node instead of the whole run"),
+    iteration: z.number().int().min(0).optional().describe("Loop iteration number (default: latest iteration)"),
+    json: z.boolean().default(false).describe("Output structured JSON (summary, agentId, source, facts)"),
+    timeout: z.number().positive().optional().describe("Narrator agent timeout in seconds (default 60)"),
+});
 const approveArgs = z.object({
     runId: z.string().describe("Run ID containing the approval gate"),
 });
@@ -3096,6 +3106,19 @@ async function runGatewayCommand(options) {
         workspaceRoot: workspace,
         identity: { backend: identityBackend, version: readPackageVersion() },
         idleTimeoutMs,
+        // The monitor's "what happened" panel: narrate a run/node with the
+        // cheapest usable local agent. The route degrades to a deterministic
+        // fact summary when no agent answers, so this never breaks the RPC.
+        whatHappened: async ({ runId, nodeId, iteration, adapter }) => {
+            const result = await whatHappened({
+                adapter,
+                runId,
+                nodeId,
+                iteration: iteration ?? undefined,
+                cwd: workspace,
+            });
+            return { summary: result.summary, agentId: result.agentId, source: result.source };
+        },
         ...(auth ? { auth } : {}),
         // `--insecure` (a deliberate unauthenticated non-loopback bind) must
         // trust any Host, or the daemon binds but 403s every LAN request.
@@ -6067,6 +6090,62 @@ const cli = Cli.create({
                 });
             }
             return fail({ code: "WHY_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
+    },
+})
+    // =========================================================================
+    // smithers what
+    // =========================================================================
+    .command("what", {
+    description: "Summarize what happened in a run or node: a cheap fast agent narrates the recorded facts (deterministic recap when no agent is available).",
+    args: whatArgs,
+    options: whatOptions,
+    alias: { node: "n", iteration: "i" },
+    async run(c) {
+        const fail = makeFail(c);
+        try {
+            const { adapter, cleanup } = await findAndOpenDb();
+            try {
+                let runId = c.args.runId;
+                if (!runId) {
+                    const latestRuns = await adapter.listRuns(1);
+                    runId = latestRuns[0]?.runId;
+                }
+                if (!runId) {
+                    return fail({ code: "RUN_NOT_FOUND", message: "No runs found.", exitCode: 4 });
+                }
+                const result = await whatHappened({
+                    adapter,
+                    runId,
+                    nodeId: c.options.node ?? null,
+                    iteration: c.options.iteration,
+                    cwd: process.cwd(),
+                    ...(c.options.timeout ? { timeoutMs: c.options.timeout * 1000 } : {}),
+                });
+                if (c.options.json || c.format === "json") {
+                    return c.ok({
+                        runId,
+                        nodeId: c.options.node ?? null,
+                        summary: result.summary,
+                        agentId: result.agentId,
+                        source: result.source,
+                        facts: result.facts,
+                    });
+                }
+                const ownCommands = c.options.node
+                    ? [{ command: `node ${c.options.node} --run-id ${runId}`, description: "Full node detail (attempts, tools, output)" }]
+                    : [{ command: `inspect ${runId}`, description: "Full run detail" }];
+                return c.ok(result.summary, { cta: withAgentNextSteps({ runId }, ownCommands) });
+            }
+            finally {
+                cleanup();
+            }
+        }
+        catch (err) {
+            if (err instanceof SmithersError && (err.code === "RUN_NOT_FOUND" || err.code === "NODE_NOT_FOUND")) {
+                return fail({ code: err.code, message: err.message, exitCode: 4 });
+            }
+            return fail({ code: "WHAT_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
 })

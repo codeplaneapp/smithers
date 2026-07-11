@@ -95,6 +95,7 @@ const typedRpcRequestMethods = {
   getDevToolsSnapshot: "getDevToolsSnapshot",
   getNodeOutput: "getNodeOutput",
   getNodeDiff: "getNodeDiff",
+  whatHappened: "whatHappened",
   cronList: "cronList",
   cronCreate: "cronCreate",
   cronDelete: "cronDelete",
@@ -240,6 +241,7 @@ describe("SmithersGatewayClient HTTP RPC", () => {
     await client.getDevToolsSnapshot({ runId: "run-1", frameNo: 2 });
     await client.getNodeOutput({ runId: "run-1", nodeId: "task" });
     await client.getNodeDiff({ runId: "run-1", nodeId: "task" });
+    await client.whatHappened({ runId: "run-1", nodeId: "task" });
     await client.cronList();
     await client.cronCreate({ workflow: "deploy", pattern: "* * * * *" });
     await client.cronDelete({ cronId: "cron-1" });
@@ -256,6 +258,7 @@ describe("SmithersGatewayClient HTTP RPC", () => {
       "getDevToolsSnapshot",
       "getNodeOutput",
       "getNodeDiff",
+      "whatHappened",
       "cronList",
       "cronCreate",
       "cronDelete",
