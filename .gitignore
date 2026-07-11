@@ -133,3 +133,6 @@ packages/server/.smithers-root-landing-ui-*/
 
 # Stray local screenshots
 /output-fields.png
+
+# Claude plugin mirror runtime state
+.smithers/claude-mirror-subscriptions.json
