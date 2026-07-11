@@ -39,6 +39,7 @@ import { WhatHappenedRouteError, whatHappenedRoute } from "./gatewayRoutes/whatH
 import { DevToolsRouteError, getDevToolsSnapshotRoute, validateFrameNoInput, validateFromSeqInput, validateRunId } from "./gatewayRoutes/getDevToolsSnapshot.js";
 import { streamDevToolsRoute } from "./gatewayRoutes/streamDevTools.js";
 import { jumpToFrameRoute, JumpToFrameError } from "./gatewayRoutes/jumpToFrame.js";
+import { retryTask as retryTaskReset } from "@smithers-orchestrator/time-travel/retry-task";
 import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRewindAuditRow";
 import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-travel/recoverInProgressRewindAudits";
 import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
@@ -1307,6 +1308,7 @@ export function statusForRpcError(code) {
         case "Busy":
         case "AlreadyDecided":
         case "RUN_NOT_ACTIVE":
+        case "RUN_ACTIVE":
         case "CONFLICT":
             return 409;
         case "DiffTooLarge":
@@ -3387,6 +3389,16 @@ a { color: var(--brand); }</style>
                 params: { runId: decodeURIComponent(runHijackCandidates[1]) },
             };
         }
+        const runNodeStates = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/node-states$/);
+        if (httpMethod === "GET" && runNodeStates) {
+            // Flat per-(nodeId, iteration) execution states with latest-attempt
+            // timing — the tree route folds these into the snapshot, this
+            // returns the raw rows for chronological views.
+            return {
+                method: "listNodeStates",
+                params: { runId: decodeURIComponent(runNodeStates[1]) },
+            };
+        }
         const runTree = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(?:tree|devtools)$/);
         if (httpMethod === "GET" && runTree) {
             return {
@@ -3413,6 +3425,19 @@ a { color: var(--brand); }</style>
         const runById = pathname.match(/^\/v1\/api\/runs\/([^/]+)$/);
         if (httpMethod === "GET" && runById) {
             return { method: "getRun", params: { runId: decodeURIComponent(runById[1]) } };
+        }
+        const nodeRetry = pathname.match(/^\/v1\/api\/nodes\/([^/]+)\/([^/]+)\/retry$/) ??
+            pathname.match(/^\/v1\/api\/runs\/([^/]+)\/nodes\/([^/]+)\/retry$/);
+        if (httpMethod === "POST" && nodeRetry) {
+            return {
+                method: "retryTask",
+                params: {
+                    ...body,
+                    runId: decodeURIComponent(nodeRetry[1]),
+                    nodeId: decodeURIComponent(nodeRetry[2]),
+                },
+                mutation: true,
+            };
         }
         const nodeRoute = pathname.match(/^\/v1\/api\/nodes\/([^/]+)\/([^/]+)\/(output|diff)$/) ??
             pathname.match(/^\/v1\/api\/runs\/([^/]+)\/nodes\/([^/]+)\/(output|diff)$/);
@@ -6724,6 +6749,96 @@ a { color: var(--brand); }</style>
                     subscribeConnection: connection.transport === "ws" ? connection : undefined,
                 });
                 return responseOk(frame.id, { runId, status: "resume_requested" });
+            }
+            case "retryTask": {
+                const runId = asString(params.runId);
+                const nodeId = asString(params.nodeId);
+                if (!runId || !nodeId) {
+                    return responseError(frame.id, "INVALID_REQUEST", "runId and nodeId are required");
+                }
+                const iteration = asNumber(params.iteration) ?? 0;
+                const resolved = await this.resolveRun(runId);
+                if (!resolved) {
+                    return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
+                }
+                // A just-settled run's in-process handle can outlive its
+                // terminal DB status by a beat (engine finalization) — wait
+                // briefly for the bookkeeping instead of refusing a retry the
+                // operator can see is legitimate. A genuinely live run keeps
+                // its handle and still gets the honest RUN_ACTIVE below.
+                for (let waited = 0; waited < 40 && this.activeRuns.has(runId); waited += 1) {
+                    await delay(25);
+                }
+                if (this.activeRuns.has(runId)) {
+                    return responseError(frame.id, "RUN_ACTIVE", "Run is currently executing — cancel or pause it before retrying a task");
+                }
+                // Same library machinery as `smithers retry-task`: cancel the
+                // node's live/failed attempts, drop its output row, re-insert
+                // it (and every node that ran after it) as pending, and flip
+                // the run back to running. No engine is spawned here.
+                const result = await retryTaskReset(resolved.adapter, {
+                    runId,
+                    nodeId,
+                    iteration,
+                    resetDependents: asBoolean(params.resetDependents) ?? true,
+                });
+                if (!result.success) {
+                    const message = result.error ?? "retry-task failed";
+                    const code = /not found/i.test(message)
+                        ? "NOT_FOUND"
+                        : /still running/i.test(message)
+                            ? "RUN_ACTIVE"
+                            : "INVALID_REQUEST";
+                    return responseError(frame.id, code, message);
+                }
+                // Resume through the exact path resumeRun takes (in-process
+                // engine with resume: true); retryTask already durably set the
+                // run's status back to running.
+                await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
+                    triggeredBy: connection.userId ?? "gateway",
+                    scopes: [...connection.scopes],
+                    role: connection.role ?? "operator",
+                    tokenId: connection.tokenId ?? null,
+                    subscribeConnection: connection.transport === "ws" ? connection : undefined,
+                });
+                return responseOk(frame.id, {
+                    runId,
+                    nodeId,
+                    iteration,
+                    resetNodes: result.resetNodes,
+                    status: "retry_requested",
+                });
+            }
+            case "listNodeStates": {
+                const runId = asString(params.runId);
+                if (!runId) {
+                    return responseError(frame.id, "INVALID_REQUEST", "runId is required");
+                }
+                const resolved = await this.resolveRun(runId);
+                if (!resolved) {
+                    return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
+                }
+                const nodes = await resolved.adapter.listNodes(runId);
+                const attempts = await resolved.adapter.listAttemptsForRun(runId);
+                // Latest attempt per (nodeId, iteration): listAttemptsForRun
+                // orders by started_at_ms then attempt, so the last write wins.
+                const latestAttempts = new Map();
+                for (const attempt of attempts) {
+                    latestAttempts.set(`${attempt.nodeId}::${attempt.iteration ?? 0}`, attempt);
+                }
+                return responseOk(frame.id, nodes.map((node) => {
+                    const attempt = latestAttempts.get(`${node.nodeId}::${node.iteration ?? 0}`);
+                    return {
+                        nodeId: node.nodeId,
+                        iteration: node.iteration ?? 0,
+                        state: node.state,
+                        lastAttempt: node.lastAttempt ?? null,
+                        updatedAtMs: node.updatedAtMs ?? null,
+                        label: node.label ?? null,
+                        startedAtMs: attempt?.startedAtMs ?? null,
+                        finishedAtMs: attempt?.finishedAtMs ?? null,
+                    };
+                }));
             }
             case "runs.get":
             case "getRun": {

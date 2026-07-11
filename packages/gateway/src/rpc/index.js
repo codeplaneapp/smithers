@@ -251,6 +251,8 @@ const HTTP_ROUTE_SCOPES = {
   "approvals.list": "run:read",
   "workflows.list": "run:read",
   "runs.diff": "run:read",
+  listNodeStates: "run:read",
+  retryTask: "run:write",
   "frames.list": "run:read",
   "frames.get": "run:read",
   "attempts.list": "run:read",
