@@ -104,6 +104,10 @@ export async function uploadWalkthrough(
   if (html.byteLength === 0) throw new Error("walkthrough is empty");
   if (html.byteLength > MAX_WALKTHROUGH_BYTES) throw new Error("walkthrough exceeds 25 MB publish limit");
   assertPublishToken(token);
+  // Copy into an ArrayBuffer-backed view so every workspace Fetch type agrees
+  // on the request-body contract, even when the caller supplied a Buffer or a
+  // view backed by a SharedArrayBuffer.
+  const requestBody = new Uint8Array(html);
   const endpoint = walkthroughPublishEndpoint(publishUrl, options);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(new Error("walkthrough publish timed out")), 30_000);
@@ -122,7 +126,7 @@ export async function uploadWalkthrough(
         authorization: `Bearer ${token}`,
         "content-type": "text/html; charset=utf-8",
       },
-      body: html,
+      body: requestBody,
     });
     if (!response.ok) {
       const detail = await readResponseText(response, {
