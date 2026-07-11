@@ -19,7 +19,7 @@ import { subscriptionCodexFirst } from "../lib/codexAccounts";
 import { protectedAutomationPaths } from "../lib/codexIssueMergeQueue";
 
 const DEFAULT_REPO = "smithersai/smithers";
-const SWEEP_CONCURRENCY = 16;
+const SWEEP_CONCURRENCY = 6;
 const LANE_CONCURRENCY = 24;
 const LANDING_GATE_COMMAND = "pnpm typecheck && pnpm lint && pnpm test";
 const MAX_REVIEW_DIFF_BYTES = 200_000;
@@ -357,10 +357,11 @@ const {
 });
 
 // ---------------------------------------------------------------------------
-// Agents. luna/terra/sol are Codex GPT-5.6 variants; fable/sonnet are Claude.
-// Role split: sol plans, luna implements, fable reviews and polishes; terra
-// moderates and resolves. Each Codex role keeps a Claude fallback so the fleet
-// rides through a Codex rate-limit: sol->fable, luna->sonnet, terra->fable.
+// Agents. luna/sol are Codex GPT-5.6 variants; fable/sonnet are Claude.
+// Role split: sol plans, luna does most work (implement + support: moderation,
+// merge resolution, CI fixes), fable reviews and polishes. Each Codex role
+// keeps a Claude fallback so the fleet rides through a Codex rate-limit:
+// luna->sonnet, sol->fable.
 // ---------------------------------------------------------------------------
 
 function codexOptions(model: string, effort: "medium" | "high" | "xhigh", cwd?: string) {
@@ -376,10 +377,11 @@ function lunaAgent(effort: "medium" | "high" | "xhigh", cwd?: string) {
     new ClaudeCodeAgent({ model: "claude-sonnet-5", ...(cwd ? { cwd } : {}) }),
   ]);
 }
-function terraAgent(cwd?: string) {
-  return subscriptionCodexFirst(codexOptions("gpt-5.6-terra", "medium", cwd), [
-    new ClaudeCodeAgent({ model: "claude-fable-5", ...(cwd ? { cwd } : {}) }),
-  ]);
+// Support roles (panel moderation, merge resolution, CI fixes) run on luna,
+// same tier as implementers, so the fleet is luna-for-most with sol reserved
+// for planning and fable reserved for reviews.
+function supportAgent(cwd?: string) {
+  return lunaAgent("high", cwd);
 }
 function solAgent(cwd?: string) {
   return subscriptionCodexFirst(codexOptions("gpt-5.6-sol", "xhigh", cwd), [
@@ -393,7 +395,7 @@ function fableAgent(cwd?: string) {
   ];
 }
 function moderatorAgent(cwd?: string) {
-  return terraAgent(cwd);
+  return supportAgent(cwd);
 }
 function implementerFor(difficulty: Triage["difficulty"]) {
   if (difficulty === "xhard") return lunaAgent("xhigh");
@@ -1455,7 +1457,7 @@ export default smithers((ctx) => {
                     <Task id="ci-fix:bootstrap" output={outputs.tfSetup} timeoutMs={35 * 60_000} continueOnFail>
                       {() => setupWorktree(0, worktreePath("ci-fix", 0, key))}
                     </Task>
-                    <Task id="ci-fix:implement" output={outputs.tfCiFix} agent={terraAgent()} {...agentTaskProps}>
+                    <Task id="ci-fix:implement" output={outputs.tfCiFix} agent={supportAgent()} {...agentTaskProps}>
                       {ciFixPrompt(ciStatus)}
                     </Task>
                     <Task id="ci-fix:candidate" output={outputs.tfCandidate} continueOnFail>
@@ -1753,7 +1755,7 @@ export default smithers((ctx) => {
                       {() => mechanicallyRebase(n, cwd, readiness.headSha)}
                     </Task>
                     {rebase?.status === "conflict" ? (
-                      <Task id={"i" + n + ":queue-resolve"} output={outputs.tfResolution} agent={terraAgent(cwd)} {...agentTaskProps}>
+                      <Task id={"i" + n + ":queue-resolve"} output={outputs.tfResolution} agent={supportAgent(cwd)} {...agentTaskProps}>
                         {resolutionPrompt(issue, { ...rebase, conflictPaths: asStrArray(rebase.conflictPaths) })}
                       </Task>
                     ) : null}
