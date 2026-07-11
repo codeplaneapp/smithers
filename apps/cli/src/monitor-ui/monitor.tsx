@@ -22,6 +22,8 @@ import {
 } from "smithers-orchestrator/gateway-react";
 import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smithers-orchestrator/gateway-client";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { processPatch, type CodeViewItem } from "@pierre/diffs";
+import { CodeView } from "@pierre/diffs/react";
 import type { Terminal as XTerminal, IDisposable } from "@xterm/xterm";
 // Inlined at bundle time (Bun.build) — the gateway serves one self-contained
 // client.js, so the stylesheet ships as a string appended to monitorCss.
@@ -31,10 +33,16 @@ import {
   asNumber,
   asString,
   autoExpandKeys,
+  buildTimeline,
+  canRetryTask,
   clampFrameNo,
   diagnoseRun,
+  diffPatchesOf,
+  diffSummaryOf,
   eventViewFor,
   filterRuns,
+  formatDiffSummary,
+  formatDurationMs,
   formatElapsed,
   formatEventLine,
   formatOutputValue,
@@ -45,10 +53,13 @@ import {
   hijackCandidateForNode,
   hijackCandidatesOf,
   isCancellable,
+  isPausable,
   isRecord,
   isResumable,
   labelForStatus,
+  looksLikeUnifiedDiff,
   nodeErrorOf,
+  nodeStateRowsOf,
   nodeSummaryEligible,
   paginateRuns,
   pick,
@@ -58,13 +69,16 @@ import {
   runProgress,
   RUNS_PAGE_SIZE,
   shortRunId,
+  splitPatchText,
   statusOptions,
+  sumDiffSummaries,
   timeAgo,
   toneForStatus,
   treeNodeKey,
   waitTone,
   workflowOptions,
   type HijackCandidate,
+  type NodeStateRow,
   type RunRow,
   type Tone,
   type TreeNodeLike,
@@ -863,11 +877,128 @@ function ExecutionTree({
 }
 
 // ---------------------------------------------------------------------------
+// Timeline: the run's task executions as a chronological flat list — loops
+// unrolled into one row per (nodeId, iteration) — from the gateway's
+// node-states route (the tree collection carries no timestamps). Polls every
+// few seconds while the run is live; clicking a row selects that node in the
+// inspector.
+// ---------------------------------------------------------------------------
+
+const TIMELINE_POLL_MS = 3_000;
+
+function TimelinePanel({
+  runId,
+  live,
+  selectedNode,
+  onSelectNode,
+}: {
+  runId: string;
+  live: boolean;
+  selectedNode: TreeNode | undefined;
+  onSelectNode: (node: TreeNode) => void;
+}) {
+  const tree = useGatewayRunTree(runId);
+  const [rows, setRows] = useState<NodeStateRow[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  // Reset only when switching runs — a live→settled flip must not blank the list.
+  const lastRunId = useRef(runId);
+  if (lastRunId.current !== runId) {
+    lastRunId.current = runId;
+    setRows(null);
+    setFailed(false);
+  }
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/node-states`);
+        if (!response.ok) throw new Error(`node-states ${response.status}`);
+        const body: unknown = await response.json();
+        if (!cancelled) {
+          setRows(nodeStateRowsOf(body));
+          setFailed(false);
+        }
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    };
+    void load();
+    const timer = live ? setInterval(() => void load(), TIMELINE_POLL_MS) : null;
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [runId, live]);
+  const now = useNowMs();
+  const entries = useMemo(() => (rows ? buildTimeline(rows, now) : []), [rows, now]);
+  // Prefer the real tree node (kind, agent, children intact) so the inspector
+  // shows everything; a row the tree has not materialized yet falls back to a
+  // minimal task node built from the state row.
+  const selectEntry = (entry: ReturnType<typeof buildTimeline>[number]) => {
+    const match = (tree.nodes as TreeNode[]).find(
+      (candidate) => candidate.id === entry.nodeId && (candidate.iteration ?? 0) === entry.iteration,
+    );
+    onSelectNode(
+      match ?? ({ id: entry.nodeId, iteration: entry.iteration, status: entry.state, kind: "task", name: entry.label ?? entry.nodeId } as TreeNode),
+    );
+  };
+  if (rows === null) {
+    return (
+      <div className="mon-empty">
+        {failed ? "Could not load the timeline — the gateway did not answer the node-states request." : "Loading timeline…"}
+      </div>
+    );
+  }
+  if (entries.length === 0) return <div className="mon-empty">No task executions recorded yet.</div>;
+  return (
+    <div className="mon-timeline" data-testid="monitor-timeline" role="list">
+      {entries.map((entry) => {
+        const tone = toneForStatus(entry.state);
+        const active =
+          selectedNode !== undefined &&
+          selectedNode.id === entry.nodeId &&
+          (selectedNode.iteration ?? 0) === entry.iteration;
+        return (
+          <button
+            key={entry.key}
+            type="button"
+            role="listitem"
+            className={`mon-timeline-row${active ? " is-active" : ""}`}
+            data-testid="monitor-timeline-row"
+            data-node-id={entry.nodeId}
+            data-iteration={entry.iteration}
+            onClick={() => selectEntry(entry)}
+          >
+            <ToneDot tone={tone} pulse={tone === "running"} />
+            <span className="mon-timeline-node" title={entry.label ?? entry.nodeId}>
+              {entry.nodeId}
+            </span>
+            {entry.iteration > 0 ? <span className="mon-chip mon-dim">#{entry.iteration}</span> : null}
+            {entry.lastAttempt != null ? (
+              <span className="mon-dim mon-mono mon-timeline-attempt" title={`latest attempt ${entry.lastAttempt}`}>
+                a{entry.lastAttempt}
+              </span>
+            ) : null}
+            <span className="mon-timeline-right">
+              <span className="mon-mono mon-timeline-duration">{formatDurationMs(entry.durationMs)}</span>
+              <span className="mon-dim mon-timeline-when">
+                {entry.endMs !== undefined ? <Ago ms={entry.endMs} /> : tone === "running" ? "running" : "—"}
+              </span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Execution panel with a frame-by-frame scrubber (time-travel view). The
 // "Frames" chip toggles scrub mode: prev/next buttons and a range input over
 // the run's committed frames fetch getDevToolsSnapshot({ runId, frameNo }) and
 // render THAT tree statically (via snapshotToGatewayRunNode) instead of the
-// live one; "Live" (or toggling the chip off) returns to the live tree.
+// live one; "Live" (or toggling the chip off) returns to the live tree. The
+// "Timeline" chip swaps the tree for the chronological task list above.
 // ---------------------------------------------------------------------------
 
 const SCRUB_DEBOUNCE_MS = 150;
@@ -884,12 +1015,14 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 function ExecutionPanel({
   runId,
+  runStatus,
   selectedNode,
   onSelectNode,
   autoSelectNodeId,
   onAutoSelected,
 }: {
   runId: string;
+  runStatus: string | undefined;
   selectedNode: TreeNode | undefined;
   onSelectNode: (node: TreeNode | undefined) => void;
   autoSelectNodeId?: string;
@@ -899,12 +1032,14 @@ function ExecutionPanel({
   // null = pinned to the latest frame until the user actually scrubs.
   const [frame, setFrame] = useState<number | null>(null);
   const [asXml, setAsXml] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
   // Reset scrub state when switching runs.
   const lastRunId = useRef(runId);
   if (lastRunId.current !== runId) {
     lastRunId.current = runId;
     if (scrubbing) setScrubbing(false);
     if (frame !== null) setFrame(null);
+    if (showTimeline) setShowTimeline(false);
   }
   // The latest committed frameNo, fetched only while scrub mode is on. The run
   // may commit more frames while scrubbing; the range simply spans what
@@ -955,22 +1090,45 @@ function ExecutionPanel({
           type="button"
           className={`mon-chip${scrubbing ? " is-on" : ""}`}
           data-testid="monitor-frames-chip"
-          onClick={() => (scrubbing ? goLive() : setScrubbing(true))}
+          onClick={() => {
+            setShowTimeline(false);
+            if (scrubbing) goLive();
+            else setScrubbing(true);
+          }}
           title="Scrub the execution tree frame by frame instead of following it live"
         >
           Frames
         </button>
         <button
           type="button"
-          className={`mon-chip${asXml ? " is-on" : ""}`}
+          className={`mon-chip${asXml && !showTimeline ? " is-on" : ""}`}
           data-testid="monitor-xml-chip"
-          onClick={() => setAsXml((value) => !value)}
+          onClick={() => {
+            if (showTimeline) {
+              setShowTimeline(false);
+              setAsXml(true);
+              return;
+            }
+            setAsXml((value) => !value);
+          }}
           title="Toggle between the expandable tree and the engine's XML view of the same nodes"
         >
           XML
         </button>
+        <button
+          type="button"
+          className={`mon-chip${showTimeline ? " is-on" : ""}`}
+          data-testid="monitor-timeline-chip"
+          onClick={() => {
+            if (!showTimeline) goLive();
+            setShowTimeline((value) => !value);
+          }}
+          title="Every task execution in the order it ran — loops unrolled, one row per iteration"
+        >
+          Timeline
+        </button>
       </header>
-      {scrubbing ? (
+      {scrubbing && !showTimeline ? (
         <div className="mon-scrub" data-testid="monitor-scrub">
           <button
             type="button"
@@ -1018,15 +1176,24 @@ function ExecutionPanel({
           </button>
         </div>
       ) : null}
-      <ExecutionTree
-        runId={runId}
-        selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
-        onSelectNode={onSelectNode}
-        autoSelectNodeId={autoSelectNodeId}
-        onAutoSelected={onAutoSelected}
-        frameOverride={scrubbing ? { root: scrubTree, loading: scrubLoading } : undefined}
-        asXml={asXml}
-      />
+      {showTimeline ? (
+        <TimelinePanel
+          runId={runId}
+          live={toneForStatus(runStatus) === "running" || toneForStatus(runStatus) === "waiting"}
+          selectedNode={selectedNode}
+          onSelectNode={onSelectNode}
+        />
+      ) : (
+        <ExecutionTree
+          runId={runId}
+          selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
+          onSelectNode={onSelectNode}
+          autoSelectNodeId={autoSelectNodeId}
+          onAutoSelected={onAutoSelected}
+          frameOverride={scrubbing ? { root: scrubTree, loading: scrubLoading } : undefined}
+          asXml={asXml}
+        />
+      )}
     </section>
   );
 }
@@ -1408,6 +1575,163 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
   );
 }
 
+// ---------------------------------------------------------------------------
+// Diff rendering. Unified-diff strings (node diffs from the gateway's
+// getNodeDiff, and output fields that carry a raw patch) render through
+// @pierre/diffs — syntax-colored added/removed lines — behind a
+// collapsed-by-default summary ("N files, +X/−Y") so a big patch never
+// swamps the inspector.
+// ---------------------------------------------------------------------------
+
+/**
+ * A patch as a proper diff view. Parsing runs per `diff --git` chunk: real
+ * bundles mix cleanly parseable files with ones @pierre/diffs' strict hunk
+ * parser rejects (binary patches, odd counts), so the parseable files render
+ * syntax-colored and the rejects fall back to raw text below — one bad file
+ * never blanks the whole diff.
+ */
+function PatchDiffView({ patch }: { patch: string }) {
+  const { files, rejected } = useMemo(() => {
+    const parsedFiles: ReturnType<typeof processPatch>["files"] = [];
+    const rawChunks: string[] = [];
+    for (const [index, chunk] of splitPatchText(patch).entries()) {
+      try {
+        parsedFiles.push(...processPatch(chunk, `smithers-monitor-${index}`, true).files);
+      } catch {
+        rawChunks.push(chunk);
+      }
+    }
+    return { files: parsedFiles, rejected: rawChunks };
+  }, [patch]);
+  const dark = isDarkTheme();
+  const items: CodeViewItem[] = files.map((file, index) => ({
+    id: `${file.name ?? index}`,
+    type: "diff",
+    fileDiff: file,
+  }));
+  return (
+    <div className="mon-diff-view" data-testid="monitor-diff-view">
+      {items.length > 0 ? (
+        <CodeView
+          disableWorkerPool
+          items={items}
+          options={{
+            collapsedContextThreshold: 12,
+            diffIndicators: "bars",
+            diffStyle: "unified",
+            hunkSeparators: "metadata",
+            overflow: "wrap",
+            theme: dark ? "github-dark" : "github-light",
+            themeType: dark ? "dark" : "light",
+          }}
+        />
+      ) : null}
+      {rejected.length > 0 ? (
+        <>
+          {items.length > 0 ? (
+            <div className="mon-dim mon-diff-raw-note">
+              {rejected.length} {rejected.length === 1 ? "file" : "files"} shown as raw patch text (not parseable as a
+              clean unified diff):
+            </div>
+          ) : null}
+          <pre className="mon-output mon-diff-raw">{rejected.join("\n")}</pre>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Collapsed-by-default diff block: the summary line carries the honest counts
+ * ("N files, +X/−Y"); the diff view only mounts on first expand, so shiki
+ * never tokenizes patches nobody opened.
+ */
+function CollapsedDiff({
+  patch,
+  summaryText,
+  label,
+  testId,
+}: {
+  patch: string;
+  summaryText?: string;
+  label?: string;
+  testId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const summary = useMemo(() => diffSummaryOf(patch), [patch]);
+  return (
+    <details
+      className="mon-diff"
+      data-testid={testId ?? "monitor-diff"}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="mon-diff-summary">
+        <span className="mon-diff-caret" aria-hidden>
+          ▸
+        </span>
+        {label ? <span className="mon-diff-label mon-mono">{label}</span> : null}
+        <span className="mon-diff-stat mon-mono">{summaryText ?? formatDiffSummary(summary)}</span>
+      </summary>
+      {open ? <PatchDiffView patch={patch} /> : null}
+    </details>
+  );
+}
+
+/**
+ * The node's recorded VCS diff (what this task's attempt changed on disk),
+ * fetched from the gateway's getNodeDiff route. Only settled nodes have one
+ * (the route refuses in-flight attempts); nodes without a recorded diff — the
+ * common case for compute tasks — simply show nothing.
+ */
+function NodeDiffSection({
+  runId,
+  nodeId,
+  iteration,
+  enabled,
+}: {
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  enabled: boolean;
+}) {
+  const [patches, setPatches] = useState<Array<{ path: string; diff: string }>>([]);
+  useEffect(() => {
+    setPatches([]);
+    if (!enabled) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const search = new URLSearchParams({ iteration: String(iteration) });
+        const response = await fetch(
+          `/v1/api/nodes/${encodeURIComponent(runId)}/${encodeURIComponent(nodeId)}/diff?${search}`,
+        );
+        if (!response.ok) return;
+        const body: unknown = await response.json();
+        if (!cancelled) setPatches(diffPatchesOf(body));
+      } catch {
+        // No recorded diff (or a VCS error) just hides the section.
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, nodeId, iteration, enabled]);
+  if (patches.length === 0) return null;
+  const combined = patches.map((patch) => patch.diff).join("\n");
+  const rollup = sumDiffSummaries(patches.map((patch) => diffSummaryOf(patch.diff)));
+  return (
+    <>
+      <h3 className="mon-kicker">Diff</h3>
+      <CollapsedDiff
+        patch={combined}
+        summaryText={formatDiffSummary({ ...rollup, files: patches.length })}
+        testId="monitor-node-diff"
+      />
+    </>
+  );
+}
+
 /** Envelope bookkeeping already shown in the inspector's meta grid. */
 const OUTPUT_RESERVED_KEYS = new Set(["runId", "nodeId", "iteration"]);
 
@@ -1440,6 +1764,8 @@ function OutputFields({ row }: { row: unknown }) {
             <span className="mon-output-key mon-mono">{key}</span>
             {scalar !== undefined ? (
               <span className="mon-output-scalar mon-mono">{scalar}</span>
+            ) : looksLikeUnifiedDiff(value) ? (
+              <CollapsedDiff patch={value as string} testId="monitor-output-diff" />
             ) : (
               <pre className="mon-output-val">{formatOutputValue(value)}</pre>
             )}
@@ -1710,7 +2036,15 @@ function HijackModal({
   );
 }
 
-function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
+function NodeInspector({
+  runId,
+  node,
+  onResult,
+}: {
+  runId: string;
+  node: TreeNode;
+  onResult: (kind: "ok" | "err", text: string) => void;
+}) {
   const nodeId = node.id ?? treeNodeKey(node);
   const output = useGatewayNodeOutput({ runId, nodeId, iteration: node.iteration ?? 0 });
   const row = rowOf(output.data);
@@ -1732,6 +2066,41 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
   // those panels there is pure noise. Leaf kinds keep the full inspector.
   const kind = String(node.kind ?? "").toLowerCase();
   const isContainer = !["task", "agent", "compute", "static"].includes(kind) && (node.children?.length ?? 0) > 0;
+  // Retry affordance: failed leaf tasks get a "Retry task" button. The RPC
+  // resets the node (and everything that ran after it) with the same library
+  // machinery as `smithers retry-task`, then resumes the run — so it is only
+  // enabled once the run itself has settled (a live engine owns its state).
+  const nodeFailed = toneForStatus(node.status) === "failed" && !isContainer;
+  const retryEnabled = canRetryTask(node.status, runStatus);
+  const [retryBusy, setRetryBusy] = useState(false);
+  const retryTask = async () => {
+    const confirmed = window.confirm(
+      `Retry ${nodeId}? This resets the task (and every task that ran after it) and resumes the run.`,
+    );
+    if (!confirmed) return;
+    setRetryBusy(true);
+    try {
+      const response = await fetch(
+        `/v1/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/retry`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ iteration: node.iteration ?? 0 }),
+        },
+      );
+      const body: unknown = await response.json().catch(() => null);
+      const envelope = isRecord(body) ? body : {};
+      if (!response.ok || envelope.ok === false) {
+        const error = isRecord(envelope.error) ? asString(envelope.error.message) : undefined;
+        throw new Error(error ?? `retry failed (${response.status})`);
+      }
+      onResult("ok", `Retry requested for ${nodeId} — the run is resuming.`);
+    } catch (error) {
+      onResult("err", `Retry failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setRetryBusy(false);
+    }
+  };
   const childCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const child of node.children ?? []) {
@@ -1744,6 +2113,22 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
     <aside className="mon-inspector" data-testid="monitor-inspector">
       <header className="mon-panel-head">
         <h2 className="mon-kicker">Node</h2>
+        {nodeFailed ? (
+          <button
+            type="button"
+            className="mon-btn"
+            data-testid="monitor-retry-task"
+            disabled={!retryEnabled || retryBusy}
+            title={
+              retryEnabled
+                ? "Reset this task (and every task that ran after it), then resume the run"
+                : "The run is still executing — pause or cancel it before retrying this task"
+            }
+            onClick={() => void retryTask()}
+          >
+            {retryBusy ? "Retrying…" : "Retry task"}
+          </button>
+        ) : null}
         {hijackAction && candidate ? (
           <button
             type="button"
@@ -1871,6 +2256,7 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
                   : "No output recorded for this node."}
             </div>
           )}
+          <NodeDiffSection runId={runId} nodeId={nodeId} iteration={node.iteration ?? 0} enabled={!isLive} />
         </>
       )}
     </aside>
@@ -1901,7 +2287,7 @@ function RunDetail({
   // The monitor is an operator surface: system workflows' runs show here too,
   // so their UI lookup (Open UI / Create UI) must see them.
   const workflowsQuery = useGatewayWorkflows({ filter: { includeSystem: true } });
-  const [busyAction, setBusyAction] = useState<"cancel" | "resume" | null>(null);
+  const [busyAction, setBusyAction] = useState<"cancel" | "resume" | "pause" | null>(null);
   const [showCustomUi, setShowCustomUi] = useState(false);
   const [creatingUi, setCreatingUi] = useState(false);
   const workflowsRefetch = workflowsQuery.refetch;
@@ -1944,19 +2330,37 @@ function RunDetail({
     (healthState === "stale" || healthState === "orphaned" || healthState === "recovering");
   const progress = runProgress(run.summary);
 
-  const act = async (kind: "cancel" | "resume") => {
+  const act = async (kind: "cancel" | "resume" | "pause") => {
     if (kind === "cancel" && !window.confirm(`Cancel run ${shortRunId(runId)} (${workflowKey})?`)) return;
     setBusyAction(kind);
     try {
       if (kind === "cancel") {
         await actions.cancelRun({ runId });
         onResult("ok", `Cancel requested for ${shortRunId(runId)}. The row updates when the engine confirms.`);
+      } else if (kind === "pause") {
+        // The gateway's pauseRun RPC (POST /v1/api/runs/:id/pause) is a
+        // durable request: the engine stops scheduling, drains in-flight
+        // tasks, then parks the run resumably. Not exposed on the actions
+        // API, so call the REST route directly.
+        const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/pause`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        const body: unknown = await response.json().catch(() => null);
+        const envelope = isRecord(body) ? body : {};
+        if (!response.ok || envelope.ok === false) {
+          const error = isRecord(envelope.error) ? asString(envelope.error.message) : undefined;
+          throw new Error(error ?? `pause failed (${response.status})`);
+        }
+        onResult("ok", `Pause requested for ${shortRunId(runId)} — in-flight tasks drain, then the run parks resumably.`);
       } else {
         await actions.resumeRun({ runId });
         onResult("ok", `Resume requested for ${shortRunId(runId)}.`);
       }
     } catch (error) {
-      onResult("err", `${kind === "cancel" ? "Cancel" : "Resume"} failed: ${error instanceof Error ? error.message : String(error)}`);
+      const verb = kind === "cancel" ? "Cancel" : kind === "pause" ? "Pause" : "Resume";
+      onResult("err", `${verb} failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusyAction(null);
     }
@@ -2016,8 +2420,26 @@ function RunDetail({
             </button>
           ) : null}
           {isResumable(status) ? (
-            <button type="button" className="mon-btn" disabled={busyAction !== null} onClick={() => void act("resume")}>
-              Resume
+            <button
+              type="button"
+              className="mon-btn"
+              data-testid="monitor-resume-run"
+              disabled={busyAction !== null}
+              onClick={() => void act("resume")}
+            >
+              {busyAction === "resume" ? "Resuming…" : "Resume"}
+            </button>
+          ) : null}
+          {isPausable(status) ? (
+            <button
+              type="button"
+              className="mon-btn"
+              data-testid="monitor-pause-run"
+              disabled={busyAction !== null}
+              title="Stop scheduling new tasks, let in-flight tasks finish, then park the run resumably"
+              onClick={() => void act("pause")}
+            >
+              {busyAction === "pause" ? "Pausing…" : "Pause"}
             </button>
           ) : null}
           {isCancellable(status) ? (
@@ -2054,6 +2476,7 @@ function RunDetail({
 
       <ExecutionPanel
         runId={runId}
+        runStatus={status}
         selectedNode={selectedNode}
         onSelectNode={onSelectNode}
         autoSelectNodeId={autoSelectNodeId}
@@ -2213,7 +2636,9 @@ function App() {
           )}
         </div>
 
-        {selectedRunId && selectedNode ? <NodeInspector runId={selectedRunId} node={selectedNode} /> : null}
+        {selectedRunId && selectedNode ? (
+          <NodeInspector runId={selectedRunId} node={selectedNode} onResult={showResult} />
+        ) : null}
       </div>
     </main>
   );
@@ -2374,6 +2799,33 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-tree-main .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); cursor: inherit; }
 .mon-tree.is-static .mon-tree-main { cursor: default; }
 .mon-tree.is-static { opacity: 0.92; }
+
+/* Timeline: one row per (nodeId, iteration), chronological, click to inspect. */
+.mon-timeline { display: flex; flex-direction: column; overflow-y: auto; max-height: 60vh; }
+.mon-timeline-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--r-1); background: none; cursor: pointer; font-size: var(--fs-2); }
+.mon-timeline-row:hover { background: var(--hover); }
+.mon-timeline-row.is-active { background: color-mix(in srgb, var(--brand) 9%, transparent); box-shadow: inset 2px 0 0 var(--brand); }
+.mon-timeline-node { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-timeline-row .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); cursor: inherit; flex: none; }
+.mon-timeline-attempt { flex: none; }
+.mon-timeline-right { display: flex; align-items: baseline; gap: var(--sp-3); margin-left: auto; flex: none; }
+.mon-timeline-duration { font-variant-numeric: tabular-nums; }
+.mon-timeline-when { font-size: var(--fs-1); font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+
+/* Collapsed diff blocks: a one-line "N files, +X/−Y" summary; the syntax-
+   colored diff view (@pierre/diffs) only mounts when expanded. */
+.mon-diff { border: 1px solid var(--border); border-radius: var(--r-2); background: var(--panel); }
+.mon-diff-summary { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); cursor: pointer; list-style: none; font-size: var(--fs-1); font-weight: 600; }
+.mon-diff-summary::-webkit-details-marker { display: none; }
+.mon-diff-summary:hover { background: var(--hover); border-radius: var(--r-2); }
+.mon-diff-caret { color: var(--muted); transition: transform 120ms ease; }
+.mon-diff[open] > .mon-diff-summary .mon-diff-caret { transform: rotate(90deg); }
+.mon-diff[open] > .mon-diff-summary { border-bottom: 1px solid var(--border); border-radius: var(--r-2) var(--r-2) 0 0; }
+.mon-diff-label { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-diff-stat { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mon-diff-view { max-height: 50vh; overflow: auto; padding: var(--sp-1); }
+.mon-diff-raw { border: 0; }
+.mon-diff-raw-note { font-size: var(--fs-1); padding: var(--sp-2) var(--sp-2) 0; }
 
 .mon-scrub { display: flex; align-items: center; gap: var(--sp-2); padding: 0 0 var(--sp-3); }
 .mon-scrub-range { flex: 1; min-width: 120px; accent-color: var(--brand); }

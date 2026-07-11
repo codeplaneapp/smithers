@@ -2,10 +2,16 @@ import { describe, expect, test } from "bun:test";
 import {
   asArray,
   autoExpandKeys,
+  buildTimeline,
+  canRetryTask,
   clampFrameNo,
   diagnoseRun,
+  diffPatchesOf,
+  diffSummaryOf,
   eventViewFor,
   filterRuns,
+  formatDiffSummary,
+  formatDurationMs,
   formatElapsed,
   formatEventLine,
   formatOutputValue,
@@ -18,8 +24,11 @@ import {
   hijackCandidatesOf,
   isCancellable,
   isNotableEvent,
+  isPausable,
   isResumable,
   labelForStatus,
+  looksLikeUnifiedDiff,
+  nodeStateRowsOf,
   nodeSummaryEligible,
   paginateRuns,
   pick,
@@ -28,7 +37,9 @@ import {
   runProgress,
   RUNS_PAGE_SIZE,
   shortRunId,
+  splitPatchText,
   statusOptions,
+  sumDiffSummaries,
   timeAgo,
   toneForStatus,
   treeToXml,
@@ -780,5 +791,197 @@ describe("treeToXml", () => {
   test("escapes XML-hostile characters and tolerates null/empty input", () => {
     expect(treeToXml(null)).toBe("");
     expect(treeToXml({ id: 'a"<b>&c', kind: "task" })).toBe('<Task id="a&quot;&lt;b>&amp;c" />');
+  });
+});
+
+describe("unified diff detection", () => {
+  const gitDiff = [
+    "diff --git a/src/app.ts b/src/app.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/app.ts",
+    "+++ b/src/app.ts",
+    "@@ -1,3 +1,4 @@",
+    " const a = 1;",
+    "-const b = 2;",
+    "+const b = 3;",
+    "+const c = 4;",
+  ].join("\n");
+
+  test("recognizes git and bare unified diffs", () => {
+    expect(looksLikeUnifiedDiff(gitDiff)).toBe(true);
+    expect(looksLikeUnifiedDiff("  \n" + gitDiff)).toBe(true);
+    expect(
+      looksLikeUnifiedDiff("--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-old\n+new"),
+    ).toBe(true);
+  });
+
+  test("rejects prose, JSON, and header pairs without hunks", () => {
+    expect(looksLikeUnifiedDiff(undefined)).toBe(false);
+    expect(looksLikeUnifiedDiff(42)).toBe(false);
+    expect(looksLikeUnifiedDiff("just some text with a + sign")).toBe(false);
+    expect(looksLikeUnifiedDiff('{"diff": "--- separator ---"}')).toBe(false);
+    // ---/+++ pair but no @@ hunk anywhere: not a diff.
+    expect(looksLikeUnifiedDiff("--- before\n+++ after\nno hunks here")).toBe(false);
+  });
+
+  test("diffSummaryOf counts files and content lines, never headers", () => {
+    expect(diffSummaryOf(gitDiff)).toEqual({ files: 1, added: 2, removed: 1 });
+    const two = `${gitDiff}\ndiff --git a/y.ts b/y.ts\n--- a/y.ts\n+++ b/y.ts\n@@ -1 +1 @@\n-x\n+y`;
+    expect(diffSummaryOf(two)).toEqual({ files: 2, added: 3, removed: 2 });
+    // Bare patch without `diff --git` headers counts `+++ ` file headers.
+    expect(diffSummaryOf("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b")).toEqual({ files: 1, added: 1, removed: 1 });
+  });
+
+  test("sumDiffSummaries and formatDiffSummary compose the rollup line", () => {
+    const total = sumDiffSummaries([
+      { files: 1, added: 2, removed: 1 },
+      { files: 1, added: 0, removed: 5 },
+    ]);
+    expect(total).toEqual({ files: 2, added: 2, removed: 6 });
+    expect(formatDiffSummary(total)).toBe("2 files, +2/−6");
+    expect(formatDiffSummary({ files: 1, added: 0, removed: 0 })).toBe("1 file, +0/−0");
+  });
+
+  test("splitPatchText chunks a bundle on diff --git boundaries", () => {
+    const multi = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1 +1 @@",
+      "-x",
+      "+y",
+      "diff --git a/b.ts b/b.ts",
+      "--- a/b.ts",
+      "+++ b/b.ts",
+      "@@ -1 +1 @@",
+      "-p",
+      "+q",
+    ].join("\n");
+    const chunks = splitPatchText(multi);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0].startsWith("diff --git a/a.ts")).toBe(true);
+    expect(chunks[1].startsWith("diff --git a/b.ts")).toBe(true);
+    // Content lines mentioning diff --git (prefixed +/-/space) never split.
+    const tricky = "diff --git a/x b/x\n@@ -1 +1 @@\n+diff --git fake\n context";
+    expect(splitPatchText(tricky)).toHaveLength(1);
+    // Bare patches without headers stay one chunk; blank input yields none.
+    expect(splitPatchText("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b")).toHaveLength(1);
+    expect(splitPatchText("\n \n")).toHaveLength(0);
+  });
+
+  test("diffPatchesOf reads the getNodeDiff envelope and drops malformed rows", () => {
+    const body = {
+      ok: true,
+      data: {
+        seq: 3,
+        baseRef: "abc",
+        patches: [
+          { path: "a.ts", diff: "diff --git a/a.ts b/a.ts" },
+          { path: "broken" },
+          "junk",
+        ],
+      },
+    };
+    expect(diffPatchesOf(body)).toEqual([{ path: "a.ts", diff: "diff --git a/a.ts b/a.ts" }]);
+    expect(diffPatchesOf({ patches: [{ path: "x", diff: "d" }] })).toEqual([{ path: "x", diff: "d" }]);
+    expect(diffPatchesOf(null)).toEqual([]);
+    expect(diffPatchesOf({ ok: false, error: { message: "no diff" } })).toEqual([]);
+  });
+});
+
+describe("timeline", () => {
+  test("nodeStateRowsOf tolerates envelopes, bare arrays, and snake_case rows", () => {
+    const enveloped = nodeStateRowsOf({
+      ok: true,
+      data: [
+        { node_id: "plan", iteration: 0, state: "finished", last_attempt: 1, updated_at_ms: 50, started_at_ms: 10, finished_at_ms: 40, label: "Plan" },
+      ],
+    });
+    expect(enveloped).toEqual([
+      { nodeId: "plan", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 50, label: "Plan", startedAtMs: 10, finishedAtMs: 40 },
+    ]);
+    const bare = nodeStateRowsOf([{ nodeId: "x", state: "failed" }, { state: "no-id" }, "junk"]);
+    expect(bare).toEqual([{ nodeId: "x", iteration: 0, state: "failed" }]);
+    expect(nodeStateRowsOf(undefined)).toEqual([]);
+  });
+
+  test("buildTimeline orders executions chronologically with loops unrolled", () => {
+    const rows = [
+      { nodeId: "review", iteration: 1, state: "finished", startedAtMs: 300, finishedAtMs: 350, updatedAtMs: 350 },
+      { nodeId: "implement", iteration: 0, state: "finished", startedAtMs: 100, finishedAtMs: 200, updatedAtMs: 200 },
+      { nodeId: "review", iteration: 0, state: "failed", startedAtMs: 210, finishedAtMs: 250, updatedAtMs: 250 },
+      // Every _smithers_nodes row carries updatedAtMs from its insert — an
+      // early insert time must NOT float a never-run node to the top.
+      { nodeId: "publish", iteration: 0, state: "pending", updatedAtMs: 5 },
+    ];
+    const timeline = buildTimeline(rows, 1_000);
+    expect(timeline.map((entry) => entry.key)).toEqual(["implement#0", "review#0", "review#1", "publish#0"]);
+    expect(timeline[0].durationMs).toBe(100);
+    expect(timeline[0].endMs).toBe(200);
+    // Never-run rows sink to the end with no invented duration or end time.
+    expect(timeline[3].durationMs).toBeUndefined();
+    expect(timeline[3].endMs).toBeUndefined();
+  });
+
+  test("buildTimeline measures live rows against now and settles on updatedAtMs fallback", () => {
+    const timeline = buildTimeline(
+      [
+        { nodeId: "live", iteration: 0, state: "in-progress", startedAtMs: 400, updatedAtMs: 450 },
+        { nodeId: "settled", iteration: 0, state: "failed", startedAtMs: 100, updatedAtMs: 180 },
+      ],
+      1_000,
+    );
+    const live = timeline.find((entry) => entry.nodeId === "live")!;
+    const settled = timeline.find((entry) => entry.nodeId === "settled")!;
+    expect(live.durationMs).toBe(600);
+    expect(live.endMs).toBeUndefined();
+    // A settled row without finishedAtMs falls back to its last state write.
+    expect(settled.endMs).toBe(180);
+    expect(settled.durationMs).toBe(80);
+  });
+
+  test("buildTimeline breaks start-time ties deterministically by key", () => {
+    const timeline = buildTimeline(
+      [
+        { nodeId: "b", iteration: 0, state: "finished", startedAtMs: 100, finishedAtMs: 110, updatedAtMs: 110 },
+        { nodeId: "a", iteration: 0, state: "finished", startedAtMs: 100, finishedAtMs: 120, updatedAtMs: 120 },
+      ],
+      1_000,
+    );
+    expect(timeline.map((entry) => entry.key)).toEqual(["a#0", "b#0"]);
+  });
+
+  test("formatDurationMs renders compact durations and an honest dash", () => {
+    expect(formatDurationMs(undefined)).toBe("—");
+    expect(formatDurationMs(4_000)).toBe("4s");
+    expect(formatDurationMs(125_000)).toBe("2m 05s");
+    expect(formatDurationMs(3_780_000)).toBe("1h 3m");
+  });
+});
+
+describe("run and task controls", () => {
+  test("isPausable only offers pause for actively running runs", () => {
+    expect(isPausable("running")).toBe(true);
+    expect(isPausable("waiting-approval")).toBe(false);
+    expect(isPausable("paused")).toBe(false);
+    expect(isPausable("failed")).toBe(false);
+    expect(isPausable(undefined)).toBe(false);
+  });
+
+  test("canRetryTask requires a failed node and a settled run", () => {
+    expect(canRetryTask("failed", "failed")).toBe(true);
+    expect(canRetryTask("failed", "finished")).toBe(true);
+    expect(canRetryTask("failed", "cancelled")).toBe(true);
+    expect(canRetryTask("failed", "paused")).toBe(true);
+    expect(canRetryTask("failed", "waiting-quota")).toBe(true);
+    // A live engine owns run state — the gateway RPC would refuse.
+    expect(canRetryTask("failed", "running")).toBe(false);
+    expect(canRetryTask("failed", "waiting-approval")).toBe(false);
+    expect(canRetryTask("failed", "waiting-event")).toBe(false);
+    expect(canRetryTask("failed", "waiting-timer")).toBe(false);
+    // Only failed nodes are retryable.
+    expect(canRetryTask("ok", "failed")).toBe(false);
+    expect(canRetryTask("running", "failed")).toBe(false);
+    expect(canRetryTask(undefined, "failed")).toBe(false);
   });
 });

@@ -459,6 +459,23 @@ export function isResumable(status: string | undefined): boolean {
   return s === "failed" || s === "cancelled" || s === "canceled" || s === "stale" || s === "orphaned" || s === "paused";
 }
 
+/** Pause is a graceful, resumable park — only an actively running run can take it. */
+export function isPausable(status: string | undefined): boolean {
+  return normalizeStatus(status) === "running";
+}
+
+/**
+ * Whether the inspector offers "Retry task" for a node: the node must have
+ * failed, and the run must not be actively executing — the gateway's
+ * retryTask (like `smithers retry-task`) refuses to reset state under a live
+ * engine, so a disabled button with that reason beats a doomed request.
+ */
+export function canRetryTask(nodeStatus: string | undefined, runStatus: string | undefined): boolean {
+  if (toneForStatus(nodeStatus) !== "failed") return false;
+  const s = normalizeStatus(runStatus);
+  return !(s === "running" || s === "waiting-approval" || s === "waiting-event" || s === "waiting-timer");
+}
+
 export type RunProgress = { done: number; failed: number; total: number; fraction: number };
 
 /**
@@ -797,6 +814,218 @@ export function formatOutputValue(value: unknown): string {
     }
   }
   return out.length > OUTPUT_MAX_CHARS ? `${out.slice(0, OUTPUT_MAX_CHARS)}\n… (truncated)` : out;
+}
+
+// ---------------------------------------------------------------------------
+// Unified-diff detection and summary. Output fields sometimes carry a raw
+// `git diff` / unified patch string, and the gateway's getNodeDiff returns
+// per-file patches — both render as a proper diff view behind a collapsed
+// summary ("N files, +X/−Y") instead of a wall of <pre> text.
+// ---------------------------------------------------------------------------
+
+/**
+ * True when a string looks like a unified diff / git patch: a `diff --git`
+ * header, or a `--- `/`+++ ` file-header pair followed by an `@@` hunk. The
+ * pair+hunk requirement keeps prose that merely mentions "--- " honest.
+ */
+export function looksLikeUnifiedDiff(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const text = value.trimStart();
+  if (text.startsWith("diff --git ")) return true;
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length - 2; i += 1) {
+    if (lines[i].startsWith("--- ") && lines[i + 1].startsWith("+++ ")) {
+      for (let j = i + 2; j < lines.length; j += 1) {
+        if (lines[j].startsWith("@@")) return true;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
+export type DiffSummary = { files: number; added: number; removed: number };
+
+/**
+ * Count files and added/removed lines in a unified diff. File count prefers
+ * `diff --git` headers; bare patches count `+++ ` headers instead. Header
+ * lines (`+++`/`---`) never count as content changes.
+ */
+export function diffSummaryOf(patch: string): DiffSummary {
+  let files = 0;
+  let headers = 0;
+  let added = 0;
+  let removed = 0;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("diff --git ")) files += 1;
+    else if (line.startsWith("+++ ")) headers += 1;
+    else if (line.startsWith("+")) added += 1;
+    else if (line.startsWith("---")) continue;
+    else if (line.startsWith("-")) removed += 1;
+  }
+  return { files: files > 0 ? files : Math.max(1, headers), added, removed };
+}
+
+/** Merge per-file summaries (one getNodeDiff patch each) into one rollup. */
+export function sumDiffSummaries(summaries: readonly DiffSummary[]): DiffSummary {
+  return summaries.reduce(
+    (acc, entry) => ({ files: acc.files + entry.files, added: acc.added + entry.added, removed: acc.removed + entry.removed }),
+    { files: 0, added: 0, removed: 0 },
+  );
+}
+
+/** "3 files, +120/−45" (singular-aware, U+2212 minus so −0 reads as a glyph). */
+export function formatDiffSummary(summary: DiffSummary): string {
+  return `${summary.files} ${summary.files === 1 ? "file" : "files"}, +${summary.added}/−${summary.removed}`;
+}
+
+/**
+ * Split a multi-file patch into per-file chunks on `diff --git` boundaries.
+ * Real bundles mix cleanly parseable files with ones @pierre/diffs' strict
+ * hunk parser rejects (binary patches, odd counts) — per-file chunks let the
+ * renderer pretty-print what parses and fall back to raw text for the rest,
+ * instead of one bad file blanking the whole diff.
+ */
+export function splitPatchText(patch: string): string[] {
+  const lines = patch.split("\n");
+  const chunks: string[] = [];
+  let current: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("diff --git ") && current.length > 0) {
+      chunks.push(current.join("\n"));
+      current = [];
+    }
+    current.push(line);
+  }
+  if (current.length > 0 && current.some((line) => line.trim().length > 0)) {
+    chunks.push(current.join("\n"));
+  }
+  return chunks;
+}
+
+/** The patches array out of a getNodeDiff HTTP body (`{ok,data:{patches}}` or a bare bundle). */
+export function diffPatchesOf(body: unknown): Array<{ path: string; diff: string }> {
+  if (!isRecord(body)) return [];
+  const bundle = isRecord(body.data) ? body.data : body;
+  const rows = Array.isArray(bundle.patches) ? bundle.patches : [];
+  const out: Array<{ path: string; diff: string }> = [];
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const path = asString(row.path);
+    const diff = asString(row.diff);
+    if (!path || !diff) continue;
+    out.push({ path, diff });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Timeline: the run's task executions as a chronological flat list, loops
+// unrolled — one entry per (nodeId, iteration). Rows come from the gateway's
+// GET /v1/api/runs/:id/node-states (the run's _smithers_nodes rows with each
+// row's latest-attempt timing attached).
+// ---------------------------------------------------------------------------
+
+export type NodeStateRow = {
+  nodeId: string;
+  iteration: number;
+  state: string;
+  lastAttempt?: number;
+  updatedAtMs?: number;
+  label?: string;
+  startedAtMs?: number;
+  finishedAtMs?: number;
+};
+
+/** Rows out of the node-states HTTP body (`{ok,data:[…]}` or a bare array), snake/camel tolerant. */
+export function nodeStateRowsOf(body: unknown): NodeStateRow[] {
+  const data = isRecord(body) ? body.data : body;
+  const rows = Array.isArray(data) ? data : [];
+  const out: NodeStateRow[] = [];
+  for (const raw of rows) {
+    if (!isRecord(raw)) continue;
+    const nodeId = asString(pick(raw, "nodeId", "node_id"));
+    if (!nodeId) continue;
+    const label = asString(raw.label);
+    const lastAttempt = asNumber(pick(raw, "lastAttempt", "last_attempt"));
+    const updatedAtMs = asNumber(pick(raw, "updatedAtMs", "updated_at_ms"));
+    const startedAtMs = asNumber(pick(raw, "startedAtMs", "started_at_ms"));
+    const finishedAtMs = asNumber(pick(raw, "finishedAtMs", "finished_at_ms"));
+    out.push({
+      nodeId,
+      iteration: asNumber(raw.iteration) ?? 0,
+      state: asString(raw.state) ?? "unknown",
+      ...(lastAttempt !== undefined ? { lastAttempt } : {}),
+      ...(updatedAtMs !== undefined ? { updatedAtMs } : {}),
+      ...(label ? { label } : {}),
+      ...(startedAtMs !== undefined ? { startedAtMs } : {}),
+      ...(finishedAtMs !== undefined ? { finishedAtMs } : {}),
+    });
+  }
+  return out;
+}
+
+export type TimelineEntry = NodeStateRow & {
+  /** Stable row key: `nodeId#iteration`. */
+  key: string;
+  /** When the execution ended (finish time, else last state write for settled rows). */
+  endMs?: number;
+  /** Wall-clock duration; live rows measure against `nowMs`. */
+  durationMs?: number;
+};
+
+/** States that mean the node never actually ran (no execution to place in time). */
+const NEVER_RAN_STATES = new Set(["pending", "queued"]);
+
+/**
+ * Order node-state rows into the timeline: rows that actually started sort by
+ * start time (loops unroll into one entry per iteration); never-run rows
+ * (still pending/queued — every row carries an updatedAtMs from its insert,
+ * which is NOT an execution time) sink to the end in id order. Duration is
+ * only computed from a real start — a live row measures against `nowMs`, a
+ * settled row against its finish (or last update as the honest fallback).
+ */
+export function buildTimeline(rows: readonly NodeStateRow[], nowMs: number): TimelineEntry[] {
+  const sortKeys = new Map<string, number | undefined>();
+  const entries = rows.map((row) => {
+    const tone = toneForStatus(row.state);
+    const settled = tone === "ok" || tone === "failed" || tone === "idle";
+    const endMs = row.finishedAtMs ?? (settled ? row.updatedAtMs : undefined);
+    const durationMs =
+      row.startedAtMs !== undefined
+        ? Math.max(0, (endMs ?? nowMs) - row.startedAtMs)
+        : undefined;
+    const key = `${row.nodeId}#${row.iteration}`;
+    const neverRan = NEVER_RAN_STATES.has(normalizeStatus(row.state)) && row.startedAtMs === undefined;
+    sortKeys.set(key, row.startedAtMs ?? (neverRan ? undefined : row.updatedAtMs));
+    return {
+      ...row,
+      key,
+      ...(endMs !== undefined ? { endMs } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    };
+  });
+  entries.sort((a, b) => {
+    const aStart = sortKeys.get(a.key);
+    const bStart = sortKeys.get(b.key);
+    if (aStart === undefined && bStart === undefined) return a.key.localeCompare(b.key);
+    if (aStart === undefined) return 1;
+    if (bStart === undefined) return -1;
+    if (aStart !== bStart) return aStart - bStart;
+    return a.key.localeCompare(b.key);
+  });
+  return entries;
+}
+
+/** Compact duration for timeline rows: "—" without a start, else 4s / 2m 05s / 1h 3m. */
+export function formatDurationMs(durationMs: number | undefined): string {
+  if (durationMs === undefined) return "—";
+  const totalSec = Math.floor(durationMs / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  if (mins < 60) return `${mins}m ${String(secs).padStart(2, "0")}s`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
 // ---------------------------------------------------------------------------
