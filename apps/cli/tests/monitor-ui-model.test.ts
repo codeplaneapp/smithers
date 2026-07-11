@@ -31,6 +31,7 @@ import {
   statusOptions,
   timeAgo,
   toneForStatus,
+  treeToXml,
   waitTone,
   workflowOptions,
 } from "../src/monitor-ui/monitorModel.ts";
@@ -725,8 +726,8 @@ describe("PTY hijack affordance", () => {
     expect(hijackActionFor("running", true, true)).toEqual({ kind: "hijack", label: "Hijack" });
   });
 
-  test("live run + finished node hides the button (a hijack would park the whole run)", () => {
-    expect(hijackActionFor("running", false, true)).toBeNull();
+  test("live run + finished node reopens the recorded session (post-mortem one lane without waiting for the fleet)", () => {
+    expect(hijackActionFor("running", false, true)).toEqual({ kind: "reopen", label: "Reopen session" });
   });
 
   test("settled runs reopen the recorded session for finished AND failed nodes", () => {
@@ -742,5 +743,42 @@ describe("PTY hijack affordance", () => {
     expect(ptyHijackUrl("https://gw.example", "r", undefined, { cols: 0, rows: Number.NaN })).toBe(
       "wss://gw.example/v1/pty/hijack?runId=r&cols=80&rows=24",
     );
+  });
+});
+
+describe("treeToXml", () => {
+  test("serializes the tree as indented engine-style XML with status attributes", () => {
+    const xml = treeToXml({
+      id: "root",
+      kind: "workflow",
+      name: "ticket-fleet",
+      status: "running",
+      children: [
+        {
+          id: "seq",
+          kind: "sequence",
+          status: "running",
+          children: [
+            { id: "guard-baseline", kind: "task", status: "ok", children: [] },
+            { id: "i531:implement", kind: "task", status: "running", iteration: 1, children: [] },
+          ],
+        },
+      ],
+    });
+    expect(xml).toBe(
+      [
+        '<Workflow id="root" name="ticket-fleet" status="running">',
+        '  <Sequence id="seq" status="running">',
+        '    <Task id="guard-baseline" status="ok" />',
+        '    <Task id="i531:implement" status="running" iteration="1" />',
+        "  </Sequence>",
+        "</Workflow>",
+      ].join("\n"),
+    );
+  });
+
+  test("escapes XML-hostile characters and tolerates null/empty input", () => {
+    expect(treeToXml(null)).toBe("");
+    expect(treeToXml({ id: 'a"<b>&c', kind: "task" })).toBe('<Task id="a&quot;&lt;b>&amp;c" />');
   });
 });

@@ -655,6 +655,44 @@ export function treeNodeKey(node: TreeNodeLike): string {
   return node.key ?? node.id ?? "";
 }
 
+export type XmlTreeNode = TreeNodeLike & {
+  name?: string;
+  kind?: string;
+  iteration?: number;
+  children?: readonly XmlTreeNode[] | null;
+};
+
+function escapeXmlAttr(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+}
+
+function xmlElementName(node: XmlTreeNode): string {
+  const kind = (node.kind ?? "node").replace(/[^a-zA-Z0-9_.-]/g, "");
+  if (!kind) return "Node";
+  return kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+/**
+ * The execution tree as indented XML — the same shape the engine renders and
+ * commits per frame, so the toggle reads like React DevTools' element view.
+ * Works on whatever tree the panel is showing, including scrubbed frames.
+ */
+export function treeToXml(node: XmlTreeNode | null | undefined, depth = 0): string {
+  if (!node) return "";
+  const indent = "  ".repeat(depth);
+  const attrs = [
+    node.id ? ` id="${escapeXmlAttr(String(node.id))}"` : "",
+    node.name && node.name !== node.id ? ` name="${escapeXmlAttr(String(node.name))}"` : "",
+    node.status ? ` status="${escapeXmlAttr(String(node.status))}"` : "",
+    typeof node.iteration === "number" && node.iteration > 0 ? ` iteration="${node.iteration}"` : "",
+  ].join("");
+  const element = xmlElementName(node);
+  const children = (node.children ?? []).filter(Boolean);
+  if (children.length === 0) return `${indent}<${element}${attrs} />`;
+  const inner = children.map((child) => treeToXml(child, depth + 1)).join("\n");
+  return `${indent}<${element}${attrs}>\n${inner}\n${indent}</${element}>`;
+}
+
 /** Containers this many levels deep render expanded even when nothing is live. */
 const AUTO_EXPAND_DEPTH = 2;
 
@@ -810,9 +848,11 @@ export function hijackActionFor(
 ): HijackAction | null {
   if (!hasCandidate) return null;
   const runLive = normalizeStatus(runStatus) === "running";
-  if (runLive) {
-    return nodeLive ? { kind: "hijack", label: "Hijack" } : null;
+  if (runLive && nodeLive) {
+    return { kind: "hijack", label: "Hijack" };
   }
+  // A settled node's recorded session stays reopenable even while the run is
+  // live — post-morteming one lane must not wait for the whole fleet.
   return { kind: "reopen", label: "Reopen session" };
 }
 

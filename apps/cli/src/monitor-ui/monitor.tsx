@@ -62,6 +62,7 @@ import {
   timeAgo,
   toneForStatus,
   treeNodeKey,
+  treeToXml,
   waitTone,
   workflowOptions,
   type HijackCandidate,
@@ -634,6 +635,7 @@ function ExecutionTree({
   autoSelectNodeId,
   onAutoSelected,
   frameOverride,
+  asXml,
 }: {
   runId: string;
   selectedNodeKey: string | undefined;
@@ -647,6 +649,8 @@ function ExecutionTree({
    * is in flight. Absent = live mode, unchanged.
    */
   frameOverride?: { root: TreeNode | null; loading: boolean };
+  /** Render the tree as engine-style XML instead of expandable rows. */
+  asXml?: boolean;
 }) {
   const { root: liveRoot, nodes, isLoading, error } = useGatewayRunTree(runId);
   const isStatic = frameOverride !== undefined;
@@ -683,6 +687,13 @@ function ExecutionTree({
       <div className="mon-empty">
         {isStatic ? (frameOverride.loading ? "Loading frame…" : "No nodes in this frame.") : "No nodes recorded yet."}
       </div>
+    );
+  }
+  if (asXml) {
+    return (
+      <pre className="mon-output mon-tree-xml" data-testid="monitor-tree-xml">
+        {treeToXml(root)}
+      </pre>
     );
   }
   return (
@@ -744,6 +755,7 @@ function ExecutionPanel({
   const [scrubbing, setScrubbing] = useState(false);
   // null = pinned to the latest frame until the user actually scrubs.
   const [frame, setFrame] = useState<number | null>(null);
+  const [asXml, setAsXml] = useState(false);
   // Reset scrub state when switching runs.
   const lastRunId = useRef(runId);
   if (lastRunId.current !== runId) {
@@ -805,6 +817,15 @@ function ExecutionPanel({
         >
           Frames
         </button>
+        <button
+          type="button"
+          className={`mon-chip${asXml ? " is-on" : ""}`}
+          data-testid="monitor-xml-chip"
+          onClick={() => setAsXml((value) => !value)}
+          title="Toggle between the expandable tree and the engine's XML view of the same nodes"
+        >
+          XML
+        </button>
       </header>
       {scrubbing ? (
         <div className="mon-scrub" data-testid="monitor-scrub">
@@ -861,6 +882,7 @@ function ExecutionPanel({
         autoSelectNodeId={autoSelectNodeId}
         onAutoSelected={onAutoSelected}
         frameOverride={scrubbing ? { root: scrubTree, loading: scrubLoading } : undefined}
+        asXml={asXml}
       />
     </section>
   );
@@ -1081,6 +1103,67 @@ function formatLiveTranscriptLine(
 }
 
 /**
+ * AgentSessionEvent rows wrap the agent's own transcript stream (the codex /
+ * claude CLI JSON items). They are by far the densest signal a live node
+ * emits, so surface the useful items — chat text, commands, tool output —
+ * and drop protocol noise. Without these the live panel sat on "No output"
+ * for minutes while the agent was visibly working.
+ */
+function formatSessionTranscriptLine(
+  payload: unknown,
+): { text: string; kind: "cmd" | "text" | "meta" } | null {
+  if (!isRecord(payload)) return null;
+  const transcript = isRecord(payload.transcript) ? payload.transcript : undefined;
+  const raw = transcript && isRecord(transcript.raw) ? transcript.raw : undefined;
+  const item = raw && isRecord(raw.payload) ? raw.payload : undefined;
+  if (!item) return null;
+  const textOf = (value: unknown): string => {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      return value
+        .map((part) =>
+          typeof part === "string" ? part : isRecord(part) && typeof part.text === "string" ? part.text : "",
+        )
+        .filter(Boolean)
+        .join(" ");
+    }
+    if (isRecord(value) && typeof value.text === "string") return value.text;
+    return "";
+  };
+  const itemType = String(item.type ?? "");
+  if (itemType === "message") {
+    const text = textOf(item.content).trim();
+    return text ? { text: text.slice(0, 400), kind: "text" } : null;
+  }
+  if (itemType === "reasoning") return null;
+  if (itemType === "local_shell_call" || itemType === "shell_call") {
+    const action = isRecord(item.action) ? item.action : undefined;
+    const command = action ? textOf(action.command).trim() : "";
+    return command ? { text: `$ ${command.slice(0, 220)}`, kind: "cmd" } : null;
+  }
+  if (itemType === "function_call" || itemType === "custom_tool_call") {
+    const name = typeof item.name === "string" ? item.name : "tool";
+    const args = typeof item.arguments === "string" ? item.arguments : typeof item.input === "string" ? item.input : "";
+    // codex shell calls arrive as a function_call whose arguments hold the command.
+    if (args.includes('"command"')) {
+      try {
+        const parsed: unknown = JSON.parse(args);
+        const command = isRecord(parsed) ? textOf(parsed.command).trim() : "";
+        if (command) return { text: `$ ${command.slice(0, 220)}`, kind: "cmd" };
+      } catch {
+        // fall through to the generic tool line
+      }
+    }
+    return { text: `⚙ ${name}${args ? ` ${args.slice(0, 160)}` : ""}`, kind: "cmd" };
+  }
+  if (itemType.endsWith("_output")) {
+    const text = textOf(item.output).trim();
+    return text ? { text: text.slice(0, 300), kind: "meta" } : null;
+  }
+  return null;
+}
+
+/**
  * Live transcript for an in-flight node. The shared run-event ring drowns any
  * single node on a busy run (16 streaming agents rotate 500 events in
  * seconds), so this polls the gateway's per-node event filter incrementally:
@@ -1117,6 +1200,11 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
           const name = String(raw.event ?? "");
           const seq = asNumber(raw.seq) ?? 0;
           if (seq > afterSeq) afterSeq = seq;
+          if (name === "AgentSessionEvent") {
+            const formatted = formatSessionTranscriptLine(raw.payload);
+            if (formatted) fresh.push({ seq, ...formatted });
+            continue;
+          }
           if (!/AgentEvent|AgentTraceEvent|NodeOutput|ToolCall|task\.output|agent\.|NodeStarted|NodeFinished|NodeFailed|NodeRetrying/i.test(name)) continue;
           const line = formatEventLine({ event: name, seq, payload: raw.payload });
           const text = line.detail.startsWith(`${nodeId} · `) ? line.detail.slice(nodeId.length + 3) : line.detail;
@@ -1570,7 +1658,24 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
           <pre className="mon-output mon-failure">{failure.message}</pre>
         </>
       ) : null}
-      <h3 className="mon-kicker">{isLive ? "Live output" : "Transcript"}</h3>
+      <div className="mon-kicker-row">
+        <h3 className="mon-kicker">{isLive ? "Live output" : "Transcript"}</h3>
+        {hijackAction && candidate ? (
+          <button
+            type="button"
+            className="mon-btn mon-hijack-inline"
+            data-testid="monitor-hijack-inline"
+            title={
+              hijackAction.kind === "hijack"
+                ? `Take over this node's live ${candidate.engine} session in an embedded terminal`
+                : `Reopen this node's recorded ${candidate.engine} session in an embedded terminal`
+            }
+            onClick={() => setShowHijack(true)}
+          >
+            ⌁ {hijackAction.kind === "hijack" ? "Hijack terminal" : "Reopen terminal"}
+          </button>
+        ) : null}
+      </div>
       <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
       <h3 className="mon-kicker">Output</h3>
       {row ? (
@@ -1982,6 +2087,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-chip.is-on { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
 
 .mon-kicker { margin: 0; font-size: var(--fs-1); line-height: var(--lh-tight); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.mon-kicker-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.mon-hijack-inline { flex: none; }
+.mon-tree-xml { max-height: 60vh; font-size: var(--fs-1); }
 .mon-count { font-variant-numeric: tabular-nums; color: var(--text); }
 .mon-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-1); }
 .mon-dim { color: var(--muted); }
