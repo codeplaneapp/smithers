@@ -68,7 +68,7 @@ counts as zero, and lets the destination triggers rebuild them.
 The exported low-level `smithersSnapshots` object still maps the physical table.
 Its schema and inline-write path remain compatible: an inline update over a
 compact row atomically retires its old content reference. New compact rows are
-not self-contained through that raw table, however—their four empty JSON strings
+not self-contained through that raw table, however: their four empty JSON strings
 are markers. Raw-table readers must move to `loadSnapshot`/`loadLatestSnapshot`,
 which return the same hydrated public `Snapshot` shape as before.
 
