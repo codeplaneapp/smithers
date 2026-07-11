@@ -35,6 +35,7 @@
     "@effect/workflow": "^0.18.2",
     "@mdx-js/esbuild": "^3.1.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@pierre/diffs": "^1.2.11",
     "@opentui/core": "^0.4.2",
     "@opentui/react": "^0.4.2",
     "@smithers-orchestrator/accounts": "workspace:*",

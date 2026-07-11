@@ -151,6 +151,7 @@
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@opentui/core": "^0.4.2",
         "@opentui/react": "^0.4.2",
+        "@pierre/diffs": "^1.2.11",
         "@smithers-orchestrator/accounts": "workspace:*",
         "@smithers-orchestrator/agents": "workspace:*",
         "@smithers-orchestrator/components": "workspace:*",
