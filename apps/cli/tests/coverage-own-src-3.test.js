@@ -128,6 +128,7 @@ describe("launchPostFailureAutopsy launch path (injected spawn)", () => {
     test("spawns the autopsy detached and reports the launched run id", () => {
         const { cwd, env } = installedWorkflowEnv();
         const spawnArgs = [];
+        const closedFds = [];
         let errorHandler;
         const lines = [];
         const spawnFn = (cmd, args, options) => {
@@ -144,6 +145,8 @@ describe("launchPostFailureAutopsy launch path (injected spawn)", () => {
             env,
             cliPath: "/fake/index.js",
             spawnFn,
+            openFn: () => 91,
+            closeFn: (fd) => closedFds.push(fd),
             write: (line) => lines.push(line),
         });
         expect(result.launched).toBe(true);
@@ -153,7 +156,9 @@ describe("launchPostFailureAutopsy launch path (injected spawn)", () => {
         expect(spawnArgs[0].args).toContain("up");
         expect(spawnArgs[0].args).toContain("--run-id");
         expect(spawnArgs[0].options).toMatchObject({ detached: true });
+        expect(spawnArgs[0].options.stdio).toEqual(["ignore", 91, 91]);
         expect(spawnArgs[0].options.env.SMITHERS_POST_FAILURE).toBe("0");
+        expect(closedFds).toEqual([91]);
         expect(lines.join("")).toContain("Post-failure autopsy launched");
 
         // The async spawn `error` handler surfaces a late ENOENT on stderr.
@@ -178,14 +183,18 @@ describe("launchPostFailureAutopsy launch path (injected spawn)", () => {
 
     test("a spawn that throws → spawn-failed", () => {
         const { cwd, env } = installedWorkflowEnv();
+        const closedFds = [];
         const result = launchPostFailureAutopsy({
             failedRunId: "failed-2",
             cwd,
             env,
             spawnFn: () => { throw new Error("no execPath"); },
+            openFn: () => 92,
+            closeFn: (fd) => closedFds.push(fd),
             write: () => {},
         });
         expect(result).toEqual({ launched: false, reason: "spawn-failed" });
+        expect(closedFds).toEqual([92]);
     });
 
     test("safeWrite swallows a throwing writer without breaking the launch", () => {

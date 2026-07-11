@@ -169,6 +169,7 @@ export default smithers((ctx) => {
           id="investigate"
           output={outputs.investigate}
           agent={agents.research}
+          retries={1}
           timeoutMs={30 * 60_000}
           deps={{ gather: outputs.gather }}
         >

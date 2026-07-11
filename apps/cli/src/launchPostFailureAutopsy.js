@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { openSync } from "node:fs";
+import { closeSync, openSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { workflowIdFromPath } from "./monitoring-suggestion.js";
@@ -40,6 +40,8 @@ const OPS_WORKFLOW_IDS = new Set([
  *   cwd?: string;
  *   cliPath?: string;
  *   spawnFn?: typeof spawn;
+ *   openFn?: typeof openSync;
+ *   closeFn?: typeof closeSync;
  *   write?: (line: string) => void;
  * }} options
  * @returns {{ launched: true; autopsyRunId: string; logFile: string } | { launched: false; reason: "no-run-id" | "flag-disabled" | "env-disabled" | "ops-workflow" | "not-installed" | "spawn-failed" }}
@@ -52,6 +54,8 @@ export function launchPostFailureAutopsy({
     cwd = process.cwd(),
     cliPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js"),
     spawnFn = spawn,
+    openFn = openSync,
+    closeFn = closeSync,
     write = (line) => process.stderr.write(line),
 }) {
     if (!failedRunId)
@@ -77,8 +81,9 @@ export function launchPostFailureAutopsy({
         workflowPath: workflowPath ? resolve(cwd, workflowPath) : null,
     });
     const logFile = resolve(dirname(entryFile), `${autopsyRunId}.log`);
+    let fd;
     try {
-        const fd = openSync(logFile, "a");
+        fd = openFn(logFile, "a");
         const child = spawnFn(process.execPath, [cliPath, "up", entryFile, "--run-id", autopsyRunId, "--input", input], {
             cwd,
             detached: true,
@@ -98,6 +103,19 @@ export function launchPostFailureAutopsy({
     }
     catch {
         return { launched: false, reason: "spawn-failed" };
+    }
+    finally {
+        // spawn() duplicates the descriptor into the child synchronously. The
+        // launcher owns the original and must release it even when spawn throws;
+        // otherwise a long-lived caller leaks one log descriptor per autopsy.
+        if (fd !== undefined) {
+            try {
+                closeFn(fd);
+            }
+            catch {
+                // Best-effort cleanup must not mask the failed run.
+            }
+        }
     }
     safeWrite(write, `[smithers] Run failed. Post-failure autopsy launched: ${autopsyRunId}. Watch it with \`smithers inspect ${autopsyRunId}\` (opt out with --no-post-failure or SMITHERS_POST_FAILURE=0).\n`);
     return { launched: true, autopsyRunId, logFile };
