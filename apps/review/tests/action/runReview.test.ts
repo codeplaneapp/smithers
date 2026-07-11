@@ -17,6 +17,16 @@ const boundary = {
   capturePath: join(tmpdir(), "capture.json"),
   outputDir: tmpdir(),
 };
+const directSpawnRuntime = {
+  prepareIsolatedUser: () => undefined,
+  restoreOutputOwnership: () => {
+    throw new Error("direct-spawn test runtime must not restore sandbox ownership");
+  },
+};
+
+function runReviewFixture(input: Parameters<typeof runReview>[0]): Promise<number> {
+  return runReview(input, directSpawnRuntime);
+}
 
 afterEach(() => {
   delete process.env.SMITHERS_FAKE_BUN_LOG;
@@ -79,7 +89,7 @@ describe("runReview", () => {
   });
 
   test("resolves with 0 when the process exits 0", async () => {
-    const code = await runReview({
+    const code = await runReviewFixture({
       ...boundary,
       // smithersRoot must be a real directory (spawn cwd must exist)
       smithersRoot: tmpdir(),
@@ -93,7 +103,7 @@ describe("runReview", () => {
 
   test("resolves with non-zero when the process exits non-zero", async () => {
     process.env.SMITHERS_FAKE_BUN_EXIT = "7";
-    const code = await runReview({
+    const code = await runReviewFixture({
       ...boundary,
       smithersRoot: tmpdir(),
       workspace: tmpdir(),
@@ -109,7 +119,7 @@ describe("runReview", () => {
     const log = join(tmp, "bun-log.json");
     process.env.SMITHERS_FAKE_BUN_LOG = log;
     try {
-      await runReview({
+      await runReviewFixture({
         ...boundary,
         smithersRoot: tmp,
         workspace: tmpdir(),
@@ -130,7 +140,7 @@ describe("runReview", () => {
     const log = join(tmp, "bun-log.json");
     process.env.SMITHERS_FAKE_BUN_LOG = log;
     try {
-      await runReview({
+      await runReviewFixture({
         ...boundary,
         smithersRoot: tmp,
         workspace: "/some/workspace",
@@ -153,7 +163,7 @@ describe("runReview", () => {
     const log = join(tmp, "bun-log.json");
     process.env.SMITHERS_FAKE_BUN_LOG = log;
     try {
-      await runReview({
+      await runReviewFixture({
         ...boundary,
         smithersRoot: tmp,
         workspace: "/some/workspace",
@@ -165,7 +175,7 @@ describe("runReview", () => {
       let logged = (await Bun.file(log).json()) as { args: string[] };
       expect(logged.args.slice(-2)).toEqual(["--quiz", "on"]);
 
-      await runReview({
+      await runReviewFixture({
         ...boundary,
         smithersRoot: tmp,
         workspace: "/some/workspace",
@@ -185,7 +195,7 @@ describe("runReview", () => {
     const log = join(tmp, "bun-log.json");
     process.env.SMITHERS_FAKE_BUN_LOG = log;
     try {
-      await runReview({
+      await runReviewFixture({
         ...boundary,
         smithersRoot: tmp,
         workspace: "/some/workspace",

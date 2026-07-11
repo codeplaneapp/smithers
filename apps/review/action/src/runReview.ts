@@ -108,6 +108,16 @@ function restoreOutputOwnership(outputDir: string): void {
   execFileSync("sudo", ["-n", "chown", "-R", `${uid}:${gid}`, outputDir], { stdio: "ignore" });
 }
 
+export interface RunReviewRuntime {
+  prepareIsolatedUser(outputDir: string): string | undefined;
+  restoreOutputOwnership(outputDir: string): void;
+}
+
+const productionRuntime: RunReviewRuntime = {
+  prepareIsolatedUser,
+  restoreOutputOwnership,
+};
+
 /**
  * Spawn the smithers review CLI against a workspace checkout with proxy-mode
  * env (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`). Walkthrough publishing is
@@ -135,7 +145,10 @@ export interface RunReviewInput {
   summaryPath?: string;
 }
 
-export async function runReview(input: RunReviewInput): Promise<number> {
+export async function runReview(
+  input: RunReviewInput,
+  runtime: RunReviewRuntime = productionRuntime,
+): Promise<number> {
   const cliPath = join(input.smithersRoot, "apps", "review", "src", "cli", "main.ts");
   const args = [
     cliPath,
@@ -177,7 +190,7 @@ export async function runReview(input: RunReviewInput): Promise<number> {
         ...(input.summaryPath ? { SMITHERS_REVIEW_SUMMARY_PATH: input.summaryPath } : {}),
       },
     });
-    const sandboxUser = prepareIsolatedUser(input.outputDir);
+    const sandboxUser = runtime.prepareIsolatedUser(input.outputDir);
     const invocation = buildReviewSpawnCommand({
       bunPath: input.bunPath ?? "bun",
       args,
@@ -213,7 +226,7 @@ export async function runReview(input: RunReviewInput): Promise<number> {
       settled = true;
       resumeCommands();
       try {
-        if (sandboxUser) restoreOutputOwnership(input.outputDir);
+        if (sandboxUser) runtime.restoreOutputOwnership(input.outputDir);
       } catch {
         // Preserve the spawn failure, which is the primary cause.
       }
@@ -224,7 +237,7 @@ export async function runReview(input: RunReviewInput): Promise<number> {
       settled = true;
       resumeCommands();
       try {
-        if (sandboxUser) restoreOutputOwnership(input.outputDir);
+        if (sandboxUser) runtime.restoreOutputOwnership(input.outputDir);
         resolve(code ?? 1);
       } catch (error) {
         reject(error);
