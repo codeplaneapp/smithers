@@ -62,7 +62,6 @@ import {
   timeAgo,
   toneForStatus,
   treeNodeKey,
-  treeToXml,
   waitTone,
   workflowOptions,
   type HijackCandidate,
@@ -559,6 +558,123 @@ type TreeNode = TreeNodeLike & {
   children?: TreeNode[] | null;
 };
 
+/**
+ * React-DevTools-style XML rendering of the execution tree: colored tags and
+ * attributes, clickable chevrons, click-to-inspect — sharing the exact same
+ * expansion state as the row view so toggling XML never loses your place.
+ */
+function XmlRow({
+  node,
+  depth,
+  expandedOverrides,
+  defaults,
+  selectedNodeKey,
+  onToggle,
+  onSelect,
+  selectDisabled,
+}: {
+  node: TreeNode;
+  depth: number;
+  expandedOverrides: ReadonlyMap<string, boolean>;
+  defaults: ReadonlySet<string>;
+  selectedNodeKey: string | undefined;
+  onToggle: (key: string) => void;
+  onSelect: (node: TreeNode) => void;
+  selectDisabled?: boolean;
+}) {
+  const key = treeNodeKey(node);
+  const children = (node.children ?? []) as TreeNode[];
+  const expanded = expandedOverrides.get(key) ?? defaults.has(key);
+  const kind = (node.kind ?? "node").replace(/[^a-zA-Z0-9_.-]/g, "") || "Node";
+  const tag = kind.charAt(0).toUpperCase() + kind.slice(1);
+  const status = asString(node.status);
+  const name = asString(node.name);
+  const openTag = (
+    <button
+      type="button"
+      className="mon-xml-open"
+      onClick={selectDisabled ? undefined : () => onSelect(node)}
+      aria-disabled={selectDisabled || undefined}
+    >
+      <span className="mon-xml-punct">&lt;</span>
+      <span className="mon-xml-tag">{tag}</span>
+      {node.id ? (
+        <span className="mon-xml-attr">
+          {" "}
+          <span className="mon-xml-attr-name">id</span>=<span className="mon-xml-str">"{node.id}"</span>
+        </span>
+      ) : null}
+      {name && name !== node.id ? (
+        <span className="mon-xml-attr">
+          {" "}
+          <span className="mon-xml-attr-name">name</span>=<span className="mon-xml-str">"{name}"</span>
+        </span>
+      ) : null}
+      {status ? (
+        <span className="mon-xml-attr">
+          {" "}
+          <span className="mon-xml-attr-name">status</span>=
+          <span className={`mon-xml-status tone-${toneForStatus(status)}`}>"{status}"</span>
+        </span>
+      ) : null}
+      {typeof node.iteration === "number" && node.iteration > 0 ? (
+        <span className="mon-xml-attr">
+          {" "}
+          <span className="mon-xml-attr-name">iteration</span>=<span className="mon-xml-str">"{node.iteration}"</span>
+        </span>
+      ) : null}
+      <span className="mon-xml-punct">{children.length === 0 ? " />" : expanded ? ">" : ""}</span>
+      {children.length > 0 && !expanded ? (
+        <span className="mon-xml-punct">
+          &gt;<span className="mon-xml-ellipsis">…</span>&lt;/<span className="mon-xml-tag">{tag}</span>&gt;
+        </span>
+      ) : null}
+    </button>
+  );
+  return (
+    <>
+      <div
+        className={`mon-xml-row${key === selectedNodeKey ? " is-active" : ""}`}
+        style={{ paddingLeft: 8 + depth * 16 }}
+      >
+        {children.length > 0 ? (
+          <button type="button" className="mon-tree-chevron" onClick={() => onToggle(key)} aria-label="Toggle">
+            {expanded ? "▾" : "▸"}
+          </button>
+        ) : (
+          <span className="mon-tree-chevron mon-dim" aria-hidden>
+            ·
+          </span>
+        )}
+        {openTag}
+      </div>
+      {expanded && children.length > 0 ? (
+        <>
+          {children.map((child) => (
+            <XmlRow
+              key={treeNodeKey(child)}
+              node={child}
+              depth={depth + 1}
+              expandedOverrides={expandedOverrides}
+              defaults={defaults}
+              selectedNodeKey={selectedNodeKey}
+              onToggle={onToggle}
+              onSelect={onSelect}
+              selectDisabled={selectDisabled}
+            />
+          ))}
+          <div className="mon-xml-row" style={{ paddingLeft: 8 + depth * 16 }}>
+            <span className="mon-tree-chevron" aria-hidden />
+            <span className="mon-xml-punct">
+              &lt;/<span className="mon-xml-tag">{tag}</span>&gt;
+            </span>
+          </div>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 function TreeRow({
   node,
   depth,
@@ -702,9 +818,25 @@ function ExecutionTree({
   }
   if (asXml) {
     return (
-      <pre className="mon-output mon-tree-xml" data-testid="monitor-tree-xml">
-        {treeToXml(root)}
-      </pre>
+      <div role="tree" className={`mon-tree mon-tree-xml${isStatic ? " is-static" : ""}`} data-testid="monitor-tree-xml">
+        <XmlRow
+          node={root}
+          depth={0}
+          expandedOverrides={overrides}
+          defaults={defaults}
+          selectedNodeKey={selectedNodeKey}
+          onToggle={(key) =>
+            setOverrides((prev) => {
+              const next = new Map(prev);
+              const current = next.get(key) ?? defaults.has(key);
+              next.set(key, !current);
+              return next;
+            })
+          }
+          onSelect={onSelectNode}
+          selectDisabled={isStatic}
+        />
+      </div>
     );
   }
   return (
@@ -2147,7 +2279,17 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-child-stat { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-1); }
 .mon-container-note { font-size: var(--fs-1); }
 .mon-hijack-inline { flex: none; }
-.mon-tree-xml { max-height: 60vh; font-size: var(--fs-1); }
+.mon-tree-xml { font-family: var(--mono, ui-monospace, monospace); }
+.mon-xml-row { display: flex; align-items: baseline; gap: 2px; line-height: 1.7; }
+.mon-xml-row.is-active { background: color-mix(in srgb, var(--brand) 12%, transparent); border-radius: var(--r-1); }
+.mon-xml-open { display: inline; border: 0; background: none; padding: 0; margin: 0; cursor: pointer; font: inherit; text-align: left; color: inherit; }
+.mon-xml-open:hover .mon-xml-tag { text-decoration: underline; }
+.mon-xml-punct { color: var(--dim); }
+.mon-xml-tag { color: var(--brand); }
+.mon-xml-attr-name { color: var(--muted); }
+.mon-xml-str { color: var(--ok); }
+.mon-xml-status { color: var(--tone, var(--ok)); }
+.mon-xml-ellipsis { color: var(--muted); padding: 0 2px; }
 .mon-count { font-variant-numeric: tabular-nums; color: var(--text); }
 .mon-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-1); }
 .mon-dim { color: var(--muted); }

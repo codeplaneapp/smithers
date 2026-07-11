@@ -624,7 +624,12 @@ function eventDetailParts(name: string, payload: Record<string, unknown>): Array
     const stream = asString(payload.stream);
     return [stream === "stderr" ? "stderr" : undefined, snippet(payload.text ?? payload.output)];
   }
-  if (name === "NodeFailed" || name === "node.failed" || name === "RunFailed" || name === "run.completed") {
+  // run.completed carries both the live `state` and the final `status`; the
+  // final status is the verdict, so surface it even when a state was shown.
+  if (name === "run.completed") {
+    return [asString(payload.status), errorSnippet(payload.error)];
+  }
+  if (name === "NodeFailed" || name === "node.failed" || name === "RunFailed") {
     return [errorSnippet(payload.error)];
   }
   return [];
