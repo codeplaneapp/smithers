@@ -29,6 +29,8 @@ const BADGE_LABELS: Record<string, string> = {
   "best-value-coding": "Best value coding",
 };
 
+const REQUIRED_ROUTING_SLOTS = ["luna", "terra", "sol", "fable"] as const;
+
 const ROLES = [
   "orchestrator",
   "planning",
@@ -69,6 +71,13 @@ type SotaRegistry = {
   version: number;
   updatedAt: string;
   policy: string[];
+  routing: {
+    slots: Record<string, string>;
+    intro: string;
+    workflowDefault: string;
+    fableGuidance: string;
+    situations: Array<{ start: string; when: string; escalate: string }>;
+  };
   models: SotaModel[];
 };
 
@@ -108,6 +117,29 @@ export function validateRegistry(registry: SotaRegistry): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(registry.updatedAt)) {
     throw new Error(`registry updatedAt must be YYYY-MM-DD, got ${registry.updatedAt}`);
   }
+  if (!registry.routing || typeof registry.routing !== "object") throw new Error("registry routing is required");
+  for (const name of REQUIRED_ROUTING_SLOTS) {
+    if (typeof registry.routing.slots?.[name] !== "string" || !registry.routing.slots[name].trim()) {
+      throw new Error(`routing slot ${name} is required`);
+    }
+  }
+  for (const [name, text] of Object.entries({
+    intro: registry.routing.intro,
+    workflowDefault: registry.routing.workflowDefault,
+    fableGuidance: registry.routing.fableGuidance,
+  })) {
+    if (typeof text !== "string" || !text.trim()) throw new Error(`routing ${name} must be non-empty text`);
+  }
+  if (!Array.isArray(registry.routing.situations) || registry.routing.situations.length === 0) {
+    throw new Error("routing situations are required");
+  }
+  for (const [index, situation] of registry.routing.situations.entries()) {
+    if (
+      typeof situation?.start !== "string" || !situation.start.trim() ||
+      typeof situation?.when !== "string" || !situation.when.trim() ||
+      typeof situation?.escalate !== "string" || !situation.escalate.trim()
+    ) throw new Error(`routing situation ${index} must have non-empty start, when, and escalate text`);
+  }
   const ids = new Set<string>();
   const slots = new Set<string>();
   const badges = new Set<string>();
@@ -138,6 +170,16 @@ export function validateRegistry(registry: SotaRegistry): void {
       throw new Error(`deprecated model ${model.id} needs replacedBy`);
     }
     if (!model.description?.trim()) throw new Error(`model ${model.id} needs a description`);
+  }
+  for (const [name, slot] of Object.entries(registry.routing.slots)) {
+    if (!slots.has(slot)) throw new Error(`routing slot ${name} references unknown slot ${slot}`);
+    const model = registry.models.find((m) => m.slot === slot);
+    if (!model || model.status === "deprecated") throw new Error(`routing slot ${name} must reference an active model`);
+  }
+  for (const situation of registry.routing.situations) {
+    if (!registry.routing.slots[situation.start]) {
+      throw new Error(`routing situation references unknown routing slot ${situation.start}`);
+    }
   }
   for (const model of registry.models) {
     if (model.replacedBy) {
@@ -260,7 +302,7 @@ function renderMdx(registry: SotaRegistry, benchmarks: Benchmark[]): string {
   lines.push("## Role defaults");
   lines.push("");
   lines.push(
-    "The Codex-first workflow tiers (see the [workflow optimization guide](/guides/workflow-optimization)) resolve to these ids:",
+    "The Codex-first workflow tiers resolve to these ids; see [Recipes](/recipes) for practical workflow patterns:",
   );
   lines.push("");
   lines.push("| Role | Default model |");
@@ -269,6 +311,40 @@ function renderMdx(registry: SotaRegistry, benchmarks: Benchmark[]): string {
   for (const role of ROLES) {
     if (defaults[role]) lines.push(`| ${role} | \`${defaults[role]}\` |`);
   }
+  lines.push("");
+  lines.push("### How to choose a tier");
+  lines.push("");
+  lines.push(
+    `The role table is a starting policy, not a claim that every task belongs to one model. ${registry.routing.intro}`,
+  );
+  lines.push("");
+  lines.push("| Situation | Start with | Escalate when |");
+  lines.push("| --- | --- | --- |");
+  for (const situation of registry.routing.situations) {
+    const slot = registry.routing.slots[situation.start];
+    const model = registry.models.find((candidate) => candidate.slot === slot);
+    if (!model) throw new Error(`missing routing model for ${situation.start}`);
+    lines.push(`| ${situation.when} | \`${model.id}\` | ${situation.escalate} |`);
+  }
+  lines.push("");
+  lines.push(registry.routing.workflowDefault);
+  lines.push("");
+  lines.push("```tsx");
+  const routingId = (name: string): string => {
+    const slot = registry.routing.slots[name];
+    const model = registry.models.find((candidate) => candidate.slot === slot);
+    if (!model) throw new Error(`missing routing model for ${name}`);
+    return model.id;
+  };
+  lines.push(`const researcher = new CodexAgent({ model: "${routingId("luna")}", config: { model_reasoning_effort: "medium" } });`);
+  lines.push(`const implementer = new CodexAgent({ model: "${routingId("luna")}", config: { model_reasoning_effort: "medium" } });`);
+  lines.push(`const validator = new CodexAgent({ model: "${routingId("terra")}" });`);
+  lines.push(`const reviewer = new CodexAgent({ model: "${routingId("sol")}" });`);
+  lines.push(`const fableFallback = new ClaudeCodeAgent({ model: "${routingId("fable")}" });`);
+  lines.push("const smartFallbackChain = [reviewer, fableFallback];");
+  lines.push("```");
+  lines.push("");
+  lines.push(`${registry.routing.fableGuidance} See [Anthropic's Fable 5 announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5) and [July redeployment update](https://www.anthropic.com/news/redeploying-fable-5).`);
   const providers = [...new Set(active(registry).map((m) => m.provider))];
   for (const provider of providers) {
     lines.push("");

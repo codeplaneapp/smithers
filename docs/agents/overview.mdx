@@ -122,12 +122,15 @@ generated workflow pool starts with Codex and pins the model tier to the job:
 | Work | Default model |
 |---|---|
 | Planning, orchestration, review, and the hardest reasoning | `gpt-5.6-sol` |
-| Mid-tier judgment, validation, and tool-focused work | `gpt-5.6-terra` |
-| **All implementation**, research, and cheap or high-volume work | `gpt-5.6-luna` |
+| Mid-tier judgment, validation, or tool-heavy work that needs extra checking | `gpt-5.6-terra` |
+| **Research, implementation, ordinary tool use, UI, and routine-to-substantial execution** | `gpt-5.6-luna` |
 
-Luna remains the implementation default even for large changes; Sol is reserved
-for planning, orchestration, and review. Smithers uses the exact tier IDs above,
-not the floating `gpt-5.6` alias.
+Start with Luna for most work, including substantial implementation and
+ordinary tool use; size alone does not promote a task to Sol. Escalate to Terra
+for stronger validation or structured tool-heavy judgment, and to Sol for
+ambiguity, high-stakes decisions, novel architecture, orchestration, final
+review, or repeated failure. Smithers uses the exact tier IDs above, not the
+floating `gpt-5.6` alias. See [SOTA role defaults](/reference/sota-models#role-defaults).
 
 Claude Code, Kimi, Gemini, and the other adapters remain supported as later
 entries in the runtime failover chain. A healthy Codex attempt completes before

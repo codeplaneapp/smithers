@@ -207,6 +207,30 @@ describe("the checked-in registry", () => {
 });
 
 describe("validateRegistry", () => {
+  for (const slot of ["luna", "terra", "sol", "fable"] as const) {
+    test(`requires routing slot ${slot}`, () => {
+      const registry = loadRegistry();
+      delete registry.routing.slots[slot];
+      expect(() => validateRegistry(registry)).toThrow(new RegExp(`routing slot ${slot} is required`));
+    });
+  }
+
+  for (const name of ["intro", "workflowDefault", "fableGuidance"] as const) {
+    test(`requires routing text ${name}`, () => {
+      const registry = loadRegistry();
+      registry.routing[name] = "";
+      expect(() => validateRegistry(registry)).toThrow(new RegExp(`routing ${name} must be non-empty text`));
+    });
+  }
+
+  for (const field of ["start", "when", "escalate"] as const) {
+    test(`requires routing situation ${field}`, () => {
+      const registry = loadRegistry();
+      registry.routing.situations[0][field] = "";
+      expect(() => validateRegistry(registry)).toThrow(/routing situation 0/);
+    });
+  }
+
   test("rejects a duplicate badge holder", () => {
     const registry = loadRegistry();
     registry.models.find((m: { id: string }) => m.id === "gpt-5.5").badges = ["best-ui"];

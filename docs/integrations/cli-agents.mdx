@@ -71,14 +71,16 @@ generated pools start with Codex workers using exact model pins:
 | Work | Model |
 |---|---|
 | Planning, orchestration, review, and the hardest reasoning | `gpt-5.6-sol` |
-| Mid-tier judgment, validation, and tool-focused work | `gpt-5.6-terra` |
-| **All implementation**, research, and cheap or high-volume work | `gpt-5.6-luna` |
+| Mid-tier judgment, validation, or tool-heavy work that needs extra checking | `gpt-5.6-terra` |
+| **Research, implementation, ordinary tool use, UI, and routine-to-substantial execution** | `gpt-5.6-luna` |
 
-Luna remains the implementation model regardless of change size. Claude Code,
-Kimi, Antigravity, and the other CLI adapters stay later in the sequential
-runtime chains and run only after every Codex attempt fails. Directly
-constructing an agent is an explicit choice and bypasses that automatic routing
-policy.
+Start with Luna for most work, including substantial implementation and
+ordinary tool use; change size alone does not require Sol. Escalate to Terra
+for stronger validation or structured tool-heavy judgment, and to Sol for
+ambiguity, high-stakes decisions, novel architecture, orchestration, final
+review, or repeated failure. Other adapters stay later in automatic sequential
+fallback chains, while an explicitly constructed provider agent remains a
+deliberate choice. See [SOTA role defaults](/reference/sota-models#role-defaults).
 
 ## Codex CLI Agent
 

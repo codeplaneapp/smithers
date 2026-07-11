@@ -21,13 +21,18 @@ Smithers pins each Codex worker to the tier that matches its role:
 | Work | Model |
 |---|---|
 | Planning, orchestration, review, and the hardest reasoning | [`gpt-5.6-sol`](https://developers.openai.com/api/docs/models/gpt-5.6-sol) |
-| Mid-tier judgment, validation, and tool-focused work | [`gpt-5.6-terra`](https://developers.openai.com/api/docs/models/gpt-5.6-terra) |
-| **All implementation**, research, and cheap or high-volume work | [`gpt-5.6-luna`](https://developers.openai.com/api/docs/models/gpt-5.6-luna) |
+| Mid-tier judgment, validation, or tool-heavy work that needs extra checking | [`gpt-5.6-terra`](https://developers.openai.com/api/docs/models/gpt-5.6-terra) |
+| **Research, implementation, ordinary tool use, UI, and routine-to-substantial execution** | [`gpt-5.6-luna`](https://developers.openai.com/api/docs/models/gpt-5.6-luna) |
 
-Use the exact tier IDs rather than the floating `gpt-5.6` alias. When usable
-Codex authentication is present, generated Smithers workflows put these Codex
-workers first. Other agent adapters remain later runtime fallbacks and run only
-when Codex cannot complete the task.
+Use the exact tier IDs rather than the floating `gpt-5.6` alias. Start with
+Luna for most research, implementation, ordinary tool use, and substantial
+execution; size alone does not require Sol. Escalate to Terra for stronger
+validation or structured tool-heavy judgment, and to Sol for ambiguity,
+high-stakes decisions, novel architecture, orchestration, final review, or
+repeated failure. When usable Codex authentication is present, generated
+Smithers workflows put these Codex workers first. Other adapters remain later
+runtime fallbacks and run only when the Codex attempt is unavailable or fails.
+See [SOTA role defaults](/reference/sota-models#role-defaults).
 
 ## Smithers docs in Codex
 

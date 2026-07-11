@@ -11,19 +11,30 @@ If you want a ready-to-run outcome before writing workflow code, start with [Sta
 
 ## Default model routing
 
-Smithers-generated workflows use Codex exclusively when usable Codex
-authentication is available. Pin the tier to the role:
+Smithers-generated workflows are Codex-first when usable Codex authentication
+is available. GPT-5.6 Luna is now the broad default: start with
+it for research, implementation, ordinary tool use, UI work, and routine-to-
+substantial execution, then escalate only when the task earns the extra cost or
+judgment. Pin the tier to the role:
 
 | Work | Model |
 |---|---|
-| Planning, orchestration, review, and the hardest reasoning | `gpt-5.6-sol` |
-| Mid-tier judgment, validation, and tool-focused work | `gpt-5.6-terra` |
-| **All implementation**, research, and cheap or high-volume work | `gpt-5.6-luna` |
+| Research, implementation, ordinary tool use, UI, and routine-to-substantial execution | `gpt-5.6-luna` |
+| Explicitly tool-heavy validation or higher-judgment escalation | `gpt-5.6-terra` |
+| Planning, orchestration, final review, and the hardest reasoning | `gpt-5.6-sol` |
 
-Luna remains the implementation model for large changes; implementation size
-does not promote it to Sol. Non-Codex adapters are automatic fallbacks only when
-Codex is unavailable. Explicit provider-specific workflows continue to run as
-written.
+Luna remains the first implementation, research, and ordinary tool-use model
+even for large or substantial changes; size alone does not promote it to Sol.
+Escalate to Terra only for explicitly tool-heavy validation or higher-judgment
+checking, and to Sol for
+ambiguous architecture, final review, high-stakes decisions, or repeated Luna
+failure. Non-Codex adapters are later sequential fallbacks when earlier Codex
+agents are unavailable or fail; they are not parallel peers or a second opinion
+on every run. `claude-fable-5` is the configured smart-role fallback or an
+intentional Claude-native specialist. Explicit provider-specific workflows
+continue to run as written. See the
+[SOTA model registry](/reference/sota-models#role-defaults) for the decision
+rules and primary release links.
 
 ## Implement → review loop
 

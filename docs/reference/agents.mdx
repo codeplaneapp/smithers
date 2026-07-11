@@ -192,12 +192,14 @@ omit `model`, the underlying CLI picks its own default. Each class adds a few
 vendor-specific options on top of the shared base below.
 
 <Note>
-Smithers-generated workflows are Codex-first: Sol (`gpt-5.6-sol`) handles
-planning, orchestration, and review; Terra (`gpt-5.6-terra`) handles mid-tier
-judgment, validation, and tool work; Luna (`gpt-5.6-luna`) handles every
-implementation task, research, and cheap work. Non-Codex CLI agents enter
-automatic pools only when Codex is unavailable. Explicitly constructed agents
-always run as written.
+Smithers-generated workflows are Codex-first: start Luna (`gpt-5.6-luna`) for
+research, implementation, ordinary tool use, UI, and routine-to-substantial
+execution. Escalate to Terra (`gpt-5.6-terra`) for stronger validation,
+structured checking, or tool-heavy judgment; use Sol (`gpt-5.6-sol`) for
+ambiguity, high-stakes decisions, novel architecture, orchestration, final
+review, or repeated failure. Non-Codex CLI agents enter automatic pools only
+when Codex is unavailable or fails; explicitly constructed agents always run as
+written. See [SOTA role defaults](/reference/sota-models#role-defaults).
 </Note>
 
 ```tsx

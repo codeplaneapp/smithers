@@ -4,9 +4,9 @@
 // default. Code refers to stable slots (codexSol, codexTerra, codex, ...) so a model
 // bump is a registry edit, not a code change. See docs/reference/sota-models.mdx.
 
-export const SOTA_REGISTRY_VERSION = 2;
+export const SOTA_REGISTRY_VERSION = 3;
 
-export const SOTA_REGISTRY_UPDATED_AT = "2026-07-09";
+export const SOTA_REGISTRY_UPDATED_AT = "2026-07-10";
 
 /** Stable handle → current best model id for that seat. */
 export const SOTA_SLOTS = Object.freeze({
@@ -71,7 +71,7 @@ export const SOTA_MODELS = Object.freeze([
       "review",
       "smart"
     ],
-    "description": "Anthropic's Mythos-class frontier model and the strongest non-Codex fallback for planning, code review, and orchestration. Smithers selects it only when Codex is unavailable."
+    "description": "Anthropic's Mythos-class model for ambitious, long, complex knowledge and coding work. Developers can use `claude-fable-5` through the Claude API at $10 per million input tokens and $50 per million output tokens. Anthropic's July 1 redeployment restored access on Claude Platform, Claude.ai, Claude Code, and Claude Cowork; the temporary included window for eligible subscription plans runs through July 12, 2026 at 11:59:59 PM PT ([promotion details](https://support.claude.com/en/articles/15424964-claude-fable-5-promotional-access)), and cloud-platform availability remains subject to the marketplace, provider, and account. Its updated safeguards may reroute blocked requests to Opus 4.8 and may false-positive during routine coding and debugging. Current Claude applications and Claude Code enable that switching by default, while API customers must opt in and configure it ([default product behavior and API opt-in](https://support.claude.com/en/articles/15363606-why-claude-switched-models-in-your-conversation-with-fable-5)); treat the notice as current product behavior rather than a permanent provider guarantee. Smithers uses Fable as a non-Codex fallback for Sol-backed smart, planning, review, and orchestration roles or as a deliberate Claude-native specialist. Claude Code uses `claude-fable-5`; Smithers' OpenCode configuration uses the provider-qualified id `anthropic/claude-fable-5`. See [Anthropic's launch announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5), [redeployment update](https://www.anthropic.com/news/redeploying-fable-5), and [current Fable availability](https://www.anthropic.com/claude/fable)."
   },
   {
     "id": "claude-opus-4-8",
@@ -105,7 +105,7 @@ export const SOTA_MODELS = Object.freeze([
       "implement",
       "cheapFast"
     ],
-    "description": "The newest Sonnet: fast, cheap, 1M context. It is the primary non-Codex fallback for implementation and cheap tool calls when Codex is unavailable."
+    "description": "The newest Sonnet: fast, cheap, 1M context. It is the primary non-Codex fallback for Luna/Terra-backed research, implementation, validation, mid-tier, and tool-heavy work when Codex is unavailable; Sol-backed orchestration, planning, review, and smart work fall back to Fable instead."
   },
   {
     "id": "claude-haiku-4-5",
@@ -142,7 +142,7 @@ export const SOTA_MODELS = Object.freeze([
       "review",
       "smart"
     ],
-    "description": "OpenAI's GPT-5.6 flagship for complex reasoning and coding. Smithers uses Sol for orchestration, planning, reviews, and other judgment-heavy work whenever Codex is available."
+    "description": "OpenAI's GPT-5.6 flagship for the hardest reasoning, coding, and judgment-heavy work. Keep Sol for orchestration, planning, final review, ambiguous or high-stakes decisions, and recovery when a lower-cost pass is not enough; do not spend it on routine implementation by default. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/)."
   },
   {
     "id": "gpt-5.6-terra",
@@ -160,7 +160,7 @@ export const SOTA_MODELS = Object.freeze([
       "smartTool",
       "validate"
     ],
-    "description": "OpenAI's balanced GPT-5.6 model. Smithers uses Terra for everyday mid-tier work, validation, and tool-heavy tasks whenever Codex is available."
+    "description": "OpenAI's balanced GPT-5.6 model for validation and higher-judgment, explicitly tool-heavy work. Terra is the `smartTool` escalation when a routine Luna pass needs more checking or consistency but the task does not need Sol's top-tier planning and review; ordinary tool use starts with Luna. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/)."
   },
   {
     "id": "gpt-5.6-luna",
@@ -182,7 +182,7 @@ export const SOTA_MODELS = Object.freeze([
       "research",
       "ui"
     ],
-    "description": "OpenAI's fast, affordable GPT-5.6 model for cost-sensitive, high-volume workloads. Smithers makes Luna the default implementation, research, and cheap-work model because it keeps strong agentic coding ability at the lowest GPT-5.6 tier."
+    "description": "OpenAI's fastest and most affordable GPT-5.6 tier, with strong capability across the family’s software, knowledge-work, research, computer-use, and tool-using workloads. Ordinary tool use starts with Luna, which is the default for research, implementation, routine-to-substantial execution, UI work, cheapFast tasks, and the first pass on many tasks that do not require Sol's judgment. Escalate to Terra only for explicit tool-heavy validation or higher-judgment checking; escalate to Sol for ambiguity, high stakes, repeated failure, or unusually long-horizon reasoning rather than assuming task size alone requires Sol. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/) and the [GPT-5.6 preview release](https://openai.com/index/previewing-gpt-5-6-sol/)."
   },
   {
     "id": "gpt-5.5",
@@ -262,7 +262,7 @@ export const SOTA_MODELS = Object.freeze([
       "implement",
       "cheapFast"
     ],
-    "description": "Google's best price-to-performance model and the best non-Codex fallback for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. Smithers selects it automatically only when Codex is unavailable."
+    "description": "Google's best price-to-performance model and the best non-Codex fallback for UI work: near-Pro intelligence at Flash speed and cost, 1M context, and it beats Gemini 3.1 Pro on coding and agentic benchmarks while running roughly 4x faster. Smithers can use it for UI work when its provider-specific route is configured; it is not a universal fallback policy."
   },
   {
     "id": "gemini-3.1-pro-preview",
