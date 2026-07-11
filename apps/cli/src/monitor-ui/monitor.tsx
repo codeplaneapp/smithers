@@ -355,19 +355,30 @@ function RunListRow({
 function RunsRail({
   runs,
   loading,
+  offline,
   selectedRunId,
   onSelect,
 }: {
   runs: RunRow[];
   loading: boolean;
+  offline: boolean;
   selectedRunId: string | undefined;
   onSelect: (runId: string) => void;
 }) {
   const groups = groupRuns(runs);
   return (
     <nav className="mon-rail-runs" data-testid="monitor-runs">
-      {loading && runs.length === 0 ? <div className="mon-empty">Loading runs…</div> : null}
-      {!loading && runs.length === 0 ? (
+      {offline && runs.length === 0 ? (
+        <div className="mon-banner tone-failed" data-testid="monitor-runs-offline">
+          <div>Can't reach the Smithers gateway.</div>
+          <div className="mon-dim">
+            This tab's gateway isn't responding — it may have been restarted on another port. The page recovers
+            automatically once it's back; otherwise re-open with <code>smithers monitor</code>.
+          </div>
+        </div>
+      ) : null}
+      {!offline && loading && runs.length === 0 ? <div className="mon-empty">Loading runs…</div> : null}
+      {!offline && !loading && runs.length === 0 ? (
         <div className="mon-empty" data-testid="monitor-empty">
           <div>No runs match.</div>
           <div className="mon-dim">
@@ -1898,6 +1909,7 @@ function App() {
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const { status: connStatus } = useGatewayConnectionStatus();
   // No offset/cursor in the gateway's ListRunsRequest filter, so fetch a wide
   // window and let the landing table paginate client-side (RUNS_PAGE_SIZE).
   const runsQuery = useGatewayRuns({ filter: { limit: 1000 } });
@@ -2000,7 +2012,13 @@ function App() {
       <div className="mon-body">
         <div className="mon-rail">
           <ApprovalsInbox onSelectRun={selectRun} onResult={showResult} />
-          <RunsRail runs={visibleRuns} loading={runsQuery.loading ?? false} selectedRunId={selectedRunId} onSelect={selectRun} />
+          <RunsRail
+            runs={visibleRuns}
+            loading={runsQuery.loading ?? false}
+            offline={connStatus === "offline" || connStatus === "unauthorized"}
+            selectedRunId={selectedRunId}
+            onSelect={selectRun}
+          />
         </div>
 
         <div className="mon-main">
