@@ -1,6 +1,9 @@
+// smithers-source: seeded
+// smithers-metadata-version: 1
 // smithers-display-name: Create workflow UI
+// smithers-description: One agent authors .smithers/ui/<key>.tsx for a workflow that lacks one and verifies it against the live gateway. Triggered by the monitor's "Create UI" button.
+// smithers-tags: ui, monitor, system
 // smithers-system: true
-// smithers-source: one agent authors .smithers/ui/<key>.tsx for a workflow that lacks one and verifies it against the live gateway. Triggered by the monitor's "Create UI" button.
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";

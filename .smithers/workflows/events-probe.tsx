@@ -1,6 +1,9 @@
+// smithers-source: seeded
+// smithers-metadata-version: 1
 // smithers-display-name: Events probe
+// smithers-description: Agent-free liveness probe — emits a steady stream of node lifecycle events so gateway/monitor streaming can be verified end to end.
+// smithers-tags: monitor, diagnostics, system
 // smithers-system: true
-// smithers-source: agent-free liveness probe — emits a steady stream of node lifecycle events so gateway/monitor streaming can be verified end to end.
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";

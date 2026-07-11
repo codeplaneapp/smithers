@@ -1,6 +1,9 @@
+// smithers-source: seeded
+// smithers-metadata-version: 1
 // smithers-display-name: Ticket fleet monitor
+// smithers-description: Cron health monitor for ticket-fleet runs — a cheap agent inspects the latest run and reports whether it is progressing.
+// smithers-tags: monitor, cron, tickets, system
 // smithers-system: true
-// smithers-source: cron health monitor for ticket-fleet runs — Sonnet inspects the latest run and reports whether it is progressing.
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";

@@ -63,6 +63,13 @@ const SEEDED_WORKFLOW_IDS = [
   "post-failure",
   // Agent-assisted CLI/plugin upgrade wrapper (system workflow).
   "upgrade",
+  // Monitoring suite (system workflows backing the /monitor UI).
+  // Cron health monitor for ticket-fleet runs.
+  "ticket-fleet-monitor",
+  // Authors .smithers/ui/<key>.tsx on demand (monitor "Create UI" button).
+  "create-ui",
+  // Agent-free event-stream liveness probe.
+  "events-probe",
 ];
 
 type TemplateFile = { path: string; contents: string; owners?: string[] };
