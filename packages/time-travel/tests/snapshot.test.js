@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
@@ -84,8 +81,7 @@ describe("captureSnapshot", () => {
         sqlite.close();
     });
     test("deduplicates repeated representative multi-megabyte states without changing loads", async () => {
-        const dir = mkdtempSync(join(tmpdir(), "smithers-snapshot-benchmark-"));
-        const sqlite = new Database(join(dir, "bench.db"));
+        const sqlite = new Database(":memory:");
         const db = drizzle(sqlite);
         ensureSmithersTables(db);
         const adapter = new SmithersDb(db);
@@ -104,7 +100,7 @@ describe("captureSnapshot", () => {
         const loadStart = performance.now();
         expect(JSON.parse((await loadSnapshot(adapter, "bench", frameCount - 1)).outputsJson).agentResults).toHaveLength(1536);
         const loadMs = performance.now() - loadStart;
-        const baseline = new Database(join(dir, "baseline.db"));
+        const baseline = new Database(":memory:");
         ensureSmithersTables(drizzle(baseline));
         const insert = baseline.query("INSERT INTO _smithers_snapshots (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, vcs_pointer, workflow_hash, content_hash, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)");
         for (let frameNo = 0; frameNo < frameCount; frameNo++) insert.run("bench", frameNo, JSON.stringify(data.nodes), JSON.stringify(data.outputs), JSON.stringify(data.ralph), JSON.stringify(data.input), `baseline-${frameNo}`, frameNo);
@@ -118,7 +114,6 @@ describe("captureSnapshot", () => {
         expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_contents").get().count).toBe(0);
         baseline.close();
         sqlite.close();
-        rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 });
     }, 60_000);
     test("cleans replaced and deleted payloads without deleting shared references", async () => {
         const { sqlite, adapter } = createTestDb();
