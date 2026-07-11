@@ -208,6 +208,82 @@ describe("snapshotToGatewayRunNode", () => {
     expect(human).toMatchObject({ id: "review", kind: "human", status: "waiting" });
   });
 
+  test("maps declared and acting agent metadata onto node.agent", () => {
+    const tree = snapshotToGatewayRunNode({
+      root: {
+        id: 1,
+        name: "Workflow",
+        type: "workflow",
+        children: [
+          {
+            // QUEUED node with only the declared assignment (+ failover chain).
+            id: 2,
+            name: "Review",
+            type: "task",
+            task: {
+              nodeId: "review",
+              kind: "agent",
+              agentSummary: {
+                label: "Reviewer",
+                engine: "claude-code",
+                model: "claude-fable-5",
+                chain: [
+                  { engine: "claude-code", model: "claude-fable-5" },
+                  { engine: "codex", model: "gpt-5.4-codex" },
+                ],
+              },
+              maxAttempts: 3,
+            },
+            children: [],
+          },
+          {
+            // Settled node on an old run: only attempt metadata exists.
+            id: 3,
+            name: "Exec",
+            type: "task",
+            task: {
+              nodeId: "exec",
+              kind: "agent",
+              state: "finished",
+              attempt: 2,
+              agentRan: { agentId: "primary", engine: "codex", model: "gpt-5.4-codex" },
+            },
+            children: [],
+          },
+          {
+            // Legacy plain-string agent prop still passes through untouched.
+            id: 4,
+            name: "Legacy",
+            type: "task",
+            task: { nodeId: "legacy", kind: "agent", agent: "old-string-agent" },
+            children: [],
+          },
+        ],
+      },
+      runState: { state: "running" },
+    });
+    const [review, exec, legacy] = tree?.children ?? [];
+    expect(review?.agent).toEqual({
+      name: "Reviewer",
+      engine: "claude-code",
+      model: "claude-fable-5",
+      chain: [
+        { engine: "claude-code", model: "claude-fable-5" },
+        { engine: "codex", model: "gpt-5.4-codex" },
+      ],
+    });
+    expect(review?.maxAttempts).toBe(3);
+    // No declared summary: the acting agent still yields a structured record,
+    // with `name` falling back to the engine so tree chips keep rendering.
+    expect(exec?.agent).toEqual({
+      name: "codex",
+      ranOn: { agentId: "primary", engine: "codex", model: "gpt-5.4-codex" },
+    });
+    expect(exec?.attempt).toBe(2);
+    expect(exec?.maxAttempts).toBeUndefined();
+    expect(legacy?.agent).toBe("old-string-agent");
+  });
+
   test("returns null for the gateway empty-root placeholder", () => {
     expect(snapshotToGatewayRunNode({ root: { id: 0, name: "(empty)", children: [] } })).toBeNull();
     expect(snapshotToGatewayRunNode(null)).toBeNull();

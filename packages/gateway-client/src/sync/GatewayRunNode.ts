@@ -1,3 +1,23 @@
+/** One display-safe agent reference: label/engine/model strings only. */
+export type GatewayRunNodeAgentRef = {
+  name?: string;
+  engine?: string;
+  model?: string;
+};
+
+/**
+ * Structured agent assignment for a task node. The top-level fields describe
+ * the DECLARED assignment (the workflow's `<Task agent={...}>` prop, known
+ * even for queued nodes); `chain` lists a declared failover chain in order;
+ * `ranOn` is what the latest attempt ACTUALLY executed on (from attempt
+ * metadata — may differ from the declaration after failover, and is the only
+ * signal on runs recorded before declared-agent capture).
+ */
+export type GatewayRunNodeAgent = GatewayRunNodeAgentRef & {
+  chain?: ReadonlyArray<GatewayRunNodeAgentRef>;
+  ranOn?: { engine?: string; model?: string; agentId?: string };
+};
+
 export type GatewayRunNode = {
   /**
    * Unique row identity, distinct per structural position in the run tree — so
@@ -23,7 +43,15 @@ export type GatewayRunNode = {
    */
   iteration?: number;
   meta?: string;
-  agent?: string;
+  /**
+   * The task's agent: a structured {@link GatewayRunNodeAgent} when the
+   * snapshot carries agent metadata, or a plain string on legacy rows.
+   */
+  agent?: string | GatewayRunNodeAgent;
+  /** Latest attempt number for the node's state-bearing iteration. */
+  attempt?: number;
+  /** Attempt budget (declared retries + 1) when finite. */
+  maxAttempts?: number;
   output?: string;
   toolCalls?: ReadonlyArray<Record<string, unknown>>;
   /** The parent row's `key` (see {@link key}) — NOT its logical `id`. */

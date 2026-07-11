@@ -1,4 +1,4 @@
-import type { GatewayRunNode } from "./GatewayRunNode.ts";
+import type { GatewayRunNode, GatewayRunNodeAgent, GatewayRunNodeAgentRef } from "./GatewayRunNode.ts";
 import { asRecord } from "../objectGuards.ts";
 
 /**
@@ -23,11 +23,19 @@ export type DevToolsSnapshotNode = {
   task?: {
     nodeId?: string;
     kind?: string;
+    /** Legacy plain-string agent prop (only ever a string in frame props). */
+    agent?: string;
+    /** Declared `<Task agent={...}>` summary from the frame task index. */
+    agentSummary?: { label?: string; engine?: string; model?: string; chain?: Array<{ label?: string; engine?: string; model?: string }> };
+    /** Agent the latest attempt actually executed on (attempt metadata). */
+    agentRan?: { agentId?: string; engine?: string; model?: string };
     label?: string;
     iteration?: number;
     /** Current lifecycle state from the run's node rows (latest iteration wins). */
     state?: string;
     attempt?: number;
+    /** Attempt budget (declared retries + 1) when finite. */
+    maxAttempts?: number;
   };
   children?: DevToolsSnapshotNode[];
 };
@@ -234,6 +242,63 @@ function rollupStatus(own: string, children: GatewayRunNode[]): string {
   return "ok";
 }
 
+function agentRef(value: { label?: string; engine?: string; model?: string } | undefined): GatewayRunNodeAgentRef | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const name = typeof value.label === "string" && value.label ? value.label : undefined;
+  const engine = typeof value.engine === "string" && value.engine ? value.engine : undefined;
+  const model = typeof value.model === "string" && value.model ? value.model : undefined;
+  if (!name && !engine && !model) {
+    return undefined;
+  }
+  return {
+    ...(name ? { name } : {}),
+    ...(engine ? { engine } : {}),
+    ...(model ? { model } : {}),
+  };
+}
+
+/**
+ * The node's agent for the run UI. Structured metadata (declared summary
+ * and/or the acting agent from attempt metadata) wins; a legacy plain-string
+ * agent prop passes through unchanged. `name` falls back to engine/model so
+ * chips keep rendering when the declaration carries no label.
+ */
+function nodeAgent(node: DevToolsSnapshotNode): GatewayRunNode["agent"] {
+  const task = node.task;
+  const declared = agentRef(task?.agentSummary);
+  const chain = (task?.agentSummary?.chain ?? [])
+    .map(agentRef)
+    .filter((entry): entry is GatewayRunNodeAgentRef => entry !== undefined);
+  const ranRaw = task?.agentRan;
+  const ranEngine = typeof ranRaw?.engine === "string" && ranRaw.engine ? ranRaw.engine : undefined;
+  const ranModel = typeof ranRaw?.model === "string" && ranRaw.model ? ranRaw.model : undefined;
+  const ranAgentId = typeof ranRaw?.agentId === "string" && ranRaw.agentId ? ranRaw.agentId : undefined;
+  const ranOn = ranEngine || ranModel || ranAgentId
+    ? {
+        ...(ranEngine ? { engine: ranEngine } : {}),
+        ...(ranModel ? { model: ranModel } : {}),
+        ...(ranAgentId ? { agentId: ranAgentId } : {}),
+      }
+    : undefined;
+  if (!declared && chain.length === 0 && !ranOn) {
+    const legacy = task?.agent ?? (typeof (node.props ?? {}).agent === "string" ? String((node.props ?? {}).agent) : undefined);
+    return typeof legacy === "string" && legacy ? legacy : undefined;
+  }
+  const agent: GatewayRunNodeAgent = { ...(declared ?? {}) };
+  if (!agent.name) {
+    agent.name = agent.engine ?? agent.model ?? ranEngine ?? ranAgentId;
+  }
+  if (chain.length > 0) {
+    agent.chain = chain;
+  }
+  if (ranOn) {
+    agent.ranOn = ranOn;
+  }
+  return agent;
+}
+
 function mapNode(
   node: DevToolsSnapshotNode,
   isRoot: boolean,
@@ -241,6 +306,9 @@ function mapNode(
   blockedNodeId: string | undefined,
 ): GatewayRunNode {
   const iteration = node.task?.iteration;
+  const agent = nodeAgent(node);
+  const attempt = node.task?.attempt;
+  const maxAttempts = node.task?.maxAttempts;
   const children = (node.children ?? []).map((child) =>
     mapNode(child, false, runStatus, blockedNodeId),
   );
@@ -256,6 +324,9 @@ function mapNode(
     kind: nodeKind(node),
     status: isRoot || node.task ? ownStatus : rollupStatus(ownStatus, children),
     ...(typeof iteration === "number" ? { iteration } : {}),
+    ...(agent !== undefined ? { agent } : {}),
+    ...(typeof attempt === "number" && Number.isFinite(attempt) ? { attempt } : {}),
+    ...(typeof maxAttempts === "number" && Number.isFinite(maxAttempts) ? { maxAttempts } : {}),
     children,
   };
 }
