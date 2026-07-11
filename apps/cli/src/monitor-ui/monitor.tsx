@@ -29,6 +29,7 @@ import type { Terminal as XTerminal, IDisposable } from "@xterm/xterm";
 // client.js, so the stylesheet ships as a string appended to monitorCss.
 import xtermCss from "@xterm/xterm/css/xterm.css" with { type: "text" };
 import {
+  accountRowsOf,
   asArray,
   asNumber,
   asString,
@@ -36,6 +37,8 @@ import {
   buildTimeline,
   canRetryTask,
   clampFrameNo,
+  cronRowsOf,
+  dataRowsOf,
   diagnoseRun,
   diffPatchesOf,
   diffSummaryOf,
@@ -45,10 +48,13 @@ import {
   formatDurationMs,
   formatElapsed,
   formatEventLine,
+  formatLatencyMs,
   formatOutputValue,
+  formatScore,
   frameScrubBounds,
   groupRuns,
   hasFailedDescendant,
+  histogramStats,
   hijackActionFor,
   hijackCandidateForNode,
   hijackCandidatesOf,
@@ -56,18 +62,29 @@ import {
   isPausable,
   isRecord,
   isResumable,
+  isTerminalStatus,
   labelForStatus,
   looksLikeUnifiedDiff,
+  metricValue,
+  nextCron,
   nodeErrorOf,
   nodeStateRowsOf,
   nodeSummaryEligible,
+  nonZeroErrorCounters,
+  openTicketCount,
+  opsStats,
   paginateRuns,
+  parsePrometheusText,
   pick,
   ptyHijackUrl,
   quotaInfoOf,
   rowOf,
   runProgress,
   RUNS_PAGE_SIZE,
+  scoreRowsOf,
+  scoresForNode,
+  scoresSummary,
+  scoreTone,
   shortRunId,
   splitPatchText,
   statusOptions,
@@ -77,9 +94,12 @@ import {
   treeNodeKey,
   waitTone,
   workflowOptions,
+  type CronRow,
   type HijackCandidate,
   type NodeStateRow,
+  type PromScrape,
   type RunRow,
+  type ScoreRow,
   type Tone,
   type TreeNodeLike,
 } from "./monitorModel.ts";
@@ -410,6 +430,515 @@ function RunsRail({
         </section>
       ))}
     </nav>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small polling data hooks for the gateway's simple-read REST routes and the
+// Prometheus /metrics text. Each keeps the last good payload on transient
+// fetch failures (the readouts must not blank during a gateway hiccup) but
+// reports `failed` so surfaces can say so.
+// ---------------------------------------------------------------------------
+
+function useJsonApi(url: string | null, refreshMs: number | null): { body: unknown; loaded: boolean; failed: boolean } {
+  const [state, setState] = useState<{ body: unknown; loaded: boolean; failed: boolean }>({
+    body: null,
+    loaded: false,
+    failed: false,
+  });
+  // Only a URL change resets the data — a polling-cadence flip (a run going
+  // live→settled) must not blank an already-loaded panel.
+  const lastUrl = useRef(url);
+  useEffect(() => {
+    if (lastUrl.current !== url) {
+      lastUrl.current = url;
+      setState({ body: null, loaded: false, failed: false });
+    }
+    if (!url) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`${url} ${response.status}`);
+        const body: unknown = await response.json();
+        if (!cancelled) setState({ body, loaded: true, failed: false });
+      } catch {
+        if (!cancelled) setState((prev) => ({ body: prev.body, loaded: prev.loaded, failed: true }));
+      }
+    };
+    void load();
+    const timer = refreshMs !== null ? setInterval(() => void load(), refreshMs) : null;
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [url, refreshMs]);
+  return state;
+}
+
+const METRICS_REFRESH_MS = 10_000;
+
+function useMetricsScrape(enabled: boolean): { scrape: PromScrape | null; failed: boolean; scrapedAtMs: number | null } {
+  const [state, setState] = useState<{ scrape: PromScrape | null; failed: boolean; scrapedAtMs: number | null }>({
+    scrape: null,
+    failed: false,
+    scrapedAtMs: null,
+  });
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch("/metrics");
+        if (!response.ok) throw new Error(`metrics ${response.status}`);
+        const text = await response.text();
+        if (!cancelled) setState({ scrape: parsePrometheusText(text), failed: false, scrapedAtMs: Date.now() });
+      } catch {
+        if (!cancelled) setState((prev) => ({ scrape: prev.scrape, failed: true, scrapedAtMs: prev.scrapedAtMs }));
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), METRICS_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [enabled]);
+  return state;
+}
+
+// ---------------------------------------------------------------------------
+// Workspace overview: the ops strip (one quiet row of stat cards above the
+// runs table) and the crons panel below it. Numbers first, labels small and
+// dim; every value is real gateway state or an honest placeholder.
+// ---------------------------------------------------------------------------
+
+function StatCard({
+  value,
+  label,
+  sub,
+  tone,
+  testId,
+}: {
+  value: string;
+  label: string;
+  sub?: string;
+  tone?: Tone;
+  testId?: string;
+}) {
+  return (
+    <div className={`mon-stat${tone ? ` tone-${tone}` : ""}`} data-testid={testId ?? "monitor-stat"}>
+      <div className="mon-stat-value mon-mono">{value}</div>
+      <div className="mon-stat-label">{label}</div>
+      {sub ? <div className="mon-stat-sub mon-dim">{sub}</div> : null}
+    </div>
+  );
+}
+
+function OpsStrip({ runs, loading }: { runs: RunRow[]; loading: boolean }) {
+  const now = useNowMs();
+  const metrics = useMetricsScrape(true);
+  const cronsApi = useJsonApi("/v1/api/crons", 30_000);
+  const accountsApi = useJsonApi("/v1/api/accounts", 60_000);
+  const memoryApi = useJsonApi("/v1/api/memory-facts", 60_000);
+  const ticketsApi = useJsonApi("/v1/api/tickets", 60_000);
+  const stats = useMemo(() => opsStats(runs as Array<Record<string, unknown>>, now), [runs, now]);
+  const crons = useMemo(() => cronRowsOf(cronsApi.body), [cronsApi.body]);
+  const accounts = useMemo(() => accountRowsOf(accountsApi.body), [accountsApi.body]);
+  const agentLatency = useMemo(
+    () => (metrics.scrape ? histogramStats(metrics.scrape, "smithers_agent_duration_ms", ["engine", "model"]) : []),
+    [metrics.scrape],
+  );
+  const upcoming = nextCron(crons);
+  const accountsReady = accounts.filter((account) => account.ready).length;
+  const memoryCount = memoryApi.loaded ? dataRowsOf(memoryApi.body).length : undefined;
+  const ticketsOpen = ticketsApi.loaded ? openTicketCount(ticketsApi.body) : undefined;
+  const pending = loading && runs.length === 0;
+  const n = (value: number | undefined): string => (value === undefined || pending ? "…" : String(value));
+  return (
+    <div className="mon-ops-strip" data-testid="monitor-ops-strip">
+      <StatCard
+        value={n(stats.active)}
+        label="active runs"
+        sub={stats.attention > 0 ? `${stats.attention} need attention` : undefined}
+        tone={stats.active > 0 ? "running" : undefined}
+        testId="monitor-stat-active"
+      />
+      <StatCard
+        value={n(stats.enginesLive)}
+        label="engines live"
+        sub="heartbeat < 60s"
+        testId="monitor-stat-engines"
+      />
+      <StatCard
+        value={n(stats.completedToday)}
+        label="completed today"
+        sub={stats.failedToday > 0 ? `${stats.failedToday} failed` : undefined}
+        testId="monitor-stat-completed"
+      />
+      {agentLatency.slice(0, 2).map((stat) => (
+        <StatCard
+          key={stat.key}
+          value={`${formatLatencyMs(stat.p50)} / ${formatLatencyMs(stat.p95)}`}
+          label={`agent p50/p95 · ${stat.key}`}
+          sub={`${stat.count} runs (this gateway)`}
+          testId="monitor-stat-latency"
+        />
+      ))}
+      {agentLatency.length === 0 ? (
+        <StatCard
+          value={metrics.scrape ? "—" : "…"}
+          label="agent latency"
+          sub={metrics.failed ? "metrics unreachable" : metrics.scrape ? "no samples this gateway yet" : "scraping…"}
+          testId="monitor-stat-latency"
+        />
+      ) : null}
+      <StatCard
+        value={
+          cronsApi.loaded
+            ? upcoming?.nextRunAtMs !== undefined
+              ? now >= upcoming.nextRunAtMs
+                ? "due now"
+                : `in ${Math.max(1, Math.round((upcoming.nextRunAtMs - now) / 60_000))}m`
+              : "—"
+            : "…"
+        }
+        label={upcoming ? `next cron · ${upcoming.workflow}` : "next cron"}
+        sub={upcoming ? upcoming.pattern : cronsApi.loaded ? "none registered" : undefined}
+        testId="monitor-stat-cron"
+      />
+      <StatCard
+        value={accountsApi.loaded ? `${accountsReady}/${accounts.length}` : "…"}
+        label="accounts ready"
+        tone={accountsApi.loaded && accountsReady < accounts.length ? "waiting" : undefined}
+        testId="monitor-stat-accounts"
+      />
+      <StatCard value={n(memoryCount)} label="memory facts" testId="monitor-stat-memory" />
+      <StatCard value={n(ticketsOpen)} label="open tickets" testId="monitor-stat-tickets" />
+    </div>
+  );
+}
+
+function CronsPanel() {
+  const now = useNowMs();
+  const cronsApi = useJsonApi("/v1/api/crons", 30_000);
+  const crons = useMemo(() => cronRowsOf(cronsApi.body), [cronsApi.body]);
+  return (
+    <section className="mon-panel mon-crons-panel" data-testid="monitor-crons">
+      <header className="mon-panel-head">
+        <h2 className="mon-kicker">
+          Crons <span className="mon-count">{cronsApi.loaded ? crons.length : ""}</span>
+        </h2>
+      </header>
+      {!cronsApi.loaded ? (
+        <div className="mon-empty mon-dim">
+          {cronsApi.failed ? (
+            "Could not load crons — the gateway did not answer."
+          ) : (
+            <span className="mon-live-pending">
+              <span className="mon-dot mon-dot-pulse" aria-hidden /> loading crons…
+            </span>
+          )}
+        </div>
+      ) : crons.length === 0 ? (
+        <div className="mon-empty mon-dim">
+          No crons registered. Add one with <code>smithers cron add &lt;pattern&gt; &lt;workflow&gt;</code>.
+        </div>
+      ) : (
+        <div className="mon-crons-scroll">
+          <table className="mon-runs-table mon-crons-table">
+            <thead>
+              <tr>
+                <th scope="col">Pattern</th>
+                <th scope="col">Workflow</th>
+                <th scope="col">Enabled</th>
+                <th scope="col">Last run</th>
+                <th scope="col">Next run</th>
+                <th scope="col">Last error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {crons.map((cron) => (
+                <tr key={cron.cronId} data-cron-id={cron.cronId}>
+                  <td className="mon-mono">{cron.pattern}</td>
+                  <td className="mon-table-workflow" title={cron.workflowPath ?? cron.workflow}>
+                    {cron.workflow}
+                  </td>
+                  <td>
+                    <span className={`mon-pill tone-${cron.enabled ? "ok" : "idle"}`}>
+                      <span className="mon-dot" aria-hidden />
+                      {cron.enabled ? "enabled" : "disabled"}
+                    </span>
+                  </td>
+                  <td className="mon-dim">
+                    <Ago ms={cron.lastRunAtMs} />
+                  </td>
+                  <td className="mon-mono">
+                    {cron.nextRunAtMs === undefined ? (
+                      <span className="mon-dim">—</span>
+                    ) : now >= cron.nextRunAtMs ? (
+                      "due now"
+                    ) : (
+                      <Countdown untilMs={cron.nextRunAtMs} />
+                    )}
+                  </td>
+                  <td className={cron.error ? "tone-failed mon-cron-error" : "mon-dim"} title={cron.error}>
+                    {cron.error ? cron.error.slice(0, 80) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scores. Scorer results are per-run rows in [0,1] (see scoreRowsOf); the run
+// panel collapses to a one-line summary past a handful, and the whole panel
+// hides when the run simply has no scores — most runs don't, and an empty
+// panel would be noise. The node inspector shows the same rows as chips.
+// ---------------------------------------------------------------------------
+
+const SCORES_COLLAPSE_THRESHOLD = 5;
+
+function useRunScores(runId: string, live: boolean): { rows: ScoreRow[]; loaded: boolean } {
+  const api = useJsonApi(`/v1/api/scores?runId=${encodeURIComponent(runId)}`, live ? 15_000 : null);
+  const rows = useMemo(() => scoreRowsOf(api.body), [api.body]);
+  return { rows, loaded: api.loaded };
+}
+
+function ScoreRowLine({ row }: { row: ScoreRow }) {
+  return (
+    <div className="mon-score-row" data-testid="monitor-score-row">
+      <span className={`mon-pill tone-${scoreTone(row.score)} mon-score-pill`}>
+        <span className="mon-dot" aria-hidden />
+        {formatScore(row.score)}
+      </span>
+      <span className="mon-score-name">{row.scorerName}</span>
+      <span className="mon-mono mon-dim mon-score-node" title={row.nodeId}>
+        {row.nodeId}
+        {row.iteration > 0 ? `#${row.iteration}` : ""}
+      </span>
+      {row.reason ? (
+        <span className="mon-dim mon-score-reason" title={row.reason}>
+          {row.reason}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function ScoresPanel({ runId, live }: { runId: string; live: boolean }) {
+  const { rows, loaded } = useRunScores(runId, live);
+  // No scores → no panel. Most runs never run a scorer; an empty-state panel
+  // on every run detail would be pure noise.
+  if (!loaded || rows.length === 0) return null;
+  const summary = scoresSummary(rows);
+  const list = (
+    <div className="mon-scores-list">
+      {rows.map((row) => (
+        <ScoreRowLine key={`${row.nodeId}#${row.iteration}:${row.scorerId}:${row.attempt}`} row={row} />
+      ))}
+    </div>
+  );
+  return (
+    <section className="mon-panel mon-scores-panel" data-testid="monitor-scores">
+      <header className="mon-panel-head">
+        <h2 className="mon-kicker">
+          Scores <span className="mon-count">{summary.count}</span>
+        </h2>
+        <span className="mon-dim mon-mono">avg {formatScore(summary.avg)}</span>
+      </header>
+      {rows.length > SCORES_COLLAPSE_THRESHOLD ? (
+        <details className="mon-scores-details">
+          <summary className="mon-scores-summary" data-testid="monitor-scores-summary">
+            <span className="mon-diff-caret" aria-hidden>
+              ▸
+            </span>
+            {summary.count} scores · avg {formatScore(summary.avg)}
+          </summary>
+          {list}
+        </details>
+      ) : (
+        list
+      )}
+    </section>
+  );
+}
+
+/** Score chips under the inspector's What-happened section — only when this node was scored. */
+function NodeScoreChips({ runId, nodeId, live }: { runId: string; nodeId: string; live: boolean }) {
+  const { rows, loaded } = useRunScores(runId, live);
+  const nodeScores = useMemo(() => scoresForNode(rows, nodeId), [rows, nodeId]);
+  if (!loaded || nodeScores.length === 0) return null;
+  return (
+    <div className="mon-node-scores" data-testid="monitor-node-scores">
+      {nodeScores.map((row) => (
+        <span
+          key={`${row.scorerId}:${row.iteration}:${row.attempt}`}
+          className={`mon-chip mon-score-chip tone-${scoreTone(row.score)}`}
+          title={row.reason ?? row.scorerName}
+        >
+          {row.scorerName} {formatScore(row.score)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Metrics view: glanceable operator stats parsed from ONE Prometheus scrape
+// (10s refresh) — agent latency percentiles per engine·model, run/RPC/
+// connection counters, and any non-zero error counters. Text and the shared
+// tone system; monospace numbers; no charting stack.
+// ---------------------------------------------------------------------------
+
+function MetricRow({ label, value, tone }: { label: string; value: string; tone?: Tone }) {
+  return (
+    <div className="mon-metric-row">
+      <span className={`mon-metric-label${tone ? ` tone-${tone}` : ""}`}>{label}</span>
+      <span className={`mon-mono mon-metric-value${tone ? ` tone-${tone}` : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function MetricsPanel() {
+  const now = useNowMs();
+  const { scrape, failed, scrapedAtMs } = useMetricsScrape(true);
+  const agentLatency = useMemo(
+    () => (scrape ? histogramStats(scrape, "smithers_agent_duration_ms", ["engine", "model"]) : []),
+    [scrape],
+  );
+  const rpcStats = useMemo(
+    () => (scrape ? histogramStats(scrape, "smithers_gateway_rpc_duration_ms", ["method"]) : []),
+    [scrape],
+  );
+  const rpcOverall = useMemo(
+    () => (scrape ? histogramStats(scrape, "smithers_gateway_rpc_duration_ms", []) : []),
+    [scrape],
+  );
+  const errors = useMemo(() => (scrape ? nonZeroErrorCounters(scrape) : []), [scrape]);
+  if (!scrape) {
+    return (
+      <section className="mon-panel mon-metrics-panel" data-testid="monitor-metrics">
+        <header className="mon-panel-head">
+          <h2 className="mon-kicker">Metrics</h2>
+        </header>
+        <div className="mon-empty mon-dim">
+          {failed ? (
+            "Could not scrape /metrics — the gateway did not answer."
+          ) : (
+            <span className="mon-live-pending">
+              <span className="mon-dot mon-dot-pulse" aria-hidden /> scraping /metrics…
+            </span>
+          )}
+        </div>
+      </section>
+    );
+  }
+  const num = (value: number | undefined): string =>
+    value === undefined ? "—" : String(Math.round(value));
+  const uptime = metricValue(scrape, "smithers_process_uptime_seconds");
+  return (
+    <section className="mon-panel mon-metrics-panel" data-testid="monitor-metrics">
+      <header className="mon-panel-head">
+        <h2 className="mon-kicker">Metrics</h2>
+        {failed ? <span className="mon-conn tone-failed">scrape failing — showing last data</span> : null}
+        <span className="mon-dim mon-count-note">
+          {scrapedAtMs ? `scraped ${Math.max(0, Math.round((now - scrapedAtMs) / 1000))}s ago` : ""}
+          {uptime !== undefined ? ` · gateway up ${formatElapsed(now - uptime * 1000, now)}` : ""}
+        </span>
+      </header>
+
+      <div className="mon-metrics-grid">
+        <div className="mon-metrics-section" data-testid="monitor-metrics-agents">
+          <h3 className="mon-kicker">Agent latency (this gateway process)</h3>
+          {agentLatency.length === 0 ? (
+            <div className="mon-empty mon-dim">
+              No agent invocations recorded by this gateway process yet — engines attached elsewhere (e.g. `smithers
+              up` in a terminal) report to their own process.
+            </div>
+          ) : (
+            <div className="mon-metrics-table">
+              <div className="mon-metric-row mon-metric-head">
+                <span className="mon-metric-label">engine · model</span>
+                <span className="mon-mono mon-metric-value">n · p50 · p95</span>
+              </div>
+              {agentLatency.map((stat) => (
+                <MetricRow
+                  key={stat.key}
+                  label={stat.key || "(unlabeled)"}
+                  value={`${stat.count} · ${formatLatencyMs(stat.p50)} · ${formatLatencyMs(stat.p95)}`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mon-metrics-section" data-testid="monitor-metrics-runs">
+          <h3 className="mon-kicker">Runs & connections</h3>
+          <div className="mon-metrics-table">
+            <MetricRow label="runs started (this process)" value={num(metricValue(scrape, "smithers_gateway_runs_started_total"))} />
+            <MetricRow label="runs completed" value={num(metricValue(scrape, "smithers_gateway_runs_completed_total"))} />
+            <MetricRow label="connections active" value={num(metricValue(scrape, "smithers_gateway_connections_active"))} />
+            <MetricRow label="connections opened" value={num(metricValue(scrape, "smithers_gateway_connections_total"))} />
+            <MetricRow label="pending approvals" value={num(metricValue(scrape, "smithers_approval_pending"))} />
+          </div>
+        </div>
+
+        <div className="mon-metrics-section" data-testid="monitor-metrics-rpc">
+          <h3 className="mon-kicker">
+            Gateway RPC{" "}
+            {rpcOverall[0] ? (
+              <span className="mon-dim">
+                — p95 {formatLatencyMs(rpcOverall[0].p95)} over {rpcOverall[0].count} calls
+              </span>
+            ) : null}
+          </h3>
+          {rpcStats.length === 0 ? (
+            <div className="mon-empty mon-dim">No RPC calls recorded yet.</div>
+          ) : (
+            <div className="mon-metrics-table">
+              <div className="mon-metric-row mon-metric-head">
+                <span className="mon-metric-label">method</span>
+                <span className="mon-mono mon-metric-value">n · p50 · p95</span>
+              </div>
+              {rpcStats.slice(0, 10).map((stat) => (
+                <MetricRow
+                  key={stat.key}
+                  label={stat.key || "(unlabeled)"}
+                  value={`${stat.count} · ${formatLatencyMs(stat.p50)} · ${formatLatencyMs(stat.p95)}`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mon-metrics-section" data-testid="monitor-metrics-errors">
+          <h3 className="mon-kicker">Errors</h3>
+          {errors.length === 0 ? (
+            <div className="mon-metric-row">
+              <span className="mon-metric-label tone-ok">no non-zero error counters</span>
+              <span className="mon-mono mon-metric-value tone-ok">0</span>
+            </div>
+          ) : (
+            <div className="mon-metrics-table">
+              {errors.map((sample, index) => (
+                <MetricRow
+                  key={`${sample.name}:${index}`}
+                  label={`${sample.name}${Object.keys(sample.labels).length ? ` {${Object.entries(sample.labels).map(([k, v]) => `${k}=${v}`).join(", ")}}` : ""}`}
+                  value={String(sample.value)}
+                  tone="failed"
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -2176,6 +2705,7 @@ function NodeInspector({
       ) : null}
       <div className="mon-inspector-title">{node.cardLabel ?? node.name ?? nodeId}</div>
       <NodeWhatHappened runId={runId} nodeId={nodeId} iteration={node.iteration ?? 0} status={node.status} />
+      <NodeScoreChips runId={runId} nodeId={nodeId} live={isLive} />
       <dl className="mon-meta-grid">
         <dt>id</dt>
         <dd className="mon-mono">{nodeId}</dd>
@@ -2509,6 +3039,8 @@ function RunDetail({
 
       <HealthStrip runId={runId} status={status} healthState={healthState} quota={quota} />
 
+      <ScoresPanel runId={runId} live={!isTerminalStatus(status)} />
+
       {showCustomUi && customUiUrl ? (
         <div className="mon-modal-backdrop" onClick={() => setShowCustomUi(false)} data-testid="monitor-ui-modal">
           <div className="mon-modal" onClick={(event) => event.stopPropagation()}>
@@ -2551,6 +3083,7 @@ function App() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [workflowFilter, setWorkflowFilter] = useState("all");
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [showMetrics, setShowMetrics] = useState(false);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { status: connStatus } = useGatewayConnectionStatus();
@@ -2577,6 +3110,8 @@ function App() {
   const selectRun = (runId: string | undefined) => {
     setSelectedRunId(runId);
     setSelectedNode(undefined);
+    // Picking a run means "show me the run" — leave the metrics view.
+    setShowMetrics(false);
     writeUrlSelection(runId, undefined);
   };
   const selectNode = (node: TreeNode | undefined) => {
@@ -2638,6 +3173,15 @@ function App() {
           <span className="mon-dim mon-count-note">
             {visibleRuns.length}/{allRuns.length} runs
           </span>
+          <button
+            type="button"
+            className={`mon-chip${showMetrics ? " is-on" : ""}`}
+            data-testid="monitor-metrics-chip"
+            onClick={() => setShowMetrics((value) => !value)}
+            title="Operator stats from the gateway's Prometheus /metrics: agent latency percentiles, run/RPC/connection counters, error counters"
+          >
+            Metrics
+          </button>
           <button type="button" className="mon-btn" onClick={() => void runsQuery.refetch()}>
             Refresh
           </button>
@@ -2666,7 +3210,9 @@ function App() {
         </div>
 
         <div className="mon-main">
-          {selectedRunId ? (
+          {showMetrics ? (
+            <MetricsPanel />
+          ) : selectedRunId ? (
             <RunDetail
               runId={selectedRunId}
               onResult={showResult}
@@ -2678,13 +3224,17 @@ function App() {
               }}
             />
           ) : (
-            <RunsTable
-              runs={visibleRuns}
-              loading={runsQuery.loading ?? false}
-              page={runsPage}
-              onPageChange={setRunsPage}
-              onSelect={selectRun}
-            />
+            <div className="mon-overview">
+              <OpsStrip runs={allRuns} loading={runsQuery.loading ?? false} />
+              <RunsTable
+                runs={visibleRuns}
+                loading={runsQuery.loading ?? false}
+                page={runsPage}
+                onPageChange={setRunsPage}
+                onSelect={selectRun}
+              />
+              <CronsPanel />
+            </div>
           )}
         </div>
 
@@ -2939,6 +3489,48 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 
 .mon-empty { color: var(--muted); text-align: center; padding: var(--sp-6) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
 .mon-empty-hero { padding-top: 18vh; }
+
+/* Workspace overview: ops strip above the runs table, crons panel below.
+   The runs table keeps the scrollable middle; the strip and crons are fixed. */
+.mon-overview { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.mon-overview .mon-runs-table-panel { flex: 1; min-height: 200px; }
+.mon-ops-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 0 var(--sp-4); }
+.mon-stat { flex: 1 1 120px; min-width: 0; max-width: 240px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--surface); padding: var(--sp-2) var(--sp-3); }
+.mon-stat-value { font-size: var(--fs-4); font-weight: 700; font-variant-numeric: tabular-nums; line-height: var(--lh-tight); color: var(--tone, var(--text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mon-stat-label { font-size: var(--fs-1); line-height: var(--lh-tight); color: var(--muted); margin-top: var(--sp-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mon-stat-sub { font-size: var(--fs-1); line-height: var(--lh-tight); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Crons panel: fixed below the table; its own horizontal scroll if narrow. */
+.mon-crons-panel { margin: var(--sp-4) 0 0; flex: none; }
+.mon-crons-scroll { overflow: auto; max-height: 32vh; border: 1px solid var(--border); border-radius: var(--r-2); }
+.mon-cron-error { max-width: 320px; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-1); }
+
+/* Scores: run panel rows + inspector chips share the tone system. */
+.mon-scores-panel .mon-panel-head { margin-bottom: var(--sp-2); }
+.mon-scores-list { display: flex; flex-direction: column; }
+.mon-score-row { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); font-size: var(--fs-2); }
+.mon-score-row:last-child { border-bottom: 0; }
+.mon-score-pill { flex: none; }
+.mon-score-name { font-weight: 600; white-space: nowrap; }
+.mon-score-node { flex: none; overflow: hidden; text-overflow: ellipsis; max-width: 220px; white-space: nowrap; }
+.mon-score-reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mon-scores-details > .mon-scores-summary { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; list-style: none; font-size: var(--fs-2); font-weight: 600; padding: var(--sp-1) 0; }
+.mon-scores-summary::-webkit-details-marker { display: none; }
+.mon-scores-details[open] > .mon-scores-summary .mon-diff-caret { transform: rotate(90deg); }
+.mon-node-scores { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: 0 0 var(--sp-3); }
+.mon-score-chip { color: var(--tone); border-color: color-mix(in srgb, var(--tone) 40%, var(--border)); cursor: default; }
+
+/* Metrics view: sections of label/value rows, monospace numbers. */
+.mon-metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-4) var(--sp-6); }
+.mon-metrics-section .mon-kicker { margin: 0 0 var(--sp-2); }
+.mon-metrics-table { display: flex; flex-direction: column; }
+.mon-metric-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); font-size: var(--fs-2); }
+.mon-metric-row:last-child { border-bottom: 0; }
+.mon-metric-head { color: var(--muted); font-size: var(--fs-1); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.mon-metric-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mon-metric-label.tone-ok, .mon-metric-value.tone-ok { color: var(--ok); }
+.mon-metric-label.tone-failed, .mon-metric-value.tone-failed { color: var(--err); }
+.mon-metric-value { font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 
 @keyframes mon-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes mon-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
