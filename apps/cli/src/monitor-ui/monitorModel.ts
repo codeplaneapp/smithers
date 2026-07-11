@@ -52,17 +52,23 @@ export function rowOf(value: unknown): Record<string, unknown> | null {
 /** Why a failed node failed, from the getNodeOutput envelope's `error` field. */
 export function nodeErrorOf(
   value: unknown,
-): { name?: string; code?: string; message: string; attempt?: number } | null {
+): { name?: string; code?: string; message: string; attempt?: number; agent?: string } | null {
   if (!isRecord(value) || !isRecord(value.error)) return null;
   const message = asString(value.error.message);
   if (!message) return null;
   const name = asString(value.error.name);
   const code = asString(value.error.code);
+  // Agent errors embed the acting agent as `Agent "<id>" (engine, model=…)`.
+  // Surface engine+model on the banner — "which agent hit the quota" should
+  // not require reading the message body.
+  const agentMatch = /Agent "[^"]*" \(([^)]+)\)/.exec(message);
+  const agent = agentMatch?.[1]?.replace(/model=/, "").replace(", ", " · ");
   return {
     ...(name ? { name } : {}),
     ...(code ? { code } : {}),
     message,
     ...(typeof value.error.attempt === "number" ? { attempt: value.error.attempt } : {}),
+    ...(agent ? { agent } : {}),
   };
 }
 

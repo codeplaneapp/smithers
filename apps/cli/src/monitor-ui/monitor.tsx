@@ -1595,6 +1595,19 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
   const candidate = hijackCandidateForNode(candidates, nodeId);
   const hijackAction = hijackActionFor(runStatus, isLive, candidate !== null);
   const [showHijack, setShowHijack] = useState(false);
+  // Containers (parallel, sequence, loop, worktree, merge-queue, …) group
+  // other nodes and never own a transcript or structured output — showing
+  // those panels there is pure noise. Leaf kinds keep the full inspector.
+  const kind = String(node.kind ?? "").toLowerCase();
+  const isContainer = !["task", "agent", "compute", "static"].includes(kind) && (node.children?.length ?? 0) > 0;
+  const childCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const child of node.children ?? []) {
+      const status = String(child.status ?? "unknown");
+      counts.set(status, (counts.get(status) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((left, right) => right[1] - left[1]);
+  }, [node]);
   return (
     <aside className="mon-inspector" data-testid="monitor-inspector">
       <header className="mon-panel-head">
@@ -1659,50 +1672,74 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
           </div>
         </>
       ) : null}
-      {failure ? (
+      {failure && !isContainer ? (
         <>
           <h3 className="mon-kicker">Failure</h3>
           <div className="mon-banner tone-failed">
             {[failure.name, failure.code].filter(Boolean).join(" · ")}
             {typeof failure.attempt === "number" ? ` · attempt ${failure.attempt}` : ""}
+            {failure.agent ? ` · ${failure.agent}` : ""}
           </div>
           <pre className="mon-output mon-failure">{failure.message}</pre>
         </>
       ) : null}
-      <div className="mon-kicker-row">
-        <h3 className="mon-kicker">{isLive ? "Live output" : "Transcript"}</h3>
-        {hijackAction && candidate ? (
-          <button
-            type="button"
-            className="mon-btn mon-hijack-inline"
-            data-testid="monitor-hijack-inline"
-            title={
-              hijackAction.kind === "hijack"
-                ? `Take over this node's live ${candidate.engine} session in an embedded terminal`
-                : `Reopen this node's recorded ${candidate.engine} session in an embedded terminal`
-            }
-            onClick={() => setShowHijack(true)}
-          >
-            ⌁ {hijackAction.kind === "hijack" ? "Hijack terminal" : "Reopen terminal"}
-          </button>
-        ) : null}
-      </div>
-      <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
-      <h3 className="mon-kicker">Output</h3>
-      {row ? (
-        <OutputFields row={row} />
-      ) : output.loading ? (
-        <div className="mon-empty mon-dim">
-          <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…</span>
-        </div>
+      {isContainer ? (
+        <>
+          <h3 className="mon-kicker">Children</h3>
+          {childCounts.length > 0 ? (
+            <div className="mon-child-rollup" data-testid="monitor-child-rollup">
+              {childCounts.map(([status, count]) => (
+                <span key={status} className="mon-child-stat">
+                  <ToneDot tone={toneForStatus(status)} /> {count} {labelForStatus(status)}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="mon-empty mon-dim">No children yet.</div>
+          )}
+          <div className="mon-dim mon-container-note">
+            {String(node.kind ?? "container")} nodes group other nodes — select a task inside for its transcript and
+            output.
+          </div>
+        </>
       ) : (
-        <div className="mon-empty mon-dim">
-          {failure
-            ? "The node failed before producing output."
-            : isLive
-              ? <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> running — structured output lands here when the node finishes</span>
-              : "No output recorded for this node."}
-        </div>
+        <>
+          <div className="mon-kicker-row">
+            <h3 className="mon-kicker">{isLive ? "Live output" : "Transcript"}</h3>
+            {hijackAction && candidate ? (
+              <button
+                type="button"
+                className="mon-btn mon-hijack-inline"
+                data-testid="monitor-hijack-inline"
+                title={
+                  hijackAction.kind === "hijack"
+                    ? `Take over this node's live ${candidate.engine} session in an embedded terminal`
+                    : `Reopen this node's recorded ${candidate.engine} session in an embedded terminal`
+                }
+                onClick={() => setShowHijack(true)}
+              >
+                ⌁ {hijackAction.kind === "hijack" ? "Hijack terminal" : "Reopen terminal"}
+              </button>
+            ) : null}
+          </div>
+          <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
+          <h3 className="mon-kicker">Output</h3>
+          {row ? (
+            <OutputFields row={row} />
+          ) : output.loading ? (
+            <div className="mon-empty mon-dim">
+              <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…</span>
+            </div>
+          ) : (
+            <div className="mon-empty mon-dim">
+              {failure
+                ? "The node failed before producing output."
+                : isLive
+                  ? <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> running — structured output lands here when the node finishes</span>
+                  : "No output recorded for this node."}
+            </div>
+          )}
+        </>
       )}
     </aside>
   );
@@ -2106,6 +2143,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 
 .mon-kicker { margin: 0; font-size: var(--fs-1); line-height: var(--lh-tight); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .mon-kicker-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.mon-child-rollup { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+.mon-child-stat { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-1); }
+.mon-container-note { font-size: var(--fs-1); }
 .mon-hijack-inline { flex: none; }
 .mon-tree-xml { max-height: 60vh; font-size: var(--fs-1); }
 .mon-count { font-variant-numeric: tabular-nums; color: var(--text); }
