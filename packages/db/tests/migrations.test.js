@@ -201,6 +201,90 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
+  test("drops poisoned compressed-prototype snapshot triggers so snapshot writes work again", () => {
+    // A store that ran the unreleased compressed-payload prototype carries
+    // AFTER INSERT/DELETE/UPDATE triggers on _smithers_snapshots whose bodies
+    // update _smithers_snapshot_payloads.ref_count — a column a later
+    // prototype iteration removed. SQLite compiles trigger bodies when the
+    // triggering statement is prepared, so EVERY snapshot insert fails with
+    // "no such column: ref_count" even though payload_hash is NULL and the
+    // WHEN clause would never match.
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE _smithers_snapshots (
+        run_id TEXT NOT NULL,
+        frame_no INTEGER NOT NULL,
+        nodes_json TEXT NOT NULL,
+        outputs_json TEXT NOT NULL,
+        ralph_json TEXT NOT NULL,
+        input_json TEXT NOT NULL,
+        vcs_pointer TEXT,
+        workflow_hash TEXT,
+        content_hash TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        payload_hash TEXT,
+        PRIMARY KEY (run_id, frame_no)
+      );
+      CREATE TABLE _smithers_snapshot_payloads (
+        content_hash TEXT PRIMARY KEY,
+        payload_b64 TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL
+      );
+      INSERT INTO _smithers_snapshot_payloads (content_hash, payload_b64, created_at_ms)
+        VALUES ('prototype-hash', 'preserved-base64', 1);
+      INSERT INTO _smithers_snapshots
+        (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, content_hash, payload_hash, created_at_ms)
+        VALUES ('prototype-run', 0, '', '', '', '', 'prototype-hash', 'prototype-hash', 1);
+      CREATE TRIGGER _smithers_snapshot_payload_insert AFTER INSERT ON _smithers_snapshots
+        WHEN NEW.payload_hash IS NOT NULL BEGIN
+          UPDATE _smithers_snapshot_payloads SET ref_count = ref_count + 1 WHERE content_hash = NEW.payload_hash;
+        END;
+      CREATE TRIGGER _smithers_snapshot_payload_delete AFTER DELETE ON _smithers_snapshots
+        WHEN OLD.payload_hash IS NOT NULL BEGIN
+          UPDATE _smithers_snapshot_payloads SET ref_count = ref_count - 1 WHERE content_hash = OLD.payload_hash;
+          DELETE FROM _smithers_snapshot_payloads WHERE content_hash = OLD.payload_hash AND ref_count = 0;
+        END;
+      CREATE TRIGGER _smithers_snapshot_payload_update AFTER UPDATE OF payload_hash ON _smithers_snapshots
+        WHEN OLD.payload_hash IS NOT NEW.payload_hash BEGIN
+          UPDATE _smithers_snapshot_payloads SET ref_count = ref_count - 1 WHERE content_hash = OLD.payload_hash;
+          DELETE FROM _smithers_snapshot_payloads WHERE content_hash = OLD.payload_hash AND ref_count = 0;
+          UPDATE _smithers_snapshot_payloads SET ref_count = ref_count + 1 WHERE content_hash = NEW.payload_hash;
+        END;
+      CREATE TRIGGER _smithers_snapshot_payload_immutable BEFORE UPDATE ON _smithers_snapshot_payloads
+        WHEN OLD.content_hash IS NOT NEW.content_hash OR OLD.payload_b64 IS NOT NEW.payload_b64
+        BEGIN SELECT RAISE(ABORT, 'snapshot payloads are immutable'); END;
+    `);
+    // Pin the failure mode the migration must repair.
+    expect(() =>
+      sqlite.run(
+        "INSERT INTO _smithers_snapshots (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, content_hash, created_at_ms) VALUES ('r', 1, '{}', '{}', '{}', '{}', 'h', 2)",
+      ),
+    ).toThrow(/no such column: ref_count/);
+
+    ensureSmithersTables(drizzle(sqlite));
+
+    const triggerNames = sqlite
+      .query("SELECT name FROM sqlite_master WHERE type = 'trigger'")
+      .all()
+      .map((row) => row.name);
+    expect(triggerNames).not.toContain("_smithers_snapshot_payload_insert");
+    expect(triggerNames).not.toContain("_smithers_snapshot_payload_delete");
+    expect(triggerNames).not.toContain("_smithers_snapshot_payload_update");
+    expect(triggerNames).not.toContain("_smithers_snapshot_payload_immutable");
+    expect(triggerNames).toContain("_smithers_snapshot_payload_refs_insert");
+    expect(triggerNames).toContain("_smithers_snapshots_payload_refs_cascade");
+    // The regression: snapshot writes work again.
+    sqlite.run(
+      "INSERT INTO _smithers_snapshots (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, content_hash, created_at_ms) VALUES ('r', 1, '{}', '{}', '{}', '{}', 'h', 2)",
+    );
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshots").get().count).toBe(2);
+    // Prototype payload rows and the payload_hash column stay readable for
+    // legacy payload_b64 lookups.
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payloads").get().count).toBe(1);
+    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0026_drop_snapshot_prototype_triggers");
+    sqlite.close();
+  });
+
   test("forward migration over a partially populated legacy DB upgrades schema without dropping rows", () => {
     // Simulate a legacy state: only the old _smithers_frames table exists with
     // a row, plus _smithers_approvals missing the new payload columns. Running

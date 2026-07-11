@@ -284,6 +284,21 @@ const SNAPSHOT_SQLITE_TRIGGERS = [
      END`,
 ];
 
+// An unreleased compressed-payload prototype (superseded by 0025's
+// content-addressed tables) installed these triggers. Later prototype
+// iterations removed the _smithers_snapshot_payloads.ref_count column their
+// bodies update, and SQLite compiles trigger bodies when the triggering
+// statement is prepared, so a store that ran the prototype fails EVERY
+// _smithers_snapshots insert with "no such column: ref_count" even though
+// payload_hash is NULL. 0026 retires the triggers; the payloads table itself
+// stays readable for legacy payload_b64 lookups.
+const SNAPSHOT_PROTOTYPE_TRIGGERS = [
+    ["_smithers_snapshot_payload_insert", "_smithers_snapshots"],
+    ["_smithers_snapshot_payload_delete", "_smithers_snapshots"],
+    ["_smithers_snapshot_payload_update", "_smithers_snapshots"],
+    ["_smithers_snapshot_payload_immutable", "_smithers_snapshot_payloads"],
+];
+
 const SNAPSHOT_POSTGRES_FUNCTION = `CREATE OR REPLACE FUNCTION _smithers_snapshot_payload_refcount() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
@@ -1034,6 +1049,43 @@ function buildMigrations(context) {
     ON _smithers_snapshot_payload_refs (content_hash)`) });
                 await installSnapshotTriggersPostgres(pgConn);
                 return { tables: ["_smithers_snapshot_contents", "_smithers_snapshot_payload_refs"], triggers: 2 };
+            },
+        },
+        {
+            id: "0026_drop_snapshot_prototype_triggers",
+            name: "Drop unreleased compressed-payload prototype snapshot triggers",
+            checksum: checksumForStatements(SNAPSHOT_PROTOTYPE_TRIGGERS.map(([name]) => `DROP TRIGGER IF EXISTS ${name}`)),
+            isApplied: (sqlite) => sqlite
+                .query(`SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name IN (${SNAPSHOT_PROTOTYPE_TRIGGERS.map(() => "?").join(", ")})`)
+                .get(...SNAPSHOT_PROTOTYPE_TRIGGERS.map(([name]) => name)).count === 0,
+            isAppliedPostgres: async (pgConn) => {
+                const triggers = await pgConn.query({
+                    text: "SELECT tgname FROM pg_trigger WHERE tgname = ANY($1) AND NOT tgisinternal",
+                    values: [SNAPSHOT_PROTOTYPE_TRIGGERS.map(([name]) => name)],
+                });
+                return (triggers.rows ?? []).length === 0;
+            },
+            up: (sqlite) => {
+                const droppedTriggers = [];
+                for (const [name] of SNAPSHOT_PROTOTYPE_TRIGGERS) {
+                    if (!sqlite.query("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(name)) {
+                        continue;
+                    }
+                    sqlite.run(`DROP TRIGGER IF EXISTS ${name}`);
+                    droppedTriggers.push(name);
+                }
+                return { droppedTriggers };
+            },
+            upPostgres: async (pgConn) => {
+                const droppedTriggers = [];
+                for (const [name, table] of SNAPSHOT_PROTOTYPE_TRIGGERS) {
+                    if (!(await tableExistsPostgres(pgConn, table))) {
+                        continue;
+                    }
+                    await pgConn.query({ text: `DROP TRIGGER IF EXISTS ${name} ON ${table}` });
+                    droppedTriggers.push(name);
+                }
+                return { droppedTriggers };
             },
         },
     ];
