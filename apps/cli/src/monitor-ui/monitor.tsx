@@ -568,6 +568,8 @@ type TreeNode = TreeNodeLike & {
   kind?: string;
   iteration?: number;
   agent?: unknown;
+  attempt?: number;
+  maxAttempts?: number;
   toolCalls?: unknown;
   children?: TreeNode[] | null;
 };
@@ -2051,7 +2053,23 @@ function NodeInspector({
   const failure = nodeErrorOf(output.data);
   const isLive = !TERMINAL_NODE_TONES.has(String(node.status ?? ""));
   const toolCalls = asArray(node.toolCalls).filter(isRecord);
-  const agentName = isRecord(node.agent) ? asString(node.agent.name) : asString(node.agent);
+  // Structured agent metadata (declared assignment + what actually ran) when
+  // the snapshot carries it; legacy rows may still hold a plain string.
+  const agentInfo = isRecord(node.agent) ? node.agent : undefined;
+  const agentName = agentInfo ? asString(agentInfo.name) : asString(node.agent);
+  const agentEngine = agentInfo ? asString(agentInfo.engine) : undefined;
+  const agentModel = agentInfo ? asString(agentInfo.model) : undefined;
+  const agentRanOn = agentInfo && isRecord(agentInfo.ranOn) ? agentInfo.ranOn : undefined;
+  const ranOnEngine = agentRanOn ? asString(agentRanOn.engine) : undefined;
+  const ranOnModel = agentRanOn ? asString(agentRanOn.model) : undefined;
+  const declaredLine = [agentEngine, agentModel].filter(Boolean).join(" · ");
+  const ranOnLine = [ranOnEngine, ranOnModel].filter(Boolean).join(" · ");
+  const agentChain = asArray(agentInfo?.chain)
+    .filter(isRecord)
+    .map((entry) => asString(entry.name) ?? [asString(entry.engine), asString(entry.model)].filter(Boolean).join(" · "))
+    .filter(Boolean);
+  const nodeAttempt = asNumber(node.attempt);
+  const nodeMaxAttempts = asNumber(node.maxAttempts);
   // Hijack affordance: only nodes whose attempts recorded a resumable agent
   // session get a button (live run + live node = hand-off; settled run =
   // reopen the session post-mortem). Compute nodes never show one.
@@ -2167,6 +2185,40 @@ function NodeInspector({
           <>
             <dt>agent</dt>
             <dd>{agentName}</dd>
+          </>
+        ) : null}
+        {declaredLine && declaredLine !== agentName ? (
+          <>
+            <dt>engine</dt>
+            <dd className="mon-mono" data-testid="monitor-agent-engine">
+              {declaredLine}
+            </dd>
+          </>
+        ) : null}
+        {ranOnLine && ranOnLine !== declaredLine ? (
+          <>
+            <dt>ran on</dt>
+            <dd className="mon-mono" data-testid="monitor-agent-ran-on">
+              {ranOnLine}
+            </dd>
+          </>
+        ) : null}
+        {agentChain.length > 1 ? (
+          <>
+            <dt>failover</dt>
+            <dd className="mon-mono" data-testid="monitor-agent-chain">
+              {agentChain.join(" → ")}
+            </dd>
+          </>
+        ) : null}
+        {typeof nodeAttempt === "number" && nodeAttempt > 0 ? (
+          <>
+            <dt>attempt</dt>
+            <dd className="mon-mono" data-testid="monitor-agent-attempt">
+              {typeof nodeMaxAttempts === "number" && nodeMaxAttempts > 0
+                ? `${nodeAttempt} of ${nodeMaxAttempts}`
+                : nodeAttempt}
+            </dd>
           </>
         ) : null}
         {typeof node.iteration === "number" ? (
