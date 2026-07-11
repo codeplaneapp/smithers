@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { Effect } from "effect";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { POSTGRES, quoteIdentifier, translateDdl } from "@smithers-orchestrator/db/dialect";
@@ -11,6 +11,11 @@ import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
 
 const DEFAULT_BATCH_SIZE = 250;
 const MIGRATION_MARKER_NAME = "migrated.json";
+const SQLITE_WAL_HEADER_BYTES = 32;
+const SQLITE_WAL_FRAME_HEADER_BYTES = 24;
+const SQLITE_SHM_REGION_BYTES = 32_768;
+const SQLITE_WAL_FORMAT_VERSION = 3_007_000;
+const SQLITE_WAL_MAGIC_VALUES = new Set([0x377f0682, 0x377f0683]);
 
 /**
  * @typedef {"sqlite" | "pglite" | "postgres"} MigrateSmithersBackend
@@ -586,6 +591,110 @@ function isUnopenableSqliteError(error) {
 }
 
 /**
+ * Read only a bounded prefix. WAL files can be large, so preflight must never
+ * load an entire sidecar merely to inspect its fixed-size header.
+ *
+ * @param {string} path
+ * @param {number} length
+ * @returns {Buffer}
+ */
+function readFilePrefix(path, length) {
+    const fd = openSync(path, "r");
+    try {
+        const buffer = Buffer.alloc(length);
+        const bytesRead = readSync(fd, buffer, 0, length, 0);
+        return buffer.subarray(0, bytesRead);
+    }
+    finally {
+        closeSync(fd);
+    }
+}
+
+/**
+ * @param {string} dbPath
+ * @param {"wal" | "shm"} sidecar
+ * @param {string} sidecarPath
+ * @param {number} sizeBytes
+ * @param {string} reason
+ * @param {string} expectedStructure
+ * @returns {SmithersError}
+ */
+function malformedSqliteSidecarError(dbPath, sidecar, sidecarPath, sizeBytes, reason, expectedStructure) {
+    return new SmithersError("DB_QUERY_FAILED", `The SQLite ${sidecar.toUpperCase()} sidecar at ${sidecarPath} is structurally malformed (${reason}). Smithers refused to open ${dbPath} for a writable schema upgrade because SQLite memory-maps WAL state and a truncated sidecar can terminate the process. Leave the original files together, restore the database and both sidecars from the same backup, or open and checkpoint the database with a trusted SQLite tool before retrying migration. The original files were left untouched.`, {
+        failure: "malformed-sqlite-sidecar",
+        dbPath,
+        sidecar,
+        sidecarPath,
+        sizeBytes,
+        expectedStructure,
+    });
+}
+
+/**
+ * Reject sidecars whose on-disk sizes cannot represent SQLite's documented WAL
+ * structures before bun:sqlite opens the source writable. This intentionally
+ * does not attempt checksum recovery or parse the native-endian WAL index: it
+ * only enforces structural invariants that are safe to establish from bounded
+ * reads. Zero-length persistent sidecars are valid after a checkpoint.
+ *
+ * @param {string} dbPath
+ */
+function assertSqliteSidecarsStructurallySafe(dbPath) {
+    // Check the mmap-backed WAL index first. A truncated SHM file is the native
+    // crash hazard this preflight must reject before doing any other sidecar IO.
+    const shmPath = `${dbPath}-shm`;
+    if (existsSync(shmPath)) {
+        const sizeBytes = statSync(shmPath).size;
+        if (sizeBytes !== 0 && sizeBytes % SQLITE_SHM_REGION_BYTES !== 0) {
+            throw malformedSqliteSidecarError(dbPath, "shm", shmPath, sizeBytes, `WAL-index size is not a multiple of ${SQLITE_SHM_REGION_BYTES} bytes`, `zero bytes, or N * ${SQLITE_SHM_REGION_BYTES} bytes`);
+        }
+    }
+
+    const walPath = `${dbPath}-wal`;
+    if (existsSync(walPath)) {
+        const sizeBytes = statSync(walPath).size;
+        if (sizeBytes > 0 && sizeBytes < SQLITE_WAL_HEADER_BYTES) {
+            throw malformedSqliteSidecarError(dbPath, "wal", walPath, sizeBytes, `non-empty WAL is shorter than its ${SQLITE_WAL_HEADER_BYTES}-byte header`, "zero bytes, or a 32-byte WAL header followed by complete page frames");
+        }
+        if (sizeBytes >= SQLITE_WAL_HEADER_BYTES) {
+            const header = readFilePrefix(walPath, SQLITE_WAL_HEADER_BYTES);
+            const magic = header.readUInt32BE(0);
+            const version = header.readUInt32BE(4);
+            const encodedPageSize = header.readUInt32BE(8);
+            const pageSize = encodedPageSize === 1 ? 65_536 : encodedPageSize;
+            const validPageSize = pageSize >= 512 && pageSize <= 65_536 && (pageSize & (pageSize - 1)) === 0;
+            if (!SQLITE_WAL_MAGIC_VALUES.has(magic) || version !== SQLITE_WAL_FORMAT_VERSION || !validPageSize) {
+                throw malformedSqliteSidecarError(dbPath, "wal", walPath, sizeBytes, "WAL header magic, format version, or page size is invalid", "SQLite WAL magic 0x377f0682/0x377f0683, format 3007000, and a power-of-two page size from 512 through 65536 bytes");
+            }
+            const frameSize = SQLITE_WAL_FRAME_HEADER_BYTES + pageSize;
+            if ((sizeBytes - SQLITE_WAL_HEADER_BYTES) % frameSize !== 0) {
+                throw malformedSqliteSidecarError(dbPath, "wal", walPath, sizeBytes, `bytes after the WAL header do not form complete ${frameSize}-byte frames`, `32 + N * (${SQLITE_WAL_FRAME_HEADER_BYTES} + ${pageSize}) bytes`);
+            }
+        }
+    }
+}
+
+/**
+ * @param {string} dbPath
+ */
+function preflightSqliteSidecars(dbPath) {
+    try {
+        assertSqliteSidecarsStructurallySafe(dbPath);
+    }
+    catch (error) {
+        if (error instanceof SmithersError) {
+            throw error;
+        }
+        const originalError = error instanceof Error ? error.message : String(error);
+        throw new SmithersError("DB_QUERY_FAILED", `Could not safely inspect the SQLite WAL/SHM sidecars for ${dbPath} before opening the migration source (${originalError}). Smithers left the database and sidecars untouched. Repair their paths or permissions, or restore the database and both sidecars from the same backup before retrying migration.`, {
+            failure: "sqlite-sidecar-inspection",
+            dbPath,
+            originalError,
+        }, { cause: error });
+    }
+}
+
+/**
  * Bring an older SQLite source up to the current Smithers schema before the
  * deterministic copy opens its read-only transaction. This preserves the
  * rollback-friendly copy path while avoiding a stale schema on the target.
@@ -596,10 +705,14 @@ function upgradeSqliteSourceStore(dbPath) {
     /** @type {Database | undefined} */
     let sqlite;
     try {
+        preflightSqliteSidecars(dbPath);
         sqlite = new Database(dbPath);
         ensureSmithersTables(drizzle(sqlite));
     }
     catch (error) {
+        if (error instanceof SmithersError) {
+            throw error;
+        }
         if (isCorruptSqliteError(error)) {
             const original = error instanceof Error ? error.message : String(error);
             throw new SmithersError("DB_QUERY_FAILED", `The legacy SQLite store at ${dbPath} appears to be corrupted (${original}). Smithers cannot migrate a corrupt store. Verify with: sqlite3 ${dbPath} 'PRAGMA integrity_check'. If it reports corruption, restore from a backup or start fresh; the original file was left untouched.`, { dbPath }, { cause: error });
@@ -905,7 +1018,13 @@ function inferSqliteSourceDbPath(primaryDbPath, workspaceRoot, hasExplicitDbPath
     const candidates = hasExplicitDbPath
         ? [primaryDbPath]
         : [primaryDbPath, join(workspaceRoot, ".smithers", "smithers.db")];
-    for (const candidate of [...new Set(candidates)]) {
+    for (const candidate of new Set(candidates)) {
+        if (existsSync(candidate)) {
+            // Source-path inference itself opens SQLite read-only. Inspect the
+            // sidecars first so that step cannot silently rebuild evidence of a
+            // malformed WAL index before the writable-upgrade guard sees it.
+            preflightSqliteSidecars(candidate);
+        }
         if (sqliteRunCountAt(candidate) > 0) {
             return candidate;
         }

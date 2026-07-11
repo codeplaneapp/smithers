@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { Database } from "bun:sqlite";
+import { Database, constants } from "bun:sqlite";
+import { spawnSync } from "node:child_process";
 import { SmithersDb } from "../../db/src/adapter.js";
 import { ensureSmithersTables } from "../../db/src/ensure.js";
 import { forkRun, getBranchInfo, listBranches } from "@smithers-orchestrator/time-travel/fork";
@@ -22,6 +23,8 @@ setDefaultTimeout(120_000);
 /** @type {string[]} */
 const tempDirs = [];
 const PG_URL = process.env.SMITHERS_TEST_PG_URL;
+const MIGRATION_RESULT_MARKER = "__SMITHERS_MIGRATION_RESULT__";
+const MIGRATION_MODULE_URL = new URL("../src/migrateSmithersStore.js", import.meta.url).href;
 
 function makeWorkspace(name) {
   const dir = join(tmpdir(), `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -77,6 +80,56 @@ function seedSqliteStore(cwd, dbPath = join(cwd, "smithers.db")) {
   `);
   api.db.$client.close();
   return dbPath;
+}
+
+function persistValidWalSidecars(dbPath) {
+  const sqlite = new Database(dbPath);
+  try {
+    // macOS persists WAL sidecars by default; opt in explicitly so Linux and
+    // Windows exercise the same real sidecar cleanup path.
+    sqlite.fileControl(constants.SQLITE_FCNTL_PERSIST_WAL, 1);
+    sqlite.exec("PRAGMA journal_mode = WAL; INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json) VALUES ('run-migrate-1', 2, 23, 'SidecarSeed', '{}');");
+  } finally {
+    sqlite.close();
+  }
+  expect(existsSync(`${dbPath}-wal`)).toBe(true);
+  expect(existsSync(`${dbPath}-shm`)).toBe(true);
+}
+
+function migrateInChild(cwd) {
+  const script = `
+    import { existsSync, statSync } from "node:fs";
+    const dbPath = ${JSON.stringify(join(cwd, "smithers.db"))};
+    const sidecarsBefore = Object.fromEntries(["wal", "shm"].map((kind) => {
+      const path = dbPath + "-" + kind;
+      return [kind, existsSync(path) ? statSync(path).size : null];
+    }));
+    const { migrateSmithersStore } = await import(${JSON.stringify(MIGRATION_MODULE_URL)});
+    try {
+      const result = await migrateSmithersStore({ cwd: ${JSON.stringify(cwd)}, from: "sqlite", to: "pglite", env: {} });
+      console.log(${JSON.stringify(MIGRATION_RESULT_MARKER)} + JSON.stringify({ ok: true, result, sidecarsBefore }));
+    } catch (error) {
+      console.log(${JSON.stringify(MIGRATION_RESULT_MARKER)} + JSON.stringify({
+        ok: false,
+        code: error?.code,
+        message: error?.message,
+        details: error?.details,
+        sidecarsBefore,
+      }));
+    }
+  `;
+  const child = spawnSync(process.execPath, ["--eval", script], {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  const markerLine = child.stdout
+    .split(/\r?\n/)
+    .find((line) => line.startsWith(MIGRATION_RESULT_MARKER));
+  return {
+    child,
+    payload: markerLine ? JSON.parse(markerLine.slice(MIGRATION_RESULT_MARKER.length)) : undefined,
+  };
 }
 
 function seedOlderSqliteStore(cwd) {
@@ -489,16 +542,7 @@ describe("migrateSmithersStore", () => {
   test("can remove sqlite files only after a successful copy", async () => {
     const cwd = makeWorkspace("smithers-migrate-remove-sqlite");
     const dbPath = seedSqliteStore(cwd);
-    const sqlite = new Database(dbPath);
-    sqlite.exec("PRAGMA journal_mode = WAL; INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json) VALUES ('run-migrate-1', 2, 23, 'SidecarSeed', '{}');");
-    sqlite.close();
-    // Some SQLite builds checkpoint and remove WAL/SHM sidecars when the last
-    // connection closes. The migration cleanup promise is filesystem-level:
-    // if sidecars exist after a successful copy, they must be removed.
-    writeFileSync(`${dbPath}-wal`, "sidecar", "utf8");
-    writeFileSync(`${dbPath}-shm`, "sidecar", "utf8");
-    expect(existsSync(`${dbPath}-wal`)).toBe(true);
-    expect(existsSync(`${dbPath}-shm`)).toBe(true);
+    persistValidWalSidecars(dbPath);
 
     const result = await migrateSmithersStore({ cwd, to: "pglite", keepSqlite: false });
 
@@ -507,6 +551,43 @@ describe("migrateSmithersStore", () => {
     expect(existsSync(`${dbPath}-wal`)).toBe(false);
     expect(existsSync(`${dbPath}-shm`)).toBe(false);
     expect(existsSync(result.markerPath)).toBe(true);
+  });
+
+  test("rejects structurally malformed WAL and SHM sidecars before a writable SQLite open", () => {
+    for (const sidecar of ["wal", "shm"]) {
+      const cwd = makeWorkspace(`smithers-migrate-malformed-${sidecar}`);
+      const dbPath = seedSqliteStore(cwd);
+      persistValidWalSidecars(dbPath);
+      const sidecarPath = `${dbPath}-${sidecar}`;
+      writeFileSync(sidecarPath, "sidecar", "utf8");
+      const sqliteBefore = readFileSync(dbPath);
+      const sidecarBefore = readFileSync(sidecarPath);
+
+      // Keep malformed native files outside this test process. If the guard
+      // regresses, only the child can receive SQLite's native signal and this
+      // assertion reports it instead of taking down the entire package suite.
+      const { child, payload } = migrateInChild(cwd);
+      expect(child.status, `child stdout:\n${child.stdout}\nchild stderr:\n${child.stderr}`).toBe(0);
+      expect(payload).toMatchObject({
+        ok: false,
+        sidecarsBefore: { [sidecar]: 7 },
+        code: "DB_QUERY_FAILED",
+        details: {
+          failure: "malformed-sqlite-sidecar",
+          dbPath,
+          sidecar,
+          sidecarPath,
+          sizeBytes: 7,
+        },
+      });
+      expect(payload.message).toContain("structurally malformed");
+      expect(payload.message).toContain("original files were left untouched");
+      expect(readFileSync(dbPath)).toEqual(sqliteBefore);
+      expect(readFileSync(sidecarPath)).toEqual(sidecarBefore);
+      expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(false);
+      expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
+      expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
+    }
   });
 
   test("copies a PGlite Smithers store back to SQLite row-for-row and writes both receipts after verification", async () => {
