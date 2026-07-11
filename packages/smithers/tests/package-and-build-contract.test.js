@@ -198,17 +198,9 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expect(scripts["check:dts"]).toBe("node scripts/check-dts.mjs");
     expect(scripts["fetch:jj"]).toBe("node scripts/fetch-jj-binaries.mjs");
     expect(scripts.observability).toBeUndefined();
-    expect(scripts.test).toBe([
-      "node scripts/check-single-effect-version.mjs",
-      "node scripts/check-dependency-boundaries.mjs",
-      "node scripts/check-no-direct-db-access.mjs",
-      "node scripts/check-docs.mjs",
-      "node scripts/check-llms.mjs",
-      "node scripts/check-sota.mjs",
-      "node scripts/check-dts.mjs",
-      "node scripts/check-smithers-test-script.mjs",
-      "pnpm -r --no-bail test",
-    ].join(" && "));
+    expect(scripts.test).toBe(
+      "node scripts/run-test-gates.mjs && node scripts/check-dts.mjs && pnpm -r --no-bail test",
+    );
 
     for (const path of [
       "scripts/publish.mjs",
@@ -219,6 +211,8 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "scripts/generate-workflow-pack.ts",
       "scripts/check-no-direct-db-access.mjs",
       "scripts/check-smithers-test-script.mjs",
+      "scripts/run-test-gates.mjs",
+      "scripts/run-test-gates.test.mjs",
       "scripts/verify-observability.sh",
     ]) expectFile(path);
 
@@ -243,11 +237,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "bun-version: 1.3.13",
       "sudo apt-get update && sudo apt-get install -y ripgrep",
       "choco install ripgrep -y",
-      "node scripts/check-single-effect-version.mjs",
-      "node scripts/check-dependency-boundaries.mjs",
-      "node scripts/check-docs.mjs",
-      "node scripts/check-llms.mjs",
-      "node scripts/check-smithers-test-script.mjs",
+      "node scripts/run-test-gates.mjs",
       "node scripts/check-dts.mjs",
       "pnpm -r --no-bail test",
       "pnpm -C .smithers test:ddd",
@@ -315,6 +305,23 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "collectBunLockVersions",
       "collectInstalledVersions",
       "Expected exactly one resolved effect version",
+    ]);
+    expectText("scripts/run-test-gates.mjs", [
+      "scripts/run-test-gates.test.mjs",
+      "scripts/check-single-effect-version.mjs",
+      "scripts/check-dependency-boundaries.mjs",
+      "scripts/check-no-direct-db-access.mjs",
+      "scripts/check-docs.mjs",
+      "scripts/check-llms.mjs",
+      "scripts/check-sota.mjs",
+      "scripts/check-smithers-test-script.mjs",
+      "spawnSync",
+      "terminated by",
+    ]);
+    expectText("scripts/run-test-gates.test.mjs", [
+      "pins the canonical gate roster",
+      "stops immediately and preserves the first nonzero status",
+      "treats launch errors and signal termination as failures",
     ]);
     expectText("scripts/check-sota.mjs", [
       "docs/reference/sota-models.mdx",
