@@ -72,11 +72,9 @@ const descriptor = createCloudflareD1SqliteDescriptor(env.DB);
 
 <Warning>
   D1 has no interactive transactions. Its `prepare`/`bind`/`run` API cannot hold
-  an open `BEGIN`/`COMMIT`/`ROLLBACK` across round-trips, so the descriptor's
-  `transaction()` is a non-atomic pass-through: it just runs the operation with
-  no transaction. A failure partway through leaves earlier writes committed.
-  Smithers' durable run-of-record writes assume transactional commits, so a
-  mid-transaction failure on D1 can leave partial state. Do not back durable run
+  an open `BEGIN`/`COMMIT`/`ROLLBACK` across round-trips. The descriptor reports
+  that limitation, and Smithers rejects transactional writes before their
+  operation begins instead of risking a partial commit. Do not back durable run
   state with D1. Use `createCloudflareDurableObjectSqliteDescriptor` for
   durability and reserve D1 for read-mostly use.
 </Warning>

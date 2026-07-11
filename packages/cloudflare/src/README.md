@@ -5,10 +5,10 @@ Single-module package (`index.js`) with three Cloudflare integrations:
 - `createCloudflareDurableObjectSqliteDescriptor` — Durable Object
   `ctx.storage` SQLite (or its `.sql` handle) → Smithers db descriptor; binds
   the real `storage.transaction` when available.
-- `createCloudflareD1SqliteDescriptor` — D1 → descriptor. Its `transaction()`
-  is a NON-ATOMIC pass-through (D1 has no interactive transactions) — read the
-  JSDoc warning before using it for durable run state; prefer the Durable
-  Object descriptor there.
+- `createCloudflareD1SqliteDescriptor` — D1 → read-mostly descriptor. D1 has no
+  interactive transactions, so the descriptor reports that limitation and
+  Smithers rejects transactional writes before they begin; prefer the Durable
+  Object descriptor for durable run state.
 - `createCloudflareSandboxProvider` — Cloudflare Sandbox SDK → Smithers
   `SandboxProvider`. It writes `.smithers/sandbox-request.json` into the
   sandbox workdir, runs the entry command, and reads the result JSON from
