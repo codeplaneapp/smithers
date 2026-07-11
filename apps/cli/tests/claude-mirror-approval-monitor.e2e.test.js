@@ -1,12 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { findAndOpenDb } from "../src/find-db.js";
+import { readClaudeMirrorSubscriptions } from "../src/claude-mirror/readClaudeMirrorSubscriptions.js";
+import { resolveClaudeMirrorSubscriptionsPath } from "../src/claude-mirror/resolveClaudeMirrorSubscriptionsPath.js";
 import { runClaudeMonitor } from "../src/claude-mirror/runClaudeMonitor.js";
 
 // Approval gates through the mirror protocol, against a real suspended run:
 // `claude tick` surfaces the pending approval, `claude node-wait` times out
 // (not fails) on the gated node, and `claude monitor` emits the
 // approval-pending NDJSON line the plugin's background monitor delivers.
+// Every CLI call pins CLAUDE_CODE_SESSION_ID so the subscription side
+// (launch-path subscribe, tick subscribe, session-scoped monitor, terminal
+// prune) is exercised deterministically both locally and in CI.
+
+const SESSION_ID = "mirror-e2e-session";
+const SESSION_ENV = { CLAUDE_CODE_SESSION_ID: SESSION_ID };
 
 const APPROVAL_WORKFLOW = `
 /** @jsxImportSource smithers-orchestrator */
@@ -46,7 +54,7 @@ const TERMINAL = new Set(["finished", "failed", "cancelled", "continued"]);
 
 /** @param {{ dir: string }} repo @param {string[]} args */
 function tryClaudeJson(repo, args) {
-    const result = runSmithers(["claude", ...args], { cwd: repo.dir, format: "json" });
+    const result = runSmithers(["claude", ...args], { cwd: repo.dir, format: "json", env: SESSION_ENV });
     return result.exitCode === 0 ? result.json : undefined;
 }
 
@@ -61,8 +69,15 @@ describe("claude mirror approvals + monitor (real run)", () => {
             cwd: repo.dir,
             format: "json",
             timeoutMs: 120_000,
+            env: SESSION_ENV,
         });
         expect(up.exitCode, `${up.stdout}\n${up.stderr}`).toBe(0);
+
+        // Detaching from inside a Claude Code session subscribed that session.
+        const subscriptionsPath = resolveClaudeMirrorSubscriptionsPath(repo.dir);
+        expect(readClaudeMirrorSubscriptions(subscriptionsPath, Date.now())).toMatchObject([
+            { runId, sessionId: SESSION_ID },
+        ]);
 
         let tick;
         for (let index = 0; index < 200; index += 1) {
@@ -91,16 +106,34 @@ describe("claude mirror approvals + monitor (real run)", () => {
         expect(waited.vanished).toBe(false);
         expect(TERMINAL.has(waited.state)).toBe(false);
 
-        // The plugin monitor surfaces the pending gate on first sight.
+        // The plugin monitor surfaces the pending gate on first sight — for
+        // the session that subscribed. A different session's monitor over the
+        // same shared store stays silent.
         const { adapter, cleanup } = await findAndOpenDb(repo.dir);
         try {
             const lines = [];
-            await runClaudeMonitor(adapter, { ticks: 1, intervalMs: 250, write: (line) => lines.push(JSON.parse(line)) });
+            await runClaudeMonitor(adapter, {
+                ticks: 1,
+                intervalMs: 250,
+                subscriptionsPath,
+                sessionId: SESSION_ID,
+                write: (line) => lines.push(JSON.parse(line)),
+            });
             const approvalLine = lines.find((line) => line.kind === "approval-pending" && line.runId === runId);
             expect(approvalLine, JSON.stringify(lines)).toBeTruthy();
             expect(approvalLine.nodeId).toBe("gate");
             expect(approvalLine.title).toBe("Approve mirror test");
             expect(approvalLine.action).toContain(`smithers approve ${runId}`);
+
+            const otherSessionLines = [];
+            await runClaudeMonitor(adapter, {
+                ticks: 1,
+                intervalMs: 250,
+                subscriptionsPath,
+                sessionId: "some-other-session",
+                write: (line) => otherSessionLines.push(line),
+            });
+            expect(otherSessionLines).toEqual([]);
         }
         finally {
             cleanup();
@@ -130,13 +163,21 @@ describe("claude mirror approvals + monitor (real run)", () => {
         expect(gated.state).toBe("finished");
         expect(gated.output).toContain("gated-ran");
 
-        // A monitor that first sees the store when everything is terminal
-        // stays silent: no history replay, no stale notifications.
+        // A monitor that first sees the run when it is terminal stays silent
+        // (no history replay, no stale notifications) and prunes the finished
+        // run's subscription so no future monitor re-inspects it.
         const { adapter: adapter2, cleanup: cleanup2 } = await findAndOpenDb(repo.dir);
         try {
             const lines = [];
-            await runClaudeMonitor(adapter2, { ticks: 1, intervalMs: 250, write: (line) => lines.push(line) });
+            await runClaudeMonitor(adapter2, {
+                ticks: 1,
+                intervalMs: 250,
+                subscriptionsPath,
+                sessionId: SESSION_ID,
+                write: (line) => lines.push(line),
+            });
             expect(lines).toEqual([]);
+            expect(readClaudeMirrorSubscriptions(subscriptionsPath, Date.now())).toEqual([]);
         }
         finally {
             cleanup2();

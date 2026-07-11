@@ -77,6 +77,8 @@ deno.lock
 # PGlite/Postgres durable store (default backend's data dir) + migration marker
 **/.smithers/pg/
 **/.smithers/migrated.json
+# Claude Code plugin monitor subscriptions (per-machine session state)
+**/.smithers/claude-mirror-subscriptions.json
 .tui-test/
 .worktrees/
 worktrees/
@@ -128,3 +130,6 @@ packages/server/.smithers-root-landing-ui-*/
 
 # GitHub Actions daily canary cache restored locally only when debugging.
 .smithers-canary-state/
+
+# Stray local screenshots
+/output-fields.png

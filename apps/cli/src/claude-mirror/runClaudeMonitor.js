@@ -1,5 +1,7 @@
 import { claudeMirrorContract } from "./claudeMirrorContract.js";
 import { isTerminalClaudeMirrorRunStatus } from "./isTerminalClaudeMirrorRunStatus.js";
+import { readClaudeMirrorSubscriptions } from "./readClaudeMirrorSubscriptions.js";
+import { removeClaudeMirrorSubscription } from "./removeClaudeMirrorSubscription.js";
 
 const RUN_SCAN_LIMIT = 50;
 const EVENT_PAGE_SIZE = 200;
@@ -27,20 +29,30 @@ const FYI_KINDS = new Set(["run-finished", "run-cancelled", "run-continued"]);
 
 /**
  * NDJSON follower behind the Claude Code plugin's background monitor: one line
- * per notable transition across local runs, each with the resolving command.
- * By default only actionable transitions stream (approval pending, human
- * request, run failed, stalled heartbeat); pass `transitions: "all"` to also
- * stream the FYI ones (finished, cancelled, continued). History before the
- * monitor started is not replayed; already-pending approvals and human
- * requests are surfaced once at startup.
+ * per notable transition, each with the resolving command. By default only
+ * actionable transitions stream (approval pending, human request, run failed,
+ * stalled heartbeat); pass `transitions: "all"` to also stream the FYI ones
+ * (finished, cancelled, continued). History before the monitor started is not
+ * replayed; already-pending approvals and human requests are surfaced once at
+ * startup.
+ *
+ * With `subscriptionsPath` set the monitor follows ONLY subscribed runs (the
+ * ones this session started or attached a mirror to, recorded by `claude
+ * tick`/`claude subscribe`), filtered to `sessionId` (entries with a null
+ * sessionId always match, and a monitor without a sessionId matches every
+ * entry). The store is shared by every session in a workspace, so scanning
+ * all runs would wake each session for every other session's — and every
+ * pre-existing — run. Without `subscriptionsPath` it scans all local runs.
  *
  * @param {any} adapter
- * @param {{ intervalMs?: number; stalledAfterMs?: number; ticks?: number; transitions?: "actionable" | "all"; write?: (line: string) => void; now?: () => number }} [options]
+ * @param {{ intervalMs?: number; stalledAfterMs?: number; ticks?: number; transitions?: "actionable" | "all"; subscriptionsPath?: string; sessionId?: string; write?: (line: string) => void; now?: () => number }} [options]
  */
 export async function runClaudeMonitor(adapter, options = {}) {
     const intervalMs = Math.max(250, Math.floor(options.intervalMs ?? 2000));
     const stalledAfterMs = Math.max(5000, Math.floor(options.stalledAfterMs ?? 120000));
     const allTransitions = options.transitions === "all";
+    const subscriptionsPath = options.subscriptionsPath;
+    const sessionId = options.sessionId;
     const write = options.write ?? ((line) => process.stdout.write(`${line}\n`));
     const now = options.now ?? Date.now;
 
@@ -70,7 +82,9 @@ export async function runClaudeMonitor(adapter, options = {}) {
     let tick = 0;
     while (options.ticks === undefined || tick < options.ticks) {
         tick += 1;
-        const runs = await Promise.resolve(adapter.listRuns(RUN_SCAN_LIMIT)).catch(() => []);
+        const runs = subscriptionsPath === undefined
+            ? await Promise.resolve(adapter.listRuns(RUN_SCAN_LIMIT)).catch(() => [])
+            : await listSubscribedRuns(adapter, subscriptionsPath, sessionId, now());
         for (const run of runs) {
             const runId = run.runId;
             if (!cursors.has(runId)) {
@@ -81,6 +95,9 @@ export async function runClaudeMonitor(adapter, options = {}) {
                     // Already over when we first saw it: pure pre-monitor history,
                     // never replayed and never synthesized below.
                     finalScanned.add(runId);
+                    if (subscriptionsPath !== undefined) {
+                        removeClaudeMirrorSubscription(subscriptionsPath, { runId, nowMs: now() });
+                    }
                 }
                 else {
                     await emitPendingGates(adapter, runId, emitOnce);
@@ -149,6 +166,11 @@ export async function runClaudeMonitor(adapter, options = {}) {
                     emit(buildEventEntry(kind, runId, undefined));
                 }
             }
+            if (finalScan && subscriptionsPath !== undefined) {
+                // Terminal is terminal for every session; drop the run from the
+                // registry so no future monitor re-inspects it.
+                removeClaudeMirrorSubscription(subscriptionsPath, { runId, nowMs: now() });
+            }
             await emitPendingGates(adapter, runId, emitOnce);
             trackStall(run, stalledAfterMs, stalledRuns, emit, now);
         }
@@ -157,6 +179,26 @@ export async function runClaudeMonitor(adapter, options = {}) {
         }
         await sleep(intervalMs);
     }
+}
+
+/**
+ * Resolve the subscribed runs this monitor follows: registry entries for this
+ * session (or with no session), deduped by run id, looked up individually.
+ * Runs missing from the store (a registry pointing at a wiped DB) drop out.
+ *
+ * @param {any} adapter
+ * @param {string} subscriptionsPath
+ * @param {string | undefined} sessionId
+ * @param {number} nowMs
+ */
+async function listSubscribedRuns(adapter, subscriptionsPath, sessionId, nowMs) {
+    const entries = readClaudeMirrorSubscriptions(subscriptionsPath, nowMs);
+    const watched = entries.filter((entry) => sessionId === undefined
+        || entry.sessionId === null
+        || entry.sessionId === sessionId);
+    const runIds = [...new Set(watched.map((entry) => entry.runId))];
+    const runs = await Promise.all(runIds.map((runId) => Promise.resolve(adapter.getRun(runId)).catch(() => undefined)));
+    return runs.filter((run) => run && typeof run.runId === "string");
 }
 
 /**

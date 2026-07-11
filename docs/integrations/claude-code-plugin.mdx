@@ -8,7 +8,7 @@ The repository ships a first-party Claude Code plugin at `claude-plugin/`. Insta
 1. **The `smithers` MCP server** (`bunx smithers-orchestrator --mcp`): `list_workflows`, `run_workflow`, `watch_run`, `resolve_approval`, `ask_human`, and the rest of the semantic tool surface.
 2. **The `smithers` skill**: teaches Claude to run durable, multi-step, or background work through Smithers instead of hand-rolled subagent trees, and to consult `https://smithers.sh/llms-full.txt` before writing any workflow code.
 3. **The `/workflows` mirror**: a generic Workflow-tool script, `workflows/smithers-run.mjs`, that launches or attaches to a Smithers run and mirrors it live into Claude Code's `/workflows` progress tree. Works for every workflow with zero per-workflow setup.
-4. **A background monitor** (experimental Claude Code component): `smithers claude monitor` streams approval requests, human-input requests, failures, and stalled-heartbeat warnings into the session as notifications, so Claude reacts even when no mirror is running. Finished and cancelled runs are not broadcast by default: the workspace store is shared by every session, so those FYI lines would wake each session for every other session's runs, and a run this session follows already reports completion through its `/workflows` mirror. Pass `--transitions all` to stream them anyway.
+4. **A background monitor** (experimental Claude Code component): `smithers claude monitor` streams approval requests, human-input requests, failures, and stalled-heartbeat warnings into the session as notifications, so Claude reacts even when no mirror is running. It follows only the runs this session subscribed to: `smithers claude tick` (the mirror) and Claude-launched runs (detached `up` / `workflow run`, MCP `run_workflow`) subscribe automatically, and `smithers claude subscribe RUN_ID` is the explicit path. The workspace store is shared by every session, so without this scoping each session would be woken for every other session's runs and for pre-existing runs at startup; `--all-runs` restores the unscoped behavior. Finished and cancelled runs are not broadcast by default either (a followed run already reports completion through its `/workflows` mirror); pass `--transitions all` to stream them anyway.
 
 ## The /workflows mirror
 
@@ -41,7 +41,7 @@ The mirror's agents run exactly one CLI command each and relay its JSON. All der
 smithers claude tick RUN_ID --after-seq 412 --wait --timeout-ms 420000 --format json
 ```
 
-One complete mirror frame: run status, event-log cursor (`seq`), the latest frame's phase plan, every node with `{nodeId, label, phase, kind, state}`, the nodeIds that changed after `--after-seq`, truncated outputs of nodes that became terminal, pending approvals and human requests, and `continuedAs` for continued runs. `--wait` blocks until a mirror-relevant event lands (tool-call and heartbeat chatter is ignored), the run reaches a terminal status, or the timeout expires (`"timedOut": true`, exit 0). With `--wait`, a store or run that does not exist yet is waited for too, so a mirror launched right after `workflow run --detach` cannot race the engine's first write.
+One complete mirror frame: run status, event-log cursor (`seq`), the latest frame's phase plan, every node with `{nodeId, label, phase, kind, state}`, the nodeIds that changed after `--after-seq`, truncated outputs of nodes that became terminal, pending approvals and human requests, and `continuedAs` for continued runs. `--wait` blocks until a mirror-relevant event lands (tool-call and heartbeat chatter is ignored), the run reaches a terminal status, or the timeout expires (`"timedOut": true`, exit 0). With `--wait`, a store or run that does not exist yet is waited for too, so a mirror launched right after `workflow run --detach` cannot race the engine's first write. Ticking a non-terminal run also records the session's subscription for `claude monitor` (following a run is subscribing to it).
 
 ```bash
 smithers claude node-wait NODE_ID --run-id RUN_ID --timeout-ms 480000 --format json
@@ -53,7 +53,14 @@ Blocks until one node reaches a terminal state, then reports `{state, output, va
 smithers claude monitor
 ```
 
-NDJSON follower for the plugin monitor: one line per notable transition (`approval-pending`, `human-request`, `run-finished`, `run-failed`, `run-cancelled`, `run-continued`, `run-stalled`), each with a summary and the resolving command. It does not replay history; already-pending gates are surfaced once at startup. In a project without a Smithers store it exits silently.
+NDJSON follower for the plugin monitor: one line per notable transition (`approval-pending`, `human-request`, `run-finished`, `run-failed`, `run-cancelled`, `run-continued`, `run-stalled`), each with a summary and the resolving command. It follows only the session's subscribed runs (recorded in `.smithers/claude-mirror-subscriptions.json`, keyed by the `CLAUDE_CODE_SESSION_ID` each command sees; `--all-runs` opts out), does not replay history, surfaces already-pending gates once at startup, and prunes a subscription when its run turns terminal. In a project without a Smithers store it exits silently.
+
+```bash
+smithers claude subscribe RUN_ID
+smithers claude unsubscribe RUN_ID
+```
+
+The explicit subscription path: `subscribe` points the session's monitor at a run it did not start (it validates the run exists), `unsubscribe` silences one. Both are session-scoped when `CLAUDE_CODE_SESSION_ID` is set; from a plain terminal `unsubscribe` drops the run for every session.
 
 These commands are protocol surface for the plugin. Keep responses additive; a breaking shape change bumps `contract` and the shipped script refuses mismatched majors with an actionable message.
 

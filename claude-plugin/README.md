@@ -15,7 +15,13 @@ Installing it gives a Claude Code session:
   and flags any that still need a UI;
 - a **PreToolUse hook** on the native `Task` / `Agent` / `Workflow` tools that
   reminds Claude to prefer a durable Smithers workflow for long-running work
-  (advisory only — it never blocks the tool).
+  (advisory only — it never blocks the tool);
+- a **background monitor** (`smithers claude monitor`) that notifies the session
+  when a run it follows needs attention (approval pending, human request,
+  failed, stalled). It follows only the runs this session started or subscribed
+  to: the /workflows mirror (`smithers claude tick`) and Claude-launched runs
+  subscribe automatically, `smithers claude subscribe <runId>` is the explicit
+  path. Other sessions' runs and pre-existing runs never notify.
 
 > Smithers is operated by the AI agent on the human's behalf — it is not a GUI the
 > human clicks. This plugin is what makes Claude Code fluent in it.
@@ -71,6 +77,10 @@ directory containing `.claude-plugin/`), which is the repo root.
     │   ├── hooks.json       # SessionStart + PreToolUse hooks (auto-discovered)
     │   ├── session-start.mjs
     │   └── prefer-smithers.mjs
+    ├── monitors/
+    │   └── monitors.json    # background `smithers claude monitor` (session-scoped)
+    ├── workflows/
+    │   └── smithers-run.mjs # the generic /workflows mirror script
     ├── skills/
     │   └── smithers/
     │       └── SKILL.md     # the on-ramp + mandatory-UI + use-Smithers rules

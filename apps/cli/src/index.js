@@ -104,6 +104,11 @@ import { buildClaudeMirrorTick } from "./claude-mirror/buildClaudeMirrorTick.js"
 import { buildClaudeNodeWait } from "./claude-mirror/buildClaudeNodeWait.js";
 import { runClaudeMonitor } from "./claude-mirror/runClaudeMonitor.js";
 import { waitForClaudeMirrorChange } from "./claude-mirror/waitForClaudeMirrorChange.js";
+import { isTerminalClaudeMirrorRunStatus } from "./claude-mirror/isTerminalClaudeMirrorRunStatus.js";
+import { resolveClaudeMirrorSubscriptionsPath } from "./claude-mirror/resolveClaudeMirrorSubscriptionsPath.js";
+import { upsertClaudeMirrorSubscription } from "./claude-mirror/upsertClaudeMirrorSubscription.js";
+import { removeClaudeMirrorSubscription } from "./claude-mirror/removeClaudeMirrorSubscription.js";
+import { subscribeClaudeSessionRun } from "./claude-mirror/subscribeClaudeSessionRun.js";
 import { isAgentHarness } from "./util/envDetect.js";
 import pc from "picocolors";
 import crypto from "node:crypto";
@@ -2203,6 +2208,9 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 env: process.env,
             });
             child.unref();
+            // A run detached from inside a Claude Code session should notify
+            // that session's background monitor (approvals, failures, stalls).
+            subscribeClaudeSessionRun(effectiveRunId);
             const monitorWorkflowId = workflowIdFromPath(workflowPath);
             const monitorHasUi = hasCustomUi(monitorWorkflowId, process.cwd());
             const monitoring = buildMonitoringGuidance({
@@ -3727,6 +3735,10 @@ const claudeMonitorOptions = z.object({
     stalledAfterMs: z.number().int().min(5000).default(120000).describe("Heartbeat age that flags a running run as stalled"),
     ticks: z.number().int().min(1).optional().describe("Stop after N polls (default: run until killed)"),
     transitions: z.enum(["actionable", "all"]).default("actionable").describe("Which transitions stream: actionable (approvals, human requests, failures, stalls) or all (also finished/cancelled/continued)"),
+    allRuns: z.boolean().default(false).describe("Follow every run in the workspace instead of only the runs this session subscribed to (via claude tick / claude subscribe)"),
+});
+const claudeSubscribeArgs = z.object({
+    runId: z.string().describe("Run ID the session's monitor should follow"),
 });
 const claudeCli = Cli.create({
     name: "claude",
@@ -3783,6 +3795,17 @@ const claudeCli = Cli.create({
                     maxOutputChars: c.options.maxOutputChars,
                     collapsePhases: c.options.collapsePhases,
                 });
+                // Ticking a run IS the session following it: record the
+                // subscription so `claude monitor` notifies about this run (and
+                // only runs followed this way). Terminal runs are history, not
+                // something to watch.
+                if (!isTerminalClaudeMirrorRunStatus(tick.status)) {
+                    upsertClaudeMirrorSubscription(resolveClaudeMirrorSubscriptionsPath(opened.choice.workspaceRoot), {
+                        runId: c.args.runId,
+                        sessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
+                        nowMs: Date.now(),
+                    });
+                }
                 return c.ok({ ...tick, timedOut });
             }
             finally {
@@ -3836,11 +3859,12 @@ const claudeCli = Cli.create({
     },
 })
     .command("monitor", {
-    description: "Follow local runs and print one NDJSON line per actionable transition (approval pending, human request, failed, stalled); --transitions all adds finished/cancelled/continued. Backs the plugin's background monitor.",
+    description: "Follow the runs this session subscribed to (claude tick / claude subscribe) and print one NDJSON line per actionable transition (approval pending, human request, failed, stalled); --transitions all adds finished/cancelled/continued, --all-runs follows every run in the workspace. Backs the plugin's background monitor.",
     options: claudeMonitorOptions,
     alias: {
         intervalMs: "interval-ms",
         stalledAfterMs: "stalled-after-ms",
+        allRuns: "all-runs",
     },
     async run(c) {
         let opened;
@@ -3858,11 +3882,76 @@ const claudeCli = Cli.create({
                 stalledAfterMs: c.options.stalledAfterMs,
                 ticks: c.options.ticks,
                 transitions: c.options.transitions,
+                // The workspace store is shared across sessions; only runs this
+                // session follows may notify it, unless --all-runs opts out.
+                ...(c.options.allRuns ? {} : {
+                    subscriptionsPath: resolveClaudeMirrorSubscriptionsPath(opened.choice.workspaceRoot),
+                    sessionId: process.env.CLAUDE_CODE_SESSION_ID || undefined,
+                }),
             });
             return c.ok(undefined);
         }
         finally {
             opened.cleanup();
+        }
+    },
+})
+    .command("subscribe", {
+    description: "Subscribe this session's background monitor to a run (done automatically by `claude tick` and Claude-launched runs); the monitor only notifies about subscribed runs.",
+    args: claudeSubscribeArgs,
+    async run(c) {
+        const fail = makeFail(c);
+        try {
+            const { adapter, cleanup, choice } = await findAndOpenDb();
+            try {
+                const run = await adapter.getRun(c.args.runId);
+                if (!run) {
+                    return fail({ code: "RUN_NOT_FOUND", message: `Run ${c.args.runId} not found in this workspace.`, exitCode: 4 });
+                }
+                const sessionId = process.env.CLAUDE_CODE_SESSION_ID ?? null;
+                const subscriptionsPath = resolveClaudeMirrorSubscriptionsPath(choice.workspaceRoot);
+                upsertClaudeMirrorSubscription(subscriptionsPath, { runId: c.args.runId, sessionId, nowMs: Date.now() });
+                return c.ok({ runId: c.args.runId, sessionId, subscriptionsPath });
+            }
+            finally {
+                cleanup();
+            }
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({ code: err.code, message: err.message, exitCode: 1 });
+            }
+            return fail({ code: "CLAUDE_SUBSCRIBE_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
+    },
+})
+    .command("unsubscribe", {
+    description: "Stop this session's background monitor from following a run (outside a Claude Code session it drops the run for every session).",
+    args: claudeSubscribeArgs,
+    async run(c) {
+        const fail = makeFail(c);
+        try {
+            const { cleanup, choice } = await findAndOpenDb();
+            try {
+                // Session-scoped when a session id is present; a human at a
+                // terminal (no session id) means "stop notifying anyone".
+                const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
+                const subscriptionsPath = resolveClaudeMirrorSubscriptionsPath(choice.workspaceRoot);
+                const removed = removeClaudeMirrorSubscription(subscriptionsPath, {
+                    runId: c.args.runId,
+                    ...(sessionId ? { sessionId } : {}),
+                });
+                return c.ok({ runId: c.args.runId, sessionId: sessionId ?? null, removed, subscriptionsPath });
+            }
+            finally {
+                cleanup();
+            }
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({ code: err.code, message: err.message, exitCode: 1 });
+            }
+            return fail({ code: "CLAUDE_UNSUBSCRIBE_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
 });

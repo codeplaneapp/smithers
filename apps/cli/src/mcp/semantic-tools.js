@@ -26,6 +26,7 @@ import { runPromise } from "../smithersRuntime.js";
 import { pickTargetCheckpoint, runRestoreOnce } from "../restore.js";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { subscribeClaudeSessionRun } from "../claude-mirror/subscribeClaudeSessionRun.js";
 /** @typedef {import("./SemanticToolCallResult.ts").SemanticToolCallResult} SemanticToolCallResult */
 /** @typedef {import("./SemanticToolContext.ts").SemanticToolContext} SemanticToolContext */
 /** @typedef {import("@smithers-orchestrator/db/adapter").RunRow} RunRow */
@@ -1088,6 +1089,10 @@ export function createSemanticToolDefinitions(options = {}) {
                     result: null,
                     error: null,
                 };
+                // The MCP server runs inside the Claude Code session process:
+                // a run launched here is a run this session started, so its
+                // background monitor should follow it.
+                subscribeClaudeSessionRun(runId, { cwd: context.cwd() });
                 const launchPromise = Effect.runPromise(runWorkflow(workflow, {
                     input: workflowInput,
                     runId,

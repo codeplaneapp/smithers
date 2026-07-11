@@ -2316,7 +2316,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[89]:
+commands[91]:
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal init asks one question (your preferred coding agent), installs the pack with defaults plus that agent's plugin (or skill if no plugin), then opens a hijacked tutorial session hosted by that agent; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -2976,7 +2976,7 @@ commands[89]:
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID; omit for all
   - name: claude.tick
-    purpose: One /workflows mirror frame for a run (Claude Code plugin protocol, contract v1); --wait blocks until a mirror-relevant event lands after --after-seq
+    purpose: One /workflows mirror frame for a run (Claude Code plugin protocol, contract v1); --wait blocks until a mirror-relevant event lands after --after-seq; also subscribes the session's claude monitor to the run
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID to mirror
     flags[6]{name,short,type,default,desc}:
@@ -2997,12 +2997,21 @@ commands[89]:
       interval-ms,,number,1000,Poll interval in ms
       max-output-chars,,number,2000,Truncate the node output to this many chars
   - name: claude.monitor
-    purpose: Follow local runs and print one NDJSON line per actionable transition (approval pending, human request, failed, stalled); --transitions all adds finished/cancelled/continued; backs the plugin's background monitor
-    flags[4]{name,short,type,default,desc}:
+    purpose: Follow the runs this session subscribed to (claude tick / claude subscribe) and print one NDJSON line per actionable transition (approval pending, human request, failed, stalled); --transitions all adds finished/cancelled/continued, --all-runs follows every run in the workspace; backs the plugin's background monitor
+    flags[5]{name,short,type,default,desc}:
       interval-ms,,number,2000,Poll interval in ms
       stalled-after-ms,,number,120000,Heartbeat age that flags a running run as stalled
       ticks,,number,,Stop after N polls (default run until killed)
       transitions,,string,actionable,Which transitions stream: actionable or all
+      all-runs,,boolean,false,Follow every run in the workspace instead of only this session's subscriptions
+  - name: claude.subscribe
+    purpose: Subscribe this session's background monitor to a run (done automatically by claude tick and Claude-launched runs); the monitor only notifies about subscribed runs
+    args[1]{name,type,required,desc}:
+      runId,string,true,Run ID the session's monitor should follow
+  - name: claude.unsubscribe
+    purpose: Stop this session's background monitor from following a run (outside a Claude Code session it drops the run for every session)
+    args[1]{name,type,required,desc}:
+      runId,string,true,Run ID the session's monitor should stop following
   - name: cron.start
     purpose: Start the background scheduler loop in the current terminal
   - name: cron.add

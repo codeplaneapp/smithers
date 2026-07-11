@@ -108,7 +108,7 @@ describe("CLI_SUBCOMMANDS command registry", () => {
             "test",
         ]);
         expect(groupCommands("token")).toEqual(["exec", "issue", "revoke"]);
-        expect(groupCommands("claude")).toEqual(["monitor", "node-wait", "tick"]);
+        expect(groupCommands("claude")).toEqual(["monitor", "node-wait", "subscribe", "tick", "unsubscribe"]);
     });
 
     test("pins positional order and defaults that are easy to mix up", () => {
