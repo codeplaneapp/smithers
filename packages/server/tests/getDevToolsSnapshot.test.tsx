@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { join } from "node:path";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
+import { Effect } from "effect";
+import { createSmithers, runWorkflow } from "smithers-orchestrator";
 import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
@@ -250,6 +251,219 @@ describe("getDevToolsSnapshotRoute", () => {
     // A frame-mounted task with no node row yet carries no state at all.
     expect(byNodeId.get("future-task")?.state).toBeUndefined();
     sqlite.close();
+  });
+
+  test("attaches declared agent summary and attempt budget from the task index", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "run-agent-index";
+    await adapter.insertRun({
+      runId,
+      workflowName: "wf",
+      status: "running",
+      createdAtMs: now(),
+    });
+    await adapter.insertFrame({
+      runId,
+      frameNo: 0,
+      createdAtMs: now(),
+      xmlJson: canonicalizeXml({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "agent-index" },
+        children: [
+          { kind: "element", tag: "smithers:task", props: { id: "review::0" }, children: [] },
+          { kind: "element", tag: "smithers:task", props: { id: "plain::0" }, children: [] },
+        ],
+      }),
+      xmlHash: "hash-agent-index",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: JSON.stringify([
+        {
+          nodeId: "review",
+          ordinal: 0,
+          iteration: 0,
+          kind: "agent",
+          agent: {
+            label: "Reviewer",
+            engine: "claude-code",
+            model: "claude-fable-5",
+            chain: [
+              { engine: "claude-code", model: "claude-fable-5" },
+              { engine: "codex", model: "gpt-5.4-codex" },
+              // Hostile/garbage entries in stored JSON must be dropped, not
+              // forwarded to clients.
+              { generate: "() => {}", apiKey: "sk-nope" },
+            ],
+            // Non-whitelisted fields never survive into the snapshot.
+            apiKey: "sk-secret",
+          },
+          maxAttempts: 3,
+        },
+        { nodeId: "plain", ordinal: 1, iteration: 0, kind: "compute" },
+      ]),
+      note: "agent-index",
+    });
+
+    // No node rows at all: the run is queued — the declared assignment must
+    // still surface (that is the whole point of render-time capture).
+    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
+    const review = snapshot.root.children[0]?.task;
+    expect(review?.state).toBeUndefined();
+    expect(review?.agentSummary).toEqual({
+      label: "Reviewer",
+      engine: "claude-code",
+      model: "claude-fable-5",
+      chain: [
+        { engine: "claude-code", model: "claude-fable-5" },
+        { engine: "codex", model: "gpt-5.4-codex" },
+      ],
+    });
+    expect(review?.maxAttempts).toBe(3);
+    expect(JSON.stringify(review)).not.toContain("sk-secret");
+    expect(JSON.stringify(review)).not.toContain("sk-nope");
+    const plain = snapshot.root.children[1]?.task;
+    expect(plain?.agentSummary).toBeUndefined();
+    expect(plain?.maxAttempts).toBeUndefined();
+    sqlite.close();
+  });
+
+  test("attaches the acting agent from the latest attempt's metadata", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "run-agent-attempts";
+    await adapter.insertRun({
+      runId,
+      workflowName: "wf",
+      status: "running",
+      createdAtMs: now(),
+    });
+    await adapter.insertFrame({
+      runId,
+      frameNo: 0,
+      createdAtMs: now(),
+      xmlJson: canonicalizeXml({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "agent-attempts" },
+        children: [
+          { kind: "element", tag: "smithers:task", props: { id: "exec::0" }, children: [] },
+          { kind: "element", tag: "smithers:task", props: { id: "queued::0" }, children: [] },
+        ],
+      }),
+      xmlHash: "hash-agent-attempts",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: "[]",
+      note: "agent-attempts",
+    });
+    await adapter.insertNode({
+      runId,
+      nodeId: "exec",
+      iteration: 0,
+      state: "in-progress",
+      lastAttempt: 2,
+      updatedAtMs: now(),
+      outputTable: "",
+      label: null,
+    });
+    const attemptRow = (attempt: number, metaJson: string | null) => ({
+      runId,
+      nodeId: "exec",
+      iteration: 0,
+      attempt,
+      state: attempt === 2 ? "in-progress" : "failed",
+      startedAtMs: now(),
+      finishedAtMs: null,
+      heartbeatAtMs: null,
+      heartbeatDataJson: null,
+      errorJson: null,
+      jjPointer: null,
+      jjCwd: "/tmp",
+      cached: false,
+      metaJson,
+    });
+    // Attempt 1 failed over from codex; attempt 2 (the LATEST) ran claude.
+    await adapter.insertAttempt(
+      attemptRow(1, JSON.stringify({ agentEngine: "codex", agentModel: "gpt-5.4-codex", agentId: "fallback" })),
+    );
+    await adapter.insertAttempt(
+      attemptRow(2, JSON.stringify({ agentEngine: "claude-code", agentModel: "claude-fable-5", agentId: "primary" })),
+    );
+
+    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
+    const byNodeId = new Map(snapshot.root.children.map((child) => [child.task?.nodeId, child.task]));
+    expect(byNodeId.get("exec")?.agentRan).toEqual({
+      agentId: "primary",
+      engine: "claude-code",
+      model: "claude-fable-5",
+    });
+    // A never-executed node has no acting agent.
+    expect(byNodeId.get("queued")?.agentRan).toBeUndefined();
+    sqlite.close();
+  });
+
+  test("real engine run captures the declared agent end to end", async () => {
+    // No mocks: a real workflow run with an agent-backed task must land the
+    // declared assignment in the frame task index (engine-side capture) AND
+    // the acting agent in attempt metadata, and both must surface on the
+    // snapshot's task node.
+    const dir = mkdtempSync(join(tmpdir(), "smithers-devtools-agent-"));
+    const dbPath = join(dir, "smithers.db");
+    try {
+      const { smithers, Workflow, Task } = createSmithers(
+        { out: z.object({ value: z.number() }) },
+        { dbPath },
+      );
+      const fakeAgent = {
+        id: "fake-reviewer",
+        label: "Reviewer",
+        cliEngine: "fake-cli",
+        model: "fake-model-1",
+        async generate() {
+          return { output: { value: 42 } };
+        },
+      };
+      const workflow = smithers(() => (
+        <Workflow name="devtools-agent-capture">
+          <Task id="review" agent={fakeAgent as never} retries={2} output="out">
+            {"Review the change."}
+          </Task>
+        </Workflow>
+      ));
+      const result = await Effect.runPromise(runWorkflow(workflow, { rootDir: dir, input: {} }));
+      expect(result.status).toBe("finished");
+      const adapter = new SmithersDb(workflow.db);
+      const snapshot = await getDevToolsSnapshotRoute({ adapter, runId: result.runId });
+      const findTask = (node: any): any => {
+        if (node.task?.nodeId === "review") {
+          return node.task;
+        }
+        for (const child of node.children ?? []) {
+          const found = findTask(child);
+          if (found) {
+            return found;
+          }
+        }
+        return undefined;
+      };
+      const task = findTask(snapshot.root);
+      expect(task).toBeDefined();
+      // Declared assignment (path 1): render-time capture into the task index.
+      expect(task.agentSummary).toEqual({
+        label: "Reviewer",
+        engine: "fake-cli",
+        model: "fake-model-1",
+      });
+      // Explicit retries={2} -> attempt budget 3. (Default agent retries are
+      // unbounded, which the index deliberately omits.)
+      expect(task.maxAttempts).toBe(3);
+      // Acting agent (path 2): attempt metadata from the executed attempt.
+      expect(task.agentRan).toEqual({
+        agentId: "fake-reviewer",
+        engine: "fake-cli",
+        model: "fake-model-1",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("preserves durable human task kind from frame props", async () => {

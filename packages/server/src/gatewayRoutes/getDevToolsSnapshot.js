@@ -58,9 +58,54 @@ function boolProp(value) {
     return value === true || value === "true" || value === "1";
 }
 
+/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsAgentRef} DevToolsAgentRef */
+/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsAgentSummary} DevToolsAgentSummary */
+
+/**
+ * Re-whitelist an agent ref persisted in the frame task index. The engine only
+ * writes label/engine/model, but the index is stored JSON — never trust it to
+ * carry more than the display fields.
+ *
+ * @param {unknown} value
+ * @returns {DevToolsAgentRef | undefined}
+ */
+function sanitizeAgentRef(value) {
+    if (!asObject(value)) {
+        return undefined;
+    }
+    const label = typeof value.label === "string" && value.label ? value.label : undefined;
+    const engine = typeof value.engine === "string" && value.engine ? value.engine : undefined;
+    const model = typeof value.model === "string" && value.model ? value.model : undefined;
+    if (!label && !engine && !model) {
+        return undefined;
+    }
+    return {
+        ...(label ? { label } : {}),
+        ...(engine ? { engine } : {}),
+        ...(model ? { model } : {}),
+    };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {DevToolsAgentSummary | undefined}
+ */
+function sanitizeAgentSummary(value) {
+    const base = sanitizeAgentRef(value);
+    if (!base || !asObject(value)) {
+        return base;
+    }
+    const chain = Array.isArray(value.chain)
+        ? value.chain
+            .map((entry) => sanitizeAgentRef(entry))
+            .filter((entry) => entry !== undefined)
+        : [];
+    return chain.length > 0 ? { ...base, chain } : base;
+}
+
 /**
  * @param {string | null | undefined} raw
- * @returns {Map<string, { iteration?: number; kind?: string }>}
+ * @returns {Map<string, { iteration?: number; kind?: string; agentSummary?: DevToolsAgentSummary; maxAttempts?: number }>}
  */
 function parseTaskIndex(raw) {
     const map = new Map();
@@ -86,6 +131,12 @@ function parseTaskIndex(raw) {
                 ? entry.iteration
                 : undefined,
             kind: typeof entry.kind === "string" ? entry.kind : undefined,
+            agentSummary: sanitizeAgentSummary(entry.agent),
+            maxAttempts: typeof entry.maxAttempts === "number" &&
+                Number.isFinite(entry.maxAttempts) &&
+                entry.maxAttempts > 0
+                ? entry.maxAttempts
+                : undefined,
         });
     }
     return map;
@@ -132,7 +183,7 @@ export function validateRequestedFrameNo(frameNo, latestFrameNo) {
 
 /**
  * @param {Record<string, unknown>} props
- * @param {Map<string, { iteration?: number; kind?: string }>} taskIndex
+ * @param {Map<string, { iteration?: number; kind?: string; agentSummary?: DevToolsAgentSummary; maxAttempts?: number }>} taskIndex
  * @returns {DevToolsNode["task"] | undefined}
  */
 function extractTaskInfo(props, taskIndex) {
@@ -171,6 +222,8 @@ function extractTaskInfo(props, taskIndex) {
         nodeId,
         kind,
         agent: typeof props.agent === "string" ? props.agent : undefined,
+        agentSummary: indexedTask?.agentSummary,
+        maxAttempts: indexedTask?.maxAttempts,
         label: typeof props.label === "string" ? props.label : undefined,
         outputTableName: typeof props.outputTableName === "string"
             ? props.outputTableName
@@ -255,7 +308,7 @@ function nodeIdentityFragment(element) {
 /**
  * @param {unknown} xml
  * @param {(warning: SnapshotSerializerWarning) => void} [onWarning]
- * @param {Map<string, { iteration?: number; kind?: string }>} [taskIndex]
+ * @param {Map<string, { iteration?: number; kind?: string; agentSummary?: DevToolsAgentSummary; maxAttempts?: number }>} [taskIndex]
  * @returns {DevToolsNode}
  */
 export function parseXmlToDevToolsRoot(xml, onWarning, taskIndex = new Map()) {
@@ -474,6 +527,93 @@ export function attachNodeStatesToDevToolsRoot(root, nodeRows) {
 }
 
 /**
+ * Attach the agent that ACTUALLY executed each task node (engine/model/agentId
+ * from the latest attempt's persisted `metaJson` — the same metadata the
+ * hijack candidates read, see ../hijackCandidates.js). Declared assignments
+ * (`task.agentSummary`) come from the frame's task index instead; this covers
+ * running/settled nodes and runs recorded before declared-agent capture.
+ * Only the newest attempt per node is parsed — attempt metaJson can carry
+ * whole conversations, so parsing every row would be wasteful.
+ *
+ * @param {DevToolsNode} root
+ * @param {Array<Record<string, unknown>>} attemptRows
+ * @returns {void}
+ */
+export function attachAgentAttemptsToDevToolsRoot(root, attemptRows) {
+    /** @type {Map<string, { iteration: number; attempt: number; metaJson: unknown }>} */
+    const latest = new Map();
+    for (const row of Array.isArray(attemptRows) ? attemptRows : []) {
+        if (!asObject(row) || typeof row.nodeId !== "string") {
+            continue;
+        }
+        const iteration = typeof row.iteration === "number" && Number.isFinite(row.iteration) ? row.iteration : 0;
+        const attempt = typeof row.attempt === "number" && Number.isFinite(row.attempt) ? row.attempt : 0;
+        const existing = latest.get(row.nodeId);
+        if (!existing ||
+            iteration > existing.iteration ||
+            (iteration === existing.iteration && attempt > existing.attempt)) {
+            latest.set(row.nodeId, { iteration, attempt, metaJson: row.metaJson });
+        }
+    }
+    if (latest.size === 0) {
+        return;
+    }
+    /** @type {Map<string, { agentId?: string; engine?: string; model?: string } | undefined>} */
+    const parsedByNode = new Map();
+    /**
+   * @param {string} nodeId
+   * @returns {{ agentId?: string; engine?: string; model?: string } | undefined}
+   */
+    const agentRanFor = (nodeId) => {
+        if (parsedByNode.has(nodeId)) {
+            return parsedByNode.get(nodeId);
+        }
+        const row = latest.get(nodeId);
+        /** @type {{ agentId?: string; engine?: string; model?: string } | undefined} */
+        let ran;
+        if (row && typeof row.metaJson === "string" && row.metaJson.length > 0) {
+            try {
+                const meta = JSON.parse(row.metaJson);
+                if (asObject(meta)) {
+                    const engine = typeof meta.agentEngine === "string" && meta.agentEngine ? meta.agentEngine : undefined;
+                    const model = typeof meta.agentModel === "string" && meta.agentModel ? meta.agentModel : undefined;
+                    const agentId = typeof meta.agentId === "string" && meta.agentId ? meta.agentId : undefined;
+                    if (engine || model || agentId) {
+                        ran = {
+                            ...(agentId ? { agentId } : {}),
+                            ...(engine ? { engine } : {}),
+                            ...(model ? { model } : {}),
+                        };
+                    }
+                }
+            }
+            catch {
+                ran = undefined;
+            }
+        }
+        parsedByNode.set(nodeId, ran);
+        return ran;
+    };
+    /** @type {DevToolsNode[]} */
+    const stack = [root];
+    while (stack.length > 0) {
+        const node = stack.pop();
+        if (!node) {
+            continue;
+        }
+        if (node.task?.nodeId) {
+            const ran = agentRanFor(node.task.nodeId);
+            if (ran) {
+                node.task.agentRan = ran;
+            }
+        }
+        for (const child of node.children) {
+            stack.push(child);
+        }
+    }
+}
+
+/**
  * @param {{
  *   adapter: SmithersDb;
  *   runId: string;
@@ -528,5 +668,7 @@ export async function getDevToolsSnapshotRoute(input) {
     // RunnableEffect is thenable but has no .catch; assimilate via Promise.resolve.
     const nodeRows = await Promise.resolve(input.adapter.listNodes(runId)).catch(() => []);
     attachNodeStatesToDevToolsRoot(snapshot.root, Array.isArray(nodeRows) ? nodeRows : []);
+    const attemptRows = await Promise.resolve(input.adapter.listAttemptsForRun(runId)).catch(() => []);
+    attachAgentAttemptsToDevToolsRoot(snapshot.root, Array.isArray(attemptRows) ? attemptRows : []);
     return runState ? { ...snapshot, runState } : snapshot;
 }
