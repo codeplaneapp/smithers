@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { Effect } from "effect";
@@ -24,43 +24,40 @@ function makeFakeChild({ stdin = true } = {}) {
 }
 
 /**
- * Spies on the global timer functions, recording every timer id created via
- * setTimeout and every id passed to clearTimeout. Returns helpers plus a
- * restore function. Real timers still run so nothing leaks during the test.
+ * Builds an isolated timer API for one runRpcCommandEffect invocation. This
+ * avoids process-wide timer spies recording unrelated timers from other test
+ * files while Bun is running them in the same process.
  */
-function installTimerSpy() {
-    const realSetTimeout = globalThis.setTimeout;
-    const realClearTimeout = globalThis.clearTimeout;
+function makeTimerHarness() {
     /** @type {Set<unknown>} */
     const created = new Set();
     /** @type {Set<unknown>} */
     const cleared = new Set();
-
-    globalThis.setTimeout = /** @type {any} */ ((fn, ms, ...rest) => {
-        const id = realSetTimeout(fn, ms, ...rest);
-        created.add(id);
-        return id;
-    });
-    globalThis.clearTimeout = /** @type {any} */ ((id) => {
-        cleared.add(id);
-        return realClearTimeout(id);
-    });
+    let sequence = 0;
 
     return {
         created,
         cleared,
-        // Untracked timer for the test's own scheduling, so test delays do not
-        // pollute the created/cleared sets we assert on.
-        realSetTimeout,
-        restore() {
-            globalThis.setTimeout = realSetTimeout;
-            globalThis.clearTimeout = realClearTimeout;
+        timerApi: /** @type {any} */ ({
+            setTimeout() {
+                const id = ++sequence;
+                created.add(id);
+                return id;
+            },
+            clearTimeout(id) {
+                cleared.add(id);
+            },
+        }),
+        waitForListeners() {
+            return new Promise((resolve) => {
+                setTimeout(resolve, 10);
+            });
         },
     };
 }
 
 describe("runRpcCommandEffect timer cleanup", () => {
-    /** @type {ReturnType<typeof installTimerSpy> | undefined} */
+    /** @type {ReturnType<typeof makeTimerHarness> | undefined} */
     let timers;
     /** @type {(() => any) | undefined} */
     let nextChild;
@@ -75,12 +72,8 @@ describe("runRpcCommandEffect timer cleanup", () => {
     );
 
     beforeEach(() => {
-        timers = installTimerSpy();
+        timers = makeTimerHarness();
         nextChild = undefined;
-    });
-
-    afterEach(() => {
-        timers?.restore();
     });
 
     test("clears total-timeout and inactivity timers when settling via handleError (stdin unavailable)", async () => {
@@ -90,10 +83,11 @@ describe("runRpcCommandEffect timer cleanup", () => {
             cwd: process.cwd(),
             env: /** @type {any} */ ({}),
             prompt: "hello",
-            // Non-trivial timeouts so real setTimeout timers are created.
+            // Non-trivial timeouts so both lifecycle timers are created.
             timeoutMs: 1_000_000,
             idleTimeoutMs: 1_000_000,
             spawnFn,
+            lifecycleTimerApi: timers?.timerApi,
         });
 
         await expect(Effect.runPromise(effect)).rejects.toThrow(
@@ -120,6 +114,7 @@ describe("runRpcCommandEffect timer cleanup", () => {
             timeoutMs: 1_000_000,
             idleTimeoutMs: 1_000_000,
             spawnFn,
+            lifecycleTimerApi: timers?.timerApi,
             // Throwing while handling an extension_ui_request makes the queued
             // handleLine() promise reject, settling the effect through the
             // lineQueue .catch -> handleError() path (never reaching the child
@@ -132,7 +127,7 @@ describe("runRpcCommandEffect timer cleanup", () => {
         const run = Effect.runPromise(effect);
 
         // Give the effect a tick to attach the readline "line" listener.
-        await new Promise((r) => timers?.realSetTimeout(r, 10));
+        await timers?.waitForListeners();
         child.stdout.write(
             JSON.stringify({
                 type: "extension_ui_request",

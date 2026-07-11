@@ -11,28 +11,31 @@ import { truncateToBytes } from "./truncateToBytes.js";
 /** @typedef {import("./PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
 
 /** @typedef {import("./PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
+/** @typedef {Pick<typeof globalThis, "setTimeout" | "clearTimeout">} LifecycleTimerApi */
 /**
- * @typedef {{ cwd: string; env: Record<string, string>; prompt: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void; onExtensionUiRequest?: (request: PiExtensionUiRequest) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null; spawnFn?: typeof spawn; }} RunRpcCommandOptions
+ * @typedef {{ cwd: string; env: Record<string, string>; prompt: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void; onExtensionUiRequest?: (request: PiExtensionUiRequest) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null; spawnFn?: typeof spawn; lifecycleTimerApi?: LifecycleTimerApi; }} RunRpcCommandOptions
  */
 
 /**
  * @param {number | undefined} timeoutMs
  * @param {() => void} onTimeout
+ * @param {LifecycleTimerApi} timerApi
  */
-function createOneShotTimer(timeoutMs, onTimeout) {
+function createOneShotTimer(timeoutMs, onTimeout, timerApi) {
     if (!timeoutMs || !Number.isFinite(timeoutMs)) {
         return { clear: () => { } };
     }
-    const timer = setTimeout(onTimeout, timeoutMs);
+    const timer = timerApi.setTimeout(onTimeout, timeoutMs);
     return {
-        clear: () => clearTimeout(timer),
+        clear: () => timerApi.clearTimeout(timer),
     };
 }
 /**
  * @param {number | undefined} timeoutMs
  * @param {() => void} onTimeout
+ * @param {LifecycleTimerApi} timerApi
  */
-function createInactivityTimer(timeoutMs, onTimeout) {
+function createInactivityTimer(timeoutMs, onTimeout, timerApi) {
     let timer;
     if (!timeoutMs || !Number.isFinite(timeoutMs)) {
         return {
@@ -42,12 +45,12 @@ function createInactivityTimer(timeoutMs, onTimeout) {
     }
     const reset = () => {
         if (timer)
-            clearTimeout(timer);
-        timer = setTimeout(onTimeout, timeoutMs);
+            timerApi.clearTimeout(timer);
+        timer = timerApi.setTimeout(onTimeout, timeoutMs);
     };
     const clear = () => {
         if (timer)
-            clearTimeout(timer);
+            timerApi.clearTimeout(timer);
         timer = undefined;
     };
     reset();
@@ -60,7 +63,7 @@ function createInactivityTimer(timeoutMs, onTimeout) {
  * @returns {Effect.Effect<{ text: string; output: unknown; stderr: string; exitCode: number | null; usage?: any; }, SmithersError>}
  */
 export function runRpcCommandEffect(command, args, options) {
-    const { cwd, env, prompt, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, onStdout, onStderr, onJsonEvent, onExtensionUiRequest, spawnFn = spawn, } = options;
+    const { cwd, env, prompt, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, onStdout, onStderr, onJsonEvent, onExtensionUiRequest, spawnFn = spawn, lifecycleTimerApi: timerApi = globalThis, } = options;
     const span = `agent:${command}:rpc`;
     const logAnnotations = {
         agentCommand: command,
@@ -172,10 +175,10 @@ export function runRpcCommandEffect(command, args, options) {
             if (!child.pid)
                 return;
             killProcessGroup("SIGTERM");
-            const killTimer = setTimeout(() => {
+            const killTimer = timerApi.setTimeout(() => {
                 killProcessGroup("SIGKILL");
             }, 250);
-            child.once("close", () => clearTimeout(killTimer));
+            child.once("close", () => timerApi.clearTimeout(killTimer));
         };
         /**
     * @param {string} reason
@@ -184,8 +187,8 @@ export function runRpcCommandEffect(command, args, options) {
             terminateChild();
             handleError(makeAgentCliError(reason), "agent RPC command interrupted");
         };
-        const totalTimeout = createOneShotTimer(timeoutMs, () => kill(`CLI timed out after ${timeoutMs}ms`));
-        const inactivity = createInactivityTimer(idleTimeoutMs, () => kill(`CLI idle timed out after ${idleTimeoutMs}ms`));
+        const totalTimeout = createOneShotTimer(timeoutMs, () => kill(`CLI timed out after ${timeoutMs}ms`), timerApi);
+        const inactivity = createInactivityTimer(idleTimeoutMs, () => kill(`CLI idle timed out after ${idleTimeoutMs}ms`), timerApi);
         function onAbort() {
             kill("CLI aborted");
         }

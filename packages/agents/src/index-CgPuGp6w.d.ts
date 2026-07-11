@@ -281,6 +281,7 @@ declare function runRpcCommandEffect(command: string, args: string[], options: R
 }, SmithersError$1>;
 type PiExtensionUiResponse$1 = PiExtensionUiResponse$2;
 type PiExtensionUiRequest$1 = PiExtensionUiRequest$2;
+type LifecycleTimerApi = Pick<typeof globalThis, "setTimeout" | "clearTimeout">;
 type RunRpcCommandOptions = {
     cwd: string;
     env: Record<string, string>;
@@ -294,6 +295,7 @@ type RunRpcCommandOptions = {
     onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void;
     onExtensionUiRequest?: (request: PiExtensionUiRequest$1) => Promise<PiExtensionUiResponse$1 | null> | PiExtensionUiResponse$1 | null;
     spawnFn?: typeof spawn;
+    lifecycleTimerApi?: LifecycleTimerApi;
 };
 
 /**
