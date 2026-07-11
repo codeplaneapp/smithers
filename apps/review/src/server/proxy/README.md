@@ -1,6 +1,7 @@
 # proxy/
 
-The metered Anthropic proxy (`/anthropic/v1/*` only).
+The metered Anthropic proxy. Its provider-key egress allowlist is POST-only:
+`/anthropic/v1/messages` and `/anthropic/v1/messages/count_tokens`.
 
 - `handleAnthropic.ts` — authenticate, enforce the per-session and per-repo
   monthly spend caps, forward with the real API key, stream the response back
@@ -9,12 +10,26 @@ The metered Anthropic proxy (`/anthropic/v1/*` only).
   then `srk_` api keys.
 - `parseUsageFromJson.ts` / `parseUsageFromSse.ts` — extract token usage from
   the response body (the SSE parser handles CRLF frames).
-- `recordUsage.ts` — appends `usage_events` and increments `spent_usd`
-  UNCONDITIONALLY; the cap is enforced pre-flight (see the comment on the
-  audit-log undercounting bug that conditional updates caused).
-- `modelPrices.ts` — static per-model price table; unknown models meter at $0
-  but still record tokens.
+- `spendReservations.ts` — estimates a Messages call from request bytes and
+  `max_tokens`, then atomically reserves both session and repository capacity.
+- `recordUsage.ts` — atomically appends `usage_events`, increments `spent_usd`,
+  and removes the settled reservation in one transactional D1 batch.
+- `modelPrices.ts` — shared price lookup plus the stricter request-model
+  allowlist; response-only unknowns use `recordUsage.ts`'s high-rate fallback.
 - `parseUsage.ts` — the shared `UsageSummary` type.
 
-Gotchas: metering misses on 2xx `/v1/messages` responses are logged loudly;
-api-key (operator) requests bypass the session and monthly caps.
+Reservation semantics: one conditional D1 `INSERT` considers recorded spend
+plus all active leases, closing the concurrent-read admission race. A complete
+2xx response settles at measured usage and releases unused capacity. A client
+cancellation, transport truncation, bodyless success, or parser miss settles at
+the full conservative estimate; a non-2xx response or failed upstream dispatch
+releases it. Leases expire after two hours and are pruned on later admissions,
+so a Worker crash cannot strand capacity forever. Settlement uses D1's
+transactional `batch()`: a failed accounting statement rolls the whole batch
+back and leaves the lease active (fail closed) until a retry or expiry.
+
+Only request models with a nonzero static price are dispatched upstream. The
+highest-known-rate fallback in `recordUsage.ts` is intentionally narrower: it
+covers a provider response that names a different/unknown model, but it is not
+an allowlist for sending new request models whose future price could exceed the
+current table.

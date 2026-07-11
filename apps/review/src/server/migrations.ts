@@ -40,6 +40,18 @@ const SCHEMA_STATEMENTS = [
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS usage_events_repo_idx ON usage_events(repo, created_at)`,
+  `CREATE TABLE IF NOT EXISTS spend_reservations (
+    id TEXT PRIMARY KEY,
+    session_hash TEXT,
+    repo TEXT NOT NULL,
+    amount_usd REAL NOT NULL CHECK (amount_usd > 0),
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    CHECK (expires_at > created_at)
+  )`,
+  `CREATE INDEX IF NOT EXISTS spend_reservations_session_idx ON spend_reservations(session_hash, expires_at)`,
+  `CREATE INDEX IF NOT EXISTS spend_reservations_repo_idx ON spend_reservations(repo, expires_at)`,
+  `CREATE INDEX IF NOT EXISTS spend_reservations_expiry_idx ON spend_reservations(expires_at)`,
   `CREATE TABLE IF NOT EXISTS reviewed_prs (
     repo TEXT NOT NULL,
     pr INTEGER NOT NULL,

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { appendFileSync, readFileSync } from "node:fs";
 import { gateEvent } from "./gateEvent";
+import { eventCanPublish, reviewCredentialPolicy } from "./reviewTrustPolicy";
 
 /**
  * Composite step 1 entrypoint. Reads the event payload, decides run vs skip,
@@ -30,11 +31,16 @@ if (eventPath) {
 
 const decision = gateEvent({ eventName, payload });
 if (decision.run) {
+  const trust = reviewCredentialPolicy();
   setOutput("should-run", "true");
   setOutput("pr-number", String(decision.prNumber));
   setOutput("event-name", decision.eventName);
   if (decision.headSha) setOutput("head-sha", decision.headSha);
-  console.log(`smithers review: ${decision.eventName} #${decision.prNumber} eligible — continuing`);
+  setOutput("subscription-eligible", trust.subscriptionEligible ? "true" : "false");
+  setOutput("can-publish", eventCanPublish(eventName, payload) ? "true" : "false");
+  console.log(
+    `smithers review: ${decision.eventName} #${decision.prNumber} eligible — ${trust.subscriptionEligible ? "trusted subscription" : "metered proxy"} (${trust.reason})`,
+  );
 } else {
   setOutput("should-run", "false");
   console.log(`::notice::smithers review skipped: ${decision.reason}`);

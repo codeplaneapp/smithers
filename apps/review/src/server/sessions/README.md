@@ -4,6 +4,13 @@ Session minting for the GitHub Action. `handleSessions.ts` maps OIDC-token or
 api-key auth to a registered repo, enforces the monthly spend cap BEFORE
 claiming a quota slot, then runs `claimReviewSlot.ts` (a single conditional
 INSERT, race-safe) and `mintSession.ts` (hashed `srs_` token, 2h TTL).
+`issue_comment` and base-controlled `pull_request_target` tokens bind the PR
+number from the request body because their signed OIDC ref is the base branch;
+all other non-PR event types are rejected. Session minting also requires the
+signed `workflow_ref` to be exactly this repository's
+`.github/workflows/pr-review.yml@refs/heads/main`, a full `workflow_sha`, and
+the workflow's first run attempt. Another workflow with `id-token: write` and
+reruns of an older trusted job therefore cannot spend the review budget.
 
 - `verifyOidc.ts` — full RS256 JWKS verification of GitHub Actions OIDC
   tokens, with tagged failure reasons.

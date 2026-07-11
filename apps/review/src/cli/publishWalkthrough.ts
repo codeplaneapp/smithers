@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { assertHttpUrl } from "@smithers-orchestrator/http-client";
 
 function loadPublishConfig(homeDir = homedir()): { url: string; token: string } {
   let url = process.env.SMITHERS_REVIEW_PUBLISH_URL?.trim() || "";
@@ -30,8 +31,12 @@ function loadPublishConfig(homeDir = homedir()): { url: string; token: string } 
 export async function publishWalkthrough(htmlPath: string, options: { homeDir?: string } = {}): Promise<string> {
   const { url, token } = loadPublishConfig(options.homeDir);
   const html = readFileSync(htmlPath);
-  const response = await fetch(`${url}/api/walkthroughs`, {
+  const endpoint = assertHttpUrl(`${url}/api/walkthroughs`);
+  const response = await fetch(endpoint, {
     method: "POST",
+    // A publish credential and HTML body must never be replayed to a redirect
+    // target. Operators can configure the final service endpoint directly.
+    redirect: "error",
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "text/html; charset=utf-8",
@@ -44,5 +49,5 @@ export async function publishWalkthrough(htmlPath: string, options: { homeDir?: 
   }
   const data = (await response.json()) as { url?: string };
   if (!data.url) throw new Error("publish failed: response had no url");
-  return data.url;
+  return assertHttpUrl(data.url).toString();
 }

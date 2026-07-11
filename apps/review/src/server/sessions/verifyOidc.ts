@@ -20,6 +20,11 @@ export interface OidcClaims {
   ref?: string;
   ref_type?: string;
   event_name?: string;
+  workflow_ref?: string;
+  workflow_sha?: string;
+  run_attempt?: string | number;
+  base_ref?: string;
+  head_ref?: string;
   pull_request?: { number?: number };
 }
 

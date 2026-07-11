@@ -32,6 +32,24 @@ function positiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
 }
 
+function approvedReviewWorkflow(
+  claims: {
+    repository?: string;
+    event_name?: string;
+    workflow_ref?: string;
+    workflow_sha?: string;
+    run_attempt?: string | number;
+  },
+): boolean {
+  if (typeof claims.repository !== "string" || !claims.repository) return false;
+  if (claims.event_name !== "pull_request_target" && claims.event_name !== "issue_comment") return false;
+  const expected = `${claims.repository}/.github/workflows/pr-review.yml@refs/heads/main`;
+  return claims.workflow_ref === expected
+    && typeof claims.workflow_sha === "string"
+    && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(claims.workflow_sha)
+    && String(claims.run_attempt) === "1";
+}
+
 type PullRequestResolution =
   | { ok: true; pr: number }
   | { ok: false; message: string };
@@ -56,7 +74,7 @@ function resolveOidcPullRequestNumber(
     return { ok: true, pr: verifiedPr };
   }
 
-  if (claims.event_name === "issue_comment" && prFromBody) {
+  if ((claims.event_name === "issue_comment" || claims.event_name === "pull_request_target") && prFromBody) {
     return { ok: true, pr: prFromBody };
   }
 
@@ -97,6 +115,9 @@ export async function handleSessions(
       return jsonError(401, "oidc: missing repository claim");
     }
     repo = claims.repository;
+    if (!approvedReviewWorkflow(claims)) {
+      return jsonError(401, "oidc: token is not from the protected review workflow");
+    }
     const resolvedPr = resolveOidcPullRequestNumber(claims, body.pr);
     if (!resolvedPr.ok) return jsonError(400, resolvedPr.message);
     pr = resolvedPr.pr;

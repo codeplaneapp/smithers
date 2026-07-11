@@ -92,6 +92,45 @@ describe("runGate (subprocess)", () => {
     expect(out["pr-number"]).toBe("42");
     expect(out["head-sha"]).toBe("deadbeef");
     expect(out["event-name"]).toBe("pull_request");
+    expect(out["subscription-eligible"]).toBe("false");
+  });
+
+  test("keeps subscription eligibility false even for a same-repo event with legacy trust variables", async () => {
+    const { outputFile, tmp } = await setup();
+    const payload = {
+      action: "synchronize",
+      repository: { id: 100, full_name: "octo/widgets" },
+      sender: { id: 7 },
+      pull_request: {
+        number: 42,
+        draft: false,
+        user: { id: 7 },
+        head: {
+          sha: "a".repeat(40),
+          ref: "trusted/change",
+          repo: { id: 100, full_name: "octo/widgets" },
+        },
+        base: {
+          sha: "b".repeat(40),
+          ref: "main",
+          repo: { id: 100, full_name: "octo/widgets" },
+        },
+      },
+    };
+    const eventPath = join(tmp, "event.json");
+    await writeFile(eventPath, JSON.stringify(payload));
+    const result = spawnGate({
+      GITHUB_EVENT_NAME: "pull_request",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_OUTPUT: outputFile,
+      SMITHERS_REVIEW_ALLOW_SUBSCRIPTIONS: "true",
+      SMITHERS_REVIEW_TRUSTED_ACTOR_IDS: "7",
+      SMITHERS_REVIEW_TRUSTED_BRANCH_RULES: "trusted/*",
+    });
+    expect(result.exitCode).toBe(0);
+    const out = await readOutput(outputFile);
+    expect(out["subscription-eligible"]).toBe("false");
+    expect(out["can-publish"]).toBe("true");
   });
 
   test("writes should-run=false for a draft PR", async () => {

@@ -7,10 +7,28 @@ import { authenticateProxyRequest } from "./authenticateProxyRequest.ts";
 import { parseUsageFromJson } from "./parseUsageFromJson.ts";
 import { parseUsageFromSse } from "./parseUsageFromSse.ts";
 import { recordUsage } from "./recordUsage.ts";
+import {
+  estimateMessagesSpend,
+  releaseSpendReservation,
+  reserveSpend,
+  type SpendReservation,
+} from "./spendReservations.ts";
+import {
+  assertHttpUrl,
+  fetchWithPolicy,
+  isHttpClientPolicyError,
+  readResponseBytes,
+} from "@smithers-orchestrator/http-client";
 
 export interface HandleAnthropicDeps {
   anthropicBaseUrl: string;
   fetchUpstream: typeof fetch;
+  /** Additional origins authorized to receive the upstream Anthropic key on redirects. */
+  anthropicAllowedOrigins?: string[];
+  /** Maximum request body forwarded upstream. Defaults to 16 MiB. */
+  anthropicMaxRequestBytes?: number;
+  /** Maximum response data retained for usage metering. Defaults to 16 MiB. */
+  anthropicMaxMeteringBytes?: number;
   now: () => number;
   /**
    * Production: ctx.waitUntil from the Worker invocation, keeping the metering
@@ -30,53 +48,12 @@ const FORWARDED_HEADERS = new Set([
 
 // Clients need these to back off correctly and to reference upstream errors.
 const PASSTHROUGH_RESPONSE_HEADERS = ["retry-after", "x-request-id"];
+const DEFAULT_MAX_REQUEST_BYTES = 16 * 1024 * 1024;
+const DEFAULT_MAX_METERING_BYTES = 16 * 1024 * 1024;
+const ALLOWED_PROXY_PATHS = new Set(["/v1/messages", "/v1/messages/count_tokens"]);
 
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-const MAX_REDIRECT_HOPS = 5;
-
-type UpstreamResult =
-  | { kind: "response"; response: Response }
-  | { kind: "cross_origin_redirect"; location: string }
-  | { kind: "too_many_redirects"; hops: number };
-
-/**
- * fetch(redirect: "follow") replays the request headers — including the
- * injected x-api-key — to whatever host a Location header names; unlike
- * `authorization`, custom headers are NOT stripped on cross-origin redirects,
- * so a compromised or misconfigured upstream could bounce the proxy to an
- * attacker origin and exfiltrate the real Anthropic key. Follow redirects
- * manually instead: every hop must stay on the configured upstream origin,
- * so the key is only ever sent to that origin. A cross-origin Location is
- * never fetched at all (redirect: "manual" does not follow it).
- */
-async function fetchUpstreamSameOrigin(
-  fetchUpstream: typeof fetch,
-  allowedOrigin: string,
-  initial: { url: string; method: string; headers: Headers; body: ArrayBuffer | undefined },
-): Promise<UpstreamResult> {
-  let { url, method, body } = initial;
-  const headers = initial.headers;
-  for (let hop = 0; hop < MAX_REDIRECT_HOPS; hop++) {
-    const response = await fetchUpstream(url, { method, headers, body, redirect: "manual" });
-    const location = response.headers.get("location");
-    if (!REDIRECT_STATUSES.has(response.status) || !location) {
-      return { kind: "response", response };
-    }
-    void response.body?.cancel().catch(() => undefined);
-    const next = new URL(location, url);
-    if (next.origin !== allowedOrigin) {
-      return { kind: "cross_origin_redirect", location: next.origin };
-    }
-    // Mirror fetch redirect semantics: 303 always re-issues as a bodyless GET,
-    // as do 301/302 on POST; 307/308 replay the method and body unchanged.
-    if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) {
-      method = "GET";
-      body = undefined;
-      headers.delete("content-type");
-    }
-    url = next.toString();
-  }
-  return { kind: "too_many_redirects", hops: MAX_REDIRECT_HOPS };
+function validByteLimit(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
 }
 
 function pickForwardHeaders(source: Headers): Headers {
@@ -87,33 +64,144 @@ function pickForwardHeaders(source: Headers): Headers {
   return out;
 }
 
-function teeForMetering(
+type CollectedMeteringBody = {
+  text: string;
+  truncated: boolean;
+  complete: boolean;
+};
+
+/**
+ * Collect a bounded view of the response while the other tee branch streams
+ * to the caller. For oversized SSE responses we retain both ends: Anthropic's
+ * message_start usage is near the beginning and message_delta usage is near
+ * the end. This keeps metering useful without retaining arbitrary model output
+ * in Worker memory.
+ */
+function streamForMetering(
   upstream: Response,
-): { passthrough: ReadableStream; collected: Promise<string> } {
-  const [a, b] = upstream.body!.tee();
-  const collected = (async () => {
-    const reader = b.getReader();
-    const decoder = new TextDecoder();
-    let acc = "";
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
-      }
-      acc += decoder.decode();
-    } catch {
-      /* upstream closed unexpectedly; whatever we have is what we record */
+  maxBytes: number,
+): { passthrough: ReadableStream; collected: Promise<CollectedMeteringBody> } {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new Error("Anthropic metering byte limit must be a non-negative safe integer");
+  }
+  const reader = upstream.body!.getReader();
+  const headLimit = Math.ceil(maxBytes / 2);
+  const tailLimit = Math.floor(maxBytes / 2);
+  const head = new Uint8Array(headLimit);
+  const tail = new Uint8Array(tailLimit);
+  let headLength = 0;
+  let tailLength = 0;
+  let tailOffset = 0;
+  let totalBytes = 0;
+  let settled = false;
+  let cancelled = false;
+  let resolveCollected!: (value: CollectedMeteringBody) => void;
+  const collected = new Promise<CollectedMeteringBody>((resolve) => {
+    resolveCollected = resolve;
+  });
+
+  const appendTail = (chunk: Uint8Array) => {
+    if (tailLimit === 0) return;
+    if (chunk.byteLength >= tailLimit) {
+      tail.set(chunk.subarray(chunk.byteLength - tailLimit));
+      tailLength = tailLimit;
+      tailOffset = 0;
+      return;
     }
-    return acc;
-  })();
-  return { passthrough: a, collected };
+    for (const byte of chunk) {
+      tail[tailOffset] = byte;
+      tailOffset = (tailOffset + 1) % tailLimit;
+      tailLength = Math.min(tailLength + 1, tailLimit);
+    }
+  };
+
+  const orderedTail = () => {
+    if (tailLength < tailLimit) return tail.slice(0, tailLength);
+    const ordered = new Uint8Array(tailLength);
+    ordered.set(tail.subarray(tailOffset), 0);
+    ordered.set(tail.subarray(0, tailOffset), tailLength - tailOffset);
+    return ordered;
+  };
+
+  const retain = (value: Uint8Array) => {
+    // Copy only the bounded slices into the fixed head/tail buffers. Copying
+    // the entire upstream chunk here would let an unusually large transport
+    // chunk temporarily defeat the metering-memory cap.
+    const chunk = value;
+    const headRemaining = headLimit - headLength;
+    if (headRemaining > 0) {
+      const take = Math.min(headRemaining, chunk.byteLength);
+      head.set(chunk.subarray(0, take), headLength);
+      headLength += take;
+    }
+    appendTail(chunk);
+    totalBytes += chunk.byteLength;
+  };
+
+  const finish = (complete: boolean) => {
+    if (settled) return;
+    settled = true;
+    reader.releaseLock();
+    const decoder = new TextDecoder();
+    if (totalBytes <= maxBytes) {
+      const tailBytes = orderedTail();
+      const overlap = Math.max(0, headLength + tailBytes.byteLength - totalBytes);
+      const suffix = tailBytes.subarray(overlap);
+      const bytes = new Uint8Array(totalBytes);
+      bytes.set(head.subarray(0, headLength));
+      bytes.set(suffix, headLength);
+      resolveCollected({ text: decoder.decode(bytes), truncated: false, complete });
+      return;
+    }
+
+    // Blank-line separation prevents a cut middle frame from swallowing the
+    // first complete SSE frame retained in the tail.
+    resolveCollected({
+      text: `${decoder.decode(head.subarray(0, headLength))}\n\n${decoder.decode(orderedTail())}`,
+      truncated: true,
+      complete,
+    });
+  };
+
+  // A tee lets the eager metering branch pull the upstream faster than the
+  // client consumes it, queueing an unbounded response in the other branch.
+  // This stream samples each chunk in the same pull that forwards it, so the
+  // caller's backpressure governs both forwarding and metering.
+  const passthrough = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { value, done } = await reader.read();
+        if (done) {
+          finish(!cancelled);
+          controller.close();
+          return;
+        }
+        if (value) {
+          retain(value);
+          controller.enqueue(value);
+        }
+      } catch (error) {
+        finish(false);
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      cancelled = true;
+      try {
+        await reader.cancel(reason);
+      } finally {
+        finish(false);
+      }
+    },
+  });
+  return { passthrough, collected };
 }
 
 /**
- * /anthropic/v1/* — auth, forward to api.anthropic.com with the real key,
+ * /anthropic/v1/messages — auth, forward to Anthropic with the real key,
  * stream the response back unmodified, then meter from a teed copy. Anything
- * outside /v1/ is rejected: the proxy is not a general egress.
+ * except Messages creation and count_tokens is rejected: the proxy is not a
+ * general egress and unmetered endpoints never receive the provider key.
  */
 export async function handleAnthropic(
   request: Request,
@@ -122,8 +210,18 @@ export async function handleAnthropic(
   url: URL,
 ): Promise<Response> {
   const proxiedPath = url.pathname.slice("/anthropic".length);
-  if (!proxiedPath.startsWith("/v1/")) {
-    return jsonError(404, "only /v1/* paths are forwarded");
+  if (!ALLOWED_PROXY_PATHS.has(proxiedPath)) {
+    return jsonError(404, "only /v1/messages and /v1/messages/count_tokens are forwarded");
+  }
+  if (request.method !== "POST") {
+    return jsonError(405, "Anthropic proxy routes require POST");
+  }
+  const maxRequestBytes = deps.anthropicMaxRequestBytes ?? DEFAULT_MAX_REQUEST_BYTES;
+  const maxMeteringBytes = deps.anthropicMaxMeteringBytes ?? DEFAULT_MAX_METERING_BYTES;
+  if (!validByteLimit(maxRequestBytes) || !validByteLimit(maxMeteringBytes)) {
+    // Validate both limits before authentication/body handling so a bad Worker
+    // deployment can never spend upstream money and fail only while metering.
+    return jsonError(500, "invalid Anthropic proxy byte-limit configuration");
   }
   const now = deps.now();
   const auth = await authenticateProxyRequest(request, env, now);
@@ -134,15 +232,16 @@ export async function handleAnthropic(
   let sessionHash: string | null = null;
   let spendCapUsd = Number.POSITIVE_INFINITY;
   let spentUsd = 0;
+  // Sessions without a live registration retain their historical session-only
+  // behavior. A large finite value is bindable by D1; Infinity is not.
+  let repoCapUsd = Number.MAX_SAFE_INTEGER;
   if (auth.kind === "session") {
     repo = auth.repo;
     pr = auth.pr;
     sessionHash = auth.hash;
     spendCapUsd = auth.spendCapUsd;
-    // Re-read spent_usd at admission: concurrent streaming requests meter via
-    // waitUntil after their streams close, so the row read during auth can be
-    // stale. A fresh read narrows (not eliminates) the over-spend window
-    // without a full reservation system.
+    // Preserve the specific exhausted-cap response before reading the body.
+    // The conditional reservation below is the authoritative concurrency gate.
     const fresh = await env.DB
       .prepare("SELECT spent_usd FROM sessions WHERE hash = ?")
       .bind(auth.hash)
@@ -158,6 +257,7 @@ export async function handleAnthropic(
     const registration = await lookupRepo(env.DB, repo);
     if (registration) {
       const monthlyCapUsd = repoMonthlyCapUsd(registration);
+      repoCapUsd = Math.min(monthlyCapUsd, Number.MAX_SAFE_INTEGER);
       const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
       if (monthSpendUsd >= monthlyCapUsd) {
         return jsonError(402, "repo monthly spend cap exhausted", {
@@ -193,6 +293,11 @@ export async function handleAnthropic(
       return jsonError(403, "repo not registered", { repo });
     }
     const monthlyCapUsd = repoMonthlyCapUsd(registration);
+    repoCapUsd = Math.min(
+      monthlyCapUsd,
+      auth.spendCapUsd ?? Number.MAX_SAFE_INTEGER,
+      Number.MAX_SAFE_INTEGER,
+    );
     const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
     if (monthSpendUsd >= monthlyCapUsd) {
       return jsonError(402, "repo monthly spend cap exhausted", {
@@ -211,40 +316,130 @@ export async function handleAnthropic(
     }
   }
 
-  const upstreamUrl = `${deps.anthropicBaseUrl.replace(/\/$/, "")}${proxiedPath}${url.search}`;
+  const anthropicBaseUrl = assertHttpUrl(deps.anthropicBaseUrl);
+  const upstreamUrl = assertHttpUrl(
+    `${anthropicBaseUrl.toString().replace(/\/$/, "")}${proxiedPath}${url.search}`,
+  );
   const upstreamHeaders = pickForwardHeaders(request.headers);
   upstreamHeaders.set("x-api-key", env.ANTHROPIC_API_KEY);
   upstreamHeaders.set("anthropic-version", upstreamHeaders.get("anthropic-version") ?? "2023-06-01");
 
-  let upstreamBody: ArrayBuffer | undefined;
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    upstreamBody = await request.arrayBuffer();
+  let upstreamBody: ArrayBuffer;
+  try {
+    const bytes = await readResponseBytes(
+      new Response(request.body, { headers: request.headers }),
+      {
+        maxBytes: maxRequestBytes,
+        signal: request.signal,
+      },
+    );
+    upstreamBody = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  } catch (err) {
+    if (request.signal.aborted) throw request.signal.reason ?? err;
+    if (isHttpClientPolicyError(err) && err.code === "RESPONSE_TOO_LARGE") {
+      return jsonError(413, "request body exceeds the Anthropic proxy limit", {
+        maxBytes: maxRequestBytes,
+      });
+    }
+    return jsonError(400, "failed to read request body");
+  }
+
+  // Both provider-key routes require an explicitly priced model. Reserve only
+  // Messages creation; count_tokens does not produce a billable message.
+  let reservation: SpendReservation | null = null;
+  const estimate = estimateMessagesSpend(upstreamBody);
+  if (!estimate.hasStaticPrice) {
+    return jsonError(400, "requested model has no static metering price", {
+      reason: "unpriced-model",
+    });
+  }
+  if (proxiedPath === "/v1/messages") {
+    reservation = await reserveSpend(env.DB, {
+      sessionHash,
+      repo,
+      repoCapUsd,
+      estimate,
+      now,
+    });
+    if (!reservation) {
+      return jsonError(402, "spend cap cannot cover the requested message", {
+        repo,
+        estimatedCostUsd: estimate.amountUsd,
+      });
+    }
   }
 
   let upstream: Response;
   try {
-    const result = await fetchUpstreamSameOrigin(
-      deps.fetchUpstream,
-      new URL(deps.anthropicBaseUrl).origin,
-      { url: upstreamUrl, method: request.method, headers: upstreamHeaders, body: upstreamBody },
-    );
-    if (result.kind === "cross_origin_redirect") {
-      // The injected key was NOT sent to (and never will be sent to) the
-      // foreign origin; fail closed rather than forward credentials off-origin.
-      return jsonError(502, "upstream redirected off the anthropic origin; refusing to forward credentials", {
-        location: result.location,
-      });
-    }
-    if (result.kind === "too_many_redirects") {
-      return jsonError(502, "too many upstream redirects", { hops: result.hops });
-    }
-    upstream = result.response;
+    upstream = await fetchWithPolicy(upstreamUrl, {
+      method: request.method,
+      headers: upstreamHeaders,
+      body: upstreamBody,
+      signal: request.signal,
+    }, {
+      fetch: deps.fetchUpstream,
+      allowedOrigins: deps.anthropicAllowedOrigins,
+    });
   } catch (err) {
-    return jsonError(502, "upstream fetch failed", { detail: String(err) });
+    if (reservation) {
+      try {
+        await releaseSpendReservation(env.DB, reservation.id);
+      } catch (releaseError) {
+        // Keep the original proxy result. The lease is fail-closed and expires
+        // automatically if D1 is temporarily unavailable during release.
+        console.error("smithers-review: failed to release spend reservation", {
+          repo,
+          reservationId: reservation.id,
+          err: String(releaseError),
+        });
+      }
+    }
+    if (request.signal.aborted) throw request.signal.reason ?? err;
+    const detail = String(err).split(env.ANTHROPIC_API_KEY).join("<redacted>");
+    return jsonError(502, "upstream fetch failed", { detail });
   }
 
   if (!upstream.body) {
     const text = await upstream.text();
+    if (reservation) {
+      const bodylessMetering = (async () => {
+        if (upstream.status < 200 || upstream.status >= 300) {
+          await releaseSpendReservation(env.DB, reservation.id);
+          return;
+        }
+        console.error("smithers-review: metering miss (bodyless 2xx messages response)", {
+          repo,
+          pr,
+          path: proxiedPath,
+          status: upstream.status,
+        });
+        await recordUsage(env.DB, {
+          sessionHash,
+          repo,
+          pr,
+          summary: {
+            model: reservation.model,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+          },
+          kind: "messages",
+          now: deps.now(),
+          reservationId: reservation.id,
+          minimumCostUsd: reservation.amountUsd,
+        });
+      })().catch((err) => {
+        console.error("smithers-review: metering failed", {
+          repo,
+          pr,
+          path: proxiedPath,
+          status: upstream.status,
+          err: String(err),
+        });
+      });
+      deps.waitUntil(bodylessMetering);
+    }
     const headers = new Headers({
       "content-type": upstream.headers.get("content-type") ?? "application/json",
     });
@@ -256,10 +451,17 @@ export async function handleAnthropic(
   }
 
   const contentType = upstream.headers.get("content-type") ?? "";
-  const { passthrough, collected } = teeForMetering(upstream);
+  const { passthrough, collected } = streamForMetering(
+    upstream,
+    maxMeteringBytes,
+  );
 
   const metering = (async () => {
-    const body = await collected;
+    const { text: body, truncated, complete } = await collected;
+    if (upstream.status < 200 || upstream.status >= 300) {
+      if (reservation) await releaseSpendReservation(env.DB, reservation.id);
+      return;
+    }
     const summary = contentType.includes("text/event-stream")
       ? parseUsageFromSse(body)
       : parseUsageFromJson(body);
@@ -267,12 +469,32 @@ export async function handleAnthropic(
       // A 2xx /v1/messages response that yields no usage is a metering MISS
       // (unexpected body shape), not a benign non-content frame — real spend
       // goes unrecorded. Surface it so Workers logs can catch a parser drift.
-      if (upstream.status >= 200 && upstream.status < 300 && proxiedPath.startsWith("/v1/messages")) {
+      if (proxiedPath === "/v1/messages") {
         console.error("smithers-review: metering miss (usage parser returned null on a 2xx messages response)", {
           repo,
           pr,
           path: proxiedPath,
           contentType,
+          truncated,
+          complete,
+        });
+      }
+      if (reservation) {
+        await recordUsage(env.DB, {
+          sessionHash,
+          repo,
+          pr,
+          summary: {
+            model: reservation.model,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+          },
+          kind: contentType.includes("text/event-stream") ? "messages_stream" : "messages",
+          now: deps.now(),
+          reservationId: reservation.id,
+          minimumCostUsd: reservation.amountUsd,
         });
       }
       return;
@@ -284,6 +506,10 @@ export async function handleAnthropic(
       summary,
       kind: contentType.includes("text/event-stream") ? "messages_stream" : "messages",
       now: deps.now(),
+      reservationId: reservation?.id,
+      // A client cancellation or transport error can hide the final usage
+      // frame. Charge the pre-dispatch bound rather than silently undercount.
+      minimumCostUsd: reservation && !complete ? reservation.amountUsd : undefined,
     });
   })().catch((err) => {
     // recordUsage spends real money; a silent failure here is the last

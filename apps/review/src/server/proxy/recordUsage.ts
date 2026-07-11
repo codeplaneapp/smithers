@@ -1,7 +1,30 @@
 import type { D1Database } from "../d1.ts";
 import { randomTokenHex } from "../randomTokenHex.ts";
-import { modelPrices } from "./modelPrices.ts";
+import { isPricedAnthropicRequestModel, modelPrices } from "./modelPrices.ts";
 import type { UsageSummary } from "./parseUsage.ts";
+
+// Unknown upstream model IDs must never become a free-metering bypass. These
+// are the highest rates in the currently supported table, so a newly accepted
+// alias is charged conservatively until its exact price is added.
+const UNKNOWN_MODEL_PRICE = {
+  input: 15,
+  output: 75,
+  cacheWrite: 18.75,
+  cacheRead: 1.5,
+} as const;
+
+export function modelPriceForMetering(model: string, logUnknown = true) {
+  const price = modelPrices(model);
+  if (isPricedAnthropicRequestModel(model)) return price;
+  if (logUnknown) {
+    console.error("smithers-review: unknown model priced at conservative metering fallback", { model });
+  }
+  return UNKNOWN_MODEL_PRICE;
+}
+
+function nonNegativeFinite(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
 
 export interface RecordedUsage {
   costUsd: number;
@@ -10,8 +33,9 @@ export interface RecordedUsage {
 
 /**
  * Append a usage_events row and increment the session's spent_usd. Cost comes
- * from the static modelPrices table; unknown models still record token counts
- * with cost 0 so dashboards see them and we can backfill later.
+ * from the static modelPrices table. Unknown models use the highest supported
+ * rates so a newly accepted upstream ID cannot bypass spend caps while its
+ * exact price is being added.
  */
 export async function recordUsage(
   db: D1Database,
@@ -22,14 +46,21 @@ export async function recordUsage(
     summary: UsageSummary;
     kind: "messages" | "messages_stream" | "other";
     now: number;
+    /** Reservation to remove only after actual usage is durably recorded. */
+    reservationId?: string;
+    /** Fail-closed charge used when a response stream is incomplete. */
+    minimumCostUsd?: number;
   },
 ): Promise<RecordedUsage> {
-  const price = modelPrices(options.summary.model);
-  const costUsd =
-    (options.summary.inputTokens * price.input) / 1_000_000 +
-    (options.summary.outputTokens * price.output) / 1_000_000 +
-    (options.summary.cacheCreationTokens * price.cacheWrite) / 1_000_000 +
-    (options.summary.cacheReadTokens * price.cacheRead) / 1_000_000;
+  const price = modelPriceForMetering(options.summary.model);
+  const measuredCostUsd =
+    (nonNegativeFinite(options.summary.inputTokens) * price.input) / 1_000_000 +
+    (nonNegativeFinite(options.summary.outputTokens) * price.output) / 1_000_000 +
+    (nonNegativeFinite(options.summary.cacheCreationTokens) * price.cacheWrite) / 1_000_000 +
+    (nonNegativeFinite(options.summary.cacheReadTokens) * price.cacheRead) / 1_000_000;
+  const minimumCostUsd = nonNegativeFinite(options.minimumCostUsd ?? 0);
+  const costUsd = Math.max(measuredCostUsd, minimumCostUsd);
+  const statements = [];
   if (options.sessionHash) {
     // This request was already forwarded to Anthropic and its response streamed
     // to the client — the cost is real money spent. Record it UNCONDITIONALLY.
@@ -38,28 +69,44 @@ export async function recordUsage(
     // conditional `... WHERE spent_usd + ? <= spend_cap_usd` dropped any call that
     // crossed the cap from BOTH the spend tally and the usage_events audit log,
     // systematically undercounting real Anthropic spend on every capped session.
-    await db
-      .prepare("UPDATE sessions SET spent_usd = spent_usd + ? WHERE hash = ?")
-      .bind(costUsd, options.sessionHash)
-      .run();
+    statements.push(
+      db
+        .prepare("UPDATE sessions SET spent_usd = spent_usd + ? WHERE hash = ?")
+        .bind(costUsd, options.sessionHash),
+    );
   }
-  await db
-    .prepare(
-      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(
-      randomTokenHex(8),
-      options.repo,
-      options.pr,
-      options.summary.model,
-      options.summary.inputTokens,
-      options.summary.outputTokens,
-      options.summary.cacheCreationTokens,
-      options.summary.cacheReadTokens,
-      costUsd,
-      options.kind,
-      options.now,
-    )
-    .run();
+  statements.push(
+    db
+      .prepare(
+        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .bind(
+        randomTokenHex(8),
+        options.repo,
+        options.pr,
+        options.summary.model,
+        options.summary.inputTokens,
+        options.summary.outputTokens,
+        options.summary.cacheCreationTokens,
+        options.summary.cacheReadTokens,
+        costUsd,
+        options.kind,
+        options.now,
+      ),
+  );
+  if (options.reservationId) {
+    statements.push(
+      db
+        .prepare("DELETE FROM spend_reservations WHERE id = ?")
+        .bind(options.reservationId),
+    );
+  }
+  // D1 batches are transactions: session spend, the repo ledger, and lease
+  // deletion either all commit or all roll back. A failed batch therefore
+  // leaves the reservation active and cannot create a permanent split tally.
+  const results = await db.batch(statements);
+  if (results.some((result) => !result.success)) {
+    throw new Error("D1 usage settlement batch failed");
+  }
   return { costUsd, recorded: true };
 }

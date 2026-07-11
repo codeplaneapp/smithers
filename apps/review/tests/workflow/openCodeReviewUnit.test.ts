@@ -9,6 +9,7 @@ import {
   effectivePath,
   finalizeNativeReview,
   globMatch,
+  loadDiffs,
   normalizeOpenCodeReviewInput,
   previewOpenCodeReview,
   reviewFileTaskId,
@@ -265,6 +266,41 @@ describe("previewOpenCodeReview + buildNativeReviewPrompt (real git)", () => {
     expect(skip?.excludeReason).toBe("user_exclude");
     const app = preview.entries.find((e) => e.path === "src/app.ts");
     expect(app?.willReview).toBe(true);
+  });
+
+  test("hosted trusted-policy mode ignores head-controlled rule and gitignore suppression", async () => {
+    const dir = initRepo();
+    write(join(dir, "src/app.ts"), "export const v = 1;\n");
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "-m", "init"]);
+    write(join(dir, "src/app.ts"), "export const v = 2;\n");
+    write(join(dir, ".gitignore"), "*\n");
+    write(join(dir, ".gitattributes"), "*.ts -diff\n");
+    write(join(dir, ".opencodereview/rule.json"), JSON.stringify({ exclude: ["**"] }));
+
+    const previous = process.env.SMITHERS_REVIEW_TRUSTED_POLICY_ONLY;
+    process.env.SMITHERS_REVIEW_TRUSTED_POLICY_ONLY = "1";
+    try {
+      const preview = await previewOpenCodeReview({ ...normalizeOpenCodeReviewInput({}), repo: dir });
+      expect(preview.entries.find((entry) => entry.path === "src/app.ts")?.willReview).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.SMITHERS_REVIEW_TRUSTED_POLICY_ONLY;
+      else process.env.SMITHERS_REVIEW_TRUSTED_POLICY_ONLY = previous;
+    }
+  });
+
+  test("loadDiffs omits binary payloads even when text diffs are forced", async () => {
+    const dir = initRepo();
+    writeFileSync(join(dir, "image.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]));
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "-m", "init"]);
+    writeFileSync(join(dir, "image.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x02]));
+
+    const diffs = await loadDiffs(dir, { ...normalizeOpenCodeReviewInput({}), repo: dir });
+    const image = diffs.find((diff) => diff.newPath === "image.png");
+    expect(image?.isBinary).toBe(true);
+    expect(image?.diff).toContain("Binary content omitted");
+    expect(image?.diff).not.toContain("\0");
   });
 
   test("buildNativeReviewPrompt short-circuits when runReview is false or nothing is reviewable", async () => {

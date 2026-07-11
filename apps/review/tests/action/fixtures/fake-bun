@@ -17,7 +17,7 @@ if [ -n "$log" ]; then
       first=0
       printf '"%s"' "$a"
     done
-    printf ']}'
+    printf '],"trustedPolicy":"%s"}' "$SMITHERS_REVIEW_TRUSTED_POLICY_ONLY"
   } > "$log"
 fi
 exit "${SMITHERS_FAKE_BUN_EXIT:-0}"

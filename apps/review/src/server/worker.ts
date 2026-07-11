@@ -16,6 +16,9 @@ export type { ReviewWorkerEnv } from "./env.ts";
 export interface ReviewWorkerDeps {
   jwksUrl: string;
   anthropicBaseUrl: string;
+  anthropicAllowedOrigins?: string[];
+  anthropicMaxRequestBytes?: number;
+  anthropicMaxMeteringBytes?: number;
   fetchUpstream: typeof fetch;
   now: () => number;
   waitUntil: (promise: Promise<unknown>) => void;

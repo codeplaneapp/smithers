@@ -493,7 +493,15 @@ function parseDiffText(diffText: string): DiffRecord[] {
   let buffer: string[] = [];
   const flush = () => {
     if (!current) return;
-    current.diff = buffer.join("\n").replace(/\n$/, "");
+    const rendered = buffer.join("\n").replace(/\n$/, "");
+    if (current.isBinary || rendered.includes("\0")) {
+      current.isBinary = true;
+      current.insertions = 0;
+      current.deletions = 0;
+      current.diff = `diff --git a/${current.oldPath} b/${current.newPath}\nBinary content omitted`;
+    } else {
+      current.diff = rendered;
+    }
     records.push(current);
     buffer = [];
   };
@@ -540,13 +548,19 @@ async function workspaceDiffText(repoDir: string) {
   let tracked = "";
   const trackedResult = await runCommand(
     "git",
-    ["-c", "core.quotepath=false", "diff", "HEAD", "--no-color", `-U${DIFF_CONTEXT_LINES}`, "--"],
+    [
+      "-c", "core.quotepath=false", "diff", "HEAD", "--no-color",
+      "--no-ext-diff", "--no-textconv", "--text", `-U${DIFF_CONTEXT_LINES}`, "--",
+    ],
     repoDir,
   );
   if (trackedResult.exitCode === 0 && trackedResult.stdout !== "") {
     tracked = trackedResult.stdout;
   } else {
-    tracked = await git(repoDir, ["diff", "--staged", "--no-color", `-U${DIFF_CONTEXT_LINES}`, "--"]);
+    tracked = await git(repoDir, [
+      "diff", "--staged", "--no-color", "--no-ext-diff", "--no-textconv", "--text",
+      `-U${DIFF_CONTEXT_LINES}`, "--",
+    ]);
   }
 
   const untracked = await git(repoDir, ["ls-files", "--others", "--exclude-standard"]);
@@ -579,14 +593,22 @@ export async function loadDiffs(repoDir: string, input: OpenCodeReviewInput) {
   if (mode === "range") {
     const base = (await git(repoDir, ["merge-base", "--end-of-options", input.from.trim(), input.to.trim()])).trim();
     if (!base) throw new Error(`Cannot find merge-base between ${input.from} and ${input.to}.`);
-    diffText = await git(repoDir, ["diff", "--no-color", `-U${DIFF_CONTEXT_LINES}`, "--end-of-options", base, input.to.trim(), "--"]);
+    diffText = await git(repoDir, [
+      "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--text",
+      `-U${DIFF_CONTEXT_LINES}`, "--end-of-options", base, input.to.trim(), "--",
+    ]);
   } else if (mode === "commit") {
-    diffText = await git(repoDir, ["show", "--no-color", `-U${DIFF_CONTEXT_LINES}`, "--end-of-options", input.commit.trim()]);
+    diffText = await git(repoDir, [
+      "show", "--no-color", "--no-ext-diff", "--no-textconv", "--text",
+      `-U${DIFF_CONTEXT_LINES}`, "--end-of-options", input.commit.trim(),
+    ]);
   } else {
     diffText = await workspaceDiffText(repoDir);
   }
 
-  const gitignorePatterns = loadGitignorePatterns(repoDir);
+  const gitignorePatterns = process.env.SMITHERS_REVIEW_TRUSTED_POLICY_ONLY === "1"
+    ? []
+    : loadGitignorePatterns(repoDir);
   return parseDiffText(diffText).filter((diff) => !isProviderExcluded(effectivePath(diff), gitignorePatterns));
 }
 
@@ -602,10 +624,13 @@ function readProjectRule(path: string): { include?: string[]; exclude?: string[]
 }
 
 function buildFileFilter(repoDir: string, customRulePath: string): FileFilter | null {
+  const trustedPolicyOnly = process.env.SMITHERS_REVIEW_TRUSTED_POLICY_ONLY === "1";
   const candidates = [
     customRulePath ? readProjectRule(resolve(customRulePath)) : null,
-    readProjectRule(join(repoDir, ".opencodereview", "rule.json")),
-    readProjectRule(join(homedir(), ".opencodereview", "rule.json")),
+    ...(trustedPolicyOnly ? [] : [
+      readProjectRule(join(repoDir, ".opencodereview", "rule.json")),
+      readProjectRule(join(homedir(), ".opencodereview", "rule.json")),
+    ]),
   ];
   const picked = candidates.find((rule) => rule && ((rule.include?.length ?? 0) > 0 || (rule.exclude?.length ?? 0) > 0));
   if (!picked) return null;

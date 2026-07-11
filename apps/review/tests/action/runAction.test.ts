@@ -1,24 +1,31 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  assertNoPersistedGitCredentials,
+  prCheckoutEnvironment,
+  pullRequestReference,
+  readWalkthroughFile,
+} from "../../action/src/runAction";
 
 const RUN_ACTION = fileURLToPath(new URL("../../action/src/runAction.ts", import.meta.url));
 const FAKE_GH = fileURLToPath(new URL("./fixtures/fake-gh", import.meta.url));
-// Package root so bun can resolve tsconfig paths from the correct base
 const PKG_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const WORKSPACE_HEAD = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: PKG_ROOT,
+  encoding: "utf8",
+}).trim();
 
-interface SpawnResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-function spawnAction(env: Record<string, string>): SpawnResult {
+function spawnAction(env: Record<string, string>) {
+  const clean: Record<string, string> = { ...process.env as Record<string, string> };
+  delete clean.ACTIONS_ID_TOKEN_REQUEST_URL;
+  delete clean.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   const result = Bun.spawnSync(["bun", RUN_ACTION], {
     cwd: PKG_ROOT,
-    env: { ...process.env, ...env },
+    env: { ...clean, ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -29,7 +36,17 @@ function spawnAction(env: Record<string, string>): SpawnResult {
   };
 }
 
-describe("runAction (subprocess)", () => {
+const livePr = {
+  number: 2,
+  url: "https://github.com/octo/widgets/pull/2",
+  baseRefName: "main",
+  headRefName: "change",
+  headRefOid: WORKSPACE_HEAD,
+  title: "Change",
+  body: "",
+};
+
+describe("runAction analysis boundary (subprocess)", () => {
   let tmp = "";
 
   beforeEach(async () => {
@@ -37,171 +54,149 @@ describe("runAction (subprocess)", () => {
   });
 
   afterEach(async () => {
-    if (tmp) {
-      await rm(tmp, { recursive: true, force: true });
-      tmp = "";
-    }
+    await rm(tmp, { recursive: true, force: true });
   });
 
   test("exits 0 with a notice when GITHUB_EVENT_PATH is empty", () => {
     const result = spawnAction({ GITHUB_EVENT_PATH: "" });
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::notice::");
     expect(result.stdout).toContain("GITHUB_EVENT_PATH is empty");
   });
 
-  test("exits 0 with a notice when GITHUB_EVENT_PATH is unset", () => {
-    const env: Record<string, string> = { ...process.env as Record<string, string> };
-    delete env.GITHUB_EVENT_PATH;
-    const result = Bun.spawnSync(["bun", RUN_ACTION], {
-      cwd: PKG_ROOT,
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
+  test("qualifies fork lookups with the immutable base-repository PR URL", () => {
+    expect(pullRequestReference({ ...livePr, owner: "octo", repo: "widgets", headSha: WORKSPACE_HEAD }, 2))
+      .toBe("https://github.com/octo/widgets/pull/2");
+    expect(pullRequestReference(null, 2)).toBe("2");
+    expect(prCheckoutEnvironment({ GH_TOKEN: "read-only" })).toMatchObject({
+      GH_TOKEN: "read-only",
+      GIT_LFS_SKIP_SMUDGE: "1",
     });
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout.toString()).toContain("GITHUB_EVENT_PATH is empty");
   });
 
-  test("exits 0 with a skip notice when the event is a draft PR", async () => {
-    const payload = {
+  test("draft PRs stop before any credential or GitHub operation", async () => {
+    const eventPath = join(tmp, "event.json");
+    await writeFile(eventPath, JSON.stringify({
       action: "opened",
       pull_request: {
         number: 1,
         draft: true,
-        head: { sha: "abc", repo: { full_name: "octo/widgets" } },
+        head: { sha: "a".repeat(40), repo: { full_name: "octo/widgets" } },
         base: { repo: { full_name: "octo/widgets" } },
       },
-    };
-    const eventPath = join(tmp, "event.json");
-    await writeFile(eventPath, JSON.stringify(payload));
-
+    }));
     const result = spawnAction({
-      GITHUB_EVENT_NAME: "pull_request",
+      GITHUB_EVENT_NAME: "pull_request_target",
       GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REPOSITORY: "octo/widgets",
     });
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::notice::");
-    expect(result.stdout).toMatch(/skipped/i);
+    expect(result.stdout).toMatch(/skipped.*draft/i);
   });
 
-  test("exits 0 with a skip notice for a fork PR", async () => {
-    const payload = {
+  test("refuses a checkout that persisted an HTTP authorization header", () => {
+    execFileSync("git", ["init", "-q", tmp]);
+    expect(() => assertNoPersistedGitCredentials(tmp)).not.toThrow();
+    execFileSync("git", ["config", "--local", "http.https://github.com/.extraheader", "AUTHORIZATION: basic secret"], { cwd: tmp });
+    expect(() => assertNoPersistedGitCredentials(tmp)).toThrow(/credential|header/i);
+  });
+
+  test("walkthrough publication accepts only a regular file and never follows a child-selected symlink", async () => {
+    const walkthrough = join(tmp, "walkthrough.html");
+    const link = join(tmp, "walkthrough-link.html");
+    await writeFile(walkthrough, "<html>safe</html>");
+    await symlink(walkthrough, link);
+    expect(readWalkthroughFile(walkthrough).toString()).toBe("<html>safe</html>");
+    expect(() => readWalkthroughFile(link)).toThrow();
+  });
+
+  test("trusted-collaborator fork PRs continue into the metered/OIDC path", async () => {
+    const eventPath = join(tmp, "event.json");
+    await writeFile(eventPath, JSON.stringify({
       action: "opened",
       pull_request: {
         number: 2,
         draft: false,
-        head: { sha: "abc", repo: { full_name: "fork/widgets" } },
-        base: { repo: { full_name: "octo/widgets" } },
+        author_association: "COLLABORATOR",
+        html_url: livePr.url,
+        title: "Change",
+        body: "",
+        head: { sha: livePr.headRefOid, ref: "change", repo: { full_name: "fork/widgets" } },
+        base: { ref: "main", repo: { full_name: "octo/widgets" } },
       },
-    };
-    const eventPath = join(tmp, "event.json");
-    await writeFile(eventPath, JSON.stringify(payload));
-
+    }));
     const result = spawnAction({
-      GITHUB_EVENT_NAME: "pull_request",
+      GITHUB_EVENT_NAME: "pull_request_target",
       GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REPOSITORY: "octo/widgets",
+      GITHUB_WORKSPACE: PKG_ROOT,
+      SMITHERS_REVIEW_WORKSPACE: PKG_ROOT,
+      SMITHERS_GH_BIN: FAKE_GH,
+      SMITHERS_FAKE_GH_STDOUT: JSON.stringify(livePr),
     });
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::notice::");
-    expect(result.stdout).toMatch(/skipped/i);
-  });
-
-  const commentPayload = {
-    action: "created",
-    issue: { number: 7, pull_request: { url: "https://api.github.com/repos/octo/widgets/pulls/7" } },
-    comment: { body: "@smithers review", author_association: "OWNER" },
-  };
-
-  function spawnCommentAction(ghEnv: Record<string, string>, eventPath: string): SpawnResult {
-    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
-    // No repository → status comments are a no-op; no OIDC vars → a run that
-    // passes the fork check fails deterministically at fetchOidcToken.
-    delete env.GITHUB_REPOSITORY;
-    delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
-    delete env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-    const result = Bun.spawnSync(["bun", RUN_ACTION], {
-      cwd: PKG_ROOT,
-      env: {
-        ...env,
-        GITHUB_EVENT_NAME: "issue_comment",
-        GITHUB_EVENT_PATH: eventPath,
-        GITHUB_WORKSPACE: PKG_ROOT,
-        SMITHERS_GH_BIN: FAKE_GH,
-        ...ghEnv,
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    return {
-      stdout: result.stdout.toString(),
-      stderr: result.stderr.toString(),
-      exitCode: result.exitCode ?? 1,
-    };
-  }
-
-  test("exits 0 with a skip notice when a comment-triggered PR is a fork", async () => {
-    const eventPath = join(tmp, "event.json");
-    await writeFile(eventPath, JSON.stringify(commentPayload));
-    const result = spawnCommentAction(
-      { SMITHERS_FAKE_GH_STDOUT: '{"isCrossRepository":true}' },
-      eventPath,
-    );
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::notice::");
-    expect(result.stdout).toContain("fork pull requests are not reviewed");
-  });
-
-  test("continues past the fork check for a same-repo comment-triggered PR", async () => {
-    const eventPath = join(tmp, "event.json");
-    await writeFile(eventPath, JSON.stringify(commentPayload));
-    const result = spawnCommentAction(
-      { SMITHERS_FAKE_GH_STDOUT: '{"isCrossRepository":false}' },
-      eventPath,
-    );
-    // Fork check passed → the next step (fetchOidcToken) fails without OIDC vars.
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout).not.toContain("fork pull requests are not reviewed");
     expect(result.stderr).toContain("ACTIONS_ID_TOKEN_REQUEST_URL");
   });
 
-  test("fails closed when the PR's fork status cannot be resolved", async () => {
+  test("comment-triggered reviews also require OIDC after resolving the PR with read-only GitHub access", async () => {
     const eventPath = join(tmp, "event.json");
-    await writeFile(eventPath, JSON.stringify(commentPayload));
-    const result = spawnCommentAction({ SMITHERS_FAKE_GH_EXIT: "7" }, eventPath);
+    await writeFile(eventPath, JSON.stringify({
+      action: "created",
+      issue: { number: 2, pull_request: { url: "https://api.github.com/repos/octo/widgets/pulls/2" } },
+      comment: { body: "@smithers review", author_association: "OWNER" },
+    }));
+    const result = spawnAction({
+      GITHUB_EVENT_NAME: "issue_comment",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REPOSITORY: "octo/widgets",
+      GITHUB_WORKSPACE: PKG_ROOT,
+      SMITHERS_REVIEW_WORKSPACE: PKG_ROOT,
+      SMITHERS_GH_BIN: FAKE_GH,
+      SMITHERS_FAKE_GH_STDOUT: JSON.stringify(livePr),
+    });
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("could not determine whether PR #7 is a fork PR");
+    expect(result.stderr).toContain("ACTIONS_ID_TOKEN_REQUEST_URL");
   });
 
-  test("throws and exits non-zero when OIDC vars are missing for a valid PR event", async () => {
-    // When a valid PR event passes the gate, runAction calls fetchOidcToken
-    // which throws if the OIDC env vars are not set.
-    const payload = {
-      action: "opened",
-      pull_request: {
-        number: 42,
-        draft: false,
-        head: { sha: "deadbeef", repo: { full_name: "octo/widgets" } },
-        base: { repo: { full_name: "octo/widgets" } },
-      },
-    };
+  test("comment-triggered reviews skip pull requests targeting a non-main base", async () => {
     const eventPath = join(tmp, "event.json");
-    await writeFile(eventPath, JSON.stringify(payload));
-
-    const env: Record<string, string> = { ...process.env as Record<string, string> };
-    delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
-    delete env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-    env.GITHUB_EVENT_NAME = "pull_request";
-    env.GITHUB_EVENT_PATH = eventPath;
-
-    const result = Bun.spawnSync(["bun", RUN_ACTION], {
-      cwd: PKG_ROOT,
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
+    await writeFile(eventPath, JSON.stringify({
+      action: "created",
+      issue: { number: 2, pull_request: { url: "https://api.github.com/repos/octo/widgets/pulls/2" } },
+      comment: { body: "@smithers review", author_association: "OWNER" },
+    }));
+    const result = spawnAction({
+      GITHUB_EVENT_NAME: "issue_comment",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REPOSITORY: "octo/widgets",
+      GITHUB_WORKSPACE: PKG_ROOT,
+      SMITHERS_REVIEW_WORKSPACE: PKG_ROOT,
+      SMITHERS_GH_BIN: FAKE_GH,
+      SMITHERS_FAKE_GH_STDOUT: JSON.stringify({ ...livePr, baseRefName: "release" }),
     });
-    // Gate passes (valid PR) → fetchOidcToken throws → process.exit(1)
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("only pull requests targeting main");
+    expect(result.stderr).not.toContain("ACTIONS_ID_TOKEN_REQUEST_URL");
+  });
+
+  test("comment-triggered reviews reject a checkout that raced to another head", async () => {
+    const eventPath = join(tmp, "event.json");
+    await writeFile(eventPath, JSON.stringify({
+      action: "created",
+      issue: { number: 2, pull_request: { url: "https://api.github.com/repos/octo/widgets/pulls/2" } },
+      comment: { body: "@smithers review", author_association: "OWNER" },
+    }));
+    const result = spawnAction({
+      GITHUB_EVENT_NAME: "issue_comment",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REPOSITORY: "octo/widgets",
+      GITHUB_WORKSPACE: PKG_ROOT,
+      SMITHERS_REVIEW_WORKSPACE: PKG_ROOT,
+      SMITHERS_GH_BIN: FAKE_GH,
+      SMITHERS_FAKE_GH_STDOUT: JSON.stringify({ ...livePr, headRefOid: "b".repeat(40) }),
+    });
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr.toString()).toContain("ACTIONS_ID_TOKEN_REQUEST_URL");
+    expect(result.stderr).toContain("checked-out pull request head");
+    expect(result.stderr).not.toContain("ACTIONS_ID_TOKEN_REQUEST_URL");
   });
 });

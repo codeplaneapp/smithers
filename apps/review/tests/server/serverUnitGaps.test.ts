@@ -161,7 +161,7 @@ describe("handleAnthropic gaps", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[]}',
       }),
       env,
     );
@@ -184,7 +184,7 @@ describe("handleAnthropic gaps", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[]}',
       }),
       env,
     );
@@ -199,8 +199,6 @@ describe("handleAnthropic gaps", () => {
     const token = await seedSession(env, "octo/widgets");
     const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });
     teardowns.push(() => fixture.stop());
-    // Drop usage_events so recordUsage's INSERT throws inside the deferred metering.
-    await env.DB.exec("DROP TABLE usage_events");
     const meterings: Promise<unknown>[] = [];
     const worker = fixedWorker({ anthropicBaseUrl: fixture.baseUrl, waitUntil: (p: Promise<unknown>) => meterings.push(p) });
     const errorSpy = spyOn(console, "error").mockImplementation(() => undefined);
@@ -214,6 +212,9 @@ describe("handleAnthropic gaps", () => {
         env,
       );
       expect(res.status).toBe(200);
+      // Reservation admission needs the ledger. Drop it only after dispatch so
+      // recordUsage's INSERT throws inside the deferred metering path.
+      await env.DB.exec("DROP TABLE usage_events");
       await res.text();
       await Promise.all(meterings);
       expect(errorSpy.mock.calls.some((c) => String(c[0]).includes("metering failed"))).toBe(true);

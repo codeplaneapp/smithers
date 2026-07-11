@@ -41,7 +41,7 @@ describe("gateEvent", () => {
       if (!d.run) expect(d.reason).toMatch(/draft/i);
     });
 
-    test("skips fork PRs", () => {
+    test("runs fork PRs from trusted collaborators through metered inference", () => {
       const d = gateEvent({
         eventName: "pull_request",
         payload: {
@@ -49,13 +49,50 @@ describe("gateEvent", () => {
           pull_request: {
             number: 1,
             draft: false,
+            author_association: "COLLABORATOR",
+            head: { repo: { full_name: "drive-by/fork" }, sha: "x" },
+            base: { repo: { full_name: "octo/widgets" } },
+          },
+        },
+      });
+      expect(d.run).toBe(true);
+      if (d.run) expect(d.prNumber).toBe(1);
+    });
+
+    test("requires a maintainer comment before spending quota on an untrusted fork", () => {
+      const d = gateEvent({
+        eventName: "pull_request_target",
+        payload: {
+          action: "opened",
+          pull_request: {
+            number: 2,
+            draft: false,
+            author_association: "FIRST_TIME_CONTRIBUTOR",
             head: { repo: { full_name: "drive-by/fork" }, sha: "x" },
             base: { repo: { full_name: "octo/widgets" } },
           },
         },
       });
       expect(d.run).toBe(false);
-      if (!d.run) expect(d.reason).toMatch(/fork/i);
+      if (!d.run) expect(d.reason).toMatch(/maintainer.*comment/i);
+    });
+
+    test("runs the same immutable payload from the base-controlled pull_request_target trigger", () => {
+      const d = gateEvent({
+        eventName: "pull_request_target",
+        payload: {
+          action: "opened",
+          pull_request: {
+            number: 9,
+            draft: false,
+            author_association: "MEMBER",
+            head: { repo: { full_name: "drive-by/fork" }, sha: "a".repeat(40) },
+            base: { repo: { full_name: "octo/widgets" } },
+          },
+        },
+      });
+      expect(d.run).toBe(true);
+      if (d.run) expect(d.eventName).toBe("pull_request_target");
     });
 
     test("skips actions that do not change the diff", () => {

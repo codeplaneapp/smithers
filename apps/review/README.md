@@ -27,36 +27,25 @@ our metered inference, posts the review, and hosts the walkthrough.
    [smithersai/smithers](https://github.com/smithersai/smithers/issues) or
    contact the maintainers.
 
-2. **Add `.github/workflows/smithers-review.yml`:**
+2. **Start from the canonical workflow.** The checked-in
+   [`.github/workflows/pr-review.yml`](../../.github/workflows/pr-review.yml)
+   dogfoods the action in this repository. Downstream repositories must pin
+   the Smithers action/publisher source to an immutable released commit rather
+   than reusing this repository's base-SHA checkout literally. Its three jobs
+   are a security boundary, not boilerplate:
 
-```yaml
-name: smithers review
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  issue_comment:
-    types: [created]
+   - `policy` reads only GitHub's event payload and classifies credential trust;
+   - `analyze` has read-only repository authority plus OIDC, checks out the PR
+     without persisted credentials, and uploads an untrusted JSON result;
+   - `publish` never checks out PR content and is the only job with
+     `pull-requests: write`; it validates repository, PR, head SHA, schema,
+     changed-file paths, and size before posting.
 
-permissions:
-  id-token: write       # proves your repo's identity to the review service
-  contents: read        # check out the PR
-  pull-requests: write  # post the review
-
-concurrency:
-  group: smithers-review-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: true
-
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: smithersai/smithers/apps/review/action@main
-```
-
-Keep the workflow on `pull_request`. Never switch it to
-`pull_request_target`: the review agents execute the PR's code, and
-`pull_request_target` would hand that code elevated credentials.
+Keep the workflow on base-controlled `pull_request_target` and
+`issue_comment`. The target checkout is safe only because the analysis job is
+read-only, credentials are not persisted, and publication is isolated; do not
+collapse those jobs or pass `github.token` to the analysis CLI. Fork and
+same-repository changes both use the metered/OIDC path.
 
 3. **Trigger a review.** Comment on any PR:
 
@@ -64,10 +53,12 @@ Keep the workflow on `pull_request`. Never switch it to
 @smithers review
 ```
 
-Only owners, members, and collaborators can trigger reviews. Repos
-registered in `auto` mode skip the comment and review every non-draft PR
-push; `comment` mode is the default. The mode is a server-side setting on
-your registration, so switching never touches your workflow file.
+Only owners, members, and collaborators can trigger reviews. Repos registered
+in `auto` mode review non-draft same-repository PRs and trusted-collaborator
+forks on each diff update. Other forks still require the maintainer comment so
+an external actor cannot consume repository review quota. `comment` mode is the
+default. The mode is a server-side setting on your registration, so switching
+never touches your workflow file.
 
 ### Reviewer quiz
 
@@ -87,45 +78,32 @@ score) into a PR comment so the author knows the review was earned.
 ### Plans and quota
 
 Subscriptions meter reviewed PRs — a monthly per-repo PR allotment set on
-your registration; the status comment shows remaining quota.
+your registration; the action log shows remaining quota.
 Re-reviewing a PR that already counted this month is free. When the quota
 is spent, the action skips with a notice instead of failing your checks.
 
-### Use your own subscription (optional)
+### Subscription credentials are local-only
 
-If you own the repo and have a Claude or ChatGPT subscription, the review
-agents can run on your subscription instead of the service's metered
-inference. Repo registration, quota counting, and walkthrough hosting work
-exactly as before; only the inference moves to your seat, so your metered
-spend on the service stays zero.
-
-**ChatGPT (Codex) — recommended.** Log in once on any machine and copy the
-credential into a repo secret:
+The PR workflow intentionally never references personal subscription
+credentials. A same-repository PR can change a `pull_request` workflow before
+any runtime gate executes, so storing `CODEX_AUTH_JSON` or
+`CLAUDE_CODE_OAUTH_TOKEN` as repository secrets would make them reachable from
+untrusted workflow edits. Remove legacy copies if this workflow was previously
+configured with them:
 
 ```sh
-codex login                      # opens the ChatGPT device-auth flow
-gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json
+gh secret delete CODEX_AUTH_JSON
+gh secret delete CLAUDE_CODE_OAUTH_TOKEN
 ```
 
-Then pass it through in the job:
-
-```yaml
-  review:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-    steps:
-      - uses: smithersai/smithers/apps/review/action@main
-```
-
-**Claude.** Mint a token with `claude setup-token` and set it as the
-`CLAUDE_CODE_OAUTH_TOKEN` repo secret, passed through the same way. The
-action prefers Codex when both secrets are present.
-
-Use this only for repos you own. A personal subscription must not serve
-other people's repos: both providers' consumer terms forbid backing a
-multi-tenant service from one seat. For that, fund the platform API key.
+The terminal CLI can still use a locally logged-in provider because local code
+and credentials share one explicit trust boundary. CI always uses the
+short-lived, repository-scoped metered/OIDC session. The trusted action keeps
+that real token in memory behind a random-key loopback broker, then launches the
+CLI and all review agents under a distinct unprivileged OS user with an empty,
+explicitly rebuilt environment. Agents run non-yolo with read-only
+filesystem/tool policies and never inherit the publisher token, GitHub token,
+OIDC request token, real inference token, or the job's general environment.
 
 ## Run it from the terminal
 

@@ -2,24 +2,26 @@
  * Pure decision: should this workflow run a review for the given GitHub event
  * payload? Two events count:
  *
- *   pull_request   non-draft same-repo PR (forks have no secrets and a
- *                  read-only token; skip them rather than fail), and only for
+ *   pull_request_target  non-draft same-repository PR or a fork authored by an
+ *                  owner/member/collaborator, and only for
  *                  actions that change the reviewable diff: opened,
  *                  synchronize, reopened, ready_for_review. Everything else
- *                  (labeled, edited, assigned, …) skips with a reason.
+ *                  (labeled, edited, assigned, …) skips with a reason. Other
+ *                  forks require the maintainer-only comment trigger so an
+ *                  external actor cannot exhaust review quota.
  *   issue_comment  action is "created" (edited/deleted comments never
  *                  re-trigger), comment is on a PR, body starts with the magic
  *                  phrase "@smithers review", and the author's association is
  *                  OWNER / MEMBER / COLLABORATOR.
  *
- * Returns the PR number (and the head SHA for `pull_request` events, when
+ * Returns the PR number (and the head SHA for pull request events, when
  * present) so the orchestrator can pass it to the CLI.
  */
 const MAGIC_PHRASE = "@smithers review";
 const COLLAB_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const REVIEWABLE_PR_ACTIONS = new Set(["opened", "synchronize", "reopened", "ready_for_review"]);
 
-export type GateInputEvent = "pull_request" | "issue_comment";
+export type GateInputEvent = "pull_request" | "pull_request_target" | "issue_comment";
 
 export type GateDecision =
   | {
@@ -45,7 +47,7 @@ function obj(value: unknown): Record<string, unknown> | null {
 export function gateEvent({ eventName, payload }: GateInput): GateDecision {
   const top = obj(payload) ?? {};
 
-  if (eventName === "pull_request") {
+  if (eventName === "pull_request" || eventName === "pull_request_target") {
     const action = typeof top.action === "string" ? top.action : "";
     if (!REVIEWABLE_PR_ACTIONS.has(action)) {
       return {
@@ -58,21 +60,26 @@ export function gateEvent({ eventName, payload }: GateInput): GateDecision {
     if (pr.draft === true) return { run: false, reason: "pull request is a draft" };
     const head = obj(pr.head);
     const base = obj(pr.base);
-    const headFull = obj(head?.repo)?.full_name;
-    const baseFull = obj(base?.repo)?.full_name ?? obj(top.repository)?.full_name;
-    if (
-      typeof headFull === "string" &&
-      typeof baseFull === "string" &&
-      headFull !== baseFull
-    ) {
-      return { run: false, reason: "fork pull requests are not reviewed" };
+    const headRepo = obj(head?.repo);
+    const baseRepo = obj(base?.repo);
+    if (typeof headRepo?.full_name !== "string" || typeof baseRepo?.full_name !== "string") {
+      return { run: false, reason: "pull_request event missing head/base repository identity" };
+    }
+    const sameRepository = headRepo.full_name === baseRepo.full_name;
+    const association = pr.author_association;
+    if (!sameRepository && (typeof association !== "string" || !COLLAB_ASSOCIATIONS.has(association))) {
+      return {
+        run: false,
+        reason: "untrusted fork pull requests require a maintainer @smithers review comment",
+      };
     }
     const number = pr.number;
     if (typeof number !== "number") {
       return { run: false, reason: "pull_request event missing pull request number" };
     }
-    const sha = typeof head?.sha === "string" ? head.sha : undefined;
-    return { run: true, eventName: "pull_request", prNumber: number, headSha: sha };
+    const sha = typeof head?.sha === "string" && head.sha.length > 0 ? head.sha : undefined;
+    if (!sha) return { run: false, reason: "pull_request event missing head SHA" };
+    return { run: true, eventName: eventName as "pull_request" | "pull_request_target", prNumber: number, headSha: sha };
   }
 
   if (eventName === "issue_comment") {

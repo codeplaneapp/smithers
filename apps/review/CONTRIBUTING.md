@@ -48,69 +48,33 @@ branch or fetch it first).
 
 ## CI
 
-`.github/workflows/pr-review.yml` runs `--pr <number> --publish` on every
-non-draft PR from a branch in this repo and posts the review onto it. The job
-is scoped to `contents: read` + `pull-requests: write` and stays on the
-`pull_request` event (never `pull_request_target`), so fork PRs run without
-secrets and are skipped. Repo secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from
-`claude setup-token`; `ANTHROPIC_API_KEY` also works) for the agents, and
-`SMITHERS_REVIEW_PUBLISH_TOKEN` for the hosted walkthrough link. Missing agent
-credentials skip the job; a missing publish token posts the review without the
-link. The walkthrough HTML is also uploaded as a run artifact.
+`.github/workflows/pr-review.yml` deliberately splits policy, analysis, and
+publication. Analysis has `contents: read`, `pull-requests: read`, and
+`id-token: write`; every checkout uses `persist-credentials: false`. The CLI
+sees an offline `gh` replay/capture shim rather than a GitHub token. Publication
+runs in a fresh job with `pull-requests: write`, never checks out the PR, and
+strictly validates the untrusted artifact against the event's repository, PR,
+head SHA, changed files, size, and schema.
+
+Every CI review uses metered OIDC inference. This is deliberately unconditional:
+a same-repository PR can alter an ordinary `pull_request` workflow before an
+in-workflow trust gate runs, so repository-level personal subscription secrets
+cannot be made safe by actor or branch checks inside it. The canonical
+`pull_request_target` workflow definition comes from the base branch, gives the
+analysis job read-only authority, and reserves PR write access for the isolated
+publisher. Agents use non-yolo read-only policies and an explicit environment
+allowlist. On hosted Linux runners the CLI crosses a real OS boundary into a
+dedicated unprivileged UID; it receives only a random local broker key while
+the session credential remains in the trusted parent process. The Claude CLI
+runs in bare mode so project hooks, settings, plugins, and MCP configuration in
+the PR checkout cannot expand its tool surface.
 
 ## Self-hosted CI (your own credentials)
 
-To run reviews in another repo's CI without the hosted service, bring your
-own Claude credentials and check out smithers next to the repo:
-
-```yaml
-name: PR review
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-
-permissions: {}
-
-jobs:
-  review:
-    # Fork PRs have no secrets and a read-only token; drafts are not ready.
-    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v6.0.2
-        with:
-          fetch-depth: 0 # the review diffs origin/<base>..<head>; merge-base needs history
-      - uses: actions/checkout@v6.0.2
-        with:
-          repository: smithersai/smithers
-          path: .smithers-review-tool
-      - uses: pnpm/action-setup@v6.0.8
-        with:
-          version: 10.10.0
-          run_install: false
-      - uses: actions/setup-node@v6.4.0
-        with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2.2.0
-        with:
-          bun-version: 1.3.13
-      - run: pnpm -C .smithers-review-tool install --frozen-lockfile
-      - run: npm install -g @anthropic-ai/claude-code
-      - name: Review the PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: >
-          bun .smithers-review-tool/apps/review/src/cli/main.ts .
-          --pr ${{ github.event.pull_request.number }}
-```
-
-`CLAUDE_CODE_OAUTH_TOKEN` comes from `claude setup-token`
-(`ANTHROPIC_API_KEY` also works). Never use `pull_request_target` here.
+Start from the canonical three-job workflow even on a self-hosted runner. Do
+not run `--pr` with a writable token or personal subscription credential in the
+same process that analyzes PR content. Keep subscription credentials out of
+PR-triggered CI entirely; local terminal use remains supported.
 
 ## Rendering diffs anywhere else
 
@@ -162,4 +126,4 @@ pnpm -C apps/review typecheck
 
 ## smithers review
 
-This repo dogfoods `apps/review` on every PR via `.github/workflows/pr-review.yml`, running the agents on a ChatGPT (Codex) subscription. See `apps/review/README.md`.
+This repo dogfoods `apps/review` on every PR via `.github/workflows/pr-review.yml`, using the metered OIDC path described in `apps/review/README.md`.

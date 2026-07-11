@@ -15,9 +15,83 @@ type RegisteredCodexCredential =
   | { provider: "codex"; configDir: string }
   | { provider: "openai-api"; apiKey: string };
 
+const CLAUDE_READ_ONLY_POLICY = {
+  yolo: false,
+  // Disable project settings, hooks, plugin sync, and project MCP before the
+  // CLI enters the attacker-controlled checkout.
+  extraArgs: ["--bare"],
+  permissionMode: "default" as const,
+  tools: ["Read", "Glob", "Grep"],
+  allowedTools: ["Read", "Glob", "Grep"],
+  disallowedTools: [
+    "Bash",
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+    "WebFetch",
+    "WebSearch",
+    "Task",
+    "Skill",
+  ],
+  disableSlashCommands: true,
+  noSessionPersistence: true,
+};
+
+const CODEX_READ_ONLY_POLICY = {
+  yolo: false,
+  sandbox: "read-only" as const,
+  fullAuto: false,
+  dangerouslyBypassApprovalsAndSandbox: false,
+};
+
+const REVIEW_AGENT_ENV_KEYS = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  "TERM",
+  "NO_COLOR",
+  "CI",
+  "GITHUB_ACTIONS",
+  "RUNNER_OS",
+  "RUNNER_ARCH",
+  "RUNNER_TEMP",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "SYSTEMROOT",
+  "WINDIR",
+  "PATHEXT",
+  "COMSPEC",
+] as const;
+
+/** Environment explicitly allowed to cross from the review CLI into an agent. */
+export function reviewAgentEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+  safeDirectory?: string,
+): Record<string, string> {
+  const safe: Record<string, string> = {};
+  for (const key of REVIEW_AGENT_ENV_KEYS) {
+    const value = env[key];
+    if (typeof value === "string" && value.length > 0) safe[key] = value;
+  }
+  if (safeDirectory) {
+    safe.GIT_CONFIG_COUNT = "1";
+    safe.GIT_CONFIG_KEY_0 = "safe.directory";
+    safe.GIT_CONFIG_VALUE_0 = safeDirectory;
+  }
+  return safe;
+}
+
 export function registeredReviewCodexCredentials(
   env: NodeJS.ProcessEnv = process.env,
 ): RegisteredCodexCredential[] {
+  if (env.SMITHERS_REVIEW_DISABLE_REGISTERED_ACCOUNTS === "1") return [];
   const root = env.SMITHERS_HOME?.trim()
     || join(env.HOME?.trim() || homedir(), ".smithers");
   try {
@@ -43,9 +117,8 @@ export function registeredReviewCodexCredentials(
  * Engine selection is keyed on `SMITHERS_REVIEW_ENGINE`:
  *
  * - `codex` (default when installed and authenticated): Sol reviews/verifies; Luna narrates and
- *   writes quizzes. Auth comes from `~/.codex/auth.json` (or `$CODEX_HOME`), which the
- *   cloud action writes from a `CODEX_AUTH_JSON` secret. This is the BYO path
- *   for repos owned by the subscription holder.
+ *   writes quizzes. Auth comes from `~/.codex/auth.json` (or `$CODEX_HOME`) for
+ *   explicit local CLI use. PR automation never supplies subscription auth.
  * - `claude`: no-Codex fallback using Fable primary and Opus failover.
  *
  * Claude auth selection: when both `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`
@@ -54,7 +127,8 @@ export function registeredReviewCodexCredentials(
  * CLI at the proxy, and ClaudeCodeAgent must forward that key to the spawned
  * `claude` binary (its default is to *clear* `ANTHROPIC_API_KEY` so subscription
  * auth wins). Otherwise (local dev, BYO Claude via CLAUDE_CODE_OAUTH_TOKEN) keep
- * subscription mode.
+ * subscription mode for explicit local CLI use. The hosted action always
+ * supplies the metered proxy pair.
  */
 function hasUsableCodex(): boolean {
   const executable = Bun.which("codex");
@@ -97,12 +171,24 @@ export function createReviewAgents(repoDir: string): {
       ? process.env.SMITHERS_REVIEW_MODEL?.trim() || "claude-fable-5"
       : "claude-fable-5";
     const fallbackModel = process.env.SMITHERS_REVIEW_FALLBACK_MODEL?.trim() || "claude-opus-4-8";
+    const explicitEnv = reviewAgentEnvironment(process.env, repoDir);
+    if (baseUrl && apiKey) {
+      // ClaudeCodeAgent injects the broker-only API key; explicitly preserve
+      // its matching loopback endpoint because this child inherits no ambient
+      // environment. The real upstream session token never enters this env.
+      explicitEnv.ANTHROPIC_BASE_URL = baseUrl;
+    } else if (process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) {
+      // Subscription credentials remain available for explicit local CLI
+      // use. Hosted PR automation is proxy-only and never sets this variable.
+      explicitEnv.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN.trim();
+    }
+    const claudeBase = { ...CLAUDE_READ_ONLY_POLICY, inheritEnv: false, env: explicitEnv };
     const primary = proxyMode
-      ? new ClaudeCodeAgent({ model: primaryModel, cwd: repoDir, apiKey })
-      : new ClaudeCodeAgent({ model: primaryModel, cwd: repoDir });
+      ? new ClaudeCodeAgent({ ...claudeBase, model: primaryModel, cwd: repoDir, apiKey })
+      : new ClaudeCodeAgent({ ...claudeBase, model: primaryModel, cwd: repoDir });
     const fallback = proxyMode
-      ? new ClaudeCodeAgent({ model: fallbackModel, cwd: repoDir, apiKey })
-      : new ClaudeCodeAgent({ model: fallbackModel, cwd: repoDir });
+      ? new ClaudeCodeAgent({ ...claudeBase, model: fallbackModel, cwd: repoDir, apiKey })
+      : new ClaudeCodeAgent({ ...claudeBase, model: fallbackModel, cwd: repoDir });
     return [primary, fallback];
   };
 
@@ -117,7 +203,15 @@ export function createReviewAgents(repoDir: string): {
     // `--output-last-message` JSON. Raise the cap so the structured output
     // survives. (#277-adjacent.)
     const maxOutputBytes = 64 * 1024 * 1024;
-    const base = { cwd: repoDir, skipGitRepoCheck: true, maxOutputBytes, ...(configDir ? { configDir } : {}) };
+    const base = {
+      ...CODEX_READ_ONLY_POLICY,
+      inheritEnv: false,
+      env: reviewAgentEnvironment(process.env, repoDir),
+      cwd: repoDir,
+      skipGitRepoCheck: true,
+      maxOutputBytes,
+      ...(configDir ? { configDir } : {}),
+    };
     // Per-task --output-schema keeps each stage pinned to its expected JSON.
     const smart = { ...base, model: reviewModel, config: { model_reasoning_effort: "xhigh" as const } };
     const cheap = { ...base, model: cheapModel, config: { model_reasoning_effort: "medium" as const } };

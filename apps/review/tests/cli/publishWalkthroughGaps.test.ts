@@ -37,10 +37,11 @@ describe("publishWalkthrough config + upload", () => {
       JSON.stringify({ publishUrl: "https://share.test/", publishToken: "cfg-token" }),
     );
 
-    const seen: { url?: string; auth?: string } = {};
+    const seen: { url?: string; auth?: string; redirect?: string } = {};
     globalThis.fetch = (async (url: string, init: RequestInit) => {
       seen.url = String(url);
       seen.auth = (init.headers as Record<string, string>).authorization;
+      seen.redirect = init.redirect;
       return new Response(JSON.stringify({ url: "https://share.test/w/xyz" }), { status: 201 });
     }) as unknown as typeof fetch;
 
@@ -49,6 +50,7 @@ describe("publishWalkthrough config + upload", () => {
     // Trailing slash on the configured URL is stripped before appending the path.
     expect(seen.url).toBe("https://share.test/api/walkthroughs");
     expect(seen.auth).toBe("Bearer cfg-token");
+    expect(seen.redirect).toBe("error");
     void dir;
   });
 

@@ -2,7 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createReviewAgents, registeredReviewCodexCredentials, resolveReviewEngine } from "../../src/workflow/createReviewAgents";
+import {
+  createReviewAgents,
+  registeredReviewCodexCredentials,
+  resolveReviewEngine,
+  reviewAgentEnvironment,
+} from "../../src/workflow/createReviewAgents";
 
 const ENV_KEYS = [
   "SMITHERS_REVIEW_ENGINE",
@@ -14,6 +19,7 @@ const ENV_KEYS = [
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_API_KEY",
   "SMITHERS_HOME",
+  "SMITHERS_REVIEW_DISABLE_REGISTERED_ACCOUNTS",
 ] as const;
 const saved: Record<string, string | undefined> = {};
 const tempDirs: string[] = [];
@@ -35,6 +41,23 @@ afterEach(() => {
 });
 
 describe("createReviewAgents", () => {
+  test("agent environment allowlist drops workflow, OIDC, publishing, and long-lived credentials", () => {
+    const safe = reviewAgentEnvironment({
+      PATH: "/safe/bin",
+      HOME: "/isolated/home",
+      GH_TOKEN: "gh-write",
+      GITHUB_TOKEN: "github-write",
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request",
+      ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example",
+      SMITHERS_REVIEW_PUBLISH_TOKEN: "publish-session",
+      CODEX_AUTH_JSON: '{"secret":true}',
+      CLAUDE_CODE_OAUTH_TOKEN: "claude-long-lived",
+      OPENAI_API_KEY: "provider-long-lived",
+      ANTHROPIC_API_KEY: "provider-key",
+    });
+    expect(safe).toEqual({ PATH: "/safe/bin", HOME: "/isolated/home" });
+  });
+
   test("defaults to Codex when installed and otherwise falls back to Claude", () => {
     clearEnv();
     expect(resolveReviewEngine(() => true)).toBe("codex");
@@ -72,6 +95,39 @@ describe("createReviewAgents", () => {
     expect(agents.quiz).toEqual(agents.review);
   });
 
+  test("claude review agents use an explicit read-only permission policy without bypass flags", async () => {
+    clearEnv();
+    process.env.SMITHERS_REVIEW_ENGINE = "claude";
+    process.env.ANTHROPIC_BASE_URL = "https://proxy.test";
+    process.env.ANTHROPIC_API_KEY = "sk-proxy";
+    const agent = createReviewAgents("/tmp/repo").review[0] as any;
+
+    expect(agent.opts.yolo).toBe(false);
+    expect(agent.opts.inheritEnv).toBe(false);
+    expect(agent.opts.permissionMode).toBe("default");
+    expect(agent.opts.tools).toEqual(["Read", "Glob", "Grep"]);
+    expect(agent.opts.allowedTools).toEqual(["Read", "Glob", "Grep"]);
+    expect(agent.opts.disallowedTools).toContain("Bash");
+    expect(agent.opts.disallowedTools).toContain("Write");
+    expect(agent.opts.env.GIT_CONFIG_KEY_0).toBe("safe.directory");
+    expect(agent.opts.env.GIT_CONFIG_VALUE_0).toBe("/tmp/repo");
+    expect(agent.opts.env.ANTHROPIC_BASE_URL).toBe("https://proxy.test");
+    // The agent class injects only the short-lived broker client key while
+    // building the child command; it is not ambient in the option env.
+    expect(agent.opts.env.ANTHROPIC_API_KEY).toBeUndefined();
+
+    const command = await agent.buildCommand({ prompt: "review", cwd: "/tmp/repo", options: {} });
+    expect(command.env.ANTHROPIC_API_KEY).toBe("sk-proxy");
+    expect({ ...agent.opts.env, ...command.env }).toMatchObject({
+      ANTHROPIC_BASE_URL: "https://proxy.test",
+      ANTHROPIC_API_KEY: "sk-proxy",
+    });
+    expect(command.args).toContain("--bare");
+    expect(command.args).not.toContain("--allow-dangerously-skip-permissions");
+    expect(command.args).not.toContain("--dangerously-skip-permissions");
+    expect(command.args).not.toContain("bypassPermissions");
+  });
+
   test("codex engine builds Codex first with Claude only after it, honoring CODEX_HOME", () => {
     clearEnv();
     process.env.SMITHERS_REVIEW_ENGINE = "codex";
@@ -98,6 +154,34 @@ describe("createReviewAgents", () => {
     expect(agents.review).toHaveLength(3);
     expect((agents.review[0] as { model?: string }).model).toBe("gpt-sol-custom");
     expect((agents.narrate[0] as { model?: string }).model).toBe("gpt-luna-custom");
+  });
+
+  test("codex review agents force read-only sandboxing without bypass flags", async () => {
+    clearEnv();
+    process.env.SMITHERS_REVIEW_ENGINE = "codex";
+    const agent = createReviewAgents("/tmp/repo").review[0] as any;
+
+    expect(agent.opts.yolo).toBe(false);
+    expect(agent.opts.inheritEnv).toBe(false);
+    expect(agent.opts.sandbox).toBe("read-only");
+    expect(agent.opts.fullAuto).toBe(false);
+    expect(agent.opts.dangerouslyBypassApprovalsAndSandbox).toBe(false);
+    expect(agent.opts.env.GIT_CONFIG_KEY_0).toBe("safe.directory");
+    expect(agent.opts.env.GIT_CONFIG_VALUE_0).toBe("/tmp/repo");
+
+    const command = await agent.buildCommand({ prompt: "review", cwd: "/tmp/repo", options: {} });
+    expect(command.args).toContain("--sandbox");
+    expect(command.args).toContain("read-only");
+    expect(command.args).not.toContain("--full-auto");
+    expect(command.args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+  });
+
+  test("action isolation can disable registered account fan-out", () => {
+    clearEnv();
+    process.env.SMITHERS_REVIEW_DISABLE_REGISTERED_ACCOUNTS = "1";
+    process.env.SMITHERS_REVIEW_ENGINE = "codex";
+    expect(registeredReviewCodexCredentials()).toEqual([]);
+    expect(createReviewAgents("/tmp/repo").review).toHaveLength(3);
   });
 
   test("blank Codex model overrides fall through to the role defaults", () => {

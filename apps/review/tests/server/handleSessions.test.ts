@@ -18,6 +18,10 @@ function baseClaims(repo: string, pr: number, exp: number) {
     iat: Math.floor(Date.now() / 1000),
     repository: repo,
     repository_owner: repo.split("/")[0],
+    event_name: "pull_request_target",
+    workflow_ref: `${repo}/.github/workflows/pr-review.yml@refs/heads/main`,
+    workflow_sha: "a".repeat(40),
+    run_attempt: "1",
     ref: `refs/pull/${pr}/merge`,
   };
 }
@@ -114,6 +118,32 @@ describe("POST /api/sessions (OIDC)", () => {
     expect(body.quiz).toBe("on");
   });
 
+  test("rejects OIDC from any workflow other than protected main review workflow", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker(jwks.url);
+    await registerRepo(env, REPO);
+    for (const claims of [
+      { ...baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600), workflow_ref: `${REPO}/.github/workflows/other.yml@refs/heads/main` },
+      { ...baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600), workflow_ref: `${REPO}/.github/workflows/pr-review.yml@refs/heads/feature` },
+      { ...baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600), workflow_sha: "short" },
+      { ...baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600), run_attempt: "2" },
+      { ...baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600), run_attempt: undefined },
+      { ...baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600), event_name: "push" },
+    ]) {
+      const token = await signTestJwt(keypair, claims);
+      const res = await worker.fetch(
+        new Request("https://review.test/api/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ oidcToken: token, pr: 42 }),
+        }),
+        env,
+      );
+      expect(res.status).toBe(401);
+      expect(((await res.json()) as { error: string }).error).toContain("protected review workflow");
+    }
+  });
+
   test("accepts body pr only for issue_comment oidc tokens without a pull request ref", async () => {
     const env = await buildTestEnv();
     const worker = makeWorker(jwks.url);
@@ -140,6 +170,31 @@ describe("POST /api/sessions (OIDC)", () => {
     expect(reviewed?.pr).toBe(77);
   });
 
+  test("accepts body pr for base-controlled pull_request_target OIDC tokens", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker(jwks.url);
+    await registerRepo(env, REPO);
+    const token = await signTestJwt(keypair, {
+      ...baseClaims(REPO, 0, Math.floor(Date.now() / 1000) + 600),
+      event_name: "pull_request_target",
+      ref: "refs/heads/main",
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ oidcToken: token, pr: 88 }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const reviewed = await env.DB
+      .prepare("SELECT pr FROM reviewed_prs WHERE repo = ?")
+      .bind(REPO)
+      .first<{ pr: number }>();
+    expect(reviewed?.pr).toBe(88);
+  });
+
   test("rejects body pr for oidc tokens that are not tied to a pull request event", async () => {
     const env = await buildTestEnv();
     const worker = makeWorker(jwks.url);
@@ -158,8 +213,8 @@ describe("POST /api/sessions (OIDC)", () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toBe("missing pull request number");
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toContain("protected review workflow");
   });
 
   test("rejects body pr that disagrees with the oidc pull request ref", async () => {
@@ -341,7 +396,7 @@ describe("POST /api/sessions (OIDC)", () => {
     // First: legitimate PR review consumes the whole quota.
     const prToken = await signTestJwt(keypair, {
       ...baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600),
-      event_name: "pull_request",
+      event_name: "pull_request_target",
     });
     const first = await worker.fetch(
       new Request("https://review.test/api/sessions", {
@@ -366,8 +421,8 @@ describe("POST /api/sessions (OIDC)", () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toContain("pull request");
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toContain("protected review workflow");
   });
 
   test("accepts body.pr when the claims prove an issue_comment context", async () => {

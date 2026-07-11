@@ -54,6 +54,7 @@ export async function createSession(input: CreateSessionInput): Promise<SessionO
   try {
     res = await f(url, {
       method: "POST",
+      redirect: "error",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(requestBody),
     });

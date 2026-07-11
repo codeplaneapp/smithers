@@ -147,6 +147,159 @@ describe("anthropic proxy", () => {
     expect(res.status).toBe(401);
   });
 
+  test("rejects an unpriced request model before any upstream call", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    let upstreamCalls = 0;
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: "https://anthropic.test",
+      fetchUpstream: (async () => {
+        upstreamCalls += 1;
+        return new Response(SSE_USAGE, { headers: { "content-type": "text/event-stream" } });
+      }) as unknown as typeof fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const response = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-future-unpriced","max_tokens":100,"messages":[]}',
+      }),
+      env,
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toContain("no static metering price");
+    expect(upstreamCalls).toBe(0);
+    const reservations = await env.DB.prepare("SELECT id FROM spend_reservations").all();
+    expect(reservations.results.length).toBe(0);
+  });
+
+  test("does not price an arbitrary premium suffix as its cheap base model", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    let upstreamCalls = 0;
+    const worker = createReviewWorker({
+      anthropicBaseUrl: "https://anthropic.test",
+      fetchUpstream: (async () => {
+        upstreamCalls += 1;
+        return new Response("unreachable");
+      }) as unknown as typeof fetch,
+    });
+    const response = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-haiku-4-5-premium","max_tokens":100,"messages":[]}',
+      }),
+      env,
+    );
+    expect(response.status).toBe(400);
+    expect(upstreamCalls).toBe(0);
+  });
+
+  test("rejects alternate routes and non-POST methods before upstream", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    let upstreamCalls = 0;
+    const worker = createReviewWorker({
+      anthropicBaseUrl: "https://anthropic.test",
+      fetchUpstream: (async () => {
+        upstreamCalls += 1;
+        return new Response("unreachable");
+      }) as unknown as typeof fetch,
+    });
+    const alternateRoute = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages/batches", {
+        method: "POST",
+        headers: { "x-api-key": token },
+      }),
+      env,
+    );
+    const wrongMethod = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "GET",
+        headers: { "x-api-key": token },
+      }),
+      env,
+    );
+    expect(alternateRoute.status).toBe(404);
+    expect(wrongMethod.status).toBe(405);
+    expect(upstreamCalls).toBe(0);
+  });
+
+  test("allows POST count_tokens without creating a spend reservation", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    const meterings: Promise<unknown>[] = [];
+    let upstreamCalls = 0;
+    const worker = createReviewWorker({
+      anthropicBaseUrl: "https://anthropic.test",
+      fetchUpstream: (async (input: string | URL | Request) => {
+        upstreamCalls += 1;
+        expect(new URL(String(input)).pathname).toBe("/v1/messages/count_tokens");
+        return new Response('{"input_tokens":12}', {
+          headers: { "content-type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+      waitUntil: (promise) => meterings.push(promise),
+    });
+    const response = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages/count_tokens", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ input_tokens: 12 });
+    await Promise.all(meterings);
+    expect(upstreamCalls).toBe(1);
+    const reservations = await env.DB.prepare("SELECT id FROM spend_reservations").all();
+    expect(reservations.results.length).toBe(0);
+  });
+
+  test("rejects invalid request and metering byte limits before upstream", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    let upstreamCalls = 0;
+    const fetchUpstream = (async () => {
+      upstreamCalls += 1;
+      return new Response("unreachable");
+    }) as unknown as typeof fetch;
+    const invalidMetering = createReviewWorker({
+      anthropicBaseUrl: "https://anthropic.test",
+      anthropicMaxMeteringBytes: -1,
+      fetchUpstream,
+    });
+    const invalidRequest = createReviewWorker({
+      anthropicBaseUrl: "https://anthropic.test",
+      anthropicMaxRequestBytes: -1,
+      fetchUpstream,
+    });
+    const meteringResponse = await invalidMetering.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[]}',
+      }),
+      env,
+    );
+    // No body: request-limit validation must not depend on the body reader.
+    const requestResponse = await invalidRequest.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token },
+      }),
+      env,
+    );
+    expect(meteringResponse.status).toBe(500);
+    expect(requestResponse.status).toBe(500);
+    expect(upstreamCalls).toBe(0);
+  });
+
   test("forwards to api.anthropic.com with the real key and meters SSE usage", async () => {
     const env = await buildTestEnv();
     const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });
@@ -243,6 +396,9 @@ describe("anthropic proxy", () => {
     const worker = createReviewWorker({
       jwksUrl: "http://unused",
       anthropicBaseUrl: "https://anthropic.test",
+      // Exercise the bounded head/tail collector: the response is over 1 MiB,
+      // while metering may retain only 1 KiB.
+      anthropicMaxMeteringBytes: 1024,
       fetchUpstream,
       now: () => Date.now(),
       waitUntil: (p) => meterings.push(p),
@@ -265,7 +421,135 @@ describe("anthropic proxy", () => {
     expect(row?.cost_usd as number).toBeCloseTo(SINGLE_CALL_COST_USD, 6);
   });
 
-  test("logs a metering miss when a 2xx messages response yields no usage (silent unmetered spend)", async () => {
+  test("rejects oversized request bodies before contacting Anthropic and accepts the exact cap", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    const exactBody = '{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[]}';
+    const maxRequestBytes = new TextEncoder().encode(exactBody).byteLength;
+    let upstreamCalls = 0;
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: "https://anthropic.test",
+      anthropicMaxRequestBytes: maxRequestBytes,
+      fetchUpstream: (async () => {
+        upstreamCalls += 1;
+        return new Response(SSE_USAGE, { headers: { "content-type": "text/event-stream" } });
+      }) as unknown as typeof fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+
+    const oversized = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: `${exactBody} `,
+      }),
+      env,
+    );
+    expect(oversized.status).toBe(413);
+    expect(upstreamCalls).toBe(0);
+
+    const streamed = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(exactBody.slice(0, 10)));
+            controller.enqueue(new TextEncoder().encode(`${exactBody.slice(10)} `));
+            controller.close();
+          },
+        }),
+        duplex: "half",
+      } as RequestInit),
+      env,
+    );
+    expect(streamed.status).toBe(413);
+    expect(upstreamCalls).toBe(0);
+
+    const exact = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: exactBody,
+      }),
+      env,
+    );
+    expect(exact.status).toBe(200);
+    expect(upstreamCalls).toBe(1);
+    await exact.text();
+  });
+
+  test("propagates the caller's exact cancellation reason through the upstream request", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    let started!: () => void;
+    const upstreamStarted = new Promise<void>((resolve) => { started = resolve; });
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: "https://anthropic.test",
+      fetchUpstream: (async (_url: string | URL | Request, init?: RequestInit) => {
+        started();
+        const signal = init?.signal;
+        await new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+        throw new Error("unreachable");
+      }) as unknown as typeof fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const controller = new AbortController();
+    const pending = worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[]}',
+        signal: controller.signal,
+      }),
+      env,
+    );
+    await upstreamStarted;
+    const reason = new DOMException("cancelled by caller", "AbortError");
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+  });
+
+  test("does not pull an upstream stream ahead of a slow response consumer", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    const meterings: Promise<unknown>[] = [];
+    let pulls = 0;
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: "https://anthropic.test",
+      fetchUpstream: (async () => new Response(new ReadableStream({
+        pull(controller) {
+          pulls += 1;
+          if (pulls > 50) controller.close();
+          else controller.enqueue(new Uint8Array([pulls]));
+        },
+      }), { status: 500, headers: { "content-type": "application/octet-stream" } })) as unknown as typeof fetch,
+      now: () => Date.now(),
+      waitUntil: (promise) => meterings.push(promise),
+    });
+
+    const response = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[]}',
+      }),
+      env,
+    );
+    await Bun.sleep(10);
+    expect(pulls).toBeLessThan(50);
+    await response.body?.cancel("test complete");
+    await Promise.all(meterings);
+  });
+
+  test("charges the reservation when a 2xx messages response yields no usage", async () => {
     const env = await buildTestEnv();
     // A 200 /v1/messages body with no `model`: parseUsageFromJson returns null,
     // so real spend would go unrecorded. That must be surfaced, not swallowed.
@@ -286,7 +570,7 @@ describe("anthropic proxy", () => {
         new Request("https://review.test/anthropic/v1/messages", {
           method: "POST",
           headers: { "x-api-key": token, "content-type": "application/json" },
-          body: '{"model":"claude-sonnet-4-6","messages":[]}',
+          body: '{"model":"claude-sonnet-4-6","max_tokens":100,"messages":[]}',
         }),
         env,
       );
@@ -298,15 +582,22 @@ describe("anthropic proxy", () => {
     } finally {
       errorSpy.mockRestore();
     }
-    const usage = await env.DB.prepare("SELECT * FROM usage_events").all();
-    expect(usage.results.length).toBe(0);
+    const usage = await env.DB.prepare("SELECT cost_usd FROM usage_events").all<{ cost_usd: number }>();
+    expect(usage.results.length).toBe(1);
+    expect(usage.results[0].cost_usd).toBeGreaterThan(0);
+    const session = await env.DB.prepare("SELECT spent_usd FROM sessions").first<{ spent_usd: number }>();
+    expect(session?.spent_usd).toBeCloseTo(usage.results[0].cost_usd, 9);
+    const reservations = await env.DB.prepare("SELECT id FROM spend_reservations").all();
+    expect(reservations.results.length).toBe(0);
   });
 
-  test("records all in-flight usage even when concurrent calls cross the spend cap", async () => {
+  test("atomically admits only one concurrent request when two reservations exceed the cap", async () => {
     const env = await buildTestEnv();
     const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });
     teardowns.push(() => fixture.stop());
-    const token = await seedSession(env, REPO, SINGLE_CALL_COST_USD + 0.00001);
+    // Each body reserves about $0.001725 (request bytes at the highest prompt
+    // rate plus 100 possible output tokens). One fits; two do not.
+    const token = await seedSession(env, REPO, 0.002);
     const meterings: Promise<unknown>[] = [];
     const worker = createReviewWorker({
       jwksUrl: "http://unused",
@@ -320,25 +611,120 @@ describe("anthropic proxy", () => {
         new Request("https://review.test/anthropic/v1/messages", {
           method: "POST",
           headers: { "x-api-key": token, "content-type": "application/json" },
-          body: '{"model":"claude-sonnet-4-6","messages":[]}',
+          body: '{"model":"claude-sonnet-4-6","max_tokens":100,"messages":[]}',
         }),
         env,
       );
 
     const [first, second] = await Promise.all([makeRequest(), makeRequest()]);
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(200);
+    expect([first.status, second.status].sort()).toEqual([200, 402]);
     await Promise.all([first.text(), second.text()]);
     await Promise.all(meterings);
 
-    // Both calls were forwarded and billed at Anthropic, so both must land in the
-    // audit ledger and the spend tally — the cap stops the NEXT request, it cannot
-    // un-spend an already-streamed one. Previously the over-cap call was silently
-    // dropped from both usage_events and spent_usd, undercounting real spend.
+    expect(fixture.requests.length).toBe(1);
     const usage = await env.DB.prepare("SELECT cost_usd FROM usage_events").all<{ cost_usd: number }>();
-    expect(usage.results.length).toBe(2);
+    expect(usage.results.length).toBe(1);
     const session = await env.DB.prepare("SELECT spent_usd FROM sessions").first<{ spent_usd: number }>();
-    expect(session?.spent_usd ?? 0).toBeCloseTo(2 * SINGLE_CALL_COST_USD, 6);
+    expect(session?.spent_usd ?? 0).toBeCloseTo(SINGLE_CALL_COST_USD, 6);
+    const reservations = await env.DB.prepare("SELECT id FROM spend_reservations").all();
+    expect(reservations.results.length).toBe(0);
+  });
+
+  test("prunes expired leases before admission so crashed Workers cannot strand capacity", async () => {
+    const env = await buildTestEnv();
+    const now = Date.now();
+    const token = await seedSession(env, REPO);
+    await env.DB
+      .prepare(
+        "INSERT INTO spend_reservations (id, session_hash, repo, amount_usd, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .bind("expired", await sha256Hex(token), REPO, 100, now - 1, now - 10_000)
+      .run();
+    const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });
+    teardowns.push(() => fixture.stop());
+    const meterings: Promise<unknown>[] = [];
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => now,
+      waitUntil: (promise) => meterings.push(promise),
+    });
+
+    const response = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[]}',
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    const active = await env.DB.prepare("SELECT id FROM spend_reservations").all<{ id: string }>();
+    expect(active.results.length).toBe(1);
+    expect(active.results[0].id).not.toBe("expired");
+
+    await response.text();
+    await Promise.all(meterings);
+    const remaining = await env.DB.prepare("SELECT id FROM spend_reservations").all();
+    expect(remaining.results.length).toBe(0);
+  });
+
+  test("settles an aborted SSE stream at the conservative reserved amount", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    const meterings: Promise<unknown>[] = [];
+    const encoder = new TextEncoder();
+    const partialSse = [
+      "event: message_start",
+      'data: {"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":300,"output_tokens":1}}}',
+      "",
+    ].join("\n");
+    let upstreamCancelled = false;
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: "https://anthropic.test",
+      fetchUpstream: (async () => new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(partialSse));
+        },
+        cancel() {
+          upstreamCancelled = true;
+        },
+      }), { headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch,
+      now: () => Date.now(),
+      waitUntil: (promise) => meterings.push(promise),
+    });
+    const response = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: '{"model":"claude-sonnet-4-6","max_tokens":100,"messages":[]}',
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    const active = await env.DB
+      .prepare("SELECT amount_usd FROM spend_reservations")
+      .first<{ amount_usd: number }>();
+    expect(active?.amount_usd ?? 0).toBeGreaterThan(SINGLE_CALL_COST_USD);
+
+    const reader = response.body!.getReader();
+    const firstChunk = await reader.read();
+    expect(new TextDecoder().decode(firstChunk.value)).toContain("message_start");
+    await reader.cancel("test abort after first SSE frame");
+    await Promise.all(meterings);
+
+    expect(upstreamCancelled).toBe(true);
+    const usage = await env.DB
+      .prepare("SELECT output_tokens, cost_usd FROM usage_events")
+      .first<{ output_tokens: number; cost_usd: number }>();
+    expect(usage?.output_tokens).toBe(1);
+    expect(usage?.cost_usd ?? 0).toBeCloseTo(active!.amount_usd, 9);
+    const session = await env.DB.prepare("SELECT spent_usd FROM sessions").first<{ spent_usd: number }>();
+    expect(session?.spent_usd ?? 0).toBeCloseTo(active!.amount_usd, 9);
+    const reservations = await env.DB.prepare("SELECT id FROM spend_reservations").all();
+    expect(reservations.results.length).toBe(0);
   });
 
   test("meters non-streaming JSON response and records kind=messages", async () => {
@@ -446,7 +832,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": "srk_unknownkey" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[]}',
       }),
       env,
     );
@@ -746,7 +1132,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[]}',
       }),
       env,
     );

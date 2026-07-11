@@ -27,7 +27,10 @@ export async function fetchOidcToken(input: FetchOidcTokenInput = {}): Promise<s
   const audience = input.audience ?? "smithers-review";
   const url = `${requestUrl}${requestUrl.includes("?") ? "&" : "?"}audience=${encodeURIComponent(audience)}`;
   const f = input.fetchImpl ?? fetch;
-  const res = await f(url, { headers: { authorization: `Bearer ${requestToken}` } });
+  const res = await f(url, {
+    redirect: "error",
+    headers: { authorization: `Bearer ${requestToken}` },
+  });
   if (!res.ok) {
     throw new Error(`OIDC token request failed: HTTP ${res.status}`);
   }

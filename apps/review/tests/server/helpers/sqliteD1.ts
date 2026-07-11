@@ -39,6 +39,15 @@ class SqlitePreparedStatement implements D1PreparedStatement {
   }
 
   async run(): Promise<D1Result> {
+    return this.runSync();
+  }
+
+  runInBatch(db: Database): D1Result {
+    if (db !== this.db) throw new Error("cannot batch a statement prepared by another database");
+    return this.runSync();
+  }
+
+  private runSync(): D1Result {
     const stmt = this.db.query(this.query);
     const result = stmt.run(...(this.args as never[]));
     return {
@@ -57,6 +66,17 @@ class SqliteD1 implements D1Database {
 
   prepare(query: string): D1PreparedStatement {
     return new SqlitePreparedStatement(this.raw, query);
+  }
+
+  async batch(statements: D1PreparedStatement[]): Promise<D1Result[]> {
+    const execute = this.raw.transaction((items: D1PreparedStatement[]) =>
+      items.map((statement) => {
+        if (!(statement instanceof SqlitePreparedStatement)) {
+          throw new Error("sqliteD1 can only batch its own prepared statements");
+        }
+        return statement.runInBatch(this.raw);
+      }));
+    return execute(statements);
   }
 
   async exec(query: string): Promise<D1ExecResult> {

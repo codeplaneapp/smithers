@@ -21,4 +21,6 @@ Root helpers: `d1.ts` (narrow D1 interface tests implement over bun:sqlite),
 
 Security invariants: tokens are stored hashed only; all bearer comparisons are
 constant-time; unknown vs revoked keys are indistinguishable to callers; the
-per-repo monthly spend cap exists because per-session caps reset on every mint.
+per-repo monthly spend cap exists because per-session caps reset on every mint;
+billable proxy calls reserve session and repository capacity atomically before
+the upstream credential is used.
