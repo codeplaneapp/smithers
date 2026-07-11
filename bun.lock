@@ -171,6 +171,8 @@
         "@smithers-orchestrator/tui": "workspace:*",
         "@smithers-orchestrator/usage": "workspace:*",
         "@smithers-orchestrator/vcs": "workspace:*",
+        "@xterm/addon-fit": "^0.11.0",
+        "@xterm/xterm": "^6.0.0",
         "cron-parser": "^5.6.1",
         "drizzle-orm": "^0.45.2",
         "effect": "3.21.4",
@@ -744,22 +746,37 @@
     "packages/jj-darwin-arm64": {
       "name": "@smithers-orchestrator/jj-darwin-arm64",
       "version": "0.28.0",
+      "bin": {
+        "jj": "bin/jj",
+      },
     },
     "packages/jj-darwin-x64": {
       "name": "@smithers-orchestrator/jj-darwin-x64",
       "version": "0.28.0",
+      "bin": {
+        "jj": "bin/jj",
+      },
     },
     "packages/jj-linux-arm64": {
       "name": "@smithers-orchestrator/jj-linux-arm64",
       "version": "0.28.0",
+      "bin": {
+        "jj": "bin/jj",
+      },
     },
     "packages/jj-linux-x64": {
       "name": "@smithers-orchestrator/jj-linux-x64",
       "version": "0.28.0",
+      "bin": {
+        "jj": "bin/jj",
+      },
     },
     "packages/jj-win32-x64": {
       "name": "@smithers-orchestrator/jj-win32-x64",
       "version": "0.28.0",
+      "bin": {
+        "jj": "bin/jj.exe",
+      },
     },
     "packages/memory": {
       "name": "@smithers-orchestrator/memory",
@@ -1003,6 +1020,8 @@
         "@smithers-orchestrator/engine": "workspace:*",
         "@smithers-orchestrator/graph": "workspace:*",
         "@smithers-orchestrator/react-reconciler": "workspace:*",
+        "@smithers-orchestrator/scheduler": "workspace:*",
+        "effect": "3.21.4",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -1136,6 +1155,13 @@
       },
     },
   },
+  "trustedDependencies": [
+    "@smithers-orchestrator/jj-linux-arm64",
+    "@smithers-orchestrator/jj-darwin-arm64",
+    "@smithers-orchestrator/jj-linux-x64",
+    "@smithers-orchestrator/jj-win32-x64",
+    "@smithers-orchestrator/jj-darwin-x64",
+  ],
   "overrides": {
     "@effect/cluster": "0.59.0",
     "@effect/platform": "0.96.2",
@@ -2598,6 +2624,10 @@
     "@vue/shared": ["@vue/shared@3.5.39", "", {}, "sha512-l1rrBtBfTnmxvtsvdQDXltUUy8S1Y+ZaqdfUzmAnJkTd8Z8rv5v/ytW+TKiqEOWyHPoqtPlNFSs0lhRmYVSHVA=="],
 
     "@workflow/serde": ["@workflow/serde@4.1.0-beta.2", "", {}, "sha512-8kkeoQKLDaKXefjV5dbhBj2aErfKp1Mc4pb6tj8144cF+Em5SPbyMbyLCHp+BVrFfFVCBluCtMx+jjvaFVZGww=="],
+
+    "@xterm/addon-fit": ["@xterm/addon-fit@0.11.0", "", {}, "sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g=="],
+
+    "@xterm/xterm": ["@xterm/xterm@6.0.0", "", {}, "sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg=="],
 
     "@xyflow/react": ["@xyflow/react@12.10.2", "", { "dependencies": { "@xyflow/system": "0.0.76", "classcat": "^5.0.3", "zustand": "^4.4.0" }, "peerDependencies": { "react": ">=17", "react-dom": ">=17" } }, "sha512-CgIi6HwlcHXwlkTpr0fxLv/0sRVNZ8IdwKLzzeCscaYBwpvfcH1QFOCeaTCuEn1FQEs/B8CjnTSjhs8udgmBgQ=="],
 

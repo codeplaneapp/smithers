@@ -3101,6 +3101,24 @@ async function runGatewayCommand(options) {
     // inside the CLI package and is bundled by the gateway's UI pipeline on
     // first request, so no workspace pack is required.
     const monitorUiEntry = fileURLToPath(new URL("./monitor-ui/monitor.tsx", import.meta.url));
+    // PTY hijack channel (`/v1/pty/hijack`): the gateway spawns this CLI's own
+    // `hijack` command inside a real PTY, so the Monitor's embedded terminal
+    // gets the exact same per-node hand-off semantics as `smithers hijack
+    // <runId> --target <nodeId>` in a shell — live runs hand the session off,
+    // finished runs reopen the recorded agent session for a post-mortem.
+    const cliEntry = fileURLToPath(new URL("./index.js", import.meta.url));
+    /** @type {(params: { runId: string; nodeId?: string }) => { command: string[]; cwd?: string; env?: Record<string, string | undefined> }} */
+    const hijackPty = ({ runId, nodeId }) => ({
+        command: [
+            process.execPath,
+            cliEntry,
+            "hijack",
+            runId,
+            ...(nodeId ? ["--target", nodeId] : []),
+        ],
+        cwd: workspace,
+        env: { ...process.env, FORCE_COLOR: process.env.FORCE_COLOR ?? "1" },
+    });
     gateway = new Gateway({
         heartbeatMs: 15_000,
         workspaceRoot: workspace,
@@ -3126,6 +3144,7 @@ async function runGatewayCommand(options) {
         ...(existsSync(monitorUiEntry)
             ? { ui: { entry: monitorUiEntry, path: "/monitor", title: "Smithers Monitor" } }
             : {}),
+        hijackPty,
     });
     const workspaceApi = await openSmithersBackend({}, {
         backend: options.backend,

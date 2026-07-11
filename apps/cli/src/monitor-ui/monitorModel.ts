@@ -749,3 +749,89 @@ export function formatOutputValue(value: unknown): string {
   }
   return out.length > OUTPUT_MAX_CHARS ? `${out.slice(0, OUTPUT_MAX_CHARS)}\n… (truncated)` : out;
 }
+
+// ---------------------------------------------------------------------------
+// PTY hijack. The gateway reports which nodes have a resumable agent session
+// (GET /v1/api/runs/:id/hijack-candidates, from persisted attempt meta) and
+// serves an interactive hand-off over the /v1/pty/hijack websocket, which
+// spawns `smithers hijack <runId> --target <nodeId>` in a real PTY. These
+// helpers decide when the inspector shows the affordance and build the
+// websocket URL; the terminal itself lives in ./monitor.tsx.
+// ---------------------------------------------------------------------------
+
+export type HijackCandidate = {
+  nodeId: string;
+  engine: string;
+  mode: string;
+};
+
+/** Candidates out of the hijack-candidates HTTP body (`{ok,data:{candidates}}`). */
+export function hijackCandidatesOf(body: unknown): HijackCandidate[] {
+  if (!isRecord(body)) return [];
+  const data = isRecord(body.data) ? body.data : body;
+  const rows = Array.isArray(data.candidates) ? data.candidates : [];
+  const out: HijackCandidate[] = [];
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const nodeId = asString(row.nodeId);
+    const engine = asString(row.engine);
+    if (!nodeId || !engine) continue;
+    out.push({ nodeId, engine, mode: asString(row.mode) ?? "native-cli" });
+  }
+  return out;
+}
+
+export function hijackCandidateForNode(
+  candidates: readonly HijackCandidate[],
+  nodeId: string | undefined,
+): HijackCandidate | null {
+  if (!nodeId) return null;
+  return candidates.find((candidate) => candidate.nodeId === nodeId) ?? null;
+}
+
+export type HijackAction = { kind: "hijack" | "reopen"; label: string };
+
+/**
+ * Which hijack affordance the node inspector shows.
+ *
+ * - No recorded session for the node: none — the button is hidden.
+ * - Run still running and the node is live: "Hijack" (a live hand-off: the
+ *   engine parks the run and `smithers hijack` resumes the agent session).
+ * - Run no longer running: "Reopen session" (post-mortem resume of the
+ *   recorded session — works for finished AND failed nodes).
+ * - Node finished but the run is still running: none. `smithers hijack`
+ *   against a live run requests a hand-off of the WHOLE run, which is not
+ *   what reopening an old node's session means; wait for the run to settle.
+ */
+export function hijackActionFor(
+  runStatus: string | undefined,
+  nodeLive: boolean,
+  hasCandidate: boolean,
+): HijackAction | null {
+  if (!hasCandidate) return null;
+  const runLive = normalizeStatus(runStatus) === "running";
+  if (runLive) {
+    return nodeLive ? { kind: "hijack", label: "Hijack" } : null;
+  }
+  return { kind: "reopen", label: "Reopen session" };
+}
+
+/**
+ * Websocket URL for the gateway's PTY hijack channel. Mirrors the transport
+ * shape of smithers cloud terminals: binary frames are PTY bytes, text frames
+ * are JSON control messages.
+ */
+export function ptyHijackUrl(
+  origin: string,
+  runId: string,
+  nodeId: string | undefined,
+  size: { cols: number; rows: number },
+): string {
+  const url = new URL("/v1/pty/hijack", origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("runId", runId);
+  if (nodeId) url.searchParams.set("nodeId", nodeId);
+  url.searchParams.set("cols", String(Math.max(2, Math.floor(size.cols) || 80)));
+  url.searchParams.set("rows", String(Math.max(2, Math.floor(size.rows) || 24)));
+  return url.toString();
+}

@@ -22,6 +22,10 @@ import {
 } from "smithers-orchestrator/gateway-react";
 import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smithers-orchestrator/gateway-client";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import type { Terminal as XTerminal, IDisposable } from "@xterm/xterm";
+// Inlined at bundle time (Bun.build) — the gateway serves one self-contained
+// client.js, so the stylesheet ships as a string appended to monitorCss.
+import xtermCss from "@xterm/xterm/css/xterm.css" with { type: "text" };
 import {
   asArray,
   asNumber,
@@ -37,6 +41,9 @@ import {
   frameScrubBounds,
   groupRuns,
   hasFailedDescendant,
+  hijackActionFor,
+  hijackCandidateForNode,
+  hijackCandidatesOf,
   isCancellable,
   isRecord,
   isResumable,
@@ -45,6 +52,7 @@ import {
   nodeSummaryEligible,
   paginateRuns,
   pick,
+  ptyHijackUrl,
   quotaInfoOf,
   rowOf,
   runProgress,
@@ -56,6 +64,7 @@ import {
   treeNodeKey,
   waitTone,
   workflowOptions,
+  type HijackCandidate,
   type RunRow,
   type Tone,
   type TreeNodeLike,
@@ -1241,6 +1250,235 @@ function NodeWhatHappened({ runId, nodeId, iteration, status }: { runId: string;
   );
 }
 
+// ---------------------------------------------------------------------------
+// PTY hijack terminal. An embedded xterm.js terminal (the same stack the
+// smithers cloud UI uses for its workspace terminals — ghostty stays a native
+// app; the web falls back to xterm) attached to the gateway's /v1/pty/hijack
+// websocket, which runs `smithers hijack <runId> --target <nodeId>` in a real
+// PTY. Transport mirrors the cloud terminal client: binary frames are raw PTY
+// bytes both ways; text frames are JSON control messages (`resize` up,
+// `exit`/`error` down).
+// ---------------------------------------------------------------------------
+
+type HijackStatus = "connecting" | "connected" | "exited" | "closed" | "error";
+
+const HIJACK_TERM_DARK = {
+  background: "#07090d",
+  foreground: "#f0f2f5",
+  cursor: "#9ba1ad",
+  selectionBackground: "rgba(123, 147, 217, 0.3)",
+};
+
+const HIJACK_TERM_LIGHT = {
+  background: "#fbfcfd",
+  foreground: "#17202a",
+  cursor: "#315d98",
+  selectionBackground: "rgba(49, 93, 152, 0.22)",
+};
+
+function isDarkTheme(): boolean {
+  const attr = document.documentElement.dataset.theme;
+  if (attr === "dark") return true;
+  if (attr === "light") return false;
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+}
+
+/** Poll the gateway's per-node hijack candidates for a run (5s while live). */
+function useHijackCandidates(runId: string, live: boolean): HijackCandidate[] {
+  const [candidates, setCandidates] = useState<HijackCandidate[]>([]);
+  useEffect(() => {
+    setCandidates([]);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/hijack-candidates`);
+        if (!response.ok) return;
+        const body: unknown = await response.json();
+        if (!cancelled) setCandidates(hijackCandidatesOf(body));
+      } catch {
+        // Transient fetch failures just keep the previous candidate view.
+      }
+    };
+    void load();
+    const timer = live ? setInterval(() => void load(), 5_000) : null;
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [runId, live]);
+  return candidates;
+}
+
+function HijackTerminal({
+  runId,
+  nodeId,
+  dark,
+  onStatus,
+}: {
+  runId: string;
+  nodeId: string;
+  dark: boolean;
+  onStatus: (status: HijackStatus) => void;
+}) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const host = mountRef.current;
+    if (!host) return;
+    const ac = new AbortController();
+    // Every resource is hoisted to effect scope and assigned as created, so
+    // the cleanup always disposes whatever exists — including a teardown while
+    // connect() is still awaiting the dynamic import (mirrors the cloud UI's
+    // TerminalSession discipline).
+    let term: XTerminal | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let dataDisposable: IDisposable | null = null;
+    let ws: WebSocket | null = null;
+    const encoder = new TextEncoder();
+
+    async function connect() {
+      onStatus("connecting");
+      const [{ Terminal }, { FitAddon }] = await Promise.all([
+        import("@xterm/xterm"),
+        import("@xterm/addon-fit"),
+      ]);
+      if (ac.signal.aborted || !host) return;
+      // The mount div persists across effect re-runs — never stack a second
+      // terminal into it.
+      host.replaceChildren();
+      term = new Terminal({
+        theme: dark ? HIJACK_TERM_DARK : HIJACK_TERM_LIGHT,
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontSize: 13,
+        cursorBlink: true,
+      });
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(host);
+      fitAddon.fit();
+      const boundTerm = term;
+      const socket = new WebSocket(ptyHijackUrl(location.origin, runId, nodeId, { cols: boundTerm.cols, rows: boundTerm.rows }));
+      ws = socket;
+      socket.binaryType = "arraybuffer";
+      const sendResize = () => {
+        if (socket.readyState !== WebSocket.OPEN) return;
+        socket.send(JSON.stringify({ type: "resize", cols: boundTerm.cols, rows: boundTerm.rows }));
+      };
+      socket.onopen = () => {
+        onStatus("connected");
+        sendResize();
+      };
+      socket.onmessage = (event) => {
+        if (typeof event.data === "string") {
+          // JSON control frames; unknown types are ignored for forward compat.
+          try {
+            const message = JSON.parse(event.data) as { type?: unknown; code?: unknown; message?: unknown };
+            if (message.type === "exit") {
+              onStatus("exited");
+              boundTerm.writeln(`\r\n\x1b[2m[session ended${typeof message.code === "number" ? ` · exit ${message.code}` : ""}]\x1b[0m`);
+            } else if (message.type === "error") {
+              onStatus("error");
+              boundTerm.writeln(`\r\n\x1b[1;31m${String(message.message ?? "PTY error")}\x1b[0m`);
+            }
+          } catch {
+            // Not JSON: drop, PTY bytes only travel on binary frames.
+          }
+          return;
+        }
+        boundTerm.write(new Uint8Array(event.data as ArrayBuffer));
+      };
+      socket.onerror = () => {
+        onStatus("error");
+        boundTerm.writeln("\r\n\x1b[1;31mTerminal socket error — the connection to the gateway failed.\x1b[0m");
+      };
+      socket.onclose = (event) => {
+        if (event.code !== 1000) onStatus("closed");
+      };
+      dataDisposable = boundTerm.onData((data) => {
+        if (socket.readyState !== WebSocket.OPEN) return;
+        const bytes = encoder.encode(data);
+        socket.send(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+      });
+      resizeObserver =
+        typeof ResizeObserver !== "undefined"
+          ? new ResizeObserver(() => {
+              fitAddon.fit();
+              sendResize();
+            })
+          : null;
+      resizeObserver?.observe(host);
+      boundTerm.focus();
+    }
+
+    void connect().catch(() => {
+      if (!ac.signal.aborted) onStatus("error");
+    });
+
+    return () => {
+      ac.abort();
+      resizeObserver?.disconnect();
+      dataDisposable?.dispose();
+      try {
+        ws?.close(1000, "terminal closed");
+      } catch {
+        // Closing a CONNECTING socket can throw in some environments.
+      }
+      term?.dispose();
+    };
+  }, [runId, nodeId, dark]);
+  return (
+    <div
+      className="mon-hijack-terminal"
+      ref={mountRef}
+      data-testid="monitor-hijack-terminal"
+      style={{ background: dark ? HIJACK_TERM_DARK.background : HIJACK_TERM_LIGHT.background }}
+    />
+  );
+}
+
+const HIJACK_STATUS_TONES: Record<HijackStatus, Tone> = {
+  connecting: "waiting",
+  connected: "ok",
+  exited: "idle",
+  closed: "idle",
+  error: "failed",
+};
+
+function HijackModal({
+  runId,
+  nodeId,
+  label,
+  engine,
+  onClose,
+}: {
+  runId: string;
+  nodeId: string;
+  label: string;
+  engine: string;
+  onClose: () => void;
+}) {
+  const [status, setStatus] = useState<HijackStatus>("connecting");
+  const dark = isDarkTheme();
+  return (
+    <div className="mon-modal-backdrop" onClick={onClose} data-testid="monitor-hijack-modal">
+      <div className="mon-modal mon-hijack-modal" onClick={(event) => event.stopPropagation()}>
+        <header className="mon-modal-head">
+          <span className="mon-kicker">
+            {label}: <span className="mon-mono">{nodeId}</span> <span className="mon-dim">· {engine}</span>
+          </span>
+          <span className={`mon-conn tone-${HIJACK_STATUS_TONES[status]}`} data-status={status}>
+            <ToneDot tone={HIJACK_STATUS_TONES[status]} pulse={status === "connected"} />
+            {status}
+          </span>
+          <button type="button" className="mon-chip" onClick={onClose}>
+            Close
+          </button>
+        </header>
+        <HijackTerminal runId={runId} nodeId={nodeId} dark={dark} onStatus={setStatus} />
+      </div>
+    </div>
+  );
+}
+
 function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
   const nodeId = node.id ?? treeNodeKey(node);
   const output = useGatewayNodeOutput({ runId, nodeId, iteration: node.iteration ?? 0 });
@@ -1249,12 +1487,46 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
   const isLive = !TERMINAL_NODE_TONES.has(String(node.status ?? ""));
   const toolCalls = asArray(node.toolCalls).filter(isRecord);
   const agentName = isRecord(node.agent) ? asString(node.agent.name) : asString(node.agent);
+  // Hijack affordance: only nodes whose attempts recorded a resumable agent
+  // session get a button (live run + live node = hand-off; settled run =
+  // reopen the session post-mortem). Compute nodes never show one.
+  const runQuery = useGatewayRun(runId);
+  const runStatus = isRecord(runQuery.data) ? asString(runQuery.data.status) : undefined;
+  const candidates = useHijackCandidates(runId, isLive);
+  const candidate = hijackCandidateForNode(candidates, nodeId);
+  const hijackAction = hijackActionFor(runStatus, isLive, candidate !== null);
+  const [showHijack, setShowHijack] = useState(false);
   return (
     <aside className="mon-inspector" data-testid="monitor-inspector">
       <header className="mon-panel-head">
         <h2 className="mon-kicker">Node</h2>
+        {hijackAction && candidate ? (
+          <button
+            type="button"
+            className="mon-btn"
+            data-testid="monitor-hijack-button"
+            data-hijack-kind={hijackAction.kind}
+            title={
+              hijackAction.kind === "hijack"
+                ? `Take over this node's live ${candidate.engine} session in an embedded terminal`
+                : `Reopen this node's recorded ${candidate.engine} session in an embedded terminal`
+            }
+            onClick={() => setShowHijack(true)}
+          >
+            {hijackAction.label}
+          </button>
+        ) : null}
         <StatusTag status={node.status} />
       </header>
+      {showHijack && hijackAction && candidate ? (
+        <HijackModal
+          runId={runId}
+          nodeId={nodeId}
+          label={hijackAction.label}
+          engine={candidate.engine}
+          onClose={() => setShowHijack(false)}
+        />
+      ) : null}
       <div className="mon-inspector-title">{node.cardLabel ?? node.name ?? nodeId}</div>
       <NodeWhatHappened runId={runId} nodeId={nodeId} iteration={node.iteration ?? 0} status={node.status} />
       <dl className="mon-meta-grid">
@@ -1570,7 +1842,7 @@ function App() {
 
   return (
     <main className="mon-shell" data-testid="monitor-root">
-      <WorkflowUiStyles mode="theme" extra={monitorCss} />
+      <WorkflowUiStyles mode="theme" extra={`${monitorCss}\n${xtermCss}`} />
       <header className="mon-topbar">
         <div className="mon-brand">
           <span className="mon-brand-mark" aria-hidden />
@@ -1846,6 +2118,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-modal-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
 .mon-modal-head .mon-kicker { flex: 1; }
 .mon-modal-frame { flex: 1; border: 0; width: 100%; background: white; }
+
+/* PTY hijack terminal: the modal hosts one xterm.js instance; the mount fills
+   the modal body and the terminal's own theme paints the surface. */
+.mon-hijack-modal { width: min(1080px, 96vw); height: min(720px, 88vh); }
+.mon-hijack-terminal { flex: 1; min-height: 0; padding: var(--sp-2) var(--sp-3); }
+.mon-hijack-terminal .xterm { height: 100%; }
 
 .mon-empty { color: var(--muted); text-align: center; padding: var(--sp-6) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
 .mon-empty-hero { padding-top: 18vh; }

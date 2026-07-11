@@ -13,6 +13,9 @@ import {
   groupForStatus,
   groupRuns,
   hasFailedDescendant,
+  hijackActionFor,
+  hijackCandidateForNode,
+  hijackCandidatesOf,
   isCancellable,
   isNotableEvent,
   isResumable,
@@ -20,6 +23,7 @@ import {
   nodeSummaryEligible,
   paginateRuns,
   pick,
+  ptyHijackUrl,
   rowOf,
   runProgress,
   RUNS_PAGE_SIZE,
@@ -677,5 +681,66 @@ describe("nodeSummaryEligible", () => {
     expect(nodeSummaryEligible("skipped")).toBe(false);
     expect(nodeSummaryEligible(undefined)).toBe(false);
     expect(nodeSummaryEligible("")).toBe(false);
+  });
+});
+
+describe("PTY hijack affordance", () => {
+  test("hijackCandidatesOf tolerates the HTTP envelope and junk rows", () => {
+    const body = {
+      ok: true,
+      data: {
+        runId: "r1",
+        candidates: [
+          { nodeId: "agent-task", engine: "claude-code", mode: "native-cli" },
+          { nodeId: "chatty", engine: "pi", mode: "conversation" },
+          { nodeId: "", engine: "claude-code" },
+          { engine: "codex" },
+          "garbage",
+        ],
+      },
+    };
+    expect(hijackCandidatesOf(body)).toEqual([
+      { nodeId: "agent-task", engine: "claude-code", mode: "native-cli" },
+      { nodeId: "chatty", engine: "pi", mode: "conversation" },
+    ]);
+    expect(hijackCandidatesOf(null)).toEqual([]);
+    expect(hijackCandidatesOf({ candidates: [{ nodeId: "n", engine: "codex" }] })).toEqual([
+      { nodeId: "n", engine: "codex", mode: "native-cli" },
+    ]);
+  });
+
+  test("hijackCandidateForNode matches by node id only", () => {
+    const candidates = [{ nodeId: "a", engine: "codex", mode: "native-cli" }];
+    expect(hijackCandidateForNode(candidates, "a")?.engine).toBe("codex");
+    expect(hijackCandidateForNode(candidates, "b")).toBeNull();
+    expect(hijackCandidateForNode(candidates, undefined)).toBeNull();
+  });
+
+  test("no candidate means no button, regardless of statuses", () => {
+    expect(hijackActionFor("running", true, false)).toBeNull();
+    expect(hijackActionFor("finished", false, false)).toBeNull();
+  });
+
+  test("live run + live node offers a hand-off Hijack", () => {
+    expect(hijackActionFor("running", true, true)).toEqual({ kind: "hijack", label: "Hijack" });
+  });
+
+  test("live run + finished node hides the button (a hijack would park the whole run)", () => {
+    expect(hijackActionFor("running", false, true)).toBeNull();
+  });
+
+  test("settled runs reopen the recorded session for finished AND failed nodes", () => {
+    for (const status of ["finished", "failed", "cancelled", "waiting-approval", "paused", undefined]) {
+      expect(hijackActionFor(status, false, true)).toEqual({ kind: "reopen", label: "Reopen session" });
+    }
+  });
+
+  test("ptyHijackUrl builds a ws url with clamped geometry", () => {
+    expect(ptyHijackUrl("http://127.0.0.1:7331", "run 1", "node/1", { cols: 120, rows: 40 })).toBe(
+      "ws://127.0.0.1:7331/v1/pty/hijack?runId=run+1&nodeId=node%2F1&cols=120&rows=40",
+    );
+    expect(ptyHijackUrl("https://gw.example", "r", undefined, { cols: 0, rows: Number.NaN })).toBe(
+      "wss://gw.example/v1/pty/hijack?runId=r&cols=80&rows=24",
+    );
   });
 });
