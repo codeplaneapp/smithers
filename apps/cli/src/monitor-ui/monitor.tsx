@@ -866,7 +866,7 @@ const FOLLOW_THRESHOLD_PX = 80;
 type EventView = "notable" | "activity" | "all";
 
 function EventLog({ runId }: { runId: string }) {
-  const { events: allEvents, streaming, error } = useGatewayRunEvents(runId, { maxEvents: 500 });
+  const { events: allEvents, streaming, error, loading } = useGatewayRunEvents(runId, { maxEvents: 500 });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
   // Default to Activity: lifecycle transitions plus the agent's visible work
@@ -944,7 +944,7 @@ function EventLog({ runId }: { runId: string }) {
       <div className="mon-events" ref={containerRef} onScroll={onScroll} data-testid="monitor-events">
         {events.length === 0 ? (
           <div className="mon-empty">
-            {allEvents.length === 0 ? "No events yet." : view === "notable" ? "No notable events yet." : "No activity yet."}
+            {loading ? "Loading events…" : allEvents.length === 0 ? "No events yet." : view === "notable" ? "No notable events yet." : "No activity yet."}
           </div>
         ) : null}
         {events.map((frame) => {
@@ -992,6 +992,17 @@ function HealthStrip({
   const failedIteration = failedTask && typeof failedTask.iteration === "number" ? failedTask.iteration : 0;
   const sampleQuery = useGatewayNodeOutput({ runId, nodeId: failedNodeId, iteration: failedIteration });
   const sampleError = nodeErrorOf(sampleQuery.data);
+  // First paint: the tree collection is still pulling — a verdict computed on
+  // an empty tree ("no tasks yet") is wrong, not neutral. Say loading.
+  if (tree.isLoading && treeNodes.length === 0) {
+    return (
+      <div className="mon-banner tone-waiting mon-health" data-testid="monitor-health-strip">
+        <div className="mon-health-headline">
+          <span className="mon-dot mon-dot-pulse" aria-hidden /> <b>Assessing run health…</b>
+        </div>
+      </div>
+    );
+  }
   const diagnosis = diagnoseRun({
     runId,
     status,

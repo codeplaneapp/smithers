@@ -32,6 +32,7 @@ export function useGatewayRunEvents(
   lastHeartbeat: GatewayEventFrame | undefined;
   error: Error | undefined;
   streaming: boolean;
+  loading: boolean;
 } {
   const { client, collections } = useSmithersCollections();
   const connection = useSyncExternalStore(
@@ -69,5 +70,8 @@ export function useGatewayRunEvents(
     lastHeartbeat,
     error: live.isError || streamFailed ? new Error("Run event stream failed.") : undefined,
     streaming: Boolean(runId) && !live.isError && !streamFailed,
+    // True only during the collection's initial pull: consumers must render a
+    // loading state, not an authoritative-looking "no events" empty state.
+    loading: Boolean(runId) && !live.isReady && events.length === 0,
   };
 }
