@@ -1,7 +1,7 @@
 {
   "name": "smithers-orchestrator",
   "version": "0.28.0",
-  "description": "Durable workflows for coding agents: crash-safe runs that pause for human approval and rewind mistakes. Claude Code, Codex, Gemini, any model.",
+  "description": "Multi-agent workflows with full observability and time travel: watch every step live, rewind, fork, and replay any run. Claude Code, Codex, Gemini, any model.",
   "license": "MIT",
   "homepage": "https://smithers.sh",
   "repository": {

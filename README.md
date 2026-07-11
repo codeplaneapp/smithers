@@ -1,6 +1,6 @@
 # Smithers
 
-**Long agent jobs shouldn't die when your terminal does.**
+**Agent workflows you can watch live, rewind, fork, and replay.**
 
 [![npm](https://img.shields.io/npm/v/smithers-orchestrator?color=2563eb&label=npm)](https://www.npmjs.com/package/smithers-orchestrator)
 [![CI](https://github.com/smithersai/smithers/actions/workflows/ci.yml/badge.svg)](https://github.com/smithersai/smithers/actions/workflows/ci.yml)
@@ -9,16 +9,19 @@
 [![Awesome Smithers](https://img.shields.io/badge/awesome-smithers-2563eb)](https://github.com/smithersai/awesome-smithers)
 
 Tell your coding agent to do real, multi-step work, then Smithers runs it for minutes or
-days with crash recovery, retries, human approvals, and full observability. The same
-workflow runs across Claude Code, Codex, Pi, AI SDK models, and remote sandboxes.
+days: watch every step live, gate the risky ones behind human approvals, and rewind,
+fork, or replay any run. The same workflow runs across Claude Code, Codex, Pi, AI SDK
+models, and remote sandboxes.
 
-*The demo that matters: a run killed mid-task, then resumed. The completed task is
-skipped, the interrupted task re-runs, the run finishes. No recovery code.*
+*Time travel: fork a run from any earlier frame and branch an alternate timeline. Every
+step is a database row, so live watching, rewind, and replay are built in.*
 
-<img src="./docs/images/why/crash-resume.gif" alt="A Smithers run is killed partway through, then resumes: the completed task is skipped, the in-flight task re-runs as a new attempt, and the run finishes" width="1032" />
+<img src="./docs/images/why/task-fork.gif" alt="Forking a Smithers run from an earlier frame to branch an alternate timeline" width="1032" />
 
 ## What you get
 
+- ⏪ **Full observability and time travel**: watch every step live, then rewind, fork, or
+  replay any run from any point.
 - 🛡️ **Durable runs that survive crashes**: every completed step is persisted the moment it
   finishes, so a run resumes from where it stopped instead of starting over.
 - 🔌 **Any agent, any model**: Claude Code, Codex, Pi, Antigravity, and more, plus any model
@@ -296,6 +299,11 @@ prompt → render workflow → run task → validate output → persist to SQLit
 That loop is the whole model: a task runs, its output is validated against a schema and
 written down, then the workflow re-renders from persisted state to decide the next task. A
 crash at any point resumes from the last write, not from the top.
+
+*A run killed mid-task, then resumed: the completed task is skipped, the interrupted task
+re-runs, the run finishes. No recovery code.*
+
+<img src="./docs/images/why/crash-resume.gif" alt="A Smithers run is killed partway through, then resumes: the completed task is skipped, the in-flight task re-runs as a new attempt, and the run finishes" width="1032" />
 
 ```bash
 bunx smithers-orchestrator up workflow.tsx --input '{"description":"Fix bug"}'

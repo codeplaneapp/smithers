@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "name": "Smithers",
-  "description": "Durable workflows for coding agents. Every step saved, every run resumable, rewindable, and approvable. Any model, any harness.",
+  "description": "Multi-agent workflows with full observability and time travel. Watch every step live; rewind, fork, or replay any run. Any model, any harness.",
   "theme": "sequoia",
   "colors": {
     "primary": "#7c6a3c",
@@ -434,7 +434,8 @@
               "runtime/render-frame",
               "runtime/run-state",
               "runtime/revert",
-              "runtime/events"
+              "runtime/events",
+              "runtime/database-storage-audit"
             ]
           },
           {
