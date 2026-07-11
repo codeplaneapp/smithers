@@ -35,6 +35,7 @@ import { diffRawSnapshots } from "@smithers-orchestrator/time-travel/diff";
 import { getNodeOutputRoute } from "./gatewayRoutes/getNodeOutput.js";
 import { NodeOutputRouteError } from "./gatewayRoutes/NodeOutputRouteError.js";
 import { getNodeDiffRoute } from "./gatewayRoutes/getNodeDiff.js";
+import { WhatHappenedRouteError, whatHappenedRoute } from "./gatewayRoutes/whatHappened.js";
 import { DevToolsRouteError, getDevToolsSnapshotRoute, validateFrameNoInput, validateFromSeqInput, validateRunId } from "./gatewayRoutes/getDevToolsSnapshot.js";
 import { streamDevToolsRoute } from "./gatewayRoutes/streamDevTools.js";
 import { jumpToFrameRoute, JumpToFrameError } from "./gatewayRoutes/jumpToFrame.js";
@@ -2077,6 +2078,12 @@ export class Gateway {
         // CLI bind guard but isHostAllowed still 403s every non-loopback request.
         this.trustAnyHost = options.insecure === true;
         this.routes = typeof options.routes === "function" ? options.routes : null;
+        // Host-injected "what happened" narrator (the smithers CLI wires a cheap
+        // agent here). Null means the whatHappened RPC answers with the
+        // deterministic fact summary only — the Gateway itself never calls an LLM.
+        this.whatHappenedNarrator = typeof options.whatHappened === "function" ? options.whatHappened : null;
+        /** @type {Map<string, { payload: Record<string, unknown> }>} */
+        this.whatHappenedCache = new Map();
         this.ui = resolveGatewayUiConfig(options.ui, "/");
         this.operatorUi = resolveDefaultOperatorUiConfig(options.operatorUi);
         this.uiApp = createGatewayUiApp({
@@ -3475,11 +3482,21 @@ a { color: var(--brand); }</style>
         // callers poll incrementally with afterSeq so only the first read
         // scans history.
         const needle = `"nodeId":"${nodeId}"`;
-        let cursor = asOptionalNonNegativeInt(params.afterSeq, "afterSeq") ?? 0;
+        // First-click cost control: without a caller cursor, start from a
+        // bounded recent window instead of seq 0 — a long run holds tens of
+        // thousands of events and a full scan per inspector click is what
+        // "slow node loading" feels like. The hint is refreshed by every scan.
+        if (!this.runEventSeqHints) {
+            /** @type {Map<string, number>} */
+            this.runEventSeqHints = new Map();
+        }
+        const callerCursor = asOptionalNonNegativeInt(params.afterSeq, "afterSeq");
+        const hint = this.runEventSeqHints.get(runId) ?? 0;
+        let cursor = callerCursor ?? Math.max(0, hint - 6_000);
         /** @type {Record<string, unknown>[]} */
         const matches = [];
-        for (let page = 0; page < 80; page += 1) {
-            const rows = await resolved.adapter.listEventHistory(runId, { afterSeq: cursor, limit: 500 });
+        for (let page = 0; page < 40; page += 1) {
+            const rows = await resolved.adapter.listEventHistory(runId, { afterSeq: cursor, limit: 2_000 });
             if (!Array.isArray(rows) || rows.length === 0) {
                 break;
             }
@@ -3496,10 +3513,11 @@ a { color: var(--brand); }</style>
             if (matches.length > limit) {
                 matches.splice(0, matches.length - limit);
             }
-            if (rows.length < 500) {
+            if (rows.length < 2_000) {
                 break;
             }
         }
+        this.runEventSeqHints.set(runId, Math.max(this.runEventSeqHints.get(runId) ?? 0, cursor));
         return matches.map((row) => serializeRunEventRow(row));
     }
     /**
@@ -6599,6 +6617,25 @@ a { color: var(--brand); }</style>
                     return responseError(frame.id, result.error.code, result.error.message);
                 }
                 return responseOk(frame.id, result.payload);
+            }
+            case "whatHappened": {
+                try {
+                    const payload = await whatHappenedRoute({
+                        runId: params.runId,
+                        nodeId: params.nodeId,
+                        iteration: params.iteration,
+                        resolveRun: this.resolveRun.bind(this),
+                        summarize: this.whatHappenedNarrator,
+                        cache: this.whatHappenedCache,
+                    });
+                    return responseOk(frame.id, payload);
+                }
+                catch (error) {
+                    if (error instanceof WhatHappenedRouteError) {
+                        return responseError(frame.id, error.code, error.message);
+                    }
+                    throw error;
+                }
             }
             case "getDevToolsSnapshot": {
                 const runId = asString(params.runId);

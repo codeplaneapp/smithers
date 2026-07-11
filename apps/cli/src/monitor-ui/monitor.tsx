@@ -1075,9 +1075,11 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [lines, setLines] = useState<Array<{ seq: number; text: string; kind: "cmd" | "text" | "meta" }>>([]);
   const [failed, setFailed] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   useEffect(() => {
     setLines([]);
     setFailed(false);
+    setLoadedOnce(false);
     let cancelled = false;
     let afterSeq = 0;
     let inFlight = false;
@@ -1111,7 +1113,10 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
             return appended.length ? [...previous, ...appended].slice(-120) : previous;
           });
         }
-        if (!cancelled) setFailed(false);
+        if (!cancelled) {
+          setFailed(false);
+          setLoadedOnce(true);
+        }
       } catch {
         if (!cancelled) setFailed(true);
       } finally {
@@ -1133,7 +1138,11 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
   if (lines.length === 0) {
     return (
       <div className="mon-empty mon-dim">
-        {failed ? "Could not load this node's events." : "No output from this node yet — its events land here as they arrive."}
+        {failed
+          ? "Could not load this node's events."
+          : !loadedOnce
+            ? <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> loading transcript…</span>
+            : "No output from this node yet — its events land here as they arrive."}
       </div>
     );
   }
@@ -1211,6 +1220,10 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
       <h3 className="mon-kicker">Output</h3>
       {row ? (
         <pre className="mon-output">{formatOutputValue(row)}</pre>
+      ) : output.loading ? (
+        <div className="mon-empty mon-dim">
+          <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…</span>
+        </div>
       ) : (
         <div className="mon-empty mon-dim">
           {failure
