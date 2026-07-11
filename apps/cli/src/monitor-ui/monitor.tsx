@@ -1041,16 +1041,38 @@ function HealthStrip({
  * the first poll returns a bounded tail of this node's history, and each
  * subsequent poll reads only past the last seen seq.
  */
-function NodeLiveOutput({ runId, nodeId }: { runId: string; nodeId: string }) {
+function formatLiveTranscriptLine(
+  eventName: string,
+  detail: string,
+): { text: string; kind: "cmd" | "text" | "meta" } | null {
+  let text = detail.replace(/^[a-z0-9_-]+ · /i, "");
+  if (/^completed command · /.test(text)) return null;
+  if (/^started command · /.test(text)) {
+    text = text
+      .replace(/^started command · /, "")
+      .replace(/^\/bin\/(?:zsh|bash|sh) -l?c\s+/, "")
+      .replace(/^["']|["']$/g, "");
+    return { text: `$ ${text.slice(0, 220)}`, kind: "cmd" };
+  }
+  if (/^(started|completed)( turn| ·|$)/.test(text) || /^Node(Started|Finished|Failed|Retrying)/.test(eventName)) {
+    return { text: text.slice(0, 160), kind: "meta" };
+  }
+  return { text: text.slice(0, 400), kind: "text" };
+}
+
+function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string; live: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [lines, setLines] = useState<Array<{ seq: number; text: string }>>([]);
+  const [lines, setLines] = useState<Array<{ seq: number; text: string; kind: "cmd" | "text" | "meta" }>>([]);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     setLines([]);
     setFailed(false);
     let cancelled = false;
     let afterSeq = 0;
+    let inFlight = false;
     const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const search = new URLSearchParams({ nodeId, limit: "120" });
         if (afterSeq > 0) search.set("afterSeq", String(afterSeq));
@@ -1058,7 +1080,7 @@ function NodeLiveOutput({ runId, nodeId }: { runId: string; nodeId: string }) {
         if (!response.ok) throw new Error(`events ${response.status}`);
         const body = (await response.json()) as { data?: unknown[] };
         const rows = Array.isArray(body.data) ? body.data : [];
-        const fresh: Array<{ seq: number; text: string }> = [];
+        const fresh: Array<{ seq: number; text: string; kind: "cmd" | "text" | "meta" }> = [];
         for (const raw of rows) {
           if (!isRecord(raw)) continue;
           const name = String(raw.event ?? "");
@@ -1067,23 +1089,32 @@ function NodeLiveOutput({ runId, nodeId }: { runId: string; nodeId: string }) {
           if (!/AgentEvent|AgentTraceEvent|NodeOutput|ToolCall|task\.output|agent\.|NodeStarted|NodeFinished|NodeFailed|NodeRetrying/i.test(name)) continue;
           const line = formatEventLine({ event: name, seq, payload: raw.payload });
           const text = line.detail.startsWith(`${nodeId} · `) ? line.detail.slice(nodeId.length + 3) : line.detail;
-          fresh.push({ seq, text: text || name });
+          const formatted = formatLiveTranscriptLine(name, text || name);
+          if (!formatted) continue;
+          fresh.push({ seq, ...formatted });
         }
         if (!cancelled && fresh.length) {
-          setLines((previous) => [...previous, ...fresh].slice(-120));
+          setLines((previous) => {
+            const lastSeq = previous.length ? previous[previous.length - 1].seq : -1;
+            const appended = fresh.filter((line) => line.seq > lastSeq);
+            return appended.length ? [...previous, ...appended].slice(-120) : previous;
+          });
         }
         if (!cancelled) setFailed(false);
       } catch {
         if (!cancelled) setFailed(true);
+      } finally {
+        inFlight = false;
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), 2_500);
+    // Terminal nodes get a one-shot transcript; only live nodes keep polling.
+    const timer = live ? setInterval(() => void poll(), 2_500) : null;
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
     };
-  }, [runId, nodeId]);
+  }, [runId, nodeId, live]);
   useEffect(() => {
     const el = containerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -1098,7 +1129,7 @@ function NodeLiveOutput({ runId, nodeId }: { runId: string; nodeId: string }) {
   return (
     <div className="mon-output mon-live-output" ref={containerRef} data-testid="monitor-live-output">
       {lines.map((line) => (
-        <div key={line.seq} className="mon-live-line">
+        <div key={line.seq} className={`mon-live-line mon-live-${line.kind}`}>
           {line.text}
         </div>
       ))}
@@ -1164,12 +1195,8 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
           <pre className="mon-output mon-failure">{failure.message}</pre>
         </>
       ) : null}
-      {isLive ? (
-        <>
-          <h3 className="mon-kicker">Live output</h3>
-          <NodeLiveOutput runId={runId} nodeId={nodeId} />
-        </>
-      ) : null}
+      <h3 className="mon-kicker">{isLive ? "Live output" : "Transcript"}</h3>
+      <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
       <h3 className="mon-kicker">Output</h3>
       {row ? (
         <pre className="mon-output">{formatOutputValue(row)}</pre>
@@ -1178,7 +1205,7 @@ function NodeInspector({ runId, node }: { runId: string; node: TreeNode }) {
           {failure
             ? "The node failed before producing output."
             : isLive
-              ? "No structured output yet — it lands here when the node finishes."
+              ? <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> running — structured output lands here when the node finishes</span>
               : "No output recorded for this node."}
         </div>
       )}
@@ -1684,7 +1711,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-output { margin: 0; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2); background: var(--panel); font-size: var(--fs-1); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; max-height: 45vh; overflow-y: auto; }
 .mon-failure { border-color: color-mix(in srgb, var(--failed, #f87171) 45%, var(--border)); }
 .mon-live-output { max-height: 32vh; }
-.mon-live-line { border-bottom: 1px dashed color-mix(in srgb, var(--border) 55%, transparent); }
+.mon-live-line { border-bottom: 1px dashed color-mix(in srgb, var(--border) 55%, transparent); overflow-wrap: anywhere; }
+.mon-live-cmd { font-family: ui-monospace, monospace; color: color-mix(in srgb, var(--text) 82%, transparent); }
+.mon-live-meta { color: var(--muted); font-style: italic; }
+.mon-live-pending { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .mon-live-line:last-child { border-bottom: 0; }
 .mon-quota { flex-direction: column; align-items: flex-start; }
 .mon-health { flex-direction: column; align-items: flex-start; gap: var(--sp-1); }
