@@ -25,7 +25,7 @@ export default smithers(() => (
   <Workflow name="events-probe">
     <Sequence>
       {TICKS.map((tickNo) => (
-        <Task key={tickNo} id={"tick-" + tickNo} output={outputs.epTick}>
+        <Task key={"tick-" + tickNo} id={"tick-" + tickNo} output={outputs.epTick}>
           {async () => {
             await sleep(TICK_DELAY_MS);
             return { tickNo, atMs: Date.now() };
