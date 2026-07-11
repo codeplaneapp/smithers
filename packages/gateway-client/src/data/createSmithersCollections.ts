@@ -270,15 +270,46 @@ function createSmithersCollectionsWithClient(
     }
   };
 
+  // A busy run emits change events continuously, and refetching kilo-row
+  // collections on every one saturates the tab (observed: 5 full /runs
+  // re-pulls in 5 idle seconds against one 64-agent run). Coalesce change
+  // invalidations leading+trailing: the first change in a quiet period
+  // refetches immediately, then further changes accumulate and flush once
+  // per window so the last change in a burst always lands.
+  const INVALIDATE_COALESCE_MS = 2_500;
+  let pendingNames: Set<string> | "all" | undefined;
+  let cooldownTimer: ReturnType<typeof setTimeout> | undefined;
+  const flushPending = () => {
+    cooldownTimer = undefined;
+    const batch = pendingNames;
+    pendingNames = undefined;
+    if (batch === undefined) return;
+    cooldownTimer = setTimeout(flushPending, INVALIDATE_COALESCE_MS);
+    void invalidate(batch === "all" ? undefined : [...batch]);
+  };
+  const queueInvalidate = (names?: readonly string[]) => {
+    if (cooldownTimer) {
+      if (!names) pendingNames = "all";
+      else if (pendingNames !== "all") {
+        pendingNames = pendingNames instanceof Set ? pendingNames : new Set<string>();
+        for (const name of names) pendingNames.add(name);
+      }
+      return;
+    }
+    cooldownTimer = setTimeout(flushPending, INVALIDATE_COALESCE_MS);
+    void invalidate(names ? [...names] : undefined);
+  };
+
   let unsubscribe: (() => void) | undefined;
   const connect = () => {
     if (unsubscribe) return;
     unsubscribe = client.stream.subscribe((event) => {
       if (event.type === "reset") {
+        // Reconnects must resync promptly; skip the coalescing window.
         void invalidate();
         return;
       }
-      if (event.type === "change") void invalidate(event.collections);
+      if (event.type === "change") queueInvalidate(event.collections);
     });
   };
 
