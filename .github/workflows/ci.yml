@@ -131,14 +131,7 @@ jobs:
 
       - name: Run test gates
         if: runner.os != 'Windows' || matrix.shard == 1
-        run: |
-          node scripts/check-single-effect-version.mjs
-          node scripts/check-dependency-boundaries.mjs
-          node scripts/check-no-direct-db-access.mjs
-          node scripts/check-docs.mjs
-          node scripts/check-llms.mjs
-          node scripts/check-sota.mjs
-          node scripts/check-smithers-test-script.mjs
+        run: node scripts/run-test-gates.mjs
 
       - name: Run d.ts freshness gate (Linux)
         if: runner.os == 'Linux'
