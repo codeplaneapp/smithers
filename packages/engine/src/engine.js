@@ -6019,7 +6019,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         try {
             const snap = await adapter.withTransaction("frame-commit", Effect.gen(function* () {
                 yield* adapter.insertFrame(frameRow);
-                return yield* captureSnapshotEffect(adapter, runId, frameNo, snapshotData);
+                return yield* captureSnapshotEffect(adapter, runId, frameNo, snapshotData, { inTransaction: true });
             }));
             const frameCommittedAtMs = nowMs();
             await Effect.runPromise(eventBus.emitEventWithPersist({

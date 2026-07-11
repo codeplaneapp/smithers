@@ -503,6 +503,7 @@ type ExternalSqliteDescriptor = {
     queryAllRaw: (statement: string, params?: ReadonlyArray<unknown>) => ReadonlyArray<Record<string, unknown>> | Promise<ReadonlyArray<Record<string, unknown>>>;
     queryValuesRaw?: (statement: string, params?: ReadonlyArray<unknown>) => ReadonlyArray<ReadonlyArray<unknown>> | Promise<ReadonlyArray<ReadonlyArray<unknown>>>;
     execute?: (statement: string, params?: ReadonlyArray<unknown>) => unknown | Promise<unknown>;
+    supportsTransactions?: boolean;
     transaction?: <T>(operation: () => T | Promise<T>) => T | Promise<T>;
 };
 

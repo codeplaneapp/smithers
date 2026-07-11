@@ -440,20 +440,14 @@ describe("forkRun failure branches", () => {
     }
   });
 
-  test("a nodesJson that turns corrupt at the reset step surfaces as a wrapped parse error", async () => {
-    // The reset path re-reads source.nodesJson after parseSnapshot already
-    // consumed it; a row whose column reads tear (e.g. corrupted storage)
-    // must surface as DB_QUERY_FAILED, not a raw SyntaxError. Modeled with a
-    // row whose nodesJson getter degrades after the initial reads.
-    const validNodes = JSON.stringify(sampleSnapshotData().nodes);
-    let reads = 0;
+  test("a corrupt nodesJson at the reset step surfaces as a wrapped parse error", async () => {
+    // Snapshot/content hydration now materializes one joined row. Corrupt JSON
+    // must still fail before the fork transaction starts and be wrapped as a
+    // DB_QUERY_FAILED parse error rather than leaking a raw SyntaxError.
     const tornRow = {
       runId: "run-torn",
       frameNo: 1,
-      get nodesJson() {
-        reads += 1;
-        return reads <= 2 ? validNodes : "{corrupt";
-      },
+      nodesJson: "{corrupt",
       outputsJson: JSON.stringify({}),
       ralphJson: "[]",
       inputJson: JSON.stringify({ prompt: "x" }),
@@ -473,7 +467,6 @@ describe("forkRun failure branches", () => {
     await expect(
       forkRun(fakePgAdapter as never, { parentRunId: "run-torn", frameNo: 1, resetNodes: ["analyze"] }),
     ).rejects.toThrow(/parse snapshot nodes|not valid JSON/);
-    expect(reads).toBeGreaterThanOrEqual(3);
   });
 
   test("a blocked child snapshot insert rolls the whole fork back", async () => {

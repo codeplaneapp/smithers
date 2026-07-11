@@ -419,7 +419,20 @@ function makeHarness(adapterState = {}) {
     };
 }
 
-function makePostgresTimeTravelStorage({ snapshots = [], branches = [], upserts = [] } = {}) {
+function makePostgresTimeTravelStorage({ snapshots = [], branches = [], contents = [], refs = [], upserts = [] } = {}) {
+    const joinedSnapshot = (snapshot) => {
+        if (!snapshot) return null;
+        const ref = refs.find((entry) => entry.runId === snapshot.runId && entry.frameNo === snapshot.frameNo);
+        const content = ref && contents.find((entry) => entry.contentHash === ref.contentHash);
+        return {
+            ...snapshot,
+            referencedContentHash: ref?.contentHash ?? null,
+            payloadNodesJson: content?.nodesJson ?? null,
+            payloadOutputsJson: content?.outputsJson ?? null,
+            payloadRalphJson: content?.ralphJson ?? null,
+            payloadInputJson: content?.inputJson ?? null,
+        };
+    };
     return {
         dialect: "postgres",
         queryAll: async (sql, params) => {
@@ -436,9 +449,13 @@ function makePostgresTimeTravelStorage({ snapshots = [], branches = [], upserts 
             throw new Error(`unexpected queryAll: ${sql}`);
         },
         queryOne: async (sql, params) => {
+            if (sql.includes("FROM _smithers_snapshot_contents")) {
+                const [contentHash] = params;
+                return contents.find((content) => content.contentHash === contentHash) ?? null;
+            }
             if (sql.includes("_smithers_snapshots")) {
                 const [runId, frameNo] = params;
-                return snapshots.find((snapshot) => snapshot.runId === runId && snapshot.frameNo === frameNo) ?? null;
+                return joinedSnapshot(snapshots.find((snapshot) => snapshot.runId === runId && snapshot.frameNo === frameNo));
             }
             if (sql.includes("_smithers_branches")) {
                 const [runId] = params;
@@ -446,10 +463,26 @@ function makePostgresTimeTravelStorage({ snapshots = [], branches = [], upserts 
             }
             throw new Error(`unexpected queryOne: ${sql}`);
         },
+        execute: async (sql, params) => {
+            if (!sql.includes("INSERT INTO _smithers_snapshot_contents")) {
+                throw new Error(`unexpected execute: ${sql}`);
+            }
+            const [contentHash, nodesJson, outputsJson, ralphJson, inputJson, refCount] = params;
+            if (!contents.some((content) => content.contentHash === contentHash)) {
+                contents.push({ contentHash, nodesJson, outputsJson, ralphJson, inputJson, refCount });
+            }
+        },
         upsert: async (table, row) => {
             upserts.push({ table, row });
             if (table === "_smithers_snapshots") {
-                snapshots.push(row);
+                const index = snapshots.findIndex((snapshot) => snapshot.runId === row.runId && snapshot.frameNo === row.frameNo);
+                if (index >= 0) snapshots[index] = row;
+                else snapshots.push(row);
+            }
+            if (table === "_smithers_snapshot_payload_refs") {
+                const index = refs.findIndex((ref) => ref.runId === row.runId && ref.frameNo === row.frameNo);
+                if (index >= 0) refs[index] = row;
+                else refs.push(row);
             }
             if (table === "_smithers_branches") {
                 branches.push(row);

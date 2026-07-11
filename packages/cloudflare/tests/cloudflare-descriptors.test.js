@@ -59,6 +59,7 @@ describe("createCloudflareDurableObjectSqliteDescriptor cursor decoding", () => 
 		const desc = createCloudflareDurableObjectSqliteDescriptor(storage);
 		expect(desc.queryAllRaw("SELECT 1")).toEqual([{ ok: 1 }]);
 		expect(calls).toEqual(["SELECT 1"]);
+		expect(desc.supportsTransactions).toBe(true);
 		expect(typeof desc.transaction).toBe("function");
 		expect(await desc.transaction(() => 42)).toBe(42);
 	});
@@ -74,6 +75,7 @@ describe("createCloudflareDurableObjectSqliteDescriptor cursor decoding", () => 
 
 	test("descriptor without a transaction leaves transaction undefined", () => {
 		const desc = createCloudflareDurableObjectSqliteDescriptor({ exec: () => [] });
+		expect(desc.supportsTransactions).toBe(false);
 		expect(desc.transaction).toBeUndefined();
 	});
 });
@@ -160,17 +162,12 @@ describe("createCloudflareD1SqliteDescriptor", () => {
 		}
 	});
 
-	test("transaction is a non-atomic pass-through that returns the operation result", async () => {
+	test("marks D1 as non-transactional instead of exposing a pass-through", () => {
 		const { database, close } = createFakeD1();
 		try {
 			const desc = createCloudflareD1SqliteDescriptor(database);
-			let ran = false;
-			const value = await desc.transaction(async () => {
-				ran = true;
-				return "done";
-			});
-			expect(ran).toBe(true);
-			expect(value).toBe("done");
+			expect(desc.supportsTransactions).toBe(false);
+			expect(desc.transaction).toBeUndefined();
 		} finally {
 			close();
 		}

@@ -75,6 +75,7 @@ export function createCloudflareDurableObjectSqliteDescriptor(storage) {
 			sql.exec(statement, ...params);
 			return [];
 		},
+		supportsTransactions: Boolean(transaction),
 		transaction,
 	};
 }
@@ -83,9 +84,10 @@ export function createCloudflareDurableObjectSqliteDescriptor(storage) {
  * Build a Smithers SQLite descriptor backed by a Cloudflare D1 database.
  *
  * WARNING — D1 has NO interactive transactions. Its prepare/bind/run API cannot
- * hold an open BEGIN/COMMIT/ROLLBACK across round-trips, so the `transaction()`
- * returned here runs the operation directly with NO atomicity: a failure or
- * crash partway through leaves the earlier writes committed. Smithers'
+ * hold an open BEGIN/COMMIT/ROLLBACK across round-trips, so this descriptor
+ * explicitly reports `supportsTransactions: false`. Smithers fails a
+ * transactional write before its operation begins rather than allowing a
+ * failure or crash partway through to leave earlier writes committed. Smithers'
  * run-of-record durability (frame commits — `insertFrame` + `captureSnapshot`,
  * run-state checkpoints, task completion) assumes transactional writes, so on
  * the D1 backend a mid-transaction failure can leave partial state. For durable
@@ -117,12 +119,9 @@ export function createCloudflareD1SqliteDescriptor(database) {
 			await database.prepare(statement).bind(...params).run();
 			return [];
 		},
-		async transaction(operation) {
-			// D1 has no interactive transactions (see this function's JSDoc): this
-			// runs the operation with no BEGIN/COMMIT/ROLLBACK and is NOT atomic.
-			// Kept as a pass-through so read-mostly D1 usage still works.
-			return await operation();
-		},
+		// SmithersDb fails before entering a transactional write. A pass-through
+		// callback would claim atomicity and can leave partial durable state.
+		supportsTransactions: false,
 	};
 }
 

@@ -2,7 +2,8 @@ import { Effect, Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { smithersBranches, smithersSnapshots } from "../schema.js";
+import { smithersBranches } from "../schema.js";
+import { persistSnapshotRow, snapshotContentHashFromJson } from "../snapshot/captureSnapshotEffect.js";
 import { loadSnapshot } from "../snapshot/loadSnapshotEffect.js";
 import { parseSnapshot } from "../snapshot/parseSnapshot.js";
 import { parseSnapshotJson } from "../snapshot/parseSnapshotJson.js";
@@ -116,6 +117,7 @@ export function forkRun(adapter, params) {
             ? params.workflowPath
             : parentRun?.workflowPath ?? null;
         const childConfigJson = patchDurabilityConfigJson(parentRun?.configJson ?? null, params.entryWorkflowHash);
+        const childContentHash = snapshotContentHashFromJson(nodesJson, source.outputsJson, source.ralphJson, inputJson);
         const childSnapshot = {
             runId: childRunId,
             frameNo: 0,
@@ -125,7 +127,7 @@ export function forkRun(adapter, params) {
             inputJson,
             vcsPointer: source.vcsPointer,
             workflowHash: childWorkflowHash,
-            contentHash: source.contentHash,
+            contentHash: childContentHash,
             createdAtMs: ts,
         };
         const childRun = parentRun
@@ -164,15 +166,7 @@ export function forkRun(adapter, params) {
         const isPostgres = adapter.internalStorage?.dialect === "postgres";
         yield* adapter.withTransactionEffect("fork run", Effect.gen(function* () {
             yield* Effect.tryPromise({
-                try: () => isPostgres
-                    ? adapter.internalStorage.upsert("_smithers_snapshots", childSnapshot, ["runId", "frameNo"])
-                    : adapter.db
-                        .insert(smithersSnapshots)
-                        .values(childSnapshot)
-                        .onConflictDoUpdate({
-                        target: [smithersSnapshots.runId, smithersSnapshots.frameNo],
-                        set: childSnapshot,
-                    }),
+                try: () => persistSnapshotRow(adapter, childSnapshot, { inTransaction: true }),
                 catch: (cause) => toSmithersError(cause, "insert forked snapshot", {
                     code: "DB_WRITE_FAILED",
                     details: { frameNo: 0, runId: childRunId },

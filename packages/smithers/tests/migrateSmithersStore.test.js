@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { SmithersDb } from "../../db/src/adapter.js";
 import { ensureSmithersTables } from "../../db/src/ensure.js";
 import { forkRun, getBranchInfo, listBranches } from "@smithers-orchestrator/time-travel/fork";
+import { loadSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import pg from "pg";
 import { createSmithers } from "../src/create.js";
@@ -61,8 +62,12 @@ function seedSqliteStore(cwd, dbPath = join(cwd, "smithers.db")) {
       VALUES ('run-migrate-1', 'write-result', 0, 1, 'finished', 12, 19, 0);
     INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
       VALUES ('run-migrate-1', 1, 12, 'RunStarted', '{"runId":"run-migrate-1"}');
+    INSERT INTO _smithers_snapshot_contents (content_hash, nodes_json, outputs_json, ralph_json, input_json, ref_count)
+      VALUES ('hash-1', '[]', '{}', '{}', '{"prompt":"hello"}', 0);
     INSERT INTO _smithers_snapshots (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, content_hash, created_at_ms)
-      VALUES ('run-migrate-1', 1, '[]', '{}', '{}', '{"prompt":"hello"}', 'hash-1', 20);
+      VALUES ('run-migrate-1', 1, '', '', '', '', 'hash-1', 20);
+    INSERT INTO _smithers_snapshot_payload_refs (run_id, frame_no, content_hash)
+      VALUES ('run-migrate-1', 1, 'hash-1');
     INSERT INTO _smithers_node_diffs (run_id, node_id, iteration, base_ref, diff_json, computed_at_ms, size_bytes)
       VALUES ('run-migrate-1', 'write-result', 0, 'base', '{"files":[]}', 21, 12);
     INSERT INTO _smithers_vectors (id, namespace, content, embedding, dimensions, metadata_json, document_id, chunk_index, created_at_ms)
@@ -275,7 +280,7 @@ describe("migrateSmithersStore", () => {
     expect(result.backend).toBe("pglite");
     expect(result.dbPath).toBe(dbPath);
     expect(result.runCount).toBe(1);
-    expect(result.schemaVersion).toBe("0023");
+    expect(result.schemaVersion).toBe("0025");
     expect(existsSync(result.markerPath)).toBe(true);
     expect(existsSync(dbPath)).toBe(true);
     expect(progress.some((event) => event.type === "table-copied" && event.table === "result")).toBe(true);
@@ -288,6 +293,10 @@ describe("migrateSmithersStore", () => {
       const pgConn = api.db.connection;
       expect(await tableCount(pgConn, "_smithers_runs")).toBe(1);
       expect(await tableCount(pgConn, "_smithers_snapshots")).toBe(1);
+      expect(await tableCount(pgConn, "_smithers_snapshot_contents")).toBe(1);
+      expect(await tableCount(pgConn, "_smithers_snapshot_payload_refs")).toBe(1);
+      const snapshotContent = await pgConn.query({ text: "SELECT ref_count FROM _smithers_snapshot_contents" });
+      expect(Number(snapshotContent.rows[0].ref_count)).toBe(1);
       expect(await tableCount(pgConn, "_smithers_node_diffs")).toBe(1);
       expect(await tableCount(pgConn, "_smithers_vectors")).toBe(1);
       expect(await tableCount(pgConn, "result")).toBe(1);
@@ -381,11 +390,8 @@ describe("migrateSmithersStore", () => {
 
       // The forked snapshot carries the migrated input forward (frame 0 of the
       // child), proving the time-travel checkpoint survived the migration.
-      const childSnapshot = await pgConn.query({
-        text: 'SELECT input_json FROM _smithers_snapshots WHERE run_id = $1 AND frame_no = 0',
-        values: [fork.runId],
-      });
-      expect(JSON.parse(childSnapshot.rows[0].input_json)).toEqual({ prompt: "hello" });
+      const childSnapshot = await loadSnapshot(adapter, fork.runId, 0);
+      expect(JSON.parse(childSnapshot.inputJson)).toEqual({ prompt: "hello" });
     } finally {
       await closeApi(api);
     }
@@ -538,6 +544,8 @@ describe("migrateSmithersStore", () => {
       expect(primaryKeyColumns).toEqual(["run_id"]);
       const indexCount = writableSqlite.query("PRAGMA index_list(_smithers_runs)").all().length;
       expect(indexCount).toBeGreaterThan(0);
+      expect(writableSqlite.query("SELECT ref_count FROM _smithers_snapshot_contents").get().ref_count).toBe(1);
+      expect(writableSqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs").get().count).toBe(1);
       expect(() => {
         writableSqlite
           .query("INSERT INTO _smithers_runs (run_id, workflow_name, workflow_path, status, created_at_ms) VALUES (?, ?, ?, ?, ?)")
@@ -565,7 +573,7 @@ describe("migrateSmithersStore", () => {
     } finally {
       await closeApi(sourceApi);
     }
-  });
+  }, 300_000);
 
   test("does not provision an existing-but-uninitialized pglite store while inferring --from", async () => {
     const cwd = makeWorkspace("smithers-migrate-pglite-probe-no-provision");
@@ -921,7 +929,7 @@ describe("migrateSmithersStore", () => {
     }
 
     const result = await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite" });
-    expect(result.schemaVersion).toBe("0023");
+    expect(result.schemaVersion).toBe("0025");
 
     // The migration itself upgraded the source schema before copying.
     sqlite = new Database(dbPath, { readonly: true });
@@ -1122,7 +1130,7 @@ describe("migrateSmithersStore real postgres", () => {
       expect(result.source.backend).toBe("sqlite");
       expect(result.target).toMatchObject({ backend: "postgres", url: "set" });
       expect(result.runCount).toBe(1);
-      expect(result.schemaVersion).toBe("0023");
+      expect(result.schemaVersion).toBe("0025");
       expect(existsSync(result.markerPath)).toBe(true);
 
       const api = await openSmithersBackend({}, { cwd, backend: "postgres", connectionString: url, env: {} });

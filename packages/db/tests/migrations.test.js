@@ -143,6 +143,9 @@ describe("DB migration edges", () => {
         .map((r) => r.name);
       expect(afterTables).toEqual(beforeTables);
       expect(afterTables).toContain("_smithers_schema_migrations");
+      sqlite.run("DROP TRIGGER _smithers_snapshot_payload_refs_insert");
+      ensureSmithersTables(db);
+      expect(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = '_smithers_snapshot_payload_refs_insert'").get()).toBeDefined();
       expect(migrationRows(sqlite).map((row) => row.id)).toEqual(
         expect.arrayContaining([
           "0001_current_tables",
@@ -155,6 +158,47 @@ describe("DB migration edges", () => {
     } finally {
       sqlite.close();
     }
+  });
+
+  test("snapshot storage migration is additive and preserves compressed prototype rows", () => {
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE _smithers_snapshots (
+        run_id TEXT NOT NULL,
+        frame_no INTEGER NOT NULL,
+        nodes_json TEXT NOT NULL,
+        outputs_json TEXT NOT NULL,
+        ralph_json TEXT NOT NULL,
+        input_json TEXT NOT NULL,
+        vcs_pointer TEXT,
+        workflow_hash TEXT,
+        content_hash TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        payload_hash TEXT,
+        PRIMARY KEY (run_id, frame_no)
+      );
+      CREATE TABLE _smithers_snapshot_payloads (
+        content_hash TEXT PRIMARY KEY,
+        payload_b64 TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL
+      );
+      INSERT INTO _smithers_snapshot_payloads (content_hash, payload_b64, created_at_ms)
+        VALUES ('prototype-hash', 'preserved-base64', 1);
+      INSERT INTO _smithers_snapshots
+        (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, content_hash, payload_hash, created_at_ms)
+        VALUES ('prototype-run', 0, '', '', '', '', 'prototype-hash', 'prototype-hash', 1);
+    `);
+    const before = sqlite.query("SELECT rootpage, sql FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshots'").get();
+    ensureSmithersTables(drizzle(sqlite));
+    const after = sqlite.query("SELECT rootpage, sql FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshots'").get();
+    expect(after).toEqual(before);
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshots").get().count).toBe(1);
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payloads").get().count).toBe(1);
+    expect(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshot_contents'").get()).toBeDefined();
+    expect(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshot_payload_refs'").get()).toBeDefined();
+    expect(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshots_0024_legacy'").get()).toBeNull();
+    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0025_snapshot_contents");
+    sqlite.close();
   });
 
   test("forward migration over a partially populated legacy DB upgrades schema without dropping rows", () => {

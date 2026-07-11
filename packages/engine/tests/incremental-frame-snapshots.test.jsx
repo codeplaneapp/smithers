@@ -26,6 +26,8 @@ import { Loop, Task, Workflow, runWorkflow } from "smithers-orchestrator";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
+import { loadSnapshot } from "@smithers-orchestrator/time-travel";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 
 const ENV_KEY = "SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS";
 const savedEnv = process.env[ENV_KEY];
@@ -132,7 +134,9 @@ async function runEquivalenceFixture(envValue, runId) {
             input: { tag: "original" },
             maxConcurrency: 1,
         }));
-        return { result, snapshots: readSnapshots(db, runId) };
+        const rows = readSnapshots(db, runId);
+        const snapshots = await Promise.all(rows.map((row) => loadSnapshot(new SmithersDb(db), runId, row.frameNo)));
+        return { result, snapshots };
     }
     finally {
         cleanup();
@@ -213,7 +217,7 @@ describe("incremental frame snapshots", () => {
                     maxConcurrency: 1,
                 }));
                 expect(result.status).toBe("finished");
-                const snapshots = readSnapshots(db, runId);
+                const snapshots = await Promise.all(readSnapshots(db, runId).map((row) => loadSnapshot(new SmithersDb(db), runId, row.frameNo)));
                 expect(snapshots.length).toBeGreaterThanOrEqual(2);
                 return JSON.parse(snapshots[snapshots.length - 1].inputJson);
             }
@@ -267,7 +271,7 @@ describe("incremental frame snapshots", () => {
                 maxConcurrency: 1,
             }));
             expect(result.status).toBe("finished");
-            const snapshots = readSnapshots(db, runId);
+            const snapshots = await Promise.all(readSnapshots(db, runId).map((row) => loadSnapshot(new SmithersDb(db), runId, row.frameNo)));
             expect(snapshots.length).toBeGreaterThanOrEqual(2);
             // The invariant the full-load path always upheld (output row and
             // finished node commit atomically, nodes are read before outputs):

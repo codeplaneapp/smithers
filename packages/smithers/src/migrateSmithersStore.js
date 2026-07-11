@@ -220,6 +220,12 @@ function tablePriority(table) {
     if (table === "_smithers_schema_migrations") return 0;
     if (table === "_smithers_runs") return 1;
     if (table === "input") return 2;
+    // Snapshot content must exist before compact snapshot metadata is copied;
+    // payload refs come last because they FK to both and rebuild ref_count via
+    // destination triggers.
+    if (table === "_smithers_snapshot_contents") return 3;
+    if (table === "_smithers_snapshots") return 4;
+    if (table === "_smithers_snapshot_payload_refs") return 5;
     if (table.startsWith("_smithers_")) return 3;
     return 4;
 }
@@ -323,7 +329,17 @@ async function prepareTargetTables(pgConn, tables) {
  */
 async function copyTable(sqlite, pgConn, table, batchSize, opts) {
     const startedAt = Date.now();
-    const columns = sourceColumns(sqlite, table.name);
+    let columns = sourceColumns(sqlite, table.name);
+    // An unreleased compressed-payload prototype added payload_hash to the
+    // snapshot table. The final schema deliberately leaves the large table
+    // unchanged; preserve those payloads in their legacy table and let readers
+    // use content_hash as the compatibility address on the destination.
+    if (table.name === "_smithers_snapshots" && columns.includes("payload_hash")) {
+        const targetColumns = new Set((await pgColumns(pgConn, table.name)).map((column) => column.name));
+        if (!targetColumns.has("payload_hash")) {
+            columns = columns.filter((column) => column !== "payload_hash");
+        }
+    }
     const sourceRows = countSqliteRows(sqlite, table.name);
     await emitProgress({ type: "table-start", table: table.name, sourceRows }, opts);
     await emitMigrationLog("info", "smithers.migration.table.start", {
@@ -360,7 +376,9 @@ async function copyTable(sqlite, pgConn, table, batchSize, opts) {
             for (const row of rows) {
                 await pgConn.query({
                     text: insertSql,
-                    values: columns.map((column) => encodePgValue(row[column])),
+                    values: columns.map((column) => table.name === "_smithers_snapshot_contents" && column === "ref_count"
+                        ? 0
+                        : encodePgValue(row[column])),
                 });
             }
             copiedRows += rows.length;
@@ -780,7 +798,13 @@ async function stablePgOrderClause(pgConn, table, names) {
 
 async function copyPgTableToSqlite(pgConn, sqlite, table, batchSize, opts) {
     const startedAt = Date.now();
-    const columns = await pgColumns(pgConn, table);
+    let columns = await pgColumns(pgConn, table);
+    if (table === "_smithers_snapshots" && columns.some((column) => column.name === "payload_hash")) {
+        const targetColumns = new Set(sourceColumns(sqlite, table));
+        if (!targetColumns.has("payload_hash")) {
+            columns = columns.filter((column) => column.name !== "payload_hash");
+        }
+    }
     const sourceRows = await countPgRows(pgConn, table);
     await emitProgress({ type: "table-start", table, sourceRows }, opts);
     if (columns.length === 0) {
@@ -804,7 +828,9 @@ async function copyPgTableToSqlite(pgConn, sqlite, table, batchSize, opts) {
             const rows = result.rows ?? [];
             if (rows.length === 0) break;
             for (const row of rows) {
-                insert.run(...names.map((column) => decodePgValueForSqlite(row[column])));
+                insert.run(...names.map((column) => table === "_smithers_snapshot_contents" && column === "ref_count"
+                    ? 0
+                    : decodePgValueForSqlite(row[column])));
             }
             copiedRows += rows.length;
             offset += rows.length;

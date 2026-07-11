@@ -28,6 +28,7 @@ import { camelToSnake } from "./utils/camelToSnake.js";
  *   queryAllRaw: (statement: string, params?: ReadonlyArray<unknown>) => ReadonlyArray<Record<string, unknown>> | Promise<ReadonlyArray<Record<string, unknown>>>;
  *   queryValuesRaw?: (statement: string, params?: ReadonlyArray<unknown>) => ReadonlyArray<ReadonlyArray<unknown>> | Promise<ReadonlyArray<ReadonlyArray<unknown>>>;
  *   execute?: (statement: string, params?: ReadonlyArray<unknown>) => unknown | Promise<unknown>;
+ *   supportsTransactions?: boolean;
  *   transaction?: <T>(operation: () => T | Promise<T>) => T | Promise<T>;
  * }} ExternalSqliteDescriptor
  */
@@ -308,6 +309,14 @@ const CREATE_TABLE_STATEMENTS = [
     next_run_at_ms INTEGER,
     error_json TEXT
   )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_snapshot_contents (
+    content_hash TEXT PRIMARY KEY,
+    nodes_json TEXT NOT NULL,
+    outputs_json TEXT NOT NULL,
+    ralph_json TEXT NOT NULL,
+    input_json TEXT NOT NULL,
+    ref_count INTEGER NOT NULL DEFAULT 0 CHECK (ref_count >= 0)
+  )`,
     `CREATE TABLE IF NOT EXISTS _smithers_snapshots (
     run_id TEXT NOT NULL,
     frame_no INTEGER NOT NULL,
@@ -320,6 +329,14 @@ const CREATE_TABLE_STATEMENTS = [
     content_hash TEXT NOT NULL,
     created_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id, frame_no)
+  )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_snapshot_payload_refs (
+    run_id TEXT NOT NULL,
+    frame_no INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    PRIMARY KEY (run_id, frame_no),
+    FOREIGN KEY (run_id, frame_no) REFERENCES _smithers_snapshots(run_id, frame_no) ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (content_hash) REFERENCES _smithers_snapshot_contents(content_hash)
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_branches (
     run_id TEXT PRIMARY KEY,
@@ -456,6 +473,8 @@ const CREATE_INDEX_STATEMENTS = [
     ON _smithers_memory_notes (namespace, status, created_at_ms)`,
     `CREATE INDEX IF NOT EXISTS _smithers_memory_note_supersessions_target_idx
     ON _smithers_memory_note_supersessions (supersedes_id)`,
+    `CREATE INDEX IF NOT EXISTS _smithers_snapshot_payload_refs_content_hash_idx
+    ON _smithers_snapshot_payload_refs (content_hash)`,
 ];
 /**
  * @param {string} identifier
@@ -1039,8 +1058,26 @@ export class SqlMessageStorage {
    * @returns {Promise<A>}
    */
     async transaction(operation) {
+        if (this.externalSqlite?.supportsTransactions === false) {
+            throw new Error(`The ${this.externalSqlite.driver} descriptor does not support atomic transactions.`);
+        }
         if (this.externalSqlite?.transaction) {
             return await this.externalSqlite.transaction(operation);
+        }
+        if (this.externalSqlite) {
+            // Generic single-connection SQLite descriptors can provide atomicity
+            // without a callback wrapper. BEGIN must succeed before the operation
+            // starts; backends such as D1 explicitly opt out above.
+            await this.execute("BEGIN IMMEDIATE");
+            try {
+                const result = await operation();
+                await this.execute("COMMIT");
+                return result;
+            }
+            catch (error) {
+                await this.execute("ROLLBACK").catch(() => undefined);
+                throw error;
+            }
         }
         return await operation();
     }

@@ -196,6 +196,157 @@ function tableColumnNames(sqlite, table) {
         .filter((name) => typeof name === "string"));
 }
 
+function indexExists(sqlite, index) {
+    return Boolean(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?").get(index));
+}
+
+const SNAPSHOT_SQLITE_TRIGGERS = [
+    `CREATE TRIGGER IF NOT EXISTS _smithers_snapshot_payload_refs_insert
+     AFTER INSERT ON _smithers_snapshot_payload_refs
+     BEGIN
+       SELECT RAISE(ABORT, 'snapshot payload reference does not match a compact snapshot')
+       WHERE NOT EXISTS (
+         SELECT 1 FROM _smithers_snapshots
+         WHERE run_id = NEW.run_id
+           AND frame_no = NEW.frame_no
+           AND content_hash = NEW.content_hash
+           AND nodes_json = '' AND outputs_json = '' AND ralph_json = '' AND input_json = ''
+       );
+       SELECT RAISE(ABORT, 'missing snapshot content')
+       WHERE NOT EXISTS (
+         SELECT 1 FROM _smithers_snapshot_contents WHERE content_hash = NEW.content_hash
+       );
+       UPDATE _smithers_snapshot_contents
+       SET ref_count = ref_count + 1
+       WHERE content_hash = NEW.content_hash;
+     END`,
+    `CREATE TRIGGER IF NOT EXISTS _smithers_snapshot_payload_refs_delete
+     AFTER DELETE ON _smithers_snapshot_payload_refs
+     BEGIN
+       UPDATE _smithers_snapshot_contents
+       SET ref_count = ref_count - 1
+       WHERE content_hash = OLD.content_hash;
+       DELETE FROM _smithers_snapshot_contents
+       WHERE content_hash = OLD.content_hash AND ref_count = 0;
+     END`,
+    `CREATE TRIGGER IF NOT EXISTS _smithers_snapshot_payload_refs_update
+     AFTER UPDATE OF content_hash ON _smithers_snapshot_payload_refs
+     WHEN OLD.content_hash IS NOT NEW.content_hash
+     BEGIN
+       SELECT RAISE(ABORT, 'snapshot payload reference does not match a compact snapshot')
+       WHERE NOT EXISTS (
+         SELECT 1 FROM _smithers_snapshots
+         WHERE run_id = NEW.run_id
+           AND frame_no = NEW.frame_no
+           AND content_hash = NEW.content_hash
+           AND nodes_json = '' AND outputs_json = '' AND ralph_json = '' AND input_json = ''
+       );
+       SELECT RAISE(ABORT, 'missing snapshot content')
+       WHERE NOT EXISTS (
+         SELECT 1 FROM _smithers_snapshot_contents WHERE content_hash = NEW.content_hash
+       );
+       UPDATE _smithers_snapshot_contents
+       SET ref_count = ref_count - 1
+       WHERE content_hash = OLD.content_hash;
+       DELETE FROM _smithers_snapshot_contents
+       WHERE content_hash = OLD.content_hash AND ref_count = 0;
+       UPDATE _smithers_snapshot_contents
+       SET ref_count = ref_count + 1
+       WHERE content_hash = NEW.content_hash;
+     END`,
+    // `smithersSnapshots` remains a public low-level table API. If an inline
+    // writer replaces a compact row, retire its content reference in the same
+    // statement so mixed-version writers remain readable and do not leak the
+    // formerly referenced content.
+    `CREATE TRIGGER IF NOT EXISTS _smithers_snapshots_payload_refs_reconcile
+     AFTER UPDATE OF content_hash, nodes_json, outputs_json, ralph_json, input_json ON _smithers_snapshots
+     WHEN EXISTS (
+       SELECT 1 FROM _smithers_snapshot_payload_refs
+       WHERE run_id = NEW.run_id
+         AND frame_no = NEW.frame_no
+         AND (
+           content_hash IS NOT NEW.content_hash
+           OR NOT (NEW.nodes_json = '' AND NEW.outputs_json = '' AND NEW.ralph_json = '' AND NEW.input_json = '')
+         )
+     )
+     BEGIN
+       DELETE FROM _smithers_snapshot_payload_refs
+       WHERE run_id = NEW.run_id AND frame_no = NEW.frame_no;
+     END`,
+    // Foreign-key cascades normally own this deletion. The trigger keeps the
+    // invariant on SQLite-compatible edge runtimes that reject PRAGMA
+    // foreign_keys while remaining a no-op when the FK already cascaded.
+    `CREATE TRIGGER IF NOT EXISTS _smithers_snapshots_payload_refs_cascade
+     AFTER DELETE ON _smithers_snapshots
+     BEGIN
+       DELETE FROM _smithers_snapshot_payload_refs
+       WHERE run_id = OLD.run_id AND frame_no = OLD.frame_no;
+     END`,
+];
+
+const SNAPSHOT_POSTGRES_FUNCTION = `CREATE OR REPLACE FUNCTION _smithers_snapshot_payload_refcount() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM _smithers_snapshots
+      WHERE run_id = NEW.run_id
+        AND frame_no = NEW.frame_no
+        AND content_hash = NEW.content_hash
+        AND nodes_json = '' AND outputs_json = '' AND ralph_json = '' AND input_json = ''
+    ) THEN
+      RAISE EXCEPTION 'snapshot payload reference does not match a compact snapshot' USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    UPDATE _smithers_snapshot_contents SET ref_count = ref_count + 1 WHERE content_hash = NEW.content_hash;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'missing snapshot content %', NEW.content_hash USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    UPDATE _smithers_snapshot_contents SET ref_count = ref_count - 1 WHERE content_hash = OLD.content_hash;
+    DELETE FROM _smithers_snapshot_contents WHERE content_hash = OLD.content_hash AND ref_count = 0;
+    RETURN OLD;
+  ELSIF TG_OP = 'UPDATE' AND OLD.content_hash IS DISTINCT FROM NEW.content_hash THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM _smithers_snapshots
+      WHERE run_id = NEW.run_id
+        AND frame_no = NEW.frame_no
+        AND content_hash = NEW.content_hash
+        AND nodes_json = '' AND outputs_json = '' AND ralph_json = '' AND input_json = ''
+    ) THEN
+      RAISE EXCEPTION 'snapshot payload reference does not match a compact snapshot' USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    UPDATE _smithers_snapshot_contents SET ref_count = ref_count - 1 WHERE content_hash = OLD.content_hash;
+    DELETE FROM _smithers_snapshot_contents WHERE content_hash = OLD.content_hash AND ref_count = 0;
+    UPDATE _smithers_snapshot_contents SET ref_count = ref_count + 1 WHERE content_hash = NEW.content_hash;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'missing snapshot content %', NEW.content_hash USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+  RETURN NEW;
+END $$`;
+
+const SNAPSHOT_POSTGRES_RECONCILE_FUNCTION = `CREATE OR REPLACE FUNCTION _smithers_snapshot_parent_reconcile() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  DELETE FROM _smithers_snapshot_payload_refs
+  WHERE run_id = NEW.run_id
+    AND frame_no = NEW.frame_no
+    AND (
+      content_hash IS DISTINCT FROM NEW.content_hash
+      OR NOT (NEW.nodes_json = '' AND NEW.outputs_json = '' AND NEW.ralph_json = '' AND NEW.input_json = '')
+    );
+  RETURN NEW;
+END $$`;
+
+async function installSnapshotTriggersPostgres(pgConn) {
+    await pgConn.query({ text: SNAPSHOT_POSTGRES_FUNCTION });
+    await pgConn.query({ text: SNAPSHOT_POSTGRES_RECONCILE_FUNCTION });
+    await pgConn.query({ text: `DROP TRIGGER IF EXISTS _smithers_snapshot_payload_refcount ON _smithers_snapshot_payload_refs` });
+    await pgConn.query({ text: `CREATE TRIGGER _smithers_snapshot_payload_refcount AFTER INSERT OR UPDATE OF content_hash OR DELETE ON _smithers_snapshot_payload_refs FOR EACH ROW EXECUTE FUNCTION _smithers_snapshot_payload_refcount()` });
+    await pgConn.query({ text: `DROP TRIGGER IF EXISTS _smithers_snapshot_parent_reconcile ON _smithers_snapshots` });
+    await pgConn.query({ text: `CREATE TRIGGER _smithers_snapshot_parent_reconcile AFTER UPDATE OF content_hash, nodes_json, outputs_json, ralph_json, input_json ON _smithers_snapshots FOR EACH ROW EXECUTE FUNCTION _smithers_snapshot_parent_reconcile()` });
+}
+
 /**
  * @param {{ query: (config: { text: string; values?: readonly unknown[] }) => Promise<{ rows?: readonly Record<string, unknown>[] }> }} pgConn
  * @param {string} table
@@ -223,6 +374,14 @@ async function tableColumnNamesPostgres(pgConn, table) {
     return new Set((result.rows ?? [])
         .map((row) => row.name)
         .filter((name) => typeof name === "string"));
+}
+
+async function indexExistsPostgres(pgConn, index) {
+    const result = await pgConn.query({
+        text: "SELECT 1 AS ok FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1 LIMIT 1",
+        values: [index],
+    });
+    return Boolean(result.rows?.[0]);
 }
 
 /**
@@ -820,6 +979,63 @@ function buildMigrations(context) {
                 return { tables: ["_smithers_memory_notes", "_smithers_memory_note_supersessions"] };
             },
         },
+        {
+            // 0024 was used briefly by an unreleased compressed-payload
+            // prototype. Use a new id and new table names so dogfood stores can
+            // retain those rows while upgrading without a table rewrite.
+            id: "0025_snapshot_contents",
+            name: "Add content-addressed snapshot storage without rewriting snapshots",
+            checksum: checksumForStatements([
+                "_smithers_snapshot_contents",
+                "_smithers_snapshot_payload_refs",
+                "_smithers_snapshot_payload_refs_content_hash_idx",
+                ...SNAPSHOT_SQLITE_TRIGGERS,
+            ]),
+            isApplied: (sqlite) => tableExists(sqlite, "_smithers_snapshots") &&
+                tableExists(sqlite, "_smithers_snapshot_contents") &&
+                tableExists(sqlite, "_smithers_snapshot_payload_refs") &&
+                indexExists(sqlite, "_smithers_snapshot_payload_refs_content_hash_idx") &&
+                sqlite.query("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name LIKE '_smithers_snapshot%payload_refs_%'").get().count === SNAPSHOT_SQLITE_TRIGGERS.length,
+            isAppliedPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_snapshots")) ||
+                    !(await tableExistsPostgres(pgConn, "_smithers_snapshot_contents")) ||
+                    !(await tableExistsPostgres(pgConn, "_smithers_snapshot_payload_refs")) ||
+                    !(await indexExistsPostgres(pgConn, "_smithers_snapshot_payload_refs_content_hash_idx"))) {
+                    return false;
+                }
+                const triggers = await pgConn.query({
+                    text: `SELECT tgname FROM pg_trigger
+                           WHERE tgname IN ('_smithers_snapshot_payload_refcount', '_smithers_snapshot_parent_reconcile')
+                             AND NOT tgisinternal`,
+                });
+                return new Set((triggers.rows ?? []).map((row) => row.tgname)).size === 2;
+            },
+            up: (sqlite) => {
+                if (!tableExists(sqlite, "_smithers_snapshots")) {
+                    if (tableExists(sqlite, "_smithers_snapshots_0024_legacy")) {
+                        throw new Error("0025 found _smithers_snapshots_0024_legacy without the live snapshot table; restore the interrupted prototype migration before continuing");
+                    }
+                    sqlite.run(createTableStatementFor("_smithers_snapshots", context.createTableStatements));
+                }
+                sqlite.run(createTableStatementFor("_smithers_snapshot_contents", context.createTableStatements));
+                sqlite.run(createTableStatementFor("_smithers_snapshot_payload_refs", context.createTableStatements));
+                sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_snapshot_payload_refs_content_hash_idx
+    ON _smithers_snapshot_payload_refs (content_hash)`);
+                for (const trigger of SNAPSHOT_SQLITE_TRIGGERS) sqlite.run(trigger);
+                return { tables: ["_smithers_snapshot_contents", "_smithers_snapshot_payload_refs"], triggers: SNAPSHOT_SQLITE_TRIGGERS.length };
+            },
+            upPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_snapshots"))) {
+                    await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_snapshots", context.createTableStatements)) });
+                }
+                await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_snapshot_contents", context.createTableStatements)) });
+                await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_snapshot_payload_refs", context.createTableStatements)) });
+                await pgConn.query({ text: translateDdl(POSTGRES, `CREATE INDEX IF NOT EXISTS _smithers_snapshot_payload_refs_content_hash_idx
+    ON _smithers_snapshot_payload_refs (content_hash)`) });
+                await installSnapshotTriggersPostgres(pgConn);
+                return { tables: ["_smithers_snapshot_contents", "_smithers_snapshot_payload_refs"], triggers: 2 };
+            },
+        },
     ];
 }
 
@@ -848,6 +1064,9 @@ export function runSmithersSchemaMigrations(sqlite, context) {
         recordMigration(sqlite, migration, details);
         applied.add(migration.id);
     }
+    // CREATE TRIGGER IF NOT EXISTS is metadata-only and repairs a manually
+    // dropped lifecycle trigger without rerunning any recorded migration.
+    for (const trigger of SNAPSHOT_SQLITE_TRIGGERS) sqlite.run(trigger);
 }
 
 /**
@@ -875,6 +1094,7 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
     for (const statement of context.createTableStatements) {
         await storage.execute(statement);
     }
+    for (const statement of SNAPSHOT_SQLITE_TRIGGERS) await storage.execute(statement);
     for (const statement of [...context.createIndexStatements, ...EXTRA_INDEX_STATEMENTS]) {
         await storage.execute(statement);
     }
@@ -982,5 +1202,7 @@ export async function runSmithersSchemaMigrationsPostgres(pgConn, context) {
  * @returns {Promise<void>}
  */
 export async function runSmithersSchemaInitPostgres(pgConn, context) {
+    // The migration runner creates current tables and installs the dialect-specific
+    // lifecycle trigger as part of 0025, including on a fresh database.
     await runSmithersSchemaMigrationsPostgres(pgConn, context);
 }

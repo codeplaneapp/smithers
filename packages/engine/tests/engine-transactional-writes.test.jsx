@@ -190,6 +190,47 @@ describe("transactional state writes", () => {
             cleanup();
         }
     });
+    test("snapshot ref failure rolls back frame and all snapshot storage", async () => {
+        const { smithers, outputs, db, cleanup } = buildSmithers();
+        const runId = "txn-frame-snapshot-rollback";
+        try {
+            const adapter = new SmithersDb(db);
+            await adapter.internalStorage.ensureSchema();
+            const client = queryClient(db);
+            client.exec(`CREATE TRIGGER fail_snapshot_ref_insert
+              BEFORE INSERT ON _smithers_snapshot_payload_refs
+              WHEN NEW.run_id = '${runId}'
+              BEGIN
+                SELECT RAISE(ABORT, 'injected snapshot ref failure');
+              END`);
+            const workflow = smithers((_ctx) => (<Workflow name="txn-frame-snapshot-rollback">
+          <Task id="frame-task" output={outputs.outputA}>
+            {{ value: 13 }}
+          </Task>
+        </Workflow>));
+            const result = await Effect.runPromise(runWorkflow(workflow, {
+                runId,
+                input: {},
+            }));
+            expect(result.status).toBe("finished");
+            const persisted = client
+                .query(`SELECT
+                  (SELECT COUNT(*) FROM _smithers_frames WHERE run_id = ?) AS frameCount,
+                  (SELECT COUNT(*) FROM _smithers_snapshots WHERE run_id = ?) AS snapshotCount,
+                  (SELECT COUNT(*) FROM _smithers_snapshot_contents) AS contentCount,
+                  (SELECT COUNT(*) FROM _smithers_snapshot_payload_refs WHERE run_id = ?) AS refCount`)
+                .get(runId, runId, runId);
+            expect(persisted).toEqual({
+                frameCount: 0,
+                snapshotCount: 0,
+                contentCount: 0,
+                refCount: 0,
+            });
+        }
+        finally {
+            cleanup();
+        }
+    }, 20_000);
     test("rollback after post-output failure forces clean retry", async () => {
         const { smithers, outputs, db, cleanup } = buildSmithers();
         const runId = "txn-rollback-retry";
