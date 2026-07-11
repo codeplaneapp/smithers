@@ -11,8 +11,26 @@ export function credentialSecretValues(...values) {
     for (const value of values) {
         if (!value) continue;
         secrets.add(value);
-        const credential = value.match(/^\S+\s+(.+)$/)?.[1];
-        if (credential) secrets.add(credential);
+
+        // Keep this parser linear: a repeated whitespace matcher followed by a
+        // repeated wildcard can backtrack quadratically on a long, malformed
+        // credential. `trimStart` uses the same ECMAScript whitespace set as
+        // `\s`, and credentials containing later line breaks were never valid
+        // wire forms here.
+        const separatorStart = value.search(/\s/u);
+        if (separatorStart <= 0) continue;
+        const separatorTail = value.slice(separatorStart);
+        const credential = separatorTail.trimStart();
+        if (credential && !/[\n\r\u2028\u2029]/u.test(credential)) {
+            secrets.add(credential);
+        } else if (!credential && separatorTail.length > 1) {
+            // Preserve the previous matcher's edge case for an all-whitespace
+            // tail: it retained one final non-line-break separator.
+            const finalSeparator = separatorTail[separatorTail.length - 1];
+            if (!/[\n\r\u2028\u2029]/u.test(finalSeparator)) {
+                secrets.add(finalSeparator);
+            }
+        }
     }
     return [...secrets].sort((left, right) => right.length - left.length);
 }
