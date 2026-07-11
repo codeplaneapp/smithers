@@ -1,3 +1,5 @@
+GitHub: https://github.com/smithersai/smithers/issues/937
+
 # Six fault cases are empty skip-only stubs — entire feature areas have zero fault/e2e coverage
 
 > Decomposed from #306 — test-coverage epic (`.smithers/tickets/.epics/0052-audit-test-coverage-gaps.md`)

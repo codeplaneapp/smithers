@@ -1,3 +1,5 @@
+GitHub: https://github.com/smithersai/smithers/issues/939
+
 # cancel reported for a run that never leaves `running`, so stall alerts keep re-firing
 
 **What happened (observed live, 2026-07-10, ticket-fleet run `run-1783718580190`)**

@@ -1,3 +1,5 @@
+GitHub: https://github.com/smithersai/smithers/issues/938
+
 # case08 inspector and case24 replay-safety are hybrids: real predicate called against fabricated storage
 
 > Decomposed from #306 — test-coverage epic (`.smithers/tickets/.epics/0052-audit-test-coverage-gaps.md`)
