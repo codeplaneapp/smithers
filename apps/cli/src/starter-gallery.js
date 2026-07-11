@@ -71,7 +71,7 @@ export const STARTER_RECIPES = [
         title: "Break a project into implementation tickets",
         audience: ["founder", "product", "operations", "engineering"],
         goals: ["plan", "coordinate"],
-        workflow: "tickets-create",
+        workflow: "create-workflow",
         outcome: "A batch of scoped tickets that can be assigned, reviewed, and tracked.",
         setup: [
             "Start from a PRD, customer request, incident summary, or internal project note.",
@@ -93,7 +93,7 @@ export const STARTER_RECIPES = [
         title: "Prepare a launch checklist",
         audience: ["founder", "product", "marketing", "operations"],
         goals: ["plan", "coordinate"],
-        workflow: "plan",
+        workflow: "create-workflow",
         outcome: "A launch plan with phases, owners, validation gates, communications, and rollback checks.",
         setup: [
             "Provide the launch date, intended audience, channels, and known risk areas.",
@@ -114,7 +114,7 @@ export const STARTER_RECIPES = [
         title: "Turn a customer report into a fix path",
         audience: ["support", "operations", "engineering"],
         goals: ["debug", "coordinate"],
-        workflow: "debug",
+        workflow: "create-workflow",
         outcome: "A reproduction plan, suspected root cause, fix, validation notes, and customer-safe summary.",
         setup: [
             "Paste the customer report, timestamps, account details that are safe to share, and expected behavior.",
@@ -139,7 +139,7 @@ export const STARTER_RECIPES = [
         title: "Create a research brief before committing work",
         audience: ["founder", "product", "marketing", "operations"],
         goals: ["research", "plan"],
-        workflow: "research",
+        workflow: "create-workflow",
         outcome: "A grounded brief with findings, assumptions, tradeoffs, and recommended next steps.",
         setup: [
             "Ask a specific question and list any sources, competitors, docs, or constraints to consider.",
@@ -159,7 +159,7 @@ export const STARTER_RECIPES = [
         title: "Clarify a vague request",
         audience: ["founder", "product", "support", "engineering"],
         goals: ["plan"],
-        workflow: "grill-me",
+        workflow: "create-workflow",
         outcome: "A tighter requirement set after the workflow asks targeted questions.",
         setup: [
             "Start with the messy request exactly as it came in.",
@@ -179,7 +179,7 @@ export const STARTER_RECIPES = [
         title: "Audit a product area for quality gaps",
         audience: ["quality", "product", "engineering", "operations"],
         goals: ["quality", "review"],
-        workflow: "audit",
+        workflow: "create-workflow",
         outcome: "A prioritized list of missing tests, docs, observability, reliability, and maintainability gaps.",
         setup: [
             "Name the feature area or workflow to inspect.",
@@ -205,7 +205,7 @@ export const STARTER_RECIPES = [
         title: "Add high-impact test coverage",
         audience: ["quality", "engineering", "product"],
         goals: ["quality", "build"],
-        workflow: "improve-test-coverage",
+        workflow: "create-workflow",
         outcome: "Focused tests around behavior that matters, with validation that the suite still passes.",
         setup: [
             "Name the feature, package, or bug class where coverage is weak.",
@@ -230,7 +230,7 @@ export const STARTER_RECIPES = [
         title: "Ship a focused change",
         audience: ["founder", "product", "engineering"],
         goals: ["build"],
-        workflow: "research-plan-implement",
+        workflow: "create-workflow",
         outcome: "Research, an implementation plan, code changes, validation, and review loops in one run.",
         setup: [
             "Give the exact user outcome and any files, APIs, screenshots, or acceptance criteria.",
@@ -251,7 +251,7 @@ export const STARTER_RECIPES = [
         title: "Run a larger project in approved milestones",
         audience: ["founder", "product", "engineering", "operations"],
         goals: ["build", "coordinate"],
-        workflow: "mission",
+        workflow: "create-workflow",
         outcome: "A milestone plan, checkpoint approvals, focused workers, validation, and a final delivery summary.",
         setup: [
             "Write the desired end state and constraints.",
@@ -431,7 +431,7 @@ export function renderStarterGallery(gallery) {
         lines.push(`  Run: ${starter.command}`);
         lines.push("");
     }
-    lines.push(`Use \`${cliCommand("init --template <id>")}\` to initialize with a selected template.`);
+    lines.push(`Use \`${cliCommand("init --template <id>")}\` to install the curated pack and receive the selected create-workflow request.`);
     lines.push(`Use \`${cliCommand("starters <id>")}\` for setup notes and follow-ups.`);
     lines.push(`Filter examples: \`${cliCommand("starters --audience product")}\`, \`${cliCommand("starters --goal quality")}\`, \`${cliCommand("starters --workflow debug")}\`.`);
     return lines.join("\n");

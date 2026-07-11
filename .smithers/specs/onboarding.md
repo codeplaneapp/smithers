@@ -20,7 +20,7 @@ This doc is the contract. The code in `src/onboarding/` implements it.
    runs durably and resumes after failure), and one question: *what do you want
    to build?* Every question carries a recommended answer, the same rule the
    grill-me interview follows. If the user is unsure, Smithers recommends a
-   default workflow and explains why.
+   focused starter request for `create-workflow` and explains why.
 
 3. **You build a workflow.** From the goal, Smithers proposes a real workflow —
    a node graph rendered live in the same `WorkflowGraph` the rest of the app
@@ -78,21 +78,22 @@ goal ─▶ shape ─▶ refine ─▶ name & create
 - **goal** — "In one line, what should this workflow do?" Free text. Empty or
   "I'm not sure" is a valid answer: it selects the recommended default.
 
-- **shape** — `classifyIntent(goal)` picks a starter template, and
-  `proposeWorkflow(draft)` turns the draft into a `WorkflowSpec` (the same type
-  the askme graph uses). The graph renders immediately, so the abstract word
-  "workflow" becomes a concrete picture the moment the user has a goal.
+- **shape** — `classifyIntent(goal)` turns the goal into one structured starter
+  request for the seeded `create-workflow` workflow, and `proposeWorkflow(draft)`
+  previews the graph it asks `create-workflow` to build. The request describes
+  the user's goal, likely graph shape, approval preference, and success checks;
+  it never claims that archived starter workflows are installed.
 
-  | The goal mentions… | Template | Teaches |
-  | --- | --- | --- |
-  | review, audit, a PR or diff | `review` | agent → merge |
-  | research, investigate, compare | `research` | fan-out → synthesize |
-  | a bug, something broken/failing | `debug` | compute → agent → compute |
-  | build, implement, add, refactor | `implement` | agent → review |
-  | *anything else, or unsure* | `research-plan-implement` (default) | the full shape: research → plan → approve → implement → review |
+  | The goal mentions… | Suggested graph shape |
+  | --- | --- |
+  | review, audit, a PR or diff | inspect → review → summarize |
+  | research, investigate, compare | fan-out research → synthesize |
+  | a bug, something broken/failing | reproduce → fix → verify |
+  | build, implement, add, refactor | plan → implement → review |
+  | *anything else, or unsure* | clarify → plan → approve → execute → verify |
 
-  The default is the richest template on purpose: it shows the most node kinds,
-  so a user who doesn't know what they want still learns what a workflow can be.
+  These are request hints, not workflow IDs. `create-workflow` remains the one
+  installation contract and writes the workflow that matches the request.
 
 - **refine** — two toggles, each mapped to one node kind so the user learns the
   vocabulary by flipping it:
@@ -100,9 +101,10 @@ goal ─▶ shape ─▶ refine ─▶ name & create
   - *Loop until it passes* adds/removes a loop-back edge from review to the work.
 
 - **name & create** — the name defaults to one derived from the goal.
-  "Create workflow" commits the draft: installs the matched workflow id into
-  `workflowsStore`, fills the composer with `draftToStarter(draft)`, raises a
-  toast, and calls `complete()`.
+  "Create workflow" commits the draft: fills the composer with a
+  `create-workflow` starter request from `draftToStarter(draft)`, raises a toast,
+  and calls `complete()`. The generated workflow is installed only after the
+  `create-workflow` run succeeds.
 
 `createWorkflowFlow.ts` holds this as pure functions — `classifyIntent`,
 `proposeWorkflow`, `draftToName`, `draftToStarter`, and the template table — so

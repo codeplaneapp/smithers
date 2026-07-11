@@ -280,7 +280,7 @@ test("workflow doctor reports discovered workflows, preload files, and agent det
         env,
     });
     expect(initResult.exitCode).toBe(0);
-    const result = runSmithers(["workflow", "doctor", "implement"], {
+    const result = runSmithers(["workflow", "doctor", "create-workflow"], {
         cwd: repo.dir,
         format: "json",
         env,
@@ -295,7 +295,7 @@ test("workflow doctor reports discovered workflows, preload files, and agent det
         },
         workflows: [
             {
-                id: "implement",
+                id: "create-workflow",
                 sourceType: "seeded",
             },
         ],

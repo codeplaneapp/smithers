@@ -1,5 +1,5 @@
 // Example only: debug is preserved here instead of being installed by default.
-// It remains an example because the default init pack is deliberately curated; run `smithers graph examples/init-pack/debug.tsx` after copying its imports.
+// Diagnose a failure, propose a fix, and verify the result. It remains an example because the curated init pack installs only authoring and documentation workflows. Run `smithers graph examples/init-pack/debug.tsx` after copying it into a project.
 // Copy this implementation and its referenced .smithers prompts/components/UI/lib files into a project to use it.
 // smithers-source: seeded
 // smithers-display-name: Debug

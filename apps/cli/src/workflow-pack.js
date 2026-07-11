@@ -6,7 +6,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { generateAgentsTs } from "./agent-detection.js";
-import { buildComponentImporterMap, componentBaseName } from "./initPackUpdates.js";
 import { installCuratedSkill, loadSkillDeselections, saveSkillDeselections, skillTargets } from "./installCuratedSkill.js";
 import { noteWorkflowPreferenceInAgentDocs } from "./noteWorkflowPreferenceInAgentDocs.js";
 // Seeded workflows authored as canonical files in .smithers/ and emitted by
@@ -16,13 +15,13 @@ import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
  * @typedef {{ onSkip?: (relPath: string) => void; scaffolded?: (counts: { writtenCount: number; skippedCount: number; preservedCount: number }) => void; skillInstalled?: (result: import("./installCuratedSkill.js").CuratedSkillResult) => void; agentDocsNoted?: (result: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary) => void; gitignoreEnsured?: (result: RootGitignoreResult) => void; installStart?: () => void; installDone?: (result: InitInstallResult, captured?: { stdout: string; stderr: string }) => void; }} InitReporter
  */
 /**
- * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; env?: NodeJS.ProcessEnv; selectedWorkflows?: string[]; selectedSkillTargets?: string[]; selectedAgentDocs?: string[]; scaffoldCustomAgent?: boolean; }} InitOptions
+ * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; env?: NodeJS.ProcessEnv; selectedSkillTargets?: string[]; selectedAgentDocs?: string[]; scaffoldCustomAgent?: boolean; }} InitOptions
  */
 /**
  * @typedef {{ status: "ok" | "skipped" | "failed"; reason?: string; }} InitInstallResult
  */
 /**
- * @typedef {{ path: string; absolutePath: string; contents: string; isComponent: boolean; importedBy: string[] }} ChangedPackFile
+ * @typedef {{ path: string; absolutePath: string; contents: string }} ChangedPackFile
  * @typedef {{ status: "created" | "updated" | "unchanged" | "skipped"; path: string; reason?: string; }} RootGitignoreResult
  * @typedef {{ rootDir: string; writtenFiles: string[]; skippedFiles: string[]; preservedPaths: string[]; changedFiles: ChangedPackFile[]; updatedFiles?: string[]; install: InitInstallResult; skill?: import("./installCuratedSkill.js").CuratedSkillResult; agentDocs?: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary; gitignore?: RootGitignoreResult; }} InitResult
  */
@@ -30,7 +29,7 @@ import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
  * @typedef {{ command: string; description: string; }} WorkflowCta
  */
 /**
- * @typedef {{ path: string; contents: string; preserveExisting?: boolean; owners?: string[]; }} TemplateFile
+ * @typedef {{ path: string; contents: string; preserveExisting?: boolean; }} TemplateFile
  */
 
 const FALLBACK_SMITHERS_SPEC = "latest";
@@ -124,6 +123,11 @@ const BUNDLED_VERSION_PINS = {
     milkdownCrepe: "7.21.2",
     // DDD renders Mermaid fenced diagrams in its markdown preview.
     mermaid: "11.12.1",
+    // create-workflow parses the skill doc it writes as real YAML frontmatter.
+    yaml: "2.9.0",
+    xyflow: "12.10.2",
+    dagre: "0.8.5",
+    dagreTypes: "0.7.54",
 };
 /**
  * @returns {DependencyVersions}
@@ -141,6 +145,10 @@ function readDependencyVersions() {
         nodeTypesVersion: resolveInstalledPackageVersion("@types/node", BUNDLED_VERSION_PINS.nodeTypes),
         milkdownCrepeVersion: resolveInstalledPackageVersion("@milkdown/crepe", BUNDLED_VERSION_PINS.milkdownCrepe),
         mermaidVersion: resolveInstalledPackageVersion("mermaid", BUNDLED_VERSION_PINS.mermaid),
+        yamlVersion: resolveInstalledPackageVersion("yaml", BUNDLED_VERSION_PINS.yaml),
+        xyflowVersion: resolveInstalledPackageVersion("@xyflow/react", BUNDLED_VERSION_PINS.xyflow),
+        dagreVersion: resolveInstalledPackageVersion("dagre", BUNDLED_VERSION_PINS.dagre),
+        dagreTypesVersion: resolveInstalledPackageVersion("@types/dagre", BUNDLED_VERSION_PINS.dagreTypes),
     };
 }
 /**
@@ -159,7 +167,6 @@ function renderPackageJson(versions) {
             gateway: "bun ./gateway.ts",
             "workflow:list": "smithers workflow list",
             "workflow:run": "smithers workflow run",
-            "workflow:implement": "smithers workflow implement",
             "workflow:inspect": "smithers workflow inspect",
             "workflow:skills": "smithers workflow skills",
         },
@@ -173,6 +180,9 @@ function renderPackageJson(versions) {
             zod: versions.zodVersion,
             "@milkdown/crepe": versions.milkdownCrepeVersion,
             mermaid: versions.mermaidVersion,
+            yaml: versions.yamlVersion,
+            "@xyflow/react": versions.xyflowVersion,
+            dagre: versions.dagreVersion,
         },
         devDependencies: {
             typescript: versions.typescriptVersion,
@@ -180,6 +190,7 @@ function renderPackageJson(versions) {
             "@types/react-dom": versions.reactDomTypesVersion,
             "@types/mdx": versions.mdxTypesVersion,
             "@types/node": versions.nodeTypesVersion,
+            "@types/dagre": versions.dagreTypesVersion,
         },
     }, null, 2) + "\n";
 }
@@ -208,120 +219,12 @@ function renderTsconfig() {
         exclude: ["./executions/**/*"],
     }, null, 2) + "\n";
 }
-/**
- * Component dependency manifest — each component's direct deps.
- * @type {Record<string, { components: string[]; prompts: string[] }>}
- */
-/**
- * @typedef {{ id: string; ui: string; seeded?: boolean; system?: boolean }} WorkflowManifestEntry
- */
-/**
- * Single source of truth for every installable workflow — its UI key, the
- * components it directly uses, and the prompts from renderPrompts() it imports.
- * Seeded workflows live in GENERATED_SEEDED_FILES; their prompts are bundled
- * inside that array and are filtered via path-prefix matching.
- * @type {WorkflowManifestEntry[]}
- */
-const WORKFLOW_MANIFEST = [
-    // The curated user-facing init pack. Their sources and transitive files are
-    // emitted by the generator; no legacy starter suite is hidden here.
-    { id: "create-workflow", ui: "create-workflow", seeded: true },
-    { id: "create-skill", ui: "create-skill", seeded: true },
-    { id: "docs-driven-development", ui: "docs-driven-development", seeded: true },
-    // System workflow: durable `smithers init` (hidden from default listings).
-    { id: "init", ui: "init", seeded: true, system: true },
-    // System workflow: auto-launched autopsy for failed runs.
-    { id: "post-failure", ui: "post-failure", seeded: true, system: true },
-    // System workflow: agent-assisted Smithers CLI/plugin/package upgrade.
-    { id: "upgrade", ui: "upgrade", seeded: true, system: true },
+export const CURATED_PUBLIC_WORKFLOW_IDS = [
+    "create-workflow",
+    "create-skill",
+    "docs-driven-development",
 ];
-/**
- * The IDs of every installable workflow, in manifest order. System workflows
- * (durable `init`, `post-failure` autopsy, `upgrade`) are internal plumbing the pack
- * closure always installs — they are never offered in the interactive wizard
- * and never subject to à-la-carte deselection — so they are excluded unless
- * `includeSystem: true` is passed. Exported so the init wizard derives its
- * option list from this single source of truth instead of a hand-kept copy.
- *
- * @param {{ includeSystem?: boolean }} [opts]
- * @returns {string[]}
- */
-export function workflowManifestIds(opts = {}) {
-    return WORKFLOW_MANIFEST
-        .filter((w) => opts.includeSystem || !w.system)
-        .map((w) => w.id);
-}
-/**
- * Compute the transitive closure of components and prompts needed by the
- * selected workflows. Defaults to all workflows when selectedWorkflows is
- * undefined (byte-identical to today's output).
- *
- * @param {string[] | undefined} selectedWorkflows
- * @returns {{ workflowIds: Set<string> }}
- */
-function computeClosure(selectedWorkflows) {
-    const allIds = WORKFLOW_MANIFEST.map((w) => w.id);
-    // System workflows (durable `init`, `post-failure`, `upgrade`) are always installed
-    // regardless of the caller's selection: the wizard never offers them and
-    // an à-la-carte selection must not drop them (else durable re-init and the
-    // failure autopsy silently stop working). Force-include them here rather
-    // than trusting every caller to remember.
-    const systemIds = WORKFLOW_MANIFEST.filter((w) => w.system).map((w) => w.id);
-    const workflowIds = new Set([...(selectedWorkflows ?? allIds), ...systemIds]);
-    return { workflowIds };
-}
-/**
- * Filter GENERATED_SEEDED_FILES to only include files owned by a selected
- * seeded workflow. Generated entries with explicit `owners` (lib helpers)
- * install only alongside a workflow that imports them; otherwise each seeded
- * workflow owns its .tsx file and any prompt whose path starts with
- * `.smithers/prompts/<id>` (exact or `<id>-*`).
- *
- * @param {TemplateFile[]} files
- * @param {Set<string>} workflowIds
- * @returns {TemplateFile[]}
- */
-function filterSeededFiles(files, workflowIds) {
-    // Sort seeded IDs longest-first to resolve prefix ambiguity
-    // (e.g. "research-plan-implement" before "research").
-    const seededIds = WORKFLOW_MANIFEST
-        .filter((w) => w.seeded)
-        .map((w) => w.id)
-        .sort((a, b) => b.length - a.length);
-    return files.filter((f) => {
-        if (Array.isArray(f.owners) && f.owners.length > 0) {
-            return f.owners.some((id) => workflowIds.has(id));
-        }
-        if (f.path.startsWith(".smithers/workflows/")) {
-            const id = f.path.replace(".smithers/workflows/", "").replace(/\.tsx$/, "");
-            return workflowIds.has(id);
-        }
-        if (f.path.startsWith(".smithers/prompts/")) {
-            const promptId = f.path.replace(".smithers/prompts/", "").replace(/\.mdx$/, "");
-            const owner = seededIds.find(
-                (id) => promptId === id || promptId.startsWith(id + "-"),
-            );
-            return owner !== undefined && workflowIds.has(owner);
-        }
-        if (f.path.startsWith(".smithers/lib/")) {
-            // A `.smithers/lib/*` helper ships only when a SELECTED seeded
-            // workflow actually imports it. Attribution is by real import edge,
-            // not a name prefix: a lib file's name need not match its importer
-            // (e.g. ddd-bug-scan imports ../lib/ddd/dddRoot.ts).
-            const rel = f.path.replace(".smithers/lib/", "");
-            const specForms = [rel, rel.replace(/\.tsx?$/, ""), rel.replace(/\/index\.tsx?$/, "")];
-            return files.some((wf) => {
-                if (!wf.path.startsWith(".smithers/workflows/")) return false;
-                const wfId = wf.path.replace(".smithers/workflows/", "").replace(/\.tsx$/, "");
-                if (!workflowIds.has(wfId)) return false;
-                return specForms.some((spec) =>
-                    wf.contents.includes(`../lib/${spec}"`) || wf.contents.includes(`../lib/${spec}'`),
-                );
-            });
-        }
-        return true;
-    });
-}
+export const CURATED_SYSTEM_WORKFLOW_IDS = ["init", "post-failure", "upgrade"];
 /**
  * @param {{ scaffoldCustomAgent?: boolean }} [options]
  * @returns {TemplateFile[]}
@@ -464,56 +367,13 @@ function renderAgentScaffoldFiles(options = {}) {
     }
     return files;
 }
-function renderGenericWorkflowUiSource(key) {
-    return `/** @jsxImportSource react */
-import { useState } from "react";
-import { createGatewayReactRoot, useGatewayActions, useGatewayRuns } from "smithers-orchestrator/gateway-react";
-const WORKFLOW_KEY = ${JSON.stringify(key)};
-function App() {
-  const [prompt, setPrompt] = useState("");
-  const [busy, setBusy] = useState(false);
-  const runsRaw = useGatewayRuns({ filter: { limit: 20 } });
-  const runs = ((runsRaw.data ?? []) as Array<{ runId: string; workflowKey?: string; status?: string }>).filter((r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY);
-  const actions = useGatewayActions();
-  async function start() { setBusy(true); try { await actions.launchRun({ workflow: WORKFLOW_KEY, input: { prompt } }); } finally { setBusy(false); } }
-  return <main style={{ fontFamily: "system-ui", background: "#0c0c0e", color: "#eee", minHeight: "100vh", padding: 20 }}>
-    <h2>{WORKFLOW_KEY}</h2>
-    <div style={{ display: "flex", gap: 8 }}><input value={prompt} onChange={(e) => setPrompt(e.currentTarget.value)} placeholder="Optional prompt…" /><button disabled={busy} onClick={() => void start()}>Start</button></div>
-    <ul>{runs.map((run) => <li key={run.runId}>{run.runId.slice(0, 8)} — {run.status ?? "running"}</li>)}</ul>
-  </main>;
-}
-createGatewayReactRoot(<App />);
-`;
-}
 const UI_WORKFLOWS = [
     { key: "create-workflow", title: "Create Workflow" },
     { key: "create-skill", title: "Create Skill" },
     { key: "docs-driven-development", title: "Docs Driven Development" },
 ];
-const SEEDED_UI_KEYS = new Set(["docs-driven-development"]);
-function renderUiFiles(workflowIds) {
-    return UI_WORKFLOWS
-        .map((w) => w.key)
-        .filter((key) => !workflowIds || workflowIds.has(key))
-        .filter((key) => !SEEDED_UI_KEYS.has(key))
-        .map((key) => ({
-            path: `.smithers/ui/${key}.tsx`,
-            contents: renderGenericWorkflowUiSource(key),
-        }));
-}
-
-/** A safe JS identifier for a workflow key used in the generated gateway.ts. */
-function toUiIdent(key) {
-    const ident = key.replace(/[^a-zA-Z0-9]/g, "_");
-    return /^[a-zA-Z_]/.test(ident) ? ident : `_${ident}`;
-}
-
-/**
- * @param {Set<string>} [workflowIds] - when provided, only mount selected workflows.
- */
-function renderGatewayFile(workflowIds) {
-    const workflows = workflowIds ? UI_WORKFLOWS.filter((w) => workflowIds.has(w.key)) : UI_WORKFLOWS;
-    const mounts = workflows.map(
+function renderGatewayFile() {
+    const mounts = UI_WORKFLOWS.map(
         (w) => `await mountWorkflow(${JSON.stringify(w.key)}, ${JSON.stringify(w.title)});`,
     );
     return {
@@ -565,13 +425,7 @@ function renderGatewayFile(workflowIds) {
         ].join("\n"),
     };
 }
-// Legacy bespoke pack UIs were moved to examples/init-pack.
-/**
- * Legacy inline workflows are no longer part of the init pack. They live in
- * examples/init-pack/ and are intentionally not rendered here.
- */
-function renderTemplateFiles(versions, env, projectRoot, closure, options = {}) {
-    const { workflowIds } = closure;
+function renderTemplateFiles(versions, env, projectRoot, options = {}) {
     return [
         { path: ".smithers/.gitignore", contents: "node_modules/\nexecutions/\nruns/\nreports/\nsandboxes/\nstate\ntmp\n*.db\n*.sqlite\npg/\n" },
         { path: ".smithers/workflows/.gitignore", contents: "*.log\nrun-*.log\n" },
@@ -580,12 +434,11 @@ function renderTemplateFiles(versions, env, projectRoot, closure, options = {}) 
         { path: ".smithers/types/assets.d.ts", contents: 'declare module "*.md" { const Component: any; export default Component; }\ndeclare module "*.mdx" { const Component: any; export default Component; }\n' },
         { path: ".smithers/bunfig.toml", contents: 'preload = ["./preload.ts"]\n' },
         { path: ".smithers/preload.ts", contents: 'import { mdxPlugin } from "smithers-orchestrator";\nmdxPlugin();\n' },
-        renderGatewayFile(workflowIds),
+        renderGatewayFile(),
         ...renderAgentScaffoldFiles({ scaffoldCustomAgent: options.scaffoldCustomAgent }),
         { path: ".smithers/agents.ts", contents: generateAgentsTs(env, { cwd: projectRoot }) },
         { path: ".smithers/smithers.config.ts", contents: "export const repoCommands = { lint: null, test: null, coverage: null } as const;\nexport default { repoCommands };\n" },
-        ...filterSeededFiles(GENERATED_SEEDED_FILES, workflowIds),
-        ...renderUiFiles(workflowIds),
+        ...GENERATED_SEEDED_FILES,
         { path: ".smithers/skills/.gitkeep", contents: "" },
         { path: ".smithers/tickets/.gitkeep", contents: "" },
     ];
@@ -599,10 +452,8 @@ function renderTemplateFiles(versions, env, projectRoot, closure, options = {}) 
 const AGENT_DOC_FILE_NAMES = ["CLAUDE.md", "AGENTS.md"];
 
 /**
- * Pack-local marker recording which workflows / agent docs the user deselected
- * during an interactive `smithers init`, so a later NON-interactive re-init
- * (agent-run `init --yes`, the durable `init` workflow, CI) does not silently
- * re-add them. Mirrors the skill-deselection marker (installCuratedSkill.js).
+ * Pack-local marker recording which agent docs the user deselected during an
+ * interactive `smithers init`.
  *
  * It lives at the pack root and is written OUTSIDE `templateFiles`, so `--force`
  * (which only rewrites bundled templates) never clobbers it. A missing or empty
@@ -621,23 +472,22 @@ function packSelectionsPath(rootDir) {
  * user chose last time instead of re-checking everything (which would persist
  * as "select all" on confirm and silently wipe the earlier opt-outs).
  * @param {string} rootDir
- * @returns {{ deselectedWorkflows: string[]; deselectedAgentDocs: string[] }}
+ * @returns {{ deselectedAgentDocs: string[] }}
  */
 export function loadPackSelections(rootDir) {
     try {
         const parsed = JSON.parse(readFileSync(packSelectionsPath(rootDir), "utf8"));
         return {
-            deselectedWorkflows: Array.isArray(parsed.deselectedWorkflows) ? parsed.deselectedWorkflows : [],
             deselectedAgentDocs: Array.isArray(parsed.deselectedAgentDocs) ? parsed.deselectedAgentDocs : [],
         };
     } catch {
-        return { deselectedWorkflows: [], deselectedAgentDocs: [] };
+        return { deselectedAgentDocs: [] };
     }
 }
 
 /**
  * @param {string} rootDir
- * @param {{ deselectedWorkflows: string[]; deselectedAgentDocs: string[] }} selections
+ * @param {{ deselectedAgentDocs: string[] }} selections
  */
 function savePackSelections(rootDir, selections) {
     try {
@@ -745,17 +595,7 @@ export function initWorkflowPack(options = {}) {
     // `init` ceremony offers these for selective update; other callers just see
     // them in the result. Enriched with shared-component impact for the warning.
     const changedFiles = [];
-    // Honor a persisted à-la-carte deselection when the caller didn't pass an
-    // explicit selection. Non-interactive re-init and the durable `init`
-    // workflow both call with selectedWorkflows/selectedAgentDocs === undefined
-    // (defaulting to "everything"); without this they would re-add a workflow
-    // or agent-doc the user opted out of during an interactive init.
-    const persisted = options.agentsOnly ? { deselectedWorkflows: [], deselectedAgentDocs: [] } : loadPackSelections(rootDir);
-    let effectiveSelectedWorkflows = options.selectedWorkflows;
-    if (effectiveSelectedWorkflows === undefined && persisted.deselectedWorkflows.length > 0) {
-        const deselected = new Set(persisted.deselectedWorkflows);
-        effectiveSelectedWorkflows = workflowManifestIds({ includeSystem: false }).filter((id) => !deselected.has(id));
-    }
+    const persisted = options.agentsOnly ? { deselectedAgentDocs: [] } : loadPackSelections(rootDir);
     let effectiveAgentDocs = options.selectedAgentDocs;
     if (effectiveAgentDocs === undefined) {
         effectiveAgentDocs = survivingAgentDocs(persisted.deselectedAgentDocs);
@@ -781,12 +621,10 @@ export function initWorkflowPack(options = {}) {
         else {
             ensureDir(executionsDir);
         }
-        const closure = computeClosure(effectiveSelectedWorkflows);
-        templateFiles = renderTemplateFiles(versions, env, projectRoot, closure, {
+        templateFiles = renderTemplateFiles(versions, env, projectRoot, {
             scaffoldCustomAgent: options.scaffoldCustomAgent,
         });
     }
-    const importerMap = buildComponentImporterMap(templateFiles);
     for (const file of templateFiles) {
         const absolutePath = resolve(rootDir, file.path.replace(/^\.smithers\//, ""));
         ensureParent(absolutePath);
@@ -808,13 +646,10 @@ export function initWorkflowPack(options = {}) {
                     current = undefined;
                 }
                 if (current !== undefined && current !== file.contents) {
-                    const component = componentBaseName(file.path);
                     changedFiles.push({
                         path: file.path,
                         absolutePath,
                         contents: file.contents,
-                        isComponent: component !== null,
-                        importedBy: component ? (importerMap.get(component) ?? []) : [],
                     });
                 }
             }
@@ -888,20 +723,12 @@ export function initWorkflowPack(options = {}) {
         });
         options.reporter?.agentDocsNoted?.(agentDocs);
     }
-    // Persist the à-la-carte workflow / agent-doc deselection so a later
-    // non-interactive re-init (or the durable `init` workflow) does not re-add
-    // what the user opted out of. Only write when the caller passed an explicit
-    // selection (the interactive ceremony does); an undefined selection is
-    // non-interactive and HONORS the marker above rather than rewriting it.
-    if (!options.agentsOnly && (options.selectedWorkflows !== undefined || options.selectedAgentDocs !== undefined)) {
-        const deselectedWorkflows = options.selectedWorkflows !== undefined
-            ? workflowManifestIds({ includeSystem: false }).filter((id) => !options.selectedWorkflows.includes(id))
-            : persisted.deselectedWorkflows;
+    if (!options.agentsOnly && options.selectedAgentDocs !== undefined) {
         const selectedDocs = options.selectedAgentDocs?.map((name) => name.toLowerCase());
         const deselectedAgentDocs = selectedDocs !== undefined
             ? AGENT_DOC_FILE_NAMES.filter((name) => !selectedDocs.includes(name.toLowerCase()))
             : persisted.deselectedAgentDocs;
-        savePackSelections(rootDir, { deselectedWorkflows, deselectedAgentDocs });
+        savePackSelections(rootDir, { deselectedAgentDocs });
     }
     const install = options.agentsOnly
         ? { status: "skipped", reason: "agents-only" }

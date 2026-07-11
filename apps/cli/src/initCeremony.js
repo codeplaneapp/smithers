@@ -3,8 +3,8 @@ import { intro, isCancel, log, multiselect } from "@clack/prompts";
 import pc from "picocolors";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { detectAvailableAgents } from "./agent-detection.js";
-import { applyWorkflowPackUpdates, initWorkflowPack } from "./workflow-pack.js";
-import { buildDefaultSelections, selectionsToPackOptions, withRequiredWorkflows } from "./init/interactiveInit.js";
+import { applyWorkflowPackUpdates, CURATED_PUBLIC_WORKFLOW_IDS, initWorkflowPack } from "./workflow-pack.js";
+import { buildDefaultSelections, selectionsToPackOptions } from "./init/interactiveInit.js";
 import { installAgentIntegration } from "./init/installAgentIntegration.js";
 import { selectPreferredAgent } from "./init/selectPreferredAgent.js";
 
@@ -16,12 +16,12 @@ import { selectPreferredAgent } from "./init/selectPreferredAgent.js";
  *
  * Returns the {@link InitResult} of the underlying {@link initWorkflowPack}
  * call, extended with `preferredAgent`, `integration`, `detections`, and
- * `selectedWorkflowCount` so the caller can launch the hijacked tutorial.
+ * `selectedWorkflowCount` so structured output can report the curated pack.
  *
  * Only call this in interactive TTY mode; piped/agent callers should use
  * {@link initWorkflowPack} directly so structured output is preserved.
  *
- * @param {{ force?: boolean; agentsOnly?: boolean; install?: boolean; global?: boolean; installSkill?: boolean; updatePrompt?: boolean; agent?: string; requiredWorkflows?: readonly string[]; env?: NodeJS.ProcessEnv; detections?: import("./AgentAvailability.ts").AgentAvailability[]; selectAgent?: typeof selectPreferredAgent; installIntegration?: typeof installAgentIntegration }} opts
+ * @param {{ force?: boolean; agentsOnly?: boolean; install?: boolean; global?: boolean; installSkill?: boolean; updatePrompt?: boolean; agent?: string; env?: NodeJS.ProcessEnv; detections?: import("./AgentAvailability.ts").AgentAvailability[]; selectAgent?: typeof selectPreferredAgent; installIntegration?: typeof installAgentIntegration }} opts
  * @returns {Promise<import("./workflow-pack.js").InitResult>}
  */
 export async function runInitCeremony(opts = {}) {
@@ -34,10 +34,7 @@ export async function runInitCeremony(opts = {}) {
     const installIntegration = opts.installIntegration ?? installAgentIntegration;
 
     const packRoot = global ? accountsRoot(env) : resolve(process.cwd(), ".smithers");
-    // Defaults honor previous opt-outs (pack-selections.json + skill marker);
-    // required workflows (e.g. create-workflow for `smithers init "<task>"`)
-    // are forced back in.
-    const selections = withRequiredWorkflows(buildDefaultSelections(env, packRoot), opts.requiredWorkflows);
+    const selections = buildDefaultSelections(env, packRoot);
 
     intro(`${pc.bgCyan(pc.black(" smithers "))} ${pc.dim(global ? "init --global" : "init")}`);
 
@@ -81,7 +78,7 @@ export async function runInitCeremony(opts = {}) {
             if (skippedCount > 0) parts.push(`${pc.bold(String(skippedCount))} ${pc.dim("preserved")}`);
             log.message(parts.length > 0 ? parts.join(pc.dim("  ·  ")) : pc.dim("nothing to write (pack already present)"));
             if (!agentsOnly) {
-                const wfCount = selections.selectedWorkflows.length;
+                const wfCount = CURATED_PUBLIC_WORKFLOW_IDS.length;
                 log.message(`${pc.dim("→")} Installing ${pc.bold(String(wfCount))} workflow${wfCount === 1 ? "" : "s"}`);
             }
         },
@@ -121,7 +118,6 @@ export async function runInitCeremony(opts = {}) {
         global,
         installSkill,
         skipInstall: agentsOnly || opts.install === false,
-        selectedWorkflows: agentsOnly ? undefined : selectedOptions.selectedWorkflows,
         selectedSkillTargets: agentsOnly ? undefined : selectedOptions.selectedSkillTargets,
         selectedAgentDocs: agentsOnly ? undefined : selectedOptions.selectedAgentDocs,
         reporter,
@@ -148,7 +144,7 @@ export async function runInitCeremony(opts = {}) {
     }
     result.preferredAgent = preferred;
     result.detections = detections;
-    result.selectedWorkflowCount = selections.selectedWorkflows.length;
+    result.selectedWorkflowCount = agentsOnly ? 0 : CURATED_PUBLIC_WORKFLOW_IDS.length;
 
     // Offer to update any shipped pack files that drifted from the latest
     // bundled version (a default run preserves existing files). Skipped with
@@ -163,33 +159,21 @@ export async function runInitCeremony(opts = {}) {
 const relPack = (path) => path.replace(/^\.smithers\//, "");
 
 /**
- * Interactive multi-select over the pack files that differ from the latest
- * bundled version. Warns when a selected file is a shared component (other
- * workflows are built on it), then writes the chosen files.
+ * Interactive multi-select over pack files that differ from the latest
+ * bundled version, then writes the chosen files.
  *
- * @param {Array<{ path: string; absolutePath: string; contents: string; isComponent: boolean; importedBy: string[] }>} changedFiles
+ * @param {Array<{ path: string; absolutePath: string; contents: string }>} changedFiles
  * @returns {Promise<string[]>} absolute paths written
  */
 async function promptPackUpdates(changedFiles) {
     const count = changedFiles.length;
     log.warn(`${pc.bold(String(count))} pack file${count === 1 ? "" : "s"} differ from the latest bundled version.`);
 
-    const sharedChanged = changedFiles.filter((file) => file.isComponent && file.importedBy.length > 0);
-    if (sharedChanged.length > 0) {
-        log.message(`${pc.yellow("Shared components")} ${pc.dim("— updating one re-affects every workflow that imports it:")}`);
-        for (const file of sharedChanged) {
-            log.message(`  ${pc.yellow(relPack(file.path))} ${pc.dim("→ " + file.importedBy.join(", "))}`);
-        }
-    }
-
     const selected = await multiselect({
         message: "Update which pack files? " + pc.dim("(the latest version overwrites your local copy)"),
         options: changedFiles.map((file) => ({
             value: file.path,
             label: relPack(file.path),
-            hint: file.isComponent && file.importedBy.length > 0
-                ? `shared · affects ${file.importedBy.length} workflow${file.importedBy.length === 1 ? "" : "s"}`
-                : undefined,
         })),
         required: false,
     });
@@ -207,13 +191,6 @@ async function promptPackUpdates(changedFiles) {
     const written = applyWorkflowPackUpdates(chosen);
     log.success(`Updated ${pc.bold(String(written.length))} pack file${written.length === 1 ? "" : "s"}`);
 
-    const chosenShared = chosen.filter((file) => file.isComponent && file.importedBy.length > 0);
-    if (chosenShared.length > 0) {
-        log.warn("You updated shared component(s) — re-check the workflows built on them:");
-        for (const file of chosenShared) {
-            log.message(`  ${pc.yellow(relPack(file.path))} ${pc.dim("→ " + file.importedBy.join(", "))}`);
-        }
-    }
     return written;
 }
 

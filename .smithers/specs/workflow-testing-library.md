@@ -480,8 +480,8 @@ alias.
   without acting" (zero side effects), and because seeded workflows already take
   a userland `dryRun` input (release-content and others), so
   `up release-content --dry-run` would be ambiguous.
-- `smithers init` seeds `.smithers/tests/` with a worked example test for `hello`
-  plus a `test` script in the pack `package.json`. This extends
+- `smithers init` seeds `.smithers/tests/` with focused tests for the curated
+  workflow pack plus a `test` script in the pack `package.json`. This extends
   `renderPackageJson`/`templateFiles` in `apps/cli/src/workflow-pack.js` and
   regenerates the seeded pack (`scripts/generate-workflow-pack.ts` to
   `apps/cli/src/seeded-workflow-pack.generated.js`, a drift-guarded artifact).

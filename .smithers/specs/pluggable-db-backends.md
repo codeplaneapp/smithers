@@ -12,7 +12,7 @@ The target behavior is:
 
    ```sh
    smithers init
-   smithers workflow run hello
+   smithers workflow run create-workflow
    smithers ps
    smithers inspect <run>
    smithers output <run> <node>
@@ -260,7 +260,8 @@ This intentionally changes the current test contract that “fresh workspaces de
 Rationale:
 
 - SQLite is the lightest local backend: no socket server, no pg client, no free-port selection, no extra process-like lifecycle.
-- It aligns with seeded workflows today: all 72 `.smithers/workflows/*.tsx` import `createSmithers`, and the seeded generated `hello` does too ([.smithers/workflows/hello.tsx](/Users/williamcory/smithers/.smithers/workflows/hello.tsx:7), [.smithers/workflows/hello.tsx](/Users/williamcory/smithers/.smithers/workflows/hello.tsx:26)).
+- It aligns with the curated seeded workflows, which use `createSmithers()` for
+  their local SQLite-backed graphs.
 - It removes the clean-init migration failure class on the common path: seeded `createSmithers()` writes SQLite, and reads default to SQLite.
 - It keeps the local live UI path simple because gateway sync already reads through `SmithersDb` for any engine backend ([.smithers/specs/postgres-tanstack-sync.md](/Users/williamcory/smithers/.smithers/specs/postgres-tanstack-sync.md:154)).
 
@@ -291,7 +292,7 @@ smithers gateway
 
 ### Seeded Workflow Policy
 
-Keep seeded workflows on `createSmithers()` for the default. This is the least churn and best matches “use SQLite as much as possible.” It also avoids unproven top-level `await` conversion across all seeded workflows and avoids PGlite socket cost for `workflow run hello`.
+Keep seeded workflows on `createSmithers()` for the default. This is the least churn and best matches “use SQLite as much as possible.” It also avoids unproven top-level `await` conversion across all seeded workflows and avoids PGlite socket cost for `workflow run create-workflow`.
 
 For opt-in PGlite/Postgres workflows, document `await openSmithersBackend()` as the required authoring idiom because `createSmithers()` correctly fails loud on non-SQLite requests ([packages/smithers/src/create.js](/Users/williamcory/smithers/packages/smithers/src/create.js:351)).
 
@@ -473,14 +474,17 @@ Make the default UI path explicit and preserve the existing client seam:
 
 ### Seeded Workflows and Workflow Pack
 
-Do not convert all seeded workflows to top-level `await openSmithersBackend()` for the default. Keep `createSmithers()` in the seeded pack so `workflow run hello` stays SQLite and instant.
+Do not convert all seeded workflows to top-level `await openSmithersBackend()` for the default. Keep `createSmithers()` in the seeded pack so `workflow run create-workflow` stays SQLite and instant.
 
 Still update docs/prompts to explain:
 
-- default workflows use SQLite via `createSmithers()`;
+- curated workflows use SQLite via `createSmithers()`;
 - use `await openSmithersBackend()` when authoring a workflow intended to run on PGlite/Postgres.
 
-There are 72 `.smithers/workflows/*.tsx`, and all currently import `createSmithers`; `SEEDED_WORKFLOW_IDS` covers only the 14 generated init-pack workflows ([scripts/generate-workflow-pack.ts](/Users/williamcory/smithers/scripts/generate-workflow-pack.ts:38), [scripts/generate-workflow-pack.ts](/Users/williamcory/smithers/scripts/generate-workflow-pack.ts:86)). This matters because gateway discovers all workflows, not only seeded ones.
+The repository contains additional development workflows, while
+`SEEDED_WORKFLOW_IDS` covers only the six curated init-pack workflows. This
+matters because the Gateway discovers every workflow present in a workspace, not
+only seeded ones.
 
 If any seeded workflow is converted to async authoring later, first prove top-level `await openSmithersBackend()` through the real MDX/JSX loader and `SMITHERS_HOT=1`.
 

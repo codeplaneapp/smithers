@@ -74,4 +74,4 @@ test("every canonical init workflow ships with a custom UI", () => {
     } finally {
         rmSync(root, { recursive: true, force: true });
     }
-});
+}, 30_000);

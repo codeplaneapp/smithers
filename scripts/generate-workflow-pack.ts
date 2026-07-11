@@ -4,10 +4,7 @@
  *
  * Single source of truth for the workflows that `smithers init` seeds.
  *
- * The legacy seeded pack is hand-embedded as escaped string arrays inside
- * `apps/cli/src/workflow-pack.js`. That duplicates the canonical dogfood files
- * in `.smithers/` and forces a manual, error-prone port every time a workflow
- * is added. This generator reads the canonical seeded files straight from
+ * This generator reads the canonical seeded files straight from
  * `.smithers/workflows/` (and the prompts they import from `.smithers/prompts/`)
  * and emits a generated module that `workflow-pack.js` splices into the init
  * pack verbatim — no escaping, no drift.
@@ -15,13 +12,14 @@
  * Adding a workflow to `smithers init` is now:
  *   1. Author it in `.smithers/workflows/<id>.tsx` with the seeded header
  *      (`// smithers-source: seeded`, `// smithers-display-name: …`, …).
- *   2. Add its id to SEEDED_WORKFLOW_IDS below.
+ *   2. Add its id to SEEDED_WORKFLOW_IDS below only when intentionally changing
+ *      the curated public/system inventory.
  *   3. `bun scripts/generate-workflow-pack.ts` and commit the regenerated module.
  *
  * `create-workflow`'s own scaffold step can run this for you so authoring a
  * workflow ships it to init automatically.
  */
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,9 +29,7 @@ const OUTPUT_FILE = resolve(REPO_ROOT, "apps/cli/src/seeded-workflow-pack.genera
 
 /**
  * Workflows whose canonical `.smithers/workflows/<id>.tsx` ships in `smithers
- * init`. Extend this list (and re-run the generator) to add a workflow to the
- * init pack. The legacy inline workflows in workflow-pack.js are NOT listed
- * here yet — they can be migrated incrementally.
+ * init`. The six entries are the curated contract, not an à-la-carte catalog.
  */
 const SEEDED_WORKFLOW_IDS = [
   "create-workflow",
@@ -47,17 +43,24 @@ const SEEDED_WORKFLOW_IDS = [
   "upgrade",
 ];
 
-type TemplateFile = { path: string; contents: string; owners?: string[] };
+type TemplateFile = { path: string; contents: string };
 
 /**
  * Seeded ids whose canonical multi-file UI (`.smithers/ui/<id>.tsx` plus its
- * relative sibling modules) ships with the pack. These UIs are authored as
- * multi-file apps, so they ride GENERATED_SEEDED_FILES (owners = the workflow
- * id) instead of the single-file WORKFLOW_UI_SOURCES map; renderUiFiles() in
- * workflow-pack.js must skip them (SEEDED_UI_KEYS) so the two paths never
- * both emit `.smithers/ui/<id>.tsx`.
+ * relative sibling modules) ships with the pack.
  */
-const SEEDED_UI_IDS = new Set(["docs-driven-development"]);
+const SEEDED_UI_IDS = new Set(["create-workflow", "create-skill", "docs-driven-development"]);
+
+const DDD_HELPER_FILES = [
+  "auditInputs.ts",
+  "build.ts",
+  "dddRoot.ts",
+  "featuresSchema.ts",
+  "generateSpecDocs.ts",
+  "generateUiModules.ts",
+  "triageCandidates.ts",
+  "validateFeatures.ts",
+];
 
 /** Prompts a workflow imports from `../prompts/<name>.mdx`. */
 function promptImportsOf(source: string): string[] {
@@ -70,10 +73,10 @@ function promptImportsOf(source: string): string[] {
 
 /**
  * Local `.smithers/lib/*` modules a workflow imports (`../lib/<spec>`). These
- * are plain TS helpers (extracted so they can be unit-tested without an agent);
- * unlike components — which init materializes from the WORKFLOW_MANIFEST — lib
- * files have no other install path, so init only ships them if the pack embeds
- * them. Returns the import specifiers verbatim (may omit the extension).
+ * are plain TS helpers (extracted so they can be unit-tested without an agent).
+ * They have no other install path, so init only ships them when the curated
+ * inventory embeds them. Returns the import specifiers verbatim (may omit the
+ * extension).
  */
 function libImportsOf(source: string): string[] {
   const specs = new Set<string>();
@@ -182,20 +185,10 @@ function build(): TemplateFile[] {
   const files: TemplateFile[] = [];
   const byPath = new Map<string, TemplateFile>();
 
-  // Dedup shared files across workflows; `owner` records which seeded
-  // workflow(s) pull the file in so init can install lib helpers only with
-  // the workflows that import them.
-  const push = (path: string, contents: string, owner?: string) => {
+  const push = (path: string, contents: string) => {
     const existing = byPath.get(path);
-    if (existing) {
-      if (owner) {
-        existing.owners ??= [];
-        if (!existing.owners.includes(owner)) existing.owners.push(owner);
-      }
-      return;
-    }
+    if (existing) return;
     const file: TemplateFile = { path, contents };
-    if (owner) file.owners = [owner];
     byPath.set(path, file);
     files.push(file);
   };
@@ -224,13 +217,9 @@ function build(): TemplateFile[] {
     // `smithers graph` with a module-not-found the moment it is seeded.
     const libQueue = libImportsOf(workflowSource).map((specifier) => resolveLibFile(specifier));
     if (id === "docs-driven-development") {
-      for (const entry of readdirSync(resolve(SMITHERS_DIR, "lib/ddd"), { withFileTypes: true })) {
-        if (entry.isFile() && !/\.test\./.test(entry.name)) {
-          libQueue.push(resolveLibFile(`ddd/${entry.name}`));
-        }
-      }
-      push(".smithers/spec/features.json", "[]\n", id);
-      push(".smithers/spec/content/overview.md", "# Product specification\n\nThis starter spec is intentionally empty. Run the docs-driven-development bootstrap to describe the target repository.\n", id);
+      for (const helper of DDD_HELPER_FILES) libQueue.push(resolveLibFile(`ddd/${helper}`));
+      push(".smithers/spec/features.json", "[]\n");
+      push(".smithers/spec/content/overview.md", "# Product specification\n\nThis starter spec is intentionally empty. Run docs-driven-development to describe the target repository.\n");
     }
     const visitedLibs = new Set<string>();
     while (libQueue.length > 0) {
@@ -238,7 +227,7 @@ function build(): TemplateFile[] {
       if (visitedLibs.has(relPath)) continue;
       visitedLibs.add(relPath);
       const libSource = readOrThrow(absPath, `lib module ${relPath} for workflow ${id}`);
-      push(`.smithers/lib/${relPath}`, libSource, id);
+      push(`.smithers/lib/${relPath}`, libSource);
       for (const nested of libRelativeImportsOf(libSource, relPath)) {
         libQueue.push(resolveLibFile(nested));
       }
@@ -255,7 +244,7 @@ function build(): TemplateFile[] {
         if (visitedUi.has(relPath)) continue;
         visitedUi.add(relPath);
         const uiSource = dddStarterUiContents(relPath, readOrThrow(absPath, `ui module ${relPath} for workflow ${id}`));
-        push(`.smithers/ui/${relPath}`, uiSource, id);
+        push(`.smithers/ui/${relPath}`, uiSource);
         for (const nested of uiRelativeImportsOf(uiSource, relPath)) {
           uiQueue.push(resolveUiFile(nested));
         }
@@ -273,7 +262,7 @@ function emit(files: TemplateFile[]): string {
     "//",
     "// Seeded workflow ids: " + SEEDED_WORKFLOW_IDS.join(", "),
     "",
-    "/** @typedef {{ path: string; contents: string; owners?: string[] }} TemplateFile */",
+    "/** @typedef {{ path: string; contents: string }} TemplateFile */",
     "",
     "/** @type {TemplateFile[]} */",
     "export const GENERATED_SEEDED_FILES = ",

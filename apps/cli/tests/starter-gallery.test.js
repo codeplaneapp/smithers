@@ -84,7 +84,7 @@ describe("starter gallery data", () => {
     test("filters by audience, goal, workflow, and tag", () => {
         expect(listStarterRecipes({ audience: "support" }).map((starter) => starter.id)).toContain("customer-incident");
         expect(listStarterRecipes({ goal: "quality" }).map((starter) => starter.id)).toContain("quality-audit");
-        expect(listStarterRecipes({ workflow: "debug" }).map((starter) => starter.id)).toEqual(["customer-incident"]);
+        expect(listStarterRecipes({ workflow: "create-workflow" }).map((starter) => starter.id)).toEqual(STARTER_TEMPLATE_IDS);
         expect(listStarterRecipes({ tag: "launch" }).map((starter) => starter.id)).toEqual(["launch-checklist"]);
     });
 

@@ -191,11 +191,11 @@ function writeFakeAgentBinaries(binDir) {
   const fixtureScript = [
     'const fs = require("node:fs");',
     'const path = require("node:path");',
-    'const invocation = process.argv.slice(2).join(" ").toLowerCase();',
+    'let stdin = ""; try { stdin = fs.readFileSync(0, "utf8"); } catch {}',
+    'const invocation = (process.argv.slice(2).join(" ") + "\\n" + stdin).toLowerCase();',
     "function writeFixtureFiles() {",
     "  const root = process.cwd();",
     '  const workflowDir = path.join(root, ".smithers", "workflows");',
-    '  const skillDir = path.join(root, ".smithers", "skills", "mock-workflow");',
     "  fs.mkdirSync(workflowDir, { recursive: true });",
     '  fs.writeFileSync(path.join(workflowDir, "mock-workflow.tsx"), [',
     '    "// smithers-source: generated",',
@@ -212,9 +212,23 @@ function writeFakeAgentBinaries(binDir) {
     '    "));",',
     '    "",',
     '  ].join("\\n"), "utf8");',
-    '  if (invocation.includes("document") || invocation.includes("skill")) fs.writeFileSync(path.join(root, ".smithers", "skills", "mock-workflow.md"), "---\\nname: mock-workflow\\ndescription: Test fixture skill.\\nworkflow: mock-workflow\\n---\\n\\n# Mock Workflow\\n", "utf8");',
     "}",
-    'if (invocation.includes("scaffold") || invocation.includes("document") || invocation.includes("skill")) writeFixtureFiles();',
+    "function writeSkillFixture() {",
+    "  const root = process.cwd();",
+    '  const skillsDir = path.join(root, ".smithers", "skills");',
+    "  fs.mkdirSync(skillsDir, { recursive: true });",
+    '  const mode = process.env.SMITHERS_TEST_SKILL_MODE || "positive";',
+    '  const attemptsPath = path.join(root, ".smithers", "test-document-attempts");',
+    '  const attempts = Number(fs.existsSync(attemptsPath) ? fs.readFileSync(attemptsPath, "utf8") : "0") + 1;',
+    '  fs.writeFileSync(attemptsPath, String(attempts), "utf8");',
+    '  if (mode === "missing") return;',
+    '  if (mode === "wrong-path") { fs.writeFileSync(path.join(skillsDir, "wrong.md"), "---\\nname: mock-workflow\\nworkflow: mock-workflow\\n---\\nwrong path\\n", "utf8"); return; }',
+    '  if (mode === "malformed" || (mode === "retry" && attempts === 1)) { fs.writeFileSync(path.join(skillsDir, "mock-workflow.md"), "---\\nname: [unterminated\\nworkflow: mock-workflow\\n---\\n", "utf8"); return; }',
+    '  if (mode === "mismatched") { fs.writeFileSync(path.join(skillsDir, "mock-workflow.md"), "---\\nname: other-workflow\\nworkflow: mock-workflow\\n---\\n", "utf8"); return; }',
+    '  fs.writeFileSync(path.join(skillsDir, "mock-workflow.md"), "---\\nname: mock-workflow\\ndescription: Test fixture skill.\\nworkflow: mock-workflow\\n---\\n\\n# Mock Workflow\\n", "utf8");',
+    "}",
+    'if (invocation.includes("scaffold")) writeFixtureFiles();',
+    'if (invocation.includes("document")) writeSkillFixture();',
   ].join("\n");
   const responseLiteral = JSON.stringify(AGENT_RESPONSE);
   writeExecutable(binDir, "claude", [
@@ -225,14 +239,16 @@ function writeFakeAgentBinaries(binDir) {
     '  process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) + "\\n");',
     "  process.exit(0);",
     "}",
-    `const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
+    `let payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
+    'if (invocation.includes("document") && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
     'process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "```json\\n" + payload + "\\n```\\n" }] } }) + "\\n");',
     "",
   ].join("\n"));
   writeExecutable(binDir, "codex", [
     "#!/usr/bin/env bun",
     fixtureScript,
-    `const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
+    `let payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
+    'if (invocation.includes("document") && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
     "const args = process.argv.slice(2);",
     'const outputIndex = args.indexOf("--output-last-message");',
     "if (outputIndex >= 0 && args[outputIndex + 1]) {",
@@ -244,7 +260,8 @@ function writeFakeAgentBinaries(binDir) {
   writeExecutable(binDir, "agy", [
     "#!/usr/bin/env bun",
     fixtureScript,
-    `const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
+    `let payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
+    'if (invocation.includes("document") && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
     'process.stdout.write(payload + "\\n");',
     "",
   ].join("\n"));
@@ -297,6 +314,7 @@ function isValidSmokeOutcome(id, status, exitCode) {
 }
 
 for (const id of SEEDED_WORKFLOW_IDS) {
+  if (id === "create-workflow") continue;
   if (id === "docs-driven-development") {
     test(`seeded workflow ${id} runs with fake agents and writes spec artifacts`, () => {
       const { repo, env } = initWorkflowPack();
@@ -330,5 +348,65 @@ for (const id of SEEDED_WORKFLOW_IDS) {
         `${id} exited ${result.exitCode} with status ${String(status)}: ${structuredDetail} ${detail}`,
       );
     }
+  }, SMOKE_TEST_TIMEOUT_MS);
+}
+
+const EXPECTED_SKILL = "---\nname: mock-workflow\ndescription: Test fixture skill.\nworkflow: mock-workflow\n---\n\n# Mock Workflow\n";
+
+function runCreateWorkflowSkillCase(mode) {
+  const { repo, env } = initWorkflowPack();
+  const runId = `create-workflow-skill-${mode}`;
+  const caseEnv = { ...env, SMITHERS_TEST_SKILL_MODE: mode };
+  const result = runSmithers(
+    ["workflow", "run", "create-workflow", "--run-id", runId, "--input", JSON.stringify(workflowInput("create-workflow"))],
+    { cwd: repo.dir, format: "json", env: caseEnv, timeoutMs: SMOKE_COMMAND_TIMEOUT_MS },
+  );
+  const verification = runSmithers(["output", runId, "skill-verification"], {
+    cwd: repo.dir,
+    format: "json",
+    env: caseEnv,
+    timeoutMs: SMOKE_COMMAND_TIMEOUT_MS,
+  });
+  return { repo, result, verification, runId, env: caseEnv };
+}
+
+test("create-workflow accepts exactly one valid companion skill and reports its terminal skillPath", () => {
+  const { repo, result, runId, env } = runCreateWorkflowSkillCase("positive");
+  expect(result.exitCode).toBe(0);
+  expect(result.json?.status).toBe("finished");
+  expect(repo.read(".smithers/skills/mock-workflow.md")).toBe(EXPECTED_SKILL);
+  expect(repo.exists(".smithers/skills/mock-workflow/SKILL.md")).toBe(false);
+  const terminal = runSmithers(["output", runId, "output"], { cwd: repo.dir, format: "json", env, timeoutMs: SMOKE_COMMAND_TIMEOUT_MS });
+  expect(terminal.exitCode).toBe(0);
+  expect(terminal.stdout).toContain('"skill_path":".smithers/skills/mock-workflow.md"');
+}, SMOKE_TEST_TIMEOUT_MS);
+
+test("create-workflow retries an invalid skill document and succeeds with exact metadata", () => {
+  const { repo, result, runId, env } = runCreateWorkflowSkillCase("retry");
+  expect(result.exitCode).toBe(0);
+  expect(repo.read(".smithers/test-document-attempts")).toBe("2");
+  expect(repo.read(".smithers/skills/mock-workflow.md")).toBe(EXPECTED_SKILL);
+  const terminal = runSmithers(["output", runId, "output"], { cwd: repo.dir, format: "json", env, timeoutMs: SMOKE_COMMAND_TIMEOUT_MS });
+  expect(terminal.stdout).toContain('"skill_path":".smithers/skills/mock-workflow.md"');
+}, SMOKE_TEST_TIMEOUT_MS);
+
+for (const mode of ["missing", "malformed", "mismatched", "wrong-path"]) {
+  test(`create-workflow fails after bounded retries for a ${mode} companion skill`, () => {
+    const { repo, result, verification } = runCreateWorkflowSkillCase(mode);
+    expect(result.exitCode).not.toBe(0);
+    expect(repo.read(".smithers/test-document-attempts")).toBe("3");
+    expect(verification.exitCode).toBe(0);
+    if (mode === "missing") {
+      expect(repo.exists(".smithers/skills/mock-workflow.md")).toBe(false);
+      expect(verification.stdout).toContain('"skill_path":".smithers/skills/mock-workflow.md"');
+    } else if (mode === "wrong-path") {
+      expect(repo.exists(".smithers/skills/mock-workflow.md")).toBe(false);
+      expect(repo.read(".smithers/skills/wrong.md")).toContain("workflow: mock-workflow");
+      expect(verification.stdout).toContain('"skill_path":".smithers/skills/wrong.md"');
+    } else {
+      expect(repo.exists(".smithers/skills/mock-workflow.md")).toBe(true);
+      expect(verification.stdout).toContain('"skill_path":".smithers/skills/mock-workflow.md"');
+    }
+    expect(verification.stdout).toContain('"contains_workflow_metadata":false');
   }, SMOKE_TEST_TIMEOUT_MS);
 }

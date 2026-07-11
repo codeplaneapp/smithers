@@ -1,5 +1,5 @@
 // Example only: context-engineer is preserved here instead of being installed by default.
-// It remains an example because the default init pack is deliberately curated; run `smithers graph examples/init-pack/context-engineer.tsx` after copying its imports.
+// Classify and route a context-heavy engineering request. It remains an example because the curated init pack installs only authoring and documentation workflows. Run `smithers graph examples/init-pack/context-engineer.tsx` after copying it into a project.
 // Copy this implementation and its referenced .smithers prompts/components/UI/lib files into a project to use it.
 // smithers-source: seeded
 // smithers-metadata-version: 1

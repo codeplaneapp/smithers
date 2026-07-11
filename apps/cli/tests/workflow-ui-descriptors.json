@@ -399,5 +399,16 @@
       "Delegation Chain"
     ],
     "verifyOutput": false
+  },
+  {
+    "key": "docs-driven-development",
+    "title": "Docs Driven Development",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "docs-driven-development-ui",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "a long-running audit/triage/implement/review loop (default maxRounds is unbounded); UI is asserted to mount + boot, not to complete deterministically with a trivial stub prompt",
+    "verifyOutput": false
   }
 ]

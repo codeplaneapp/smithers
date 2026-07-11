@@ -46,54 +46,18 @@ function initWorkflowPack(repo = createTempRepo()) {
     expect(initResult.exitCode).toBe(0);
     return { repo, env };
 }
-test("seeded implement workflow runs end-to-end and writes logs under .smithers/executions", () => {
+test("curated init pack discovers only the public authoring workflows", () => {
     const { repo, env } = initWorkflowPack();
-    const result = runSmithers(["workflow", "implement", "--prompt", "hello"], {
+    const result = runSmithers(["workflow", "list"], {
         cwd: repo.dir,
         format: "json",
         env,
     });
     expect(result.exitCode).toBe(0);
-    expect(result.json).toMatchObject({
-        status: "finished",
-    });
-    const runId = result.json?.runId;
-    expect(typeof runId).toBe("string");
-    expect(repo.exists(`.smithers/executions/${runId}/logs`)).toBe(true);
-}, WORKFLOW_PACK_SMOKE_TIMEOUT_MS);
-test("seeded review workflow runs end-to-end with fake agents", () => {
-    const { repo, env } = initWorkflowPack();
-    const result = runSmithers(["workflow", "review", "--prompt", "hello"], {
-        cwd: repo.dir,
-        format: "json",
-        env,
-    });
-    expect(result.exitCode).toBe(0);
-    expect(result.json).toMatchObject({
-        status: "finished",
-    });
-}, WORKFLOW_PACK_SMOKE_TIMEOUT_MS);
-test("seeded plan workflow runs end-to-end with fake agents", () => {
-    const { repo, env } = initWorkflowPack();
-    const result = runSmithers(["workflow", "plan", "--prompt", "hello"], {
-        cwd: repo.dir,
-        format: "json",
-        env,
-    });
-    expect(result.exitCode).toBe(0);
-    expect(result.json).toMatchObject({
-        status: "finished",
-    });
-}, WORKFLOW_PACK_SMOKE_TIMEOUT_MS);
-test("seeded improve-test-coverage workflow resolves and runs end-to-end", () => {
-    const { repo, env } = initWorkflowPack();
-    const result = runSmithers(["workflow", "improve-test-coverage", "--prompt", "hello"], {
-        cwd: repo.dir,
-        format: "json",
-        env,
-    });
-    expect(result.exitCode).toBe(0);
-    expect(result.json).toMatchObject({
-        status: "finished",
-    });
+    const ids = (result.json?.workflows ?? result.json ?? []).map((workflow) => workflow.id ?? workflow.name);
+    expect(ids.sort()).toEqual(["create-skill", "create-workflow", "docs-driven-development"]);
+    expect(ids).not.toContain("implement");
+    expect(ids).not.toContain("review");
+    expect(ids).not.toContain("plan");
+    expect(ids).not.toContain("improve-test-coverage");
 }, WORKFLOW_PACK_SMOKE_TIMEOUT_MS);

@@ -25,7 +25,7 @@ import {
  *      this closes that gap.
  *   2. A workflow-owned <UI> declaration is discovered from workflow source.
  *   3. A workflow UI bundle builds, boots, and mounts in a real Chromium loaded
- *      from the live gateway (`/workflows/plan`).
+ *      from the live gateway (`/workflows/docs-driven-development`).
  *
  * No route mocking: a real `smithers init`, the generated gateway booted as a
  * real server, and a headless Chromium driving it. Chromium is resolved from the
@@ -103,7 +103,9 @@ browserTest(
 
     expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
     expect(repo.read(".smithers/gateway.ts")).not.toContain("ui: { entry:");
-    expect(repo.read(".smithers/workflows/plan.tsx")).toContain('<UI entry="../ui/plan.tsx"');
+    expect(repo.read(".smithers/workflows/docs-driven-development.tsx")).toContain(
+      '<UI entry="../ui/docs-driven-development.tsx"',
+    );
 
     const port = await findOpenPort();
     const base = `http://127.0.0.1:${port}`;
@@ -116,8 +118,12 @@ browserTest(
     let browser;
     try {
       expect(await waitForHealth(base)).toBe(true);
-      expect(await listWorkflowUi(base, "plan")).toEqual(
-        expect.objectContaining({ key: "plan", hasUi: true, uiPath: "/workflows/plan" }),
+      expect(await listWorkflowUi(base, "docs-driven-development")).toEqual(
+        expect.objectContaining({
+          key: "docs-driven-development",
+          hasUi: true,
+          uiPath: "/workflows/docs-driven-development",
+        }),
       );
 
       // 1a — Raw HTTP: `GET /` is a 302 (to a mounted console) or a 200 HTML
@@ -145,14 +151,14 @@ browserTest(
       expect(rootText).not.toContain('"code":"NOT_FOUND"');
       expect(rootText.trim().length).toBeGreaterThan(0);
 
-      // 2 — A workflow UI bundle builds + boots + mounts. `plan` ships a UI with
-      // a stable test id (see workflow-ui-descriptors.json).
-      await page.goto(`${base}/workflows/plan`, { waitUntil: "domcontentloaded" });
-      await page.waitForSelector('[data-testid="plan-ui"]', { timeout: 20_000 });
+      // 2 — A workflow UI bundle builds + boots + mounts. `docs-driven-development`
+      // ships a UI with a stable test id (see workflow-ui-descriptors.json).
+      await page.goto(`${base}/workflows/docs-driven-development`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector('[data-testid="docs-driven-development-ui"]', { timeout: 20_000 });
 
       // An unknown runId must still serve the bundle (empty-run state handled
       // client-side), not 500 the route.
-      const unknownRun = await fetch(`${base}/workflows/plan?runId=does-not-exist`);
+      const unknownRun = await fetch(`${base}/workflows/docs-driven-development?runId=does-not-exist`);
       expect(unknownRun.status).toBe(200);
       expect(unknownRun.headers.get("content-type") ?? "").toContain("text/html");
     } finally {

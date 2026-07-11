@@ -237,10 +237,6 @@ export async function runInitCommand(c, fail) {
                 installSkill: c.options.skill,
                 updatePrompt: c.options.updatePrompt,
                 agent: c.options.agent,
-                // `smithers init "<task>"` launches the create-workflow builder
-                // right after init, so keep it in the pack even if the wizard
-                // deselected it — otherwise the dispatch fails with RUN_NOT_FOUND.
-                requiredWorkflows: c.args?.prompt ? ["create-workflow"] : undefined,
             })
             : initWorkflowPack({
                 force: c.options.force,
