@@ -87,6 +87,14 @@
               "guide/concepts",
               "guide/context-engineering"
             ]
+          },
+          {
+            "group": "Compare",
+            "pages": [
+              "why/vs-claude-code-workflows",
+              "why/vs-temporal",
+              "why/vs-langgraph"
+            ]
           }
         ]
       },
@@ -108,7 +116,10 @@
         "pages": [
           "why/background-agents",
           "why/durable-open-orchestration",
-          "why-react"
+          "why-react",
+          "why/vs-claude-code-workflows",
+          "why/vs-temporal",
+          "why/vs-langgraph"
         ]
       },
       {

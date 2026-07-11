@@ -12,10 +12,10 @@ Tell your coding agent to do real, multi-step work, then Smithers runs it for mi
 days with crash recovery, retries, human approvals, and full observability. The same
 workflow runs across Claude Code, Codex, Pi, AI SDK models, and remote sandboxes.
 
-*Watch every step of a workflow run, pause execution, approve gates, and rewind to an
-earlier checkpoint. Independent steps can run at the same time.*
+*The demo that matters: a run killed mid-task, then resumed. The completed task is
+skipped, the interrupted task re-runs, the run finishes. No recovery code.*
 
-<img width="1032" height="434" alt="image" src="https://github.com/user-attachments/assets/13b57654-ecd7-458f-bca5-15bbfa9bb323" />
+<img src="./docs/images/why/crash-resume.gif" alt="A Smithers run is killed partway through, then resumes: the completed task is skipped, the in-flight task re-runs as a new attempt, and the run finishes" width="1032" />
 
 ## What you get
 
@@ -57,7 +57,10 @@ inside one session, one vendor, and one terminal.
 | Orchestration is a prompt you retype | A workflow is a file you version, review, and rerun |
 
 When the work has to survive the session, hand the fan-out to Smithers. Your agent still
-drives everything; the run just stops being disposable. The longer argument is in
+drives everything; the run just stops being disposable. Detailed comparisons:
+[vs. Claude Code Workflows](https://smithers.sh/why/vs-claude-code-workflows),
+[vs. Temporal](https://smithers.sh/why/vs-temporal), and
+[vs. LangGraph](https://smithers.sh/why/vs-langgraph). The longer argument is in
 [the open, durable version of agent workflows](https://smithers.sh/why/durable-open-orchestration).
 
 ## Get started
@@ -294,10 +297,6 @@ That loop is the whole model: a task runs, its output is validated against a sch
 written down, then the workflow re-renders from persisted state to decide the next task. A
 crash at any point resumes from the last write, not from the top.
 
-*A run killed mid-task, then resumed: the completed task is skipped, the interrupted task re-runs, the run finishes.*
-
-<img src="./docs/images/why/crash-resume.gif" alt="A Smithers run is killed partway through, then resumes: the completed task is skipped, the in-flight task re-runs as a new attempt, and the run finishes" width="1032" />
-
 ```bash
 bunx smithers-orchestrator up workflow.tsx --input '{"description":"Fix bug"}'
 bunx smithers-orchestrator up workflow.tsx --run-id abc123 --resume true   # resume after a crash
@@ -310,6 +309,11 @@ bunx smithers-orchestrator replay abc123                                    # re
 
 Prefer the CLI? The seeded workflows run directly, and whether your agent started a run or
 you did, you can see exactly what's happening:
+
+*Watch every step of a workflow run, pause execution, approve gates, and rewind to an
+earlier checkpoint. Independent steps can run at the same time.*
+
+<img width="1032" height="434" alt="The Smithers run UI: live workflow steps with pause, approval, and rewind controls" src="https://github.com/user-attachments/assets/13b57654-ecd7-458f-bca5-15bbfa9bb323" />
 
 ```bash
 bunx smithers-orchestrator workflow run hello   # smallest possible run; prompt lives at .smithers/prompts/hello.mdx
