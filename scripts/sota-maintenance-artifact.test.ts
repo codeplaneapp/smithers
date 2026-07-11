@@ -16,7 +16,11 @@ const WORKFLOW_PATH = resolve(import.meta.dir, "../.github/workflows/sota-resear
 const roots: string[] = [];
 
 function git(cwd: string, args: string[]): string {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  // Match the publisher's global-config-free Git behavior when creating and
+  // inspecting fixtures. In particular, an ambient Windows core.autocrlf=true
+  // must not create a CRLF checkout that the hardened publisher later sees as
+  // dirty after it deliberately ignores global Git configuration.
+  const result = spawnSync("git", ["-c", "core.autocrlf=false", ...args], { cwd, encoding: "utf8" });
   if (result.status !== 0) throw new Error(result.stderr || result.stdout);
   return result.stdout.trim();
 }
@@ -109,6 +113,27 @@ describe("SOTA maintenance publication artifact", () => {
     ]);
     expect(git(paths.publisher, ["ls-files", "--stage", "--", "scripts/new.mjs"]).split(/\s+/)[0]).toBe(
       newScriptMode,
+    );
+  });
+
+  test("refuses a dirty publisher checkout before applying an artifact", () => {
+    const paths = fixture();
+    writeFileSync(resolve(paths.source, "docs/existing.mdx"), "artifact change\n");
+    pack(paths);
+    writeFileSync(resolve(paths.publisher, "docs/existing.mdx"), "unpublished local change\n");
+
+    expect(() =>
+      materializeArtifact({
+        artifactDir: paths.artifact,
+        checkoutDir: paths.publisher,
+        repository: REPOSITORY,
+        baseSha: paths.baseSha,
+        runId: RUN_ID,
+        runAttempt: RUN_ATTEMPT,
+      }),
+    ).toThrow(/publisher checkout must be clean.*docs\/existing\.mdx/);
+    expect(readFileSync(resolve(paths.publisher, "docs/existing.mdx"), "utf8")).toBe(
+      "unpublished local change\n",
     );
   });
 

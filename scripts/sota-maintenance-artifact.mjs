@@ -351,8 +351,9 @@ function ensureCleanCheckout(checkoutDir, baseSha) {
   assertSafeRoot(resolve(checkoutDir), "publisher checkout");
   const head = git(["rev-parse", "HEAD"], checkoutDir).trim();
   if (head !== baseSha) fail(`publisher checkout is ${head}, expected ${baseSha}`);
-  if (git(["status", "--porcelain=v1", "--untracked-files=all"], checkoutDir) !== "") {
-    fail("publisher checkout must be clean before applying an artifact");
+  const status = git(["status", "--porcelain=v1", "--untracked-files=all"], checkoutDir);
+  if (status !== "") {
+    fail(`publisher checkout must be clean before applying an artifact: ${status.trim().slice(0, 2_000)}`);
   }
 }
 
