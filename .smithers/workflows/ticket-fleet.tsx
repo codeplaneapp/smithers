@@ -357,10 +357,10 @@ const {
 });
 
 // ---------------------------------------------------------------------------
-// Agents. luna/terra/sol are Codex GPT-5.6 variants; fable is Claude Fable 5.
+// Agents. luna/terra/sol are Codex GPT-5.6 variants; fable/sonnet are Claude.
 // Role split: sol plans, luna implements, fable reviews and polishes; terra
-// moderates and resolves. Codex chains fan out across every registered Codex
-// subscription; sol/fable keep a cross-provider fallback for resilience.
+// moderates and resolves. Each Codex role keeps a Claude fallback so the fleet
+// rides through a Codex rate-limit: sol->fable, luna->sonnet, terra->fable.
 // ---------------------------------------------------------------------------
 
 function codexOptions(model: string, effort: "medium" | "high" | "xhigh", cwd?: string) {
@@ -372,10 +372,14 @@ function codexOptions(model: string, effort: "medium" | "high" | "xhigh", cwd?: 
   };
 }
 function lunaAgent(effort: "medium" | "high" | "xhigh", cwd?: string) {
-  return subscriptionCodexFirst(codexOptions("gpt-5.6-luna", effort, cwd));
+  return subscriptionCodexFirst(codexOptions("gpt-5.6-luna", effort, cwd), [
+    new ClaudeCodeAgent({ model: "claude-sonnet-5", ...(cwd ? { cwd } : {}) }),
+  ]);
 }
 function terraAgent(cwd?: string) {
-  return subscriptionCodexFirst(codexOptions("gpt-5.6-terra", "medium", cwd));
+  return subscriptionCodexFirst(codexOptions("gpt-5.6-terra", "medium", cwd), [
+    new ClaudeCodeAgent({ model: "claude-fable-5", ...(cwd ? { cwd } : {}) }),
+  ]);
 }
 function solAgent(cwd?: string) {
   return subscriptionCodexFirst(codexOptions("gpt-5.6-sol", "xhigh", cwd), [
