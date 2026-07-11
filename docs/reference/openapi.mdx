@@ -25,7 +25,7 @@ import {
 <Note>
 The async factories (`createOpenApiTools`, `createOpenApiTool`) fetch URL specs.
 The `*Sync` variants take only an object or a local file path; they do not fetch
-URLs. Pick async when the spec lives behind an HTTP URL.
+URLs. Pick async when the spec lives behind an HTTP(S) URL.
 </Note>
 
 ## createOpenApiTools
@@ -41,22 +41,74 @@ function createOpenApiTools(
 ```
 
 <ParamField path="input" type="string | OpenApiSpec" required>
-  The spec as a parsed object, a file path, an HTTP URL, or raw JSON/YAML text.
+  The spec as a parsed object, a file path, an HTTP(S) URL, or raw JSON/YAML
+  text. Other URL schemes are not fetched.
 </ParamField>
 
 <ParamField path="options" type="OpenApiToolsOptions">
-  Auth, filtering, base URL, and per-operation curation.
+  Auth, filtering, base URL, outbound request policy, and per-operation
+  curation.
 
   <Expandable title="OpenApiToolsOptions">
     <ParamField path="baseUrl" type="string">
-      Override the request base URL. Defaults to the spec's first
-      `servers[].url`.
+      Operator-pinned request base URL and exact initial trust origin (scheme,
+      hostname, and port). It is required when `auth` or `headers` are
+      configured; a spec-controlled `servers[].url` never receives those
+      credentials without this pin. Otherwise the request URL defaults to the
+      spec's first server. The resolved URL must use HTTP(S).
     </ParamField>
     <ParamField path="headers" type="Record<string, string>">
-      Static headers merged into every request.
+      Static headers merged into every request. Configuring any header requires
+      an explicit `baseUrl`.
     </ParamField>
     <ParamField path="auth" type="OpenApiAuth">
-      Authentication applied to every request. See [Types](#types).
+      Authentication applied to every request. Requires an explicit `baseUrl`.
+      See [Types](#types).
+    </ParamField>
+    <ParamField path="allowedOrigins" type="string[]">
+      Exact cross-origin redirect destinations allowed to retain injected
+      `auth`, sensitive headers, and query API keys. Other safe cross-origin
+      redirects are followed after those credentials are stripped;
+      body-preserving redirects to an untrusted origin are rejected. Origins
+      include scheme, hostname, and port. This is redirect-only and never
+      authorizes a spec-controlled initial server.
+    </ParamField>
+    <ParamField path="allowPrivateNetwork" type="boolean" default="false">
+      Permit private/special destinations for remote spec URLs, redirect hops,
+      and unpinned credential-free spec servers. Prefer an exact `baseUrl` for
+      API requests. This cannot replace `baseUrl` when `auth` or `headers` are
+      configured, and redirect credentials still require `allowedOrigins`.
+    </ParamField>
+    <ParamField path="resolveHostname" type="(hostname: string) => readonly string[] | Promise<readonly string[]>">
+      Override Node/Bun DNS resolution for controlled runtimes or deterministic
+      tests. By default, remote specs, unpinned API servers, and redirect hosts
+      fail closed when resolution fails, returns no addresses, or any A/AAAA
+      answer is outside ordinary public-unicast space. Fetch resolves again at
+      connection time, so this check does not eliminate DNS-rebinding races.
+    </ParamField>
+    <ParamField path="maxRedirects" type="number" default="5">
+      Maximum redirect hops. Every target must use HTTP(S), and
+      HTTPS-to-HTTP downgrades are rejected.
+    </ParamField>
+    <ParamField path="maxRequestBytes" type="number" default="10485760">
+      Maximum serialized operation request-body bytes (10 MiB by default).
+      Must be a non-negative safe integer. Oversized declared
+      `Content-Length` and bodies are rejected locally before fetch with
+      `REQUEST_TOO_LARGE`; exact-cap bodies are accepted. JSON, URL-encoded,
+      raw, and multipart bodies are measured in their wire representation,
+      including generated multipart boundaries and part headers.
+    </ParamField>
+    <ParamField path="maxResponseBytes" type="number" default="1048576">
+      Maximum operation response body size in bytes (1 MiB by default),
+      enforced against both `Content-Length` and streamed bytes.
+    </ParamField>
+    <ParamField path="maxSpecBytes" type="number" default="5242880">
+      Maximum bytes buffered while loading a remote OpenAPI document (5 MiB by
+      default), enforced against both `Content-Length` and streamed bytes.
+    </ParamField>
+    <ParamField path="signal" type="AbortSignal">
+      Cancels remote spec loading. Generated tools separately honor the AI SDK
+      execution context's `abortSignal` for operation requests.
     </ParamField>
     <ParamField path="include" type="string[]">
       Allowlist of `operationId`s. Only listed operations become tools.
@@ -91,10 +143,18 @@ const tools = await createOpenApiTools("https://api.example.com/openapi.json", {
   baseUrl: "https://api.example.com",
   auth: { type: "bearer", token: process.env.API_TOKEN! },
   include: ["listPets", "getPetById"],
+  allowedOrigins: ["https://downloads.example.com"],
 });
 
 const agent = new ToolLoopAgent({ model: openai("gpt-5.6-terra"), tools });
 ```
+
+The factory honors the AI SDK execution context's `abortSignal`. Cancellation
+stops the request and bounded response read. Operator-injected headers override
+model-supplied header parameters. Non-2xx errors redact exact configured secret
+values and the generated Basic/query wire forms from both the returned message
+and structured body; unrelated error detail is preserved. Pass `options.signal`
+when tool creation itself must be cancellable while a remote spec is loading.
 
 **Source** [`createOpenApiTools.js`](https://github.com/smithersai/smithers/blob/main/packages/openapi/src/tool-factory/createOpenApiTools.js) · [`OpenApiToolsOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/openapi/src/OpenApiToolsOptions.ts) · **Tests** [`tool-factory.test.js`](https://github.com/smithersai/smithers/blob/main/packages/openapi/tests/tool-factory.test.js) · **See also** [OpenAPI tools](/concepts/openapi-tools), [Tools](/integrations/tools)
 

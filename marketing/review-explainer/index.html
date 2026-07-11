@@ -690,26 +690,12 @@
       <section>
         <div class="section-head">
           <h2>Add it to a repo</h2>
-          <p>Users add one workflow. The service side decides whether the repo runs automatically or waits for the magic comment.</p>
+          <p>Users add one base-controlled workflow. The service side decides whether the repo runs automatically or waits for the magic comment.</p>
         </div>
-        <pre class="code-block">name: smithers review
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  issue_comment:
-    types: [created]
-
-permissions:
-  id-token: write
-  contents: read
-  pull-requests: write
-
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: smithersai/smithers/apps/review/action@main</pre>
+        <p class="lead">Start from the repository's canonical three-job workflow: trusted policy, read-only analysis, then an isolated publisher. Pin both Smithers action sources to the full 40-character commit SHA published for the audited release; never use a moving branch ref.</p>
+        <pre class="code-block">policy (trusted event classification)
+  -&gt; analyze (read-only repository + short-lived identity)
+  -&gt; publish (validated artifact + pull-request write access)</pre>
       </section>
     </div>
   </main>

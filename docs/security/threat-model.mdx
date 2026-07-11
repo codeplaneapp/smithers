@@ -1,0 +1,116 @@
+---
+title: Security and Threat Model
+description: Trust boundaries, protected assets, attacker assumptions, and deployment responsibilities for Smithers.
+---
+
+Smithers coordinates agents that can read source code, invoke tools, modify
+repositories, and wait for human approval. Treat the Gateway, workflow modules,
+database, agent processes, sandbox workers, and integration credentials as one
+security-sensitive system. This page states the boundaries Smithers enforces
+and the controls a production operator must add.
+
+Report suspected vulnerabilities through the repository's [private security
+reporting process](https://github.com/smithersai/smithers/security/policy).
+Repository administrators must enable GitHub Private Vulnerability Reporting
+and keep the repository's protected-branch rules aligned with required CI and
+security checks; those settings cannot be enforced by source files alone.
+
+## Protected assets
+
+- source code, worktree state, patches, and generated artifacts;
+- provider, integration, Gateway, and deployment credentials;
+- workflow inputs, prompts, outputs, events, approval notes, and memory;
+- the authority to launch, approve, cancel, rewind, or hijack a run;
+- audit history and the integrity of durable run state; and
+- service availability, provider quota, and billable agent usage.
+
+## Trust boundaries
+
+| Boundary | Trusted side | Untrusted or less-trusted side | Required control |
+| --- | --- | --- | --- |
+| Gateway edge | Gateway process and its configured identity source | browsers, API clients, webhooks, and the network | TLS, authentication, narrow scopes, Origin policy, request limits, and reverse-proxy rate limits |
+| Workflow execution | reviewed workflow code and explicit operator policy | prompts, repository content, model output, and downloaded data | approvals for consequential actions, bounded tools, and isolation for untrusted execution |
+| Sandbox | host control plane and durable database | code running in the worker | no ambient credentials, minimal mounts, network policy, resource limits, and reviewed patches |
+| Persistence | database owner and backup process | workflow-supplied values and concurrent workers | migrations, integrity checks, least-privilege database access, tested backups, and retention policy |
+| Integrations | configured destination and credential owner | remote APIs and their responses | scoped credentials, HTTPS, bounded timeouts and responses, retry budgets, and secret-safe errors |
+| Observability | restricted telemetry pipeline | prompts, tool output, errors, and third-party collectors | redaction, access control, encryption, cardinality limits, and explicit retention |
+| Software supply chain | reviewed source and frozen lockfile | registries, transitive packages, and external Actions | production audit, dependency review, CodeQL, immutable third-party Action pins, and time-bounded exceptions |
+
+## Attacker assumptions
+
+Assume an attacker can control repository text, issue or pull-request content,
+workflow input, model-visible web content, tool output, webhook payloads, and
+malformed network responses. They may possess a low-privilege Gateway token and
+may try to exhaust connections, memory, disk, provider quota, or approval
+attention. Do not assume model output is trustworthy merely because it is
+structured or produced by a review step.
+
+Smithers does not protect a host after an attacker has administrator access,
+protect secrets deliberately passed into an unsandboxed agent process, or make
+arbitrary user-authored workflow code safe to execute. A workflow module is
+application code and runs with the privileges of its process unless the
+operator places the risky work inside an enforced sandbox.
+
+## Security invariants
+
+- A remotely reachable Gateway must require authentication and TLS. Bearer
+  grants should have narrow scopes and expiry, and trusted-proxy mode is safe
+  only when clients cannot bypass the proxy or inject identity headers.
+- The unauthenticated local Gateway is an operator endpoint. Keep it on a
+  loopback address; `--insecure` is an explicit removal of that protection.
+- Human approval is an authorization decision, not a content-safety scanner.
+  The approver must see the real target, effect, and diff before authorizing a
+  consequential action.
+- Untrusted code belongs in a sandbox with network disabled unless required,
+  no host or database credentials, read-only inputs, bounded resources, and a
+  reviewed output path.
+- Secrets must not be placed in workflow input, prompts, outputs, events,
+  patches, or model-visible logs. Inject short-lived credentials only at the
+  process boundary that needs them.
+- Audit and approval records must be append-only for ordinary operators and
+  retained long enough to investigate delayed failures.
+
+## Representative abuse cases
+
+| Abuse case | Built-in control | Operator responsibility |
+| --- | --- | --- |
+| A web page drives a local Gateway | Host and Origin checks on unauthenticated HTTP and WebSocket paths | keep the bind loopback-only and do not enable insecure host trust |
+| A stolen token launches or approves work | scoped grants, expiry, revocation, and recorded token identifiers | issue separate short-lived grants, protect the token store, and rotate after exposure |
+| Repository text prompt-injects an agent | approvals, sandbox primitives, tool and output bounds | treat all repository content as hostile instructions and keep credentials out of the agent environment |
+| A forged webhook starts a workflow | per-workflow HMAC verification | use a high-entropy secret, terminate TLS, restrict ingress, and rotate on disclosure |
+| A sandbox returns a hostile path or patch | path confinement, bundle validation, and optional diff review | keep automatic patch acceptance off for high-risk work and isolate the worker account |
+| A dependency or Action is compromised | frozen lockfile, production advisory gate, dependency review, CodeQL, and pinned security-workflow Actions | require review for lockfile and workflow changes and resolve expiring advisory exceptions |
+| Telemetry leaks sensitive content | targeted trace redaction and structured metrics | restrict collectors, add organization-specific redaction, and configure retention and deletion |
+| Requests exhaust the service | bounded Gateway bodies, payloads, connections, and stream queues | add edge rate limits, workload quotas, disk alerts, and capacity limits |
+
+## Known residual risks
+
+- Model behavior is probabilistic. Review loops reduce mistakes but do not form
+  a security boundary.
+- Pattern-based redaction cannot recognize every secret or personal-data shape.
+- SQLite is appropriate for a single durable process, not an active-active
+  multi-replica deployment. Use managed PostgreSQL for that topology.
+- The optional Pi integration currently has upstream advisories without fixed
+  releases. It must not run on a shared multi-user host; the tracked exceptions
+  and expiry dates live in `.github/production-advisory-exceptions.json`.
+- Optional third-party agents and providers have their own update, credential,
+  and isolation requirements.
+
+## Production review checklist
+
+Before exposing a deployment, verify:
+
+1. the Gateway is behind TLS, authenticated, and not directly reachable around
+   a trusted proxy;
+2. each client has only the scopes it needs and grants have bounded lifetimes;
+3. sandbox network, mounts, credentials, CPU, memory, process, and disk limits
+   are enforced by the selected runtime;
+4. database backup restore and disaster-recovery procedures have been tested;
+5. telemetry access, redaction, retention, and deletion match the data handled;
+6. alert delivery and an incident owner exist for auth failures, run failures,
+   queue growth, database errors, and resource saturation; and
+7. CI passes `pnpm audit:prod`, dependency review, CodeQL, typecheck, and the
+   relevant unit, integration, and fault tests.
+
+See [Production Hardening](/deployment/production-hardening) for deployment
+controls and the root security policy for coordinated disclosure.

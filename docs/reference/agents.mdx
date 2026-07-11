@@ -359,9 +359,9 @@ emits `--model` / `--provider` flags. See
 ## createHttpTool
 
 Build an AI SDK tool that calls any REST API without an OpenAPI spec. The
-returned tool takes a method, url, headers, query, body, and optional auth at
-call time; `createHttpTool` only configures the description and any default
-headers. Pass it to an agent's `tools`.
+returned tool takes a method, URL, headers, query, body, and optional auth at
+call time. The creator options define its description, configured headers, and
+outbound request policy. Pass it to an agent's `tools`.
 
 ```ts
 function createHttpTool(options?: CreateHttpToolOptions): Tool;
@@ -374,7 +374,46 @@ function createHttpTool(options?: CreateHttpToolOptions): Tool;
       description.
     </ParamField>
     <ParamField path="defaultHeaders" type="Record<string, string>">
-      Headers merged into every request, overridable per call.
+      Headers merged into requests whose destination is trusted by `baseUrl` or
+      `allowedHosts`. Treat these as credentials when they contain tokens,
+      cookies, or API keys. Non-empty defaults require at least one of those
+      destination gates; otherwise tool construction fails closed.
+    </ParamField>
+    <ParamField path="baseUrl" type="string">
+      Trusts this URL's exact origin (scheme, hostname, and port) to receive
+      `defaultHeaders`. It does not make model-supplied relative request URLs
+      valid.
+    </ParamField>
+    <ParamField path="allowedHosts" type="string[]">
+      Additional destinations allowed to receive `defaultHeaders`. An HTTP(S)
+      URL without a path, query, or fragment matches only that exact origin
+      (scheme, hostname, and port). A bare hostname or `hostname:port` entry
+      authorizes only its HTTPS origin, never HTTP implicitly.
+    </ParamField>
+    <ParamField path="allowedOrigins" type="string[]">
+      Exact cross-origin redirect destinations allowed to retain sensitive
+      headers. Origins include scheme, hostname, and port. Other safe
+      cross-origin redirects are followed after credentials are stripped;
+      body-preserving redirects to an untrusted origin are rejected.
+    </ParamField>
+    <ParamField path="maxRedirects" type="number" default="5">
+      Maximum redirect hops. Each target is revalidated and HTTPS-to-HTTP
+      downgrades are rejected.
+    </ParamField>
+    <ParamField path="maxResponseBytes" type="number" default="1048576">
+      Maximum response body size in bytes (1 MiB by default). Applies to both
+      declared `Content-Length` and streamed bytes.
+    </ParamField>
+    <ParamField path="allowPrivateNetwork" type="boolean" default="false">
+      Permit model-selected localhost-style names, non-global IP literals, and
+      hostnames resolving to non-global addresses. Keep this off; prefer an
+      exact `baseUrl`, `allowedHosts`, or `allowedOrigins` entry for an
+      intentional internal or special-scope endpoint.
+    </ParamField>
+    <ParamField path="resolveHostname" type="(hostname: string) => readonly string[] | Promise<readonly string[]>">
+      Override Node/Bun DNS resolution for controlled runtimes or deterministic
+      tests. Resolution failures, empty answers, and any non-global A/AAAA
+      answer are denied by default.
     </ParamField>
   </Expandable>
 </ParamField>
@@ -385,7 +424,7 @@ The model invokes the tool with an `HttpToolInput` and receives an
 <ParamField path="input" type="HttpToolInput">
   <Expandable title="HttpToolInput">
     <ParamField path="url" type="string" required>
-      Request URL.
+      Absolute HTTP(S) request URL. Other schemes are rejected.
     </ParamField>
     <ParamField path="method" type='"GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"' default='"GET"'>
       HTTP method.
@@ -417,7 +456,8 @@ The model invokes the tool with an `HttpToolInput` and receives an
       </Expandable>
     </ParamField>
     <ParamField path="timeoutMs" type="number">
-      Positive integer; aborts the request after this many milliseconds.
+      Positive integer; aborts the request after this many milliseconds. The
+      tool also honors the AI SDK execution context's `abortSignal`.
     </ParamField>
   </Expandable>
 </ParamField>
@@ -448,11 +488,31 @@ const implementer = new OpenAIAgent({
   model: "gpt-5.6-luna",
   tools: {
     http: createHttpTool({
-      defaultHeaders: { "user-agent": "smithers" },
+      baseUrl: "https://api.example.com",
+      defaultHeaders: {
+        authorization: `Bearer ${process.env.EXAMPLE_API_TOKEN!}`,
+      },
+      allowedOrigins: ["https://uploads.example.com"],
     }),
   },
 });
 ```
+
+Redirects preserve credentials only on the initial origin, same-origin hops,
+and explicitly allowed origins. On all other safe cross-origin redirects,
+configured default, per-call, and custom-auth headers plus common credential
+headers are removed before the next request. A redirect that would preserve a
+request body to an untrusted origin is rejected. Response reads stop at the
+configured cap, and cancellation aborts the fetch rather than waiting for the
+remote peer.
+
+The destination check rejects localhost-style names and IP literals outside
+ordinary public-unicast space, including private, loopback, link-local, shared,
+benchmarking, documentation, translation, mapped, multicast, and other IANA
+non-global special-purpose ranges. It also resolves untrusted hostnames and
+fails closed when any A/AAAA answer is non-global. Fetch resolves again when it
+connects, so production deployments must still block private ranges, cloud
+metadata, and DNS-rebinding races at the egress boundary.
 
 **Source** [`createHttpTool.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/http/createHttpTool.js) · [`CreateHttpToolOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/http/CreateHttpToolOptions.ts) · **Tests** [`http-tool.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/http-tool.test.js) · **See also** [Common tools](/integrations/common-tools), [OpenAPI tools](/concepts/openapi-tools)
 

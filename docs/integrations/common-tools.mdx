@@ -5,13 +5,52 @@ description: Patterns for hitting GitHub, Linear, Notion, Slack, Obsidian as too
 
 <Note>API reference: [Tools](/reference/tools) lists every built-in tool and helper, its options, and links to source and tests.</Note>
 
-For each external service, you have three choices:
+For each external service, you have four choices:
 
 1. **OpenAPI tools**: point `createOpenApiTools()` at the service's OpenAPI spec. See [OpenAPI tools](/concepts/openapi-tools).
-2. **CLI in a task**: if the service has a CLI (`gh`, `linear`, `notion`, `slack`), run it inside a `<Task>` via the `bash` tool. See [side-effect tools with idempotency](/recipes#side-effect-tools-with-idempotency).
-3. **Custom `defineTool`**: wrap the service's REST API in a Zod-validated tool. See [`defineTool`](/integrations/tools#definetool).
+2. **Generic HTTP tool**: use `createHttpTool()` for a small REST surface with no usable spec.
+3. **CLI in a task**: if the service has a CLI (`gh`, `linear`, `notion`, `slack`), run it inside a `<Task>` via the `bash` tool. See [side-effect tools with idempotency](/recipes#side-effect-tools-with-idempotency).
+4. **Custom `defineTool`**: wrap the service's REST API in a Zod-validated tool. See [`defineTool`](/integrations/tools#definetool).
 
-### Example: CLI in a task (Pattern 2)
+### Example: bounded authenticated HTTP (Pattern 2)
+
+```ts
+import { createHttpTool } from "smithers-orchestrator";
+
+const http = createHttpTool({
+  baseUrl: "https://api.example.com",
+  defaultHeaders: {
+    authorization: `Bearer ${process.env.EXAMPLE_API_TOKEN!}`,
+  },
+  allowedOrigins: ["https://downloads.example.com"],
+  maxResponseBytes: 1024 * 1024,
+});
+```
+
+All built-in outbound HTTP tools accept only HTTP(S) URLs and revalidate every
+redirect. Credentials remain on same-origin redirects; a cross-origin redirect
+receives them only when its exact origin is explicitly trusted with
+`allowedOrigins`. Other safe cross-origin redirects are followed without
+sensitive headers; body-preserving redirects to an untrusted origin and
+HTTPS-to-HTTP downgrades fail. Responses are byte-capped and AI SDK task
+cancellation propagates into fetches and response reads.
+
+Non-empty generic HTTP `defaultHeaders` require an exact `baseUrl` or explicit
+`allowedHosts`, so operator credentials can never be attached to an arbitrary
+initial URL selected by a model. URL-form `allowedHosts` entries match an exact
+origin; bare hostnames and `hostname:port` entries authorize HTTPS only.
+
+Use the narrowest trust rule available: curate OpenAPI operation IDs and pin an
+exact `baseUrl` whenever OpenAPI `auth` or `headers` are configured. A spec's
+`servers[].url` is not credential trust, and `allowedOrigins` only controls
+redirect credential retention. Allow only the redirect destinations the API
+actually uses, and leave private-network access disabled unless the workflow
+intentionally targets an internal service. Untrusted hostnames are resolved and
+denied when any A/AAAA answer is non-global, but Fetch resolves again while
+connecting. DNS-rebinding and IP-range controls still belong at the
+deployment's egress boundary.
+
+### Example: CLI in a task (Pattern 3)
 
 ```tsx
 <Task

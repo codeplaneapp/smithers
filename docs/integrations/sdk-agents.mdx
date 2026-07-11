@@ -165,7 +165,15 @@ Use the `createOpenAI` path when you need provider-level configuration beyond `b
 
 ```ts
 const http = createHttpTool({
-  defaultHeaders: { "user-agent": "smithers-workflow" },
+  baseUrl: "https://api.example.com",
+  defaultHeaders: {
+    authorization: `Bearer ${process.env.EXAMPLE_API_TOKEN!}`,
+    "user-agent": "smithers-workflow",
+  },
+  // Permit this exact cross-origin redirect to retain credentials.
+  allowedOrigins: ["https://uploads.example.com"],
+  maxResponseBytes: 1024 * 1024,
+  maxRedirects: 3,
 });
 
 const ops = new AnthropicAgent({
@@ -177,6 +185,32 @@ const ops = new AnthropicAgent({
 ```
 
 The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `auth` (`bearer`, `basic`, or custom header), and `timeoutMs`. Results include `ok`, `status`, `statusText`, response `headers`, and a parsed JSON or text `body`.
+
+The request URL and every redirect target must use HTTP(S) and cannot embed URL
+userinfo. Localhost-style names and IP literals outside ordinary public-unicast
+space are blocked by default, including private, loopback, link-local, shared,
+benchmarking, documentation, translation, mapped, multicast, and other IANA
+non-global special-purpose ranges. Untrusted hostnames are also denied when
+resolution fails or any A/AAAA answer is non-global. Prefer an exact `baseUrl`
+or `allowedHosts` entry for a deliberate initial endpoint, and
+`allowedOrigins` for an intentional redirect destination.
+`allowPrivateNetwork: true` opens the broader exception. `baseUrl` and
+`allowedHosts` gate which model-selected destinations receive `defaultHeaders`;
+configuring defaults without either gate fails at construction. An HTTP(S)
+`allowedHosts` entry is an exact origin, while a bare hostname or
+`hostname:port` authorizes only its HTTPS origin. Redirects keep
+sensitive headers on the initial origin and same-origin hops, strip them on
+other cross-origin hops, and retain them on a cross-origin hop only when its
+exact origin is in `allowedOrigins`. A redirect that would preserve a request
+body to an untrusted origin is rejected, as are HTTPS-to-HTTP redirects.
+
+The defaults allow 5 redirects and 1 MiB response bodies. Both declared and
+streamed oversize responses fail closed. The AI SDK's tool-call `abortSignal`
+is composed with `timeoutMs`, so cancelling a task stops both the fetch and the
+response read. `resolveHostname` is an injectable DNS resolver for controlled
+runtimes and deterministic tests. Fetch resolves again at connection time, so
+deployment egress must still block private ranges, metadata, and DNS-rebinding
+races.
 
 ## Hermes
 
@@ -250,6 +284,9 @@ import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/
 const transcribeAudio = createTranscriptionTool({
   provider: "deepgram", // or "whisper"
   apiKey: process.env.DEEPGRAM_API_KEY!,
+  allowedAudioHosts: ["media.example.com"],
+  maxAudioBytes: 25 * 1024 * 1024,
+  maxResponseBytes: 1024 * 1024,
 });
 
 const agent = new AnthropicAgent({
@@ -258,6 +295,65 @@ const agent = new AnthropicAgent({
   instructions: "Transcribe audio clips and summarize the result.",
 });
 ```
+
+`audioUrl` and the provider `baseUrl` are HTTP(S)-only and cannot embed URL
+userinfo. The tool blocks localhost-style audio names and IP literals outside
+ordinary public-unicast space by default. It also resolves untrusted audio
+hostnames before the initial request and every redirect, denying failed or
+empty resolution and any non-global A/AAAA answer. Use `allowedAudioHosts` for
+a specific internal or special-scope media host instead of disabling the guard
+globally. `resolveHostname` can inject a resolver for controlled runtimes and
+tests, but deployment egress is still required to close DNS-rebinding races.
+Audio downloads default to a 25 MiB limit; base64-decoded input has the same
+cap, with encoded size and validity checked before the decoded audio is
+allocated. Provider responses default to 1 MiB. Redirect targets are
+revalidated, provider credentials and request bodies do not cross an untrusted
+origin, and HTTPS downgrades fail. The configured provider origin and exact
+`allowedOrigins` remain operator trust; other provider redirect hostnames must
+resolve entirely to public-unicast addresses. The AI SDK `abortSignal` cancels downloads
+and provider calls. Redirects default to 5 hops; add an exact provider redirect
+origin to `allowedOrigins` only when it must retain credentials or intentionally
+reach a private service.
+
+## Document Parsing Toolset
+
+`createDocumentParsingToolset` exposes one `parse_document` tool backed by
+Firecrawl, Mistral OCR, LlamaParse, or a custom provider. Import it from the
+agents package's documented subpath:
+
+```ts
+import {
+  createDocumentParsingToolset,
+} from "@smithers-orchestrator/agents/document-parsing/createDocumentParsingToolset";
+
+const { tools: documentTools } = createDocumentParsingToolset({
+  provider: "firecrawl",
+  apiKey: process.env.FIRECRAWL_API_KEY!,
+  maxInputBytes: 25 * 1024 * 1024,
+  maxResponseBytes: 10 * 1024 * 1024,
+});
+
+const agent = new AnthropicAgent({
+  model: "claude-fable-5",
+  tools: documentTools,
+  instructions: "Extract the requested fields and cite the source document.",
+});
+```
+
+URL sources and provider base URLs are HTTP(S)-only. Provider credentials stay
+on their origin across redirects, cross-origin hops are followed without those
+credentials, and request bodies are not replayed to an untrusted origin.
+HTTPS downgrades are rejected. Redirects default to 5 hops; use
+`allowedOrigins` only for an exact provider redirect origin that must retain
+credentials or intentionally reach a private service. Every other provider
+redirect hostname must resolve entirely to public-unicast addresses;
+`resolveHostname` can inject a resolver for controlled runtimes and tests.
+Provider responses default to a 10 MiB cap. Cancellation reaches
+provider requests, response reads, and the LlamaParse polling wait. Decoded
+base64 and UTF-8 text inputs default to a separate 25 MiB `maxInputBytes` cap.
+Their size is checked before a built-in or custom provider runs, and malformed
+or oversized base64 is rejected before its decoded payload is allocated. URL
+source size remains a provider/deployment concern.
 
 ## Example: Dual Setup
 

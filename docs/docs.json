@@ -161,7 +161,8 @@
           "deployment/reference",
           "deployment/serverless",
           "deployment/control-plane",
-          "deployment/production-hardening"
+          "deployment/production-hardening",
+          "security/threat-model"
         ]
       },
       {

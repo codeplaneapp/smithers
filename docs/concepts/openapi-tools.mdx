@@ -15,6 +15,8 @@ import { createOpenApiTools } from "smithers-orchestrator/openapi";
 const tools = await createOpenApiTools("./petstore.json", {
   baseUrl: "https://api.petstore.example.com",
   auth: { type: "bearer", token: process.env.PETSTORE_TOKEN! },
+  include: ["listPets", "getPetById"],
+  allowedOrigins: ["https://downloads.petstore.example.com"],
 });
 
 const agent = new ToolLoopAgent({
@@ -27,15 +29,23 @@ const agent = new ToolLoopAgent({
 
 ```ts
 type OpenApiToolsOptions = {
-  baseUrl?: string;                  // overrides spec.servers[0].url
-  headers?: Record<string, string>;  // merged into every request
-  auth?:
+  baseUrl?: string;                  // exact initial trust origin; required below
+  headers?: Record<string, string>;  // requires baseUrl
+  auth?:                             // requires baseUrl
     | { type: "apiKey"; name: string; in: "header" | "query"; value: string }
     | { type: "bearer"; token: string }
     | { type: "basic"; username: string; password: string };
   include?: string[];                // operationId allowlist
   exclude?: string[];                // operationId blocklist
   namePrefix?: string;               // prefix generated tool names
+  allowedOrigins?: string[];         // redirect origins allowed to retain auth
+  allowPrivateNetwork?: boolean;     // opt in private specs, servers, redirects
+  resolveHostname?: (hostname: string) => readonly string[] | Promise<readonly string[]>;
+  maxRedirects?: number;             // default: 5
+  maxRequestBytes?: number;          // serialized body, default: 10 MiB
+  maxResponseBytes?: number;         // default: 1 MiB
+  maxSpecBytes?: number;             // remote specs, default: 5 MiB
+  signal?: AbortSignal;              // cancels remote spec loading
   operations?: Record<
     string,
     | false
@@ -53,7 +63,9 @@ type OpenApiToolsOptions = {
 };
 ```
 
-Pass the spec itself as the first argument to `createOpenApiTools(input, options)`. `input` may be a parsed spec object, file path, URL, or raw OpenAPI text.
+Pass the spec itself as the first argument to `createOpenApiTools(input,
+options)`. `input` may be a parsed spec object, file path, HTTP(S) URL, or raw
+OpenAPI text. The synchronous factories do not fetch URLs.
 
 ## Public API
 
@@ -65,7 +77,11 @@ Pass the spec itself as the first argument to `createOpenApiTools(input, options
 | `extractOperations(spec)` | Extract operations from an already parsed spec. |
 | `loadSpecEffect(input)` | Load and parse a spec from object, path, URL, or raw text. |
 | `loadSpecSync(input)` | Load and parse a spec from object, local file path, or raw text. It does not fetch URLs. |
-| `jsonSchemaToZod(schema, spec, visited?)` / `buildOperationSchema(parameters, requestBody, spec)` | Lower-level schema conversion helpers. |
+| `jsonSchemaToZod(schema, spec, visited?, depth?)` / `buildOperationSchema(parameters, requestBody, spec)` | Lower-level schema conversion helpers. `depth` is the current recursion depth and normally remains omitted. |
+
+`loadSpecEffect` also accepts an optional second argument with
+`allowedOrigins`, `allowPrivateNetwork`, `resolveHostname`, `maxRedirects`,
+`maxSpecBytes`, and `signal` for remote loads.
 
 ## CLI
 
@@ -95,8 +111,67 @@ For each operation:
 
 - JSON responses are parsed and returned as objects.
 - Non-JSON responses are returned as strings.
-- HTTP status codes are not special-cased by the tool factory; if the server returns a JSON or text error body, that body is returned to the agent.
-- Request failures, fetch failures, and schema/tool execution exceptions are returned as `{ error: true, message, status: "failed" }` so the agent can react in its loop.
+- Non-2xx responses are failures, not successful tool results. The bounded body
+  is included in the error detail after exact configured secret values and
+  their generated Basic/query wire forms are redacted. Ordinary error fields
+  remain available for recovery logic.
+- Request failures, fetch failures, non-2xx responses, request/response-limit
+  errors, and schema/tool execution exceptions are returned as
+  `{ error: true, message, status: "failed" }` so the agent can react in its
+  loop.
+- Serialized operation request bodies default to a 10 MiB cap and are rejected
+  locally before fetch. JSON, URL-encoded, raw, and multipart bodies are
+  measured in their wire representation; multipart accounting includes
+  generated boundaries and part headers. Exact-cap bodies are accepted.
+- Operation response bodies default to a 1 MiB cap. An oversized declared
+  length fails before reading; a streamed response is cancelled on overflow.
+- Remote OpenAPI documents default to a separate 5 MiB cap. Pass `signal` in
+  the factory options to cancel spec loading.
+- The AI SDK tool-call `abortSignal` cancels the active request and response
+  read.
+
+## Outbound safety
+
+OpenAPI documents are code-like input: a spec controls server URLs, paths,
+header parameters, and which calls become agent tools. Audit the spec and use
+`include` or per-operation curation before exposing it to an agent.
+
+Smithers applies these network rules to generated calls:
+
+- Remote spec URLs, resolved server URLs, operation URLs, and every redirect
+  target must use HTTP(S) and cannot embed URL userinfo.
+- A spec-controlled `servers[].url` is not credential trust. Configuring
+  `auth` or `headers` requires an explicit `baseUrl`, which pins the exact
+  initial origin (scheme, hostname, and port).
+- Without `baseUrl`, a credential-free spec server is rejected when its
+  hostname cannot be resolved safely or any A/AAAA answer is outside ordinary
+  public-unicast space. IP literals are classified directly.
+- Remote spec fetches and every redirect target use the same destination
+  check. Resolution failures, empty answers, and any non-global answer fail
+  closed. Redirects default to at most 5 hops, and an HTTPS-to-HTTP downgrade
+  is rejected.
+- `allowPrivateNetwork` deliberately permits private/special remote spec URLs,
+  unpinned credential-free API servers, and redirect destinations. It cannot
+  replace a credentialed `baseUrl`; redirect credentials still require the
+  exact origin in `allowedOrigins`.
+- Operator `auth` and `headers` override model-supplied header parameters.
+  Configured auth, custom headers, declared header parameters, and query API
+  keys stay on the initial origin and same-origin redirects.
+- Other safe cross-origin redirects are followed after those header and query
+  credentials are stripped. A redirect that would preserve a request body to
+  an untrusted origin is rejected. Add the exact destination origin to
+  `allowedOrigins` only when the API intentionally requires credentials there.
+  Origin matching includes the scheme, hostname, and port. `allowedOrigins`
+  never authorizes the initial server selected by a spec.
+
+`allowedOrigins` is not a general destination allowlist and does not make an
+untrusted spec safe. It is a narrow exception for retaining credentials across
+a known cross-origin redirect.
+
+`resolveHostname` can inject a resolver for controlled runtimes and
+deterministic tests. Destination validation resolves A/AAAA records, but Fetch
+resolves the hostname again when connecting; production egress policy must
+still block private ranges, cloud metadata, and DNS-rebinding races.
 
 ## Filtering
 
@@ -113,6 +188,7 @@ OpenAPI tool calls update the exported Effect metrics (`openApiToolCallsTotal`, 
 - Schema composition (`allOf`, `anyOf`, `oneOf`) is supported; converts to Zod unions/intersections.
 - Nullable fields and defaults from the spec are preserved.
 - Cookie parameters are ignored when generating tool input schemas and requests.
-- JSON request bodies are the only request body media type generated today; non-JSON bodies such as form data, multipart uploads, and binary payloads are not encoded.
+- JSON request bodies, form-encoded bodies, multipart bodies, and raw body
+  media types are encoded.
 - Parameter serialization styles are not implemented. Path parameters are URL-encoded and substituted directly, and query parameters are sent with default `URLSearchParams` serialization.
 - Swagger 2.0 objects are not supported as a first-class input format. Use OpenAPI 3.x specs with `openapi`, `paths`, and `info` fields.

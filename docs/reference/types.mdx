@@ -1679,9 +1679,17 @@ type OpenApiSpec = {
 };
 
 type OpenApiToolsOptions = {
-  baseUrl?: string;
-  headers?: Record<string, string>;
-  auth?: OpenApiAuth;
+  baseUrl?: string; // exact initial trust origin; required with headers/auth
+  headers?: Record<string, string>; // requires baseUrl
+  auth?: OpenApiAuth; // requires baseUrl
+  allowedOrigins?: string[]; // redirect credential trust only
+  allowPrivateNetwork?: boolean; // private specs, servers, redirects; defaults false
+  resolveHostname?: (hostname: string) => readonly string[] | Promise<readonly string[]>;
+  maxRedirects?: number; // defaults to 5
+  maxRequestBytes?: number; // serialized body; defaults to 10 MiB
+  maxResponseBytes?: number; // defaults to 1 MiB
+  maxSpecBytes?: number; // remote specs; defaults to 5 MiB
+  signal?: AbortSignal; // cancels remote spec loading
   include?: string[];
   exclude?: string[];
   namePrefix?: string;

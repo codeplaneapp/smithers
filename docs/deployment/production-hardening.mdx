@@ -10,13 +10,14 @@ This page covers storage durability, access scoping, execution isolation, secret
 Run these checks before promoting a workflow module:
 
 ```bash
+pnpm audit:prod
 pnpm check:effect
 pnpm check:deps
 pnpm -r typecheck
 pnpm test
 ```
 
-The default CI workflow (`.github/workflows/ci.yml`) runs `check:effect`, `check:deps`, typecheck, and `test` on pull requests and pushes to `main`.
+The default CI workflow (`.github/workflows/ci.yml`) runs the production dependency audit, `check:effect`, `check:deps`, typecheck, and `test` on pull requests and pushes to `main`. Dependency exceptions are limited to upstream advisories with no fixed release and live in `.github/production-advisory-exceptions.json`; CI rejects expired, stale, or newly fixable entries.
 
 ## Persistence
 
@@ -83,6 +84,82 @@ Operational rules:
 - Redact logs before forwarding them to shared observability sinks.
 - Split launch permissions from approval permissions for workflows that can write files, create pull requests, or deploy.
 
+## Outbound HTTP
+
+Treat every model-selected URL, spec-declared server, media URL, document URL,
+and redirect target as untrusted input. For outbound requests Smithers performs,
+the generic HTTP, OpenAPI, transcription, and document-parsing tools enforce a
+shared baseline:
+
+- Only `http:` and `https:` URLs are fetchable. `file:`, `data:`, `ftp:`, and
+  other schemes fail before I/O. Embedded URL userinfo is rejected without
+  echoing credentials or query data into policy errors.
+- Redirects default to at most 5 hops, and every hop is validated.
+  HTTPS-to-HTTP downgrades fail instead of moving credentials or content onto
+  a cleartext connection.
+- Sensitive headers and named query credentials are preserved for the initial
+  origin and same-origin redirects. Safe cross-origin redirects are followed
+  only after those credentials are removed, unless the exact destination
+  origin is explicitly configured in `allowedOrigins` for a tool that supports
+  credentialed cross-origin hops. Redirects that would preserve a request body
+  to an untrusted origin fail.
+- OpenAPI specs do not define credential trust. Generated tools require an
+  operator-pinned `baseUrl` whenever `auth` or static `headers` are configured;
+  `allowedOrigins` is redirect-only and cannot authorize the spec's initial
+  server. Non-2xx errors redact exact configured values and Smithers-generated
+  Basic/query wire forms before exposing the bounded response body to an agent.
+- AI SDK cancellation reaches active fetches, response reads, audio downloads,
+  and document-parser polling waits. Do not catch an abort and retry it as a
+  transient provider error.
+- Response bodies have byte limits enforced against both `Content-Length` and
+  streamed bytes. The defaults are 1 MiB for generic HTTP and OpenAPI responses,
+  5 MiB for remote OpenAPI documents, 1 MiB for transcription-provider
+  responses, 25 MiB for downloaded audio, and 10 MiB for document-parser
+  responses.
+- OpenAPI operation request bodies default to a 10 MiB `maxRequestBytes` cap
+  enforced locally before fetch. The cap covers the serialized wire form of
+  JSON, URL-encoded, raw, and multipart bodies, including multipart boundary
+  and part-header overhead.
+- Transcription validates base64 size before decoding against the same 25 MiB
+  audio cap. Document parsing rejects decoded base64 or UTF-8 text inputs above
+  its separate 25 MiB `maxInputBytes` default before any built-in or custom
+  provider runs. URL document size remains a provider/deployment concern.
+
+The generic HTTP and transcription tools additionally reject localhost-style
+names and IP literals outside ordinary public-unicast space by default. OpenAPI
+applies the same guard to remote spec URLs, redirect hops, and an initial server
+selected by a spec when `baseUrl` is absent. Untrusted hostnames are resolved
+and fail closed when resolution fails, no addresses are returned, or any A/AAAA
+answer is non-global. This policy covers private, loopback, link-local, shared,
+benchmarking, documentation, translation, mapped, multicast, and other IANA
+non-global special-purpose ranges.
+
+Configured search, document-parsing, text-to-speech, GitHub, Linear, and
+Telegram provider origins remain operator trust, including intentional private
+origins. Their untrusted cross-origin redirect targets use the same public DNS
+policy unless the exact destination appears in a supported `allowedOrigins`
+option. This prevents a malformed provider redirect from turning a credential-
+stripped GET into a private-network read.
+
+Prefer `allowedHosts` for generic HTTP destinations that may receive configured
+defaults, an OpenAPI `baseUrl` for initial origin trust, and `allowedOrigins`
+only for exact redirect origins allowed to retain credentials. A URL-form
+`allowedHosts` entry is an exact origin; a bare hostname or `hostname:port`
+authorizes HTTPS only. Enable a generic tool's `allowPrivateNetwork`, an
+OpenAPI tool's `allowPrivateNetwork` for private remote specs, unpinned servers,
+or redirects, or transcription's `allowPrivateAudioUrl` only where internal and
+metadata access is already constrained by network policy. The
+`resolveHostname` hooks support controlled runtimes and deterministic tests;
+they are not a network sandbox. Application checks resolve but do not pin DNS,
+and Fetch resolves again while connecting, so the deployment must still block
+private ranges, metadata addresses, and DNS-rebinding races at the egress
+boundary.
+
+Size caps bound memory use and the amount of untrusted data exposed to an agent;
+they do not make the content trustworthy. Validate media/document types, curate
+OpenAPI operations, set task timeouts, and keep side-effecting calls behind
+idempotency and approval controls.
+
 ## Cache Policy
 
 Use cache policy keys deliberately:
@@ -125,5 +202,7 @@ Before a production release:
 - Database backups have been restored in a staging environment.
 - Gateway tokens are scoped and have bounded TTLs.
 - Sandbox runtime enforcement has been tested against the intended threat model.
+- Outbound tools use explicit origins, response caps, and cancellation; any
+  private-network exception is documented and enforced by network policy.
 - Approval paths have a named owner and a fallback owner (see [Approval](/components/approval)).
 - Logs are retained long enough to investigate delayed workflow failures.

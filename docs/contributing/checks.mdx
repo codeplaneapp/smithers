@@ -1,6 +1,6 @@
 ---
 title: "Checks"
-description: "Run pnpm verify (typecheck, lint, test) before opening a pull request."
+description: "Run the production audit, lint, typecheck, and test gates before opening a pull request."
 ---
 
 Run this before a pull request:
@@ -12,15 +12,19 @@ pnpm verify
 It runs, in order:
 
 ```sh
-pnpm typecheck
+pnpm audit:prod
 pnpm lint
+pnpm -r typecheck
+pnpm --filter ./.smithers typecheck
+pnpm typecheck:examples
+pnpm typecheck:evals
 pnpm test
 ```
 
-`pnpm typecheck` runs every workspace typecheck. Each workspace owns its `tsconfig.json`.
+`pnpm audit:prod` rejects new production advisories and expired security exceptions. `pnpm -r typecheck` runs every workspace typecheck; the following commands cover the workflow pack, examples, and evals explicitly.
 
 `pnpm lint` checks `apps/*/src`, `apps/*/tests`, `packages/*/src`, `packages/*/tests`, and `.smithers`.
 
 `pnpm test` runs workspace tests.
 
-Do not use root `tsc --noEmit` as the pre-PR gate.
+Do not use root `tsc --noEmit` as the complete pre-PR gate.

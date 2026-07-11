@@ -8537,9 +8537,17 @@ type OpenApiSpec = {
 };
 
 type OpenApiToolsOptions = {
-  baseUrl?: string;
-  headers?: Record<string, string>;
-  auth?: OpenApiAuth;
+  baseUrl?: string; // exact initial trust origin; required with headers/auth
+  headers?: Record<string, string>; // requires baseUrl
+  auth?: OpenApiAuth; // requires baseUrl
+  allowedOrigins?: string[]; // redirect credential trust only
+  allowPrivateNetwork?: boolean; // private specs, servers, redirects; defaults false
+  resolveHostname?: (hostname: string) => readonly string[] | Promise<readonly string[]>;
+  maxRedirects?: number; // defaults to 5
+  maxRequestBytes?: number; // serialized body; defaults to 10 MiB
+  maxResponseBytes?: number; // defaults to 1 MiB
+  maxSpecBytes?: number; // remote specs; defaults to 5 MiB
+  signal?: AbortSignal; // cancels remote spec loading
   include?: string[];
   exclude?: string[];
   namePrefix?: string;
@@ -9035,6 +9043,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/gateway-react` | React hooks and root helpers for Gateway-backed UIs | Gateway |
 | `@smithers-orchestrator/gateway-ui` | Prebuilt React components for Gateway-backed UIs, built on the gateway-react hooks | Gateway UI Components |
 | `@smithers-orchestrator/graph` | Framework-neutral workflow graph model, XML nodes, task descriptors, and graph snapshots | Planner Internals, Types |
+| `@smithers-orchestrator/http-client` | Shared HTTP(S) URL validation, credential-safe redirect handling, abort composition, and byte-capped response readers | Production Hardening, SDK Agents |
 | `@smithers-orchestrator/init-site` | Private Cloudflare Worker deployment for the interactive Smithers init wizard and workflow builder marketing site | Ecosystem |
 | `@smithers-orchestrator/integrations` | External webhook and polling event sources, cursor storage, signature verification, and delivery helpers for workflow integrations | Integrations, Server |
 | `@smithers-orchestrator/jj-darwin-arm64` | Vendored jj (Jujutsu) binary for darwin-arm64; auto-installed as an optional dependency of `@smithers-orchestrator/vcs`, not depended on directly | VCS Guide |
@@ -9208,6 +9217,8 @@ Defined in the root `package.json` for development:
 | `check:llms` | `node scripts/check-llms.mjs` | Verify generated llms docs are current |
 | `check:sota` | `node scripts/check-sota.mjs` | Verify the SOTA registry's generated docs page and CLI module match `docs/data/sota-models.json` |
 | `check:dts` | `node scripts/check-dts.mjs` | Verify per-file `.d.ts` declarations are freshly regenerated from source |
+| `audit:prod` | `node scripts/audit-production.mjs` | Reject new production advisories and stale, expired, or newly fixable security exceptions |
+| `verify` | `pnpm audit:prod && pnpm lint && pnpm -r typecheck && pnpm --filter ./.smithers typecheck && pnpm typecheck:examples && pnpm typecheck:evals && pnpm test` | Run the complete local pre-PR audit, lint, typecheck, and test gate |
 | `fetch:jj` | `node scripts/fetch-jj-binaries.mjs` | Fetch vendored jj binaries for supported platforms |
 | `docs:components` | `node scripts/generate-component-source.mjs` | Embed composite component source as tabs in their docs pages |
 | `docs:llms` | `bun scripts/generate-llms.ts && bun scripts/optimize-llms-full.ts` | Regenerate `llms-core.txt` and `llms-full.txt` |
@@ -11302,6 +11313,8 @@ import { createOpenApiTools } from "smithers-orchestrator/openapi";
 const tools = await createOpenApiTools("./petstore.json", {
   baseUrl: "https://api.petstore.example.com",
   auth: { type: "bearer", token: process.env.PETSTORE_TOKEN! },
+  include: ["listPets", "getPetById"],
+  allowedOrigins: ["https://downloads.petstore.example.com"],
 });
 
 const agent = new ToolLoopAgent({
@@ -11314,15 +11327,23 @@ const agent = new ToolLoopAgent({
 
 ```ts
 type OpenApiToolsOptions = {
-  baseUrl?: string;                  // overrides spec.servers[0].url
-  headers?: Record<string, string>;  // merged into every request
-  auth?:
+  baseUrl?: string;                  // exact initial trust origin; required below
+  headers?: Record<string, string>;  // requires baseUrl
+  auth?:                             // requires baseUrl
     | { type: "apiKey"; name: string; in: "header" | "query"; value: string }
     | { type: "bearer"; token: string }
     | { type: "basic"; username: string; password: string };
   include?: string[];                // operationId allowlist
   exclude?: string[];                // operationId blocklist
   namePrefix?: string;               // prefix generated tool names
+  allowedOrigins?: string[];         // redirect origins allowed to retain auth
+  allowPrivateNetwork?: boolean;     // opt in private specs, servers, redirects
+  resolveHostname?: (hostname: string) => readonly string[] | Promise<readonly string[]>;
+  maxRedirects?: number;             // default: 5
+  maxRequestBytes?: number;          // serialized body, default: 10 MiB
+  maxResponseBytes?: number;         // default: 1 MiB
+  maxSpecBytes?: number;             // remote specs, default: 5 MiB
+  signal?: AbortSignal;              // cancels remote spec loading
   operations?: Record<
     string,
     | false
@@ -11340,7 +11361,9 @@ type OpenApiToolsOptions = {
 };
 ```
 
-Pass the spec itself as the first argument to `createOpenApiTools(input, options)`. `input` may be a parsed spec object, file path, URL, or raw OpenAPI text.
+Pass the spec itself as the first argument to `createOpenApiTools(input,
+options)`. `input` may be a parsed spec object, file path, HTTP(S) URL, or raw
+OpenAPI text. The synchronous factories do not fetch URLs.
 
 ## Public API
 
@@ -11352,7 +11375,11 @@ Pass the spec itself as the first argument to `createOpenApiTools(input, options
 | `extractOperations(spec)` | Extract operations from an already parsed spec. |
 | `loadSpecEffect(input)` | Load and parse a spec from object, path, URL, or raw text. |
 | `loadSpecSync(input)` | Load and parse a spec from object, local file path, or raw text. It does not fetch URLs. |
-| `jsonSchemaToZod(schema, spec, visited?)` / `buildOperationSchema(parameters, requestBody, spec)` | Lower-level schema conversion helpers. |
+| `jsonSchemaToZod(schema, spec, visited?, depth?)` / `buildOperationSchema(parameters, requestBody, spec)` | Lower-level schema conversion helpers. `depth` is the current recursion depth and normally remains omitted. |
+
+`loadSpecEffect` also accepts an optional second argument with
+`allowedOrigins`, `allowPrivateNetwork`, `resolveHostname`, `maxRedirects`,
+`maxSpecBytes`, and `signal` for remote loads.
 
 ## CLI
 
@@ -11382,8 +11409,67 @@ For each operation:
 
 - JSON responses are parsed and returned as objects.
 - Non-JSON responses are returned as strings.
-- HTTP status codes are not special-cased by the tool factory; if the server returns a JSON or text error body, that body is returned to the agent.
-- Request failures, fetch failures, and schema/tool execution exceptions are returned as `{ error: true, message, status: "failed" }` so the agent can react in its loop.
+- Non-2xx responses are failures, not successful tool results. The bounded body
+  is included in the error detail after exact configured secret values and
+  their generated Basic/query wire forms are redacted. Ordinary error fields
+  remain available for recovery logic.
+- Request failures, fetch failures, non-2xx responses, request/response-limit
+  errors, and schema/tool execution exceptions are returned as
+  `{ error: true, message, status: "failed" }` so the agent can react in its
+  loop.
+- Serialized operation request bodies default to a 10 MiB cap and are rejected
+  locally before fetch. JSON, URL-encoded, raw, and multipart bodies are
+  measured in their wire representation; multipart accounting includes
+  generated boundaries and part headers. Exact-cap bodies are accepted.
+- Operation response bodies default to a 1 MiB cap. An oversized declared
+  length fails before reading; a streamed response is cancelled on overflow.
+- Remote OpenAPI documents default to a separate 5 MiB cap. Pass `signal` in
+  the factory options to cancel spec loading.
+- The AI SDK tool-call `abortSignal` cancels the active request and response
+  read.
+
+## Outbound safety
+
+OpenAPI documents are code-like input: a spec controls server URLs, paths,
+header parameters, and which calls become agent tools. Audit the spec and use
+`include` or per-operation curation before exposing it to an agent.
+
+Smithers applies these network rules to generated calls:
+
+- Remote spec URLs, resolved server URLs, operation URLs, and every redirect
+  target must use HTTP(S) and cannot embed URL userinfo.
+- A spec-controlled `servers[].url` is not credential trust. Configuring
+  `auth` or `headers` requires an explicit `baseUrl`, which pins the exact
+  initial origin (scheme, hostname, and port).
+- Without `baseUrl`, a credential-free spec server is rejected when its
+  hostname cannot be resolved safely or any A/AAAA answer is outside ordinary
+  public-unicast space. IP literals are classified directly.
+- Remote spec fetches and every redirect target use the same destination
+  check. Resolution failures, empty answers, and any non-global answer fail
+  closed. Redirects default to at most 5 hops, and an HTTPS-to-HTTP downgrade
+  is rejected.
+- `allowPrivateNetwork` deliberately permits private/special remote spec URLs,
+  unpinned credential-free API servers, and redirect destinations. It cannot
+  replace a credentialed `baseUrl`; redirect credentials still require the
+  exact origin in `allowedOrigins`.
+- Operator `auth` and `headers` override model-supplied header parameters.
+  Configured auth, custom headers, declared header parameters, and query API
+  keys stay on the initial origin and same-origin redirects.
+- Other safe cross-origin redirects are followed after those header and query
+  credentials are stripped. A redirect that would preserve a request body to
+  an untrusted origin is rejected. Add the exact destination origin to
+  `allowedOrigins` only when the API intentionally requires credentials there.
+  Origin matching includes the scheme, hostname, and port. `allowedOrigins`
+  never authorizes the initial server selected by a spec.
+
+`allowedOrigins` is not a general destination allowlist and does not make an
+untrusted spec safe. It is a narrow exception for retaining credentials across
+a known cross-origin redirect.
+
+`resolveHostname` can inject a resolver for controlled runtimes and
+deterministic tests. Destination validation resolves A/AAAA records, but Fetch
+resolves the hostname again when connecting; production egress policy must
+still block private ranges, cloud metadata, and DNS-rebinding races.
 
 ## Filtering
 
@@ -11400,7 +11486,8 @@ OpenAPI tool calls update the exported Effect metrics (`openApiToolCallsTotal`, 
 - Schema composition (`allOf`, `anyOf`, `oneOf`) is supported; converts to Zod unions/intersections.
 - Nullable fields and defaults from the spec are preserved.
 - Cookie parameters are ignored when generating tool input schemas and requests.
-- JSON request bodies are the only request body media type generated today; non-JSON bodies such as form data, multipart uploads, and binary payloads are not encoded.
+- JSON request bodies, form-encoded bodies, multipart bodies, and raw body
+  media types are encoded.
 - Parameter serialization styles are not implemented. Path parameters are URL-encoded and substituted directly, and query parameters are sent with default `URLSearchParams` serialization.
 - Swagger 2.0 objects are not supported as a first-class input format. Use OpenAPI 3.x specs with `openapi`, `paths`, and `info` fields.
 
@@ -14348,7 +14435,15 @@ Use the `createOpenAI` path when you need provider-level configuration beyond `b
 
 ```ts
 const http = createHttpTool({
-  defaultHeaders: { "user-agent": "smithers-workflow" },
+  baseUrl: "https://api.example.com",
+  defaultHeaders: {
+    authorization: `Bearer ${process.env.EXAMPLE_API_TOKEN!}`,
+    "user-agent": "smithers-workflow",
+  },
+  // Permit this exact cross-origin redirect to retain credentials.
+  allowedOrigins: ["https://uploads.example.com"],
+  maxResponseBytes: 1024 * 1024,
+  maxRedirects: 3,
 });
 
 const ops = new AnthropicAgent({
@@ -14360,6 +14455,32 @@ const ops = new AnthropicAgent({
 ```
 
 The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `auth` (`bearer`, `basic`, or custom header), and `timeoutMs`. Results include `ok`, `status`, `statusText`, response `headers`, and a parsed JSON or text `body`.
+
+The request URL and every redirect target must use HTTP(S) and cannot embed URL
+userinfo. Localhost-style names and IP literals outside ordinary public-unicast
+space are blocked by default, including private, loopback, link-local, shared,
+benchmarking, documentation, translation, mapped, multicast, and other IANA
+non-global special-purpose ranges. Untrusted hostnames are also denied when
+resolution fails or any A/AAAA answer is non-global. Prefer an exact `baseUrl`
+or `allowedHosts` entry for a deliberate initial endpoint, and
+`allowedOrigins` for an intentional redirect destination.
+`allowPrivateNetwork: true` opens the broader exception. `baseUrl` and
+`allowedHosts` gate which model-selected destinations receive `defaultHeaders`;
+configuring defaults without either gate fails at construction. An HTTP(S)
+`allowedHosts` entry is an exact origin, while a bare hostname or
+`hostname:port` authorizes only its HTTPS origin. Redirects keep
+sensitive headers on the initial origin and same-origin hops, strip them on
+other cross-origin hops, and retain them on a cross-origin hop only when its
+exact origin is in `allowedOrigins`. A redirect that would preserve a request
+body to an untrusted origin is rejected, as are HTTPS-to-HTTP redirects.
+
+The defaults allow 5 redirects and 1 MiB response bodies. Both declared and
+streamed oversize responses fail closed. The AI SDK's tool-call `abortSignal`
+is composed with `timeoutMs`, so cancelling a task stops both the fetch and the
+response read. `resolveHostname` is an injectable DNS resolver for controlled
+runtimes and deterministic tests. Fetch resolves again at connection time, so
+deployment egress must still block private ranges, metadata, and DNS-rebinding
+races.
 
 ## Hermes
 
@@ -14433,6 +14554,9 @@ import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/
 const transcribeAudio = createTranscriptionTool({
   provider: "deepgram", // or "whisper"
   apiKey: process.env.DEEPGRAM_API_KEY!,
+  allowedAudioHosts: ["media.example.com"],
+  maxAudioBytes: 25 * 1024 * 1024,
+  maxResponseBytes: 1024 * 1024,
 });
 
 const agent = new AnthropicAgent({
@@ -14441,6 +14565,65 @@ const agent = new AnthropicAgent({
   instructions: "Transcribe audio clips and summarize the result.",
 });
 ```
+
+`audioUrl` and the provider `baseUrl` are HTTP(S)-only and cannot embed URL
+userinfo. The tool blocks localhost-style audio names and IP literals outside
+ordinary public-unicast space by default. It also resolves untrusted audio
+hostnames before the initial request and every redirect, denying failed or
+empty resolution and any non-global A/AAAA answer. Use `allowedAudioHosts` for
+a specific internal or special-scope media host instead of disabling the guard
+globally. `resolveHostname` can inject a resolver for controlled runtimes and
+tests, but deployment egress is still required to close DNS-rebinding races.
+Audio downloads default to a 25 MiB limit; base64-decoded input has the same
+cap, with encoded size and validity checked before the decoded audio is
+allocated. Provider responses default to 1 MiB. Redirect targets are
+revalidated, provider credentials and request bodies do not cross an untrusted
+origin, and HTTPS downgrades fail. The configured provider origin and exact
+`allowedOrigins` remain operator trust; other provider redirect hostnames must
+resolve entirely to public-unicast addresses. The AI SDK `abortSignal` cancels downloads
+and provider calls. Redirects default to 5 hops; add an exact provider redirect
+origin to `allowedOrigins` only when it must retain credentials or intentionally
+reach a private service.
+
+## Document Parsing Toolset
+
+`createDocumentParsingToolset` exposes one `parse_document` tool backed by
+Firecrawl, Mistral OCR, LlamaParse, or a custom provider. Import it from the
+agents package's documented subpath:
+
+```ts
+import {
+  createDocumentParsingToolset,
+} from "@smithers-orchestrator/agents/document-parsing/createDocumentParsingToolset";
+
+const { tools: documentTools } = createDocumentParsingToolset({
+  provider: "firecrawl",
+  apiKey: process.env.FIRECRAWL_API_KEY!,
+  maxInputBytes: 25 * 1024 * 1024,
+  maxResponseBytes: 10 * 1024 * 1024,
+});
+
+const agent = new AnthropicAgent({
+  model: "claude-fable-5",
+  tools: documentTools,
+  instructions: "Extract the requested fields and cite the source document.",
+});
+```
+
+URL sources and provider base URLs are HTTP(S)-only. Provider credentials stay
+on their origin across redirects, cross-origin hops are followed without those
+credentials, and request bodies are not replayed to an untrusted origin.
+HTTPS downgrades are rejected. Redirects default to 5 hops; use
+`allowedOrigins` only for an exact provider redirect origin that must retain
+credentials or intentionally reach a private service. Every other provider
+redirect hostname must resolve entirely to public-unicast addresses;
+`resolveHostname` can inject a resolver for controlled runtimes and tests.
+Provider responses default to a 10 MiB cap. Cancellation reaches
+provider requests, response reads, and the LlamaParse polling wait. Decoded
+base64 and UTF-8 text inputs default to a separate 25 MiB `maxInputBytes` cap.
+Their size is checked before a built-in or custom provider runs, and malformed
+or oversized base64 is rejected before its decoded payload is allocated. URL
+source size remains a provider/deployment concern.
 
 ## Example: Dual Setup
 
@@ -14974,13 +15157,52 @@ const result = await Effect.runPromise(runWorkflow(workflow, {
 
 <Note>API reference: Tools lists every built-in tool and helper, its options, and links to source and tests.</Note>
 
-For each external service, you have three choices:
+For each external service, you have four choices:
 
 1. **OpenAPI tools**: point `createOpenApiTools()` at the service's OpenAPI spec. See OpenAPI tools.
-2. **CLI in a task**: if the service has a CLI (`gh`, `linear`, `notion`, `slack`), run it inside a `<Task>` via the `bash` tool. See side-effect tools with idempotency.
-3. **Custom `defineTool`**: wrap the service's REST API in a Zod-validated tool. See `defineTool`.
+2. **Generic HTTP tool**: use `createHttpTool()` for a small REST surface with no usable spec.
+3. **CLI in a task**: if the service has a CLI (`gh`, `linear`, `notion`, `slack`), run it inside a `<Task>` via the `bash` tool. See side-effect tools with idempotency.
+4. **Custom `defineTool`**: wrap the service's REST API in a Zod-validated tool. See `defineTool`.
 
-### Example: CLI in a task (Pattern 2)
+### Example: bounded authenticated HTTP (Pattern 2)
+
+```ts
+import { createHttpTool } from "smithers-orchestrator";
+
+const http = createHttpTool({
+  baseUrl: "https://api.example.com",
+  defaultHeaders: {
+    authorization: `Bearer ${process.env.EXAMPLE_API_TOKEN!}`,
+  },
+  allowedOrigins: ["https://downloads.example.com"],
+  maxResponseBytes: 1024 * 1024,
+});
+```
+
+All built-in outbound HTTP tools accept only HTTP(S) URLs and revalidate every
+redirect. Credentials remain on same-origin redirects; a cross-origin redirect
+receives them only when its exact origin is explicitly trusted with
+`allowedOrigins`. Other safe cross-origin redirects are followed without
+sensitive headers; body-preserving redirects to an untrusted origin and
+HTTPS-to-HTTP downgrades fail. Responses are byte-capped and AI SDK task
+cancellation propagates into fetches and response reads.
+
+Non-empty generic HTTP `defaultHeaders` require an exact `baseUrl` or explicit
+`allowedHosts`, so operator credentials can never be attached to an arbitrary
+initial URL selected by a model. URL-form `allowedHosts` entries match an exact
+origin; bare hostnames and `hostname:port` entries authorize HTTPS only.
+
+Use the narrowest trust rule available: curate OpenAPI operation IDs and pin an
+exact `baseUrl` whenever OpenAPI `auth` or `headers` are configured. A spec's
+`servers[].url` is not credential trust, and `allowedOrigins` only controls
+redirect credential retention. Allow only the redirect destinations the API
+actually uses, and leave private-network access disabled unless the workflow
+intentionally targets an internal service. Untrusted hostnames are resolved and
+denied when any A/AAAA answer is non-global, but Fetch resolves again while
+connecting. DNS-rebinding and IP-range controls still belong at the
+deployment's egress boundary.
+
+### Example: CLI in a task (Pattern 3)
 
 ```tsx
 <Task
