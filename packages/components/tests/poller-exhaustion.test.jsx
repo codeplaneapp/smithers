@@ -1,7 +1,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, test } from "bun:test";
 import { Poller, runWorkflow } from "smithers-orchestrator";
-import { createTestSmithers } from "./helpers.js";
+import { createTestSmithers, sleep } from "./helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
 const COMPONENT_TIMEOUT_MS = 30_000;
@@ -11,6 +11,25 @@ const COMPONENT_TIMEOUT_MS = 30_000;
  */
 function workflowTest(name, fn) {
     test(name, fn, COMPONENT_TIMEOUT_MS);
+}
+/**
+ * Resume a run that parked on its inter-attempt <Timer> until it settles.
+ * The gateway timer sweep plays this role in production.
+ * @param {any} workflow
+ * @param {any} first
+ * @returns {Promise<any>}
+ */
+async function resumeUntilSettled(workflow, first) {
+    let result = first;
+    for (let attempt = 0; attempt < 40 && result.status === "waiting-timer"; attempt++) {
+        await sleep(25);
+        result = await Effect.runPromise(runWorkflow(workflow, {
+            input: {},
+            runId: result.runId,
+            resume: true,
+        }));
+    }
+    return result;
 }
 describe("Poller exhaustion", () => {
     workflowTest("onTimeout=return-last finishes the run with the last unsatisfied check", async () => {
@@ -37,7 +56,8 @@ describe("Poller exhaustion", () => {
           </Sequence>
         </Workflow>);
         });
-        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        const result = await resumeUntilSettled(workflow, first);
         expect(result.status).toBe("finished");
         expect(calls).toBe(2);
         const checkRows = db.select().from(tables.check).all();
