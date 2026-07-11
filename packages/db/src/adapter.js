@@ -2639,6 +2639,28 @@ export class SmithersDb {
         return this.read(`list event history ${runId}`, () => this.internalStorage.listEventHistory(runId, query));
     }
     /**
+   * The newest events naming one node, ascending. One SQL pass (LIKE on the
+   * payload) instead of paging the whole history through JS: node transcripts
+   * on long runs need this to stay interactive, and unlike a bounded recency
+   * scan it finds OLD nodes' events too.
+   *
+   * @param {string} runId
+   * @param {string} nodeId Validated upstream (no quotes/percent — node id charset).
+   * @param {{ afterSeq?: number; limit?: number }} [query]
+   * @returns {RunnableEffect<EventRow[], SmithersError>}
+   */
+    listNodeEvents(runId, nodeId, query = {}) {
+        const limit = Math.max(1, Math.min(500, Math.floor(query.limit ?? 100)));
+        const afterSeq = Math.max(0, Math.floor(query.afterSeq ?? 0));
+        const needle = `%"nodeId":"${nodeId}"%`;
+        return this.read(`list node events ${nodeId}`, () => this.internalStorage.queryAll(`SELECT * FROM (
+           SELECT * FROM _smithers_events
+           WHERE run_id = ? AND seq > ? AND payload_json LIKE ?
+           ORDER BY seq DESC
+           LIMIT ?
+         ) ORDER BY seq ASC`, [runId, afterSeq, needle, limit]));
+    }
+    /**
    * @param {string} runId
    * @param {EventHistoryQuery} [query]
    * @returns {RunnableEffect<number, SmithersError>}

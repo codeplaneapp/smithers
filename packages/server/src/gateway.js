@@ -3476,48 +3476,17 @@ a { color: var(--brand); }</style>
             });
             return rows.map((row) => serializeRunEventRow(row));
         }
-        // Per-node tail: a busy run's shared event window drowns any single
-        // node, so page forward and keep the newest `limit` events whose
-        // payload names this node. Cheap string probe before any JSON parse;
-        // callers poll incrementally with afterSeq so only the first read
-        // scans history.
-        const needle = `"nodeId":"${nodeId}"`;
-        // First-click cost control: without a caller cursor, start from a
-        // bounded recent window instead of seq 0 — a long run holds tens of
-        // thousands of events and a full scan per inspector click is what
-        // "slow node loading" feels like. The hint is refreshed by every scan.
-        if (!this.runEventSeqHints) {
-            /** @type {Map<string, number>} */
-            this.runEventSeqHints = new Map();
+        // Per-node transcript: one SQL pass in the adapter (newest matches,
+        // returned ascending). JS-side history paging could not stay
+        // interactive on long runs, and its bounded recency window missed OLD
+        // nodes' events entirely — transcripts for early nodes never loaded.
+        if (!/^[a-zA-Z0-9:_.\-]{1,160}$/.test(nodeId)) {
+            throw new SmithersError("INVALID_INPUT", "nodeId contains unsupported characters");
         }
-        const callerCursor = asOptionalNonNegativeInt(params.afterSeq, "afterSeq");
-        const hint = this.runEventSeqHints.get(runId) ?? 0;
-        let cursor = callerCursor ?? Math.max(0, hint - 6_000);
-        /** @type {Record<string, unknown>[]} */
-        const matches = [];
-        for (let page = 0; page < 40; page += 1) {
-            const rows = await resolved.adapter.listEventHistory(runId, { afterSeq: cursor, limit: 2_000 });
-            if (!Array.isArray(rows) || rows.length === 0) {
-                break;
-            }
-            for (const row of rows) {
-                const seq = Number(row.seq ?? 0);
-                if (seq > cursor) {
-                    cursor = seq;
-                }
-                const payloadJson = typeof row.payloadJson === "string" ? row.payloadJson : "";
-                if (payloadJson.includes(needle)) {
-                    matches.push(row);
-                }
-            }
-            if (matches.length > limit) {
-                matches.splice(0, matches.length - limit);
-            }
-            if (rows.length < 2_000) {
-                break;
-            }
-        }
-        this.runEventSeqHints.set(runId, Math.max(this.runEventSeqHints.get(runId) ?? 0, cursor));
+        const matches = await resolved.adapter.listNodeEvents(runId, nodeId, {
+            afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+            limit,
+        });
         return matches.map((row) => serializeRunEventRow(row));
     }
     /**
