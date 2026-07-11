@@ -153,9 +153,12 @@ describe("the checked-in registry", () => {
     const configDir = resolve(root, "codex-work");
     mkdirSync(bin, { recursive: true });
     mkdirSync(configDir, { recursive: true });
-    const claude = resolve(bin, "claude");
-    writeFileSync(claude, "#!/bin/sh\nexit 0\n");
-    chmodSync(claude, 0o755);
+    // Match the platform's real command lookup contract. Windows resolves
+    // extensionless command names through PATHEXT; an extensionless POSIX
+    // shell fixture can never represent an installed `claude` command there.
+    const claude = resolve(bin, process.platform === "win32" ? "claude.CMD" : "claude");
+    writeFileSync(claude, process.platform === "win32" ? "@exit /b 0\r\n" : "#!/bin/sh\nexit 0\n");
+    if (process.platform !== "win32") chmodSync(claude, 0o755);
     writeFileSync(resolve(root, "accounts.json"), JSON.stringify({
       version: 1,
       accounts: [
@@ -166,8 +169,10 @@ describe("the checked-in registry", () => {
 
     const previousHome = process.env.SMITHERS_HOME;
     const previousTestPath = process.env.SMITHERS_TEST_AGENT_PATH;
+    const previousPathExt = process.env.PATHEXT;
     process.env.SMITHERS_HOME = root;
     process.env.SMITHERS_TEST_AGENT_PATH = bin;
+    if (process.platform === "win32") process.env.PATHEXT = ".CMD";
     try {
       const nonce = `${Date.now()}-${Math.random()}`;
       const roles = await import(`${pathToFileURL(resolve(import.meta.dir, "../.smithers/components/roles.ts")).href}?case=${nonce}`);
@@ -185,6 +190,8 @@ describe("the checked-in registry", () => {
       else process.env.SMITHERS_HOME = previousHome;
       if (previousTestPath === undefined) delete process.env.SMITHERS_TEST_AGENT_PATH;
       else process.env.SMITHERS_TEST_AGENT_PATH = previousTestPath;
+      if (previousPathExt === undefined) delete process.env.PATHEXT;
+      else process.env.PATHEXT = previousPathExt;
       rmSync(root, { recursive: true, force: true });
     }
   });

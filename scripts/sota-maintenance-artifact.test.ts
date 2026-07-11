@@ -74,6 +74,11 @@ describe("SOTA maintenance publication artifact", () => {
 
   test("packages, binds, hashes, and materializes only allowlisted changes", () => {
     const paths = fixture();
+    // Windows has no POSIX executable bit, so chmod cannot turn an untracked
+    // file into mode 100755. The scheduled packer/publisher runs on Linux and
+    // must continue preserving executable modes there; Windows should package
+    // the same new file as a regular 100644 Git blob.
+    const newScriptMode = process.platform === "win32" ? "100644" : "100755";
     writeFileSync(resolve(paths.source, "docs/existing.mdx"), "after\n");
     writeFileSync(resolve(paths.source, "scripts/new.mjs"), "export const changed = true;\n");
     chmodSync(resolve(paths.source, "scripts/new.mjs"), 0o755);
@@ -82,7 +87,7 @@ describe("SOTA maintenance publication artifact", () => {
     const manifest = pack(paths);
     expect(manifest.files.map((file) => [file.path, file.mode])).toEqual([
       ["docs/existing.mdx", "100644"],
-      ["scripts/new.mjs", "100755"],
+      ["scripts/new.mjs", newScriptMode],
     ]);
     expect(manifest.deletions).toEqual(["scripts/remove.mjs"]);
     expect(manifest.baseSha).toBe(paths.baseSha);
@@ -102,6 +107,9 @@ describe("SOTA maintenance publication artifact", () => {
       "scripts/new.mjs",
       "scripts/remove.mjs",
     ]);
+    expect(git(paths.publisher, ["ls-files", "--stage", "--", "scripts/new.mjs"]).split(/\s+/)[0]).toBe(
+      newScriptMode,
+    );
   });
 
   test("rejects artifacts whose run or base binding does not match", () => {
