@@ -916,7 +916,12 @@ export class BaseCliAgent {
                 cwd,
                 options,
             }),
-            catch: (cause) => toSmithersError(cause, "build agent command"),
+            // A subclass may honor cancellation while preparing its command
+            // (for example while sharing a bounded credential refresh). Preserve
+            // the caller's exact abort reason just as the HTTP boundary does.
+            catch: (cause) => options?.abortSignal?.aborted
+                ? (options.abortSignal.reason ?? cause)
+                : toSmithersError(cause, "build agent command"),
         })), Effect.flatMap((commandSpec) => {
             cleanup = commandSpec.cleanup;
             metricTags = {

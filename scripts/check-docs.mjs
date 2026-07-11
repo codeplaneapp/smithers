@@ -2787,9 +2787,8 @@ function checkReadmeAvoidsDeprecatedRalphPromotion() {
   const readme = readFileSync(README, "utf8");
   const required = [
     // The hero workflow-runs screenshot was removed with the unreleased UI; the
-    // README no longer ships that image, so only the Loop primitive guidance and
-    // the Ralph/Studio-avoidance rules below are enforced.
-    "| `<Loop>`     | Repeat tasks until a condition is met  |",
+    // README no longer ships that image or the old primitive table, so only the
+    // current Loop example and Ralph/Studio-avoidance rules are enforced.
     "<Loop until={ctx.latest(outputs.review, \"validate\")?.approved} maxIterations={5}>",
     "</Loop>",
   ];
@@ -3200,7 +3199,7 @@ function checkOpenApiDocsMatchCurrentPackage() {
     [OPENAPI_CONCEPTS, 'import { openai } from "@ai-sdk/openai";'],
     [OPENAPI_CONCEPTS, "`loadSpecEffect(input)` | Load and parse a spec from object, path, URL, or raw text."],
     [OPENAPI_CONCEPTS, "`loadSpecSync(input)` | Load and parse a spec from object, local file path, or raw text. It does not fetch URLs."],
-    [OPENAPI_CONCEPTS, "`jsonSchemaToZod(schema, spec, visited?)` / `buildOperationSchema(parameters, requestBody, spec)`"],
+    [OPENAPI_CONCEPTS, "`jsonSchemaToZod(schema, spec, visited?, depth?)` / `buildOperationSchema(parameters, requestBody, spec)`"],
     [OPENAPI_CONCEPTS, "OpenAPI tool calls update the exported Effect metrics (`openApiToolCallsTotal`, `openApiToolCallErrorsTotal`, `openApiToolDuration`)"],
     [OPENAPI_CONCEPTS, "The current tool factory does not emit `OpenApiToolCalled` onto the Smithers run event bus"],
     [COMMON_TOOLS_INTEGRATION, "See [OpenAPI tools](/concepts/openapi-tools)."],
@@ -3216,7 +3215,7 @@ function checkOpenApiDocsMatchCurrentPackage() {
     [OPENAPI_SPEC_SOURCE, "paths: Record<string, PathItem>;"],
     [OPENAPI_SPEC_SOURCE, "requestBodies?: Record<string, RequestBodyObject>;"],
     [OPENAPI_DECLARATIONS, "declare function jsonSchemaToZod(schema: SchemaObject | RefObject | undefined, spec:"],
-    [OPENAPI_DECLARATIONS, "visited?: Set<string>): z.ZodType;"],
+    [OPENAPI_DECLARATIONS, "visited?: Set<string>, depth?: number): z.ZodType;"],
     [OPENAPI_DECLARATIONS, "declare function buildOperationSchema(parameters: ParameterObject[], requestBody: RequestBodyObject | undefined, spec:"],
   ];
   const forbidden = [

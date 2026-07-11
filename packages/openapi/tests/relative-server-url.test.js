@@ -71,7 +71,11 @@ describe("relative server URL — real HTTP round-trip", () => {
 
     test("relative server URL resolves against the URL the spec was loaded from", async () => {
         const specUrl = `${baseUrl}/api/v3/openapi.json`;
-        const tools = await createOpenApiTools(specUrl);
+        const tools = await createOpenApiTools(specUrl, {
+            // The fixture intentionally serves both the spec and API from a
+            // loopback address; production public specs need no opt-in.
+            allowPrivateNetwork: true,
+        });
 
         const result = await tools.getPetById.execute({ petId: "42" });
 

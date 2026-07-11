@@ -7,9 +7,11 @@
 // Non-destructive: it snapshots the committed `.d.ts` under `pkg/src`, runs the
 // real build to regenerate them, content-compares regenerated-vs-committed to
 // detect drift, then ALWAYS restores the committed tree in a `finally` — even if
-// the build throws. The build script is `clean-dts src && tsup`, which deletes
-// every `.d.ts` before tsup rewrites them; without the restore, a transient tsup
-// failure would leave ~100 tracked declarations deleted across graph+integrations
+// the build throws. Package builds remove their generated declarations before
+// tsup runs (the whole tree for per-file packages, selected bundled entries for
+// agents); without the restore, a transient tsup failure would leave tracked
+// declarations deleted across agents, graph, integrations, OpenAPI, and the
+// shared HTTP client
 // (a nasty footgun in this shared jj working tree). The net effect of this gate
 // is now zero: pass or fail, the tree ends byte-identical to how it started.
 //
@@ -35,7 +37,13 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packages = ["packages/graph", "packages/integrations"];
+const packages = [
+  "packages/agents",
+  "packages/graph",
+  "packages/http-client",
+  "packages/integrations",
+  "packages/openapi",
+];
 
 /**
  * Snapshot every `.d.ts` under `srcDir` as a rel-path → content map.

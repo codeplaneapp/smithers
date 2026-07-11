@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "exceptions": [
+    {
+      "id": "GHSA-848j-6mx2-7j84",
+      "package": "elliptic",
+      "versions": ["6.6.1"],
+      "paths": [
+        "packages/agent-eliza > @elizaos/core@1.7.2 > crypto-browserify@3.12.1 > browserify-sign@4.2.6 > elliptic@6.6.1",
+        "packages/agent-eliza > @elizaos/core@1.7.2 > crypto-browserify@3.12.1 > create-ecdh@4.0.4 > elliptic@6.6.1"
+      ],
+      "severity": "low",
+      "expiresOn": "2026-10-08",
+      "rationale": "No patched elliptic release exists. The dependency is pulled in by crypto-browserify through the opt-in Eliza adapter.",
+      "mitigation": "Smithers does not use this dependency for control-plane signing. Keep the Eliza adapter isolated from security-sensitive signing workloads and replace the transitive crypto-browserify chain when upstream permits it."
+    },
+    {
+      "id": "GHSA-7v5m-pr3q-6453",
+      "package": "@mariozechner/pi-coding-agent",
+      "versions": ["0.73.1"],
+      "paths": ["packages/pi-plugin > @mariozechner/pi-coding-agent@0.73.1"],
+      "severity": "low",
+      "expiresOn": "2026-10-08",
+      "rationale": "The upstream Pi release has no patched version for the HTML session-export sanitization issue.",
+      "mitigation": "The Pi integration is opt-in and Smithers does not publish or render Pi HTML session exports. Do not open untrusted Pi session exports in a privileged browser context."
+    },
+    {
+      "id": "GHSA-jfgx-wxx8-mp94",
+      "package": "@mariozechner/pi-coding-agent",
+      "versions": ["0.73.1"],
+      "paths": ["packages/pi-plugin > @mariozechner/pi-coding-agent@0.73.1"],
+      "severity": "high",
+      "expiresOn": "2026-09-08",
+      "rationale": "The upstream Pi release has no patched version for predictable temporary extension-install paths.",
+      "mitigation": "Treat the Pi integration as single-user tooling: do not run it on shared multi-user hosts, and run agent workloads inside an isolated account or sandbox. Remove this exception as soon as upstream publishes a fix."
+    },
+    {
+      "id": "GHSA-r95r-rj6r-c39x",
+      "package": "@mariozechner/pi-coding-agent",
+      "versions": ["0.73.1"],
+      "paths": ["packages/pi-plugin > @mariozechner/pi-coding-agent@0.73.1"],
+      "severity": "low",
+      "expiresOn": "2026-10-08",
+      "rationale": "The upstream Pi release has no patched version for concurrent auth-file writes.",
+      "mitigation": "Use a per-user Pi configuration directory, restrict it to that user, and avoid concurrent credential mutations on shared hosts."
+    }
+  ]
+}

@@ -5,13 +5,13 @@ import { createMcpToolset } from "../src/mcp/createMcpToolset.js";
 
 const DEMO_SERVER = resolve(import.meta.dir, "fixtures", "demo-mcp-server.js");
 const FLOOD_SERVER = resolve(import.meta.dir, "fixtures", "stderr-flood-mcp-server.js");
+const PENDING_SERVER = resolve(import.meta.dir, "fixtures", "pending-mcp-server.js");
 
 /** @param {Partial<import("../src/mcp/McpToolsetOptions")>} [options] */
 function connectDemo(options) {
   return createMcpToolset({ command: "bun", args: [DEMO_SERVER] }, options);
 }
 
-/** AI SDK passes these to `execute`; the MCP tools ignore them. */
 const callOptions = { toolCallId: "test-call", messages: [] };
 
 describe("createMcpToolset (real MCP server over stdio)", () => {
@@ -80,6 +80,21 @@ describe("createMcpToolset (real MCP server over stdio)", () => {
     },
     20000,
   );
+
+  test("cancels a pending live MCP tool call through the AI SDK abort signal", async () => {
+    const toolset = await createMcpToolset({ command: "bun", args: [PENDING_SERVER] });
+    const controller = new AbortController();
+    try {
+      const pending = toolset.tools.wait_forever.execute(
+        {},
+        { ...callOptions, abortSignal: controller.signal },
+      );
+      controller.abort(new DOMException("cancelled by caller", "AbortError"));
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      await toolset.close();
+    }
+  });
 });
 
 /**

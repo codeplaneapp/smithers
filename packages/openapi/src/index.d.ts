@@ -1,9 +1,7 @@
-import * as effect from 'effect';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { Tool } from 'ai';
-import * as effect_MetricState from 'effect/MetricState';
-import * as effect_MetricKeyType from 'effect/MetricKeyType';
+export { openApiToolCallErrorsTotal, openApiToolCallsTotal, openApiToolDuration } from '@smithers-orchestrator/observability/metrics';
 
 type HttpMethod = "get" | "post" | "put" | "delete" | "patch";
 
@@ -83,18 +81,52 @@ type OpenApiToolResponseExample = {
     description?: string;
     value: unknown;
 };
-
 type OpenApiOperationCuration = false | {
     include?: boolean;
     name?: string;
     description?: string;
     responseExamples?: OpenApiToolResponseExample[];
 };
-
-type OpenApiToolsOptions$5 = {
+type OpenApiToolsOptions$6 = {
+    /**
+     * Operator-pinned request base URL. Credentialed tools require this instead
+     * of trusting a spec-controlled servers[].url.
+     */
     baseUrl?: string;
     headers?: Record<string, string>;
     auth?: OpenApiAuth$1;
+    /**
+     * Additional origins that may receive configured auth/custom headers after
+     * a redirect. The resolved API origin is always trusted. Cross-origin
+     * redirects outside this list are followed only after sensitive headers are
+     * stripped; HTTPS-to-HTTP redirects are rejected. This is redirect-only and
+     * never authorizes a spec-controlled initial server.
+     */
+    allowedOrigins?: string[];
+    /**
+     * Permit private/special destinations for remote spec loads, redirect hops,
+     * and an unpinned credential-free spec server. Off by default; prefer an
+     * exact baseUrl for API requests. This cannot replace baseUrl when auth or
+     * headers are configured.
+     */
+    allowPrivateNetwork?: boolean;
+    /**
+     * Override Node/Bun DNS resolution used to reject spec/API hostnames whose
+     * A/AAAA answers include non-global addresses. Resolution failures, empty
+     * answers, and malformed or non-global answers are denied. Useful for
+     * controlled runtimes and deterministic tests.
+     */
+    resolveHostname?: (hostname: string) => readonly string[] | Promise<readonly string[]>;
+    /** Maximum number of redirect hops. Defaults to 5. */
+    maxRedirects?: number;
+    /** Maximum serialized request-body bytes. Defaults to 10 MiB; must be a non-negative safe integer. */
+    maxRequestBytes?: number;
+    /** Maximum decoded response bytes buffered by a generated tool. Defaults to 1 MiB; must be a non-negative safe integer. */
+    maxResponseBytes?: number;
+    /** Maximum bytes buffered while loading a remote OpenAPI spec. Defaults to 5 MiB; must be a non-negative safe integer. */
+    maxSpecBytes?: number;
+    /** Cancels remote spec loading. Per-tool execution uses the AI SDK abort signal. */
+    signal?: AbortSignal;
     include?: string[];
     exclude?: string[];
     namePrefix?: string;
@@ -152,15 +184,16 @@ declare function extractOperations(spec: OpenApiSpec$a): ParsedOperation$1[];
 type OpenApiSpec$a = OpenApiSpec$b;
 type ParsedOperation$1 = ParsedOperation$2;
 
-/** @typedef {import("./OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
 /**
  * Load an OpenAPI spec from a JSON/YAML string, URL, file path, or object.
  *
  * @param {string | OpenApiSpec} input
+ * @param {Pick<OpenApiToolsOptions, "allowedOrigins" | "allowPrivateNetwork" | "maxRedirects" | "maxSpecBytes" | "resolveHostname" | "signal">} [options]
  * @returns {Effect.Effect<OpenApiSpec, unknown>}
  */
-declare function loadSpecEffect(input: string | OpenApiSpec$9): Effect.Effect<OpenApiSpec$9, unknown>;
+declare function loadSpecEffect(input: string | OpenApiSpec$9, options?: Pick<OpenApiToolsOptions$5, "allowedOrigins" | "allowPrivateNetwork" | "maxRedirects" | "maxSpecBytes" | "resolveHostname" | "signal">): Effect.Effect<OpenApiSpec$9, unknown>;
 type OpenApiSpec$9 = OpenApiSpec$b;
+type OpenApiToolsOptions$5 = OpenApiToolsOptions$6;
 
 /** @typedef {import("./OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
 /**
@@ -182,16 +215,14 @@ type OpenApiSpec$8 = OpenApiSpec$b;
  * @param {SchemaObject | RefObject | undefined} schema
  * @param {OpenApiSpec} spec
  * @param {Set<string>} [visited]
+ * @param {number} [depth]
  * @returns {z.ZodType}
  */
-declare function jsonSchemaToZod(schema: SchemaObject | RefObject | undefined, spec: OpenApiSpec$7, visited?: Set<string>): z.ZodType;
+declare function jsonSchemaToZod(schema: SchemaObject | RefObject | undefined, spec: OpenApiSpec$7, visited?: Set<string>, depth?: number): z.ZodType;
 type OpenApiSpec$7 = OpenApiSpec$b;
 type RefObject = RefObject$1;
 type SchemaObject = SchemaObject$1;
 
-/** @typedef {import("./OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
-/** @typedef {import("./ParameterObject.ts").ParameterObject} ParameterObject */
-/** @typedef {import("./RequestBodyObject.ts").RequestBodyObject} RequestBodyObject */
 /**
  * Build a single Zod object schema for an operation's input, combining:
  * - path parameters
@@ -220,7 +251,7 @@ type RequestBodyObject = RequestBodyObject$1;
  */
 declare function createOpenApiTools(input: string | OpenApiSpec$5, options?: OpenApiToolsOptions$4): Promise<Record<string, any>>;
 type OpenApiSpec$5 = OpenApiSpec$b;
-type OpenApiToolsOptions$4 = OpenApiToolsOptions$5;
+type OpenApiToolsOptions$4 = OpenApiToolsOptions$6;
 
 /** @typedef {import("../OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
 /** @typedef {import("../OpenApiToolsOptions.ts").OpenApiToolsOptions} OpenApiToolsOptions */
@@ -233,7 +264,7 @@ type OpenApiToolsOptions$4 = OpenApiToolsOptions$5;
  */
 declare function createOpenApiToolsSync(input: string | OpenApiSpec$4, options?: OpenApiToolsOptions$3): Record<string, any>;
 type OpenApiSpec$4 = OpenApiSpec$b;
-type OpenApiToolsOptions$3 = OpenApiToolsOptions$5;
+type OpenApiToolsOptions$3 = OpenApiToolsOptions$6;
 
 /** @typedef {import("../OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
 /** @typedef {import("../OpenApiToolsOptions.ts").OpenApiToolsOptions} OpenApiToolsOptions */
@@ -247,7 +278,7 @@ type OpenApiToolsOptions$3 = OpenApiToolsOptions$5;
  */
 declare function createOpenApiTool(input: string | OpenApiSpec$3, operationId: string, options?: OpenApiToolsOptions$2): Promise<any>;
 type OpenApiSpec$3 = OpenApiSpec$b;
-type OpenApiToolsOptions$2 = OpenApiToolsOptions$5;
+type OpenApiToolsOptions$2 = OpenApiToolsOptions$6;
 
 /**
  * Type alias for an AI SDK tool produced from an OpenAPI operation.
@@ -270,7 +301,7 @@ type OpenApiTool$1 = Tool;
 declare function createOpenApiToolSync(input: string | OpenApiSpec$2, operationId: string, options?: OpenApiToolsOptions$1): OpenApiTool;
 type OpenApiSpec$2 = OpenApiSpec$b;
 type OpenApiTool = OpenApiTool$1;
-type OpenApiToolsOptions$1 = OpenApiToolsOptions$5;
+type OpenApiToolsOptions$1 = OpenApiToolsOptions$6;
 
 /** @typedef {import("../OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
 /**
@@ -287,16 +318,9 @@ declare function listOperations(input: string | OpenApiSpec$1): Array<{
 }>;
 type OpenApiSpec$1 = OpenApiSpec$b;
 
-/** @type {import("effect").Metric.Metric.Counter<number>} */
-declare const openApiToolCallsTotal: effect.Metric.Metric.Counter<number>;
-/** @type {import("effect").Metric.Metric.Counter<number>} */
-declare const openApiToolCallErrorsTotal: effect.Metric.Metric.Counter<number>;
-/** @type {import("effect").Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>} */
-declare const openApiToolDuration: effect.Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
-
 type OpenApiAuth = OpenApiAuth$1;
 type OpenApiSpec = OpenApiSpec$b;
-type OpenApiToolsOptions = OpenApiToolsOptions$5;
+type OpenApiToolsOptions = OpenApiToolsOptions$6;
 type ParsedOperation = ParsedOperation$2;
 
-export { type OpenApiAuth, type OpenApiSpec, type OpenApiToolsOptions, type ParsedOperation, buildOperationSchema, createOpenApiTool, createOpenApiToolSync, createOpenApiTools, createOpenApiToolsSync, extractOperations, jsonSchemaToZod, listOperations, loadSpecEffect, loadSpecSync, openApiToolCallErrorsTotal, openApiToolCallsTotal, openApiToolDuration };
+export { type OpenApiAuth, type OpenApiSpec, type OpenApiToolsOptions, type ParsedOperation, buildOperationSchema, createOpenApiTool, createOpenApiToolSync, createOpenApiTools, createOpenApiToolsSync, extractOperations, jsonSchemaToZod, listOperations, loadSpecEffect, loadSpecSync };

@@ -10,6 +10,9 @@ import { extractOperations, loadSpecSync } from "../src/spec-parser.js";
 import { loadSpecEffect } from "../src/loadSpecEffect.js";
 import { parseSpecText } from "../src/_specHelpers.js";
 import { SPEC_SOURCE_URL } from "../src/specSourceUrl.js";
+
+const publicDns = async () => ["8.8.8.8"];
+import { createOpenApiTools } from "../src/tool-factory/createOpenApiTools.js";
 import { petStoreSpec, refSpec, noOperationIdSpec } from "./fixtures.js";
 
 const originalFetch = globalThis.fetch;
@@ -80,23 +83,25 @@ describe("loadSpecEffect", () => {
             expect(url).toBe("https://example.test/openapi.json");
             return new Response(JSON.stringify(petStoreSpec), { status: 200 });
         };
-        const fromUrl = await Effect.runPromise(loadSpecEffect("https://example.test/openapi.json"));
+        const fromUrl = await Effect.runPromise(loadSpecEffect("https://example.test/openapi.json", {
+            resolveHostname: publicDns,
+        }));
         expect(fromUrl.paths["/pets"]).toBeDefined();
     });
 
     test("tracks the response URL as spec source for URL-loaded specs", async () => {
         globalThis.fetch = async (url) => {
             expect(url).toBe("https://example.test/openapi.json");
-            return {
-                ok: true,
-                status: 200,
-                statusText: "OK",
-                url: "https://cdn.example.test/specs/openapi.json",
-                text: async () => JSON.stringify(petStoreSpec),
-            };
+            const response = new Response(JSON.stringify(petStoreSpec), { status: 200 });
+            Object.defineProperty(response, "url", {
+                value: "https://cdn.example.test/specs/openapi.json",
+            });
+            return response;
         };
 
-        const spec = await Effect.runPromise(loadSpecEffect("https://example.test/openapi.json"));
+        const spec = await Effect.runPromise(loadSpecEffect("https://example.test/openapi.json", {
+            resolveHostname: publicDns,
+        }));
         expect(/** @type {Record<PropertyKey, unknown>} */ (spec)[SPEC_SOURCE_URL]).toBe(
             "https://cdn.example.test/specs/openapi.json",
         );
@@ -105,12 +110,92 @@ describe("loadSpecEffect", () => {
     test("wraps URL and raw text loading failures", async () => {
         globalThis.fetch = async () => new Response("missing", { status: 404, statusText: "Not Found" });
         await expect(
-            Effect.runPromise(loadSpecEffect("https://example.test/missing.json")),
+            Effect.runPromise(loadSpecEffect("https://example.test/missing.json", { resolveHostname: publicDns })),
         ).rejects.toThrow("openapi fetch spec");
 
         await expect(
             Effect.runPromise(loadSpecEffect("not valid json or yaml")),
         ).rejects.toThrow("openapi load spec");
+    });
+
+    test("rejects an invalid remote-spec response cap before fetch", async () => {
+        let fetches = 0;
+        globalThis.fetch = async () => {
+            fetches += 1;
+            return new Response(JSON.stringify(petStoreSpec));
+        };
+        let caught;
+        try {
+            await Effect.runPromise(loadSpecEffect("https://example.test/openapi.json", {
+                maxSpecBytes: Number.NaN,
+                resolveHostname: publicDns,
+            }));
+        }
+        catch (error) {
+            caught = error;
+        }
+        expect(String(caught)).toContain("maxSpecBytes must be a non-negative safe integer");
+        expect(fetches).toBe(0);
+    });
+
+    test("cancels a non-2xx remote spec body before surfacing the status", async () => {
+        let cancelled = false;
+        globalThis.fetch = async () => new Response(new ReadableStream({
+            cancel() {
+                cancelled = true;
+            },
+        }), { status: 503, statusText: "Unavailable" });
+        await expect(
+            Effect.runPromise(loadSpecEffect("https://example.test/unavailable.json", { resolveHostname: publicDns })),
+        ).rejects.toThrow("openapi fetch spec");
+        expect(cancelled).toBe(true);
+    });
+
+    test("public async factories preserve the exact remote-spec abort reason", async () => {
+        const controller = new AbortController();
+        let markStarted;
+        const started = new Promise((resolve) => {
+            markStarted = resolve;
+        });
+        globalThis.fetch = async (_url, init) => {
+            markStarted();
+            return new Promise((_resolve, reject) => {
+                init?.signal?.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+            });
+        };
+        const reason = new DOMException("cancelled", "AbortError");
+        const pending = createOpenApiTools("https://example.test/openapi.json", {
+            signal: controller.signal,
+            resolveHostname: publicDns,
+        });
+        await started;
+        controller.abort(reason);
+        await expect(pending).rejects.toBe(reason);
+    });
+
+    test("blocks private remote spec destinations and public-to-private redirects before contact", async () => {
+        const contacted = [];
+        globalThis.fetch = async (url) => {
+            contacted.push(String(url));
+            return new Response(null, {
+                status: 302,
+                headers: { location: "https://127.0.0.1/private-spec" },
+            });
+        };
+
+        await expect(Effect.runPromise(loadSpecEffect("https://127.0.0.1/openapi.json")))
+            .rejects.toThrow("openapi fetch spec");
+        expect(contacted).toEqual([]);
+
+        await expect(Effect.runPromise(loadSpecEffect("https://public-spec.example/openapi.json", {
+            resolveHostname: publicDns,
+        }))).rejects.toThrow("openapi fetch spec");
+        expect(contacted).toEqual(["https://public-spec.example/openapi.json"]);
+
+        globalThis.fetch = async () => new Response(JSON.stringify(petStoreSpec));
+        await expect(Effect.runPromise(loadSpecEffect("http://127.0.0.1/openapi.json", {
+            allowPrivateNetwork: true,
+        }))).resolves.toMatchObject({ openapi: "3.0.0" });
     });
 
     test("rejects Swagger 2.0 YAML text through the Effect loader", async () => {

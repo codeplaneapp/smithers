@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createHttpTool } from "../src/http/createHttpTool.js";
 
 const callOptions = { toolCallId: "test-call", messages: [] };
+const publicDns = { resolveHostname: async () => ["93.184.216.34"] };
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
@@ -42,7 +43,11 @@ describe("createHttpTool", () => {
 
   test("withholds default headers from a host outside the allowlist", async () => {
     const calls = stub(() => new Response("", { status: 204 }));
-    const tool = createHttpTool({ baseUrl: "https://api.example.com", defaultHeaders: { "x-secret": "s" } });
+    const tool = createHttpTool({
+      baseUrl: "https://api.example.com",
+      defaultHeaders: { "x-secret": "s" },
+      ...publicDns,
+    });
     const result = await tool.execute({ url: "https://evil.example/steal" }, callOptions);
     expect(result.body).toBeNull(); // 204 -> null
     expect(calls[0].init.headers.get("x-secret")).toBeNull();
@@ -50,7 +55,7 @@ describe("createHttpTool", () => {
 
   test("serializes a JSON body and applies bearer auth", async () => {
     const calls = stub(() => Response.json({ echoed: true }));
-    const tool = createHttpTool();
+    const tool = createHttpTool(publicDns);
     await tool.execute(
       { url: "https://api.example.com/x", method: "POST", body: { hello: "world" }, auth: { type: "bearer", token: "tok" } },
       callOptions,
@@ -62,7 +67,7 @@ describe("createHttpTool", () => {
 
   test("passes a string body through untouched and applies basic auth", async () => {
     const calls = stub(() => new Response("plain", { status: 200, headers: { "content-type": "text/plain" } }));
-    const tool = createHttpTool();
+    const tool = createHttpTool(publicDns);
     const result = await tool.execute(
       { url: "https://api.example.com/x", method: "PUT", body: "raw-string", auth: { type: "basic", username: "u", password: "p" } },
       callOptions,
@@ -74,7 +79,7 @@ describe("createHttpTool", () => {
 
   test("applies a custom header auth and returns null for an empty body", async () => {
     const calls = stub(() => new Response("", { status: 200 }));
-    const tool = createHttpTool({ allowedHosts: ["api.example.com:8443"] });
+    const tool = createHttpTool({ allowedHosts: ["api.example.com:8443"], ...publicDns });
     const result = await tool.execute(
       { url: "https://api.example.com/x", headers: { "x-req": "1" }, auth: { type: "header", name: "x-key", value: "kv" } },
       callOptions,
@@ -91,10 +96,10 @@ describe("createHttpTool", () => {
       aborted = init.signal?.aborted ?? false;
       return Response.json({ late: true });
     });
-    const tool = createHttpTool();
-    const result = await tool.execute({ url: "https://api.example.com/slow", timeoutMs: 1 }, callOptions);
+    const tool = createHttpTool(publicDns);
+    const pending = tool.execute({ url: "https://api.example.com/slow", timeoutMs: 1 }, callOptions);
+    await expect(pending).rejects.toMatchObject({ name: "TimeoutError" });
     expect(aborted).toBe(true);
-    expect(result.body).toEqual({ late: true });
   });
 
   test("parses a full-URL allowlist entry down to its host", async () => {
@@ -107,10 +112,10 @@ describe("createHttpTool", () => {
     expect(calls[0].init.headers.get("x-secret")).toBe("s");
   });
 
-  test("tolerates an unparseable baseUrl when resolving the allowlist", async () => {
-    stub(() => Response.json({ ok: true }));
-    const tool = createHttpTool({ baseUrl: "::::not a url", defaultHeaders: { "x-secret": "s" } });
-    const result = await tool.execute({ url: "https://api.example.com/x" }, callOptions);
-    expect(result.ok).toBe(true);
+  test("rejects an unparseable baseUrl at construction", () => {
+    expect(() => createHttpTool({
+      baseUrl: "::::not a url",
+      defaultHeaders: { "x-secret": "s" },
+    })).toThrow(/URL is invalid/);
   });
 });

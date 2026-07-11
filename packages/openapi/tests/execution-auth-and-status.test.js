@@ -6,9 +6,13 @@
 //      returned as a successful tool result.
 // ---------------------------------------------------------------------------
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { createOpenApiToolsSync } from "../src/tool-factory.js";
+import { createOpenApiToolsSync as createOpenApiToolsSyncRaw } from "../src/tool-factory.js";
 
 const originalFetch = globalThis.fetch;
+const createOpenApiToolsSync = (spec, options = {}) => createOpenApiToolsSyncRaw(spec, {
+    resolveHostname: async () => ["8.8.8.8"],
+    ...options,
+});
 
 // A spec that deliberately declares a header *parameter* whose name collides
 // with the injected auth header. A prompt-injected / adversarial model could
@@ -67,42 +71,58 @@ describe("injected auth wins over LLM-controlled header params (trust boundary)"
 
     test("bearer token cannot be overwritten by an Authorization header param", async () => {
         const tools = createOpenApiToolsSync(authClobberSpec, {
+            baseUrl: "https://api.example.com",
             auth: { type: "bearer", token: "REAL-SECRET" },
         });
         // The model supplies a malicious Authorization header param value.
         await tools.listPets.execute({ Authorization: "attacker-token" });
         const [, init] = mockFetch.mock.calls[0];
         // Operator-injected auth must win — the attacker value is discarded.
-        expect(init.headers["Authorization"]).toBe("Bearer REAL-SECRET");
-        expect(init.headers["Authorization"]).not.toContain("attacker");
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer REAL-SECRET");
+        expect(new Headers(init.headers).get("authorization")).not.toContain("attacker");
     });
 
     test("bearer token cannot be stripped to empty by an Authorization header param", async () => {
         const tools = createOpenApiToolsSync(authClobberSpec, {
+            baseUrl: "https://api.example.com",
             auth: { type: "bearer", token: "REAL-SECRET" },
         });
         await tools.listPets.execute({ Authorization: "" });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["Authorization"]).toBe("Bearer REAL-SECRET");
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer REAL-SECRET");
+    });
+
+    test("header collisions are case-insensitive and never combine attacker auth", async () => {
+        const lowerCaseSpec = structuredClone(authClobberSpec);
+        lowerCaseSpec.paths["/pets"].get.parameters[0].name = "authorization";
+        const tools = createOpenApiToolsSync(lowerCaseSpec, {
+            baseUrl: "https://api.example.com",
+            auth: { type: "bearer", token: "REAL-SECRET" },
+        });
+        await tools.listPets.execute({ authorization: "attacker-token" });
+        const [, init] = mockFetch.mock.calls[0];
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer REAL-SECRET");
     });
 
     test("basic auth cannot be overwritten by an Authorization header param", async () => {
         const tools = createOpenApiToolsSync(authClobberSpec, {
+            baseUrl: "https://api.example.com",
             auth: { type: "basic", username: "admin", password: "secret" },
         });
         await tools.listPets.execute({ Authorization: "Bearer attacker" });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["Authorization"]).toBe(`Basic ${btoa("admin:secret")}`);
+        expect(new Headers(init.headers).get("authorization")).toBe(`Basic ${btoa("admin:secret")}`);
     });
 
     test("apiKey-in-header value cannot be overwritten by a colliding header param", async () => {
         const tools = createOpenApiToolsSync(apiKeyClobberSpec, {
+            baseUrl: "https://api.example.com",
             auth: { type: "apiKey", name: "X-API-Key", value: "REAL-KEY", in: "header" },
         });
         await tools.listPets.execute({ "X-API-Key": "attacker-key" });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["X-API-Key"]).toBe("REAL-KEY");
-        expect(init.headers["X-API-Key"]).not.toContain("attacker");
+        expect(new Headers(init.headers).get("x-api-key")).toBe("REAL-KEY");
+        expect(new Headers(init.headers).get("x-api-key")).not.toContain("attacker");
     });
 
     test("non-colliding header params are still forwarded alongside injected auth", async () => {
@@ -123,13 +143,14 @@ describe("injected auth wins over LLM-controlled header params (trust boundary)"
             },
         };
         const tools = createOpenApiToolsSync(spec, {
+            baseUrl: "https://api.example.com",
             auth: { type: "bearer", token: "REAL-SECRET" },
         });
         await tools.listPets.execute({ "X-Request-Id": "req-1" });
         const [, init] = mockFetch.mock.calls[0];
         // Both survive: the benign header param AND the injected auth.
-        expect(init.headers["X-Request-Id"]).toBe("req-1");
-        expect(init.headers["Authorization"]).toBe("Bearer REAL-SECRET");
+        expect(new Headers(init.headers).get("x-request-id")).toBe("req-1");
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer REAL-SECRET");
     });
 });
 
@@ -166,13 +187,14 @@ describe("operator options.headers precedence (operator-controlled override)", (
                 },
             },
             {
+                baseUrl: "https://api.example.com",
                 auth: { type: "bearer", token: "A" },
                 headers: { Authorization: "Bearer B" },
             },
         );
         await tools.listPets.execute({});
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["Authorization"]).toBe("Bearer B");
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer B");
     });
 
     test("auth and an unrelated operator header both survive", async () => {
@@ -188,14 +210,26 @@ describe("operator options.headers precedence (operator-controlled override)", (
                 },
             },
             {
+                baseUrl: "https://api.example.com",
                 auth: { type: "bearer", token: "A" },
                 headers: { "X-Custom": "c" },
             },
         );
         await tools.listPets.execute({});
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["Authorization"]).toBe("Bearer A");
-        expect(init.headers["X-Custom"]).toBe("c");
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer A");
+        expect(new Headers(init.headers).get("x-custom")).toBe("c");
+    });
+
+    test("operator header override is case-insensitive", async () => {
+        const tools = createOpenApiToolsSync(authClobberSpec, {
+            baseUrl: "https://api.example.com",
+            auth: { type: "bearer", token: "A" },
+            headers: { authorization: "Bearer B" },
+        });
+        await tools.listPets.execute({ Authorization: "attacker" });
+        const [, init] = mockFetch.mock.calls[0];
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer B");
     });
 });
 
@@ -322,6 +356,7 @@ describe("non-2xx HTTP responses are surfaced as errors, not success", () => {
             ),
         );
         const tools = createOpenApiToolsSync(errorSpec, {
+            baseUrl: "https://api.example.com",
             auth: { type: "bearer", token: "SUPER-SECRET-TOKEN" },
         });
         const result = await tools.createPet.execute({ body: { name: "Fido" } });

@@ -23,7 +23,7 @@ const operation = {
 };
 
 const baseUrl = "https://api.example.com";
-const options = {};
+const options = { resolveHostname: async () => ["8.8.8.8"] };
 
 /** Read current counter value */
 async function readCounter(metric) {

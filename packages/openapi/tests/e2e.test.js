@@ -122,6 +122,7 @@ describe("OpenAPI e2e — real HTTP round-trip", () => {
 
     test("full flow: create tools from spec object → call listPets → verify real HTTP", async () => {
         const tools = await createOpenApiTools(makeSpec(), {
+            baseUrl,
             auth: { type: "bearer", token: "test-token" },
         });
 
@@ -144,7 +145,7 @@ describe("OpenAPI e2e — real HTTP round-trip", () => {
     });
 
     test("full flow: create single tool → call getPet with path param", async () => {
-        const getPet = await createOpenApiTool(makeSpec(), "getPet");
+        const getPet = await createOpenApiTool(makeSpec(), "getPet", { baseUrl });
 
         const result = await getPet.execute({ petId: "42" });
 
@@ -155,6 +156,7 @@ describe("OpenAPI e2e — real HTTP round-trip", () => {
 
     test("full flow: create tools with prefix and filter", async () => {
         const tools = await createOpenApiTools(makeSpec(), {
+            baseUrl,
             include: ["listPets", "getPet"],
             namePrefix: "store_",
         });
@@ -167,7 +169,7 @@ describe("OpenAPI e2e — real HTTP round-trip", () => {
     });
 
     test("full flow: POST with request body", async () => {
-        const tools = await createOpenApiTools(makeSpec());
+        const tools = await createOpenApiTools(makeSpec(), { baseUrl });
 
         const result = await tools.createPet.execute({
             body: { name: "NewPet", tag: "fish" },
@@ -191,7 +193,7 @@ describe("OpenAPI e2e — real HTTP round-trip", () => {
                 responses: { "404": { description: "Not found" } },
             },
         };
-        const tools = await createOpenApiTools(spec);
+        const tools = await createOpenApiTools(spec, { baseUrl });
         const result = await tools.getMissing.execute({});
 
         expect(result).toHaveProperty("error", true);

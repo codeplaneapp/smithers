@@ -1,4 +1,14 @@
 import { dynamicTool, jsonSchema } from "ai";
+import {
+  abortableDelay,
+  assertHttpUrl,
+  fetchWithPolicy,
+  readResponseJson,
+  readResponseText,
+} from "@smithers-orchestrator/http-client";
+import { createPublicRedirectValidator } from "@smithers-orchestrator/http-client/node";
+import { assertBase64WithinLimit, decodeBase64Bounded } from "../base64.js";
+import { responseByteLimit } from "../responseByteLimit.js";
 
 /** @typedef {import("./DocumentParsingProvider.ts").DocumentParsingProvider} DocumentParsingProvider */
 /** @typedef {import("./DocumentParsingToolset.ts").DocumentParsingToolset} DocumentParsingToolset */
@@ -8,6 +18,9 @@ import { dynamicTool, jsonSchema } from "ai";
 // bounded to ~20s total (attempts x interval) before the tool errors out.
 const LLAMAPARSE_POLL_MAX_ATTEMPTS = 20;
 const LLAMAPARSE_POLL_INTERVAL_MS = 1000;
+const DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_MAX_INPUT_BYTES = 25 * 1024 * 1024;
+const MAX_ERROR_BYTES = 64 * 1024;
 
 const inputSchema = {
   type: "object",
@@ -57,16 +70,27 @@ const inputSchema = {
  * @returns {DocumentParsingToolset}
  */
 export function createDocumentParsingToolset(options = {}) {
-  const provider = resolveProvider(options);
-  const toolName = options.toolName ?? "parse_document";
+  const normalizedOptions = {
+    ...options,
+    maxResponseBytes: responseByteLimit(
+      options.maxResponseBytes,
+      DEFAULT_MAX_RESPONSE_BYTES,
+    ),
+  };
+  const provider = resolveProvider(normalizedOptions);
+  const toolName = normalizedOptions.toolName ?? "parse_document";
+  const maxInputBytes = normalizedOptions.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES;
+  if (!Number.isSafeInteger(maxInputBytes) || maxInputBytes < 0) {
+    throw new Error("Document parsing input byte limit must be a non-negative safe integer");
+  }
   return {
     tools: {
       [toolName]: dynamicTool({
         description:
           "Parse documents and images into readable text/markdown using Firecrawl, Mistral OCR, LlamaParse, or a custom provider.",
         inputSchema: jsonSchema(inputSchema),
-        execute: async (input, callOptions) =>
-          provider.parseDocument(normalizeInput(input), { abortSignal: callOptions?.abortSignal }),
+        execute: async (input, execution) =>
+          provider.parseDocument(normalizeInput(input, maxInputBytes), { signal: execution?.abortSignal }),
       }),
     },
     toolNames: [toolName],
@@ -88,9 +112,10 @@ function resolveProvider(options) {
 
 /**
  * @param {unknown} input
+ * @param {number} maxInputBytes
  * @returns {Parameters<DocumentParsingProvider["parseDocument"]>[0]}
  */
-function normalizeInput(input) {
+function normalizeInput(input, maxInputBytes) {
   const value = /** @type {Parameters<DocumentParsingProvider["parseDocument"]>[0]} */ (input ?? {});
   if (!value.source || typeof value.source !== "object") {
     throw new Error("parse_document requires a source");
@@ -99,11 +124,20 @@ function normalizeInput(input) {
   if (source.type === "url" && typeof source.url !== "string") {
     throw new Error("parse_document source.url is required for url sources");
   }
+  if (source.type === "url") {
+    assertHttpUrl(source.url);
+  }
   if (source.type === "base64" && typeof source.data !== "string") {
     throw new Error("parse_document source.data is required for base64 sources");
   }
   if (source.type === "text" && typeof source.text !== "string") {
     throw new Error("parse_document source.text is required for text sources");
+  }
+  if (source.type === "base64") {
+    assertBase64WithinLimit(source.data, maxInputBytes, "Document parsing input");
+  }
+  if (source.type === "text" && Buffer.byteLength(source.text, "utf8") > maxInputBytes) {
+    throw new Error(`Document parsing input exceeds the maximum size of ${maxInputBytes} bytes`);
   }
   return value;
 }
@@ -118,13 +152,15 @@ function createFirecrawlProvider(options) {
   const apiKey = options.apiKey ?? process.env.FIRECRAWL_API_KEY;
   return {
     name: "firecrawl",
-    async parseDocument(input) {
-      if (input.source.type !== "url") return parseFirecrawlFile(request, baseUrl, apiKey, input);
+    async parseDocument(input, execution = {}) {
+      if (input.source.type !== "url") {
+        return parseFirecrawlFile(request, baseUrl, apiKey, input, options, execution.signal);
+      }
       const json = await postJson(request, `${baseUrl}/scrape`, apiKey, {
         url: input.source.url,
         formats: [input.outputFormat === "text" ? "markdown" : (input.outputFormat ?? "markdown")],
         onlyMainContent: false,
-      });
+      }, options, execution.signal);
       const data = pickObject(json, "data") ?? pickObject(json, "result") ?? pickObject(json, undefined);
       const markdown = pickString(data, "markdown");
       const text = pickString(data, "text") ?? pickString(data, "content") ?? markdown ?? "";
@@ -144,9 +180,18 @@ function createFirecrawlProvider(options) {
  * @param {string} baseUrl
  * @param {string | undefined} apiKey
  * @param {Parameters<DocumentParsingProvider["parseDocument"]>[0]} input
+ * @param {DocumentParsingToolsetOptions} options
+ * @param {AbortSignal | undefined} signal
  */
-async function parseFirecrawlFile(request, baseUrl, apiKey, input) {
-  const json = await postMultipart(request, `${baseUrl}/parse`, apiKey, createDocumentFormData(input, createFirecrawlOptions(input)));
+async function parseFirecrawlFile(request, baseUrl, apiKey, input, options, signal) {
+  const json = await postMultipart(
+    request,
+    `${baseUrl}/parse`,
+    apiKey,
+    createDocumentFormData(input, createFirecrawlOptions(input), options.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES),
+    options,
+    signal,
+  );
   const data = pickObject(json, "data") ?? pickObject(json, "result") ?? pickObject(json, undefined);
   const markdown = pickString(data, "markdown");
   const text = pickString(data, "text") ?? pickString(data, "content") ?? markdown ?? "";
@@ -169,20 +214,20 @@ function createMistralOcrProvider(options) {
   const apiKey = options.apiKey ?? process.env.MISTRAL_API_KEY;
   return {
     name: "mistral-ocr",
-    async parseDocument(input, parseOptions) {
+    async parseDocument(input, execution = {}) {
       if (input.source.type === "text") {
         return { provider: "mistral-ocr", text: input.source.text, raw: { source: "text" } };
       }
       const document = input.source.type === "url"
         ? { type: "document_url", document_url: input.source.url }
         : input.source.type === "base64"
-          ? createMistralBase64Document(input.source)
+          ? createMistralBase64Document(input.source, options.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES)
           : undefined;
       const json = await postJson(request, `${baseUrl}/ocr`, apiKey, {
         model: "mistral-ocr-latest",
         document,
         ...(input.instructions ? { prompt: input.instructions } : {}),
-      }, parseOptions?.abortSignal);
+      }, options, execution.signal);
       const pages = Array.isArray(json?.pages) ? json.pages.map(normalizePage).filter(Boolean) : undefined;
       const markdown = pages?.map((page) => page.markdown || page.text || "").filter(Boolean).join("\n\n");
       return {
@@ -206,18 +251,28 @@ function createLlamaParseProvider(options) {
   const apiKey = options.apiKey ?? process.env.LLAMA_CLOUD_API_KEY;
   return {
     name: "llamaparse",
-    async parseDocument(input) {
-      const fileId = input.source.type === "url" ? undefined : await uploadLlamaParseFile(request, baseUrl, apiKey, input);
+    async parseDocument(input, execution = {}) {
+      const fileId = input.source.type === "url"
+        ? undefined
+        : await uploadLlamaParseFile(request, baseUrl, apiKey, input, options, execution.signal);
       const created = await postJson(request, `${baseUrl}/api/v2/parse`, apiKey, {
         ...(fileId ? { file_id: fileId } : { source_url: input.source.url }),
         tier: "agentic",
         version: "latest",
         expand: input.outputFormat === "text" ? ["text_full", "metadata"] : ["markdown_full", "text_full", "metadata"],
         ...(input.instructions ? { parsing_instruction: input.instructions } : {}),
-      });
+      }, options, execution.signal);
       const jobId = pickString(pickObject(created, "job") ?? created, "id");
       if (!jobId) throw new Error("LlamaParse did not return a parse job id");
-      const json = await pollLlamaParseJob(request, baseUrl, apiKey, jobId, input.outputFormat);
+      const json = await pollLlamaParseJob(
+        request,
+        baseUrl,
+        apiKey,
+        jobId,
+        input.outputFormat,
+        options,
+        execution.signal,
+      );
       const markdown = pickString(json, "markdown_full") ?? pickString(pickObject(json, "markdown"), "text");
       const text = pickString(json, "text_full") ?? pickString(pickObject(json, "text"), "text") ?? markdown ?? "";
       return {
@@ -236,9 +291,18 @@ function createLlamaParseProvider(options) {
  * @param {string} baseUrl
  * @param {string | undefined} apiKey
  * @param {Parameters<DocumentParsingProvider["parseDocument"]>[0]} input
+ * @param {DocumentParsingToolsetOptions} options
+ * @param {AbortSignal | undefined} signal
  */
-async function uploadLlamaParseFile(request, baseUrl, apiKey, input) {
-  const json = await postMultipart(request, `${baseUrl}/api/v1/files/`, apiKey, createDocumentFormData(input));
+async function uploadLlamaParseFile(request, baseUrl, apiKey, input, options, signal) {
+  const json = await postMultipart(
+    request,
+    `${baseUrl}/api/v1/files/`,
+    apiKey,
+    createDocumentFormData(input, undefined, options.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES),
+    options,
+    signal,
+  );
   const fileId = pickString(json, "id");
   if (!fileId) throw new Error("LlamaParse did not return an uploaded file id");
   return fileId;
@@ -249,22 +313,28 @@ async function uploadLlamaParseFile(request, baseUrl, apiKey, input) {
  * @param {string} url
  * @param {string | undefined} apiKey
  * @param {unknown} body
- * @param {AbortSignal | undefined} [abortSignal]
+ * @param {DocumentParsingToolsetOptions} options
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<any>}
  */
-async function postJson(request, url, apiKey, body, abortSignal) {
-  if (!apiKey) throw new Error(`Missing API key for ${url}`);
-  const response = await request(url, {
+async function postJson(request, url, apiKey, body, options, signal) {
+  if (!apiKey) throw new Error("Missing API key for document parsing provider");
+  const response = await fetchWithPolicy(assertHttpUrl(url), {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    ...(abortSignal ? { signal: abortSignal } : {}),
+    signal,
+  }, {
+    fetch: request,
+    allowedOrigins: options.allowedOrigins,
+    maxRedirects: options.maxRedirects,
+    validateUrl: createPublicRedirectValidator(url, {
+      allowedOrigins: options.allowedOrigins,
+      resolveHostname: options.resolveHostname,
+      signal,
+    }),
   });
-  if (!response.ok) {
-    const message = await response.text().catch(() => "");
-    throw new Error(`Document parsing provider failed (${response.status}): ${message || response.statusText}`);
-  }
-  return response.json();
+  return readProviderJson(response, options, signal, apiKey);
 }
 
 /**
@@ -272,20 +342,28 @@ async function postJson(request, url, apiKey, body, abortSignal) {
  * @param {string} url
  * @param {string | undefined} apiKey
  * @param {FormData} body
+ * @param {DocumentParsingToolsetOptions} options
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<any>}
  */
-async function postMultipart(request, url, apiKey, body) {
-  if (!apiKey) throw new Error(`Missing API key for ${url}`);
-  const response = await request(url, {
+async function postMultipart(request, url, apiKey, body, options, signal) {
+  if (!apiKey) throw new Error("Missing API key for document parsing provider");
+  const response = await fetchWithPolicy(assertHttpUrl(url), {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
     body,
+    signal,
+  }, {
+    fetch: request,
+    allowedOrigins: options.allowedOrigins,
+    maxRedirects: options.maxRedirects,
+    validateUrl: createPublicRedirectValidator(url, {
+      allowedOrigins: options.allowedOrigins,
+      resolveHostname: options.resolveHostname,
+      signal,
+    }),
   });
-  if (!response.ok) {
-    const message = await response.text().catch(() => "");
-    throw new Error(`Document parsing provider failed (${response.status}): ${message || response.statusText}`);
-  }
-  return response.json();
+  return readProviderJson(response, options, signal, apiKey);
 }
 
 /**
@@ -294,19 +372,27 @@ async function postMultipart(request, url, apiKey, body) {
  * @param {string | undefined} apiKey
  * @param {string} jobId
  * @param {"text" | "markdown" | "json" | undefined} outputFormat
+ * @param {DocumentParsingToolsetOptions} options
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<any>}
  */
-async function pollLlamaParseJob(request, baseUrl, apiKey, jobId, outputFormat) {
+async function pollLlamaParseJob(request, baseUrl, apiKey, jobId, outputFormat, options, signal) {
   const expand = outputFormat === "text" ? "text_full,metadata" : "markdown_full,text_full,metadata";
   for (let attempt = 0; attempt < LLAMAPARSE_POLL_MAX_ATTEMPTS; attempt += 1) {
-    const json = await getJson(request, `${baseUrl}/api/v2/parse/${encodeURIComponent(jobId)}?expand=${expand}`, apiKey);
+    const json = await getJson(
+      request,
+      `${baseUrl}/api/v2/parse/${encodeURIComponent(jobId)}?expand=${expand}`,
+      apiKey,
+      options,
+      signal,
+    );
     const job = pickObject(json, "job") ?? json;
     const status = pickString(job, "status");
     if (status === "COMPLETED" || status === "completed") return json;
     if (status === "FAILED" || status === "failed" || status === "CANCELLED" || status === "cancelled") {
       throw new Error(`LlamaParse job ${jobId} ${status}: ${pickString(job, "error_message") ?? "no error details"}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, LLAMAPARSE_POLL_INTERVAL_MS));
+    await abortableDelay(LLAMAPARSE_POLL_INTERVAL_MS, signal);
   }
   throw new Error(`LlamaParse job ${jobId} did not complete before timeout`);
 }
@@ -315,19 +401,56 @@ async function pollLlamaParseJob(request, baseUrl, apiKey, jobId, outputFormat) 
  * @param {typeof fetch} request
  * @param {string} url
  * @param {string | undefined} apiKey
+ * @param {DocumentParsingToolsetOptions} options
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<any>}
  */
-async function getJson(request, url, apiKey) {
-  if (!apiKey) throw new Error(`Missing API key for ${url}`);
-  const response = await request(url, {
+async function getJson(request, url, apiKey, options, signal) {
+  if (!apiKey) throw new Error("Missing API key for document parsing provider");
+  const response = await fetchWithPolicy(assertHttpUrl(url), {
     method: "GET",
     headers: { Authorization: `Bearer ${apiKey}` },
+    signal,
+  }, {
+    fetch: request,
+    allowedOrigins: options.allowedOrigins,
+    maxRedirects: options.maxRedirects,
+    validateUrl: createPublicRedirectValidator(url, {
+      allowedOrigins: options.allowedOrigins,
+      resolveHostname: options.resolveHostname,
+      signal,
+    }),
   });
+  return readProviderJson(response, options, signal, apiKey);
+}
+
+/**
+ * @param {Response} response
+ * @param {DocumentParsingToolsetOptions} options
+ * @param {AbortSignal | undefined} signal
+ * @param {string | undefined} apiKey
+ */
+async function readProviderJson(response, options, signal, apiKey) {
+  const maxBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
   if (!response.ok) {
-    const message = await response.text().catch(() => "");
-    throw new Error(`Document parsing provider failed (${response.status}): ${message || response.statusText}`);
+    let message = "";
+    try {
+      message = await readResponseText(response, {
+        maxBytes: Math.min(maxBytes, MAX_ERROR_BYTES),
+        signal,
+      });
+    } catch (error) {
+      if (signal?.aborted) throw signal.reason ?? error;
+      if (error instanceof Error && error.name === "AbortError") throw error;
+    }
+    let statusText = response.statusText;
+    if (apiKey) {
+      message = message.split(apiKey).join("[REDACTED]");
+      statusText = statusText.split(apiKey).join("[REDACTED]");
+    }
+    throw new Error(`Document parsing provider failed (${response.status}): ${message || statusText}`);
   }
-  return response.json();
+  return readResponseJson(response, { maxBytes, signal });
 }
 
 /**
@@ -369,11 +492,12 @@ function pickString(value, key) {
 /**
  * @param {Parameters<DocumentParsingProvider["parseDocument"]>[0]} input
  * @param {unknown} [options]
+ * @param {number} maxInputBytes
  * @returns {FormData}
  */
-function createDocumentFormData(input, options) {
+function createDocumentFormData(input, options, maxInputBytes) {
   const form = new FormData();
-  form.append("file", sourceToBlob(input.source), sourceFilename(input.source));
+  form.append("file", sourceToBlob(input.source, maxInputBytes), sourceFilename(input.source));
   if (options) form.append("options", JSON.stringify(options));
   return form;
 }
@@ -393,11 +517,15 @@ function createFirecrawlOptions(input) {
 
 /**
  * @param {Parameters<DocumentParsingProvider["parseDocument"]>[0]["source"]} source
+ * @param {number} maxInputBytes
  * @returns {Blob}
  */
-function sourceToBlob(source) {
+function sourceToBlob(source, maxInputBytes) {
   if (source.type === "base64") {
-    return new Blob([Buffer.from(source.data, "base64")], { type: source.mimeType ?? "application/octet-stream" });
+    return new Blob(
+      [decodeBase64Bounded(source.data, maxInputBytes, "Document parsing input")],
+      { type: source.mimeType ?? "application/octet-stream" },
+    );
   }
   if (source.type === "text") return new Blob([source.text], { type: "text/html" });
   throw new Error("File upload requires base64 or text source");
@@ -426,8 +554,10 @@ function defaultFilename(mimeType) {
 
 /**
  * @param {{ type: "base64"; data: string; mimeType?: string; filename?: string }} source
+ * @param {number} maxInputBytes
  */
-function createMistralBase64Document(source) {
+function createMistralBase64Document(source, maxInputBytes) {
+  assertBase64WithinLimit(source.data, maxInputBytes, "Document parsing input");
   const dataUrl = `data:${source.mimeType ?? "application/pdf"};base64,${source.data}`;
   if ((source.mimeType ?? "").startsWith("image/")) return { type: "image_url", image_url: dataUrl };
   return { type: "document_url", document_url: dataUrl };

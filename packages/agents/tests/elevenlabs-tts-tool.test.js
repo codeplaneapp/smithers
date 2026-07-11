@@ -38,9 +38,9 @@ describe("createElevenLabsTextToSpeechTool", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("https://api.elevenlabs.io/v1/text-to-speech/voice_123");
     expect(calls[0].init.method).toBe("POST");
-    expect(calls[0].init.headers).toEqual({
-      Accept: "audio/mpeg",
-      "Content-Type": "application/json",
+    expect(Object.fromEntries(new Headers(calls[0].init.headers))).toEqual({
+      accept: "audio/mpeg",
+      "content-type": "application/json",
       "xi-api-key": "test-eleven-key",
     });
     expect(JSON.parse(String(calls[0].init.body))).toEqual({

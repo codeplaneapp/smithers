@@ -2,8 +2,13 @@
 // HTTP execution tests with mock fetch
 // ---------------------------------------------------------------------------
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { createOpenApiToolsSync } from "../src/tool-factory.js";
+import { createOpenApiToolsSync as createOpenApiToolsSyncRaw } from "../src/tool-factory.js";
 import { petStoreSpec, complexSchemaSpec } from "./fixtures.js";
+import { readMultipartWireBody } from "./wire-body.js";
+const createOpenApiToolsSync = (spec, options = {}) => createOpenApiToolsSyncRaw(spec, {
+    resolveHostname: async () => ["8.8.8.8"],
+    ...options,
+});
 // Save original fetch
 const originalFetch = globalThis.fetch;
 describe("OpenAPI tool execution", () => {
@@ -46,7 +51,7 @@ describe("OpenAPI tool execution", () => {
         expect(url).toContain("/pets");
         expect(init.method).toBe("POST");
         expect(init.body).toBe(JSON.stringify({ name: "Fido", tag: "dog" }));
-        expect(init.headers["Content-Type"]).toBe("application/json");
+        expect(new Headers(init.headers).get("content-type")).toBe("application/json");
     });
     test("POST request prefers application/json over earlier declared media types", async () => {
         const tools = createOpenApiToolsSync({
@@ -79,7 +84,7 @@ describe("OpenAPI tool execution", () => {
         });
         await tools.createPet.execute({ body: { name: "Fido" } });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["Content-Type"]).toBe("application/json");
+        expect(new Headers(init.headers).get("content-type")).toBe("application/json");
         expect(init.body).toBe(JSON.stringify({ name: "Fido" }));
     });
     test("POST request with multipart form body", async () => {
@@ -113,10 +118,11 @@ describe("OpenAPI tool execution", () => {
         });
         await tools.uploadFile.execute({ body: { file: "contents", purpose: "avatar" } });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.body).toBeInstanceOf(FormData);
-        expect(init.body.get("file")).toBe("contents");
-        expect(init.body.get("purpose")).toBe("avatar");
-        expect(init.headers["Content-Type"]).toBeUndefined();
+        const wire = await readMultipartWireBody(init);
+        expect(wire.body).toBeInstanceOf(Uint8Array);
+        expect(wire.contentType).toMatch(/^multipart\/form-data;\s*boundary=.+$/i);
+        expect(wire.form.get("file")).toBe("contents");
+        expect(wire.form.get("purpose")).toBe("avatar");
     });
     test("POST request with urlencoded form body", async () => {
         const tools = createOpenApiToolsSync({
@@ -151,7 +157,7 @@ describe("OpenAPI tool execution", () => {
         const [, init] = mockFetch.mock.calls[0];
         expect(init.body).toBeInstanceOf(URLSearchParams);
         expect(init.body.toString()).toBe("email=a%40example.com&optIn=true");
-        expect(init.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+        expect(new Headers(init.headers).get("content-type")).toBe("application/x-www-form-urlencoded");
     });
     test("DELETE request", async () => {
         const tools = createOpenApiToolsSync(petStoreSpec);
@@ -164,34 +170,38 @@ describe("OpenAPI tool execution", () => {
     });
     test("applies bearer auth header", async () => {
         const tools = createOpenApiToolsSync(petStoreSpec, {
+            baseUrl: "https://api.petstore.example.com",
             auth: { type: "bearer", token: "my-token" },
         });
         const listPets = tools.listPets;
         await listPets.execute({});
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["Authorization"]).toBe("Bearer my-token");
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer my-token");
     });
     test("applies basic auth header", async () => {
         const tools = createOpenApiToolsSync(petStoreSpec, {
+            baseUrl: "https://api.petstore.example.com",
             auth: { type: "basic", username: "admin", password: "secret" },
         });
         const listPets = tools.listPets;
         await listPets.execute({});
         const [, init] = mockFetch.mock.calls[0];
         const expected = `Basic ${btoa("admin:secret")}`;
-        expect(init.headers["Authorization"]).toBe(expected);
+        expect(new Headers(init.headers).get("authorization")).toBe(expected);
     });
     test("applies apiKey auth in header", async () => {
         const tools = createOpenApiToolsSync(petStoreSpec, {
+            baseUrl: "https://api.petstore.example.com",
             auth: { type: "apiKey", name: "X-API-Key", value: "key123", in: "header" },
         });
         const listPets = tools.listPets;
         await listPets.execute({});
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["X-API-Key"]).toBe("key123");
+        expect(new Headers(init.headers).get("x-api-key")).toBe("key123");
     });
     test("applies apiKey auth in query", async () => {
         const tools = createOpenApiToolsSync(petStoreSpec, {
+            baseUrl: "https://api.petstore.example.com",
             auth: { type: "apiKey", name: "api_key", value: "key123", in: "query" },
         });
         const listPets = tools.listPets;
@@ -201,12 +211,13 @@ describe("OpenAPI tool execution", () => {
     });
     test("applies custom headers", async () => {
         const tools = createOpenApiToolsSync(petStoreSpec, {
+            baseUrl: "https://api.petstore.example.com",
             headers: { "X-Custom": "value" },
         });
         const listPets = tools.listPets;
         await listPets.execute({});
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["X-Custom"]).toBe("value");
+        expect(new Headers(init.headers).get("x-custom")).toBe("value");
     });
     test("uses custom base URL", async () => {
         const tools = createOpenApiToolsSync(petStoreSpec, {
@@ -243,7 +254,7 @@ describe("OpenAPI tool execution", () => {
             body: { query: "test" },
         });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["X-Request-Id"]).toBe("req-123");
+        expect(new Headers(init.headers).get("x-request-id")).toBe("req-123");
     });
     test("query parameter named body does not replace request body", async () => {
         const spec = {

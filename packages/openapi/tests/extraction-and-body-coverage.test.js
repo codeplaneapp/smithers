@@ -9,13 +9,18 @@
 // ---------------------------------------------------------------------------
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { Effect } from "effect";
-import { createOpenApiToolsSync, listOperations } from "../src/tool-factory.js";
+import { createOpenApiToolsSync as createOpenApiToolsSyncRaw, listOperations } from "../src/tool-factory.js";
 import { extractOperations } from "../src/extractOperations.js";
 import { loadSpecSync } from "../src/loadSpecSync.js";
 import { loadSpecEffect } from "../src/loadSpecEffect.js";
 import { isSmithersError } from "@smithers-orchestrator/errors/isSmithersError";
+import { readMultipartWireBody } from "./wire-body.js";
 
 const originalFetch = globalThis.fetch;
+const createOpenApiToolsSync = (spec, options = {}) => createOpenApiToolsSyncRaw(spec, {
+    resolveHostname: async () => ["8.8.8.8"],
+    ...options,
+});
 
 const putPatchSpec = {
     openapi: "3.0.0",
@@ -228,8 +233,10 @@ describe("request body serialization fallbacks", () => {
         const tools = createOpenApiToolsSync(spec);
         await tools.upload.execute({ body: { tags: ["a", "b"] } });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.body).toBeInstanceOf(FormData);
-        expect(init.body.getAll("tags")).toEqual(["a", "b"]);
+        const wire = await readMultipartWireBody(init);
+        expect(wire.body).toBeInstanceOf(Uint8Array);
+        expect(wire.contentType).toMatch(/^multipart\/form-data;\s*boundary=.+$/i);
+        expect(wire.form.getAll("tags")).toEqual(["a", "b"]);
     });
 
     test("urlencoded array property repeats the key per item", async () => {
@@ -291,7 +298,7 @@ describe("request body serialization fallbacks", () => {
         const tools = createOpenApiToolsSync(spec);
         await tools.putBlob.execute({ body: "raw-bytes-here" });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["Content-Type"]).toBe("application/octet-stream");
+        expect(new Headers(init.headers).get("content-type")).toBe("application/octet-stream");
         // Raw string passed through unchanged — NOT JSON.stringify'd.
         expect(init.body).toBe("raw-bytes-here");
         expect(init.body).not.toBe(JSON.stringify("raw-bytes-here"));
@@ -322,7 +329,7 @@ describe("request body serialization fallbacks", () => {
         const tools = createOpenApiToolsSync(spec);
         await tools.importCsv.execute({ body: { a: 1 } });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.headers["Content-Type"]).toBe("text/csv");
+        expect(new Headers(init.headers).get("content-type")).toBe("text/csv");
         expect(init.body).toBe(JSON.stringify({ a: 1 }));
     });
 });

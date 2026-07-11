@@ -1,9 +1,33 @@
+import {
+  abortableDelay,
+  assertHttpUrl,
+  fetchWithPolicy,
+  HttpClientPolicyError,
+  isHttpClientPolicyError,
+  readResponseText,
+} from "@smithers-orchestrator/http-client";
+import { createPublicRedirectValidator } from "@smithers-orchestrator/http-client/node";
+
 export const TELEGRAM_API_ROOT = "https://api.telegram.org";
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 // Deliberately below the 4096 hard cap: leaves headroom for MarkdownV2 escaping
 // and any prefixes callers prepend to a chunk.
 export const TELEGRAM_SAFE_CHUNK_LENGTH = 3800;
 export const TELEGRAM_WEBHOOK_SECRET_HEADER = "x-telegram-bot-api-secret-token";
+const DEFAULT_MAX_RETRY_AFTER_MS = 30_000;
+const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
+
+function responseByteLimit(value) {
+  const resolved = value ?? DEFAULT_MAX_RESPONSE_BYTES;
+  if (!Number.isSafeInteger(resolved) || resolved < 0) {
+    throw new HttpClientPolicyError(
+      "INVALID_OPTION",
+      "maxResponseBytes must be a non-negative safe integer.",
+      { option: "maxResponseBytes" },
+    );
+  }
+  return resolved;
+}
 
 // Exactly the message-bearing update kinds normalizeTelegramUpdate understands
 // (messageFromUpdate mirrors this list).
@@ -18,6 +42,27 @@ function isRecord(value) {
 function compact(value) {
   const trimmed = typeof value === "string" ? value.trim() : "";
   return trimmed ? trimmed : null;
+}
+
+function redactTelegramToken(value, token, seen = new WeakSet()) {
+  if (typeof value === "string") return value.split(token).join("<redacted>");
+  if (Array.isArray(value)) return value.map((item) => redactTelegramToken(item, token, seen));
+  if (!isRecord(value)) return value;
+  if (seen.has(value)) return "<redacted-cycle>";
+  seen.add(value);
+  const redacted = {};
+  for (const [key, item] of Object.entries(value)) {
+    redacted[key] = redactTelegramToken(item, token, seen);
+  }
+  return redacted;
+}
+
+function sanitizeTelegramPolicyError(error, token) {
+  return new HttpClientPolicyError(
+    error.code,
+    redactTelegramToken(error.message, token),
+    redactTelegramToken(error.details ?? {}, token),
+  );
 }
 
 function bodyTextFromMessage(message) {
@@ -58,12 +103,12 @@ function messageFromUpdate(update) {
   return null;
 }
 
-function telegramDelayMs(error, attempt, retryBaseMs) {
+function telegramDelayMs(error, attempt, retryBaseMs, maxRetryAfterMs) {
   // Bot API `parameters.retry_after` is in seconds — honor it (converted to ms)
   // over our exponential backoff.
   const retryAfter = error.payload?.parameters?.retry_after;
   if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
-    return Math.ceil(retryAfter * 1000);
+    return Math.min(Math.ceil(retryAfter * 1000), maxRetryAfterMs);
   }
   return retryBaseMs * 2 ** attempt;
 }
@@ -248,12 +293,14 @@ export async function sendTelegramTextChunks(client, args) {
 export function createTelegramClient(options) {
   const token = compact(options?.botToken);
   if (!token) throw new Error("botToken is required");
-  const apiRoot = (compact(options.apiRoot) ?? TELEGRAM_API_ROOT).replace(/\/+$/, "");
+  const apiRoot = assertHttpUrl(compact(options.apiRoot) ?? TELEGRAM_API_ROOT).toString().replace(/\/+$/, "");
   const fetchImpl = options.fetch ?? globalThis.fetch;
   if (typeof fetchImpl !== "function") throw new Error("fetch is not available");
   const maxRetries = Math.max(0, Math.floor(options.maxRetries ?? 3));
   const retryBaseMs = Math.max(1, Math.floor(options.retryBaseMs ?? 500));
-  const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const maxRetryAfterMs = Math.max(0, Math.floor(options.maxRetryAfterMs ?? DEFAULT_MAX_RETRY_AFTER_MS));
+  const maxResponseBytes = responseByteLimit(options.maxResponseBytes);
+  const sleep = options.sleep;
 
   async function call(method, body = {}, init = {}) {
     let lastError = null;
@@ -261,7 +308,8 @@ export function createTelegramClient(options) {
       try {
         let response;
         try {
-          response = await fetchImpl(`${apiRoot}/bot${token}/${method}`, {
+          const endpoint = `${apiRoot}/bot${token}/${method}`;
+          response = await fetchWithPolicy(endpoint, {
             method: "POST",
             headers: {
               "content-type": "application/json",
@@ -270,17 +318,32 @@ export function createTelegramClient(options) {
             },
             body: JSON.stringify(body),
             signal: init.signal,
+          }, {
+            fetch: fetchImpl,
+            allowedOrigins: options.allowedOrigins,
+            maxRedirects: options.maxRedirects,
+            validateUrl: createPublicRedirectValidator(endpoint, {
+              allowedOrigins: options.allowedOrigins,
+              resolveHostname: options.resolveHostname,
+              signal: init.signal,
+            }),
           });
         } catch (error) {
           if (init.signal?.aborted || error?.name === "AbortError") throw error;
-          throw new TelegramNetworkError(method, error);
+          if (isHttpClientPolicyError(error)) throw sanitizeTelegramPolicyError(error, token);
+          throw new TelegramNetworkError(method, sanitizeTelegramNetworkCause(error, token));
         }
 
         let text;
         try {
-          text = await response.text();
+          text = await readResponseText(response, {
+            maxBytes: maxResponseBytes,
+            signal: init.signal,
+          });
         } catch (error) {
-          throw new TelegramNetworkError(method, error);
+          if (init.signal?.aborted || error?.name === "AbortError") throw error;
+          if (isHttpClientPolicyError(error)) throw sanitizeTelegramPolicyError(error, token);
+          throw new TelegramNetworkError(method, sanitizeTelegramNetworkCause(error, token));
         }
 
         let payload;
@@ -291,20 +354,25 @@ export function createTelegramClient(options) {
             method,
             response.status,
             `Telegram ${method} returned invalid JSON with HTTP ${response.status}`,
-            { raw: text },
+            { raw: redactTelegramToken(text, token) },
           );
         }
-        if (response.ok && payload.ok !== false) return payload.result;
+        const safePayload = redactTelegramToken(payload, token);
+        if (response.ok && payload.ok !== false) return safePayload.result;
         throw new TelegramBotApiError(
           method,
           response.status >= 400 ? response.status : (payload.error_code ?? response.status),
-          typeof payload.description === "string" ? payload.description : undefined,
-          payload,
+          typeof safePayload.description === "string" ? safePayload.description : undefined,
+          safePayload,
         );
       } catch (error) {
         lastError = error;
         if (attempt >= maxRetries || !isRetryableTelegramError(error)) throw error;
-        await sleep(telegramDelayMs(error, attempt, retryBaseMs));
+        await sleepWithSignal(
+          telegramDelayMs(error, attempt, retryBaseMs, maxRetryAfterMs),
+          init.signal,
+          sleep,
+        );
       }
     }
     throw lastError ?? new Error(`Telegram ${method} failed`);
@@ -365,6 +433,30 @@ export function createTelegramClient(options) {
         init,
       ),
   };
+}
+
+function sanitizeTelegramNetworkCause(error, token) {
+  const raw = error instanceof Error ? error.message : String(error);
+  const safe = raw.split(token).join("<redacted>").replace(/\/bot[^/\s]+/g, "/bot<redacted>");
+  const sanitized = new Error(safe);
+  sanitized.name = error instanceof Error ? error.name : "Error";
+  return sanitized;
+}
+
+async function sleepWithSignal(ms, signal, sleep) {
+  if (!sleep) return abortableDelay(ms, signal);
+  if (!signal) return sleep(ms);
+  if (signal.aborted) throw signal.reason ?? new DOMException("The operation was aborted", "AbortError");
+  let onAbort;
+  const aborted = new Promise((_, reject) => {
+    onAbort = () => reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    await Promise.race([Promise.resolve(sleep(ms, signal)), aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 export class FakeTelegramClient {

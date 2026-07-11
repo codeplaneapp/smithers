@@ -1,5 +1,14 @@
 import { dynamicTool } from "ai";
 import { z } from "zod";
+import {
+  assertHttpUrl,
+  composeAbortSignals,
+  fetchWithPolicy,
+  HttpClientPolicyError,
+  readResponseText,
+} from "@smithers-orchestrator/http-client";
+import { assertPublicHostname } from "@smithers-orchestrator/http-client/node";
+import { responseByteLimit } from "../responseByteLimit.js";
 
 /** @typedef {import("ai").Tool} Tool */
 /** @typedef {import("./CreateHttpToolOptions.ts").CreateHttpToolOptions} CreateHttpToolOptions */
@@ -22,6 +31,8 @@ const httpToolInputSchema = z.object({
   timeoutMs: z.number().int().positive().optional(),
 });
 
+const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
+
 /**
  * Create an AI SDK tool that can call any REST API without an OpenAPI spec.
  *
@@ -29,152 +40,226 @@ const httpToolInputSchema = z.object({
  * @returns {Tool}
  */
 export function createHttpTool(options = {}) {
+  if (options.baseUrl) assertHttpUrl(options.baseUrl);
+  resolveAllowedHosts(options);
+  if (
+    Object.keys(options.defaultHeaders ?? {}).length > 0 &&
+    !options.baseUrl &&
+    (options.allowedHosts?.length ?? 0) === 0
+  ) {
+    throw new HttpClientPolicyError(
+      "INVALID_OPTION",
+      "defaultHeaders require baseUrl or allowedHosts so model-selected URLs cannot receive operator credentials.",
+      { option: "defaultHeaders" },
+    );
+  }
   return dynamicTool({
     description:
       options.description ??
       "Call any REST API by providing method, url, headers, query params, body, and optional auth.",
     inputSchema: httpToolInputSchema,
-    execute: async (input) => executeHttpRequest(/** @type {HttpToolInput} */ (input), options),
+    execute: async (input, execution) =>
+      executeHttpRequest(
+        /** @type {HttpToolInput} */ (input),
+        options,
+        execution?.abortSignal,
+      ),
   });
 }
-
-/** Redirect statuses the tool resolves manually (fetch spec § 4.4). */
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-
-/** Hop budget for one logical request, matching the fetch spec's limit. */
-const MAX_REDIRECTS = 20;
 
 /**
  * @param {HttpToolInput} input
  * @param {CreateHttpToolOptions} options
+ * @param {AbortSignal | undefined} callerSignal
  * @returns {Promise<HttpToolOutput>}
  */
-async function executeHttpRequest(input, options) {
-  const url = new URL(input.url);
+async function executeHttpRequest(input, options, callerSignal) {
+  const maxResponseBytes = responseByteLimit(
+    options.maxResponseBytes,
+    DEFAULT_MAX_RESPONSE_BYTES,
+  );
+  const url = assertHttpUrl(input.url);
   for (const [key, value] of Object.entries(input.query ?? {})) {
     if (value !== null && value !== undefined) {
       url.searchParams.set(key, String(value));
     }
   }
 
-  const controller = input.timeoutMs ? new AbortController() : null;
-  const timeout = controller ? setTimeout(() => controller.abort(), input.timeoutMs) : null;
-  try {
-    // Resolve every Location hop manually (`redirect: "manual"`). Letting
-    // fetch follow redirects would forward the caller's secret headers
-    // (custom API keys, configured defaults) to whatever host a response
-    // points at; here each hop rebuilds its headers so secrets ride only to
-    // the origin the caller originally authorized or an allowlisted host.
-    const originalOrigin = url.origin;
-    let currentUrl = url;
-    let method = input.method ?? "GET";
-    let sendBody = input.body !== undefined;
-    for (let hop = 0; ; hop++) {
-      const headers = buildHopHeaders(input, options, currentUrl, originalOrigin, hop);
-      const init = /** @type {RequestInit} */ ({ method, headers, redirect: "manual" });
-      if (sendBody && method !== "GET" && method !== "HEAD") {
-        init.body = serializeBody(input.body, headers);
-      }
-      if (controller) {
-        init.signal = controller.signal;
-      }
-      const response = await fetch(currentUrl, init);
-      const location = response.headers.get("location");
-      const nextUrl =
-        REDIRECT_STATUSES.has(response.status) && location !== null
-          ? resolveLocation(location, currentUrl)
-          : null;
-      if (!nextUrl) {
-        return {
-          ok: response.ok,
-          status: response.status,
-          statusText: response.statusText,
-          headers: Object.fromEntries(response.headers.entries()),
-          body: await parseResponseBody(response),
-        };
-      }
-      if (hop + 1 > MAX_REDIRECTS) {
-        throw new Error(`HTTP tool request to ${input.url} exceeded ${MAX_REDIRECTS} redirects`);
-      }
-      // 303 turns any non-HEAD method into a body-less GET; 301/302 do the
-      // same for POST (fetch spec § 4.4 step 13).
-      if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) {
-        if (method !== "HEAD") {
-          method = "GET";
-        }
-        sendBody = false;
-      }
-      await response.body?.cancel();
-      currentUrl = nextUrl;
-    }
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  }
-}
-
-/**
- * Build the outgoing headers for one hop of the manually resolved redirect
- * chain. The first hop gets the standard treatment: host-gated default
- * headers, then caller headers, then auth. Redirect hops carry those
- * potentially-secret headers only while they stay on the original request's
- * origin or land on an explicitly allowlisted host; every other cross-origin
- * hop is sent bare, so a redirecting (or compromised) endpoint cannot bounce
- * the request elsewhere and exfiltrate the secrets.
- *
- * @param {HttpToolInput} input
- * @param {CreateHttpToolOptions} options
- * @param {URL} url
- * @param {string} originalOrigin
- * @param {number} hop
- * @returns {Headers}
- */
-function buildHopHeaders(input, options, url, originalOrigin, hop) {
   const headers = new Headers();
-  if (hop > 0 && !isTrustedRedirectTarget(url, originalOrigin, options)) {
-    return headers;
-  }
   applyDefaultHeaders(headers, options, url);
   for (const [key, value] of Object.entries(input.headers ?? {})) {
     headers.set(key, value);
   }
   applyAuth(headers, input.auth);
-  return headers;
+
+  const init = /** @type {RequestInit} */ ({
+    method: input.method ?? "GET",
+    headers,
+  });
+  if (input.body !== undefined && init.method !== "GET" && init.method !== "HEAD") {
+    init.body = serializeBody(input.body, headers);
+  }
+
+  const timeoutController = input.timeoutMs ? new AbortController() : null;
+  const timeout = timeoutController
+    ? setTimeout(
+        () => timeoutController.abort(new DOMException("HTTP tool request timed out", "TimeoutError")),
+        input.timeoutMs,
+      )
+    : null;
+  const composed = composeAbortSignals(callerSignal, timeoutController?.signal);
+  init.signal = composed.signal;
+  try {
+    const response = await fetchWithPolicy(url, init, {
+      allowedOrigins: resolveAllowedOrigins(options),
+      maxRedirects: options.maxRedirects,
+      sensitiveHeaders: [
+        ...Object.keys(options.defaultHeaders ?? {}),
+        ...Object.keys(input.headers ?? {}),
+        ...(input.auth?.type === "header" ? [input.auth.name] : []),
+      ],
+      validateUrl: (candidate) => assertSafeHttpDestination(candidate, options, composed.signal),
+    });
+    const secrets = requestSecretValues(options, input);
+    const responseHeaders = redactPayload(
+      Object.fromEntries(response.headers.entries()),
+      secrets,
+    );
+    const responseBody = await parseResponseBody(
+      response,
+      maxResponseBytes,
+      composed.signal,
+    );
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: redactString(response.statusText, secrets),
+      headers: responseHeaders,
+      body: redactPayload(responseBody, secrets),
+    };
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    composed.cleanup();
+  }
+}
+
+/** @param {Set<string>} secrets @param {unknown} value */
+function addSecret(secrets, value) {
+  if (typeof value === "string" && value.length > 0) secrets.add(value);
 }
 
 /**
- * A redirect hop may carry the request's secret headers only when it stays on
- * the origin the caller originally requested or lands on a host the tool
- * creator allowlisted via `baseUrl`/`allowedHosts`.
+ * Values attached by configuration or explicit request auth must not re-enter
+ * model-visible output if an allowed endpoint reflects request material.
+ * @param {CreateHttpToolOptions} options
+ * @param {HttpToolInput} input
+ */
+function requestSecretValues(options, input) {
+  const secrets = new Set();
+  for (const value of Object.values(options.defaultHeaders ?? {})) addSecret(secrets, value);
+  for (const value of Object.values(input.headers ?? {})) addSecret(secrets, value);
+  const auth = input.auth;
+  if (auth?.type === "bearer") {
+    addSecret(secrets, auth.token);
+    addSecret(secrets, `Bearer ${auth.token}`);
+  } else if (auth?.type === "basic") {
+    const credential = `${auth.username}:${auth.password}`;
+    const encoded = btoa(credential);
+    addSecret(secrets, auth.password);
+    addSecret(secrets, credential);
+    addSecret(secrets, encoded);
+    addSecret(secrets, `Basic ${encoded}`);
+  } else if (auth?.type === "header") {
+    addSecret(secrets, auth.value);
+  }
+  return [...secrets].sort((left, right) => right.length - left.length);
+}
+
+/** @param {string} value @param {readonly string[]} secrets */
+function redactString(value, secrets) {
+  let redacted = value;
+  for (const secret of secrets) {
+    // One-character credentials are too ambiguous for substring replacement
+    // (a password of "p" must not turn "plain" into "[REDACTED]lain"). Exact
+    // reflected values are still hidden, while longer wire secrets are removed
+    // wherever a provider embeds them in diagnostics or payloads.
+    if (secret.length < 4) {
+      if (redacted === secret) redacted = "[REDACTED]";
+    } else {
+      redacted = redacted.split(secret).join("[REDACTED]");
+    }
+  }
+  return redacted;
+}
+
+/** @param {unknown} value @param {readonly string[]} secrets @returns {any} */
+function redactPayload(value, secrets) {
+  if (typeof value === "string") return redactString(value, secrets);
+  if (Array.isArray(value)) return value.map((item) => redactPayload(item, secrets));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+      redactString(key, secrets),
+      redactPayload(item, secrets),
+    ]));
+  }
+  return value;
+}
+
+/**
+ * Origins explicitly trusted for credential-bearing redirect hops. The
+ * initial origin is trusted by fetchWithPolicy. Legacy `allowedHosts` remains
+ * scoped to deciding whether configured default headers may be attached to the
+ * initial request; only `allowedOrigins` expands redirect credential trust.
+ *
+ * @param {CreateHttpToolOptions} options
+ * @returns {string[]}
+ */
+function resolveAllowedOrigins(options) {
+  const origins = new Set();
+  for (const entry of options.allowedOrigins ?? []) {
+    origins.add(assertHttpUrl(entry).origin);
+  }
+  return [...origins];
+}
+
+/**
+ * Block localhost-style names and non-global IP literals selected by a model,
+ * including every redirect hop. Explicit destination configuration is treated
+ * as operator intent and can authorize an internal/special endpoint without
+ * opening the entire private network.
+ *
+ * DNS names are checked for localhost-style names here. Deployments that allow
+ * arbitrary public DNS should still enforce egress/DNS-rebinding policy at the
+ * network boundary.
  *
  * @param {URL} url
- * @param {string} originalOrigin
  * @param {CreateHttpToolOptions} options
- * @returns {boolean}
+ * @param {AbortSignal | undefined} [signal]
  */
-function isTrustedRedirectTarget(url, originalOrigin, options) {
-  if (url.origin === originalOrigin) return true;
-  const allowed = resolveAllowedHosts(options);
-  return allowed !== null && allowed.has(url.host.toLowerCase());
+async function assertSafeHttpDestination(url, options, signal) {
+  if (options.allowPrivateNetwork || isExplicitlyTrustedDestination(url, options)) return;
+  await assertPublicHostname(url.hostname, {
+    resolveHostname: options.resolveHostname,
+    signal,
+  });
 }
 
-/**
- * Resolve a Location header against the URL that produced it. Returns null
- * for an unparseable or non-HTTP(S) target, in which case the redirect
- * response itself is returned to the caller instead of being followed.
- *
- * @param {string} location
- * @param {URL} base
- * @returns {URL | null}
- */
-function resolveLocation(location, base) {
-  try {
-    const next = new URL(location, base);
-    return next.protocol === "http:" || next.protocol === "https:" ? next : null;
-  } catch {
-    return null;
+/** @param {URL} url @param {CreateHttpToolOptions} options */
+function isExplicitlyTrustedDestination(url, options) {
+  if (options.baseUrl) {
+    try {
+      if (assertHttpUrl(options.baseUrl).origin === url.origin) return true;
+    } catch {
+      // Invalid configuration is surfaced when its value is otherwise used.
+    }
   }
+  for (const origin of options.allowedOrigins ?? []) {
+    if (assertHttpUrl(origin).origin === url.origin) return true;
+  }
+  const allowedHosts = resolveAllowedHosts(options);
+  return allowedHosts?.has(url.origin.toLowerCase()) ?? false;
 }
 
 /**
@@ -183,8 +268,8 @@ function resolveLocation(location, base) {
  * the model chooses the request URL, so sending them to an arbitrary host would
  * leak them to an attacker-controlled endpoint. When `baseUrl`/`allowedHosts`
  * pin an allowlist the headers ride only to matching hosts; requests to the
- * configured base URL are never broken. With no allowlist the behavior is
- * unchanged (send everywhere), so configure one when the headers hold secrets.
+ * configured base URL are never broken. Construction fails when defaults are
+ * configured without either destination gate.
  *
  * @param {Headers} headers
  * @param {CreateHttpToolOptions} options
@@ -193,55 +278,64 @@ function resolveLocation(location, base) {
 function applyDefaultHeaders(headers, options, url) {
   const defaults = options.defaultHeaders;
   if (!defaults) return;
-  const allowed = resolveAllowedHosts(options);
-  if (allowed && !allowed.has(url.host.toLowerCase())) return;
+  const allowedHosts = resolveAllowedHosts(options);
+  const hasDestinationGate = Boolean(options.baseUrl || allowedHosts);
+  const matchesBaseOrigin = options.baseUrl
+    ? assertHttpUrl(options.baseUrl).origin === url.origin
+    : false;
+  const matchesAllowedHost = allowedHosts?.has(url.origin.toLowerCase()) ?? false;
+  if (hasDestinationGate && !matchesBaseOrigin && !matchesAllowedHost) return;
   for (const [key, value] of Object.entries(defaults)) {
     headers.set(key, value);
   }
 }
 
 /**
- * Build the set of hosts allowed to receive `defaultHeaders`, drawn from
- * `baseUrl`'s host plus any explicit `allowedHosts`. Hosts are matched as
- * WHATWG `url.host` (hostname plus any non-default port), so an entry with no
- * port matches only default-port requests and a mismatched explicit port fails
- * closed. Returns null when neither is configured (no restriction).
+ * Build the explicit host-based exceptions allowed to receive
+ * `defaultHeaders`. `baseUrl` is checked separately as an exact origin so an
+ * HTTPS configuration never authorizes cleartext HTTP on the same host.
+ * URL-form `allowedHosts` entries are exact origins. Bare hosts are interpreted
+ * as HTTPS origins, so a credential gate can never silently authorize
+ * cleartext HTTP. Ports remain part of the match. Returns null when no entry is
+ * configured.
  *
  * @param {CreateHttpToolOptions} options
  * @returns {Set<string> | null}
  */
 function resolveAllowedHosts(options) {
   const hosts = new Set();
-  if (options.baseUrl) {
-    try {
-      hosts.add(new URL(options.baseUrl).host.toLowerCase());
-    } catch {
-      // Ignore an unparseable baseUrl; allowedHosts can still pin the allowlist.
-    }
-  }
   for (const entry of options.allowedHosts ?? []) {
-    hosts.add(hostOf(entry));
+    hosts.add(originOfAllowedHost(entry));
   }
   return hosts.size ? hosts : null;
 }
 
 /**
- * Accept either a bare host (`api.example.com`, `api.example.com:8443`) or a
- * full URL as an allowlist entry.
+ * Accept either a bare HTTPS host (`api.example.com`,
+ * `api.example.com:8443`) or a full HTTP(S) URL as an exact-origin entry.
  *
  * @param {string} entry
  * @returns {string}
  */
-function hostOf(entry) {
+function originOfAllowedHost(entry) {
   const value = entry.trim();
-  if (value.includes("://")) {
-    try {
-      return new URL(value).host.toLowerCase();
-    } catch {
-      // Fall through and treat the entry as a bare host.
+  try {
+    const explicitUrl = value.includes("://");
+    const url = assertHttpUrl(explicitUrl ? value : `https://${value}`);
+    // URL-form entries historically accepted API paths and normalized them to
+    // an origin. Preserve that safe behavior; only bare-host syntax rejects a
+    // disguised path/query/fragment.
+    if (!explicitUrl && (url.pathname !== "/" || url.search || url.hash)) {
+      throw new Error("path not allowed");
     }
+    return url.origin.toLowerCase();
+  } catch {
+    throw new HttpClientPolicyError(
+      "INVALID_OPTION",
+      "allowedHosts entries must be bare HTTPS hosts or valid HTTP(S) URLs.",
+      { option: "allowedHosts" },
+    );
   }
-  return value.toLowerCase();
 }
 
 /**
@@ -276,13 +370,15 @@ function serializeBody(body, headers) {
 
 /**
  * @param {Response} response
+ * @param {number} maxBytes
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<unknown>}
  */
-async function parseResponseBody(response) {
+async function parseResponseBody(response, maxBytes, signal) {
   if (response.status === 204 || response.status === 205) {
     return null;
   }
-  const text = await response.text();
+  const text = await readResponseText(response, { maxBytes, signal });
   if (!text) {
     return null;
   }

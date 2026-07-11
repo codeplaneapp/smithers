@@ -30,7 +30,17 @@ export interface TelegramClientOptions {
   fetch?: typeof fetch;
   maxRetries?: number;
   retryBaseMs?: number;
-  sleep?: (ms: number) => Promise<void>;
+  /** Maximum server-provided retry delay. Defaults to 30 seconds. */
+  maxRetryAfterMs?: number;
+  /** Maximum Bot API response bytes. Defaults to 1 MiB; must be a non-negative safe integer. */
+  maxResponseBytes?: number;
+  /** Maximum redirect hops. Defaults to 5. */
+  maxRedirects?: number;
+  /** Origins trusted to receive credentials and intentional private redirects. */
+  allowedOrigins?: string[];
+  /** Override DNS resolution used to reject untrusted private redirect targets. */
+  resolveHostname?: (hostname: string) => readonly string[] | Promise<readonly string[]>;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export interface TelegramRequestInit {

@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { afterAll, describe, expect, test } from "bun:test";
+import { Effect, Schema } from "effect";
 import { makeGitHubClient, nextPageUrl } from "../src/github/GitHubClient.js";
 import { configureGitHub, resolveGitHubConfig } from "../src/github/config.js";
 
@@ -72,6 +72,19 @@ function startFixture() {
                     : null;
                 return json(items, { headers: next ? { link: next } : {} });
             }
+            if (url.pathname === "/declared-oversize") {
+                return new Response("x".repeat(5 * 1024 * 1024 + 1));
+            }
+            if (url.pathname === "/echo-credential") {
+                const authorization = request.headers.get("authorization") ?? "";
+                return json({
+                    message: `denied reflected=${authorization} raw=${authorization.replace(/^Bearer\s+/, "")}`,
+                }, { status: 403 });
+            }
+            if (url.pathname === "/schema-echo-credential") {
+                const authorization = request.headers.get("authorization") ?? "";
+                return json({ message: `schema received ${authorization}` });
+            }
             return json({ message: "Not Found" }, { status: 404 });
         },
     });
@@ -129,9 +142,85 @@ describe("GitHubClient", () => {
         const serialized = JSON.stringify({ message: error.message, details: error.details });
         expect(serialized).not.toContain("test-token-shhh");
     });
+    test("redacts credentials reflected by GitHub from every surfaced error field", async () => {
+        const error = await Effect.runPromise(
+            client.request("GET", "/echo-credential").pipe(Effect.flip),
+        );
+        const serialized = JSON.stringify({
+            message: error.message,
+            summary: error.summary,
+            details: error.details,
+            cause: error.cause instanceof Error
+                ? { name: error.cause.name, message: error.cause.message }
+                : error.cause,
+        });
+        expect(serialized).not.toContain("test-token-shhh");
+        expect(serialized).not.toContain("Bearer test-token-shhh");
+        expect(serialized).toContain("[REDACTED]");
+    });
+    test("redacts reflected credentials from schema-decode causes", async () => {
+        const error = await Effect.runPromise(client.request(
+            "GET",
+            "/schema-echo-credential",
+            undefined,
+            { schema: Schema.Struct({ id: Schema.Number }) },
+        ).pipe(Effect.flip));
+        const serialized = JSON.stringify({
+            message: error.message,
+            summary: error.summary,
+            details: error.details,
+            cause: error.cause instanceof Error
+                ? { name: error.cause.name, message: error.cause.message }
+                : error.cause,
+        });
+        expect(serialized).not.toContain("test-token-shhh");
+        expect(serialized).not.toContain("Bearer test-token-shhh");
+    });
+    test("does not retry deterministic response-limit failures", async () => {
+        const before = fixture.requests.filter((r) => r.path === "/declared-oversize").length;
+        const error = await Effect.runPromise(
+            client.request("GET", "/declared-oversize").pipe(Effect.flip),
+        );
+        expect(error.details?.retryable).toBe(false);
+        expect(fixture.requests.filter((r) => r.path === "/declared-oversize")).toHaveLength(before + 1);
+    });
     test("paginate follows Link rel=next headers", async () => {
         const items = await Effect.runPromise(client.paginate("/paged", { perPage: 2 }));
         expect(items).toEqual([1, 2, 3]);
+    });
+    test("paginate rejects a cross-origin Link before exposing the token", async () => {
+        let attackerRequests = 0;
+        let attackerAuthorization = null;
+        const attacker = Bun.serve({
+            port: 0,
+            fetch: (request) => {
+                attackerRequests += 1;
+                attackerAuthorization = request.headers.get("authorization");
+                return Response.json(["stolen"]);
+            },
+        });
+        const source = Bun.serve({
+            port: 0,
+            fetch: () => Response.json(["first"], {
+                headers: {
+                    link: `<http://127.0.0.1:${attacker.port}/steal>; rel="next"`,
+                },
+            }),
+        });
+        try {
+            const guarded = makeGitHubClient({
+                token: "pagination-secret",
+                apiBaseUrl: `http://127.0.0.1:${source.port}`,
+            });
+            await expect(Effect.runPromise(guarded.paginate("/page"))).rejects.toThrow(
+                /configured API origin/,
+            );
+            expect(attackerRequests).toBe(0);
+            expect(attackerAuthorization).toBeNull();
+        } finally {
+            source.stop(true);
+            attacker.stop(true);
+        }
     });
 });
 

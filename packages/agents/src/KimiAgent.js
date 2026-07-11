@@ -5,14 +5,126 @@ import { tmpdir, homedir } from "node:os";
 import { BaseCliAgent, pushFlag, pushList, isRecord, asString, toolKindFromName, createSyntheticIdGenerator, } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList, } from "./capability-registry/index.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import {
+    assertHttpUrl,
+    fetchWithPolicy,
+    isHttpClientPolicyError,
+    readResponseText,
+} from "@smithers-orchestrator/http-client";
+
+const DEFAULT_KIMI_OAUTH_HOST = "https://auth.kimi.com";
+const KIMI_OAUTH_REFRESH_TIMEOUT_MS = 15_000;
+const KIMI_OAUTH_MAX_RESPONSE_BYTES = 64 * 1024;
+const KIMI_OAUTH_MAX_REDIRECTS = 3;
+const KIMI_OAUTH_SENSITIVE_HEADERS = [
+    "x-msh-device-id",
+    "x-msh-device-name",
+    "x-msh-device-model",
+    "x-msh-os-version",
+    "x-msh-platform",
+    "x-msh-version",
+];
 
 /**
  * The kimi CLI's OAuth refresh endpoint, mirroring the Python implementation
- * in `kimi_cli.auth.oauth.refresh_token`. Honour the same env-var override
- * the CLI uses (KIMI_OAUTH_HOST) so test/staging overrides keep working.
+ * in `kimi_cli.auth.oauth.refresh_token`. The override comes from the same
+ * effective environment as the agent process, rather than ambient process
+ * state that an `inheritEnv: false` agent deliberately excluded.
+ *
+ * @param {Record<string, string | undefined>} env
+ * @returns {URL}
  */
-function kimiOAuthHost() {
-    return process.env.KIMI_OAUTH_HOST?.replace(/\/+$/, "") || "https://auth.kimi.com";
+function kimiOAuthTokenUrl(env) {
+    const configured = typeof env.KIMI_OAUTH_HOST === "string" && env.KIMI_OAUTH_HOST.trim()
+        ? env.KIMI_OAUTH_HOST.trim()
+        : DEFAULT_KIMI_OAUTH_HOST;
+    const host = assertHttpUrl(configured);
+    if (host.search || host.hash) {
+        throw new Error("invalid-oauth-host");
+    }
+    const hostname = host.hostname.toLowerCase();
+    // Keep the cleartext exception literal and exact: localhost names can be
+    // redirected by local resolver configuration, and the wider 127/8 range is
+    // unnecessary for the test/dev use case.
+    const isLoopback = hostname === "127.0.0.1" || hostname === "[::1]";
+    // Refresh tokens must not traverse cleartext networks. HTTP remains
+    // available for loopback-only local development and test servers.
+    if (host.protocol === "http:" && !isLoopback) {
+        throw new Error("invalid-oauth-host");
+    }
+    return assertHttpUrl(new URL("/api/oauth/token", host));
+}
+
+/** @param {AbortSignal | undefined} signal */
+function throwIfAborted(signal) {
+    if (!signal?.aborted)
+        return;
+    throw signal.reason ?? new DOMException("The operation was aborted", "AbortError");
+}
+
+/**
+ * Race a single caller's wait against its cancellation without forwarding that
+ * signal into the shared refresh. Kimi rotates refresh tokens, so aborting the
+ * refresh itself would also fail every other waiter sharing the flight.
+ *
+ * @param {Promise<void>} refresh
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<void>}
+ */
+function waitForRefresh(refresh, signal) {
+    throwIfAborted(signal);
+    if (!signal)
+        return refresh;
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (fn) => {
+            if (settled)
+                return;
+            settled = true;
+            signal.removeEventListener("abort", onAbort);
+            fn();
+        };
+        const onAbort = () => finish(() => reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError")));
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) {
+            onAbort();
+            return;
+        }
+        refresh.then(
+            () => finish(resolve),
+            (error) => finish(() => reject(error)),
+        );
+    });
+}
+
+/**
+ * Fixed, credential-safe refresh failure. Never carry provider response text,
+ * the configured endpoint, a token, or a device identifier into user errors.
+ */
+class KimiOAuthRefreshError extends Error {
+    /** @param {string} reason */
+    constructor(reason) {
+        super(reason);
+        this.name = "KimiOAuthRefreshError";
+    }
+}
+
+/**
+ * @param {unknown} error
+ * @param {AbortSignal} timeoutSignal
+ * @returns {KimiOAuthRefreshError}
+ */
+function sanitizeRefreshError(error, timeoutSignal) {
+    if (error instanceof KimiOAuthRefreshError)
+        return error;
+    if (timeoutSignal.aborted)
+        return new KimiOAuthRefreshError("timeout");
+    if (isHttpClientPolicyError(error)) {
+        return new KimiOAuthRefreshError(
+            error.code === "RESPONSE_TOO_LARGE" ? "response-too-large" : "request-policy-rejected",
+        );
+    }
+    return new KimiOAuthRefreshError("network-error");
 }
 
 /**
@@ -29,9 +141,12 @@ const inflightRefreshes = new Map();
 /**
  * @param {string} credsDir
  * @param {string} fileName
+ * @param {Record<string, string | undefined>} env
+ * @param {AbortSignal | undefined} callerSignal
  * @returns {Promise<{ ok: boolean; refreshed?: boolean; deduped?: boolean; reason?: string; expiredAt?: string | null }>}
  */
-async function refreshKimiTokenIfNeeded(credsDir, fileName) {
+async function refreshKimiTokenIfNeeded(credsDir, fileName, env, callerSignal) {
+    throwIfAborted(callerSignal);
     const path = join(credsDir, fileName);
     /** @type {{access_token?: string, refresh_token?: string, expires_at?: number, token_type?: string, scope?: string} | null} */
     let data = null;
@@ -54,20 +169,31 @@ async function refreshKimiTokenIfNeeded(credsDir, fileName) {
     if (typeof data.refresh_token !== "string" || data.refresh_token.length === 0) {
         return { ok: false, reason: "no-refresh-token", expiredAt: new Date(data.expires_at * 1000).toISOString() };
     }
+    let tokenUrl;
+    try {
+        tokenUrl = kimiOAuthTokenUrl(env);
+    }
+    catch {
+        return { ok: false, reason: "invalid-oauth-host", expiredAt: new Date(data.expires_at * 1000).toISOString() };
+    }
+    throwIfAborted(callerSignal);
     // Dedupe concurrent refreshes per-credential-file within this process.
-    const flightKey = path;
+    // Include the effective endpoint so an isolated agent never joins a flight
+    // created from another agent's ambient KIMI_OAUTH_HOST.
+    const flightKey = `${path}\0${tokenUrl.origin}`;
     const inflight = inflightRefreshes.get(flightKey);
     if (inflight) {
         try {
-            await inflight;
+            await waitForRefresh(inflight, callerSignal);
             return { ok: true, refreshed: true, deduped: true };
         }
         catch (err) {
-            return { ok: false, reason: err?.message ?? "refresh-failed", expiredAt: new Date(data.expires_at * 1000).toISOString() };
+            if (callerSignal?.aborted)
+                throw callerSignal.reason ?? err;
+            return { ok: false, reason: err instanceof KimiOAuthRefreshError ? err.message : "refresh-failed", expiredAt: new Date(data.expires_at * 1000).toISOString() };
         }
     }
     const refresher = (async () => {
-        const tokenUrl = `${kimiOAuthHost()}/api/oauth/token`;
         // client_id matches kimi_cli.auth.oauth.KIMI_CODE_CLIENT_ID. Without it the
         // /api/oauth/token endpoint returns 400 invalid_request.
         const body = new URLSearchParams({
@@ -95,48 +221,99 @@ async function refreshKimiTokenIfNeeded(credsDir, fileName) {
             }
         }
         catch { /* device-id is optional */ }
-        const resp = await fetch(tokenUrl, {
-            method: "POST",
-            headers,
-            body,
-        });
-        if (!resp.ok) {
-            const text = await resp.text().catch(() => "");
-            const tag = resp.status === 401 ? "invalid_grant" : `http-${resp.status}`;
-            throw new Error(`kimi oauth refresh failed (${tag}): ${text.slice(0, 200)}`);
+        const timeoutController = new AbortController();
+        const timeout = setTimeout(() => {
+            const error = new Error("Kimi OAuth refresh timed out");
+            error.name = "TimeoutError";
+            timeoutController.abort(error);
+        }, KIMI_OAUTH_REFRESH_TIMEOUT_MS);
+        timeout.unref?.();
+        try {
+            const resp = await fetchWithPolicy(tokenUrl, {
+                method: "POST",
+                headers,
+                body,
+                signal: timeoutController.signal,
+            }, {
+                maxRedirects: KIMI_OAUTH_MAX_REDIRECTS,
+                sensitiveHeaders: KIMI_OAUTH_SENSITIVE_HEADERS,
+                validateUrl: (url) => {
+                    if (url.origin !== tokenUrl.origin) {
+                        throw new KimiOAuthRefreshError("request-policy-rejected");
+                    }
+                },
+            });
+            let text;
+            try {
+                text = await readResponseText(resp, {
+                    maxBytes: KIMI_OAUTH_MAX_RESPONSE_BYTES,
+                    signal: timeoutController.signal,
+                });
+            }
+            catch (error) {
+                throw sanitizeRefreshError(error, timeoutController.signal);
+            }
+            if (!resp.ok) {
+                const tag = resp.status === 401 ? "invalid_grant" : `http-${resp.status}`;
+                // The provider body is deliberately omitted: error payloads may
+                // echo the submitted refresh token or device identifier.
+                throw new KimiOAuthRefreshError(tag);
+            }
+            let fresh;
+            try {
+                fresh = JSON.parse(text);
+            }
+            catch {
+                throw new KimiOAuthRefreshError("malformed-response");
+            }
+            if (typeof fresh?.access_token !== "string" || fresh.access_token.length === 0) {
+                throw new KimiOAuthRefreshError("missing access_token");
+            }
+            const expiresIn = typeof fresh.expires_in === "number"
+                ? fresh.expires_in
+                : 3600;
+            const merged = {
+                ...data,
+                access_token: fresh.access_token,
+                refresh_token: typeof fresh.refresh_token === "string" ? fresh.refresh_token : data.refresh_token,
+                token_type: typeof fresh.token_type === "string" ? fresh.token_type : data.token_type,
+                scope: typeof fresh.scope === "string" ? fresh.scope : data.scope,
+                expires_in: expiresIn,
+                expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+            };
+            // Write atomically so kimi-cli reading concurrently never sees a torn file.
+            const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+            try {
+                writeFileSync(tmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
+                renameSync(tmp, path);
+            }
+            catch {
+                throw new KimiOAuthRefreshError("credential-write-failed");
+            }
         }
-        /** @type {any} */
-        const fresh = await resp.json();
-        if (typeof fresh?.access_token !== "string") {
-            throw new Error("kimi oauth refresh: missing access_token in response");
+        catch (error) {
+            throw sanitizeRefreshError(error, timeoutController.signal);
         }
-        const expiresIn = typeof fresh.expires_in === "number"
-            ? fresh.expires_in
-            : 3600;
-        const merged = {
-            ...data,
-            access_token: fresh.access_token,
-            refresh_token: typeof fresh.refresh_token === "string" ? fresh.refresh_token : data.refresh_token,
-            token_type: typeof fresh.token_type === "string" ? fresh.token_type : data.token_type,
-            scope: typeof fresh.scope === "string" ? fresh.scope : data.scope,
-            expires_in: expiresIn,
-            expires_at: Math.floor(Date.now() / 1000) + expiresIn,
-        };
-        // Write atomically so kimi-cli reading concurrently never sees a torn file.
-        const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-        writeFileSync(tmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
-        renameSync(tmp, path);
+        finally {
+            clearTimeout(timeout);
+        }
     })();
     inflightRefreshes.set(flightKey, refresher);
+    const clearFlight = () => {
+        if (inflightRefreshes.get(flightKey) === refresher)
+            inflightRefreshes.delete(flightKey);
+    };
+    // The flight outlives any individual waiter. Attach both handlers so a
+    // caller abort cannot leave an unhandled rejection or clear a live flight.
+    void refresher.then(clearFlight, clearFlight);
     try {
-        await refresher;
+        await waitForRefresh(refresher, callerSignal);
         return { ok: true, refreshed: true };
     }
     catch (err) {
-        return { ok: false, reason: err?.message ?? "refresh-failed", expiredAt: new Date(data.expires_at * 1000).toISOString() };
-    }
-    finally {
-        inflightRefreshes.delete(flightKey);
+        if (callerSignal?.aborted)
+            throw callerSignal.reason ?? err;
+        return { ok: false, reason: err instanceof KimiOAuthRefreshError ? err.message : "refresh-failed", expiredAt: new Date(data.expires_at * 1000).toISOString() };
     }
 }
 
@@ -150,8 +327,11 @@ async function refreshKimiTokenIfNeeded(credsDir, fileName) {
  * @param {string} shareDir
  * @param {string} agentId
  * @param {string} agentModel
+ * @param {Record<string, string | undefined>} env
+ * @param {AbortSignal | undefined} callerSignal
  */
-async function ensureKimiCredentialsUsable(shareDir, agentId, agentModel) {
+async function ensureKimiCredentialsUsable(shareDir, agentId, agentModel, env, callerSignal) {
+    throwIfAborted(callerSignal);
     const credsDir = join(shareDir, "credentials");
     if (!existsSync(credsDir))
         return; // No creds dir → kimi will print "LLM not set" which the BaseCliAgent classifier handles.
@@ -168,7 +348,8 @@ async function ensureKimiCredentialsUsable(shareDir, agentId, agentModel) {
     let lastFailure = null;
     let anyUsable = false;
     for (const name of tokenFiles) {
-        const result = await refreshKimiTokenIfNeeded(credsDir, name);
+        throwIfAborted(callerSignal);
+        const result = await refreshKimiTokenIfNeeded(credsDir, name, env, callerSignal);
         if (result.ok) {
             anyUsable = true;
         }
@@ -347,15 +528,25 @@ export class KimiAgent extends BaseCliAgent {
         const args = [];
         let commandEnv;
         let cleanup;
+        const effectiveEnv = {
+            ...(this.inheritEnv ? process.env : {}),
+            ...this.opts.env,
+        };
         // Isolate kimi metadata per invocation to avoid concurrent writes to
         // ~/.kimi/kimi.json across parallel tasks. If caller explicitly provides
         // configDir or KIMI_SHARE_DIR in opts.env, preserve that override.
         const explicitShareDir = this.opts.configDir ?? this.opts.env?.KIMI_SHARE_DIR;
-        const sourceShareDir = explicitShareDir ?? process.env.KIMI_SHARE_DIR ?? join(homedir(), ".kimi");
+        const sourceShareDir = explicitShareDir ?? effectiveEnv.KIMI_SHARE_DIR ?? join(homedir(), ".kimi");
         // Refresh expired OAuth credentials in place using the stored refresh_token,
         // and only fail fast (non-retryable) if the refresh itself fails. This avoids
         // forcing the user to run `kimi login` every time their access_token rotates.
-        await ensureKimiCredentialsUsable(sourceShareDir, this.id ?? "<anonymous>", this.opts.model ?? this.model ?? "<unset>");
+        await ensureKimiCredentialsUsable(
+            sourceShareDir,
+            this.id ?? "<anonymous>",
+            this.opts.model ?? this.model ?? "<unset>",
+            effectiveEnv,
+            params.options?.abortSignal,
+        );
         if (!explicitShareDir) {
             const isolatedShareDir = mkdtempSync(join(tmpdir(), "kimi-share-"));
             if (existsSync(sourceShareDir)) {

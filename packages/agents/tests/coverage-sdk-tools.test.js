@@ -179,17 +179,18 @@ describe("createTranscriptionTool error handling", () => {
     const tool = createTranscriptionTool({
       provider: "deepgram",
       apiKey: "k",
-      fetch: async () => ({
-        ok: false,
-        status: 503,
-        statusText: "Service Unavailable",
-        text: async () => {
-          throw new Error("stream already consumed");
-        },
-      }),
+      fetch: async () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(new Error("stream already consumed"));
+            },
+          }),
+          { status: 503, statusText: "Service Unavailable" },
+        ),
     });
     await expect(
-      tool.execute({ audioUrl: "https://example.com/a.mp3" }, callOptions),
+      tool.execute({ audioBase64: Buffer.from("x").toString("base64") }, callOptions),
     ).rejects.toThrow(/Failed to transcribe audio with Deepgram: 503 Service Unavailable$/);
   });
 
@@ -234,7 +235,7 @@ describe("createTranscriptionTool error handling", () => {
   test("rejects an unparseable audioUrl", async () => {
     await expect(
       whisperTool().execute({ audioUrl: "http://[not a url" }, callOptions),
-    ).rejects.toThrow(/Invalid audioUrl/);
+    ).rejects.toMatchObject({ code: "INVALID_URL" });
   });
 
   test("rejects a host outside allowedAudioHosts", async () => {
@@ -268,9 +269,9 @@ describe("createTranscriptionTool error handling", () => {
           return Response.json({ text: "leaked" });
         },
       });
-      await expect(tool.execute({ audioUrl }, callOptions)).rejects.toThrow(
-        /private, loopback, or link-local/i,
-      );
+      await expect(tool.execute({ audioUrl }, callOptions)).rejects.toMatchObject({
+        code: "INVALID_URL",
+      });
       expect(called).toBe(0);
     });
   }

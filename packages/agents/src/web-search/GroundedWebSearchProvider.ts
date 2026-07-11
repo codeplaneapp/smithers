@@ -10,6 +10,11 @@ export type GroundedWebSearchResult = {
   score?: number;
 };
 
+export type GroundedWebSearchProviderExecutionOptions = {
+  /** Cancels the current tool invocation. Providers should forward it to I/O. */
+  readonly signal?: AbortSignal;
+};
+
 export type GroundedWebSearchProvider = {
   name: GroundedWebSearchProviderName;
   kind: GroundedWebSearchProviderKind;
@@ -17,5 +22,5 @@ export type GroundedWebSearchProvider = {
     query: string;
     maxResults: number;
     freshness?: "day" | "week" | "month" | "year";
-  }): Promise<GroundedWebSearchResult[]>;
+  }, options?: GroundedWebSearchProviderExecutionOptions): Promise<GroundedWebSearchResult[]>;
 };

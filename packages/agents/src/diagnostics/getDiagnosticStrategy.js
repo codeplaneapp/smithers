@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { assertHttpUrl, fetchWithPolicy } from "@smithers-orchestrator/http-client";
 /** @typedef {import("./DiagnosticCheck.ts").DiagnosticCheck} DiagnosticCheck */
 /** @typedef {import("./DiagnosticCheckId.ts").DiagnosticCheckId} DiagnosticCheckId */
 /** @typedef {import("./DiagnosticContext.ts").DiagnosticContext} DiagnosticContext */
@@ -62,6 +63,39 @@ function parseHeaderInt(value) {
         return undefined;
     const n = parseInt(value, 10);
     return Number.isNaN(n) ? undefined : n;
+}
+
+const DIAGNOSTIC_SENSITIVE_HEADERS = ["x-api-key", "x-goog-api-key"];
+
+/**
+ * Keep vendor credentials on the probe's initial origin. The shared client
+ * follows redirects manually, strips these headers (and Authorization) on an
+ * unauthorized cross-origin hop, and rejects body-preserving cross-origin
+ * redirects before the destination is contacted.
+ * @param {string | URL | Request} input
+ * @param {RequestInit} init
+ */
+async function fetchCredentialedProbe(input, init) {
+    const initial = assertHttpUrl(input instanceof Request ? input.url : input);
+    const response = await fetchWithPolicy(input, init, {
+        sensitiveHeaders: DIAGNOSTIC_SENSITIVE_HEADERS,
+        // A credential check is meaningful only against the configured vendor
+        // origin. Following a stripped cross-origin redirect could turn an
+        // attacker-controlled 200 into a false "credential valid" result.
+        validateUrl: (url, context) => {
+            if (!context.initial && url.origin !== initial.origin) {
+                throw new Error("Credentialed diagnostic redirect left the configured vendor origin.");
+            }
+        },
+    });
+    // Diagnostic checks inspect status and headers only. Explicitly release the
+    // unread payload so a streaming vendor response cannot retain its socket
+    // until garbage collection or consume memory behind the probe's back.
+    // Do not await a custom stream's cancellation promise: the probe has no
+    // payload dependency, and an adversarial stream must not be able to stall
+    // diagnostics after headers have arrived.
+    void response.body?.cancel().catch(() => undefined);
+    return response;
 }
 // ---------------------------------------------------------------------------
 // Claude strategy
@@ -191,7 +225,7 @@ const claudeRateLimitCheck = {
             };
         }
         try {
-            const res = await fetch("https://api.anthropic.com/v1/messages/count_tokens", {
+            const res = await fetchCredentialedProbe("https://api.anthropic.com/v1/messages/count_tokens", {
                 method: "POST",
                 headers: {
                     "x-api-key": apiKey,
@@ -386,7 +420,7 @@ function openaiApiKeyCheck({ codexCliAuth }) {
                 };
             }
             try {
-                const res = await fetch(openaiModelsUrl(ctx.env), {
+                const res = await fetchCredentialedProbe(openaiModelsUrl(ctx.env), {
                     headers: { Authorization: `Bearer ${creds.apiKey}` },
                     signal: AbortSignal.timeout(4_000),
                 });
@@ -449,7 +483,7 @@ function openaiRateLimitCheck({ codexCliAuth }) {
                 };
             }
             try {
-                const res = await fetch(openaiModelsUrl(ctx.env), {
+                const res = await fetchCredentialedProbe(openaiModelsUrl(ctx.env), {
                     headers: { Authorization: `Bearer ${creds.apiKey}` },
                     signal: AbortSignal.timeout(4_000),
                 });
@@ -529,7 +563,7 @@ const googleAuthCheck = {
         if (apiKey) {
             // Probe the models endpoint to validate the key
             try {
-                const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
+                const res = await fetchCredentialedProbe("https://generativelanguage.googleapis.com/v1beta/models", {
                     headers: { "x-goog-api-key": apiKey },
                     signal: AbortSignal.timeout(4_000),
                 });
@@ -596,7 +630,7 @@ const googleRateLimitCheck = {
             };
         }
         try {
-            const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
+            const res = await fetchCredentialedProbe("https://generativelanguage.googleapis.com/v1beta/models", {
                 headers: { "x-goog-api-key": apiKey },
                 signal: AbortSignal.timeout(4_000),
             });

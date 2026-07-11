@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-// Recursively delete every `.d.ts` under a root (default `src`) so a subsequent
-// `tsup` declaration build starts clean. Without this, a renamed/removed source
-// module leaves its stale `.d.ts` behind (tsup only writes, never prunes), which
-// the check-dts freshness gate would then miss. Usage: `node clean-dts.mjs [dir]`.
-import { readdirSync, rmSync, statSync } from "node:fs";
-import { join } from "node:path";
+// Delete declaration outputs before a `tsup` build so an existing `.d.ts` does
+// not shadow its same-named JS entry and stale hashed chunks cannot survive.
+// With no entries, every declaration under the root is removed. Packages that
+// also ship hand-authored subpath declarations can name only generated entries:
+//   node clean-dts.mjs src index BaseCliAgent/index
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 const root = process.argv[2] ?? "src";
+const entries = process.argv.slice(3);
 
 function clean(dir) {
   for (const entry of readdirSync(dir)) {
@@ -20,4 +22,20 @@ function clean(dir) {
   }
 }
 
-clean(root);
+function cleanEntry(entry) {
+  const directory = join(root, dirname(entry));
+  const name = basename(entry);
+  const exact = join(directory, `${name}.d.ts`);
+  if (existsSync(exact)) rmSync(exact);
+  for (const file of readdirSync(directory)) {
+    if (file.startsWith(`${name}-`) && file.endsWith(".d.ts")) {
+      rmSync(join(directory, file));
+    }
+  }
+}
+
+if (entries.length > 0) {
+  for (const entry of entries) cleanEntry(entry);
+} else {
+  clean(root);
+}

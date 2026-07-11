@@ -28,3 +28,52 @@ Gotchas: `SPEC_SOURCE_URL` (`specSourceUrl.js`) is a registered symbol stamped
 on fetched specs so a relative `servers[].url` can be resolved against the
 document URL. `metrics.js` re-exports the tool-call counters/histogram from
 `@smithers-orchestrator/observability` and backs the `./metrics` export.
+
+## Safe authenticated requests
+
+```ts
+import { createOpenApiTools } from "smithers-orchestrator/openapi";
+
+const tools = await createOpenApiTools("./openapi.yaml", {
+  baseUrl: "https://api.example.com",
+  auth: { type: "bearer", token: process.env.EXAMPLE_API_TOKEN! },
+  include: ["listProjects", "getProject"],
+  allowedOrigins: ["https://downloads.example.com"],
+  maxRequestBytes: 10 * 1024 * 1024,
+  maxResponseBytes: 1024 * 1024,
+  maxSpecBytes: 5 * 1024 * 1024,
+  maxRedirects: 3,
+});
+```
+
+Remote spec URLs, resolved server URLs, operation URLs, and every redirect
+target must use HTTP(S) and cannot embed URL userinfo. A spec-controlled
+`servers[].url` is not credential trust: configuring `auth` or `headers`
+requires an explicit `baseUrl`, which pins the exact initial origin (scheme,
+hostname, and port). Without that pin, uncredentialed spec servers are checked
+for localhost-style and non-global destinations. Remote spec URLs and every
+redirect hop receive the same check. Hostnames are denied when resolution
+fails, no addresses are returned, or any A/AAAA answer is non-global.
+`allowPrivateNetwork` opts remote spec loads, unpinned credential-free API
+servers, and redirect destinations into private/special network access; it
+cannot replace `baseUrl` when credentials are configured. `resolveHostname`
+can inject a resolver for controlled runtimes and deterministic tests. Fetch
+resolves again after validation, so deployment egress must still block private
+ranges, metadata, and DNS-rebinding races.
+
+Redirects keep injected credentials on the pinned initial origin and
+same-origin hops. A safe cross-origin hop is followed only after configured
+auth, custom headers, header parameters, and query API keys are removed unless
+its exact origin is listed in `allowedOrigins`. That option is redirect-only; it
+does not authorize a spec-controlled initial server. A redirect that would
+preserve a request body to an untrusted origin is rejected, as are
+HTTPS-to-HTTP downgrades. Redirects default to 5 hops. Remote specs default to a
+5 MiB cap (`maxSpecBytes`). Serialized operation request bodies default to a
+10 MiB cap (`maxRequestBytes`) enforced before fetch. JSON, URL-encoded, raw,
+and multipart bodies are measured in their wire representation; multipart
+measurement includes generated boundaries and part headers. Operation responses
+default to a 1 MiB cap (`maxResponseBytes`). Non-2xx tool errors redact
+configured secret values and their generated Basic/query wire forms from the
+returned message and body while preserving ordinary error detail. Pass `signal`
+to cancel remote spec loading; AI SDK tool-call cancellation propagates through
+each operation request and bounded response read.

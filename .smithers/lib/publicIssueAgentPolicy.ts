@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 
@@ -47,6 +48,7 @@ export const PUBLIC_ISSUE_SAFE_ENV_NAMES = [
   "PATHEXT",
   "GIT_TERMINAL_PROMPT",
   "SMITHERS_BIN",
+  "COREPACK_HOME",
 ] as const;
 
 export const PUBLIC_ISSUE_CODEX_EXTRA_ARGS = [
@@ -258,15 +260,97 @@ function normalizedReadPaths(paths: readonly string[] | undefined): string[] {
   return [...new Set((paths ?? []).map((path) => path.trim()).filter(Boolean))].sort();
 }
 
+function existingCorepackHome(
+  source: EnvironmentSource,
+  options: PublicIssueAgentPolicyOptions,
+): string | undefined {
+  const candidates = [
+    source.COREPACK_HOME?.trim(),
+    options.hostHome ? join(options.hostHome, ".cache", "node", "corepack") : undefined,
+  ];
+  return candidates.find((path): path is string => Boolean(path && existsSync(path)));
+}
+
 function readablePackageRoot(path: string): string {
   const normalized = path.replaceAll("\\", "/");
+  const commandLineTools = normalized.match(/^(.*\/CommandLineTools)(?:\/|$)/);
+  if (commandLineTools?.[1]) return commandLineTools[1];
   const nvm = normalized.match(/^(.*\/\.nvm\/versions\/node\/[^/]+)/);
   if (nvm?.[1]) return nvm[1];
   const bun = normalized.match(/^(.*\/\.bun\/bin)(?:\/|$)/);
   if (bun?.[1]) return bun[1];
+  const homebrewOpt = normalized.match(/^(.*\/opt\/[^/]+)/);
+  if (homebrewOpt?.[1]) return homebrewOpt[1];
   const cellar = normalized.match(/^(.*\/Cellar\/[^/]+\/[^/]+)/);
   if (cellar?.[1]) return cellar[1];
   return dirname(path);
+}
+
+function resolveDarwinDeveloperTool(binary: string, executable: string): string | undefined {
+  if (
+    process.platform !== "darwin"
+    || !executable.startsWith("/usr/bin/")
+    || !existsSync("/usr/bin/xcrun")
+  ) return undefined;
+
+  try {
+    const resolved = execFileSync("/usr/bin/xcrun", ["--find", binary], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2_000,
+    }).trim();
+    return resolved && resolved !== executable && existsSync(resolved) ? resolved : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Resolve exact non-system Mach-O library roots needed by an installed tool. */
+function resolveDarwinLibraryReadPaths(executable: string): string[] {
+  if (process.platform !== "darwin" || !existsSync("/usr/bin/otool")) return [];
+
+  const roots = new Set<string>();
+  const inspected = new Set<string>();
+  const pending = [executable];
+
+  // Tool binaries have a small dependency graph; cap traversal so malformed
+  // binaries cannot turn policy construction into unbounded host inspection.
+  while (pending.length > 0 && inspected.size < 128) {
+    const current = pending.shift()!;
+    if (inspected.has(current)) continue;
+    inspected.add(current);
+
+    let output: string;
+    try {
+      output = execFileSync("/usr/bin/otool", ["-L", current], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 2_000,
+      });
+    } catch {
+      // Scripts and non-Mach-O binaries do not have dylib load commands.
+      continue;
+    }
+
+    for (const line of output.split("\n").slice(1)) {
+      const dependency = line.trim().match(/^(\/.*?) \(compatibility version /)?.[1];
+      if (!dependency || !existsSync(dependency)) continue;
+      if (dependency.startsWith("/usr/lib/") || dependency.startsWith("/System/Library/")) {
+        continue;
+      }
+
+      roots.add(readablePackageRoot(dependency));
+      try {
+        const resolved = realpathSync(dependency);
+        roots.add(readablePackageRoot(resolved));
+        pending.push(resolved);
+      } catch {
+        pending.push(dependency);
+      }
+    }
+  }
+
+  return [...roots];
 }
 
 /** Resolve only the installed runtime roots needed by repo checks. */
@@ -299,7 +383,15 @@ export function resolvePublicIssueToolchainReadPaths(
       }
       if (resolved) break;
     }
-    if (resolved) roots.add(readablePackageRoot(resolved));
+    if (resolved) {
+      roots.add(readablePackageRoot(resolved));
+      for (const path of resolveDarwinLibraryReadPaths(resolved)) roots.add(path);
+      const developerTool = resolveDarwinDeveloperTool(binary, resolved);
+      if (developerTool) {
+        roots.add(readablePackageRoot(developerTool));
+        for (const path of resolveDarwinLibraryReadPaths(developerTool)) roots.add(path);
+      }
+    }
   }
 
   if (process.platform === "darwin" && existsSync("/System/Library/OpenSSL")) {
@@ -312,6 +404,7 @@ function codexFilesystemConfig(
   workspaceAccess: "read" | "write",
   toolchainReadPaths: readonly string[],
   vcsMetadataAccess: "deny" | "read" = "deny",
+  safeHome?: string,
 ): string {
   const entries = [
     "glob_scan_max_depth=8",
@@ -319,6 +412,7 @@ function codexFilesystemConfig(
     `${JSON.stringify(":minimal")}="read"`,
     `${JSON.stringify(":tmpdir")}="write"`,
     `${JSON.stringify(":slash_tmp")}="deny"`,
+    ...(safeHome ? [`${JSON.stringify(safeHome)}="write"`] : []),
     `${JSON.stringify(":workspace_roots")}={`
       + [
         `${JSON.stringify(".")}="${workspaceAccess}"`,
@@ -357,8 +451,13 @@ export function buildPublicIssueCodexPolicy(
 ): PublicIssueCodexPolicy {
   const profile = `public-issue-${role}`;
   const workspaceAccess = role === "write" ? "write" : "read";
-  const toolchainReadPaths = normalizedReadPaths(options.toolchainReadPaths);
+  const corepackHome = existingCorepackHome(source, options);
+  const toolchainReadPaths = normalizedReadPaths([
+    ...(options.toolchainReadPaths ?? []),
+    ...(corepackHome ? [corepackHome] : []),
+  ]);
   const env = buildPublicIssueSafeEnv(source, options);
+  if (corepackHome) env.COREPACK_HOME = corepackHome;
 
   return {
     inheritEnv: false,
@@ -366,7 +465,7 @@ export function buildPublicIssueCodexPolicy(
     yolo: false,
     config: [
       `default_permissions="${profile}"`,
-      `permissions.${profile}.filesystem=${codexFilesystemConfig(workspaceAccess, toolchainReadPaths)}`,
+      `permissions.${profile}.filesystem=${codexFilesystemConfig(workspaceAccess, toolchainReadPaths, "deny", options.safeHome)}`,
       `permissions.${profile}.network.enabled=false`,
       `shell_environment_policy.inherit="none"`,
       `shell_environment_policy.include_only=${JSON.stringify(PUBLIC_ISSUE_SAFE_ENV_NAMES)}`,
@@ -385,14 +484,20 @@ export function buildLocalGateCodexPolicy(
   options: PublicIssueAgentPolicyOptions = {},
 ): PublicIssueCodexPolicy {
   const profile = "local-issue-gate";
+  const corepackHome = existingCorepackHome(source, options);
   const env = buildPublicIssueSafeEnv(source, options);
+  if (corepackHome) env.COREPACK_HOME = corepackHome;
+  const toolchainReadPaths = normalizedReadPaths([
+    ...(options.toolchainReadPaths ?? []),
+    ...(corepackHome ? [corepackHome] : []),
+  ]);
   return {
     inheritEnv: false,
     env,
     yolo: false,
     config: [
       `default_permissions="${profile}"`,
-      `permissions.${profile}.filesystem=${codexFilesystemConfig("write", normalizedReadPaths(options.toolchainReadPaths), "read")}`,
+      `permissions.${profile}.filesystem=${codexFilesystemConfig("write", toolchainReadPaths, "read", options.safeHome)}`,
       `permissions.${profile}.network.enabled=false`,
       `shell_environment_policy.inherit="none"`,
       `shell_environment_policy.include_only=${JSON.stringify(PUBLIC_ISSUE_SAFE_ENV_NAMES)}`,
@@ -481,6 +586,16 @@ export function buildPublicIssueClaudePolicy(
   source: EnvironmentSource = process.env,
   options: PublicIssueAgentPolicyOptions = {},
 ): PublicIssueClaudePolicy {
+  const corepackHome = existingCorepackHome(source, options);
+  const effectiveOptions = {
+    ...options,
+    toolchainReadPaths: normalizedReadPaths([
+      ...(options.toolchainReadPaths ?? []),
+      ...(corepackHome ? [corepackHome] : []),
+    ]),
+  };
+  const env = buildPublicIssueSafeEnv(source, effectiveOptions);
+  if (corepackHome) env.COREPACK_HOME = corepackHome;
   const tools = [
     ...(role === "write" ? CLAUDE_WRITE_TOOLS : CLAUDE_READ_TOOLS),
   ];
@@ -494,7 +609,7 @@ export function buildPublicIssueClaudePolicy(
 
   return {
     inheritEnv: false,
-    env: buildPublicIssueSafeEnv(source, options),
+    env,
     yolo: false,
     permissionMode: "dontAsk",
     allowedTools: [
@@ -510,7 +625,7 @@ export function buildPublicIssueClaudePolicy(
     settings: JSON.stringify(claudeSettings(
       role,
       role === "write" ? [...CLAUDE_WRITE_ALLOW_RULES] : [...CLAUDE_READ_ALLOW_RULES],
-      options,
+      effectiveOptions,
     )),
     settingSources: "",
     extraArgs: ["--safe-mode"],

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync, rmSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -11,20 +11,20 @@ import { KimiAgent } from "../src/index.js";
  *   1. Reads $KIMI_SHARE_DIR/credentials/*.json.
  *   2. If `expires_at` is within 60s of now, POSTs grant_type=refresh_token
  *      to $KIMI_OAUTH_HOST/api/oauth/token and atomically rewrites the file.
- *   3. Dedupes concurrent refreshes per credential file via an in-process
- *      Map<path, Promise>.
+ *   3. Dedupes concurrent refreshes per credential file and effective OAuth
+ *      origin via an in-process Map.
  *   4. Throws AGENT_CONFIG_INVALID (failureRetryable=false) only if BOTH
  *      the credential is unusable AND the refresh attempt fails.
  *
- * We exercise the path through the agent's `buildCommand` because that is the
- * only public entry point. We intercept the network with a global `fetch`
- * mock and use a fake `kimi` binary on PATH so the spawn doesn't actually
- * run anything (we never let buildCommand be invoked when refresh fails;
- * for the success case we reset fetch and expect a normal spawn).
+ * Most cases exercise the path through `buildCommand`; the cancellation case
+ * goes through `generate` to cover BaseCliAgent's public error boundary. We
+ * intercept the network with a global `fetch` mock and use a fake `kimi`
+ * binary for the generate success waiter.
  */
 
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_OAUTH_HOST = process.env.KIMI_OAUTH_HOST;
+const ORIGINAL_SET_TIMEOUT = globalThis.setTimeout;
 
 /**
  * @param {string} shareDir
@@ -105,6 +105,15 @@ async function callBuildCommand(agentOpts) {
     });
 }
 
+function successfulRefreshResponse() {
+    return new Response(JSON.stringify({
+        access_token: "rotated-access",
+        refresh_token: "rotated-refresh",
+        token_type: "Bearer",
+        expires_in: 3600,
+    }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
 describe("KimiAgent OAuth refresh — failure paths", () => {
     test("401 invalid_grant from refresh endpoint => AGENT_CONFIG_INVALID, failureRetryable=false", async () => {
         writeCreds(shareDir, expiredCred());
@@ -133,7 +142,14 @@ describe("KimiAgent OAuth refresh — failure paths", () => {
 
     test("500 from refresh endpoint => AGENT_CONFIG_INVALID with http-500 tag", async () => {
         writeCreds(shareDir, expiredCred());
-        const fetchMock = makeFetch(async () => new Response("upstream blew up", { status: 500 }));
+        writeFileSync(join(shareDir, "device_id"), "private-device-id");
+        const fetchMock = makeFetch(async () => new Response(JSON.stringify({
+            error: "upstream blew up",
+            access_token: "expired-access",
+            refresh_token: "valid-refresh",
+            device_id: "private-device-id",
+            endpoint: "https://provider-secret.example/token?trace=secret",
+        }), { status: 500 }));
         globalThis.fetch = fetchMock;
         try {
             await callBuildCommand({ env: { KIMI_SHARE_DIR: shareDir }, model: "kimi-k2-instruct" });
@@ -142,6 +158,11 @@ describe("KimiAgent OAuth refresh — failure paths", () => {
             expect(err.code).toBe("AGENT_CONFIG_INVALID");
             expect(err.details?.failureRetryable).toBe(false);
             expect(String(err.message)).toContain("http-500");
+            const surfaced = `${String(err.message)} ${JSON.stringify(err.details)}`;
+            expect(surfaced).not.toContain("expired-access");
+            expect(surfaced).not.toContain("valid-refresh");
+            expect(surfaced).not.toContain("private-device-id");
+            expect(surfaced).not.toContain("provider-secret.example");
         }
     });
 
@@ -211,6 +232,244 @@ describe("KimiAgent OAuth refresh — failure paths", () => {
             expect(err.details?.failureRetryable).toBe(false);
             expect(String(err.message)).toContain("no refresh_token is stored");
             expect(fetchMock.calls).toHaveLength(0);
+        }
+    });
+});
+
+describe("KimiAgent OAuth refresh — transport policy", () => {
+    test("inheritEnv:false excludes the ambient OAuth host", async () => {
+        writeCreds(shareDir, expiredCred());
+        process.env.KIMI_OAUTH_HOST = "https://ambient-host.example.com";
+        const fetchMock = makeFetch(async () => successfulRefreshResponse());
+        globalThis.fetch = fetchMock;
+
+        const spec = await callBuildCommand({
+            inheritEnv: false,
+            env: { KIMI_SHARE_DIR: shareDir },
+            model: "kimi-k2-instruct",
+        });
+        if (typeof spec.cleanup === "function") await spec.cleanup();
+
+        expect(fetchMock.calls).toHaveLength(1);
+        expect(fetchMock.calls[0].url).toBe("https://auth.kimi.com/api/oauth/token");
+        expect(fetchMock.calls[0].url).not.toContain("ambient-host.example.com");
+    });
+
+    test("opts.env OAuth host overrides inherited process state", async () => {
+        writeCreds(shareDir, expiredCred());
+        process.env.KIMI_OAUTH_HOST = "https://ambient-host.example.com";
+        const fetchMock = makeFetch(async () => successfulRefreshResponse());
+        globalThis.fetch = fetchMock;
+
+        const spec = await callBuildCommand({
+            env: {
+                KIMI_SHARE_DIR: shareDir,
+                KIMI_OAUTH_HOST: "https://agent-host.example.com/base-path",
+            },
+            model: "kimi-k2-instruct",
+        });
+        if (typeof spec.cleanup === "function") await spec.cleanup();
+
+        expect(fetchMock.calls).toHaveLength(1);
+        expect(fetchMock.calls[0].url).toBe("https://agent-host.example.com/api/oauth/token");
+    });
+
+    test("allows cleartext HTTP only for loopback OAuth hosts", async () => {
+        writeCreds(shareDir, expiredCred());
+        const fetchMock = makeFetch(async () => successfulRefreshResponse());
+        globalThis.fetch = fetchMock;
+
+        const spec = await callBuildCommand({
+            inheritEnv: false,
+            env: { KIMI_SHARE_DIR: shareDir, KIMI_OAUTH_HOST: "http://127.0.0.1:8787" },
+            model: "kimi-k2-instruct",
+        });
+        if (typeof spec.cleanup === "function") await spec.cleanup();
+
+        expect(fetchMock.calls).toHaveLength(1);
+        expect(fetchMock.calls[0].url).toBe("http://127.0.0.1:8787/api/oauth/token");
+    });
+
+    test("rejects cleartext remote OAuth hosts", async () => {
+        writeCreds(shareDir, expiredCred());
+        const fetchMock = makeFetch(async () => {
+            throw new Error("transport must not be reached");
+        });
+        globalThis.fetch = fetchMock;
+        const configuredUrl = "http://remote-auth.example.com/private-path";
+
+        try {
+            await callBuildCommand({
+                inheritEnv: false,
+                env: { KIMI_SHARE_DIR: shareDir, KIMI_OAUTH_HOST: configuredUrl },
+                model: "kimi-k2-instruct",
+            });
+            throw new Error("expected throw");
+        } catch (err) {
+            const surfaced = `${String(err.message)} ${JSON.stringify(err.details)}`;
+            expect(err.code).toBe("AGENT_CONFIG_INVALID");
+            expect(surfaced).toContain("invalid-oauth-host");
+            expect(surfaced).not.toContain("remote-auth.example.com");
+            expect(fetchMock.calls).toHaveLength(0);
+        }
+    });
+
+    test("rejects cleartext localhost names rather than trusting DNS", async () => {
+        writeCreds(shareDir, expiredCred());
+        const fetchMock = makeFetch(async () => {
+            throw new Error("transport must not be reached");
+        });
+        globalThis.fetch = fetchMock;
+
+        await expect(callBuildCommand({
+            inheritEnv: false,
+            env: { KIMI_SHARE_DIR: shareDir, KIMI_OAUTH_HOST: "http://localhost:8787" },
+            model: "kimi-k2-instruct",
+        })).rejects.toMatchObject({ code: "AGENT_CONFIG_INVALID" });
+        expect(fetchMock.calls).toHaveLength(0);
+    });
+
+    test("rejects non-HTTP OAuth hosts without contacting the transport or echoing the URL", async () => {
+        writeCreds(shareDir, expiredCred());
+        const fetchMock = makeFetch(async () => {
+            throw new Error("transport must not be reached");
+        });
+        globalThis.fetch = fetchMock;
+        const configuredUrl = "file:///private/oauth/token?refresh_token=valid-refresh";
+
+        try {
+            await callBuildCommand({
+                inheritEnv: false,
+                env: { KIMI_SHARE_DIR: shareDir, KIMI_OAUTH_HOST: configuredUrl },
+                model: "kimi-k2-instruct",
+            });
+            throw new Error("expected throw");
+        } catch (err) {
+            const surfaced = `${String(err.message)} ${JSON.stringify(err.details)}`;
+            expect(err.code).toBe("AGENT_CONFIG_INVALID");
+            expect(surfaced).toContain("invalid-oauth-host");
+            expect(surfaced).not.toContain(configuredUrl);
+            expect(surfaced).not.toContain("valid-refresh");
+            expect(fetchMock.calls).toHaveLength(0);
+        }
+    });
+
+    test("rejects OAuth host userinfo without echoing embedded credentials", async () => {
+        writeCreds(shareDir, expiredCred());
+        const fetchMock = makeFetch(async () => {
+            throw new Error("transport must not be reached");
+        });
+        globalThis.fetch = fetchMock;
+        const configuredUrl = "https://embedded-user:embedded-password@auth.example.com";
+
+        try {
+            await callBuildCommand({
+                inheritEnv: false,
+                env: { KIMI_SHARE_DIR: shareDir, KIMI_OAUTH_HOST: configuredUrl },
+                model: "kimi-k2-instruct",
+            });
+            throw new Error("expected throw");
+        } catch (err) {
+            const surfaced = `${String(err.message)} ${JSON.stringify(err.details)}`;
+            expect(err.code).toBe("AGENT_CONFIG_INVALID");
+            expect(surfaced).toContain("invalid-oauth-host");
+            expect(surfaced).not.toContain("embedded-user");
+            expect(surfaced).not.toContain("embedded-password");
+            expect(fetchMock.calls).toHaveLength(0);
+        }
+    });
+
+    test("blocks cross-origin body replay on redirects before credentials reach the target", async () => {
+        writeCreds(shareDir, expiredCred());
+        writeFileSync(join(shareDir, "device_id"), "private-device-id");
+        const fetchMock = makeFetch(async () => new Response(null, {
+            status: 307,
+            headers: { location: "https://redirect-target.example.com/collect?secret=1" },
+        }));
+        globalThis.fetch = fetchMock;
+
+        try {
+            await callBuildCommand({
+                env: { KIMI_SHARE_DIR: shareDir, KIMI_OAUTH_HOST: "https://oauth-origin.example.com" },
+                model: "kimi-k2-instruct",
+            });
+            throw new Error("expected throw");
+        } catch (err) {
+            const surfaced = `${String(err.message)} ${JSON.stringify(err.details)}`;
+            expect(err.code).toBe("AGENT_CONFIG_INVALID");
+            expect(surfaced).toContain("request-policy-rejected");
+            expect(surfaced).not.toContain("valid-refresh");
+            expect(surfaced).not.toContain("private-device-id");
+            expect(surfaced).not.toContain("redirect-target.example.com");
+            expect(fetchMock.calls).toHaveLength(1);
+            expect(String(fetchMock.calls[0].init?.body)).toContain("refresh_token=valid-refresh");
+            expect(fetchMock.calls[0].init?.redirect).toBe("manual");
+        }
+    });
+
+    test("does not follow a body-dropping redirect to a different OAuth origin", async () => {
+        writeCreds(shareDir, expiredCred());
+        const fetchMock = makeFetch(async () => new Response(null, {
+            status: 302,
+            headers: { location: "https://redirect-target.example.com/fake-token" },
+        }));
+        globalThis.fetch = fetchMock;
+
+        await expect(callBuildCommand({
+            env: { KIMI_SHARE_DIR: shareDir, KIMI_OAUTH_HOST: "https://oauth-origin.example.com" },
+            model: "kimi-k2-instruct",
+        })).rejects.toMatchObject({ code: "AGENT_CONFIG_INVALID" });
+        expect(fetchMock.calls).toHaveLength(1);
+    });
+
+    test("rejects oversized OAuth responses with a bounded, content-free error", async () => {
+        writeCreds(shareDir, expiredCred());
+        const fetchMock = makeFetch(async () => new Response("x".repeat(65_537), {
+            status: 200,
+            headers: { "content-length": "65537" },
+        }));
+        globalThis.fetch = fetchMock;
+
+        try {
+            await callBuildCommand({ env: { KIMI_SHARE_DIR: shareDir }, model: "kimi-k2-instruct" });
+            throw new Error("expected throw");
+        } catch (err) {
+            const surfaced = `${String(err.message)} ${JSON.stringify(err.details)}`;
+            expect(err.code).toBe("AGENT_CONFIG_INVALID");
+            expect(surfaced).toContain("response-too-large");
+            expect(surfaced).not.toContain("xxxxxxxx");
+        }
+    });
+
+    test("an internal timeout aborts a hung refresh with a sanitized error", async () => {
+        writeCreds(shareDir, expiredCred());
+        const timerSpy = spyOn(globalThis, "setTimeout").mockImplementation((handler, delay, ...args) => {
+            return ORIGINAL_SET_TIMEOUT(handler, delay === 15_000 ? 1 : delay, ...args);
+        });
+        const fetchMock = makeFetch(async (_url, init) => new Promise((resolve, reject) => {
+            const signal = init?.signal;
+            if (signal?.aborted) {
+                reject(signal.reason);
+                return;
+            }
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }));
+        globalThis.fetch = fetchMock;
+
+        try {
+            await callBuildCommand({
+                env: { KIMI_SHARE_DIR: shareDir, KIMI_OAUTH_HOST: "https://timeout-secret.example.com" },
+                model: "kimi-k2-instruct",
+            });
+            throw new Error("expected throw");
+        } catch (err) {
+            const surfaced = `${String(err.message)} ${JSON.stringify(err.details)}`;
+            expect(err.code).toBe("AGENT_CONFIG_INVALID");
+            expect(surfaced).toContain("timeout");
+            expect(surfaced).not.toContain("timeout-secret.example.com");
+            expect(surfaced).not.toContain("valid-refresh");
+        } finally {
+            timerSpy.mockRestore();
         }
     });
 });
@@ -297,5 +556,46 @@ describe("KimiAgent OAuth refresh — concurrent refresh dedup", () => {
         expect(totalCalls).toBe(1);
         // By definition of dedup we should never see two concurrent refreshes.
         expect(observedMaxInflight).toBeLessThanOrEqual(1);
+    });
+
+    test("one generate caller aborts with its exact reason while another completes the shared refresh", async () => {
+        writeCreds(shareDir, expiredCred());
+        let releaseRefresh;
+        let announceStarted;
+        const refreshStarted = new Promise((resolve) => {
+            announceStarted = resolve;
+        });
+        const refreshResponse = new Promise((resolve) => {
+            releaseRefresh = () => resolve(successfulRefreshResponse());
+        });
+        let totalCalls = 0;
+        globalThis.fetch = async () => {
+            totalCalls += 1;
+            announceStarted();
+            return refreshResponse;
+        };
+
+        const env = {
+            KIMI_SHARE_DIR: shareDir,
+            PATH: `${tempBinDir}:${process.env.PATH ?? ""}`,
+        };
+        const agentA = new KimiAgent({ env, model: "kimi-k2-instruct" });
+        const agentB = new KimiAgent({ env, model: "kimi-k2-instruct" });
+        const controller = new AbortController();
+        const reason = new Error("stop only this Kimi invocation");
+
+        const callerA = agentA.generate({ prompt: "x", abortSignal: controller.signal });
+        await refreshStarted;
+        const callerB = agentB.generate({ prompt: "x" });
+        controller.abort(reason);
+
+        await expect(callerA).rejects.toBe(reason);
+        releaseRefresh();
+        const resultB = await callerB;
+
+        expect(totalCalls).toBe(1);
+        expect(resultB).toBeDefined();
+        const written = JSON.parse(readFileSync(join(shareDir, "credentials", "default.json"), "utf8"));
+        expect(written.access_token).toBe("rotated-access");
     });
 });

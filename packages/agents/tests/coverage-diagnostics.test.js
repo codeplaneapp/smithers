@@ -88,6 +88,145 @@ describe("claude rate_limit_status probe", () => {
   });
 });
 
+describe("credentialed diagnostic redirect policy", () => {
+  test("cancels the final response body after status/header-only probes", async () => {
+    let cancellations = 0;
+    globalThis.fetch = /** @type {any} */ (async () => new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("unused provider payload"));
+        },
+        cancel() {
+          cancellations += 1;
+        },
+      }),
+      { status: 200 },
+    ));
+
+    const strategy = getDiagnosticStrategy("codex");
+    const result = await check(strategy, "api_key_valid").run({
+      env: { OPENAI_API_KEY: "openai-test-key" },
+      cwd: "/tmp",
+    });
+
+    expect(result.status).toBe("pass");
+    expect(cancellations).toBe(1);
+  });
+
+  test("rejects an Anthropic cross-origin GET redirect before contacting it", async () => {
+    const requests = [];
+    globalThis.fetch = /** @type {any} */ (async (url, init) => {
+      requests.push({ url: String(url), method: init?.method, headers: new Headers(init?.headers) });
+      if (requests.length === 1) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://redirect.example.test/anthropic" },
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
+
+    const strategy = getDiagnosticStrategy("claude");
+    const result = await check(strategy, "rate_limit_status").run({
+      env: { ANTHROPIC_API_KEY: "sk-ant-must-not-leak" },
+      cwd: "/tmp",
+    });
+
+    expect(result.status).toBe("error");
+    expect(requests).toHaveLength(1);
+    expect(requests[0].headers.get("x-api-key")).toBe("sk-ant-must-not-leak");
+  });
+
+  test("rejects a body-preserving Anthropic cross-origin redirect before contacting it", async () => {
+    let requests = 0;
+    globalThis.fetch = /** @type {any} */ (async () => {
+      requests += 1;
+      return new Response(null, {
+        status: 307,
+        headers: { location: "https://redirect.example.test/anthropic" },
+      });
+    });
+
+    const strategy = getDiagnosticStrategy("claude");
+    const result = await check(strategy, "rate_limit_status").run({
+      env: { ANTHROPIC_API_KEY: "sk-ant-must-not-leak" },
+      cwd: "/tmp",
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("Redirect cannot forward a request body");
+    expect(requests).toBe(1);
+  });
+
+  test("rejects a Google cross-origin redirect before contacting it", async () => {
+    const headers = [];
+    globalThis.fetch = /** @type {any} */ (async (_url, init) => {
+      headers.push(new Headers(init?.headers));
+      if (headers.length === 1) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://redirect.example.test/google" },
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
+
+    const strategy = getDiagnosticStrategy("pi", { provider: "google" });
+    const result = await check(strategy, "api_key_valid").run({
+      env: { GOOGLE_API_KEY: "google-must-not-leak" },
+      cwd: "/tmp",
+    });
+
+    expect(result.status).toBe("error");
+    expect(headers).toHaveLength(1);
+    expect(headers[0].get("x-goog-api-key")).toBe("google-must-not-leak");
+  });
+
+  test("rejects an OpenAI cross-origin redirect before contacting it", async () => {
+    const headers = [];
+    globalThis.fetch = /** @type {any} */ (async (_url, init) => {
+      headers.push(new Headers(init?.headers));
+      if (headers.length === 1) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://redirect.example.test/openai" },
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
+
+    const strategy = getDiagnosticStrategy("codex");
+    const result = await check(strategy, "api_key_valid").run({
+      env: { OPENAI_API_KEY: "openai-must-not-leak" },
+      cwd: "/tmp",
+    });
+
+    expect(result.status).toBe("error");
+    expect(headers).toHaveLength(1);
+    expect(headers[0].get("authorization")).toBe("Bearer openai-must-not-leak");
+  });
+
+  test("retains credentials across a same-origin diagnostic redirect", async () => {
+    const headers = [];
+    globalThis.fetch = /** @type {any} */ (async (url, init) => {
+      headers.push(new Headers(init?.headers));
+      return headers.length === 1
+        ? new Response(null, { status: 302, headers: { location: new URL("/redirected", url).toString() } })
+        : new Response("{}", { status: 200 });
+    });
+
+    const strategy = getDiagnosticStrategy("pi", { provider: "google" });
+    const result = await check(strategy, "api_key_valid").run({
+      env: { GOOGLE_API_KEY: "same-origin-key" },
+      cwd: "/tmp",
+    });
+
+    expect(result.status).toBe("pass");
+    expect(headers).toHaveLength(2);
+    expect(headers[1].get("x-goog-api-key")).toBe("same-origin-key");
+  });
+});
+
 describe("claude api_key_valid credential resolution", () => {
   const apiKey = () => check(getDiagnosticStrategy("claude"), "api_key_valid");
 

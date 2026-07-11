@@ -10,7 +10,14 @@
 
 import { Context, Effect, Layer } from "effect";
 import { IntegrationError } from "../core/IntegrationError.js";
+import {
+    credentialSecretValues,
+    redactSecretText,
+    sanitizeErrorCause,
+} from "../core/redactSecrets.js";
 import { resolveLinearConfig } from "./config.js";
+import { assertHttpUrl, fetchWithPolicy, readResponseJson } from "@smithers-orchestrator/http-client";
+import { createPublicRedirectValidator } from "@smithers-orchestrator/http-client/node";
 
 /** Context tag for the Linear GraphQL client service. */
 export const LinearClient = /** @type {Context.Tag<LinearClientService, LinearClientService>} */ (
@@ -63,6 +70,7 @@ export function normalizeLinearPriority(priority) {
 
 const MAX_ATTEMPTS = 5;
 const MAX_RETRY_DELAY_MS = 30_000;
+const MAX_LINEAR_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 /**
  * Retry delay from Linear rate-limit headers: `Retry-After` (seconds) or
@@ -128,6 +136,8 @@ const COMMENT_CREATE_MUTATION = `mutation CommentCreate($input: CommentCreateInp
 export function makeLinearClient(config) {
     const resolved = resolveLinearConfig(config);
     const { apiKey, apiBaseUrl } = resolved;
+    const secrets = credentialSecretValues(apiKey);
+    const safeApiBaseUrl = redactSecretText(apiBaseUrl, secrets);
 
     // Per-client lookup caches (team key → team, teamId → states/labels).
     /** @type {Map<string, LinearTeamRef>} */
@@ -144,23 +154,13 @@ export function makeLinearClient(config) {
      */
     const query = (gql, variables) => Effect.gen(function* () {
         if (!apiKey) {
-            return yield* Effect.fail(new IntegrationError("delivery-failed", "Linear API key is not configured. Pass config.apiKey, call configureLinear({ apiKey }), or set SMITHERS_LINEAR_API_KEY.", { apiBaseUrl }));
+            return yield* Effect.fail(new IntegrationError("delivery-failed", "Linear API key is not configured. Pass config.apiKey, call configureLinear({ apiKey }), or set SMITHERS_LINEAR_API_KEY.", { apiBaseUrl: safeApiBaseUrl }));
         }
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-            // One controller spans the request AND its body: aborting it
-            // cancels an in-flight fetch and tears down the connection under
-            // a pending response.json(). Effect.tryPromise aborts the signal
-            // it hands us when the fiber is interrupted, so forwarding it to
-            // the controller makes both steps interruptible.
-            const controller = new AbortController();
-            /** @param {AbortSignal} signal */
-            const abortWith = (signal) => {
-                signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
-            };
             const response = yield* Effect.tryPromise({
                 try: (signal) => {
-                    abortWith(signal);
-                    return fetch(apiBaseUrl, {
+                    const endpoint = assertHttpUrl(apiBaseUrl);
+                    return fetchWithPolicy(endpoint, {
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
@@ -168,43 +168,72 @@ export function makeLinearClient(config) {
                             Authorization: apiKey,
                         },
                         body: JSON.stringify({ query: gql, variables: variables ?? {} }),
-                        signal: controller.signal,
+                        signal,
+                    }, {
+                        validateUrl: createPublicRedirectValidator(endpoint, { signal }),
                     });
                 },
-                catch: (cause) => new IntegrationError("delivery-failed", "Linear API request failed (network error).", { apiBaseUrl }, { cause }),
+                catch: (cause) => new IntegrationError(
+                    "delivery-failed",
+                    "Linear API request failed (network error).",
+                    { apiBaseUrl: safeApiBaseUrl },
+                    { cause: sanitizeErrorCause(cause, secrets) },
+                ),
             });
             if (response.status === 429 || response.status >= 500) {
+                // Retry decisions use only status/headers. Release the body
+                // before sleeping so a streaming error cannot pin a socket or
+                // bypass the normal response-size bound across attempts.
+                yield* Effect.tryPromise({
+                    try: async () => {
+                        await response.body?.cancel();
+                    },
+                    catch: () => undefined,
+                }).pipe(Effect.ignore);
                 const retryable = attempt < MAX_ATTEMPTS;
                 const delayMs = retryDelayFromHeaders(response.headers) ??
                     Math.min(250 * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS);
                 if (!retryable) {
-                    return yield* Effect.fail(new IntegrationError("delivery-failed", `Linear API responded ${response.status} after ${attempt} attempts.`, { status: response.status, apiBaseUrl }));
+                    return yield* Effect.fail(new IntegrationError("delivery-failed", `Linear API responded ${response.status} after ${attempt} attempts.`, { status: response.status, apiBaseUrl: safeApiBaseUrl }));
                 }
                 yield* Effect.sleep(`${delayMs} millis`);
                 continue;
             }
             const json = yield* Effect.tryPromise({
-                try: (signal) => {
-                    abortWith(signal);
-                    return response.json();
-                },
-                catch: (cause) => new IntegrationError("decode-failed", `Linear API returned a non-JSON response (status ${response.status}).`, { status: response.status }, { cause }),
+                try: (signal) => readResponseJson(response, {
+                    maxBytes: MAX_LINEAR_RESPONSE_BYTES,
+                    signal,
+                }),
+                catch: (cause) => new IntegrationError(
+                    "decode-failed",
+                    `Linear API returned a non-JSON response (status ${response.status}).`,
+                    { status: response.status },
+                    { cause: sanitizeErrorCause(cause, secrets) },
+                ),
             });
             if (!response.ok) {
+                const errors = Array.isArray(json?.errors)
+                    ? json.errors.map((/** @type {any} */ e) =>
+                        redactSecretText(String(e?.message ?? "unknown"), secrets))
+                    : undefined;
                 return yield* Effect.fail(new IntegrationError("delivery-failed", `Linear API responded ${response.status}.`, {
                     status: response.status,
-                    errors: json?.errors?.map((/** @type {any} */ e) => e?.message) ?? undefined,
+                    errors,
                 }));
             }
             if (Array.isArray(json?.errors) && json.errors.length > 0) {
-                return yield* Effect.fail(new IntegrationError("delivery-failed", `Linear GraphQL error: ${json.errors
-                    .map((/** @type {any} */ e) => e?.message ?? "unknown")
-                    .join("; ")}`, { errors: json.errors.map((/** @type {any} */ e) => e?.message) }));
+                const errors = json.errors.map((/** @type {any} */ e) =>
+                    redactSecretText(String(e?.message ?? "unknown"), secrets));
+                return yield* Effect.fail(new IntegrationError(
+                    "delivery-failed",
+                    `Linear GraphQL error: ${errors.join("; ")}`,
+                    { errors },
+                ));
             }
             return json?.data;
         }
         // Unreachable — the loop either returns or fails.
-        return yield* Effect.fail(new IntegrationError("delivery-failed", "Linear API retry loop exhausted.", { apiBaseUrl }));
+        return yield* Effect.fail(new IntegrationError("delivery-failed", "Linear API retry loop exhausted.", { apiBaseUrl: safeApiBaseUrl }));
     });
 
     /**
@@ -257,7 +286,11 @@ export function makeLinearClient(config) {
         const states = yield* listStates(teamId);
         const match = states.find((state) => state.name?.toLowerCase() === stateName.toLowerCase());
         if (!match) {
-            return yield* Effect.fail(new IntegrationError("decode-failed", `Linear workflow state "${stateName}" not found for team.`, { teamId, stateName, known: states.map((s) => s.name) }));
+            return yield* Effect.fail(new IntegrationError("decode-failed", `Linear workflow state "${stateName}" not found for team.`, {
+                teamId,
+                stateName,
+                known: states.map((state) => redactSecretText(String(state.name ?? ""), secrets)),
+            }));
         }
         return match.id;
     });

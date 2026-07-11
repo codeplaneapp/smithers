@@ -9,7 +9,19 @@
 
 import { Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
 import { logWarning } from "@smithers-orchestrator/observability/logging";
+import {
+    assertHttpUrl,
+    fetchWithPolicy,
+    isHttpClientPolicyError,
+    readResponseText,
+} from "@smithers-orchestrator/http-client";
+import { createPublicRedirectValidator } from "@smithers-orchestrator/http-client/node";
 import { IntegrationError } from "../core/IntegrationError.js";
+import {
+    credentialSecretValues,
+    redactSecretText,
+    sanitizeErrorCause,
+} from "../core/redactSecrets.js";
 import { resolveGitHubConfig } from "./config.js";
 
 /** @typedef {import("./GitHubConfig.ts").GitHubConfig} GitHubConfig */
@@ -17,6 +29,7 @@ import { resolveGitHubConfig } from "./config.js";
 // Upper bound for honoring Retry-After / x-ratelimit-reset so a hostile or
 // clock-skewed header can never park a workflow task for hours.
 const MAX_RETRY_AFTER_MS = 60_000;
+const MAX_GITHUB_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 /**
  * Context tag for the GitHub REST client. Provide it with
@@ -115,14 +128,25 @@ export function nextPageUrl(linkHeader) {
  */
 export function makeGitHubClient(config) {
     const resolved = resolveGitHubConfig(config);
-    const baseUrl = resolved.apiBaseUrl.replace(/\/+$/, "");
+    const secrets = credentialSecretValues(
+        resolved.token,
+        resolved.token ? `Bearer ${resolved.token}` : undefined,
+    );
+    const baseUrl = assertHttpUrl(resolved.apiBaseUrl).toString().replace(/\/+$/, "");
+    const baseOrigin = new URL(baseUrl).origin;
     /**
    * @param {string} path
    * @param {Record<string, string | number | boolean | undefined>} [query]
    * @returns {string}
    */
     const buildUrl = (path, query) => {
-        const url = new URL(path.startsWith("http") ? path : `${baseUrl}${path.startsWith("/") ? "" : "/"}${path}`);
+        const url = assertHttpUrl(path.startsWith("http") ? path : `${baseUrl}${path.startsWith("/") ? "" : "/"}${path}`);
+        if (url.origin !== baseOrigin) {
+            throw new IntegrationError("delivery-failed", "GitHub pagination/request URL left the configured API origin.", {
+                expectedOrigin: baseOrigin,
+                receivedOrigin: url.origin,
+            });
+        }
         for (const [key, value] of Object.entries(query ?? {})) {
             if (value !== undefined) {
                 url.searchParams.set(key, String(value));
@@ -133,8 +157,6 @@ export function makeGitHubClient(config) {
     /**
    * One HTTP attempt: resolves with `{ json, headers }` or fails with an
    * IntegrationError tagged `retryable` for 429/secondary-rate-limit/5xx.
-   * Effect's interruption signal is forwarded to `fetch`, so interrupting the
-   * fiber aborts the in-flight request and any pending body read.
    * @param {GitHubRequestMethod} method
    * @param {string} url
    * @param {unknown} [body]
@@ -154,13 +176,18 @@ export function makeGitHubClient(config) {
             if (body !== undefined) {
                 headers["content-type"] = "application/json";
             }
-            const response = await fetch(url, {
+            const response = await fetchWithPolicy(url, {
                 method,
                 headers,
                 body: body === undefined ? undefined : JSON.stringify(body),
                 signal,
+            }, {
+                validateUrl: createPublicRedirectValidator(url, { signal }),
             });
-            const text = await response.text();
+            const text = await readResponseText(response, {
+                maxBytes: MAX_GITHUB_RESPONSE_BYTES,
+                signal,
+            });
             /** @type {unknown} */
             let json = null;
             if (text.length > 0) {
@@ -176,9 +203,10 @@ export function makeGitHubClient(config) {
             }
             const rateLimited = isRateLimitResponse(response.status, response.headers, json);
             const retryable = rateLimited || response.status >= 500;
-            const message = json && typeof json === "object" && "message" in json
+            const providerMessage = json && typeof json === "object" && "message" in json
                 ? String(/** @type {{ message: unknown }} */ (json).message)
                 : response.statusText;
+            const message = redactSecretText(providerMessage, secrets);
             throw new IntegrationError("delivery-failed", `GitHub request failed: ${method} ${new URL(url).pathname} → ${response.status} ${message}`, {
                 status: response.status,
                 method,
@@ -191,7 +219,12 @@ export function makeGitHubClient(config) {
         },
         catch: (cause) => cause instanceof IntegrationError
             ? cause
-            : new IntegrationError("delivery-failed", `GitHub request failed: ${method} — ${cause instanceof Error ? cause.message : String(cause)}`, { method, retryable: true }, { cause }),
+            : new IntegrationError(
+                "delivery-failed",
+                `GitHub request failed: ${method} — ${redactSecretText(cause instanceof Error ? cause.message : String(cause), secrets)}`,
+                { method, retryable: !isHttpClientPolicyError(cause) },
+                { cause: sanitizeErrorCause(cause, secrets) },
+            ),
     });
     /**
    * @param {GitHubRequestMethod} method
@@ -222,7 +255,12 @@ export function makeGitHubClient(config) {
     }));
     /** @type {GitHubClientService["request"]} */
     const request = (method, path, body, options) => requestUrl(method, buildUrl(path, options?.query), body).pipe(Effect.flatMap(({ json }) => options?.schema
-        ? Schema.decodeUnknown(options.schema)(json).pipe(Effect.mapError((cause) => new IntegrationError("decode-failed", `GitHub response for ${method} ${path} failed schema validation.`, { method, path }, { cause })))
+        ? Schema.decodeUnknown(options.schema)(json).pipe(Effect.mapError((cause) => new IntegrationError(
+            "decode-failed",
+            `GitHub response for ${method} ${redactSecretText(path, secrets)} failed schema validation.`,
+            { method, path: redactSecretText(path, secrets) },
+            { cause: sanitizeErrorCause(cause, secrets) },
+        )))
         : Effect.succeed(/** @type {any} */ (json))));
     /** @type {GitHubClientService["paginate"]} */
     const paginate = (path, options) => Effect.gen(function* () {
@@ -241,7 +279,10 @@ export function makeGitHubClient(config) {
             else if (json !== null) {
                 items.push(json);
             }
-            url = nextPageUrl(headers.get("link"));
+            const next = nextPageUrl(headers.get("link"));
+            // Link is untrusted response data. Re-apply the configured API
+            // origin policy before it can become a credentialed request.
+            url = next ? buildUrl(next) : null;
             pages += 1;
         }
         return items;

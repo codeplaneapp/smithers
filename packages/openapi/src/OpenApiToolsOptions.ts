@@ -16,17 +16,45 @@ type OpenApiOperationCuration =
 	  };
 
 export type OpenApiToolsOptions = {
+	/**
+	 * Operator-pinned request base URL. Credentialed tools require this instead
+	 * of trusting a spec-controlled servers[].url.
+	 */
 	baseUrl?: string;
 	headers?: Record<string, string>;
 	auth?: OpenApiAuth;
 	/**
-	 * Extra origins (e.g. "https://cdn.example.com") that redirects may be
-	 * followed to. Redirect destinations are always validated against the
-	 * origin of the request itself (the configured OpenAPI service); any hop
-	 * to another origin is refused unless it is listed here, so the injected
-	 * auth/API-key headers can never leak to an unexpected host.
+	 * Additional origins that may receive configured auth/custom headers after
+	 * a redirect. The resolved API origin is always trusted. Cross-origin
+	 * redirects outside this list are followed only after sensitive headers are
+	 * stripped; HTTPS-to-HTTP redirects are rejected. This is redirect-only and
+	 * never authorizes a spec-controlled initial server.
 	 */
-	allowedRedirectOrigins?: string[];
+	allowedOrigins?: string[];
+	/**
+	 * Permit private/special destinations for remote spec loads, redirect hops,
+	 * and an unpinned credential-free spec server. Off by default; prefer an
+	 * exact baseUrl for API requests. This cannot replace baseUrl when auth or
+	 * headers are configured.
+	 */
+	allowPrivateNetwork?: boolean;
+	/**
+	 * Override Node/Bun DNS resolution used to reject spec/API hostnames whose
+	 * A/AAAA answers include non-global addresses. Resolution failures, empty
+	 * answers, and malformed or non-global answers are denied. Useful for
+	 * controlled runtimes and deterministic tests.
+	 */
+	resolveHostname?: (hostname: string) => readonly string[] | Promise<readonly string[]>;
+	/** Maximum number of redirect hops. Defaults to 5. */
+	maxRedirects?: number;
+	/** Maximum serialized request-body bytes. Defaults to 10 MiB; must be a non-negative safe integer. */
+	maxRequestBytes?: number;
+	/** Maximum decoded response bytes buffered by a generated tool. Defaults to 1 MiB; must be a non-negative safe integer. */
+	maxResponseBytes?: number;
+	/** Maximum bytes buffered while loading a remote OpenAPI spec. Defaults to 5 MiB; must be a non-negative safe integer. */
+	maxSpecBytes?: number;
+	/** Cancels remote spec loading. Per-tool execution uses the AI SDK abort signal. */
+	signal?: AbortSignal;
 	include?: string[];
 	exclude?: string[];
 	namePrefix?: string;

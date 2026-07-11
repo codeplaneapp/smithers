@@ -191,7 +191,8 @@ describe("Firecrawl + LlamaParse error and shape branches", () => {
       provider: "firecrawl",
       apiKey: "k",
       fetch: async (_url, init) => {
-        const file = /** @type {FormData} */ (init.body).get("file");
+        const form = await new Response(init.body, { headers: init.headers }).formData();
+        const file = /** @type {File} */ (form.get("file"));
         names.push(file.name);
         return Response.json({ data: { markdown: "ok" } });
       },
@@ -285,7 +286,8 @@ describe("Firecrawl + LlamaParse error and shape branches", () => {
         provider: "firecrawl",
         apiKey: "k",
         fetch: async (_url, init) => {
-          name = /** @type {FormData} */ (init.body).get("file").name;
+          const form = await new Response(init.body, { headers: init.headers }).formData();
+          name = /** @type {File} */ (form.get("file")).name;
           return Response.json({ data: { markdown: "ok" } });
         },
       },

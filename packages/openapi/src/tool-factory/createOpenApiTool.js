@@ -17,6 +17,13 @@ import { createOpenApiToolFromSpec } from "./_helpers.js";
  * @returns {Promise<any>} A single AI SDK tool
  */
 export async function createOpenApiTool(input, operationId, options = {}) {
-    const spec = await Effect.runPromise(loadSpecEffect(input));
+    let spec;
+    try {
+        spec = await Effect.runPromise(loadSpecEffect(input, options));
+    }
+    catch (error) {
+        if (options.signal?.aborted) throw options.signal.reason ?? error;
+        throw error;
+    }
     return createOpenApiToolFromSpec(spec, operationId, options);
 }

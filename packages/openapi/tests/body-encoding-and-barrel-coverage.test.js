@@ -5,11 +5,16 @@
 // public barrel re-exports in src/index.js.
 // ---------------------------------------------------------------------------
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { createOpenApiToolsSync, createOpenApiToolSync } from "../src/tool-factory.js";
+import { createOpenApiToolsSync as createOpenApiToolsSyncRaw, createOpenApiToolSync } from "../src/tool-factory.js";
 import { petStoreSpec } from "./fixtures.js";
+import { readMultipartWireBody } from "./wire-body.js";
 import * as barrel from "../src/index.js";
 
 const originalFetch = globalThis.fetch;
+const createOpenApiToolsSync = (spec, options = {}) => createOpenApiToolsSyncRaw(spec, {
+    resolveHostname: async () => ["8.8.8.8"],
+    ...options,
+});
 
 /**
  * @param {string} mediaType
@@ -61,9 +66,11 @@ describe("request-body encoding branches", () => {
         );
         await tools.doThing.execute({ body: { count: 5 } });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.body).toBeInstanceOf(FormData);
+        const wire = await readMultipartWireBody(init);
+        expect(wire.body).toBeInstanceOf(Uint8Array);
+        expect(wire.contentType).toMatch(/^multipart\/form-data;\s*boundary=.+$/i);
         // toFormValue's String(value) fallback for a non-string, non-Blob value.
-        expect(init.body.get("count")).toBe("5");
+        expect(wire.form.get("count")).toBe("5");
     });
 
     test("multipart non-object body falls back to a single 'body' entry", async () => {
@@ -72,9 +79,10 @@ describe("request-body encoding branches", () => {
         );
         await tools.doThing.execute({ body: "raw-payload" });
         const [, init] = mockFetch.mock.calls[0];
-        expect(init.body).toBeInstanceOf(FormData);
-        expect(init.body.get("body")).toBe("raw-payload");
-        expect(init.headers["Content-Type"]).toBeUndefined();
+        const wire = await readMultipartWireBody(init);
+        expect(wire.body).toBeInstanceOf(Uint8Array);
+        expect(wire.contentType).toMatch(/^multipart\/form-data;\s*boundary=.+$/i);
+        expect(wire.form.get("body")).toBe("raw-payload");
     });
 
     test("urlencoded non-object body falls back to a single 'body' param", async () => {
@@ -85,7 +93,7 @@ describe("request-body encoding branches", () => {
         const [, init] = mockFetch.mock.calls[0];
         expect(init.body).toBeInstanceOf(URLSearchParams);
         expect(init.body.get("body")).toBe("raw-payload");
-        expect(init.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+        expect(new Headers(init.headers).get("content-type")).toBe("application/x-www-form-urlencoded");
     });
 });
 

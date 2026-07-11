@@ -2,6 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { createTranscriptionTool } from "../src/transcription/createTranscriptionTool.js";
 
 const callOptions = { toolCallId: "test-call", messages: [] };
+const publicDns = async () => ["8.8.8.8"];
+
+/** @param {string[]} chunks */
+function chunkedResponse(chunks) {
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+      controller.close();
+    },
+  }));
+}
 
 describe("createTranscriptionTool", () => {
   test("posts audio to Whisper and returns normalized transcript text", async () => {
@@ -22,10 +33,38 @@ describe("createTranscriptionTool", () => {
 
     expect(result).toEqual({ text: "hello from audio", language: "en", durationSeconds: 1.25, provider: "whisper" });
     expect(requests).toHaveLength(1);
-    expect(requests[0].url).toBe("https://api.openai.com/v1/audio/transcriptions");
+    expect(String(requests[0].url)).toBe("https://api.openai.com/v1/audio/transcriptions");
     expect(requests[0].init.method).toBe("POST");
-    expect(requests[0].init.headers.Authorization).toBe("Bearer openai-test-key");
-    expect(requests[0].init.body).toBeInstanceOf(FormData);
+    expect(new Headers(requests[0].init.headers).get("authorization")).toBe("Bearer openai-test-key");
+    const encodedForm = await new Response(requests[0].init.body, {
+      headers: requests[0].init.headers,
+    }).formData();
+    expect(encodedForm.get("file")).toBeInstanceOf(Blob);
+    expect(encodedForm.get("model")).toBe("whisper-1");
+  });
+
+  test("blocks a transcription provider redirect into a private destination", async () => {
+    let calls = 0;
+    const transcription = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "openai-test-key",
+      fetch: async () => {
+        calls += 1;
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://127.0.0.1/private" },
+        });
+      },
+    });
+
+    await expect(transcription.execute(
+      { audioBase64: Buffer.from("audio bytes").toString("base64"), mimeType: "audio/wav" },
+      callOptions,
+    )).rejects.toMatchObject({
+      code: "INVALID_URL",
+      details: { reason: "non-public-destination" },
+    });
+    expect(calls).toBe(1);
   });
 
   test("posts audio URLs to Deepgram and normalizes the first alternative", async () => {
@@ -33,8 +72,12 @@ describe("createTranscriptionTool", () => {
     const transcription = createTranscriptionTool({
       provider: "deepgram",
       apiKey: "deepgram-test-key",
+      resolveHostname: publicDns,
       fetch: async (url, init) => {
         requests.push({ url, init });
+        if (String(url) === "https://example.com/audio.mp3") {
+          return new Response("audio bytes", { headers: { "content-type": "audio/mpeg" } });
+        }
         return Response.json({
           metadata: { duration: 2.5 },
           results: { channels: [{ alternatives: [{ transcript: "deepgram transcript" }] }] },
@@ -45,9 +88,11 @@ describe("createTranscriptionTool", () => {
     const result = await transcription.execute({ audioUrl: "https://example.com/audio.mp3" }, callOptions);
 
     expect(result).toEqual({ text: "deepgram transcript", durationSeconds: 2.5, provider: "deepgram" });
-    expect(requests[0].url).toBe("https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true");
-    expect(requests[0].init.headers.Authorization).toBe("Token deepgram-test-key");
-    expect(JSON.parse(requests[0].init.body)).toEqual({ url: "https://example.com/audio.mp3" });
+    expect(String(requests[0].url)).toBe("https://example.com/audio.mp3");
+    expect(String(requests[1].url)).toBe("https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true");
+    expect(new Headers(requests[1].init.headers).get("authorization")).toBe("Token deepgram-test-key");
+    expect(new Headers(requests[1].init.headers).get("content-type")).toBe("audio/mpeg");
+    expect(new TextDecoder().decode(requests[1].init.body)).toBe("audio bytes");
   });
 
   const ssrfAudioUrls = [
@@ -55,8 +100,20 @@ describe("createTranscriptionTool", () => {
     ["loopback IPv4", "http://127.0.0.1/secret"],
     ["private IPv4", "http://10.0.0.5/internal"],
     ["localhost name", "http://localhost:8080/audio.wav"],
+    ["absolute localhost name", "http://localhost./audio.wav"],
+    ["absolute localhost subdomain", "http://media.localhost./audio.wav"],
+    ["absolute single-label mDNS name", "http://local./audio.wav"],
+    ["absolute mDNS name", "http://media.local./audio.wav"],
+    ["benchmarking IPv4", "http://198.18.0.1/audio.wav"],
+    ["documentation IPv4", "http://192.0.2.1/audio.wav"],
     ["IPv6 loopback", "http://[::1]/audio.wav"],
+    ["documentation IPv6", "http://[2001:db8::1]/audio.wav"],
+    ["multicast IPv6", "http://[ff02::1]/audio.wav"],
     ["IPv4-mapped loopback", "http://[::ffff:127.0.0.1]/audio.wav"],
+    ["IPv4-mapped public", "http://[::ffff:8.8.8.8]/audio.wav"],
+    ["integer loopback spelling", "http://2130706433/audio.wav"],
+    ["octal loopback spelling", "http://0177.0.0.1/audio.wav"],
+    ["hex loopback spelling", "http://0x7f000001/audio.wav"],
   ];
   for (const [label, audioUrl] of ssrfAudioUrls) {
     test(`refuses to fetch an SSRF audioUrl (${label}) before any request`, async () => {
@@ -70,12 +127,33 @@ describe("createTranscriptionTool", () => {
         },
       });
 
-      await expect(transcription.execute({ audioUrl }, callOptions)).rejects.toThrow(
-        /private, loopback, or link-local/i,
-      );
+      await expect(transcription.execute({ audioUrl }, callOptions)).rejects.toMatchObject({
+        code: "INVALID_URL",
+      });
       expect(called).toBe(0);
     });
   }
+
+  test("refuses an audio hostname whose DNS answers include a private address", async () => {
+    let called = 0;
+    const transcription = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "openai-test-key",
+      resolveHostname: async () => ["8.8.8.8", "169.254.169.254"],
+      fetch: async () => {
+        called += 1;
+        return Response.json({ text: "leaked" });
+      },
+    });
+
+    await expect(transcription.execute({
+      audioUrl: "https://public-audio.example/file.mp3",
+    }, callOptions)).rejects.toMatchObject({
+      code: "INVALID_URL",
+      details: { reason: "dns-non-public-address" },
+    });
+    expect(called).toBe(0);
+  });
 
   test("refuses a non-http(s) audioUrl scheme", async () => {
     let called = 0;
@@ -88,9 +166,9 @@ describe("createTranscriptionTool", () => {
       },
     });
 
-    await expect(transcription.execute({ audioUrl: "file:///etc/passwd" }, callOptions)).rejects.toThrow(
-      /http\(s\)/i,
-    );
+    await expect(
+      transcription.execute({ audioUrl: "file:///etc/passwd" }, callOptions),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_PROTOCOL" });
     expect(called).toBe(0);
   });
 
@@ -99,7 +177,8 @@ describe("createTranscriptionTool", () => {
     const transcription = createTranscriptionTool({
       provider: "whisper",
       apiKey: "openai-test-key",
-      fetch: async (url, init) => {
+      resolveHostname: publicDns,
+      fetch: async (url) => {
         requests.push(String(url));
         if (String(url) === "https://cdn.example.com/audio.mp3") {
           return new Response(new Blob([Buffer.from("audio bytes")]), {
@@ -207,6 +286,177 @@ describe("createTranscriptionTool", () => {
 
     expect(downloaded).toBe(true);
     expect(result.text).toBe("internal transcript");
+  });
+
+  test("bounds remote audio, base64 audio, and provider response bodies", async () => {
+    const remote = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "key",
+      maxAudioBytes: 4,
+      resolveHostname: publicDns,
+      fetch: async (url) => {
+        if (String(url).includes("cdn.example")) {
+          return new Response("12345", { headers: { "content-length": "5" } });
+        }
+        return Response.json({ text: "unused" });
+      },
+    });
+    await expect(
+      remote.execute({ audioUrl: "https://cdn.example/audio.wav" }, callOptions),
+    ).rejects.toMatchObject({ code: "RESPONSE_TOO_LARGE" });
+
+    const base64 = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "key",
+      maxAudioBytes: 4,
+      resolveHostname: publicDns,
+      fetch: async () => Response.json({ text: "unused" }),
+    });
+    await expect(
+      base64.execute({ audioBase64: Buffer.from("12345").toString("base64") }, callOptions),
+    ).rejects.toThrow(/4 bytes/);
+
+    let malformedCalled = false;
+    const malformed = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "key",
+      fetch: async () => {
+        malformedCalled = true;
+        return Response.json({ text: "unused" });
+      },
+    });
+    await expect(
+      malformed.execute({ audioBase64: "YQ=" }, callOptions),
+    ).rejects.toThrow(/Invalid base64 input/);
+    expect(malformedCalled).toBe(false);
+
+    const provider = createTranscriptionTool({
+      provider: "deepgram",
+      apiKey: "key",
+      maxResponseBytes: 4,
+      fetch: async () => new Response("12345", { headers: { "content-length": "5" } }),
+    });
+    await expect(
+      provider.execute({ audioBase64: Buffer.from("a").toString("base64") }, callOptions),
+    ).rejects.toMatchObject({ code: "RESPONSE_TOO_LARGE" });
+  });
+
+  test("bounds chunked audio/provider bodies and accepts exact-at-cap bodies", async () => {
+    const remoteOverflow = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "key",
+      maxAudioBytes: 4,
+      resolveHostname: publicDns,
+      fetch: async (url) =>
+        String(url).includes("cdn.example")
+          ? chunkedResponse(["123", "45"])
+          : Response.json({ text: "unused" }),
+    });
+    await expect(
+      remoteOverflow.execute({ audioUrl: "https://cdn.example/audio.wav" }, callOptions),
+    ).rejects.toMatchObject({ code: "RESPONSE_TOO_LARGE" });
+
+    const remoteExact = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "key",
+      maxAudioBytes: 4,
+      resolveHostname: publicDns,
+      fetch: async (url) =>
+        String(url).includes("cdn.example")
+          ? chunkedResponse(["12", "34"])
+          : Response.json({ text: "exact audio" }),
+    });
+    await expect(
+      remoteExact.execute({ audioUrl: "https://cdn.example/audio.wav" }, callOptions),
+    ).resolves.toMatchObject({ text: "exact audio" });
+
+    const providerOverflow = createTranscriptionTool({
+      provider: "deepgram",
+      apiKey: "key",
+      maxResponseBytes: 4,
+      fetch: async () => chunkedResponse(["123", "45"]),
+    });
+    await expect(
+      providerOverflow.execute({ audioBase64: Buffer.from("a").toString("base64") }, callOptions),
+    ).rejects.toMatchObject({ code: "RESPONSE_TOO_LARGE" });
+
+    const providerExact = createTranscriptionTool({
+      provider: "deepgram",
+      apiKey: "key",
+      maxResponseBytes: 2,
+      fetch: async () => chunkedResponse(["{", "}"]),
+    });
+    await expect(
+      providerExact.execute({ audioBase64: Buffer.from("a").toString("base64") }, callOptions),
+    ).resolves.toEqual({ text: "", provider: "deepgram" });
+  });
+
+  test("cancels both a remote audio download and a provider submission", async () => {
+    for (const input of [
+      { audioUrl: "https://cdn.example/audio.wav" },
+      { audioBase64: Buffer.from("audio").toString("base64") },
+    ]) {
+      const controller = new AbortController();
+      const transcription = createTranscriptionTool({
+        provider: "whisper",
+        apiKey: "key",
+        resolveHostname: publicDns,
+        fetch: async (_url, init) =>
+          new Promise((_resolve, reject) => {
+            const signal = init?.signal;
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          }),
+      });
+      const pending = transcription.execute(input, {
+        ...callOptions,
+        abortSignal: controller.signal,
+      });
+      controller.abort(new DOMException("cancelled", "AbortError"));
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    }
+  });
+
+  test("preserves cancellation while reading a non-2xx provider body", async () => {
+    const controller = new AbortController();
+    const reason = new DOMException("cancelled during provider error", "AbortError");
+    const transcription = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "key",
+      fetch: async () => {
+        queueMicrotask(() => controller.abort(reason));
+        return new Response("provider failure", { status: 500 });
+      },
+    });
+
+    let caught;
+    try {
+      await transcription.execute(
+        { audioBase64: Buffer.from("audio").toString("base64") },
+        { ...callOptions, abortSignal: controller.signal },
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBe(reason);
+  });
+
+  test("redacts a reflected provider API key from non-2xx errors", async () => {
+    const transcription = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "transcription-secret",
+      fetch: async () => new Response("received bearer transcription-secret", { status: 500 }),
+    });
+    let caught;
+    try {
+      await transcription.execute(
+        { audioBase64: Buffer.from("audio").toString("base64") },
+        callOptions,
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught?.message).toContain("[REDACTED]");
+    expect(caught?.message).not.toContain("transcription-secret");
   });
 });
 

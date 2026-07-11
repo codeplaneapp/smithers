@@ -16,6 +16,13 @@ import { createOpenApiToolsFromSpec } from "./_helpers.js";
  * @returns {Promise<Record<string, any>>} Record of operationId → AI SDK tool
  */
 export async function createOpenApiTools(input, options = {}) {
-    const spec = await Effect.runPromise(loadSpecEffect(input));
+    let spec;
+    try {
+        spec = await Effect.runPromise(loadSpecEffect(input, options));
+    }
+    catch (error) {
+        if (options.signal?.aborted) throw options.signal.reason ?? error;
+        throw error;
+    }
     return createOpenApiToolsFromSpec(spec, options);
 }

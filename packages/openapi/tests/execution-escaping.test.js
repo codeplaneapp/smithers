@@ -4,10 +4,14 @@
 // double-encoding, and credential characters.
 // ---------------------------------------------------------------------------
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { createOpenApiToolsSync } from "../src/tool-factory.js";
+import { createOpenApiToolsSync as createOpenApiToolsSyncRaw } from "../src/tool-factory.js";
 import { petStoreSpec, complexSchemaSpec } from "./fixtures.js";
 
 const originalFetch = globalThis.fetch;
+const createOpenApiToolsSync = (spec, options = {}) => createOpenApiToolsSyncRaw(spec, {
+    resolveHostname: async () => ["8.8.8.8"],
+    ...options,
+});
 
 describe("OpenAPI executeRequest escaping", () => {
     let mockFetch;
@@ -67,6 +71,7 @@ describe("OpenAPI executeRequest escaping", () => {
 
     test("basic auth credentials containing ':' and '@' are base64-encoded verbatim", async () => {
         const tools = createOpenApiToolsSync(petStoreSpec, {
+            baseUrl: "https://api.petstore.example.com",
             auth: {
                 type: "basic",
                 username: "user@host",
@@ -76,11 +81,12 @@ describe("OpenAPI executeRequest escaping", () => {
         await tools.listPets.execute({});
         const [, init] = mockFetch.mock.calls[0];
         const expected = `Basic ${btoa("user@host:p:a:s:s")}`;
-        expect(init.headers["Authorization"]).toBe(expected);
+        expect(new Headers(init.headers).get("authorization")).toBe(expected);
     });
 
     test("apiKey auth in query is URL-encoded (special characters survive round-trip)", async () => {
         const tools = createOpenApiToolsSync(petStoreSpec, {
+            baseUrl: "https://api.petstore.example.com",
             auth: {
                 type: "apiKey",
                 name: "api_key",

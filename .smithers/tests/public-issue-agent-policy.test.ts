@@ -84,6 +84,7 @@ describe("public issue agent policy", () => {
     expect(readFilesystem).toContain('":minimal"="read"');
     expect(readFilesystem).toContain('":tmpdir"="write"');
     expect(readFilesystem).toContain('":slash_tmp"="deny"');
+    expect(readFilesystem).toContain('"/tmp/issue-home"="write"');
     expect(readFilesystem).toContain('glob_scan_max_depth=8');
     expect(readFilesystem).toContain('":workspace_roots"={"."="read",".git"="deny",".jj"="deny"');
     expect(readFilesystem).toContain('".env"="deny"');
@@ -121,6 +122,31 @@ describe("public issue agent policy", () => {
     expect(filesystem).toContain('":workspace_roots"={"."="write",".git"="read",".jj"="read"');
     expect(filesystem).toContain('".smithers/pg"="deny"');
     expect(gate.config).toContain("permissions.local-issue-gate.network.enabled=false");
+    expect(filesystem).toContain('"/tmp/gate-home"="write"');
+  });
+
+  test("pins Corepack to an existing tool cache without reopening the host home", async () => {
+    const hostHome = await mkdtemp(join(tmpdir(), "smithers-corepack-home-"));
+    const corepackHome = join(hostHome, ".cache", "node", "corepack");
+    await mkdir(corepackHome, { recursive: true });
+
+    try {
+      const options = { safeHome: "/tmp/issue-home", hostHome };
+      const combined = buildPublicIssueAgentPolicy("write", hostileEnv, options);
+      const filesystem = combined.codex.config.find((entry) =>
+        entry.startsWith("permissions.public-issue-write.filesystem=")
+      ) ?? "";
+      const claudeSettings = JSON.parse(combined.claude.settings);
+
+      expect(combined.codex.env.COREPACK_HOME).toBe(corepackHome);
+      expect(combined.claude.env.COREPACK_HOME).toBe(corepackHome);
+      expect(filesystem).toContain(`${JSON.stringify(corepackHome)}="read"`);
+      expect(filesystem).not.toContain(`${JSON.stringify(hostHome)}="read"`);
+      expect(claudeSettings.sandbox.filesystem.allowRead).toContain(corepackHome);
+      expect(claudeSettings.sandbox.filesystem.denyRead).toContain(hostHome);
+    } finally {
+      await rm(hostHome, { recursive: true, force: true });
+    }
   });
 
   test("limits Claude read roles to file inspection and fails closed", () => {
@@ -267,7 +293,7 @@ describe("public issue agent policy", () => {
   });
 
   test.skipIf(!Bun.which("codex"))(
-    "runs the required toolchain inside the real Codex sandbox without home or network access",
+    "runs the available toolchain inside the real Codex sandbox without home or network access",
     async () => {
       const sandboxRoot = join(repoRoot, ".smithers", "sandboxes");
       await mkdir(sandboxRoot, { recursive: true });
@@ -292,6 +318,16 @@ describe("public issue agent policy", () => {
           hostHome: homedir(),
           toolchainReadPaths,
         });
+        const availableToolCommands = [
+          ["node", "node --version"],
+          ["bun", "bun --version"],
+          ["pnpm", "pnpm --version"],
+          ["git", "git --version"],
+          ["jj", "(cd \"$TMPDIR\" && jj --version)"],
+          ["rg", "rg --version >/dev/null"],
+        ]
+          .filter(([binary]) => Bun.which(binary!))
+          .map(([, command]) => command!);
         const args = [
           "sandbox",
           "-P",
@@ -303,12 +339,7 @@ describe("public issue agent policy", () => {
           "bash",
           "-c",
           [
-            "node --version",
-            "bun --version",
-            "pnpm --version",
-            "git --version",
-            "(cd \"$TMPDIR\" && jj --version)",
-            "rg --version >/dev/null",
+            ...availableToolCommands,
             "test -r package.json",
             "touch \"$TMPDIR/policy-canary\"",
             `test ! -r ${JSON.stringify(join(homedir(), ".ssh"))}`,
@@ -327,7 +358,7 @@ describe("public issue agent policy", () => {
             `Codex sandbox canary exited ${result.exitCode}:\n${result.stdout.toString()}\n${result.stderr.toString()}`,
           );
         }
-        expect(result.stdout.toString()).toContain("jj ");
+        if (Bun.which("jj")) expect(result.stdout.toString()).toContain("jj ");
         expect(result.stderr.toString()).not.toContain("data did not match");
       } finally {
         await rm(runtime, { recursive: true, force: true });

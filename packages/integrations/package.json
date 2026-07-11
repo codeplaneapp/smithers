@@ -44,6 +44,7 @@
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
     "@smithers-orchestrator/errors": "workspace:*",
+    "@smithers-orchestrator/http-client": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/react-reconciler": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",

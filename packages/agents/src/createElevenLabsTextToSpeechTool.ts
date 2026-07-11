@@ -21,6 +21,14 @@ export type ElevenLabsTextToSpeechToolOptions = {
   defaultModelId?: string;
   baseUrl?: string;
   fetch?: typeof fetch;
+  /** Origins allowed to retain `xi-api-key` across redirects. */
+  allowedOrigins?: string[];
+  /** Maximum redirect hops. Defaults to 5. */
+  maxRedirects?: number;
+  /** Maximum audio response bytes buffered into base64. Defaults to 25 MiB; must be a non-negative safe integer. */
+  maxResponseBytes?: number;
+  /** Override DNS resolution used to reject untrusted private redirect targets. */
+  resolveHostname?: (hostname: string) => readonly string[] | Promise<readonly string[]>;
 };
 
 export type ElevenLabsTextToSpeechToolset = {

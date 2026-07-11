@@ -111,6 +111,46 @@ describe("LinearClient", () => {
         expect(JSON.stringify({ message: error.message, details: error.details })).not.toContain(API_KEY);
     });
 
+    test.each([
+        ["GraphQL error", 200],
+        ["HTTP error", 403],
+    ])("redacts provider-reflected credentials from a %s", async (_label, status) => {
+        const reflected = Bun.serve({
+            port: 0,
+            fetch: (request) => {
+                const authorization = request.headers.get("authorization") ?? "";
+                return Response.json({
+                    errors: [{
+                        message: `denied reflected=${authorization} raw=${authorization.replace(/^Bearer\s+/, "")}`,
+                    }],
+                }, { status });
+            },
+        });
+        try {
+            const apiKey = "Bearer linear-provider-secret";
+            const client = makeLinearClient({
+                apiKey,
+                apiBaseUrl: `http://localhost:${reflected.port}`,
+            });
+            const error = await Effect.runPromise(Effect.flip(
+                client.query("query Viewer { viewer { id } }"),
+            ));
+            const serialized = JSON.stringify({
+                message: error.message,
+                summary: error.summary,
+                details: error.details,
+                cause: error.cause instanceof Error
+                    ? { name: error.cause.name, message: error.cause.message }
+                    : error.cause,
+            });
+            expect(serialized).not.toContain("linear-provider-secret");
+            expect(serialized).not.toContain(apiKey);
+            expect(serialized).toContain("[REDACTED]");
+        } finally {
+            reflected.stop(true);
+        }
+    });
+
     test("fails fast with a clear error when no API key is configured", async () => {
         const server = fixture();
         configureLinear({});

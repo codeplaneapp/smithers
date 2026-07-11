@@ -116,7 +116,7 @@ describe("createOpenApiToolsSync", () => {
         });
         expect(Object.keys(tools).length).toBeGreaterThan(0);
     });
-    test("falls back to localhost when no base URL option or server is present", async () => {
+    test("falls back to localhost only with an explicit private-network opt-in", async () => {
         const specWithoutServers = {
             openapi: "3.0.0",
             info: { title: "Local", version: "1.0.0" },
@@ -132,7 +132,9 @@ describe("createOpenApiToolsSync", () => {
         const mockFetch = mock(() => Promise.resolve(new Response("ok")));
         globalThis.fetch = mockFetch;
 
-        const tools = createOpenApiToolsSync(specWithoutServers);
+        const tools = createOpenApiToolsSync(specWithoutServers, {
+            allowPrivateNetwork: true,
+        });
         await tools.getHealth.execute({});
 
         expect(mockFetch).toHaveBeenCalledTimes(1);

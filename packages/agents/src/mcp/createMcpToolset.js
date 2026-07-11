@@ -65,7 +65,8 @@ export async function createMcpToolset(config, options = {}) {
     tools[`${prefix}${mcpTool.name}`] = dynamicTool({
       description: mcpTool.description ?? mcpTool.name,
       inputSchema: jsonSchema(/** @type {any} */ (mcpTool.inputSchema ?? { type: "object", properties: {} })),
-      execute: async (input, callOptions) => callMcpTool(client, mcpTool.name, input, callOptions?.abortSignal),
+      execute: async (input, execution) =>
+        callMcpTool(client, mcpTool.name, input, execution?.abortSignal),
     });
   }
 
@@ -105,26 +106,16 @@ function drainStderr(transport, onStderr) {
  * Invoke one MCP tool and reduce its result to a value the model can read:
  * structured content when the server returns it, otherwise the joined text.
  *
- * The AI SDK's per-call abort signal is forwarded as the MCP request's
- * cancellation signal, so aborting the agent run rejects the pending call
- * immediately AND sends `notifications/cancelled` to the server, instead of
- * leaving the MCP operation running to its (60s default) timeout.
- *
  * @param {Client} client
  * @param {string} name
  * @param {unknown} input
- * @param {AbortSignal} [abortSignal]
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<unknown>}
  */
-async function callMcpTool(client, name, input, abortSignal) {
-  const result = await client.callTool(
-    {
-      name,
-      arguments: /** @type {Record<string, unknown>} */ (input ?? {}),
-    },
-    undefined,
-    abortSignal ? { signal: abortSignal } : undefined,
-  );
+async function callMcpTool(client, name, input, signal) {
+  const abortReason = () => signal?.reason ?? new DOMException("The operation was aborted", "AbortError");
+  if (signal?.aborted) throw abortReason();
+  const result = await invokeMcpTool(client, name, input, signal, abortReason);
   const parts = Array.isArray(result.content) ? result.content : [];
   let text = "";
   for (const part of parts) {
@@ -137,4 +128,26 @@ async function callMcpTool(client, name, input, abortSignal) {
     return { error: true, message: text || `MCP tool "${name}" failed`, status: "failed" };
   }
   return result.structuredContent ?? text;
+}
+
+/**
+ * @param {Client} client
+ * @param {string} name
+ * @param {unknown} input
+ * @param {AbortSignal | undefined} signal
+ * @param {() => unknown} abortReason
+ */
+async function invokeMcpTool(client, name, input, signal, abortReason) {
+  try {
+    const result = await client.callTool({
+      name,
+      arguments: /** @type {Record<string, unknown>} */ (input ?? {}),
+    }, undefined, signal ? { signal } : undefined);
+    return result;
+  } catch (error) {
+    // The MCP SDK wraps transport cancellation in McpError. Preserve the
+    // caller's original reason so AI SDK cancellation remains observable.
+    if (signal?.aborted) throw abortReason();
+    throw error;
+  }
 }

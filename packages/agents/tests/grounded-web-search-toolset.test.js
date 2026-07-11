@@ -91,6 +91,81 @@ describe("createGroundedWebSearchToolset", () => {
       { name: "brave", query: "latest smithers integrations", maxResults: 4, freshness: undefined },
     ]);
   });
+
+  test("passes the AI SDK abort signal to every provider", async () => {
+    const controller = new AbortController();
+    const observedSignals = [];
+    const toolset = createGroundedWebSearchToolset({
+      providers: [
+        providerWithSignal("exa", "semantic", observedSignals),
+        providerWithSignal("tavily", "fresh", observedSignals),
+      ],
+    });
+
+    await toolset.tools.grounded_web_search.execute(
+      { query: "latest smithers integrations" },
+      { ...callOptions, abortSignal: controller.signal },
+    );
+
+    expect(observedSignals).toEqual([controller.signal, controller.signal]);
+  });
+
+  test("returns the exact abort reason without waiting for an uncooperative provider", async () => {
+    const controller = new AbortController();
+    const reason = new Error("stop the pending search");
+    let markStarted;
+    const started = new Promise((resolve) => {
+      markStarted = resolve;
+    });
+    const toolset = createGroundedWebSearchToolset({
+      providers: [
+        {
+          name: "exa",
+          kind: "semantic",
+          async search() {
+            markStarted();
+            return new Promise(() => {});
+          },
+        },
+        provider("brave", "fresh", []),
+      ],
+    });
+
+    const pending = toolset.tools.grounded_web_search.execute(
+      { query: "latest smithers integrations" },
+      { ...callOptions, abortSignal: controller.signal },
+    );
+    await started;
+    controller.abort(reason);
+
+    expect(await rejectionWithin(pending)).toBe(reason);
+  });
+
+  test("does not start providers for a pre-aborted tool call", async () => {
+    const controller = new AbortController();
+    const reason = new Error("already cancelled");
+    let calls = 0;
+    const neverCalled = (name, kind) => ({
+      name,
+      kind,
+      async search() {
+        calls += 1;
+        return [];
+      },
+    });
+    const toolset = createGroundedWebSearchToolset({
+      providers: [neverCalled("exa", "semantic"), neverCalled("brave", "fresh")],
+    });
+    controller.abort(reason);
+
+    const pending = toolset.tools.grounded_web_search.execute(
+      { query: "latest smithers integrations" },
+      { ...callOptions, abortSignal: controller.signal },
+    );
+
+    expect(await rejectionWithin(pending)).toBe(reason);
+    expect(calls).toBe(0);
+  });
 });
 
 describe("grounded web search HTTP providers", () => {
@@ -159,6 +234,85 @@ describe("grounded web search HTTP providers", () => {
     expect(JSON.parse(requests[0].init.body)).toEqual({ q: "smithers", num: 2, tbs: "qdr:y" });
     expect(results).toEqual([{ title: "Serper result", url: "https://example.com", snippet: "Snippet", publishedDate: "Jun 1, 2026" }]);
   });
+
+  const cancellableProviders = [
+    ["Exa", createExaSearchProvider],
+    ["Tavily", createTavilySearchProvider],
+    ["Brave", createBraveSearchProvider],
+    ["Serper", createSerperSearchProvider],
+  ];
+
+  for (const [name, createProvider] of cancellableProviders) {
+    test(`${name} cancels a genuinely pending transport with the exact reason`, async () => {
+      const controller = new AbortController();
+      const reason = new Error(`cancel ${name}`);
+      let transportSignal;
+      let markStarted;
+      const started = new Promise((resolve) => {
+        markStarted = resolve;
+      });
+      const searchProvider = createProvider({
+        apiKey: "key",
+        fetch: async (_url, init = {}) =>
+          new Promise((_resolve, reject) => {
+            transportSignal = init.signal;
+            if (transportSignal?.aborted) {
+              reject(transportSignal.reason);
+            } else {
+              transportSignal?.addEventListener(
+                "abort",
+                () => reject(transportSignal.reason),
+                { once: true },
+              );
+            }
+            markStarted();
+          }),
+      });
+
+      const pending = searchProvider.search(
+        { query: "smithers", maxResults: 1 },
+        { signal: controller.signal },
+      );
+      await started;
+      controller.abort(reason);
+
+      expect(await rejectionWithin(pending)).toBe(reason);
+      expect(transportSignal.aborted).toBe(true);
+      expect(transportSignal.reason).toBe(reason);
+    });
+  }
+
+  test("cancels a stalled response read with the exact reason", async () => {
+    const controller = new AbortController();
+    const reason = new Error("cancel stalled search response");
+    let cancelReason;
+    let markReading;
+    const reading = new Promise((resolve) => {
+      markReading = resolve;
+    });
+    const searchProvider = createExaSearchProvider({
+      apiKey: "key",
+      fetch: async () =>
+        new Response(new ReadableStream({
+          pull() {
+            markReading();
+          },
+          cancel(value) {
+            cancelReason = value;
+          },
+        })),
+    });
+
+    const pending = searchProvider.search(
+      { query: "smithers", maxResults: 1 },
+      { signal: controller.signal },
+    );
+    await reading;
+    controller.abort(reason);
+
+    expect(await rejectionWithin(pending)).toBe(reason);
+    expect(cancelReason).toBe(reason);
+  });
 });
 
 function provider(name, kind, results, calls = []) {
@@ -168,6 +322,17 @@ function provider(name, kind, results, calls = []) {
     async search(input) {
       calls.push({ name, ...input });
       return results;
+    },
+  };
+}
+
+function providerWithSignal(name, kind, observedSignals) {
+  return {
+    name,
+    kind,
+    async search(_input, options) {
+      observedSignals.push(options?.signal);
+      return [];
     },
   };
 }
@@ -186,4 +351,24 @@ function isoDateDaysAgo(days) {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() - days);
   return date.toISOString().slice(0, 10);
+}
+
+async function rejectionWithin(promise, timeoutMs = 500) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise.then(
+        () => new Error("Expected the operation to reject"),
+        (error) => error,
+      ),
+      new Promise((resolve) => {
+        timer = setTimeout(
+          () => resolve(new Error(`Operation did not settle within ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

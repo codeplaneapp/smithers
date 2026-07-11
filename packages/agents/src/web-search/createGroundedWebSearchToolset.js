@@ -31,7 +31,13 @@ export function createGroundedWebSearchToolset(options) {
           },
           required: ["query"],
         }),
-        execute: async (input) => searchAll(providers, input, options.maxResultsPerProvider ?? 5),
+        execute: async (input, execution) =>
+          searchAll(
+            providers,
+            input,
+            options.maxResultsPerProvider ?? 5,
+            execution?.abortSignal,
+          ),
       }),
     },
     toolNames: ["grounded_web_search"],
@@ -42,14 +48,23 @@ export function createGroundedWebSearchToolset(options) {
  * @param {GroundedWebSearchProvider[]} providers
  * @param {unknown} input
  * @param {number} maxResultsPerProvider
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<{ query: string; providers: string[]; results: Array<GroundedWebSearchResult & { provider: string; citation: number }> }>}
  */
-async function searchAll(providers, input, maxResultsPerProvider) {
+async function searchAll(providers, input, maxResultsPerProvider, signal) {
+  throwIfAborted(signal);
   const args = normalizeInput(input, maxResultsPerProvider);
-  const settled = await Promise.allSettled(providers.map(async (provider) => ({
+  const providerResults = Promise.allSettled(providers.map(async (provider) => ({
     provider,
-    results: await provider.search(args),
+    results: signal
+      ? await provider.search(args, { signal })
+      : await provider.search(args),
   })));
+  // A third-party provider may not observe its signal. The tool invocation must
+  // still settle promptly rather than letting one permanently pending provider
+  // hold the whole fan-out open.
+  const settled = await raceWithAbort(providerResults, signal);
+  throwIfAborted(signal);
   const deduped = new Map();
   const succeededProviders = [];
   for (const outcome of settled) {
@@ -71,6 +86,44 @@ async function searchAll(providers, input, maxResultsPerProvider) {
     providers: succeededProviders,
     results: [...deduped.values()],
   };
+}
+
+/**
+ * @param {AbortSignal | undefined} signal
+ */
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  throw abortReason(signal);
+}
+
+/**
+ * @param {AbortSignal} signal
+ * @returns {unknown}
+ */
+function abortReason(signal) {
+  return signal.reason ?? new DOMException("The operation was aborted", "AbortError");
+}
+
+/**
+ * @template T
+ * @param {Promise<T>} operation
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<T>}
+ */
+async function raceWithAbort(operation, signal) {
+  if (!signal) return operation;
+  throwIfAborted(signal);
+  /** @type {(() => void) | undefined} */
+  let onAbort;
+  const aborted = new Promise((_, reject) => {
+    onAbort = () => reject(abortReason(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([operation, aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 /**
