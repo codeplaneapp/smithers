@@ -267,6 +267,21 @@ describe("adapter: output tables + physical table checks", () => {
         const { adapter } = createDb();
         expect(await adapter.getRawNodeOutput("phantom_tbl", "r1", "n1")).toBeNull();
     });
+
+    test("deleteOutputRowEffect resolves a camelCase output key to its snake_case physical table", async () => {
+        // Node rows persist the workflow schema KEY (`tfCandidate`) while
+        // createSmithers creates the physical table via camelToSnake
+        // (`tf_candidate`). `smithers retry-task` deletes through an adapter
+        // opened without the workflow's output schema, so the adapter must
+        // fall back to the naming convention instead of failing with
+        // "Output table tfCandidate is missing runId/nodeId columns".
+        const { sqlite, adapter } = createDb();
+        const schema = z.object({ summary: z.string() });
+        sqlite.exec(zodToCreateTableSQL("tf_candidate", schema));
+        sqlite.run("INSERT INTO tf_candidate (run_id, node_id, iteration, summary) VALUES ('r1', 'n1', 0, 'hi')");
+        await adapter.deleteOutputRowEffect("tfCandidate", { runId: "r1", nodeId: "n1", iteration: 0 });
+        expect(sqlite.query("SELECT COUNT(*) AS count FROM tf_candidate").get().count).toBe(0);
+    });
 });
 
 describe("adapter: frame-truncation deletes", () => {

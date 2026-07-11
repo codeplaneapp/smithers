@@ -1529,6 +1529,24 @@ export class SmithersDb {
                     catch { }
                 }
             }
+            if (tableInfo.length === 0) {
+                // Node rows persist the schema KEY (`tfCandidate`) while the
+                // physical table is snake_case (`tf_candidate`). A CLI-opened
+                // adapter has no workflow output schema to consult, so fall
+                // back to the naming convention before giving up.
+                const snakeName = camelToSnake(tableName);
+                if (snakeName !== tableName) {
+                    const escapedSnake = snakeName.replaceAll(`"`, `""`);
+                    const snakeInfo = client
+                        .query(`PRAGMA table_info("${escapedSnake}")`)
+                        .all();
+                    if (snakeInfo.length > 0) {
+                        resolvedTableName = snakeName;
+                        escapedTableName = escapedSnake;
+                        tableInfo = snakeInfo;
+                    }
+                }
+            }
             const columnNames = new Set(tableInfo
                 .map((column) => column.name)
                 .filter((name) => typeof name === "string"));
