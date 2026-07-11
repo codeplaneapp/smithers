@@ -113,7 +113,9 @@ export function diffSnapshots(a, b) {
     };
 }
 /**
- * Convenience: diff two raw Snapshot rows.
+ * Convenience: diff two hydrated Snapshot rows (for example, values returned
+ * by `loadSnapshot`). Physical compact rows from `smithersSnapshots` do not
+ * contain inline JSON payloads.
  *
  * @param {Snapshot} a
  * @param {Snapshot} b

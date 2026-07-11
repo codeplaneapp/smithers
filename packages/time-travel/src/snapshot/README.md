@@ -9,6 +9,10 @@ Capturing and reading run snapshots (the fork/replay/timeline source of truth).
 - `loadSnapshotEffect.js` joins metadata/reference/content in one statement for
   exact/latest reads; `listSnapshotsEffect.js` reads the lightweight metadata
   index.
+- The exported `smithersSnapshots` Drizzle object maps the physical metadata
+  table. New compact rows intentionally expose empty JSON marker fields there;
+  consumers that need full state must use `loadSnapshot`/`loadLatestSnapshot`.
+  Direct inline writes remain supported for compatibility.
 - `parseSnapshot.js` converts a raw row into a `ParsedSnapshot` (nodes keyed
   `nodeId::iteration`, ralph keyed `ralphId`); `parseSnapshotJson.js` turns
   malformed JSON columns into a `SmithersError` instead of a raw `SyntaxError`.

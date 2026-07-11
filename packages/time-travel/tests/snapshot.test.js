@@ -55,6 +55,19 @@ describe("captureSnapshot", () => {
             queryAllRaw: async (sql, params = []) => sqlite.query(sql).all(...params),
             queryValuesRaw: async (sql, params = []) => sqlite.query(sql).values(...params),
             execute: async (sql, params = []) => { sqlite.query(sql).run(...params); },
+            supportsTransactions: true,
+            transaction: async (operation) => {
+                sqlite.run("BEGIN IMMEDIATE");
+                try {
+                    const result = await operation();
+                    sqlite.run("COMMIT");
+                    return result;
+                }
+                catch (error) {
+                    sqlite.run("ROLLBACK");
+                    throw error;
+                }
+            },
         };
         const adapter = new SmithersDb(descriptor);
         await adapter.internalStorage.ensureSchema();

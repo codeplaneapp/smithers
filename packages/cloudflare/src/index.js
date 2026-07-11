@@ -87,11 +87,11 @@ export function createCloudflareDurableObjectSqliteDescriptor(storage) {
  * hold an open BEGIN/COMMIT/ROLLBACK across round-trips, so this descriptor
  * explicitly reports `supportsTransactions: false`. Smithers fails a
  * transactional write before its operation begins rather than allowing a
- * failure or crash partway through to leave earlier writes committed. Smithers'
- * run-of-record durability (frame commits — `insertFrame` + `captureSnapshot`,
- * run-state checkpoints, task completion) assumes transactional writes, so on
- * the D1 backend a mid-transaction failure can leave partial state. For durable
- * workflow state use `createCloudflareDurableObjectSqliteDescriptor`, which
+ * failure or crash partway through to leave earlier writes committed. Direct
+ * descriptor calls remain separate D1 operations, so a caller's own multi-write
+ * sequence can still leave partial state. Smithers' run-of-record flows require
+ * transactions and therefore reject D1 before they start. For durable workflow
+ * state use `createCloudflareDurableObjectSqliteDescriptor`, which
  * binds the real `storage.transaction`; reserve D1 for read-mostly /
  * non-transactional use. `database.batch()` is not a substitute: the
  * transaction bodies are interactive read-then-write (e.g. read the current

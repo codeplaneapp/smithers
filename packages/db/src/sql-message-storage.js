@@ -1065,19 +1065,11 @@ export class SqlMessageStorage {
             return await this.externalSqlite.transaction(operation);
         }
         if (this.externalSqlite) {
-            // Generic single-connection SQLite descriptors can provide atomicity
-            // without a callback wrapper. BEGIN must succeed before the operation
-            // starts; backends such as D1 explicitly opt out above.
-            await this.execute("BEGIN IMMEDIATE");
-            try {
-                const result = await operation();
-                await this.execute("COMMIT");
-                return result;
-            }
-            catch (error) {
-                await this.execute("ROLLBACK").catch(() => undefined);
-                throw error;
-            }
+            // A sequence of BEGIN/operation/COMMIT calls is not sufficient here:
+            // the descriptor may route each call to a different connection, and
+            // other storage calls could interleave. Only a descriptor-owned
+            // callback can hold the physical transaction boundary atomically.
+            throw new Error(`The ${this.externalSqlite.driver} descriptor must provide an atomic transaction() callback.`);
         }
         return await operation();
     }

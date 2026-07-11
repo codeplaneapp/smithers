@@ -57,19 +57,25 @@ the reference row is the explicit compact marker. Exact/latest loads join metada
 reference, and content in one statement, so concurrent rewind cannot delete the
 content between two reads. Legacy inline rows continue to load directly.
 
-Capture, frame commit, fork, replacement, rewind, direct snapshot deletion, and
-store migration all preserve the same transaction boundary. SQLite-compatible
-runtimes also install a delete fallback trigger for environments that reject
-`PRAGMA foreign_keys`; PostgreSQL uses the foreign-key cascade. Store copies order
-content before snapshots and references, copy derived counts as zero, and let the
-destination triggers rebuild them.
+Capture, frame commit, fork, replacement, rewind, and direct snapshot deletion
+preserve their existing atomic boundaries. SQLite-compatible runtimes also
+install a delete fallback trigger for environments that reject
+`PRAGMA foreign_keys`; PostgreSQL uses the foreign-key cascade. Store migration
+continues its existing table-at-a-time commits rather than claiming whole-copy
+atomicity; it orders content before snapshots and references, copies derived
+counts as zero, and lets the destination triggers rebuild them.
 
-The public low-level snapshot table remains compatible with inline writers: an
-inline update over a compact row atomically retires its old content reference.
-External SQLite descriptors without a transaction callback use a real
-`BEGIN IMMEDIATE`/commit fallback. Backends that explicitly cannot provide
-interactive transactions, including Cloudflare D1, fail before a transactional
-write begins instead of risking a partial frame or snapshot.
+The exported low-level `smithersSnapshots` object still maps the physical table.
+Its schema and inline-write path remain compatible: an inline update over a
+compact row atomically retires its old content reference. New compact rows are
+not self-contained through that raw table, however—their four empty JSON strings
+are markers. Raw-table readers must move to `loadSnapshot`/`loadLatestSnapshot`,
+which return the same hydrated public `Snapshot` shape as before.
+
+External SQLite descriptors must provide a real atomic `transaction()` callback.
+Descriptors that cannot hold that physical boundary, including Cloudflare D1,
+fail before a transactional write begins instead of risking a partial frame or
+snapshot.
 
 The unreleased gzip prototype used by existing dogfood data is retained under its
 old table name and remains readable with hash verification. The final migration

@@ -370,7 +370,9 @@ type SnapshotData$1 = SnapshotData$2;
  */
 declare function diffSnapshots(a: ParsedSnapshot$1, b: ParsedSnapshot$1): SnapshotDiff$1;
 /**
- * Convenience: diff two raw Snapshot rows.
+ * Convenience: diff two hydrated Snapshot rows (for example, values returned
+ * by `loadSnapshot`). Physical compact rows from `smithersSnapshots` do not
+ * contain inline JSON payloads.
  *
  * @param {Snapshot} a
  * @param {Snapshot} b
@@ -526,7 +528,9 @@ type RunTimeline$1 = RunTimeline$2;
 type TimelineTree$1 = TimelineTree$4;
 
 /**
- * Full state snapshot captured at each frame commit.
+ * Physical snapshot metadata table. New content-addressed rows use empty JSON
+ * strings as a compact marker; read full state through `loadSnapshot` or
+ * `loadLatestSnapshot`. Legacy/direct inline rows remain writable.
  * PK: (run_id, frame_no)
  */
 declare const smithersSnapshots: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{

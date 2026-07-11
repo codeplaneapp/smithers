@@ -91,20 +91,17 @@ describe("SqlMessageStorage external-sqlite connection", () => {
         expect((await storage.queryAll("SELECT * FROM _smithers_runs")).length).toBe(1);
     });
 
-    test("transaction fallback rolls back dependent async writes when no callback is supplied", async () => {
+    test("descriptor without a transaction callback fails before running the operation", async () => {
         const { raw, descriptor } = makeExternalDb({ withTransaction: false });
         const storage = new SqlMessageStorage(descriptor);
         await storage.ensureSchema();
-        raw.run(`CREATE TRIGGER reject_snapshot_ref BEFORE INSERT ON _smithers_snapshot_payload_refs
-            BEGIN SELECT RAISE(ABORT, 'injected ref failure'); END`);
+        let ran = false;
         await expect(storage.transaction(async () => {
+            ran = true;
             await storage.execute("INSERT INTO _smithers_snapshot_contents (content_hash, nodes_json, outputs_json, ralph_json, input_json, ref_count) VALUES ('fallback-hash', '[]', '{}', '[]', '{}', 0)");
-            await storage.execute("INSERT INTO _smithers_snapshots (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, content_hash, created_at_ms) VALUES ('fallback-run', 0, '', '', '', '', 'fallback-hash', 1)");
-            await storage.execute("INSERT INTO _smithers_snapshot_payload_refs (run_id, frame_no, content_hash) VALUES ('fallback-run', 0, 'fallback-hash')");
-        })).rejects.toThrow(/injected ref failure/);
+        })).rejects.toThrow(/must provide an atomic transaction\(\) callback/);
+        expect(ran).toBe(false);
         expect(raw.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_contents").get().count).toBe(0);
-        expect(raw.query("SELECT COUNT(*) AS count FROM _smithers_snapshots").get().count).toBe(0);
-        expect(raw.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs").get().count).toBe(0);
         raw.close();
     });
 

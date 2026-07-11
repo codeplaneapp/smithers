@@ -1,6 +1,8 @@
 import { integer, sqliteTable, text, primaryKey, } from "drizzle-orm/sqlite-core";
 /**
- * Full state snapshot captured at each frame commit.
+ * Physical snapshot metadata table. New content-addressed rows use empty JSON
+ * strings as a compact marker; read full state through `loadSnapshot` or
+ * `loadLatestSnapshot`. Legacy/direct inline rows remain writable.
  * PK: (run_id, frame_no)
  */
 export const smithersSnapshots = sqliteTable("_smithers_snapshots", {
