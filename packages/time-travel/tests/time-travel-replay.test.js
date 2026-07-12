@@ -61,6 +61,90 @@ describe("replayFromCheckpoint", () => {
         expect(result.vcsPointer).toBeNull();
         expect(result.vcsError).toBeUndefined();
     });
+    test("re-blesses workflow hashes so a replayed edit resumes (regression: replay ignored the new source)", async () => {
+        const { adapter } = createTestDb();
+        // Parent ran an OLD workflow source; replaying carries a NEW (edited) source.
+        await adapter.insertRun({
+            runId: "parent-run",
+            parentRunId: null,
+            workflowName: "time-travel-parent",
+            workflowPath: "/tmp/old-workflow.tsx",
+            workflowHash: "old-workflow-hash",
+            status: "failed",
+            createdAtMs: 1_000,
+            startedAtMs: 1_100,
+            finishedAtMs: 1_200,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            cancelRequestedAtMs: null,
+            hijackRequestedAtMs: null,
+            hijackTarget: null,
+            vcsType: null,
+            vcsRoot: null,
+            vcsRevision: null,
+            errorJson: null,
+            configJson: JSON.stringify({
+                keep: "value",
+                __smithersDurability: { version: 2, entryWorkflowHash: "old-entry-hash" },
+            }),
+        });
+        await captureSnapshot(adapter, "parent-run", 0, sampleData({ workflowHash: "old-workflow-hash" }));
+
+        const result = await replayFromCheckpoint(adapter, {
+            parentRunId: "parent-run",
+            frameNo: 0,
+            workflowPath: "/tmp/new-workflow.tsx",
+            workflowHash: "new-workflow-hash",
+            entryWorkflowHash: "new-entry-hash",
+        });
+
+        // The forked child must carry the NEW source's identity; otherwise the
+        // resume guard rejects the replay with RESUME_METADATA_MISMATCH.
+        const childRun = await adapter.getRun(result.runId);
+        expect(childRun).toMatchObject({
+            workflowPath: "/tmp/new-workflow.tsx",
+            workflowHash: "new-workflow-hash",
+        });
+        expect(JSON.parse(childRun?.configJson ?? "{}")).toEqual({
+            keep: "value",
+            __smithersDurability: { version: 2, entryWorkflowHash: "new-entry-hash" },
+        });
+        expect(result.snapshot.workflowHash).toBe("new-workflow-hash");
+    });
+    test("leaves parent workflow hashes untouched when replay passes no source identity", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertRun({
+            runId: "parent-run",
+            parentRunId: null,
+            workflowName: "time-travel-parent",
+            workflowPath: "/tmp/old-workflow.tsx",
+            workflowHash: "old-workflow-hash",
+            status: "failed",
+            createdAtMs: 1_000,
+            startedAtMs: 1_100,
+            finishedAtMs: 1_200,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            cancelRequestedAtMs: null,
+            hijackRequestedAtMs: null,
+            hijackTarget: null,
+            vcsType: null,
+            vcsRoot: null,
+            vcsRevision: null,
+            errorJson: null,
+            configJson: JSON.stringify({ __smithersDurability: { version: 2, entryWorkflowHash: "old-entry-hash" } }),
+        });
+        await captureSnapshot(adapter, "parent-run", 0, sampleData({ workflowHash: "old-workflow-hash" }));
+
+        const result = await replayFromCheckpoint(adapter, { parentRunId: "parent-run", frameNo: 0 });
+
+        const childRun = await adapter.getRun(result.runId);
+        expect(childRun).toMatchObject({
+            workflowPath: "/tmp/old-workflow.tsx",
+            workflowHash: "old-workflow-hash",
+        });
+        expect(result.snapshot.workflowHash).toBe("old-workflow-hash");
+    });
     test("sets branch description to indicate replay", async () => {
         const { adapter } = createTestDb();
         await captureSnapshot(adapter, "parent-run", 2, sampleData());
