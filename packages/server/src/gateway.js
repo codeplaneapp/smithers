@@ -60,6 +60,8 @@ import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
 /** @typedef {{ streamId: string, runId: string, outboundQueue: Record<string, unknown>[], flushPending: boolean, backpressureDisconnected: boolean }} RunEventStreamState */
+/** @typedef {{ streamId: string, runId: string, heartbeat: unknown, outboundQueue: Record<string, unknown>[], flushPending: boolean, backpressureDisconnected: boolean }} RunEventStreamState */
+/** @typedef {{ queue: Array<{ data: string, bytes: number, event: string }>, queuedBytes: number, flushPending: boolean, disconnected: boolean }} ConnectionEventWriterState */
 /** @typedef {import("./GatewayAuthConfig.js").GatewayAuthConfig} GatewayAuthConfig */
 /** @typedef {import("./GatewayOperatorUiConfig.js").GatewayOperatorUiConfig} GatewayOperatorUiConfig */
 /** @typedef {import("./GatewayOptions.js").GatewayOptions} GatewayOptions */
@@ -95,6 +97,7 @@ import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
  *   runEventHeartbeatTimer?: ReturnType<typeof setInterval> | null;
  *   lastActivity?: number;
  *   closed?: boolean;
+ *   eventWriter?: ConnectionEventWriterState | null;
  * } & Record<string, unknown>} ConnectionState
  */
 /**
@@ -181,6 +184,21 @@ const RUN_EVENT_HEARTBEAT_MS = 1_000;
 const RUN_EVENT_STREAM_OUTBOUND_QUEUE_LIMIT = 1_000;
 const RUN_EVENT_STREAM_WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
 const RUN_EVENT_STREAM_DRAIN_RETRY_MS = 10;
+// One byte-bounded writer per connection for EVERY gateway event frame.
+// broadcastEvent used to hand the generic copy of each run event straight to
+// ws.send while only the dedicated run-event stream frames went through a
+// bounded queue, so a slow socket could still accumulate unbounded ws
+// buffering via the generic copy. Every event frame now flows through
+// sendEvent -> writeConnectionEventFrame, which drains against the socket's
+// observable bufferedAmount and tracks its own queued bytes. Overflowing the
+// per-connection byte budget closes the connection (the per-connection
+// failure behavior); the per-stream frame-count overflow (run.error:
+// BackpressureDisconnect) still tears down individual slow streams first.
+const CONNECTION_EVENT_WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
+const CONNECTION_EVENT_QUEUE_MAX_BYTES = 32 * 1024 * 1024;
+const CONNECTION_EVENT_DRAIN_RETRY_MS = 10;
+// RFC 6455 1013 "Try Again Later": the peer may reconnect once it can keep up.
+const CONNECTION_EVENT_BACKPRESSURE_CLOSE_CODE = 1013;
 // Same slow-consumer guard for streamDevTools subscriptions; mirrors the
 // run-event-stream limits above and the extension-stream limits in
 // GatewayExtensions.js (EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT /
@@ -5242,6 +5260,7 @@ a { color: var(--brand); }</style>
             heartbeatTimer: null,
             runEventHeartbeatTimer: null,
             authDeadlineTimer: null,
+            eventWriter: null,
         };
         this.connections.add(connection);
         // A fresh socket occupies a bounded pre-auth slot until a successful
@@ -5988,6 +6007,10 @@ a { color: var(--brand); }</style>
         if (connection.ws.readyState !== connection.ws.OPEN) {
             return;
         }
+        const writer = this.getConnectionEventWriter(connection);
+        if (writer.disconnected) {
+            return;
+        }
         connection.seq += 1;
         const frame = {
             type: "event",
@@ -5997,8 +6020,128 @@ a { color: var(--brand); }</style>
             stateVersion,
             apiVersion: SMITHERS_API_VERSION,
         };
-        connection.ws.send(JSON.stringify(frame));
-        this.recordMessageSent("ws", "event", { event });
+        this.writeConnectionEventFrame(connection, writer, JSON.stringify(frame), event);
+    }
+    /**
+   * @param {ConnectionState} connection
+   * @returns {ConnectionEventWriterState}
+   */
+    getConnectionEventWriter(connection) {
+        let writer = connection.eventWriter;
+        if (!writer) {
+            writer = { queue: [], queuedBytes: 0, flushPending: false, disconnected: false };
+            connection.eventWriter = writer;
+        }
+        return writer;
+    }
+    /**
+   * Observable buffered event bytes for a connection: what the socket itself
+   * reports (bufferedAmount) plus what the bounded writer is still holding.
+   * @param {ConnectionState} connection
+   * @returns {number}
+   */
+    getConnectionBufferedEventBytes(connection) {
+        const socketBuffered = typeof connection.ws?.bufferedAmount === "number" ? connection.ws.bufferedAmount : 0;
+        return socketBuffered + (connection.eventWriter?.queuedBytes ?? 0);
+    }
+    /**
+   * The single byte-bounded writer every event frame for a connection goes
+   * through — the generic broadcast copy AND the dedicated run-event stream
+   * frames (whose per-stream queues drain into sendEvent) both land here, so
+   * neither can bypass backpressure. On a healthy socket frames are written
+   * straight through; once the socket's observable bufferedAmount crosses the
+   * high-water mark frames queue here — bounded by bytes — and drain when the
+   * socket recovers. Overflow disconnects the connection.
+   * @param {ConnectionState} connection
+   * @param {ConnectionEventWriterState} writer
+   * @param {string} data
+   * @param {string} event
+   */
+    writeConnectionEventFrame(connection, writer, data, event) {
+        const ws = connection.ws;
+        const socketCongested = typeof ws.bufferedAmount === "number" &&
+            ws.bufferedAmount > CONNECTION_EVENT_WS_BUFFERED_HIGH_WATER_BYTES;
+        if (writer.queue.length === 0 && !socketCongested) {
+            ws.send(data);
+            this.recordMessageSent("ws", "event", { event });
+            return;
+        }
+        const bytes = Buffer.byteLength(data, "utf8");
+        if (writer.queuedBytes + bytes > CONNECTION_EVENT_QUEUE_MAX_BYTES) {
+            this.disconnectConnectionForEventBackpressure(connection, writer, event);
+            return;
+        }
+        writer.queue.push({ data, bytes, event });
+        writer.queuedBytes += bytes;
+        this.drainConnectionEventWriter(connection, writer);
+    }
+    /**
+   * Drain the connection writer's queue against the socket's buffered bytes.
+   * Mirrors drainRunEventStream: a congested socket re-arms a short retry
+   * instead of dropping frames; the byte cap (enforced at enqueue time) is
+   * what bounds memory and trips the per-connection disconnect.
+   * @param {ConnectionState} connection
+   * @param {ConnectionEventWriterState} writer
+   */
+    drainConnectionEventWriter(connection, writer) {
+        if (writer.flushPending || writer.disconnected) {
+            return;
+        }
+        writer.flushPending = true;
+        try {
+            while (writer.queue.length > 0 &&
+                !writer.disconnected &&
+                connection.ws.readyState === connection.ws.OPEN) {
+                const ws = connection.ws;
+                if (typeof ws.bufferedAmount === "number" &&
+                    ws.bufferedAmount > CONNECTION_EVENT_WS_BUFFERED_HIGH_WATER_BYTES) {
+                    setTimeout(() => {
+                        writer.flushPending = false;
+                        this.drainConnectionEventWriter(connection, writer);
+                    }, CONNECTION_EVENT_DRAIN_RETRY_MS);
+                    return;
+                }
+                const entry = writer.queue.shift();
+                if (!entry) {
+                    continue;
+                }
+                writer.queuedBytes -= entry.bytes;
+                ws.send(entry.data);
+                this.recordMessageSent("ws", "event", { event: entry.event });
+            }
+        }
+        finally {
+            writer.flushPending = false;
+        }
+    }
+    /**
+   * Per-connection overflow behavior: a consumer that stays congested past the
+   * socket high-water mark AND fills the byte-bounded queue is disconnected
+   * outright (close 1013 Try Again Later) — the socket's close handler tears
+   * down every stream on the connection, and nothing further buffers for it.
+   * @param {ConnectionState} connection
+   * @param {ConnectionEventWriterState} writer
+   * @param {string} event
+   */
+    disconnectConnectionForEventBackpressure(connection, writer, event) {
+        if (writer.disconnected) {
+            return;
+        }
+        writer.disconnected = true;
+        writer.queue.length = 0;
+        writer.queuedBytes = 0;
+        emitGatewayEffect(Metric.increment(gatewayRunEventBackpressureDisconnectTotal));
+        emitGatewayLog("warning", "Gateway connection disconnected for event backpressure", {
+            ...gatewayContextAnnotations(connection),
+            event,
+            wsBufferedAmount: typeof connection.ws?.bufferedAmount === "number" ? connection.ws.bufferedAmount : null,
+            queueMaxBytes: CONNECTION_EVENT_QUEUE_MAX_BYTES,
+            wsBufferedHighWaterBytes: CONNECTION_EVENT_WS_BUFFERED_HIGH_WATER_BYTES,
+        }, "gateway:broadcast");
+        try {
+            connection.ws.close(CONNECTION_EVENT_BACKPRESSURE_CLOSE_CODE, "event backpressure");
+        }
+        catch { }
     }
     /**
    * @param {string} event

@@ -168,6 +168,13 @@ describe("streamRunEvents backpressure", () => {
 
     // The (limit+1)th frame trips the disconnect.
     expect(disconnectedAt).toBe(QUEUE_LIMIT + 1);
+    // No bypass: while the socket is still congested the run.error notification
+    // sits in the connection's byte-bounded event writer instead of being
+    // pushed onto the socket, then flushes once the socket recovers.
+    expect(runErrors(connection)).toHaveLength(0);
+    expect(connection.eventWriter.queue).toHaveLength(1);
+    connection.ws.bufferedAmount = 0;
+    await sleep(30);
     const errors = runErrors(connection);
     expect(errors).toHaveLength(1);
     expect(errors[0].payload.error.code).toBe("BackpressureDisconnect");

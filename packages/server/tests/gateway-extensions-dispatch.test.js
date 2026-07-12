@@ -252,10 +252,16 @@ describe("Gateway.extend + routeExtensionRequest", () => {
     expect(res.ok).toBe(true);
     // Let the queued ctx.send loop run and the backpressure check fire.
     await new Promise((r) => setTimeout(r, 30));
+    expect(cleanedUp).toBe(true);
+    // No bypass: while the socket is still congested the teardown error sits
+    // in the connection's byte-bounded event writer instead of being pushed
+    // onto the socket, then flushes once the socket recovers.
+    expect(sent.find((entry) => entry.event === "ext.stream.error")).toBeUndefined();
+    connection.ws.bufferedAmount = 0;
+    await new Promise((r) => setTimeout(r, 30));
     const errEvent = sent.find((entry) => entry.event === "ext.stream.error");
     expect(errEvent).toBeDefined();
     expect(errEvent.payload.error.code).toBe("BackpressureDisconnect");
-    expect(cleanedUp).toBe(true);
   });
 
   test("disconnect aborts a long-running resource handler via ctx.signal", async () => {
