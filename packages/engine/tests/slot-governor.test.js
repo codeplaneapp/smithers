@@ -99,3 +99,50 @@ describe("createSlotGovernor (auto cap)", () => {
         expect(governor.onSlotWait(4, 20).raiseTo).toBe(16);
     });
 });
+
+describe("createSlotGovernor (declared parallel width)", () => {
+    test("raises the cap to a declared width, bypassing the auto-raise ceiling", () => {
+        const governor = createSlotGovernor(4, { explicit: false, ceiling: 16 });
+        expect(governor.onDeclaredWidth(64)).toEqual({ raiseTo: 64 });
+        // Demand-driven raises stay clamped to the ceiling, which the declared
+        // width already exceeds: no further raise past the declared 64.
+        expect(governor.onSlotWait(64, 10)).toEqual({ warn: null, raiseTo: null });
+    });
+
+    test("an explicit pin is never raised by a declared width", () => {
+        const governor = createSlotGovernor(2, { explicit: true });
+        expect(governor.onDeclaredWidth(64)).toEqual({ raiseTo: null });
+    });
+
+    test("a declared width at or below the current cap is a no-op", () => {
+        const governor = createSlotGovernor(4, { explicit: false });
+        expect(governor.onDeclaredWidth(4)).toEqual({ raiseTo: null });
+        expect(governor.onDeclaredWidth(3)).toEqual({ raiseTo: null });
+    });
+
+    test("undefined and non-integer widths are ignored", () => {
+        const governor = createSlotGovernor(4, { explicit: false });
+        expect(governor.onDeclaredWidth(undefined)).toEqual({ raiseTo: null });
+        expect(governor.onDeclaredWidth(Number.NaN)).toEqual({ raiseTo: null });
+        expect(governor.onDeclaredWidth(6.5)).toEqual({ raiseTo: null });
+    });
+
+    test("demand still raises past a smaller declared width, up to the ceiling", () => {
+        const governor = createSlotGovernor(4, { explicit: false, ceiling: 16 });
+        expect(governor.onDeclaredWidth(6)).toEqual({ raiseTo: 6 });
+        expect(governor.onSlotWait(6, 4).raiseTo).toBe(10);
+        expect(governor.onSlotWait(10, 20).raiseTo).toBe(16);
+    });
+
+    test("re-renders track the raised cap: only wider declarations raise again", () => {
+        const governor = createSlotGovernor(4, { explicit: false });
+        expect(governor.onDeclaredWidth(8)).toEqual({ raiseTo: 8 });
+        expect(governor.onDeclaredWidth(8)).toEqual({ raiseTo: null });
+        expect(governor.onDeclaredWidth(12)).toEqual({ raiseTo: 12 });
+    });
+
+    test("non-positive cap never raises", () => {
+        const governor = createSlotGovernor(0, { explicit: false });
+        expect(governor.onDeclaredWidth(8)).toEqual({ raiseTo: null });
+    });
+});

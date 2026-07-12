@@ -5259,6 +5259,29 @@ function timerStartsFromContinuationEnvelope(envelope) {
     return timerStarts.size > 0 ? timerStarts : undefined;
 }
 /**
+ * Widest DECLARED parallel width in an extracted graph: the largest
+ * `parallelMaxConcurrency` any task descriptor recorded from its nearest
+ * `<Parallel>`/`<MergeQueue>` ancestor. A parallel without a positive numeric
+ * `maxConcurrency` is unlimited and declares no width (it stays governed by
+ * the demand-driven auto-raise), so it contributes nothing here.
+ *
+ * @param {readonly { readonly parallelMaxConcurrency?: number }[]} tasks
+ * @returns {number | undefined}
+ */
+function widestDeclaredParallelWidth(tasks) {
+    /** @type {number | undefined} */
+    let widest;
+    for (const task of tasks) {
+        const width = task.parallelMaxConcurrency;
+        if (typeof width === "number" &&
+            Number.isFinite(width) &&
+            (widest === undefined || width > widest)) {
+            widest = width;
+        }
+    }
+    return widest;
+}
+/**
  * @template Schema
  * @param {SmithersWorkflow<Schema>} workflow
  * @param {RunOptions} opts
@@ -6598,6 +6621,32 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 });
                 lastGraph = graph;
                 descriptorMap = buildDescriptorMap(graph.tasks);
+                // Derive the run's default concurrency from what the workflow
+                // DECLARED: a <Parallel maxConcurrency={64}> must not crawl at
+                // the engine default of 4 — or stall at the demand auto-raise
+                // ceiling — just because no --max-concurrency flag was
+                // supplied. The governor ignores this for explicitly pinned
+                // runs (flag or restored pin), and declared widths bypass the
+                // auto-raise ceiling; demand-driven raises past the declared
+                // width stay clamped to the ceiling.
+                const widthDecision = slotGovernor.onDeclaredWidth(widestDeclaredParallelWidth(graph.tasks));
+                if (widthDecision.raiseTo !== null) {
+                    const previousCap = maxConcurrency;
+                    maxConcurrency = widthDecision.raiseTo;
+                    logInfo(`raising maxConcurrency from ${previousCap} to ${maxConcurrency}: ` +
+                        `the workflow declares a Parallel maxConcurrency of ${maxConcurrency} ` +
+                        `(pass --max-concurrency to pin the cap)`, { runId, previousMaxConcurrency: previousCap, maxConcurrency }, "engine:concurrency");
+                    // Same handoff as the demand-driven auto-raise: freed
+                    // capacity goes to the tasks that queued first; each
+                    // resolved waiter increments activeTaskCount when it
+                    // resumes.
+                    let capacity = maxConcurrency - activeTaskCount;
+                    while (capacity > 0 && taskWaiters.length > 0) {
+                        const next = taskWaiters.shift();
+                        next?.resolve();
+                        capacity -= 1;
+                    }
+                }
                 workflowName = getWorkflowNameFromXml(graph.xml);
                 updateCurrentCorrelationContext({ workflowName });
                 cacheEnabled =

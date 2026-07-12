@@ -13,11 +13,19 @@
  * per run the first time queued demand reaches the cap itself (i.e. total
  * demand is at least twice the cap), so transient one-off waits stay quiet.
  *
+ * Beyond demand, workflows also DECLARE width statically: the engine feeds
+ * each extracted graph's widest `<Parallel maxConcurrency>` to
+ * `onDeclaredWidth`. A declared width is author intent — unlike demand-driven
+ * raises it is NOT clamped to the auto-raise ceiling (a workflow declaring
+ * `maxConcurrency={64}` runs 64 wide by default), while demand-driven raises
+ * past the declared width stay clamped to the ceiling. Explicit
+ * `--max-concurrency` pins beat both.
+ *
  * @param {number} maxConcurrency
  * @param {{ explicit?: boolean, ceiling?: number }} [options] `explicit` marks
  *   a user-pinned cap (never auto-raised); `ceiling` overrides the auto-raise
  *   ceiling (defaults to the env var above, else 16).
- * @returns {{ onSlotWait: (activeTaskCount: number, waitingCount: number) => { warn: string | null, raiseTo: number | null } }}
+ * @returns {{ onSlotWait: (activeTaskCount: number, waitingCount: number) => { warn: string | null, raiseTo: number | null }, onDeclaredWidth: (declaredWidth: number | undefined) => { raiseTo: number | null } }}
  */
 export function createSlotGovernor(maxConcurrency, options = {}) {
     const explicit = Boolean(options.explicit);
@@ -25,6 +33,31 @@ export function createSlotGovernor(maxConcurrency, options = {}) {
     let cap = maxConcurrency;
     let warned = false;
     return {
+        /**
+         * Call with the widest DECLARED `<Parallel maxConcurrency>` width in a
+         * freshly extracted graph (undefined when no parallel declares one).
+         * Declared widths bypass the auto-raise ceiling — the author asked for
+         * that width — so this raises the cap to the declared width whenever
+         * the run is not explicitly pinned and the width exceeds the current
+         * cap. The ceiling keeps governing demand-driven raises in
+         * `onSlotWait`, including raises past a smaller declared width.
+         *
+         * @param {number | undefined} declaredWidth
+         * @returns {{ raiseTo: number | null }} `raiseTo` is the new cap the
+         *   engine should adopt (always above the current one), else null
+         */
+        onDeclaredWidth(declaredWidth) {
+            if (explicit || cap <= 0) {
+                return { raiseTo: null };
+            }
+            if (typeof declaredWidth !== "number" ||
+                !Number.isInteger(declaredWidth) ||
+                declaredWidth <= cap) {
+                return { raiseTo: null };
+            }
+            cap = declaredWidth;
+            return { raiseTo: declaredWidth };
+        },
         /**
          * Call when a task is about to queue for a slot. `waitingCount` counts
          * the queue INCLUDING the task about to wait.
