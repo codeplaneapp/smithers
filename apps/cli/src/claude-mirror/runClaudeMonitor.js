@@ -44,6 +44,11 @@ const FYI_KINDS = new Set(["run-finished", "run-cancelled", "run-continued"]);
  * all runs would wake each session for every other session's — and every
  * pre-existing — run. Without `subscriptionsPath` it scans all local runs.
  *
+ * A run counts as stalled only when its heartbeat is older than
+ * `stalledAfterMs` AND no new events were persisted within that window: a
+ * saturated engine keeps persisting events while its heartbeat timers starve,
+ * and that durable activity is liveness a late heartbeat cannot veto.
+ *
  * @param {any} adapter
  * @param {{ intervalMs?: number; stalledAfterMs?: number; ticks?: number; transitions?: "actionable" | "all"; subscriptionsPath?: string; sessionId?: string; write?: (line: string) => void; now?: () => number }} [options]
  */
@@ -62,6 +67,8 @@ export async function runClaudeMonitor(adapter, options = {}) {
     const emitted = new Set();
     /** @type {Set<string>} runs currently flagged stalled */
     const stalledRuns = new Set();
+    /** @type {Map<string, number>} last time NEW persisted events were observed per run */
+    const eventActivityAt = new Map();
     /** @type {Set<string>} terminal runs that already got their final scan */
     const finalScanned = new Set();
 
@@ -114,6 +121,7 @@ export async function runClaudeMonitor(adapter, options = {}) {
                 finalScanned.add(runId);
             }
             let cursor = cursors.get(runId) ?? 0;
+            const cursorAtScanStart = cursor;
             let sawTerminalEvent = false;
             // Live runs read one page per tick (the cursor catches up next tick).
             // The final scan of a terminal run must drain every remaining page:
@@ -155,6 +163,11 @@ export async function runClaudeMonitor(adapter, options = {}) {
                 }
             }
             cursors.set(runId, cursor);
+            if (cursor > cursorAtScanStart) {
+                // New rows landed since the last tick: the engine is durably
+                // making progress even if its heartbeat timer is starved.
+                eventActivityAt.set(runId, now());
+            }
             if (finalScan && !sawTerminalEvent) {
                 // The engine commits the terminal run status BEFORE it persists the
                 // RunFailed/RunFinished event row, so this one-shot final scan can
@@ -172,7 +185,7 @@ export async function runClaudeMonitor(adapter, options = {}) {
                 removeClaudeMirrorSubscription(subscriptionsPath, { runId, nowMs: now() });
             }
             await emitPendingGates(adapter, runId, emitOnce);
-            trackStall(run, stalledAfterMs, stalledRuns, emit, now);
+            trackStall(run, stalledAfterMs, stalledRuns, emit, now, eventActivityAt.get(runId));
         }
         if (options.ticks !== undefined && tick >= options.ticks) {
             break;
@@ -282,17 +295,23 @@ function buildEventEntry(kind, runId, payload) {
  * @param {Set<string>} stalledRuns
  * @param {(entry: Record<string, unknown>) => void} emit
  * @param {() => number} now
+ * @param {number | undefined} lastEventActivityAtMs
  */
-function trackStall(run, stalledAfterMs, stalledRuns, emit, now) {
+function trackStall(run, stalledAfterMs, stalledRuns, emit, now, lastEventActivityAtMs) {
     const runId = run.runId;
     const heartbeat = typeof run.heartbeatAtMs === "number" ? run.heartbeatAtMs : undefined;
-    const isStalled = run.status === "running" && heartbeat !== undefined && now() - heartbeat > stalledAfterMs;
+    const heartbeatLate = heartbeat !== undefined && now() - heartbeat > stalledAfterMs;
+    // Heartbeat timers starve on a saturated engine while event persistence
+    // keeps flowing, so recently persisted events count as liveness: a late
+    // heartbeat alone must not flag a run that is still durably progressing.
+    const recentEventActivity = lastEventActivityAtMs !== undefined && now() - lastEventActivityAtMs <= stalledAfterMs;
+    const isStalled = run.status === "running" && heartbeatLate && !recentEventActivity;
     if (isStalled && !stalledRuns.has(runId)) {
         stalledRuns.add(runId);
         emit({
             kind: "run-stalled",
             runId,
-            summary: `Run ${runId} has not heartbeaten for over ${Math.round(stalledAfterMs / 1000)}s.`,
+            summary: `Run ${runId} has not heartbeaten for over ${Math.round(stalledAfterMs / 1000)}s and shows no recent event activity.`,
             action: `Check it with: smithers why ${runId} (resume with: smithers up --resume ${runId})`,
         });
     }
