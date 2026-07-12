@@ -1,5 +1,7 @@
 /** @typedef {import("./GroundedWebSearchProvider.ts").GroundedWebSearchProvider} GroundedWebSearchProvider */
 
+const MAX_REDIRECTS = 5;
+
 /**
  * @param {{ apiKey: string; baseUrl?: string; fetch?: typeof fetch }} options
  * @returns {GroundedWebSearchProvider}
@@ -10,7 +12,7 @@ export function createExaSearchProvider(options) {
     kind: "semantic",
     async search(input) {
       const fetchImpl = options.fetch ?? fetch;
-      const response = await fetchImpl(`${options.baseUrl ?? "https://api.exa.ai"}/search`, {
+      const response = await fetchWithSameOriginRedirects(fetchImpl, `${options.baseUrl ?? "https://api.exa.ai"}/search`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -34,6 +36,56 @@ export function createExaSearchProvider(options) {
       })).filter((result) => result.url);
     },
   };
+}
+
+/**
+ * Follow redirects manually so the `x-api-key` header never rides an
+ * automatically-followed hop to another origin. Every `Location` hop is
+ * resolved against the current URL and validated: same-origin redirects are
+ * followed (up to {@link MAX_REDIRECTS}), while a cross-origin hop fails
+ * closed instead of leaking the credential to an untrusted host.
+ *
+ * @param {typeof fetch} fetchImpl
+ * @param {string} url
+ * @param {{ method: string; headers: Record<string, string>; body?: string }} init
+ * @returns {Promise<Response>}
+ */
+async function fetchWithSameOriginRedirects(fetchImpl, url, init) {
+  let current = new URL(url);
+  let method = init.method;
+  let body = init.body;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    const response = await fetchImpl(current, { ...init, method, body, redirect: "manual" });
+    if (!isRedirectStatus(response.status)) return response;
+    const location = response.headers.get("location");
+    // A redirect status without a Location header is not followable; surface
+    // the response as-is (matching fetch semantics).
+    if (!location) return response;
+    /** @type {URL} */
+    let next;
+    try {
+      next = new URL(location, current);
+    } catch {
+      throw new Error(`Exa search redirect returned an invalid Location header: ${location}`);
+    }
+    if (next.origin !== current.origin) {
+      throw new Error(
+        `Exa search redirected cross-origin from ${current.origin} to ${next.origin}; refusing to forward the API key`,
+      );
+    }
+    // Mirror fetch redirect semantics: 303 (and 301/302 on POST) switch to GET.
+    if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) {
+      method = "GET";
+      body = undefined;
+    }
+    current = next;
+  }
+  throw new Error(`Exa search exceeded ${MAX_REDIRECTS} redirects`);
+}
+
+/** @param {number} status */
+function isRedirectStatus(status) {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
 /** @param {string | undefined} freshness */
