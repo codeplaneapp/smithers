@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 // barrel would resolve to whatever install node_modules points at).
 import { SmithersDb } from "../../../packages/db/src/adapter.js";
 import { ensureSmithersTables } from "../../../packages/db/src/ensure.js";
+import { smithersBranches } from "../../../packages/time-travel/src/schema.js";
 import { cascadeCancelRun, isCancellableRunStatus, terminateRunOwner } from "../src/cancel-cascade.js";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 
@@ -115,6 +116,63 @@ async function insertRun(adapter, runId, overrides = {}) {
 
 const fresh = () => Date.now() + FRESH_HEARTBEAT_LEEWAY_MS;
 const stale = () => Date.now() - STALE_HEARTBEAT_MS;
+
+/**
+ * Mirrors the branches DDL that ensureSmithersTables already runs
+ * (packages/db/src/sql-message-storage.js CREATE_TABLE_STATEMENTS), so these
+ * helpers are idempotent no-ops on a normal test DB. It is re-stated here only
+ * so the "no _smithers_branches table" case can DROP the table and then restore
+ * it, which is the one scenario ensureSmithersTables cannot produce.
+ */
+const CREATE_BRANCHES_TABLE_SQL = `CREATE TABLE IF NOT EXISTS _smithers_branches (
+    run_id TEXT PRIMARY KEY,
+    parent_run_id TEXT NOT NULL,
+    parent_frame_no INTEGER NOT NULL,
+    branch_label TEXT,
+    fork_description TEXT,
+    created_at_ms INTEGER NOT NULL
+  )`;
+
+/**
+ * Mark `runId` as a time-travel FORK of `parentRunId` — the same branch row
+ * forkRunEffect writes (the fork's _smithers_runs row still carries
+ * parentRunId, which is exactly the overload the cascade must see through).
+ *
+ * @param {Database} sqlite
+ * @param {SmithersDb} adapter
+ */
+async function insertForkBranch(sqlite, adapter, runId, parentRunId) {
+    sqlite.run(CREATE_BRANCHES_TABLE_SQL);
+    await adapter.db.insert(smithersBranches).values({
+        runId,
+        parentRunId,
+        parentFrameNo: 1,
+        branchLabel: null,
+        forkDescription: "test fork",
+        createdAtMs: Date.now(),
+    });
+}
+
+/**
+ * Mark `runId` as a continue-as-new CONTINUATION of `parentRunId` — the branch
+ * row the engine writes on handoff (packages/engine/src/engine.js, branchLabel
+ * "continue-as-new"). It reuses the fork table, but a continuation is the SAME
+ * logical run in a fresh segment, so the cascade must still cancel it.
+ *
+ * @param {Database} sqlite
+ * @param {SmithersDb} adapter
+ */
+async function insertContinuationBranch(sqlite, adapter, runId, parentRunId) {
+    sqlite.run(CREATE_BRANCHES_TABLE_SQL);
+    await adapter.db.insert(smithersBranches).values({
+        runId,
+        parentRunId,
+        parentFrameNo: 1,
+        branchLabel: "continue-as-new",
+        forkDescription: "continue-as-new:test",
+        createdAtMs: Date.now(),
+    });
+}
 
 describe("cascadeCancelRun (real sqlite store)", () => {
     test("cancels nested descendants: stale root, waiting child, stale grandchild with an in-flight attempt", async () => {
@@ -268,6 +326,169 @@ describe("cascadeCancelRun (real sqlite store)", () => {
                 expect.objectContaining({ runId: "late-child", action: "cancelled" }),
             ]);
             expect((await adapter.getRun("late-child")).status).toBe("cancelled");
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("a continue-as-new CONTINUATION is still cancelled — it reuses the branches table but is the same logical run, not an independent branch", async () => {
+        const { sqlite, adapter } = createMemoryDb();
+        try {
+            await insertRun(adapter, "root", { heartbeatAtMs: stale() });
+            // continue-as-new handoff: a branch row EXISTS (engine writes one),
+            // but labelled "continue-as-new". Sparing it like a fork would leave
+            // the live continuation running after `smithers cancel <root>` —
+            // i.e. cancel would silently fail to stop the run.
+            await insertRun(adapter, "cont", { parentRunId: "root", heartbeatAtMs: stale() });
+            await insertContinuationBranch(sqlite, adapter, "cont", "root");
+            // Work spawned by the continuation dies with it.
+            await insertRun(adapter, "cont-child", { parentRunId: "cont", heartbeatAtMs: stale() });
+            // A genuine fork of the SAME root still survives, proving the
+            // discriminator is the branch LABEL, not merely the row's presence.
+            await insertRun(adapter, "fork", { parentRunId: "root", heartbeatAtMs: stale() });
+            await insertForkBranch(sqlite, adapter, "fork", "root");
+
+            const summary = await cascadeCancelRun(adapter, "root");
+
+            const byId = Object.fromEntries(summary.descendants.map((d) => [d.runId, d.action]));
+            expect(byId).toEqual({ cont: "cancelled", "cont-child": "cancelled" });
+            for (const runId of ["root", "cont", "cont-child"]) {
+                expect((await adapter.getRun(runId)).status).toBe("cancelled");
+            }
+            const fork = await adapter.getRun("fork");
+            expect(fork.status).toBe("running");
+            expect(fork.cancelRequestedAtMs ?? null).toBeNull();
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+    test("a time-travel FORK of the root survives the cascade — and so does everything beneath it — while child workflows still die", async () => {
+        const { sqlite, adapter } = createMemoryDb();
+        try {
+            await insertRun(adapter, "root", { heartbeatAtMs: stale() });
+            // Lifecycle children: cancelled with the root, transitively.
+            await insertRun(adapter, "child-wf", { parentRunId: "root", status: "waiting-approval", heartbeatAtMs: null });
+            await insertRun(adapter, "grand-wf", { parentRunId: "child-wf", heartbeatAtMs: stale() });
+            // A fork: parent_run_id also points at root, but a branch row marks
+            // it an independent branch of history. Its own child has NO branch
+            // row — the prune must cover the whole subtree, not just the fork.
+            await insertRun(adapter, "fork", { parentRunId: "root", heartbeatAtMs: stale() });
+            await insertForkBranch(sqlite, adapter, "fork", "root");
+            await insertRun(adapter, "fork-child", { parentRunId: "fork", heartbeatAtMs: stale() });
+
+            const summary = await cascadeCancelRun(adapter, "root");
+
+            expect(summary.root).toMatchObject({ runId: "root", action: "cancelled" });
+            const byId = Object.fromEntries(summary.descendants.map((d) => [d.runId, d.action]));
+            expect(byId).toEqual({
+                "child-wf": "cancelled",
+                "grand-wf": "cancelled",
+            });
+            for (const runId of ["root", "child-wf", "grand-wf"]) {
+                expect((await adapter.getRun(runId)).status).toBe("cancelled");
+            }
+            // The fork branch keeps running, untouched — no flip, no request.
+            for (const runId of ["fork", "fork-child"]) {
+                const run = await adapter.getRun(runId);
+                expect(run.status).toBe("running");
+                expect(run.cancelRequestedAtMs ?? null).toBeNull();
+            }
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("explicitly cancelling a fork BY ID still cancels it and its lifecycle children — but not a nested fork of it", async () => {
+        const { sqlite, adapter } = createMemoryDb();
+        try {
+            await insertRun(adapter, "source", { heartbeatAtMs: stale() });
+            await insertRun(adapter, "fork", { parentRunId: "source", heartbeatAtMs: stale() });
+            await insertForkBranch(sqlite, adapter, "fork", "source");
+            await insertRun(adapter, "fork-child", { parentRunId: "fork", status: "waiting-event", heartbeatAtMs: null });
+            await insertRun(adapter, "fork-of-fork", { parentRunId: "fork", heartbeatAtMs: stale() });
+            await insertForkBranch(sqlite, adapter, "fork-of-fork", "fork");
+
+            const summary = await cascadeCancelRun(adapter, "fork");
+
+            // Depth 0: the branch-row check never applies to the cascade root.
+            expect(summary.root).toMatchObject({ runId: "fork", action: "cancelled" });
+            expect(summary.descendants).toEqual([
+                expect.objectContaining({ runId: "fork-child", action: "cancelled" }),
+            ]);
+            expect((await adapter.getRun("fork")).status).toBe("cancelled");
+            expect((await adapter.getRun("fork-child")).status).toBe("cancelled");
+            expect((await adapter.getRun("fork-of-fork")).status).toBe("running");
+            // The fork's SOURCE is an ancestor, never a descendant.
+            expect((await adapter.getRun("source")).status).toBe("running");
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("no _smithers_branches table (time travel never used): treated as no forks, cascade sweeps without throwing", async () => {
+        const { sqlite, adapter } = createMemoryDb();
+        try {
+            // Simulate a pre-time-travel DB whose migrations never made the
+            // branches table, and assert it is really gone.
+            sqlite.run(`DROP TABLE IF EXISTS _smithers_branches`);
+            const tables = sqlite
+                .query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_branches'`)
+                .all();
+            expect(tables).toEqual([]);
+            await insertRun(adapter, "root", { heartbeatAtMs: stale() });
+            await insertRun(adapter, "child", { parentRunId: "root", status: "waiting-approval", heartbeatAtMs: null });
+
+            const summary = await cascadeCancelRun(adapter, "root");
+
+            expect(summary.root).toMatchObject({ runId: "root", action: "cancelled" });
+            expect(summary.descendants).toEqual([
+                expect.objectContaining({ runId: "child", action: "cancelled" }),
+            ]);
+            expect((await adapter.getRun("root")).status).toBe("cancelled");
+            expect((await adapter.getRun("child")).status).toBe("cancelled");
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("race: a fork created WHILE the cascade runs is spared by the re-discovery pass; a late lifecycle child is still swept", async () => {
+        const { sqlite, adapter } = createMemoryDb();
+        try {
+            await insertRun(adapter, "root", { heartbeatAtMs: stale() });
+
+            // While the root is being flipped, someone forks it AND its engine
+            // launches one last child — pass 2 must sweep the child but spare
+            // the fork.
+            let injected = false;
+            const racy = new Proxy(adapter, {
+                get(target, prop, receiver) {
+                    if (prop === "listInProgressAttempts") {
+                        return async (runId) => {
+                            if (runId === "root" && !injected) {
+                                injected = true;
+                                await insertRun(target, "late-child", { parentRunId: "root", heartbeatAtMs: stale() });
+                                await insertRun(target, "late-fork", { parentRunId: "root", heartbeatAtMs: stale() });
+                                await insertForkBranch(sqlite, target, "late-fork", "root");
+                            }
+                            return target.listInProgressAttempts(runId);
+                        };
+                    }
+                    const value = Reflect.get(target, prop, receiver);
+                    return typeof value === "function" ? value.bind(target) : value;
+                },
+            });
+
+            const summary = await cascadeCancelRun(racy, "root");
+            expect(summary.descendants).toEqual([
+                expect.objectContaining({ runId: "late-child", action: "cancelled" }),
+            ]);
+            expect((await adapter.getRun("late-child")).status).toBe("cancelled");
+            expect((await adapter.getRun("late-fork")).status).toBe("running");
         }
         finally {
             sqlite.close();
@@ -441,6 +662,43 @@ describe("smithers cancel cascades (CLI integration)", () => {
             expect(repeat.json?.code).toBe("RUN_NOT_ACTIVE");
             expect((await adapter.getRun("root")).status).toBe("cancelled");
             expect((await adapter.getRun("straggler")).status).toBe("cancelled");
+        }
+        finally {
+            sqlite.close();
+        }
+    }, CLI_COMMAND_TIMEOUT_MS);
+
+    test("cancelling a superseded root spares the time-travel fork that replaced it", async () => {
+        const repo = createTempRepo();
+        const { sqlite, adapter } = openRepoDb(repo);
+        try {
+            // The live-run shape that motivated the fix: a dead root, one
+            // lifecycle child to sweep, and a healthy fork that superseded the
+            // root. `smithers cancel root` must not take the fork down.
+            await insertRun(adapter, "root", { heartbeatAtMs: stale() });
+            await insertRun(adapter, "child-wf", { parentRunId: "root", status: "waiting-approval", heartbeatAtMs: null });
+            await insertRun(adapter, "fork", { parentRunId: "root", heartbeatAtMs: stale() });
+            await insertForkBranch(sqlite, adapter, "fork", "root");
+            await insertRun(adapter, "fork-child", { parentRunId: "fork", status: "waiting-event", heartbeatAtMs: null });
+
+            const result = runSmithers(["cancel", "root"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
+
+            expect(result.exitCode).toBe(2);
+            expect(result.json).toMatchObject({ runId: "root", status: "cancelled" });
+            expect(result.json?.descendants).toMatchObject({
+                discovered: 1,
+                cancelled: ["child-wf"],
+            });
+            expect((await adapter.getRun("root")).status).toBe("cancelled");
+            expect((await adapter.getRun("child-wf")).status).toBe("cancelled");
+            const fork = await adapter.getRun("fork");
+            expect(fork.status).toBe("running");
+            expect(fork.cancelRequestedAtMs ?? null).toBeNull();
+            expect((await adapter.getRun("fork-child")).status).toBe("waiting-event");
         }
         finally {
             sqlite.close();

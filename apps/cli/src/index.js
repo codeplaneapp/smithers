@@ -35,7 +35,7 @@ import { CronExpressionParser } from "cron-parser";
 import { buildAgentAskRequestRow, isHumanRequestPastTimeout, validateHumanRequestValue, waitForHumanAnswer, } from "@smithers-orchestrator/engine/human-requests";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
-import { cascadeCancelRun, isCancellableRunStatus } from "./cancel-cascade.js";
+import { cascadeCancelRun, isCancellableRunStatus, listCascadeLineage } from "./cancel-cascade.js";
 import { isDaemonDisabled } from "./isDaemonDisabled.js";
 import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, formatAskHumanResolveHelp, parseChoices, resolveAskHumanContext, } from "./ask-human.js";
@@ -6937,7 +6937,10 @@ const cli = Cli.create({
                     // have died between flipping the root and sweeping its
                     // descendants, so if any linked descendant is still
                     // cancellable, finish the cascade instead of erroring.
-                    const descendants = await adapter.listRunDescendants(c.args.runId);
+                    // Use the cascade's OWN lineage (fork subtrees pruned): a fork is
+                    // spared by the sweep, so counting it here would report success
+                    // while cancelling nothing instead of RUN_NOT_ACTIVE.
+                    const descendants = await listCascadeLineage(adapter, c.args.runId);
                     let hasCancellableDescendant = false;
                     for (const row of descendants) {
                         if (row.depth === 0)

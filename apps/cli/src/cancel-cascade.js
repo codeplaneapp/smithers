@@ -168,6 +168,109 @@ export async function terminateRunOwner(pid, options = {}) {
 }
 
 /**
+ * Collapse an error (and its cause chain) into searchable text so
+ * missing-table detection sees the driver's message wherever a wrapper
+ * buried it.
+ *
+ * @param {unknown} error
+ * @returns {string}
+ */
+function collectErrorText(error) {
+    const parts = [];
+    let current = error;
+    for (let hops = 0; current != null && hops < 8; hops++) {
+        parts.push(current instanceof Error ? current.message : String(current));
+        current = /** @type {{ cause?: unknown }} */ (current).cause;
+    }
+    return parts.join(" ");
+}
+
+/**
+ * Branch label the engine stamps on a continue-as-new handoff
+ * (packages/engine/src/engine.js). A continuation reuses the fork plumbing —
+ * it writes a `_smithers_branches` row too — but it is NOT an independent
+ * branch: it is the SAME logical run carrying on in a fresh segment, so cancel
+ * MUST still reach it. Only genuine time-travel forks are spared.
+ */
+const CONTINUE_AS_NEW_LABEL = "continue-as-new";
+
+/**
+ * Which of `runIds` are time-travel FORKS — runs with a `_smithers_branches`
+ * row keyed by their own run id, EXCLUDING continue-as-new continuations.
+ * `parent_run_id` on `_smithers_runs` is overloaded: child workflows, forks,
+ * and continuations all point at the run that spawned them. A fork is an
+ * independent branch of history, not a lifecycle child, so the cascade must
+ * never sweep it — but a continuation is the run itself, so the cascade must.
+ *
+ * A DB that never used time travel has no `_smithers_branches` table at all;
+ * that is legitimately "no forks" (SQLite: "no such table", Postgres/PGlite:
+ * `relation ... does not exist`), never a fault. Any other error stays fatal.
+ *
+ * @param {SmithersDb} adapter
+ * @param {readonly string[]} runIds
+ * @returns {Promise<Set<string>>}
+ */
+async function listForkRunIds(adapter, runIds) {
+    if (runIds.length === 0) {
+        return new Set();
+    }
+    const placeholders = runIds.map(() => "?").join(", ");
+    try {
+        const rows = /** @type {{ runId: string }[]} */ (await adapter.internalStorage.queryAll(`SELECT run_id FROM _smithers_branches WHERE run_id IN (${placeholders}) AND (branch_label IS NULL OR branch_label <> ?)`, [...runIds, CONTINUE_AS_NEW_LABEL]));
+        return new Set(rows.map((row) => row.runId));
+    }
+    catch (error) {
+        if (/no such table|does not exist/i.test(collectErrorText(error))) {
+            return new Set();
+        }
+        throw error;
+    }
+}
+
+/**
+ * The lineage a cancel of `rootRunId` will actually reach: its descendants with
+ * every fork subtree pruned out. Callers that need to reason about what a
+ * cascade WILL do (e.g. the CLI's terminal-root pre-check, which decides between
+ * RUN_NOT_ACTIVE and finishing an interrupted cascade) must use this rather than
+ * a raw listRunDescendants, or they will count a fork — which the cascade spares
+ * — as work still to do, and report success while cancelling nothing.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} rootRunId
+ * @returns {Promise<{ runId: string; parentRunId: string | null; depth: number }[]>}
+ */
+export async function listCascadeLineage(adapter, rootRunId) {
+    return pruneForkSubtrees(adapter, await adapter.listRunDescendants(rootRunId));
+}
+
+/**
+ * Drop every fork subtree from a listRunDescendants result: a descendant that
+ * is a fork is pruned together with everything beneath it. The root (depth 0)
+ * is never checked — explicitly cancelling a fork BY ID must still cancel it.
+ * Rows arrive depth-ascending, so a parent's verdict always precedes its
+ * children's.
+ *
+ * @param {SmithersDb} adapter
+ * @param {{ runId: string; parentRunId: string | null; depth: number }[]} rows
+ * @returns {Promise<{ runId: string; parentRunId: string | null; depth: number }[]>}
+ */
+async function pruneForkSubtrees(adapter, rows) {
+    const forkIds = await listForkRunIds(adapter, rows.filter((row) => row.depth > 0).map((row) => row.runId));
+    if (forkIds.size === 0) {
+        return rows;
+    }
+    const prunedIds = new Set();
+    return rows.filter((row) => {
+        if (row.depth > 0 &&
+            (forkIds.has(row.runId) || (row.parentRunId !== null && prunedIds.has(row.parentRunId)))) {
+            prunedIds.add(row.runId);
+            return false;
+        }
+        return true;
+    });
+}
+
+/**
  * @typedef {{
  *   runId: string;
  *   depth: number;
@@ -186,8 +289,12 @@ export async function terminateRunOwner(pid, options = {}) {
  */
 
 /**
- * Cancel a run AND every transitive descendant (runs whose parent_run_id chain
- * leads back to it), then clean up dead-engine owner processes.
+ * Cancel a run AND every transitive child-workflow descendant (runs whose
+ * parent_run_id chain leads back to it), then clean up dead-engine owner
+ * processes. Time-travel forks also carry parent_run_id, but a fork is an
+ * independent branch of history, not a lifecycle child: fork subtrees are
+ * pruned from every discovery pass and survive the cascade. A fork given
+ * explicitly as the root is still cancelled.
  *
  * Per run:
  * - live running (fresh heartbeat) → durable cancel request; its engine aborts
@@ -259,7 +366,9 @@ export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
     };
     for (let pass = 0; pass < MAX_CASCADE_DISCOVERY_PASSES; pass++) {
         const rows = await adapter.listRunDescendants(rootRunId);
-        const pending = rows.filter((row) => !processed.has(row.runId));
+        // Re-pruned every pass so a fork created mid-cascade is spared too.
+        const lineage = await pruneForkSubtrees(adapter, rows);
+        const pending = lineage.filter((row) => !processed.has(row.runId));
         if (pass > 0 && pending.length === 0)
             break;
         for (const row of pending) {
