@@ -118,6 +118,7 @@
 /** @typedef {import("./UIProps.ts").WorkflowViewBootProps} WorkflowViewBootProps */
 /** @typedef {import("./UIProps.ts").WorkflowViewProps} WorkflowViewProps */
 /** @typedef {import("./WaitForEventProps.ts").WaitForEventProps} WaitForEventProps */
+/** @typedef {import("./WorkflowFileRef.ts").WorkflowFileRef} WorkflowFileRef */
 /** @typedef {import("./WorkflowProps.ts").WorkflowProps} WorkflowProps */
 /** @typedef {import("./WorktreeProps.ts").WorktreeProps} WorktreeProps */
 // @smithers-type-exports-end

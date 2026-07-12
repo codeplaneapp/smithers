@@ -1,5 +1,6 @@
 // @smithers-type-exports-begin
 /** @typedef {import("./ChildWorkflowDefinition.ts").ChildWorkflowDefinition} ChildWorkflowDefinition */
+/** @typedef {import("./ChildWorkflowFileRef.ts").ChildWorkflowFileRef} ChildWorkflowFileRef */
 // @smithers-type-exports-end
 
 export { runWorkflow } from "./engine.js";
@@ -12,6 +13,7 @@ export * from "./alert-runtime.js";
 export * from "./approvals.js";
 export * from "./child-workflow.js";
 export * from "./events.js";
+export * from "./workflow-file.js";
 export * from "./createDocWatcher.js";
 export * from "./getDefinedToolMetadata.js";
 export * from "./human-requests.js";

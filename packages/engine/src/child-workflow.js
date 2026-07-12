@@ -1,8 +1,10 @@
 import { Effect } from "effect";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { getWorkflowMakeBridgeRuntime } from "./effect/workflow-make-bridge.js";
+import { isWorkflowFileRef, loadWorkflowFileRef } from "./workflow-file.js";
 /** @typedef {import("./ChildWorkflowDefinition.ts").ChildWorkflowDefinition} ChildWorkflowDefinition */
 /** @typedef {import("./ChildWorkflowExecuteOptions.ts").ChildWorkflowExecuteOptions} ChildWorkflowExecuteOptions */
 /** @typedef {import("@smithers-orchestrator/driver/RunResult").RunResult} RunResult */
@@ -117,10 +119,28 @@ function resolveChildWorkflow(definition, parentWorkflow) {
  */
 export async function executeChildWorkflow(parentWorkflow, options) {
     const runtime = requireTaskRuntime();
-    const childWorkflow = resolveChildWorkflow(options.workflow, parentWorkflow);
+    let definition = options.workflow;
+    let workflowPath = options.workflowPath;
+    if (isWorkflowFileRef(definition)) {
+        // A runtime-generated workflow file: load it from the approved root
+        // (defaulting to the parent run's rootDir) so a path authored mid-run
+        // cannot escape the parent's workspace. The loaded module becomes the
+        // child run's own workflowPath so resume re-loads the same file.
+        const loaded = await loadWorkflowFileRef(definition, {
+            approvedRoot: options.rootDir,
+        });
+        definition = loaded.workflow;
+        workflowPath = workflowPath ?? loaded.path;
+    }
+    const childWorkflow = resolveChildWorkflow(definition, parentWorkflow);
     const input = normalizeChildInput(options.input);
     const childRunId = options.runId ??
         buildChildWorkflowRunId(options.parentRunId ?? runtime.runId, runtime.stepId, runtime.iteration);
+    // The child may bring its own db (e.g. a runtime-generated workflow with
+    // its own dbPath) that has never seen a run: create the system tables
+    // before probing for an existing child run. No-op when the parent already
+    // initialized the shared db, and for Postgres (ensured by its entry point).
+    ensureSmithersTables(/** @type {any} */ (childWorkflow.db));
     const adapter = new SmithersDb(childWorkflow.db);
     const existingChildRun = await adapter.getRun(childRunId);
     const resume = Boolean(existingChildRun);
@@ -132,7 +152,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
             resume,
             parentRunId: options.parentRunId ?? runtime.runId,
             rootDir: options.rootDir,
-            workflowPath: options.workflowPath,
+            workflowPath,
             allowNetwork: options.allowNetwork,
             maxOutputBytes: options.maxOutputBytes,
             toolTimeoutMs: options.toolTimeoutMs,
@@ -151,7 +171,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
         resume,
         parentRunId: options.parentRunId ?? runtime.runId,
         rootDir: options.rootDir,
-        workflowPath: options.workflowPath,
+        workflowPath,
         allowNetwork: options.allowNetwork,
         maxOutputBytes: options.maxOutputBytes,
         toolTimeoutMs: options.toolTimeoutMs,

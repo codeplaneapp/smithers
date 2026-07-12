@@ -3,11 +3,16 @@ import type { CachePolicy } from "@smithers-orchestrator/scheduler/CachePolicy";
 import type { RetryPolicy } from "@smithers-orchestrator/scheduler/RetryPolicy";
 import type { SmithersWorkflow } from "../SmithersWorkflow.ts";
 import type { OutputTarget } from "./OutputTarget.ts";
+import type { WorkflowFileRef } from "./WorkflowFileRef.ts";
 
 export type SubflowProps = {
 	id: string;
-	/** The child workflow definition. */
-	workflow: SmithersWorkflow<unknown>;
+	/**
+	 * The child workflow definition: a built workflow object, or a
+	 * `{ path, approvedRoot? }` reference to a workflow module file generated
+	 * at runtime (loaded from the approved root when the node executes).
+	 */
+	workflow: SmithersWorkflow<unknown> | WorkflowFileRef;
 	/** Input to pass to the child workflow. */
 	input?: unknown;
 	/** `"childRun"` gets its own DB row/run; `"inline"` embeds in parent. */
