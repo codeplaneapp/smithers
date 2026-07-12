@@ -705,6 +705,15 @@ declare class SmithersDb {
    */
     getLatestChildRun(parentRunId: string): RunnableEffect<RunRow | undefined, SmithersError$1>;
     /**
+   * Walk parent_run_id DOWN from a run: the run itself at depth 0 followed by
+   * every transitive child, breadth-first (depth ascending). Mirrors
+   * listRunAncestry (which walks up) including its cycle guard.
+   *
+   * @param {string} runId
+   * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
+   */
+    listRunDescendants(runId: string, limit?: number): RunnableEffect<RunAncestryRow[], SmithersError$1>;
+    /**
    * @param {string} [status]
    * @param {string} [workflow]
    * @returns {RunnableEffect<RunRow[], SmithersError>}

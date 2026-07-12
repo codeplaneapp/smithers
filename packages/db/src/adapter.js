@@ -1201,6 +1201,40 @@ export class SmithersDb {
          LIMIT 1`, [parentRunId]));
     }
     /**
+   * Walk parent_run_id DOWN from a run: the run itself at depth 0 followed by
+   * every transitive child, breadth-first (depth ascending). Mirrors
+   * listRunAncestry (which walks up) including its cycle guard.
+   *
+   * @param {string} runId
+   * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
+   */
+    listRunDescendants(runId, limit = 1000) {
+        const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 1000;
+        const visitedCheck = this.internalStorage.dialect === POSTGRES
+            ? "POSITION(',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',' IN descendants.path) = 0"
+            : "instr(descendants.path, ',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',') = 0";
+        return this.read(`list run descendants ${runId}`, () => this.internalStorage.queryAll(`WITH RECURSIVE descendants(run_id, parent_run_id, depth, path) AS (
+           SELECT run_id, parent_run_id, 0
+                , ',' || CAST(length(run_id) AS TEXT) || ':' || run_id || ','
+           FROM _smithers_runs
+           WHERE run_id = ? AND ? > 0
+           UNION ALL
+           SELECT child.run_id, child.parent_run_id, descendants.depth + 1
+                , descendants.path || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ','
+           FROM _smithers_runs child
+           JOIN descendants ON child.parent_run_id = descendants.run_id
+           WHERE descendants.depth + 1 < ?
+             AND ${visitedCheck}
+         )
+         SELECT
+           run_id,
+           parent_run_id,
+           depth
+         FROM descendants
+         ORDER BY depth ASC
+         LIMIT ?`, [runId, normalizedLimit, normalizedLimit, normalizedLimit]));
+    }
+    /**
    * @param {string} [status]
    * @param {string} [workflow]
    * @returns {RunnableEffect<RunRow[], SmithersError>}

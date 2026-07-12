@@ -35,6 +35,7 @@ import { CronExpressionParser } from "cron-parser";
 import { buildAgentAskRequestRow, isHumanRequestPastTimeout, validateHumanRequestValue, waitForHumanAnswer, } from "@smithers-orchestrator/engine/human-requests";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
+import { cascadeCancelRun, isCancellableRunStatus } from "./cancel-cascade.js";
 import { isDaemonDisabled } from "./isDaemonDisabled.js";
 import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, formatAskHumanResolveHelp, parseChoices, resolveAskHumanContext, } from "./ask-human.js";
@@ -6931,25 +6932,48 @@ const cli = Cli.create({
                 if (!run) {
                     return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${c.args.runId}`, exitCode: 4 });
                 }
-                if (run.status !== "running" &&
-                    run.status !== "waiting-approval" &&
-                    run.status !== "waiting-event" &&
-                    run.status !== "waiting-timer" &&
-                    run.status !== "paused") {
-                    return fail({ code: "RUN_NOT_ACTIVE", message: `Run is not active (status: ${run.status})`, exitCode: 4 });
+                if (!isCancellableRunStatus(run.status)) {
+                    // Terminal root. Idempotent completion: a previous cancel may
+                    // have died between flipping the root and sweeping its
+                    // descendants, so if any linked descendant is still
+                    // cancellable, finish the cascade instead of erroring.
+                    const descendants = await adapter.listRunDescendants(c.args.runId);
+                    let hasCancellableDescendant = false;
+                    for (const row of descendants) {
+                        if (row.depth === 0)
+                            continue;
+                        const child = await adapter.getRun(row.runId);
+                        if (child && isCancellableRunStatus(child.status)) {
+                            hasCancellableDescendant = true;
+                            break;
+                        }
+                    }
+                    if (!hasCancellableDescendant) {
+                        return fail({ code: "RUN_NOT_ACTIVE", message: `Run is not active (status: ${run.status})`, exitCode: 4 });
+                    }
                 }
-                // A live engine in another process is driving this run. A bare
-                // status flip is invisible to it: it only observes cancellation
-                // by polling `cancel_requested_at_ms` (its cancelWatcher), and on
-                // completion it overwrites status with "finished", clobbering our
-                // "cancelled". Set the durable cancel request so the engine aborts
-                // its agents and writes the terminal cancelled status itself.
-                if (run.status === "running" && isRunHeartbeatFresh(run)) {
-                    await adapter.requestRunCancel(c.args.runId, Date.now());
-                    process.exitCode = 2;
+                // Cascade: cancel the run plus every linked descendant. Live runs
+                // (fresh heartbeat) get the durable cancel request — a live engine
+                // only observes cancellation by polling `cancel_requested_at_ms`
+                // (its cancelWatcher) and would clobber a bare status flip with
+                // "finished" on completion. Stale/waiting/paused runs are flipped
+                // directly and any surviving detached owner process group is
+                // terminated.
+                const summary = await cascadeCancelRun(adapter, c.args.runId);
+                const rootAction = summary.root?.action ?? "already-terminal";
+                const descendantReport = {
+                    discovered: summary.descendants.length,
+                    cancelRequested: summary.descendants.filter((d) => d.action === "cancel-requested").map((d) => d.runId),
+                    cancelled: summary.descendants.filter((d) => d.action === "cancelled").map((d) => d.runId),
+                    alreadyTerminal: summary.descendants.filter((d) => d.action === "already-terminal").map((d) => d.runId),
+                };
+                process.exitCode = 2;
+                if (rootAction === "cancel-requested") {
                     return c.ok({
                         runId: c.args.runId,
                         status: "cancel-requested",
+                        descendants: descendantReport,
+                        terminatedOwners: summary.terminatedOwners,
                     }, {
                         cta: {
                             commands: [
@@ -6959,41 +6983,12 @@ const cli = Cli.create({
                         },
                     });
                 }
-                const inProgress = await adapter.listInProgressAttempts(c.args.runId);
-                const allAttempts = await adapter.listAttemptsForRun(c.args.runId);
-                const now = Date.now();
-                for (const attempt of inProgress) {
-                    await adapter.updateAttempt(c.args.runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-                        state: "cancelled",
-                        finishedAtMs: now,
-                    });
-                }
-                const waitingTimers = allAttempts.filter((attempt) => attempt.state === "waiting-timer");
-                for (const attempt of waitingTimers) {
-                    await adapter.updateAttempt(c.args.runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-                        state: "cancelled",
-                        finishedAtMs: now,
-                    });
-                }
-                const nodes = await adapter.listNodes(c.args.runId);
-                for (const node of nodes.filter((n) => n.state === "waiting-timer")) {
-                    await adapter.insertNode({
-                        runId: c.args.runId,
-                        nodeId: node.nodeId,
-                        iteration: node.iteration ?? 0,
-                        state: "cancelled",
-                        lastAttempt: node.lastAttempt ?? null,
-                        updatedAtMs: now,
-                        outputTable: node.outputTable ?? "",
-                        label: node.label ?? null,
-                    });
-                }
-                await adapter.updateRun(c.args.runId, { status: "cancelled", finishedAtMs: now });
-                process.exitCode = 2;
                 return c.ok({
                     runId: c.args.runId,
-                    status: "cancelled",
-                    cancelledAttempts: inProgress.length + waitingTimers.length,
+                    status: rootAction === "cancelled" ? "cancelled" : run.status,
+                    cancelledAttempts: summary.cancelledAttempts,
+                    descendants: descendantReport,
+                    terminatedOwners: summary.terminatedOwners,
                 }, {
                     cta: {
                         commands: [
