@@ -71,6 +71,21 @@ export function isTelegramApiError(error) {
 }
 
 /**
+ * Forward an Effect interruption signal into the per-request controller so
+ * interrupting the fiber during either the request or the response-body read
+ * aborts the whole HTTP exchange.
+ * @param {AbortSignal} signal Effect's interruption signal for one step
+ * @param {AbortController} controller shared controller for the exchange
+ */
+function linkInterruptSignal(signal, controller) {
+    if (signal.aborted) {
+        controller.abort(signal.reason);
+        return;
+    }
+    signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+}
+
+/**
  * True for a 400 the Bot API raises when it cannot parse formatted entities
  * (or the message is too long) — the cue to retry as plain text.
  * @param {unknown} error
@@ -119,30 +134,46 @@ export function makeTelegramClient(config) {
    * @param {{ body: BodyInit; headers?: Record<string, string> }} request
    * @returns {Effect.Effect<unknown, SmithersError>}
    */
-    const rawCall = (method, request) => Effect.gen(function* () {
-        const response = yield* Effect.tryPromise({
-            try: () => fetch(`${apiBaseUrl}/bot${botToken}/${method}`, {
-                method: "POST",
-                headers: request.headers,
-                body: request.body,
-            }),
-            catch: (cause) => new TelegramApiError(`Telegram API request failed for method "${method}": ${redactBotToken(cause instanceof Error ? cause.message : String(cause), botToken)}`, { method }),
+    const rawCall = (method, request) => Effect.suspend(() => {
+        // One controller per attempt spans the request and the response-body
+        // read: interrupting the fiber at either stage aborts the in-flight
+        // HTTP exchange instead of leaving it running in the background.
+        const controller = new AbortController();
+        return Effect.gen(function* () {
+            const response = yield* Effect.tryPromise({
+                try: (signal) => {
+                    linkInterruptSignal(signal, controller);
+                    return fetch(`${apiBaseUrl}/bot${botToken}/${method}`, {
+                        method: "POST",
+                        headers: request.headers,
+                        body: request.body,
+                        signal: controller.signal,
+                    });
+                },
+                catch: (cause) => new TelegramApiError(`Telegram API request failed for method "${method}": ${redactBotToken(cause instanceof Error ? cause.message : String(cause), botToken)}`, { method }),
+            });
+            const payload = yield* Effect.tryPromise({
+                try: (signal) => {
+                    // The fetch step's signal is settled once headers arrive;
+                    // re-link so an interrupt mid-body-read still cancels the
+                    // request (and with it the body stream).
+                    linkInterruptSignal(signal, controller);
+                    return response.json();
+                },
+                catch: (cause) => new TelegramApiError(`Telegram API returned a non-JSON response for method "${method}" (status ${response.status}).`, { method, errorCode: response.status, cause: undefined }),
+            });
+            const body = /** @type {{ ok?: boolean; result?: unknown; error_code?: number; description?: string; parameters?: { retry_after?: number } }} */ (payload ?? {});
+            if (!body.ok) {
+                const description = redactBotToken(String(body.description ?? `HTTP ${response.status}`), botToken);
+                return yield* Effect.fail(new TelegramApiError(`Telegram API "${method}" failed: ${description}`, {
+                    method,
+                    errorCode: body.error_code ?? response.status,
+                    description,
+                    retryAfterSeconds: body.parameters?.retry_after ?? null,
+                }));
+            }
+            return body.result;
         });
-        const payload = yield* Effect.tryPromise({
-            try: () => response.json(),
-            catch: (cause) => new TelegramApiError(`Telegram API returned a non-JSON response for method "${method}" (status ${response.status}).`, { method, errorCode: response.status, cause: undefined }),
-        });
-        const body = /** @type {{ ok?: boolean; result?: unknown; error_code?: number; description?: string; parameters?: { retry_after?: number } }} */ (payload ?? {});
-        if (!body.ok) {
-            const description = redactBotToken(String(body.description ?? `HTTP ${response.status}`), botToken);
-            return yield* Effect.fail(new TelegramApiError(`Telegram API "${method}" failed: ${description}`, {
-                method,
-                errorCode: body.error_code ?? response.status,
-                description,
-                retryAfterSeconds: body.parameters?.retry_after ?? null,
-            }));
-        }
-        return body.result;
     });
     /**
    * @param {string} method
