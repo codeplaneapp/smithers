@@ -65,7 +65,7 @@ export async function createMcpToolset(config, options = {}) {
     tools[`${prefix}${mcpTool.name}`] = dynamicTool({
       description: mcpTool.description ?? mcpTool.name,
       inputSchema: jsonSchema(/** @type {any} */ (mcpTool.inputSchema ?? { type: "object", properties: {} })),
-      execute: async (input) => callMcpTool(client, mcpTool.name, input),
+      execute: async (input, callOptions) => callMcpTool(client, mcpTool.name, input, callOptions?.abortSignal),
     });
   }
 
@@ -105,16 +105,26 @@ function drainStderr(transport, onStderr) {
  * Invoke one MCP tool and reduce its result to a value the model can read:
  * structured content when the server returns it, otherwise the joined text.
  *
+ * The AI SDK's per-call abort signal is forwarded as the MCP request's
+ * cancellation signal, so aborting the agent run rejects the pending call
+ * immediately AND sends `notifications/cancelled` to the server, instead of
+ * leaving the MCP operation running to its (60s default) timeout.
+ *
  * @param {Client} client
  * @param {string} name
  * @param {unknown} input
+ * @param {AbortSignal} [abortSignal]
  * @returns {Promise<unknown>}
  */
-async function callMcpTool(client, name, input) {
-  const result = await client.callTool({
-    name,
-    arguments: /** @type {Record<string, unknown>} */ (input ?? {}),
-  });
+async function callMcpTool(client, name, input, abortSignal) {
+  const result = await client.callTool(
+    {
+      name,
+      arguments: /** @type {Record<string, unknown>} */ (input ?? {}),
+    },
+    undefined,
+    abortSignal ? { signal: abortSignal } : undefined,
+  );
   const parts = Array.isArray(result.content) ? result.content : [];
   let text = "";
   for (const part of parts) {
