@@ -5,8 +5,10 @@ import {
   GATEWAY_RPC_DEFINITIONS,
   GATEWAY_RPC_ERRORS,
   SMITHERS_API_VERSION,
+  getGatewayRpcDefinition,
   getRequiredScopeForGatewayMethod,
   type GatewayRpcDefinition,
+  type GatewayRpcMethod,
   type JsonSchema,
 } from "../src/rpc/index.js";
 import { GATEWAY_SCOPE_DESCRIPTIONS, GATEWAY_SCOPE_VALUES } from "../src/auth/scopes.js";
@@ -37,8 +39,19 @@ type GatewayApiRouteDefinition = {
   requiredScope: GatewayScope;
   requestSchema?: JsonSchema;
   responseSchema?: JsonSchema;
+  parameters?: readonly GatewayApiParameterDefinition[];
   mutation?: boolean;
   sse?: boolean;
+};
+
+type GatewayApiParameterDefinition = {
+  name: string;
+  in: "path" | "query";
+  description: string;
+  required?: boolean;
+  schema: JsonSchema;
+  style?: "form" | "simple";
+  explode?: boolean;
 };
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -52,10 +65,25 @@ function scopeForRpc(method: string): GatewayScope {
   return getRequiredScopeForGatewayMethod(method) ?? "run:read";
 }
 
+function requireRpcDefinition(method: GatewayRpcMethod): GatewayRpcDefinition {
+  const definition = getGatewayRpcDefinition(method);
+  if (!definition) throw new Error(`Missing Gateway RPC definition: ${method}`);
+  return definition;
+}
+
+function requireRequestProperty(definition: GatewayRpcDefinition, property: string): JsonSchema {
+  const schema = definition.requestSchema.properties?.[property];
+  if (!schema) throw new Error(`Missing ${definition.method} request property: ${property}`);
+  return schema;
+}
+
 const objectSchema = {
   type: "object",
   additionalProperties: true,
 } satisfies JsonSchema;
+
+const listScoresForRunsRpc = requireRpcDefinition("listScoresForRuns");
+const getScoreDetailRpc = requireRpcDefinition("getScoreDetail");
 
 const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
   { method: "get", path: "/v1/api/runs", operationId: "apiListRuns", summary: "List runs.", rpcMethod: "listRuns", requiredScope: scopeForRpc("listRuns"), responseSchema: { type: "array", items: objectSchema } },
@@ -75,6 +103,46 @@ const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
   { method: "get", path: "/v1/api/docs", operationId: "apiListDocs", summary: "List docs.", rpcMethod: "listDocs", requiredScope: scopeForRpc("listDocs"), responseSchema: { type: "array", items: objectSchema } },
   { method: "get", path: "/v1/api/prompts", operationId: "apiListPrompts", summary: "List prompts.", rpcMethod: "listPrompts", requiredScope: scopeForRpc("listPrompts"), responseSchema: { type: "array", items: objectSchema } },
   { method: "get", path: "/v1/api/scores", operationId: "apiListScores", summary: "List scores for a run.", rpcMethod: "listScores", requiredScope: scopeForRpc("listScores"), responseSchema: { type: "array", items: objectSchema } },
+  {
+    method: "get",
+    path: "/v1/api/scores/compare",
+    operationId: "apiListScoresForRuns",
+    summary: "List scores across runs.",
+    rpcMethod: "listScoresForRuns",
+    requiredScope: scopeForRpc("listScoresForRuns"),
+    responseSchema: listScoresForRunsRpc.responseSchema,
+    parameters: [
+      {
+        name: "runId",
+        in: "query",
+        description: "Run id entry. Repeat this query parameter for each run to compare.",
+        required: false,
+        schema: requireRequestProperty(listScoresForRunsRpc, "runIds"),
+        style: "form",
+        explode: true,
+      },
+      { name: "nodeId", in: "query", description: "Optional exact, case-sensitive node id filter.", schema: requireRequestProperty(listScoresForRunsRpc, "nodeId") },
+      { name: "scorerId", in: "query", description: "Optional exact, case-sensitive scorer id filter.", schema: requireRequestProperty(listScoresForRunsRpc, "scorerId") },
+      { name: "scorerName", in: "query", description: "Optional exact, case-sensitive scorer name filter.", schema: requireRequestProperty(listScoresForRunsRpc, "scorerName") },
+      { name: "source", in: "query", description: "Optional score provenance filter.", schema: requireRequestProperty(listScoresForRunsRpc, "source") },
+      { name: "order", in: "query", description: "Primary score timestamp order.", schema: requireRequestProperty(listScoresForRunsRpc, "order") },
+      { name: "offset", in: "query", description: "Global result offset.", schema: requireRequestProperty(listScoresForRunsRpc, "offset") },
+      { name: "limit", in: "query", description: "Maximum globally merged rows to return.", schema: requireRequestProperty(listScoresForRunsRpc, "limit") },
+    ],
+  },
+  {
+    method: "get",
+    path: "/v1/api/scores/{runId}/{scoreId}",
+    operationId: "apiGetScoreDetail",
+    summary: "Read one score with decoded detail.",
+    rpcMethod: "getScoreDetail",
+    requiredScope: scopeForRpc("getScoreDetail"),
+    responseSchema: getScoreDetailRpc.responseSchema,
+    parameters: [
+      { name: "runId", in: "path", description: "Owning run id.", required: true, schema: requireRequestProperty(getScoreDetailRpc, "runId") },
+      { name: "scoreId", in: "path", description: "Exact persisted score id.", required: true, schema: requireRequestProperty(getScoreDetailRpc, "scoreId") },
+    ],
+  },
   { method: "get", path: "/v1/api/tickets", operationId: "apiListTickets", summary: "List work docs.", rpcMethod: "listTickets", requiredScope: scopeForRpc("listTickets"), responseSchema: { type: "array", items: objectSchema } },
   { method: "get", path: "/v1/api/memory-facts", operationId: "apiListMemoryFacts", summary: "List memory facts.", rpcMethod: "listMemoryFacts", requiredScope: scopeForRpc("listMemoryFacts"), responseSchema: { type: "array", items: objectSchema } },
   { method: "get", path: "/v1/api/crons", operationId: "apiCronList", summary: "List cron schedules.", rpcMethod: "cronList", requiredScope: scopeForRpc("cronList"), responseSchema: { type: "array", items: objectSchema } },
@@ -270,6 +338,19 @@ function buildApiPath(definition: GatewayApiRouteDefinition) {
     "x-smithers-api-version": SMITHERS_API_VERSION,
     "x-smithers-required-scope": definition.requiredScope,
     ...(definition.rpcMethod ? { "x-smithers-rpc-method": definition.rpcMethod } : {}),
+    ...(definition.parameters?.length
+      ? {
+          parameters: definition.parameters.map((parameter) => ({
+            name: parameter.name,
+            in: parameter.in,
+            description: parameter.description,
+            required: parameter.required ?? parameter.in === "path",
+            schema: parameter.schema,
+            ...(parameter.style ? { style: parameter.style } : {}),
+            ...(parameter.explode !== undefined ? { explode: parameter.explode } : {}),
+          })),
+        }
+      : {}),
     responses: {
       "200": {
         description: definition.sse ? "Invalidation event stream." : "Gateway REST response.",

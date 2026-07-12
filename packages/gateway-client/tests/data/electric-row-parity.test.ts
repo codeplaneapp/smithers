@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import {
   serializeApprovalRow,
+  serializeComparisonScoreRow,
   serializeCronRow,
   serializeDocRow,
   serializeMemoryFactRow,
@@ -11,6 +12,11 @@ import {
   serializeTicketRow,
 } from "@smithers-orchestrator/gateway/api";
 import { createSmithersPostgres } from "smithers-orchestrator";
+import type {
+  GatewayComparisonScoreRow,
+  GatewayScoreDetail,
+  GatewayScoreRow,
+} from "../../src/index.ts";
 import { mapSmithersElectricRow } from "../../src/data/mapSmithersElectricRow.ts";
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -120,7 +126,13 @@ describe("Electric row-shape parity", () => {
     expect(mapSmithersElectricRow("approvals", await rawOne(connection, "SELECT * FROM _smithers_approvals WHERE run_id = $1", [runId]))).toEqual(apiApproval);
     expect(mapSmithersElectricRow("docs", await rawOne(connection, "SELECT * FROM _smithers_docs WHERE path = $1", ["docs/readme.md"]))).toEqual(apiDoc);
     expect(mapSmithersElectricRow("tickets", await rawOne(connection, "SELECT * FROM _smithers_docs WHERE path = $1", ["tickets/t-1.md"]))).toEqual(apiTicket);
-    expect(mapSmithersElectricRow("scores", await rawOne(connection, "SELECT * FROM _smithers_scorers WHERE run_id = $1", [runId]))).toEqual(apiScore);
+    const electricScore = await rawOne(connection, "SELECT * FROM _smithers_scorers WHERE run_id = $1", [runId]);
+    expect(mapSmithersElectricRow("scores", electricScore)).toEqual(apiScore);
+    const comparisonScore = serializeComparisonScoreRow(electricScore);
+    expect(comparisonScore).toEqual({ scoreId: "score-row-1", ...apiScore });
+    for (const detailField of ["meta", "input", "output", "groundTruth", "context"]) {
+      expect(comparisonScore).not.toHaveProperty(detailField);
+    }
     expect(mapSmithersElectricRow("memoryFacts", await rawOne(connection, "SELECT * FROM _smithers_memory_facts WHERE namespace = $1 AND key = $2", ["workspace", "preference"]))).toEqual(apiMemory);
     expect(mapSmithersElectricRow("crons", await rawOne(connection, "SELECT * FROM _smithers_cron WHERE cron_id = $1", ["cron-parity"]))).toEqual(apiCron);
   }, 120_000);
@@ -143,5 +155,54 @@ describe("Electric row-shape parity", () => {
       iteration: 0,
       childIds: [],
     });
+  });
+
+  test("cross-run comparison rows add only scoreId to the existing score row", () => {
+    const score: GatewayScoreRow = {
+      runId: "run-parity",
+      nodeId: "task1",
+      iteration: 0,
+      attempt: 1,
+      scorerId: "score:exact",
+      scorerName: "Exact",
+      source: "eval",
+      score: 1,
+      reason: null,
+      scoredAtMs: 1_718_000_000_007,
+      latencyMs: 12,
+      durationMs: 34,
+    };
+    const comparison: GatewayComparisonScoreRow = { scoreId: "score-row-1", ...score };
+
+    expect(comparison).toEqual({ scoreId: "score-row-1", ...score });
+    expect(Object.keys(comparison).sort()).toEqual([
+      "attempt",
+      "durationMs",
+      "iteration",
+      "latencyMs",
+      "nodeId",
+      "reason",
+      "runId",
+      "score",
+      "scoreId",
+      "scoredAtMs",
+      "scorerId",
+      "scorerName",
+      "source",
+    ]);
+    for (const detailField of ["meta", "input", "output", "groundTruth", "context"]) {
+      expect(comparison).not.toHaveProperty(detailField);
+    }
+
+    const detail: GatewayScoreDetail = {
+      ...comparison,
+      meta: null,
+      input: { prompt: "hello" },
+      output: "hello",
+      groundTruth: "hello",
+      context: null,
+    };
+    expect(detail.meta).toBeNull();
+    expect(detail.input).toEqual({ prompt: "hello" });
   });
 });

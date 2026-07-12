@@ -1433,6 +1433,59 @@ declare class SmithersDb {
    */
     listScorerResults(runId: string, nodeId?: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
+   * Count scorer rows across a bounded set of runs. Every caller-supplied value
+   * is bound as a placeholder; only the fixed filter column names are composed
+   * into the statement.
+   * @param {{
+   *   runIds: string[];
+   *   nodeId?: string;
+   *   scorerId?: string;
+   *   scorerName?: string;
+   *   source?: string;
+   * }} query
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    countScorerResultsForRuns(query: {
+        runIds: string[];
+        nodeId?: string;
+        scorerId?: string;
+        scorerName?: string;
+        source?: string;
+    }): RunnableEffect<number, SmithersError$1>;
+    /**
+   * Fetch one globally-sortable candidate page of scorer rows for a set of
+   * runs. The server merges candidates from distinct stores and applies the
+   * final global offset/limit.
+   * @param {{
+   *   runIds: string[];
+   *   nodeId?: string;
+   *   scorerId?: string;
+   *   scorerName?: string;
+   *   source?: string;
+   *   order: "scoredAtAsc" | "scoredAtDesc";
+   *   offset: number;
+   *   limit: number;
+   * }} query
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listScorerResultsForRuns(query: {
+        runIds: string[];
+        nodeId?: string;
+        scorerId?: string;
+        scorerName?: string;
+        source?: string;
+        order: "scoredAtAsc" | "scoredAtDesc";
+        offset: number;
+        limit: number;
+    }): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
+   * Read one scorer row by its exact persisted id, scoped to its owning run.
+   * @param {string} runId
+   * @param {string} scoreId
+   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+   */
+    getScorerResult(runId: string, scoreId: string): RunnableEffect<Record<string, unknown> | undefined, SmithersError$1>;
+    /**
    * @param {string} runId
    * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
    */

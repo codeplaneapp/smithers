@@ -1,11 +1,13 @@
 import type {
   CancelRunRequest,
   CancelRunResponse,
+  ListScoresForRunsRequest,
   CronCreateRequest,
   CronDeleteRequest,
   CronListRequest,
   CronRunRequest,
   GetRunRequest,
+  GetScoreDetailRequest,
   GetSchemaSignatureResponse,
   HijackRunRequest,
   HijackRunResponse,
@@ -34,12 +36,14 @@ import type {
   SubmitSignalRequest,
 } from "@smithers-orchestrator/gateway/rpc";
 import type { GatewayCronRow } from "../sync/GatewayCronRow.ts";
+import type { GatewayComparisonScoreRow } from "../sync/GatewayComparisonScoreRow.ts";
 import type { GatewayMemoryFactRow } from "../sync/GatewayMemoryFactRow.ts";
 import type { GatewayPromptRow } from "../sync/GatewayPromptRow.ts";
 import type { GatewayRunEventRow } from "../sync/GatewayRunEventRow.ts";
 import type { GatewayRunNode } from "../sync/GatewayRunNode.ts";
 import type { GatewayRunRow } from "../sync/GatewayRunRow.ts";
 import type { GatewayRunSummaryRow } from "../sync/GatewayRunSummaryRow.ts";
+import type { GatewayScoreDetail } from "../sync/GatewayScoreDetail.ts";
 import type { GatewayScoreRow } from "../sync/GatewayScoreRow.ts";
 import type { GatewayTicketRow } from "../sync/GatewayTicketRow.ts";
 import type { ApiMutationResult } from "./ApiMutationResult.ts";
@@ -69,6 +73,8 @@ export type SmithersApi = {
   listPrompts(): Promise<ListPromptsResponse>;
   listMemoryFacts(params?: ListMemoryFactsRequest): Promise<GatewayMemoryFactRow[]>;
   listScores(params?: ListScoresRequest): Promise<GatewayScoreRow[]>;
+  listScoresForRuns(params: ListScoresForRunsRequest): Promise<{ rows: GatewayComparisonScoreRow[]; total: number }>;
+  getScoreDetail(params: GetScoreDetailRequest): Promise<GatewayScoreDetail>;
   listTickets(params?: ListTicketsRequest): Promise<GatewayTicketRow[]>;
   createTicket(params: CreateTicketRequest): Promise<ApiMutationResult<GatewayTicketRow>>;
   updateTicket(params: UpdateTicketRequest): Promise<ApiMutationResult<GatewayTicketRow>>;

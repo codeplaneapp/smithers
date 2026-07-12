@@ -1543,6 +1543,52 @@ declare class Gateway {
    */
     listScoresForRun(runId: string, nodeId?: string | null): Promise<Array<Record<string, unknown>> | null>;
     /**
+   * Query persisted scorer rows across runs that may live in distinct stores.
+   * All run ownership is resolved before the first score-table query so an
+   * unknown id fails atomically. Each store contributes its filtered count and
+   * its first `offset + limit` candidates; pagination happens after the global
+   * deterministic merge.
+   * @param {{
+   *   runIds: string[];
+   *   nodeId?: string;
+   *   scorerId?: string;
+   *   scorerName?: string;
+   *   source?: string;
+   *   order: "scoredAtAsc" | "scoredAtDesc";
+   *   offset: number;
+   *   limit: number;
+   * }} query
+   * @returns {Promise<{ missingRunId: string } | { rows: Array<Record<string, unknown>>, total: number }>}
+   */
+    listScoresForRunsAcrossStores(query: {
+        runIds: string[];
+        nodeId?: string;
+        scorerId?: string;
+        scorerName?: string;
+        source?: string;
+        order: "scoredAtAsc" | "scoredAtDesc";
+        offset: number;
+        limit: number;
+    }): Promise<{
+        missingRunId: string;
+    } | {
+        rows: Array<Record<string, unknown>>;
+        total: number;
+    }>;
+    /**
+   * Read and decode one exact persisted score row. Missing runs and missing
+   * score ids remain distinct so the typed RPC errors stay precise; malformed
+   * JSON throws `Internal`.
+   * @param {string} runId
+   * @param {string} scoreId
+   * @returns {Promise<{ missing: "run" | "score" } | { detail: Record<string, unknown> }>}
+   */
+    getScoreDetailForRun(runId: string, scoreId: string): Promise<{
+        missing: "run" | "score";
+    } | {
+        detail: Record<string, unknown>;
+    }>;
+    /**
    * The ONE adapter that backs the ticket WRITE RPCs (create/update/delete) and
    * the file-watcher. `_smithers_docs` is a SINGLE global table (not per-run,
    * not per-workflow), so writes must land in one deterministic DB — the first
@@ -1777,7 +1823,6 @@ type ConnectRequest = ConnectRequest$1;
 type RunEventStreamState = {
     streamId: string;
     runId: string;
-    heartbeat: unknown;
     outboundQueue: Record<string, unknown>[];
     flushPending: boolean;
     backpressureDisconnected: boolean;

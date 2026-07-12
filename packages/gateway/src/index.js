@@ -55,6 +55,12 @@
 /** @typedef {import("./rpc/gatewayRpcTypes.ts").GatewayScoreRow} GatewayScoreRow */
 /** @typedef {import("./rpc/gatewayRpcTypes.ts").ListScoresRequest} ListScoresRequest */
 /** @typedef {import("./rpc/gatewayRpcTypes.ts").ListScoresResponse} ListScoresResponse */
+/** @typedef {import("./rpc/gatewayRpcTypes.ts").GatewayComparisonScoreRow} GatewayComparisonScoreRow */
+/** @typedef {import("./rpc/gatewayRpcTypes.ts").ListScoresForRunsRequest} ListScoresForRunsRequest */
+/** @typedef {import("./rpc/gatewayRpcTypes.ts").ListScoresForRunsResponse} ListScoresForRunsResponse */
+/** @typedef {import("./rpc/gatewayRpcTypes.ts").GetScoreDetailRequest} GetScoreDetailRequest */
+/** @typedef {import("./rpc/gatewayRpcTypes.ts").GatewayScoreDetail} GatewayScoreDetail */
+/** @typedef {import("./rpc/gatewayRpcTypes.ts").GetScoreDetailResponse} GetScoreDetailResponse */
 /** @typedef {import("./rpc/gatewayRpcTypes.ts").GatewayDocKind} GatewayDocKind */
 /** @typedef {import("./rpc/gatewayRpcTypes.ts").GatewayTicketRow} GatewayTicketRow */
 /** @typedef {import("./rpc/gatewayRpcTypes.ts").ListTicketsRequest} ListTicketsRequest */
@@ -88,6 +94,8 @@ export {
   serializePromptRow,
   serializeRunEventRow,
   serializeRunRow,
+  serializeComparisonScoreRow,
+  serializeScoreDetailRow,
   serializeScoreRow,
   serializeTicketRow,
   serializeWorkflowRow,

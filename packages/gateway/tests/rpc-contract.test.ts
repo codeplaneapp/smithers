@@ -48,6 +48,10 @@ import {
   type ListMemoryFactsRequest,
   type ListPromptsRequest,
   type ListScoresRequest,
+  type ListScoresForRunsRequest,
+  type ListScoresForRunsResponse,
+  type GetScoreDetailRequest,
+  type GetScoreDetailResponse,
   type ListTicketsRequest,
   type CreateTicketRequest,
   type UpdateTicketRequest,
@@ -113,6 +117,18 @@ function validateAgainstSchema(value: unknown, schema: JsonSchema, path = "$"): 
 
   if (typeof value === "number" && schema.minimum !== undefined && value < schema.minimum) {
     errors.push(`${path}: ${value} is below minimum ${schema.minimum}`);
+  }
+  if (typeof value === "number" && schema.maximum !== undefined && value > schema.maximum) {
+    errors.push(`${path}: ${value} is above maximum ${schema.maximum}`);
+  }
+  if (typeof value === "string" && schema.minLength !== undefined && value.length < schema.minLength) {
+    errors.push(`${path}: string is shorter than minLength ${schema.minLength}`);
+  }
+  if (typeof value === "string" && schema.maxLength !== undefined && value.length > schema.maxLength) {
+    errors.push(`${path}: string is longer than maxLength ${schema.maxLength}`);
+  }
+  if (Array.isArray(value) && schema.maxItems !== undefined && value.length > schema.maxItems) {
+    errors.push(`${path}: array exceeds maxItems ${schema.maxItems}`);
   }
 
   if (types.includes("object") || (schema.properties && jsonType(value) === "object")) {
@@ -187,6 +203,8 @@ describe("Gateway RPC contract", () => {
       "listMemoryFacts",
       "listPrompts",
       "listScores",
+      "listScoresForRuns",
+      "getScoreDetail",
       "listTickets",
       "createTicket",
       "updateTicket",
@@ -226,6 +244,32 @@ describe("Gateway RPC contract", () => {
     expect(getGatewayScopeValues()).toEqual(GATEWAY_SCOPE_VALUES);
   });
 
+  test("publishes the exact cross-run score and detail contract", () => {
+    const list = getGatewayRpcDefinition("listScoresForRuns")!;
+    expect(list.transport).toBe("http+websocket");
+    expect(list.requiredScope).toBe("score:read");
+    expect(list.requestSchema.properties?.order?.default).toBe("scoredAtAsc");
+    expect(list.requestSchema.properties?.offset?.maximum).toBe(9_999);
+    expect(list.requestSchema.properties?.limit?.maximum).toBe(500);
+    expect(list.requestSchema.properties?.runIds?.items?.maxLength).toBe(256);
+    expect(list.requestSchema.properties?.runIds?.maxItems).toBe(30);
+    expect(list.requestSchema.properties?.source?.enum).toEqual(["live", "batch"]);
+    const row = list.responseSchema.properties?.rows?.items;
+    expect(row?.required).toContain("scoreId");
+    expect(row?.properties).not.toHaveProperty("meta");
+    expect(row?.properties).not.toHaveProperty("input");
+
+    const detail = getGatewayRpcDefinition("getScoreDetail")!;
+    expect(detail.transport).toBe("http+websocket");
+    expect(detail.requiredScope).toBe("score:read");
+    for (const field of ["meta", "input", "output", "groundTruth", "context"]) {
+      expect(detail.responseSchema.required).toContain(field);
+    }
+    expect(detail.errors).toContain("ScoreNotFound");
+    expect(GATEWAY_RPC_ERRORS.ScoreNotFound.httpStatus).toBe(404);
+    expect(isGatewayRpcMethod("compareExperiments")).toBe(false);
+  });
+
   test("pins exact required scopes for every stable RPC method", () => {
     const expectedScopes: Record<string, GatewayScope> = {
       launchRun: "run:write",
@@ -256,6 +300,8 @@ describe("Gateway RPC contract", () => {
       listMemoryFacts: "memory:read",
       listPrompts: "prompt:read",
       listScores: "score:read",
+      listScoresForRuns: "score:read",
+      getScoreDetail: "score:read",
       listTickets: "ticket:read",
       createTicket: "ticket:write",
       updateTicket: "ticket:write",
@@ -658,6 +704,35 @@ describe("Gateway RPC contract", () => {
         method: "listScores",
         request: { runId: "r1", nodeId: "n1" } satisfies ListScoresRequest,
         response: [],
+      },
+      {
+        method: "listScoresForRuns",
+        request: { runIds: ["r1", "r2"], scorerName: "quality", source: "batch", order: "scoredAtDesc", offset: 2, limit: 50 } satisfies ListScoresForRunsRequest,
+        response: {
+          rows: [{ scoreId: "score-1", runId: "r1", nodeId: "n1", iteration: 0, attempt: 1, scorerId: "quality", scorerName: "quality", source: "batch", score: 0.9, scoredAtMs: 1 }],
+          total: 1,
+        } satisfies ListScoresForRunsResponse,
+      },
+      {
+        method: "getScoreDetail",
+        request: { runId: "r1", scoreId: "score-1" } satisfies GetScoreDetailRequest,
+        response: {
+          scoreId: "score-1",
+          runId: "r1",
+          nodeId: "n1",
+          iteration: 0,
+          attempt: 1,
+          scorerId: "quality",
+          scorerName: "quality",
+          source: "batch",
+          score: 0.9,
+          scoredAtMs: 1,
+          meta: { rubric: "quality" },
+          input: null,
+          output: { verdict: "pass" },
+          groundTruth: null,
+          context: ["nightly"],
+        } satisfies GetScoreDetailResponse,
       },
       {
         method: "listTickets",

@@ -14,7 +14,7 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 import { Effect, Metric } from "effect";
 import { WebSocketServer } from "ws";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { DB_RUN_ID_MAX_LENGTH, SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { captureTxid, createTxidCapture, isRealPostgresAdapter, runWithTxidCapture } from "@smithers-orchestrator/db/captureTxid";
 import { getSmithersSchemaSignature } from "@smithers-orchestrator/db/getSmithersSchemaSignature";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
@@ -44,7 +44,7 @@ import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRew
 import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-travel/recoverInProgressRewindAudits";
 import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
 import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
-import { apiCollectionNames, serializeAccountRow, serializeApprovalRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow, } from "@smithers-orchestrator/gateway/api";
+import { apiCollectionNames, serializeAccountRow, serializeApprovalRow, serializeComparisonScoreRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreDetailRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow, } from "@smithers-orchestrator/gateway/api";
 import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
 import { EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, GatewayExtensions, isExtensionMethod, } from "./GatewayExtensions.js";
 import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
@@ -1335,6 +1335,7 @@ export function statusForRpcError(code) {
         case "SeqOutOfRange":
             return 400;
         case "RunNotFound":
+        case "ScoreNotFound":
         case "NodeNotFound":
         case "AttemptNotFound":
         case "IterationNotFound":
@@ -1849,6 +1850,150 @@ function asOptionalNonNegativeInt(value, field) {
     }
     return number;
 }
+const SCORE_COMPARE_MAX_RUNS = 30;
+const SCORE_ID_MAX_LENGTH = 256;
+const SCORE_COMPARE_MAX_WINDOW = 10_000;
+const SCORE_COMPARE_MAX_OFFSET = SCORE_COMPARE_MAX_WINDOW - 1;
+const SCORE_COMPARE_DEFAULT_LIMIT = 500;
+const SCORE_COMPARE_MAX_LIMIT = 500;
+/**
+ * Normalize the cross-run score identities once, before any persistence read.
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+function normalizeScoreRunIds(value) {
+    if (!Array.isArray(value)) {
+        throw new SmithersError("INVALID_REQUEST", "runIds must be an array of strings");
+    }
+    if (value.length > SCORE_COMPARE_MAX_RUNS) {
+        throw new SmithersError("INVALID_REQUEST", `runIds may contain at most ${SCORE_COMPARE_MAX_RUNS} entries`);
+    }
+    const seen = new Set();
+    const runIds = [];
+    for (const valueRunId of value) {
+        if (typeof valueRunId !== "string") {
+            throw new SmithersError("INVALID_REQUEST", "runIds must contain only strings");
+        }
+        const runId = valueRunId.trim();
+        if (!runId) {
+            throw new SmithersError("INVALID_REQUEST", "runIds must not contain blank ids");
+        }
+        if (runId.length > DB_RUN_ID_MAX_LENGTH) {
+            throw new SmithersError("INVALID_REQUEST", `runIds must be at most ${DB_RUN_ID_MAX_LENGTH} characters after trimming`);
+        }
+        if (!seen.has(runId)) {
+            seen.add(runId);
+            runIds.push(runId);
+        }
+    }
+    return runIds;
+}
+/**
+ * @param {unknown} value
+ * @param {string} field
+ * @returns {string | undefined}
+ */
+function optionalScoreFilter(value, field) {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== "string") {
+        throw new SmithersError("INVALID_REQUEST", `${field} must be a string`);
+    }
+    return value;
+}
+/** @param {unknown} value @returns {"live" | "batch" | undefined} */
+function optionalScoreSource(value) {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value !== "live" && value !== "batch") {
+        throw new SmithersError("INVALID_REQUEST", "source must be live or batch");
+    }
+    return value;
+}
+/**
+ * @param {unknown} value
+ * @param {string} field
+ * @param {number} fallback
+ * @param {number} minimum
+ * @param {number} maximum
+ */
+function boundedScorePageInteger(value, field, fallback, minimum, maximum) {
+    if (value === undefined) {
+        return fallback;
+    }
+    if (typeof value !== "number" || !Number.isInteger(value) || value < minimum || value > maximum) {
+        throw new SmithersError("INVALID_REQUEST", `${field} must be an integer from ${minimum} to ${maximum}`);
+    }
+    return value;
+}
+/**
+ * @param {unknown} value
+ * @returns {"scoredAtAsc" | "scoredAtDesc"}
+ */
+function scoreResultOrder(value) {
+    if (value === undefined) {
+        return "scoredAtAsc";
+    }
+    if (value !== "scoredAtAsc" && value !== "scoredAtDesc") {
+        throw new SmithersError("INVALID_REQUEST", "order must be scoredAtAsc or scoredAtDesc");
+    }
+    return value;
+}
+/** @param {unknown} left @param {unknown} right */
+function compareAscending(left, right) {
+    return left < right ? -1 : left > right ? 1 : 0;
+}
+/**
+ * @param {Record<string, unknown>} left
+ * @param {Record<string, unknown>} right
+ * @param {"scoredAtAsc" | "scoredAtDesc"} order
+ */
+function compareScoreRows(left, right, order) {
+    const leftScoredAt = Number(left.scoredAtMs ?? 0);
+    const rightScoredAt = Number(right.scoredAtMs ?? 0);
+    if (leftScoredAt !== rightScoredAt) {
+        return order === "scoredAtAsc" ? leftScoredAt - rightScoredAt : rightScoredAt - leftScoredAt;
+    }
+    for (const key of ["runId", "nodeId"]) {
+        const compared = compareAscending(String(left[key] ?? ""), String(right[key] ?? ""));
+        if (compared !== 0)
+            return compared;
+    }
+    for (const key of ["iteration", "attempt"]) {
+        const compared = Number(left[key] ?? 0) - Number(right[key] ?? 0);
+        if (compared !== 0)
+            return compared;
+    }
+    for (const key of ["scorerId", "scoreId"]) {
+        const compared = compareAscending(String(left[key] ?? ""), String(right[key] ?? ""));
+        if (compared !== 0)
+            return compared;
+    }
+    return 0;
+}
+/**
+ * Decode one persisted JSON detail column. SQL NULL is an honest JSON null;
+ * malformed or non-text persistence is an explicit internal failure.
+ * @param {unknown} value
+ * @param {string} scoreId
+ * @param {string} field
+ */
+function decodeScoreDetailJson(value, scoreId, field) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    if (typeof value !== "string") {
+        throw new SmithersError("Internal", `Persisted score ${scoreId} has non-text ${field} JSON`);
+    }
+    try {
+        return JSON.parse(value);
+    }
+    catch (cause) {
+        throw new SmithersError("Internal", `Persisted score ${scoreId} has malformed ${field} JSON`, undefined, { cause });
+    }
+}
 /**
  * @param {URLSearchParams} searchParams
  * @param {string} name
@@ -1918,6 +2063,15 @@ function serializeGatewayApiPayload(method, payload) {
             return serializeRowOrRows(payload, serializeMemoryFactRow);
         case "listScores":
             return serializeRowOrRows(payload, serializeScoreRow);
+        case "listScoresForRuns": {
+            const response = asObject(payload) ?? {};
+            const rows = Array.isArray(response.rows)
+                ? response.rows.map((row) => serializeComparisonScoreRow(asObject(row) ?? {}))
+                : [];
+            return { rows, total: response.total ?? 0 };
+        }
+        case "getScoreDetail":
+            return serializeRowOrRows(payload, serializeScoreDetailRow);
         case "listTickets":
         case "createTicket":
         case "updateTicket":
@@ -3672,6 +3826,33 @@ a { color: var(--brand); }</style>
         }
         if (httpMethod === "POST" && pathname === "/v1/api/crons/run") {
             return { method: "cronRun", params: body, mutation: true };
+        }
+        // Keep the fixed comparison path ahead of the parameterized score
+        // detail route so `compare` can never be interpreted as a run id.
+        if (httpMethod === "GET" && pathname === "/v1/api/scores/compare") {
+            return {
+                method: "listScoresForRuns",
+                params: {
+                    runIds: url.searchParams.getAll("runId"),
+                    nodeId: queryString(url.searchParams, "nodeId"),
+                    scorerId: queryString(url.searchParams, "scorerId"),
+                    scorerName: queryString(url.searchParams, "scorerName"),
+                    source: queryString(url.searchParams, "source"),
+                    order: queryString(url.searchParams, "order"),
+                    offset: queryNonNegativeInt(url.searchParams, "offset"),
+                    limit: queryNonNegativeInt(url.searchParams, "limit"),
+                },
+            };
+        }
+        const scoreDetail = pathname.match(/^\/v1\/api\/scores\/([^/]+)\/([^/]+)$/);
+        if (httpMethod === "GET" && scoreDetail) {
+            return {
+                method: "getScoreDetail",
+                params: {
+                    runId: decodeURIComponent(scoreDetail[1]),
+                    scoreId: decodeURIComponent(scoreDetail[2]),
+                },
+            };
         }
         if (httpMethod === "POST" && pathname === "/v1/api/tickets") {
             return { method: "createTicket", params: body, mutation: true };
@@ -6474,6 +6655,93 @@ a { color: var(--brand); }</style>
             durationMs: row.durationMs ?? null,
         }));
     }
+    /**
+   * Query persisted scorer rows across runs that may live in distinct stores.
+   * All run ownership is resolved before the first score-table query so an
+   * unknown id fails atomically. Each store contributes its filtered count and
+   * its first `offset + limit` candidates; pagination happens after the global
+   * deterministic merge.
+   * @param {{
+   *   runIds: string[];
+   *   nodeId?: string;
+   *   scorerId?: string;
+   *   scorerName?: string;
+   *   source?: string;
+   *   order: "scoredAtAsc" | "scoredAtDesc";
+   *   offset: number;
+   *   limit: number;
+   * }} query
+   * @returns {Promise<{ missingRunId: string } | { rows: Array<Record<string, unknown>>, total: number }>}
+   */
+    async listScoresForRunsAcrossStores(query) {
+        /** @type {Map<SmithersDb, string[]>} */
+        const runIdsByAdapter = new Map();
+        // Deliberately finish this complete ownership pass before score queries.
+        for (const runId of query.runIds) {
+            const resolved = await this.resolveRun(runId);
+            if (!resolved) {
+                return { missingRunId: runId };
+            }
+            const runIds = runIdsByAdapter.get(resolved.adapter) ?? [];
+            runIds.push(runId);
+            runIdsByAdapter.set(resolved.adapter, runIds);
+        }
+        const candidateLimit = query.offset + query.limit;
+        const storeResults = await Promise.all([...runIdsByAdapter.entries()].map(async ([adapter, runIds]) => {
+            const storeQuery = {
+                runIds,
+                nodeId: query.nodeId,
+                scorerId: query.scorerId,
+                scorerName: query.scorerName,
+                source: query.source,
+            };
+            const [total, rows] = await Promise.all([
+                adapter.countScorerResultsForRuns(storeQuery),
+                adapter.listScorerResultsForRuns({
+                    ...storeQuery,
+                    order: query.order,
+                    offset: 0,
+                    limit: candidateLimit,
+                }),
+            ]);
+            return { total, rows };
+        }));
+        const candidates = storeResults.flatMap((result) => result.rows.map((row) => serializeComparisonScoreRow(row)));
+        candidates.sort((left, right) => compareScoreRows(left, right, query.order));
+        return {
+            rows: candidates.slice(query.offset, query.offset + query.limit),
+            total: storeResults.reduce((sum, result) => sum + result.total, 0),
+        };
+    }
+    /**
+   * Read and decode one exact persisted score row. Missing runs and missing
+   * score ids remain distinct so the typed RPC errors stay precise; malformed
+   * JSON throws `Internal`.
+   * @param {string} runId
+   * @param {string} scoreId
+   * @returns {Promise<{ missing: "run" | "score" } | { detail: Record<string, unknown> }>}
+   */
+    async getScoreDetailForRun(runId, scoreId) {
+        const resolved = await this.resolveRun(runId);
+        if (!resolved) {
+            return { missing: "run" };
+        }
+        const row = await resolved.adapter.getScorerResult(runId, scoreId);
+        if (!row) {
+            return { missing: "score" };
+        }
+        return {
+            detail: serializeScoreDetailRow({
+                ...row,
+                scoreId: row.id,
+                meta: decodeScoreDetailJson(row.metaJson, scoreId, "meta"),
+                input: decodeScoreDetailJson(row.inputJson, scoreId, "input"),
+                output: decodeScoreDetailJson(row.outputJson, scoreId, "output"),
+                groundTruth: decodeScoreDetailJson(row.groundTruthJson, scoreId, "groundTruth"),
+                context: decodeScoreDetailJson(row.contextJson, scoreId, "context"),
+            }),
+        };
+    }
     // ---------------------------------------------------------------------------
     // Tickets / work docs (`_smithers_docs`) — listTickets/createTicket/
     // updateTicket/deleteTicket RPCs + the file-watcher durability seam.
@@ -8091,6 +8359,75 @@ a { color: var(--brand); }</style>
                     return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
                 }
                 return responseOk(frame.id, scores);
+            }
+            case "listScoresForRuns": {
+                const allowed = new Set(["runIds", "nodeId", "scorerId", "scorerName", "source", "order", "offset", "limit"]);
+                const unexpected = Object.keys(params).find((key) => !allowed.has(key));
+                if (unexpected) {
+                    return responseError(frame.id, "INVALID_REQUEST", `Unexpected listScoresForRuns parameter: ${unexpected}`);
+                }
+                let runIds;
+                let nodeId;
+                let scorerId;
+                let scorerName;
+                let source;
+                let order;
+                let offset;
+                let limit;
+                try {
+                    runIds = normalizeScoreRunIds(params.runIds);
+                    nodeId = optionalScoreFilter(params.nodeId, "nodeId");
+                    scorerId = optionalScoreFilter(params.scorerId, "scorerId");
+                    scorerName = optionalScoreFilter(params.scorerName, "scorerName");
+                    source = optionalScoreSource(params.source);
+                    order = scoreResultOrder(params.order);
+                    offset = boundedScorePageInteger(params.offset, "offset", 0, 0, SCORE_COMPARE_MAX_OFFSET);
+                    limit = boundedScorePageInteger(params.limit, "limit", SCORE_COMPARE_DEFAULT_LIMIT, 1, SCORE_COMPARE_MAX_LIMIT);
+                    if (offset + limit > SCORE_COMPARE_MAX_WINDOW) {
+                        throw new SmithersError("INVALID_REQUEST", `offset + limit must not exceed ${SCORE_COMPARE_MAX_WINDOW}`);
+                    }
+                }
+                catch (error) {
+                    if (isSmithersError(error)) {
+                        return responseError(frame.id, error.code, error.summary);
+                    }
+                    throw error;
+                }
+                if (runIds.length === 0) {
+                    return responseOk(frame.id, { rows: [], total: 0 });
+                }
+                const result = await this.listScoresForRunsAcrossStores({ runIds, nodeId, scorerId, scorerName, source, order, offset, limit });
+                if ("missingRunId" in result) {
+                    return responseError(frame.id, "RunNotFound", `Run not found: ${result.missingRunId}`);
+                }
+                return responseOk(frame.id, result);
+            }
+            case "getScoreDetail": {
+                const unexpected = Object.keys(params).find((key) => key !== "runId" && key !== "scoreId");
+                if (unexpected) {
+                    return responseError(frame.id, "INVALID_REQUEST", `Unexpected getScoreDetail parameter: ${unexpected}`);
+                }
+                if (typeof params.runId !== "string" || typeof params.scoreId !== "string") {
+                    return responseError(frame.id, "INVALID_REQUEST", "runId and scoreId must be strings");
+                }
+                const runId = params.runId.trim();
+                const scoreId = params.scoreId.trim();
+                if (!runId || !scoreId) {
+                    return responseError(frame.id, "INVALID_REQUEST", "runId and scoreId must not be blank");
+                }
+                if (runId.length > DB_RUN_ID_MAX_LENGTH) {
+                    return responseError(frame.id, "INVALID_REQUEST", `runId must be at most ${DB_RUN_ID_MAX_LENGTH} characters after trimming`);
+                }
+                if (scoreId.length > SCORE_ID_MAX_LENGTH) {
+                    return responseError(frame.id, "INVALID_REQUEST", `scoreId must be at most ${SCORE_ID_MAX_LENGTH} characters after trimming`);
+                }
+                const result = await this.getScoreDetailForRun(runId, scoreId);
+                if ("missing" in result) {
+                    return result.missing === "run"
+                        ? responseError(frame.id, "RunNotFound", `Run not found: ${runId}`)
+                        : responseError(frame.id, "ScoreNotFound", `Score not found on run ${runId}: ${scoreId}`);
+                }
+                return responseOk(frame.id, result.detail);
             }
             case "listTickets": {
                 const kind = asString(params.kind);

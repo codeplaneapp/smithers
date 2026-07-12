@@ -7,6 +7,8 @@ export { serializeMemoryFactRow } from "./serializeMemoryFactRow.js";
 export { serializePromptRow } from "./serializePromptRow.js";
 export { serializeRunEventRow } from "./serializeRunEventRow.js";
 export { serializeRunRow } from "./serializeRunRow.js";
+export { serializeComparisonScoreRow } from "./serializeComparisonScoreRow.js";
+export { serializeScoreDetailRow } from "./serializeScoreDetailRow.js";
 export { serializeScoreRow } from "./serializeScoreRow.js";
 export { serializeTicketRow } from "./serializeTicketRow.js";
 export { serializeWorkflowRow } from "./serializeWorkflowRow.js";
