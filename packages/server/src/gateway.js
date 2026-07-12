@@ -59,7 +59,7 @@ import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
-/** @typedef {{ streamId: string, runId: string, heartbeat: unknown, outboundQueue: Record<string, unknown>[], flushPending: boolean, backpressureDisconnected: boolean }} RunEventStreamState */
+/** @typedef {{ streamId: string, runId: string, outboundQueue: Record<string, unknown>[], flushPending: boolean, backpressureDisconnected: boolean }} RunEventStreamState */
 /** @typedef {import("./GatewayAuthConfig.js").GatewayAuthConfig} GatewayAuthConfig */
 /** @typedef {import("./GatewayOperatorUiConfig.js").GatewayOperatorUiConfig} GatewayOperatorUiConfig */
 /** @typedef {import("./GatewayOptions.js").GatewayOptions} GatewayOptions */
@@ -92,6 +92,7 @@ import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
  *   userId: string | null;
  *   subscribedRuns?: Set<string>;
  *   heartbeat?: unknown;
+ *   runEventHeartbeatTimer?: ReturnType<typeof setInterval> | null;
  *   lastActivity?: number;
  *   closed?: boolean;
  * } & Record<string, unknown>} ConnectionState
@@ -2719,26 +2720,55 @@ a { color: var(--brand); }</style>
         if (!connection.runEventStreams) {
             connection.runEventStreams = new Map();
         }
-        const heartbeat = setInterval(() => {
-            this.sendEvent(connection, "run.heartbeat", {
-                apiVersion: SMITHERS_API_VERSION,
-                type: "Heartbeat",
-                streamId,
-                runId,
-                ts: nowMs(),
-            });
-        }, RUN_EVENT_HEARTBEAT_MS);
         connection.runEventStreams.set(streamId, {
             streamId,
             runId,
-            heartbeat,
             outboundQueue: [],
             flushPending: false,
             backpressureDisconnected: false,
         });
+        this.startRunEventHeartbeat(connection);
         const previous = this.runEventSubscriberCounts.get(runId) ?? 0;
         this.runEventSubscriberCounts.set(runId, previous + 1);
         return () => this.unregisterRunEventSubscriber(connection, streamId);
+    }
+    /**
+   * Start the connection's shared run-event heartbeat timer. Each WebSocket
+   * connection owns at most ONE heartbeat interval no matter how many run
+   * event streams it registers; every tick emits one `run.heartbeat` frame
+   * per active stream. No-op while the timer is already running; the timer
+   * stops when the last stream unregisters (or the connection tears down).
+   * @param {ConnectionState} connection
+   */
+    startRunEventHeartbeat(connection) {
+        if (connection.runEventHeartbeatTimer) {
+            return;
+        }
+        connection.runEventHeartbeatTimer = setInterval(() => {
+            const streams = connection.runEventStreams;
+            if (!streams || streams.size === 0) {
+                this.stopRunEventHeartbeat(connection);
+                return;
+            }
+            for (const stream of streams.values()) {
+                this.sendEvent(connection, "run.heartbeat", {
+                    apiVersion: SMITHERS_API_VERSION,
+                    type: "Heartbeat",
+                    streamId: stream.streamId,
+                    runId: stream.runId,
+                    ts: nowMs(),
+                });
+            }
+        }, RUN_EVENT_HEARTBEAT_MS);
+    }
+    /**
+   * @param {ConnectionState} connection
+   */
+    stopRunEventHeartbeat(connection) {
+        if (connection.runEventHeartbeatTimer) {
+            clearInterval(connection.runEventHeartbeatTimer);
+            connection.runEventHeartbeatTimer = null;
+        }
     }
     /**
    * @param {ConnectionState} connection
@@ -2749,8 +2779,10 @@ a { color: var(--brand); }</style>
         if (!stream) {
             return;
         }
-        clearInterval(stream.heartbeat);
         connection.runEventStreams?.delete(streamId);
+        if (!connection.runEventStreams || connection.runEventStreams.size === 0) {
+            this.stopRunEventHeartbeat(connection);
+        }
         const previous = this.runEventSubscriberCounts.get(stream.runId) ?? 0;
         const nextCount = Math.max(0, previous - 1);
         if (nextCount === 0) {
@@ -2768,6 +2800,7 @@ a { color: var(--brand); }</style>
     cleanupRunEventSubscribers(connection) {
         const streams = connection.runEventStreams;
         if (!streams || streams.size === 0) {
+            this.stopRunEventHeartbeat(connection);
             return;
         }
         for (const streamId of streams.keys()) {
@@ -4343,6 +4376,7 @@ a { color: var(--brand); }</style>
             if (connection.heartbeatTimer) {
                 clearInterval(connection.heartbeatTimer);
             }
+            this.stopRunEventHeartbeat(connection);
             try {
                 connection.ws.close();
             }
@@ -5054,6 +5088,7 @@ a { color: var(--brand); }</style>
             subscribedRuns: null,
             devtoolsStreams: new Map(),
             heartbeatTimer: null,
+            runEventHeartbeatTimer: null,
         };
         this.connections.add(connection);
         this.markActivity();
