@@ -5,7 +5,7 @@
 
 import { resolveStableId } from "../utils/tree-ids.js";
 import { getTableName } from "drizzle-orm";
-import { DEFAULT_MERGE_QUEUE_CONCURRENCY, WORKTREE_EMPTY_PATH_ERROR, } from "../constants.js";
+import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR, } from "../constants.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { resolveWorktreePath } from "../worktree-path.js";
 
@@ -188,6 +188,20 @@ function parseSubtreeConcurrency(raw) {
     return max >= 1 ? max : undefined;
 }
 /**
+ * Parse a `priority` prop (numeric strings coerced in line with
+ * `maxConcurrency`; non-finite values ignored). Higher-priority runnable
+ * tasks claim scarce concurrency slots first; unset means "inherit from the
+ * nearest container that set one", ultimately defaulting to 0.
+ * @param {unknown} value
+ * @returns {number | undefined}
+ */
+function parsePriority(value) {
+    if (value == null)
+        return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+/**
  * Stable key identifying a direct child of a subtree-capped parallel. Prefers
  * an explicit key/id on the child element so resume stays stable across
  * sibling insertions; falls back to the child's element ordinal.
@@ -267,7 +281,7 @@ export function extractFromHost(root, opts) {
     }
     /**
    * @param {HostNode} node
-   * @param {{ path: number[]; iteration: number; ralphId?: string; parentIsRalph: boolean; parallelStack: { id: string; max?: number }[];  worktreeStack: { id: string; path: string; branch?: string; baseBranch?: string }[];  loopStack: { ralphId: string; iteration: number }[]; subtree?: { groupId: string; max: number; childKey: string }; }} ctx
+   * @param {{ path: number[]; iteration: number; ralphId?: string; parentIsRalph: boolean; parallelStack: { id: string; max?: number }[];  worktreeStack: { id: string; path: string; branch?: string; baseBranch?: string }[];  loopStack: { ralphId: string; iteration: number }[]; subtree?: { groupId: string; max: number; childKey: string }; priority?: number; }} ctx
    */
     function walk(node, ctx) {
         if (node.kind === "text")
@@ -295,6 +309,11 @@ export function extractFromHost(root, opts) {
             loopStack = [...loopStack, { ralphId: logicalId, iteration }];
         }
         let nextParallelStack = parallelStack;
+        // Priority inheritance: a <Parallel>/<MergeQueue> container's priority
+        // becomes the default for every descendant task node (explicit
+        // `priority` on a node still wins). <MergeQueue> defaults to
+        // MERGE_QUEUE_PRIORITY so landing work outranks starting new work.
+        let nextPriority = ctx.priority;
         // A parallel may also opt into subtree-level concurrency: every
         // descendant leaf task (not just innermost-group members) records the
         // NEAREST such ancestor so the scheduler can cap in-flight direct
@@ -302,6 +321,7 @@ export function extractFromHost(root, opts) {
         let subtreePending;
         if (node.tag === "smithers:parallel") {
             nextParallelStack = pushGroup("parallel", node.rawProps, ctx.path, parallelStack);
+            nextPriority = parsePriority(node.rawProps?.priority) ?? nextPriority;
             const subtreeMax = parseSubtreeConcurrency(node.rawProps ?? {});
             if (subtreeMax != null) {
                 subtreePending = {
@@ -313,6 +333,7 @@ export function extractFromHost(root, opts) {
         // Treat <MergeQueue> as a parallel-concurrency group with default 1
         if (node.tag === "smithers:merge-queue") {
             nextParallelStack = pushGroup("merge-queue", node.rawProps, ctx.path, nextParallelStack);
+            nextPriority = parsePriority(node.rawProps?.priority) ?? MERGE_QUEUE_PRIORITY;
         }
         // Entering a Worktree node: push onto the worktree stack
         let nextWorktreeStack = worktreeStack;
@@ -432,6 +453,7 @@ export function extractFromHost(root, opts) {
                     subtreeGroupId: ctx.subtree?.groupId,
                     subtreeChildKey: ctx.subtree?.childKey,
                     subtreeMax: ctx.subtree?.max,
+                    priority: parsePriority(raw.priority) ?? ctx.priority,
                 };
                 tasks.push(descriptor);
                 mountedTaskIds.push(`${nodeId}::${iteration}`);
@@ -582,6 +604,7 @@ export function extractFromHost(root, opts) {
                 subtreeGroupId: ctx.subtree?.groupId,
                 subtreeChildKey: ctx.subtree?.childKey,
                 subtreeMax: ctx.subtree?.max,
+                priority: parsePriority(raw.priority) ?? ctx.priority,
             };
             tasks.push(descriptor);
             mountedTaskIds.push(`${nodeId}::${iteration}`);
@@ -665,6 +688,7 @@ export function extractFromHost(root, opts) {
                 subtreeGroupId: ctx.subtree?.groupId,
                 subtreeChildKey: ctx.subtree?.childKey,
                 subtreeMax: ctx.subtree?.max,
+                priority: parsePriority(raw.priority) ?? ctx.priority,
             };
             tasks.push(descriptor);
             mountedTaskIds.push(`${nodeId}::${iteration}`);
@@ -750,6 +774,7 @@ export function extractFromHost(root, opts) {
                 subtreeGroupId: ctx.subtree?.groupId,
                 subtreeChildKey: ctx.subtree?.childKey,
                 subtreeMax: ctx.subtree?.max,
+                priority: parsePriority(raw.priority) ?? ctx.priority,
             };
             tasks.push(descriptor);
             mountedTaskIds.push(`${nodeId}::${iteration}`);
@@ -931,6 +956,7 @@ export function extractFromHost(root, opts) {
                 subtreeGroupId: ctx.subtree?.groupId,
                 subtreeChildKey: ctx.subtree?.childKey,
                 subtreeMax: ctx.subtree?.max,
+                priority: parsePriority(raw.priority) ?? ctx.priority,
                 memoryConfig: raw.memory && typeof raw.memory === "object" && !Array.isArray(raw.memory)
                     ? /** @type {TaskDescriptor["memoryConfig"]} */ (raw.memory)
                     : undefined,
@@ -959,6 +985,7 @@ export function extractFromHost(root, opts) {
                         childKey: resolveSubtreeChildKey(child.rawProps ?? {}, childOrdinal),
                     }
                     : ctx.subtree,
+                priority: nextPriority,
             });
         }
     }

@@ -12,6 +12,13 @@ export type ParallelProps = {
 	 * descendant task. Both props may coexist.
 	 */
 	subtreeConcurrency?: number;
+	/**
+	 * Scheduling priority inherited by descendant task nodes as their default
+	 * (default 0; an explicit `priority` on a child wins). When more tasks are
+	 * runnable than free concurrency slots, higher priority claims slots
+	 * first; ties keep plan order. Never overrides dependencies or caps.
+	 */
+	priority?: number;
 	skipIf?: boolean;
 	children?: React.ReactNode;
 };

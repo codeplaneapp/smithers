@@ -78,6 +78,13 @@ export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends
 	/** What Smithers should do after a hijacked session exits. */
 	onHijackExit?: "complete" | "reopen";
 	allowTools?: string[];
+	/**
+	 * Scheduling priority (default 0, or the nearest `<Parallel>`/`<MergeQueue>`
+	 * ancestor's priority). When more tasks are runnable than free concurrency
+	 * slots, higher priority claims slots first; ties keep plan order. Never
+	 * overrides dependencies or group caps.
+	 */
+	priority?: number;
 	label?: string;
 	meta?: Record<string, unknown>;
 	/** @internal Used by createSmithers() to bind tasks to the correct workflow context. */

@@ -169,6 +169,14 @@ export type TaskDescriptor = {
   subtreeChildKey?: string;
   /** Max direct-child subtrees of the subtree group allowed in flight at once. */
   subtreeMax?: number;
+  /**
+   * Scheduling priority (default 0). When more tasks are runnable than free
+   * concurrency slots, higher-priority tasks claim slots first; equal
+   * priorities keep plan order. Never overrides dependencies or group caps.
+   * Inherited from the nearest `<Parallel>`/`<MergeQueue>` ancestor that sets
+   * one unless the node sets its own.
+   */
+  priority?: number;
   needsApproval: boolean;
   waitAsync?: boolean;
   approvalMode?: "gate" | "decision" | "select" | "rank";

@@ -11,6 +11,16 @@ import { parseStateKey } from "./parseStateKey.js";
 /** @typedef {import("./TaskStateMap.ts").TaskStateMap} TaskStateMap */
 
 /**
+ * Effective scheduling priority of a task descriptor (default 0; higher wins
+ * when runnable tasks compete for scarce concurrency slots).
+ * @param {TaskDescriptor} descriptor
+ * @returns {number}
+ */
+function descriptorPriority(descriptor) {
+    const priority = descriptor.priority;
+    return typeof priority === "number" && Number.isFinite(priority) ? priority : 0;
+}
+/**
  * @param {TaskState} state
  * @param {TaskDescriptor} descriptor
  * @returns {boolean}
@@ -713,6 +723,16 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
     }
     if (plan)
         walk(plan);
+    // Priority ordering: when more tasks are runnable than free concurrency
+    // slots, higher-priority tasks must claim slots first — the session and
+    // driver dispatch (and the engine's slot queue) consume `runnable` in
+    // order. The sort is stable (spec-guaranteed), so equal priorities keep
+    // plan-walk order, and the all-default fast path returns the walk order
+    // untouched. Group/subtree admission above already ran in plan order and
+    // is unaffected: priority only reorders tasks that were ALL admitted.
+    if (runnable.some((task) => descriptorPriority(task) !== 0)) {
+        runnable.sort((left, right) => descriptorPriority(right) - descriptorPriority(left));
+    }
     return {
         runnable,
         pendingExists,

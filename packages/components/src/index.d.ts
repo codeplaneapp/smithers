@@ -216,6 +216,13 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
     /** What Smithers should do after a hijacked session exits. */
     onHijackExit?: "complete" | "reopen";
     allowTools?: string[];
+    /**
+     * Scheduling priority (default 0, or the nearest `<Parallel>`/`<MergeQueue>`
+     * ancestor's priority). When more tasks are runnable than free concurrency
+     * slots, higher priority claims slots first; ties keep plan order. Never
+     * overrides dependencies or group caps.
+     */
+    priority?: number;
     label?: string;
     meta?: Record<string, unknown>;
     /** @internal Used by createSmithers() to bind tasks to the correct workflow context. */
@@ -578,6 +585,13 @@ type ParallelProps$2 = {
      * descendant task. Both props may coexist.
      */
     subtreeConcurrency?: number;
+    /**
+     * Scheduling priority inherited by descendant task nodes as their default
+     * (default 0; an explicit `priority` on a child wins). When more tasks are
+     * runnable than free concurrency slots, higher priority claims slots
+     * first; ties keep plan order. Never overrides dependencies or caps.
+     */
+    priority?: number;
     skipIf?: boolean;
     children?: React__default.ReactNode;
 };
@@ -647,6 +661,14 @@ type OptimizerProps$2 = {
 type MergeQueueProps$2 = {
     id?: string;
     maxConcurrency?: number;
+    /**
+     * Scheduling priority inherited by descendant task nodes as their default.
+     * Defaults to MERGE_QUEUE_PRIORITY (1000, well above the task default of 0)
+     * so that once work is ready to land, landing outranks starting new work
+     * when runnable tasks compete for scarce concurrency slots. An explicit
+     * `priority` on a child node wins. Never overrides dependencies or caps.
+     */
+    priority?: number;
     skipIf?: boolean;
     children?: React__default.ReactNode;
 };
@@ -1891,6 +1913,7 @@ type SequenceProps$1 = SequenceProps$2;
  */
 declare function Parallel(props: ParallelProps$1): React__default.ReactElement<{
     label?: string | undefined;
+    priority?: number | undefined;
     maxConcurrency: number | undefined;
     subtreeConcurrency: number | undefined;
     id: string | undefined;
@@ -1903,6 +1926,7 @@ type ParallelProps$1 = ParallelProps$2;
  */
 declare function MergeQueue(props: MergeQueueProps$1): React__default.ReactElement<{
     maxConcurrency: number;
+    priority: number;
     id: string | undefined;
 }, string | React__default.JSXElementConstructor<any>> | null;
 type MergeQueueProps$1 = MergeQueueProps$2;

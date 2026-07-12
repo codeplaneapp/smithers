@@ -3,7 +3,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { validateForkSources } from "./validateForkSources.js";
 import { resolveWorktreePath } from "./worktree-path.js";
 import { resolveStableId } from "./utils/tree-ids.js";
-import { DEFAULT_MERGE_QUEUE_CONCURRENCY, WORKTREE_EMPTY_PATH_ERROR } from "./constants.js";
+import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR } from "./constants.js";
 /** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./XmlNode.ts").XmlNode} XmlNode */
 /** @typedef {import("./ExtractOptions.ts").ExtractOptions} ExtractOptions */
@@ -314,6 +314,20 @@ function parseSubtreeConcurrency(raw) {
     return max >= 1 ? max : undefined;
 }
 /**
+ * Parse a `priority` prop (numeric strings coerced in line with
+ * `maxConcurrency`; non-finite values ignored). Higher-priority runnable
+ * tasks claim scarce concurrency slots first; unset means "inherit from the
+ * nearest container that set one", ultimately defaulting to 0.
+ * @param {unknown} value
+ * @returns {number | undefined}
+ */
+function parsePriority(value) {
+    if (value == null)
+        return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+/**
  * Stable key identifying a direct child of a subtree-capped parallel. Prefers
  * an explicit key/id on the child element so resume stays stable across
  * sibling insertions; falls back to the child's element ordinal.
@@ -385,7 +399,7 @@ export function extractGraph(root, opts) {
     }
     /**
    * @param {HostNode} node
-   * @param {{ readonly path: readonly number[]; readonly iteration: number; readonly ralphId?: string; readonly parentIsRalph: boolean; readonly parallelStack: readonly { readonly id: string; readonly max?: number }[]; readonly worktreeStack: readonly { readonly id: string; readonly path: string; readonly branch?: string; readonly baseBranch?: string; }[]; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; readonly subtree?: { readonly groupId: string; readonly max: number; readonly childKey: string }; }} ctx
+   * @param {{ readonly path: readonly number[]; readonly iteration: number; readonly ralphId?: string; readonly parentIsRalph: boolean; readonly parallelStack: readonly { readonly id: string; readonly max?: number }[]; readonly worktreeStack: readonly { readonly id: string; readonly path: string; readonly branch?: string; readonly baseBranch?: string; }[]; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; readonly subtree?: { readonly groupId: string; readonly max: number; readonly childKey: string }; readonly priority?: number; }} ctx
    */
     function walk(node, ctx) {
         if (node.kind === "text")
@@ -396,6 +410,11 @@ export function extractGraph(root, opts) {
         let loopStack = ctx.loopStack;
         let nextParallelStack = ctx.parallelStack;
         let nextWorktreeStack = ctx.worktreeStack;
+        // Priority inheritance: a <Parallel>/<MergeQueue> container's priority
+        // becomes the default for every descendant task node (explicit
+        // `priority` on a node still wins). <MergeQueue> defaults to
+        // MERGE_QUEUE_PRIORITY so landing work outranks starting new work.
+        let nextPriority = ctx.priority;
         if (node.tag === "smithers:ralph") {
             if (ctx.parentIsRalph) {
                 throw new SmithersError("NESTED_LOOP", "Nested <Ralph> is not supported.");
@@ -417,6 +436,7 @@ export function extractGraph(root, opts) {
         let subtreePending;
         if (node.tag === "smithers:parallel") {
             nextParallelStack = pushGroup("parallel", raw, ctx.path, ctx.parallelStack);
+            nextPriority = parsePriority(raw.priority) ?? nextPriority;
             const subtreeMax = parseSubtreeConcurrency(raw);
             if (subtreeMax != null) {
                 subtreePending = {
@@ -427,6 +447,7 @@ export function extractGraph(root, opts) {
         }
         if (node.tag === "smithers:merge-queue") {
             nextParallelStack = pushGroup("merge-queue", raw, ctx.path, nextParallelStack);
+            nextPriority = parsePriority(raw.priority) ?? MERGE_QUEUE_PRIORITY;
         }
         if (node.tag === "smithers:worktree") {
             const id = resolveStableId(raw.id, "worktree", ctx.path);
@@ -465,6 +486,7 @@ export function extractGraph(root, opts) {
             subtreeGroupId: ctx.subtree?.groupId,
             subtreeChildKey: ctx.subtree?.childKey,
             subtreeMax: ctx.subtree?.max,
+            priority: parsePriority(raw.priority) ?? ctx.priority,
         };
         if (node.tag === "smithers:subflow") {
             const logicalNodeId = requireTaskId(raw, "Subflow");
@@ -749,6 +771,7 @@ export function extractGraph(root, opts) {
                         childKey: resolveSubtreeChildKey(child.rawProps ?? {}, childOrdinal),
                     }
                     : ctx.subtree,
+                priority: nextPriority,
             });
         }
     }

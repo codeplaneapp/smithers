@@ -2776,11 +2776,25 @@ function isQuotaTaskFailure(attempt) {
     return meta?.failureQuota === true;
 }
 /**
+ * Effective scheduling priority of a task descriptor (default 0; higher wins
+ * when runnable tasks compete for scarce concurrency slots).
+ * @param {Pick<TaskDescriptor, "priority">} desc
+ * @returns {number}
+ */
+function descriptorPriority(desc) {
+    const priority = desc.priority;
+    return typeof priority === "number" && Number.isFinite(priority) ? priority : 0;
+}
+/**
  * Apply only the global maxConcurrency cap.
  *
  * Per-group caps (Parallel/MergeQueue) are enforced upstream by the scheduler
  * when selecting runnable tasks. Keeping group logic in a single place avoids
  * double-enforcement and admission drift.
+ *
+ * Higher-priority runnable tasks claim scarce capacity first (default
+ * priority 0). The sort is stable (spec-guaranteed), so equal priorities keep
+ * the caller's order and an all-default run selects exactly as before.
  *
  * @param {TaskDescriptor[]} runnable
  * @param {TaskStateMap} stateMap
@@ -2799,7 +2813,10 @@ export function applyConcurrencyLimits(runnable, stateMap, maxConcurrency, allTa
     }
     void Effect.runPromise(Metric.set(schedulerConcurrencyUtilization, maxConcurrency > 0 ? inProgressTotal / maxConcurrency : 0));
     const capacity = Math.max(0, maxConcurrency - inProgressTotal);
-    for (const desc of runnable) {
+    const ordered = runnable.some((desc) => descriptorPriority(desc) !== 0)
+        ? [...runnable].sort((left, right) => descriptorPriority(right) - descriptorPriority(left))
+        : runnable;
+    for (const desc of ordered) {
         if (selected.length >= capacity)
             break;
         selected.push(desc);
@@ -5334,13 +5351,20 @@ async function runWorkflowBodyDriver(workflow, opts) {
     /** @type {Set<string>} */
     const budgetSkippedKeys = new Set();
     let activeTaskCount = 0;
+    // Slot wait queue ordered by task priority (descending, default 0):
+    // freed slots go to the highest-priority waiter first so e.g. MergeQueue
+    // landing work outranks starting new ticket work. Equal priorities keep
+    // FIFO order, so an all-default run drains exactly like the old plain
+    // FIFO queue.
+    /** @type {{ priority: number; resolve: () => void }[]} */
     const taskWaiters = [];
     // `let`: replaced before tasks start when a resumed run restores a
     // persisted `--max-concurrency` pin that this invocation's opts lack.
     let slotGovernor = createSlotGovernor(maxConcurrency, {
         explicit: opts.maxConcurrency !== undefined,
     });
-    const acquireTaskSlot = async () => {
+    /** @param {number} priority */
+    const acquireTaskSlot = async (priority) => {
         if (activeTaskCount < maxConcurrency) {
             activeTaskCount += 1;
             return;
@@ -5362,7 +5386,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             let capacity = maxConcurrency - activeTaskCount;
             while (capacity > 0 && taskWaiters.length > 0) {
                 const next = taskWaiters.shift();
-                next?.();
+                next?.resolve();
                 capacity -= 1;
             }
             if (capacity > 0) {
@@ -5371,22 +5395,29 @@ async function runWorkflowBodyDriver(workflow, opts) {
             }
         }
         await new Promise((resolveWaiter) => {
-            taskWaiters.push(resolveWaiter);
+            // Insert after every waiter with priority >= ours: higher priority
+            // moves ahead of lower, equal priority stays FIFO.
+            let index = taskWaiters.length;
+            while (index > 0 && taskWaiters[index - 1].priority < priority) {
+                index -= 1;
+            }
+            taskWaiters.splice(index, 0, { priority, resolve: resolveWaiter });
         });
         activeTaskCount += 1;
     };
     const releaseTaskSlot = () => {
         activeTaskCount = Math.max(0, activeTaskCount - 1);
         const next = taskWaiters.shift();
-        next?.();
+        next?.resolve();
     };
     /**
    * @template A
    * @param {() => Promise<A>} execute
+   * @param {number} priority
    * @returns {Promise<A>}
    */
-    const withTaskSlot = async (execute) => {
-        await acquireTaskSlot();
+    const withTaskSlot = async (execute, priority) => {
+        await acquireTaskSlot(priority);
         try {
             return await execute();
         }
@@ -5892,7 +5923,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         finally {
             activeDriverTaskKeys.delete(taskKey);
         }
-    });
+    }, descriptorPriority(task));
     /**
    * @param {WorkflowGraph} graph
    * @param {RenderContext["trigger"]} [trigger]
