@@ -156,6 +156,58 @@ function kindWhere(kind: string | undefined): string | undefined {
   return kind ? `kind = ${quoteSqlLiteral(kind)}` : undefined;
 }
 
+// Filter values are interpolated into an Electric shape `where` clause (a SQL
+// snippet Postgres evaluates). quoteSqlLiteral escapes quotes, but predicates
+// are only pushed down for values in this conservative charset; anything else
+// falls back to the RPC-backed query collection, which enforces the filter
+// server-side instead.
+const SAFE_SHAPE_LITERAL = /^[A-Za-z0-9_.:-]+$/;
+
+function shapeLiteral(value: string): string | undefined {
+  return SAFE_SHAPE_LITERAL.test(value) ? quoteSqlLiteral(value) : undefined;
+}
+
+/**
+ * Electric pushdown for the documented listRuns filters. Returns the shape
+ * `where` clause when the filter can be represented with exactly the RPC's
+ * semantics, or undefined when it cannot — an explicit limit (shapes have no
+ * ORDER BY/LIMIT), a workflow filter (the gateway resolves workflow keys in
+ * JS), or a status outside the safe literal charset — in which case the
+ * collection falls back to the RPC-backed query collection so multiplayer rows
+ * match local rows. Exported for the filter-parity regression tests.
+ */
+export function runsShapeWhere(params: ListRunsRequest): { where?: string } | undefined {
+  const filter = params.filter ?? {};
+  if (filter.limit !== undefined || filter.workflow !== undefined) return undefined;
+  if (filter.status === undefined) return {};
+  const status = shapeLiteral(filter.status);
+  if (!status) return undefined;
+  // Mirrors adapter.listRuns: a "running" filter also matches "continued".
+  return {
+    where: filter.status === "running"
+      ? `(status = ${status} OR status = 'continued')`
+      : `status = ${status}`,
+  };
+}
+
+/**
+ * Electric pushdown for the documented listApprovals filters. The RPC returns
+ * PENDING approvals only, so every approvals shape carries the
+ * requested-status predicate (decided rows must be absent); a runId filter
+ * narrows it further. workflow (JS workflow-key resolution) and limit cannot
+ * be represented and fall back to the RPC-backed query collection. Exported
+ * for the filter-parity regression tests.
+ */
+export function approvalsShapeWhere(params: ListApprovalsRequest): { where: string } | undefined {
+  const filter = params.filter ?? {};
+  if (filter.limit !== undefined || filter.workflow !== undefined) return undefined;
+  const pending = "status = 'requested'";
+  if (filter.runId === undefined) return { where: pending };
+  const runId = shapeLiteral(filter.runId);
+  if (!runId) return undefined;
+  return { where: `run_id = ${runId} AND ${pending}` };
+}
+
 function txidMatch(result: { txid?: string } | undefined) {
   if (!result?.txid) throw new Error("Postgres domain API mutation did not return txid for Electric matching.");
   const txid = Number(result.txid);
@@ -325,48 +377,63 @@ function createSmithersCollectionsWithClient(
 
   return {
     client,
-    runs: (params: ListRunsRequest = {}) =>
-      getOrCreate<GatewayRunSummaryRow, string>(
+    runs: (params: ListRunsRequest = {}) => {
+      const pushdown = runsShapeWhere(params);
+      // txid matching only functions on Electric-backed collections; RPC-backed
+      // query collections (local mode, or a multiplayer filter that cannot be
+      // pushed down) confirm optimistic writes by refetching instead.
+      const electric = Boolean(multiplayerMode && pushdown);
+      const handlers: MutationHandlers<GatewayRunSummaryRow, string> = {
+        onInsert: async ({ transaction }) => {
+          let latest: { txid?: string } | undefined;
+          for (const mutation of transaction.mutations) {
+            const row = mutation.modified as GatewayRunSummaryRow & { workflow?: string; input?: Record<string, unknown> };
+            const workflow = row.workflow ?? row.workflowKey;
+            if (!workflow) throw new Error("runs.insert requires workflow or workflowKey.");
+            latest = await client.api.launchRun({ workflow, input: row.input ?? {} });
+          }
+          if (electric) return txidMatch(latest);
+        },
+        onUpdate: async ({ transaction }) => {
+          let latest: { txid?: string } | undefined;
+          for (const mutation of transaction.mutations) {
+            const row = mutation.modified as GatewayRunSummaryRow;
+            if (row.status === "cancelled" || row.status === "cancelling") {
+              latest = await client.api.cancelRun({ runId: row.runId });
+            } else if (row.status === "running") {
+              latest = await client.api.resumeRun({ runId: row.runId });
+            } else {
+              throw new Error(`runs.update cannot persist status ${row.status ?? "unknown"}.`);
+            }
+          }
+          if (electric) return txidMatch(latest);
+        },
+        onDelete: async ({ transaction }) => {
+          let latest: { txid?: string } | undefined;
+          for (const mutation of transaction.mutations) {
+            latest = await client.api.cancelRun({ runId: String(mutation.key) });
+          }
+          if (electric) return txidMatch(latest);
+        },
+      };
+      if (!pushdown) {
+        return getOrCreateQuery<GatewayRunSummaryRow, string>(
+          smithersCollectionKeys.runs(params),
+          (row) => row.runId,
+          () => client.api.listRuns(params),
+          handlers,
+        );
+      }
+      return getOrCreate<GatewayRunSummaryRow, string>(
         smithersCollectionKeys.runs(params),
         "runs",
         (row) => row.runId,
         () => client.api.listRuns(params),
         (row) => mapSmithersElectricRow("runs", row),
-        undefined,
-        {
-          onInsert: async ({ transaction }) => {
-            let latest: { txid?: string } | undefined;
-            for (const mutation of transaction.mutations) {
-              const row = mutation.modified as GatewayRunSummaryRow & { workflow?: string; input?: Record<string, unknown> };
-              const workflow = row.workflow ?? row.workflowKey;
-              if (!workflow) throw new Error("runs.insert requires workflow or workflowKey.");
-              latest = await client.api.launchRun({ workflow, input: row.input ?? {} });
-            }
-            if (multiplayerMode) return txidMatch(latest);
-          },
-          onUpdate: async ({ transaction }) => {
-            let latest: { txid?: string } | undefined;
-            for (const mutation of transaction.mutations) {
-              const row = mutation.modified as GatewayRunSummaryRow;
-              if (row.status === "cancelled" || row.status === "cancelling") {
-                latest = await client.api.cancelRun({ runId: row.runId });
-              } else if (row.status === "running") {
-                latest = await client.api.resumeRun({ runId: row.runId });
-              } else {
-                throw new Error(`runs.update cannot persist status ${row.status ?? "unknown"}.`);
-              }
-            }
-            if (multiplayerMode) return txidMatch(latest);
-          },
-          onDelete: async ({ transaction }) => {
-            let latest: { txid?: string } | undefined;
-            for (const mutation of transaction.mutations) {
-              latest = await client.api.cancelRun({ runId: String(mutation.key) });
-            }
-            if (multiplayerMode) return txidMatch(latest);
-          },
-        },
-      ),
+        pushdown.where,
+        handlers,
+      );
+    },
     run: (runId: string) =>
       getOrCreate<GatewayRunRow, string>(
         smithersCollectionKeys.run(runId),
@@ -377,45 +444,57 @@ function createSmithersCollectionsWithClient(
         runId ? runWhere(runId) : undefined,
       ),
     runTree: runTreeCollection,
-    approvals: (params: ListApprovalsRequest = {}) =>
-      getOrCreate<GatewayApprovalRow, string>(
+    approvals: (params: ListApprovalsRequest = {}) => {
+      const pushdown = approvalsShapeWhere(params);
+      const electric = Boolean(multiplayerMode && pushdown);
+      const handlers: MutationHandlers<GatewayApprovalRow, string> = {
+        onUpdate: async ({ transaction }) => {
+          let latest: { txid?: string } | undefined;
+          for (const mutation of transaction.mutations) {
+            const row = mutation.modified as GatewayApprovalRow & { decision?: SubmitApprovalDecision };
+            latest = await client.api.submitApproval({
+              runId: row.runId,
+              nodeId: row.nodeId,
+              iteration: row.iteration,
+              approved: true,
+              decision: row.decision ?? { approved: true },
+            });
+          }
+          if (electric) return txidMatch(latest);
+        },
+        onDelete: async ({ transaction }) => {
+          let latest: { txid?: string } | undefined;
+          for (const mutation of transaction.mutations) {
+            const row = mutation.original as GatewayApprovalRow;
+            latest = await client.api.submitApproval({
+              runId: row.runId,
+              nodeId: row.nodeId,
+              iteration: row.iteration,
+              approved: false,
+              decision: { approved: false },
+            });
+          }
+          if (electric) return txidMatch(latest);
+        },
+      };
+      if (!pushdown) {
+        return getOrCreateQuery<GatewayApprovalRow, string>(
+          smithersCollectionKeys.approvals(params),
+          (row) => `${row.runId}:${row.nodeId}:${row.iteration}`,
+          () => client.api.listApprovals(params),
+          handlers,
+        );
+      }
+      return getOrCreate<GatewayApprovalRow, string>(
         smithersCollectionKeys.approvals(params),
         "approvals",
         (row) => `${row.runId}:${row.nodeId}:${row.iteration}`,
         () => client.api.listApprovals(params),
         (row) => mapSmithersElectricRow("approvals", row),
-        params.filter?.runId ? runWhere(params.filter.runId) : undefined,
-        {
-          onUpdate: async ({ transaction }) => {
-            let latest: { txid?: string } | undefined;
-            for (const mutation of transaction.mutations) {
-              const row = mutation.modified as GatewayApprovalRow & { decision?: SubmitApprovalDecision };
-              latest = await client.api.submitApproval({
-                runId: row.runId,
-                nodeId: row.nodeId,
-                iteration: row.iteration,
-                approved: true,
-                decision: row.decision ?? { approved: true },
-              });
-            }
-            if (multiplayerMode) return txidMatch(latest);
-          },
-          onDelete: async ({ transaction }) => {
-            let latest: { txid?: string } | undefined;
-            for (const mutation of transaction.mutations) {
-              const row = mutation.original as GatewayApprovalRow;
-              latest = await client.api.submitApproval({
-                runId: row.runId,
-                nodeId: row.nodeId,
-                iteration: row.iteration,
-                approved: false,
-                decision: { approved: false },
-              });
-            }
-            if (multiplayerMode) return txidMatch(latest);
-          },
-        },
-      ),
+        pushdown.where,
+        handlers,
+      );
+    },
     workflows: (params: ListWorkflowsRequest = {}) =>
       getOrCreateQuery<GatewayWorkflowRow, string>(
         smithersCollectionKeys.workflows(params),
