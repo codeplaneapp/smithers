@@ -423,6 +423,9 @@ importers:
       '@smithers-orchestrator/scheduler':
         specifier: workspace:*
         version: link:../../packages/scheduler
+      '@smithers-orchestrator/scorers':
+        specifier: workspace:*
+        version: link:../../packages/scorers
       '@smithers-orchestrator/server':
         specifier: workspace:*
         version: link:../../packages/server
