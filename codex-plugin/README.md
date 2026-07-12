@@ -11,6 +11,8 @@ Installing it gives a Codex session:
   (not hand-rolled subagents) **and mandates a live custom UI for every workflow**;
 - a **SessionStart hook** that detects a `.smithers/` project, lists its workflows,
   and flags any that still need a UI.
+- an optional **durable native spawn-tool routing policy** under `scripts/`, for
+  Codex 0.144+; it writes Smithers guidance into Codex's native multi-agent hints.
 
 > Smithers is operated by the AI agent on the human's behalf — it is not a GUI the
 > human clicks. This plugin is what makes Codex fluent in it.
@@ -58,11 +60,17 @@ repo root.
     ├── hooks/
     │   ├── hooks.json      # SessionStart hook (auto-discovered; NOT a manifest field)
     │   └── session-start.mjs
+    ├── scripts/
+    │   └── configure-codex-routing.mjs  # App Server setup/status/disable CLI
     ├── skills/
     │   └── smithers/
     │       └── SKILL.md    # the on-ramp + the mandatory-UI authoring contract
     └── README.md
 ```
+
+The routing configurator uses Codex App Server JSON-RPC and a namespaced snapshot
+in `$CODEX_HOME/.smithers-codex-routing.json`; it never manages model routing or
+spawn metadata. See the durable routing section in the skill for setup commands.
 
 > Codex's plugin validator (≥ 0.142) rejects a `hooks` field in `plugin.json`, so
 > hooks are auto-discovered from `hooks/hooks.json` instead, and `.mcp.json` must

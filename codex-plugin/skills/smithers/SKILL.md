@@ -101,6 +101,27 @@ fields are JSON strings.
 For the full API at any time, run `bunx smithers-orchestrator docs-full` (prints
 the complete `llms-full.txt`) or `bunx smithers-orchestrator ask "<question>"`.
 
+## Durable spawn-tool routing (recommended)
+
+Codex >= 0.144 supports native multi-agent spawn hints. The dependency-free
+configurator at `scripts/configure-codex-routing.mjs` persists Smithers guidance
+in the two supported `features.multi_agent_v2` hint fields using Codex App Server:
+
+```bash
+node scripts/configure-codex-routing.mjs                 # dry-run
+node scripts/configure-codex-routing.mjs --apply          # install
+node scripts/configure-codex-routing.mjs --status         # inspect
+node scripts/configure-codex-routing.mjs --disable        # preview restore
+node scripts/configure-codex-routing.mjs --disable --apply
+```
+
+Setup saves exact prior values in `$CODEX_HOME/.smithers-codex-routing.json` and
+preserves the original snapshot on later setup runs. Existing user-authored hint
+text is a conflict and is never overwritten unless `--replace-existing-policy`
+is explicitly supplied. Disable refuses to clobber edits made after setup and
+validates rollback. Use `--status --require-effective` as an automation doctor
+check.
+
 ---
 
 # MANDATORY: every workflow gets a live custom UI

@@ -3,3 +3,4 @@ packages:
   - "apps/*"
   - "e2e"
   - ".smithers"
+  - "codex-plugin"
