@@ -428,6 +428,8 @@
               "rpc/list-approvals",
               "rpc/list-docs",
               "rpc/list-scores",
+              "rpc/list-scores-for-runs",
+              "rpc/get-score-detail",
               "rpc/list-accounts",
               "rpc/list-memory-facts",
               "rpc/list-prompts",
