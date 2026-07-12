@@ -7599,6 +7599,7 @@ const cli = Cli.create({
                     return fail(parsedOverrides.error);
                 const inputOverrides = parsedOverrides.value;
                 const resetNodes = c.options.node ? [c.options.node] : undefined;
+                const resolvedReplayWorkflowPath = resolve(c.args.workflow);
                 const result = await replayFromCheckpoint(adapter, {
                     parentRunId: c.options.runId,
                     frameNo: c.options.frame,
@@ -7606,6 +7607,12 @@ const cli = Cli.create({
                     resetNodes,
                     branchLabel: c.options.label,
                     restoreVcs: c.options.restoreVcs,
+                    // Re-bless durable metadata to the workflow being replayed so a
+                    // replay that carries an edited workflow resumes (mirrors `fork`);
+                    // otherwise the resume guard rejects it with RESUME_METADATA_MISMATCH.
+                    workflowPath: resolvedReplayWorkflowPath,
+                    workflowHash: await readWorkflowGraphHash(resolvedReplayWorkflowPath),
+                    entryWorkflowHash: await readWorkflowEntryHash(resolvedReplayWorkflowPath),
                 });
                 reportReplayResult({
                     result,

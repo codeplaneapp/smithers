@@ -17,8 +17,11 @@ import { replaysStarted } from "./replaysStarted.js";
  */
 export function replayFromCheckpoint(adapter, params) {
     return Effect.gen(function* () {
-        const { parentRunId, frameNo, inputOverrides, resetNodes, branchLabel, restoreVcs, cwd, } = params;
-        // 1. Fork the run
+        const { parentRunId, frameNo, inputOverrides, resetNodes, branchLabel, restoreVcs, cwd, workflowPath, workflowHash, entryWorkflowHash, } = params;
+        // 1. Fork the run. Thread through the workflow identity so a replay that
+        //    carries an edited workflow re-blesses the child's durable metadata;
+        //    otherwise the child inherits the parent's hashes and the resume
+        //    guard rejects the very edit replay exists to carry forward.
         const { runId, branch, snapshot } = yield* forkRunEffect(adapter, {
             parentRunId,
             frameNo,
@@ -26,6 +29,9 @@ export function replayFromCheckpoint(adapter, params) {
             resetNodes,
             branchLabel,
             forkDescription: `Replay from ${parentRunId}:${frameNo}`,
+            ...(workflowPath !== undefined ? { workflowPath } : {}),
+            ...(workflowHash !== undefined ? { workflowHash } : {}),
+            ...(entryWorkflowHash !== undefined ? { entryWorkflowHash } : {}),
         });
         // 2. Optionally restore VCS state
         let vcsRestored = false;
