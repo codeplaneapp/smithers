@@ -243,9 +243,10 @@ function stripContentHeaders(headers) {
  * @param {Record<string, string>} headers
  * @param {BodyInit | undefined} body
  * @param {OpenApiToolsOptions} options
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<Response>}
  */
-async function fetchWithRedirectValidation(url, method, headers, body, options) {
+async function fetchWithRedirectValidation(url, method, headers, body, options, signal) {
     const allowedOrigins = buildAllowedRedirectOrigins(url, options);
     let currentUrl = url;
     let currentMethod = method;
@@ -256,6 +257,9 @@ async function fetchWithRedirectValidation(url, method, headers, body, options) 
         const init = { method: currentMethod, headers: currentHeaders, redirect: "manual" };
         if (currentBody !== undefined) {
             init.body = currentBody;
+        }
+        if (signal !== undefined) {
+            init.signal = signal;
         }
         const response = await fetch(currentUrl, init);
         if (!isRedirectStatus(response.status)) {
@@ -290,9 +294,11 @@ async function fetchWithRedirectValidation(url, method, headers, body, options) 
  * @param {Record<string, unknown>} args
  * @param {string} baseUrl
  * @param {OpenApiToolsOptions} options
+ * @param {AbortSignal} [signal] - Aborts the underlying fetch (every redirect
+ *   hop and the body read), e.g. when the AI SDK cancels the tool call.
  * @returns {Promise<unknown>}
  */
-export async function executeRequest(operation, args, baseUrl, options) {
+export async function executeRequest(operation, args, baseUrl, options, signal) {
     /** @type {Record<string, string>} */
     const pathParams = {};
     /** @type {Record<string, string>} */
@@ -338,7 +344,7 @@ export async function executeRequest(operation, args, baseUrl, options) {
         : undefined;
     // Redirects are followed manually so injected auth headers can never leak
     // to an origin outside the configured service origin / allowlist.
-    const response = await fetchWithRedirectValidation(url, operation.method.toUpperCase(), headers, body, options);
+    const response = await fetchWithRedirectValidation(url, operation.method.toUpperCase(), headers, body, options, signal);
     const contentType = response.headers.get("content-type") ?? "";
     /** @type {unknown} */
     const payload = contentType.includes("application/json")
@@ -365,14 +371,19 @@ export async function executeRequest(operation, args, baseUrl, options) {
  * @param {Record<string, unknown>} args
  * @param {string} baseUrl
  * @param {OpenApiToolsOptions} options
+ * @param {AbortSignal} [abortSignal] - External cancellation (the AI SDK's
+ *   `ToolExecutionOptions.abortSignal`), combined with the fiber's own
+ *   interruption signal so both cancel the underlying fetch.
  * @returns {Effect.Effect<unknown, unknown, never>}
  */
-export function executeToolEffect(operation, args, baseUrl, options) {
+export function executeToolEffect(operation, args, baseUrl, options, abortSignal) {
     const started = nowMs();
     return Effect.gen(function* () {
         yield* Metric.increment(openApiToolCallsTotal);
         return yield* Effect.tryPromise({
-            try: () => executeRequest(operation, args, baseUrl, options),
+            // The `(fiberSignal)` form makes fiber interruption abort the
+            // in-flight request instead of orphaning it.
+            try: (fiberSignal) => executeRequest(operation, args, baseUrl, options, abortSignal === undefined ? fiberSignal : AbortSignal.any([abortSignal, fiberSignal])),
             catch: (err) => err,
         });
     }).pipe(
@@ -464,11 +475,19 @@ export function createToolFromOperation(operation, spec, baseUrl, options) {
         tool: tool({
             description,
             inputSchema: zodSchema(inputSchema),
-            execute: async (args) => {
+            execute: async (args, executionOptions) => {
+                const abortSignal = executionOptions?.abortSignal;
                 try {
-                    return await Effect.runPromise(executeToolEffect(operation, /** @type {Record<string, unknown>} */ (args), baseUrl, options));
+                    abortSignal?.throwIfAborted();
+                    return await Effect.runPromise(executeToolEffect(operation, /** @type {Record<string, unknown>} */ (args), baseUrl, options, abortSignal));
                 }
                 catch (error) {
+                    // A cancelled call is not a tool failure: rethrow so the
+                    // AI SDK observes the abort instead of a fabricated
+                    // error result the model would try to act on.
+                    if (abortSignal?.aborted) {
+                        throw error;
+                    }
                     // Return error info as tool result instead of throwing
                     const e = /** @type {{ message?: string }} */ (error);
                     return {
