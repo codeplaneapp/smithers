@@ -809,9 +809,22 @@ function applySync(
     }
     if (verdict.isMeta && verdict.subTickets.length && !ticket.isEpicDir) {
       // Decompose: write per-item tickets, open per-item issues, park the parent in .epics/.
+      // Idempotency guard: sync-apply retries replay the cached sync-plan snapshot, so a
+      // prior (crashed-then-retried) attempt may have already decomposed this epic. If the
+      // parent is already parked in .epics/ (source gone, dest present), the sub-tickets were
+      // written and their issues opened — re-running would ENOENT on the rename AND open
+      // DUPLICATE issues. Skip.
+      const epicSrc = join(ticketsDir, ticket.ticketPath);
+      const epicDst = join(ticketsDir, ".epics", basename(ticket.ticketPath));
+      if (!existsSync(epicSrc) && existsSync(epicDst)) {
+        details.push("decompose skipped (already parked) " + ticket.ticketPath);
+        continue;
+      }
       for (const sub of verdict.subTickets.slice(0, 24)) {
-        const created = createIssue(sub.title, sub.body + "\n\n---\nSplit from `.smithers/tickets/" + ticket.ticketPath + "` by ticket-fleet.");
         const fileName = slugify(ticket.slug) + "--" + slugify(sub.title) + ".md";
+        // Skip a sub-ticket already written by a prior attempt (its issue is already open).
+        if (existsSync(join(ticketsDir, "smithers", fileName))) continue;
+        const created = createIssue(sub.title, sub.body + "\n\n---\nSplit from `.smithers/tickets/" + ticket.ticketPath + "` by ticket-fleet.");
         if (!input.dryRun) {
           writeFileSync(join(ticketsDir, "smithers", fileName),
             "# " + sub.title + "\n\nGitHub: " + created.url + "\n\nParent: " + ticket.ticketPath + "\n\n" + sub.body + "\n", "utf8");
@@ -819,7 +832,7 @@ function applySync(
       }
       if (!input.dryRun) {
         mkdirSync(join(ticketsDir, ".epics"), { recursive: true });
-        renameSync(join(ticketsDir, ticket.ticketPath), join(ticketsDir, ".epics", basename(ticket.ticketPath)));
+        if (existsSync(epicSrc)) renameSync(epicSrc, epicDst);
       }
       if (ticket.linkedIssue && !input.dryRun) {
         ghCommentIssue(input.repo, ticket.linkedIssue,
