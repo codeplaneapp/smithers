@@ -22,6 +22,24 @@ import {
 } from "smithers-orchestrator/gateway-react";
 import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smithers-orchestrator/gateway-client";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import {
+  Button,
+  SmithersUiStyles,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "smithers-orchestrator/ui";
+import {
+  Chip,
+  MonitorToolbar,
+  RunLifecycleActions,
+  RunRailRow,
+  RunsPagination,
+  ToneDot,
+} from "./monitorShell.tsx";
 import { processPatch, type CodeViewItem } from "@pierre/diffs";
 import { CodeView } from "@pierre/diffs/react";
 import type { Terminal as XTerminal, IDisposable } from "@xterm/xterm";
@@ -184,10 +202,6 @@ function StatusTag({ status, label }: { status: string | undefined; label?: stri
   );
 }
 
-function ToneDot({ tone, pulse }: { tone: Tone; pulse?: boolean }) {
-  return <span className={`mon-dot tone-${tone}${pulse ? " mon-dot-pulse" : ""}`} aria-hidden />;
-}
-
 /**
  * Transport truth readout. "Live" only when the gateway link is really
  * streaming; every degraded state gets the same treatment — short label,
@@ -338,22 +352,17 @@ function ApprovalsInbox({
               {approval.requestSummary ? <div className="mon-approval-summary">{approval.requestSummary}</div> : null}
             </button>
             <div className="mon-approval-actions">
-              <button
-                type="button"
-                className="mon-btn mon-btn-ok"
+              <Button
+                variant="outline"
+                className="mon-btn-ok"
                 disabled={busy}
                 onClick={() => void decide(approval, true)}
               >
                 Approve
-              </button>
-              <button
-                type="button"
-                className="mon-btn mon-btn-danger"
-                disabled={busy}
-                onClick={() => void decide(approval, false)}
-              >
+              </Button>
+              <Button variant="destructive" disabled={busy} onClick={() => void decide(approval, false)}>
                 Deny
-              </button>
+              </Button>
             </div>
           </div>
         );
@@ -378,22 +387,19 @@ function RunListRow({
   const tone = toneForStatus(run.status);
   const live = tone === "running" || tone === "waiting";
   return (
-    <button
-      type="button"
-      className={`mon-run-row${active ? " is-active" : ""}`}
-      data-testid="monitor-run-row"
-      data-run-id={run.runId}
-      onClick={() => onSelect(run.runId)}
-    >
-      <ToneDot tone={tone} pulse={tone === "running"} />
-      <span className="mon-run-name" title={run.workflowKey ?? "unknown workflow"}>
-        {run.workflowKey ?? "unknown"}
-      </span>
-      <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
-      <span className="mon-run-when mon-dim">
-        {live ? <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} /> : <Ago ms={run.createdAtMs} />}
-      </span>
-    </button>
+    <RunRailRow
+      runId={run.runId}
+      name={run.workflowKey ?? "unknown"}
+      title={run.workflowKey ?? "unknown workflow"}
+      shortId={shortRunId(run.runId)}
+      tone={tone}
+      pulse={tone === "running"}
+      when={
+        live ? <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} /> : <Ago ms={run.createdAtMs} />
+      }
+      active={active}
+      onSelect={onSelect}
+    />
   );
 }
 
@@ -658,34 +664,34 @@ function CronsPanel() {
         </div>
       ) : (
         <div className="mon-crons-scroll">
-          <table className="mon-runs-table mon-crons-table">
-            <thead>
-              <tr>
-                <th scope="col">Pattern</th>
-                <th scope="col">Workflow</th>
-                <th scope="col">Enabled</th>
-                <th scope="col">Last run</th>
-                <th scope="col">Next run</th>
-                <th scope="col">Last error</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="mon-runs-table mon-crons-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Pattern</TableHead>
+                <TableHead scope="col">Workflow</TableHead>
+                <TableHead scope="col">Enabled</TableHead>
+                <TableHead scope="col">Last run</TableHead>
+                <TableHead scope="col">Next run</TableHead>
+                <TableHead scope="col">Last error</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {crons.map((cron) => (
-                <tr key={cron.cronId} data-cron-id={cron.cronId}>
-                  <td className="mon-mono">{cron.pattern}</td>
-                  <td className="mon-table-workflow" title={cron.workflowPath ?? cron.workflow}>
+                <TableRow key={cron.cronId} data-cron-id={cron.cronId}>
+                  <TableCell className="mon-mono">{cron.pattern}</TableCell>
+                  <TableCell className="mon-table-workflow" title={cron.workflowPath ?? cron.workflow}>
                     {cron.workflow}
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell>
                     <span className={`mon-pill tone-${cron.enabled ? "ok" : "idle"}`}>
                       <span className="mon-dot" aria-hidden />
                       {cron.enabled ? "enabled" : "disabled"}
                     </span>
-                  </td>
-                  <td className="mon-dim">
+                  </TableCell>
+                  <TableCell className="mon-dim">
                     <Ago ms={cron.lastRunAtMs} />
-                  </td>
-                  <td className="mon-mono">
+                  </TableCell>
+                  <TableCell className="mon-mono">
                     {cron.nextRunAtMs === undefined ? (
                       <span className="mon-dim">—</span>
                     ) : now >= cron.nextRunAtMs ? (
@@ -693,14 +699,14 @@ function CronsPanel() {
                     ) : (
                       <Countdown untilMs={cron.nextRunAtMs} />
                     )}
-                  </td>
-                  <td className={cron.error ? "tone-failed mon-cron-error" : "mon-dim"} title={cron.error}>
+                  </TableCell>
+                  <TableCell className={cron.error ? "tone-failed mon-cron-error" : "mon-dim"} title={cron.error}>
                     {cron.error ? cron.error.slice(0, 80) : "—"}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </section>
@@ -1015,72 +1021,54 @@ function RunsTable({
         </h2>
       </header>
       <div className="mon-runs-scroll">
-        <table className="mon-runs-table" data-testid="monitor-runs-table">
-          <thead>
-            <tr>
-              <th scope="col">Status</th>
-              <th scope="col">Run</th>
-              <th scope="col">Workflow</th>
-              <th scope="col">Progress</th>
-              <th scope="col">Started</th>
-              <th scope="col">Duration</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="mon-runs-table" data-testid="monitor-runs-table">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Status</TableHead>
+              <TableHead scope="col">Run</TableHead>
+              <TableHead scope="col">Workflow</TableHead>
+              <TableHead scope="col">Progress</TableHead>
+              <TableHead scope="col">Started</TableHead>
+              <TableHead scope="col">Duration</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {pageRows.map((run) => (
-              <tr
+              <TableRow
                 key={run.runId}
                 className="mon-runs-table-row"
                 data-run-id={run.runId}
                 onClick={() => onSelect(run.runId)}
               >
-                <td>
+                <TableCell>
                   <StatusTag status={run.status} />
-                </td>
-                <td className="mon-mono">{shortRunId(run.runId)}</td>
-                <td className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
+                </TableCell>
+                <TableCell className="mon-mono">{shortRunId(run.runId)}</TableCell>
+                <TableCell className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
                   {run.workflowKey ?? "unknown"}
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <RunProgressCell run={run} />
-                </td>
-                <td className="mon-dim">
+                </TableCell>
+                <TableCell className="mon-dim">
                   <Ago ms={run.startedAtMs ?? run.createdAtMs} />
-                </td>
-                <td className="mon-dim mon-mono">
+                </TableCell>
+                <TableCell className="mon-dim mon-mono">
                   <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={run.finishedAtMs} />
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
-      <footer className="mon-runs-pagination" data-testid="monitor-runs-pagination">
-        <span className="mon-dim mon-count-note">
-          Showing {firstRow}–{lastRow} of {total}
-        </span>
-        <span className="mon-runs-pagination-controls">
-          <button
-            type="button"
-            className="mon-btn"
-            disabled={shownPage <= 1}
-            onClick={() => onPageChange(shownPage - 1)}
-          >
-            Prev
-          </button>
-          <span className="mon-dim mon-count-note">
-            Page {shownPage} / {pageCount}
-          </span>
-          <button
-            type="button"
-            className="mon-btn"
-            disabled={shownPage >= pageCount}
-            onClick={() => onPageChange(shownPage + 1)}
-          >
-            Next
-          </button>
-        </span>
-      </footer>
+      <RunsPagination
+        page={shownPage}
+        pageCount={pageCount}
+        firstRow={firstRow}
+        lastRow={lastRow}
+        total={total}
+        onPageChange={onPageChange}
+      />
     </section>
   );
 }
@@ -1625,13 +1613,10 @@ function ExecutionPanel({
       <header className="mon-panel-head">
         <h2 className="mon-kicker">Execution</h2>
         {selectedNode && !scrubbing ? (
-          <button type="button" className="mon-chip" onClick={() => onSelectNode(undefined)}>
-            Clear selection
-          </button>
+          <Chip onClick={() => onSelectNode(undefined)}>Clear selection</Chip>
         ) : null}
-        <button
-          type="button"
-          className={`mon-chip${scrubbing ? " is-on" : ""}`}
+        <Chip
+          on={scrubbing}
           data-testid="monitor-frames-chip"
           onClick={() => {
             setShowTimeline(false);
@@ -1641,10 +1626,9 @@ function ExecutionPanel({
           title="Scrub the execution tree frame by frame instead of following it live"
         >
           Frames
-        </button>
-        <button
-          type="button"
-          className={`mon-chip${asXml && !showTimeline ? " is-on" : ""}`}
+        </Chip>
+        <Chip
+          on={asXml && !showTimeline}
           data-testid="monitor-xml-chip"
           onClick={() => {
             if (showTimeline) {
@@ -1657,10 +1641,9 @@ function ExecutionPanel({
           title="Toggle between the expandable tree and the engine's XML view of the same nodes"
         >
           XML
-        </button>
-        <button
-          type="button"
-          className={`mon-chip${showTimeline ? " is-on" : ""}`}
+        </Chip>
+        <Chip
+          on={showTimeline}
           data-testid="monitor-timeline-chip"
           onClick={() => {
             if (!showTimeline) goLive();
@@ -1669,19 +1652,17 @@ function ExecutionPanel({
           title="Every task execution in the order it ran — loops unrolled, one row per iteration"
         >
           Timeline
-        </button>
+        </Chip>
       </header>
       {scrubbing && !showTimeline ? (
         <div className="mon-scrub" data-testid="monitor-scrub">
-          <button
-            type="button"
-            className="mon-chip"
+          <Chip
             onClick={() => step(-1)}
             disabled={latestFrameNo === undefined || shownFrame <= bounds.min}
             aria-label="Previous frame"
           >
             ◀
-          </button>
+          </Chip>
           <input
             className="mon-scrub-range"
             type="range"
@@ -1696,15 +1677,13 @@ function ExecutionPanel({
             }}
             aria-label="Frame"
           />
-          <button
-            type="button"
-            className="mon-chip"
+          <Chip
             onClick={() => step(1)}
             disabled={latestFrameNo === undefined || shownFrame >= bounds.max}
             aria-label="Next frame"
           >
             ▶
-          </button>
+          </Chip>
           <span className="mon-mono mon-dim mon-scrub-note">
             frame {latestFrameNo === undefined ? "… / …" : `${shownFrame} / ${bounds.max}`}
           </span>
@@ -1714,9 +1693,9 @@ function ExecutionPanel({
               frame unavailable
             </span>
           ) : null}
-          <button type="button" className="mon-chip" onClick={goLive} title="Return to the live tree">
+          <Chip onClick={goLive} title="Return to the live tree">
             Live
-          </button>
+          </Chip>
         </div>
       ) : null}
       {showTimeline ? (
@@ -1788,33 +1767,29 @@ function EventLog({ runId }: { runId: string }) {
         <h2 className="mon-kicker">
           Events <span className="mon-count">{events.length}{view === "all" ? "" : `/${allEvents.length}`}</span>
         </h2>
-        <button
-          type="button"
-          className={`mon-chip${view === "notable" ? " is-on" : ""}`}
+        <Chip
+          on={view === "notable"}
           onClick={() => setView("notable")}
           title="Node/run lifecycle, approvals, human requests"
         >
           Notable
-        </button>
-        <button
-          type="button"
-          className={`mon-chip${view === "activity" ? " is-on" : ""}`}
+        </Chip>
+        <Chip
+          on={view === "activity"}
           onClick={() => setView("activity")}
           title="Notable plus tool calls, agent output, frames, and token usage"
         >
           Activity
-        </button>
-        <button
-          type="button"
-          className={`mon-chip${view === "all" ? " is-on" : ""}`}
+        </Chip>
+        <Chip
+          on={view === "all"}
           onClick={() => setView("all")}
           title="Every event, including heartbeats and session bookkeeping"
         >
           All
-        </button>
-        <button
-          type="button"
-          className={`mon-chip mon-follow${following ? " is-on" : ""}`}
+        </Chip>
+        <Chip
+          on={following}
           onClick={() => {
             setFollowing(true);
             const el = containerRef.current;
@@ -1823,7 +1798,7 @@ function EventLog({ runId }: { runId: string }) {
           title="Auto-scroll to new events"
         >
           {streaming ? "● " : ""}Follow
-        </button>
+        </Chip>
       </header>
       {error ? <div className="mon-banner tone-failed">{error.message}</div> : null}
       <div className="mon-events" ref={containerRef} onScroll={onScroll} data-testid="monitor-events">
@@ -1943,16 +1918,16 @@ function HealthStrip({
       <div className="mon-health-fix mon-dim">{diagnosis.fix}</div>
       {diagnosis.action === "resume" ? (
         <div className="mon-health-actions">
-          <button
-            type="button"
-            className="mon-btn mon-btn-ok"
+          <Button
+            variant="outline"
+            className="mon-btn-ok"
             data-testid="monitor-resume-run"
             disabled={resumeBusy}
             title="Ask the gateway to re-attach an engine and resume this run now"
             onClick={() => void requestResume()}
           >
             {resumeBusy ? "Resuming…" : "Resume now"}
-          </button>
+          </Button>
           {resumeNote ? <span className="mon-dim">{resumeNote}</span> : null}
         </div>
       ) : null}
@@ -2603,9 +2578,7 @@ function HijackModal({
             <ToneDot tone={HIJACK_STATUS_TONES[status]} pulse={status === "connected"} />
             {status}
           </span>
-          <button type="button" className="mon-chip" onClick={onClose}>
-            Close
-          </button>
+          <Chip onClick={onClose}>Close</Chip>
         </header>
         <HijackTerminal runId={runId} nodeId={nodeId} dark={dark} onStatus={setStatus} />
       </div>
@@ -2707,9 +2680,8 @@ function NodeInspector({
       <header className="mon-panel-head">
         <h2 className="mon-kicker">Node</h2>
         {nodeFailed ? (
-          <button
-            type="button"
-            className="mon-btn"
+          <Button
+            variant="outline"
             data-testid="monitor-retry-task"
             disabled={!retryEnabled || retryBusy}
             title={
@@ -2720,12 +2692,11 @@ function NodeInspector({
             onClick={() => void retryTask()}
           >
             {retryBusy ? "Retrying…" : "Retry task"}
-          </button>
+          </Button>
         ) : null}
         {hijackAction && candidate ? (
-          <button
-            type="button"
-            className="mon-btn"
+          <Button
+            variant="outline"
             data-testid="monitor-hijack-button"
             data-hijack-kind={hijackAction.kind}
             title={
@@ -2736,7 +2707,7 @@ function NodeInspector({
             onClick={() => setShowHijack(true)}
           >
             {hijackAction.label}
-          </button>
+          </Button>
         ) : null}
         <StatusTag status={node.status} />
       </header>
@@ -2852,9 +2823,10 @@ function NodeInspector({
           <div className="mon-kicker-row">
             <h3 className="mon-kicker">{isLive ? "Live output" : "Transcript"}</h3>
             {hijackAction && candidate ? (
-              <button
-                type="button"
-                className="mon-btn mon-hijack-inline"
+              <Button
+                variant="outline"
+                size="sm"
+                className="mon-hijack-inline"
                 data-testid="monitor-hijack-inline"
                 title={
                   hijackAction.kind === "hijack"
@@ -2864,7 +2836,7 @@ function NodeInspector({
                 onClick={() => setShowHijack(true)}
               >
                 ⌁ {hijackAction.kind === "hijack" ? "Hijack terminal" : "Reopen terminal"}
-              </button>
+              </Button>
             ) : null}
           </div>
           <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
@@ -3019,13 +2991,12 @@ function RunDetail({
         ) : null}
         <div className="mon-detail-actions">
           {customUiUrl ? (
-            <button type="button" className="mon-btn" onClick={() => setShowCustomUi(true)} title={`Open this workflow's custom UI (${customUiPath})`}>
+            <Button variant="outline" onClick={() => setShowCustomUi(true)} title={`Open this workflow's custom UI (${customUiPath})`}>
               Open UI
-            </button>
+            </Button>
           ) : workflowRow && workflowKey !== "create-ui" ? (
-            <button
-              type="button"
-              className="mon-btn"
+            <Button
+              variant="outline"
               disabled={creatingUi}
               title="Launch the create-ui workflow: one agent writes .smithers/ui/<key>.tsx and verifies it against this gateway"
               onClick={() => {
@@ -3045,41 +3016,15 @@ function RunDetail({
               }}
             >
               {creatingUi ? "Creating UI…" : "Create UI"}
-            </button>
+            </Button>
           ) : null}
-          {isResumable(status) ? (
-            <button
-              type="button"
-              className="mon-btn"
-              data-testid="monitor-resume-run"
-              disabled={busyAction !== null}
-              onClick={() => void act("resume")}
-            >
-              {busyAction === "resume" ? "Resuming…" : "Resume"}
-            </button>
-          ) : null}
-          {isPausable(status) ? (
-            <button
-              type="button"
-              className="mon-btn"
-              data-testid="monitor-pause-run"
-              disabled={busyAction !== null}
-              title="Stop scheduling new tasks, let in-flight tasks finish, then park the run resumably"
-              onClick={() => void act("pause")}
-            >
-              {busyAction === "pause" ? "Pausing…" : "Pause"}
-            </button>
-          ) : null}
-          {isCancellable(status) ? (
-            <button
-              type="button"
-              className="mon-btn mon-btn-danger"
-              disabled={busyAction !== null}
-              onClick={() => void act("cancel")}
-            >
-              Cancel
-            </button>
-          ) : null}
+          <RunLifecycleActions
+            resumable={isResumable(status)}
+            pausable={isPausable(status)}
+            cancellable={isCancellable(status)}
+            busyAction={busyAction}
+            onAction={(kind) => void act(kind)}
+          />
         </div>
       </header>
 
@@ -3092,12 +3037,12 @@ function RunDetail({
           <div className="mon-modal" onClick={(event) => event.stopPropagation()}>
             <header className="mon-modal-head">
               <span className="mon-kicker">{workflowKey} UI</span>
-              <a className="mon-chip" href={customUiUrl} target="_blank" rel="noreferrer">
-                Open in new tab
-              </a>
-              <button type="button" className="mon-chip" onClick={() => setShowCustomUi(false)}>
-                Close
-              </button>
+              <Chip asChild>
+                <a href={customUiUrl} target="_blank" rel="noreferrer">
+                  Open in new tab
+                </a>
+              </Chip>
+              <Chip onClick={() => setShowCustomUi(false)}>Close</Chip>
             </header>
             <iframe className="mon-modal-frame" src={customUiUrl} title={`${workflowKey} custom UI`} />
           </div>
@@ -3184,62 +3129,35 @@ function App() {
 
   return (
     <main className="mon-shell" data-testid="monitor-root">
-      <WorkflowUiStyles mode="theme" extra={`${monitorCss}\n${xtermCss}`} />
+      <WorkflowUiStyles mode="theme" />
+      <SmithersUiStyles extra={`${monitorCss}\n${xtermCss}`} />
       <header className="mon-topbar">
         <div className="mon-brand">
           <span className="mon-brand-mark" aria-hidden />
           <h1>Smithers Monitor</h1>
           <ConnectionBadge />
         </div>
-        <div className="mon-toolbar">
-          <input
-            className="mon-input"
-            data-testid="monitor-filter"
-            value={filterText}
-            onChange={(event) => setFilterText(event.currentTarget.value)}
-            placeholder="Search runs…"
-            type="search"
-          />
-          <select className="mon-select" value={statusFilter} onChange={(event) => setStatusFilter(event.currentTarget.value)}>
-            <option value="all">all statuses</option>
-            {statuses.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
-          <select className="mon-select" value={workflowFilter} onChange={(event) => setWorkflowFilter(event.currentTarget.value)}>
-            <option value="all">all workflows</option>
-            {workflows.map((workflow) => (
-              <option key={workflow} value={workflow}>
-                {workflow}
-              </option>
-            ))}
-          </select>
-          <span className="mon-dim mon-count-note">
-            {visibleRuns.length}/{allRuns.length} runs
-          </span>
-          <button
-            type="button"
-            className={`mon-chip${showMetrics ? " is-on" : ""}`}
-            data-testid="monitor-metrics-chip"
-            onClick={() => setShowMetrics((value) => !value)}
-            title="Operator stats from the gateway's Prometheus /metrics: agent latency percentiles, run/RPC/connection counters, error counters"
-          >
-            Metrics
-          </button>
-          <button type="button" className="mon-btn" onClick={() => void runsQuery.refetch()}>
-            Refresh
-          </button>
-        </div>
+        <MonitorToolbar
+          filterText={filterText}
+          onFilterText={setFilterText}
+          statusFilter={statusFilter}
+          onStatusFilter={setStatusFilter}
+          statuses={statuses}
+          workflowFilter={workflowFilter}
+          onWorkflowFilter={setWorkflowFilter}
+          workflows={workflows}
+          visibleCount={visibleRuns.length}
+          totalCount={allRuns.length}
+          showMetrics={showMetrics}
+          onToggleMetrics={() => setShowMetrics((value) => !value)}
+          onRefresh={() => void runsQuery.refetch()}
+        />
       </header>
 
       {banner ? (
         <div className={`mon-banner mon-banner-app tone-${banner.kind === "ok" ? "ok" : "failed"}`} role="status">
           {banner.text}
-          <button type="button" className="mon-chip" onClick={() => setBanner(null)}>
-            Dismiss
-          </button>
+          <Chip onClick={() => setBanner(null)}>Dismiss</Chip>
         </div>
       ) : null}
 
@@ -3297,10 +3215,14 @@ function App() {
 // default, OS dark mode, `data-theme` override) — every color is a theme
 // variable or a color-mix tint of one; tones carry state, never decoration.
 //
-// Geometry comes from the token scales below (also exported for every
-// workflow UI by WorkflowUiStyles): spacing --sp-*, type --fs-*/--lh-*,
-// radius --r-*, and one control height --ctl-h shared by every button, chip,
-// input, and select. No bare pixel values in spacing/radius/font-size rules.
+// Controls (buttons, chips, inputs, selects, row buttons, tables) are the
+// shared smithers-orchestrator/ui primitives rendered by SmithersUiStyles at
+// the root — their geometry, hover, focus-ring, and disabled styling live in
+// that package, never here. This sheet only carries monitor layout plus
+// monitor-specific accents on those primitives (.mon-btn-ok, .mon-toggle).
+// Geometry for the rest comes from the token scales below: spacing --sp-*,
+// type --fs-*/--lh-*, radius --r-*. No bare pixel values in spacing/radius/
+// font-size rules.
 // ---------------------------------------------------------------------------
 
 const monitorCss = `
@@ -3333,20 +3255,18 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-conn-hint { color: var(--muted); font-weight: 400; }
 .mon-conn .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); margin-left: var(--sp-1); }
 .mon-toolbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-.mon-input, .mon-select { height: var(--ctl-h); padding: 0 var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-1); background: var(--surface); color: var(--text); }
-.mon-input { min-width: 200px; }
-.mon-input:focus-visible, .mon-select:focus-visible, .mon-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .mon-count-note { font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 
-/* Buttons and chips share one control geometry: height, padding, radius. */
-.mon-btn { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--ctl-h); padding: 0 var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-1); background: var(--surface); cursor: pointer; font-weight: 600; font-size: var(--fs-2); white-space: nowrap; }
-.mon-btn:hover { background: var(--hover); }
-.mon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+/* Controls are the shared smithers-orchestrator/ui primitives (sui-*): Button,
+   Input, Select, RowButton carry their own geometry, hover, focus ring, and
+   disabled styling. Only monitor-specific accents live here. */
+.mon-filter-input { min-width: 200px; }
 .mon-btn-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
-.mon-btn-danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, var(--border)); }
-.mon-chip { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--ctl-h); padding: 0 var(--sp-3); border-radius: var(--r-1); font-size: var(--fs-1); font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; white-space: nowrap; text-decoration: none; }
-.mon-chip:hover { background: var(--hover); }
-.mon-chip.is-on { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
+.mon-toggle { color: var(--muted); font-size: var(--fs-1); font-weight: 600; }
+.mon-toggle.is-on { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
+
+/* Non-interactive label chips (agent names, #iteration, score chips). */
+.mon-chip { display: inline-flex; align-items: center; gap: var(--sp-1); height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); font-size: var(--fs-1); font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--muted); white-space: nowrap; }
 
 .mon-kicker { margin: 0; font-size: var(--fs-1); line-height: var(--lh-tight); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .mon-kicker-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
@@ -3398,11 +3318,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-approval-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-1); }
 .mon-wait { font-size: var(--fs-1); font-weight: 600; color: var(--tone); }
 
-.mon-run-group { display: flex; flex-direction: column; }
+.mon-run-group { display: flex; flex-direction: column; gap: var(--sp-1); }
 .mon-run-group .mon-kicker { padding: 0 var(--sp-1) var(--sp-1); }
-.mon-run-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--r-1); background: none; cursor: pointer; }
-.mon-run-row:hover { background: var(--hover); }
-.mon-run-row.is-active { background: color-mix(in srgb, var(--brand) 9%, transparent); box-shadow: inset 2px 0 0 var(--brand); }
+/* Rail rows are shared RowButtons; only the internal layout is monitor-specific. */
+.mon-run-row { justify-content: flex-start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
 .mon-run-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mon-run-when { margin-left: auto; font-size: var(--fs-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
@@ -3411,12 +3330,15 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-runs-table-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: 0; }
 .mon-runs-table-panel .mon-panel-head { margin-bottom: var(--sp-2); }
 .mon-runs-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-2); }
-.mon-runs-table { width: 100%; border-collapse: collapse; font-size: var(--fs-2); }
-.mon-runs-table th { position: sticky; top: 0; z-index: 1; background: var(--surface); text-align: left; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-1); line-height: var(--lh-tight); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
-.mon-runs-table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The shared Table wraps itself in an overflow-x container; inside the
+   monitor's scrollports that inner scroller would defeat the sticky header,
+   so let the outer .mon-*-scroll own all scrolling. */
+.mon-runs-scroll [data-slot="table-container"], .mon-crons-scroll [data-slot="table-container"] { overflow-x: visible; }
+.mon-runs-table { font-size: var(--fs-2); }
+.mon-runs-table th { position: sticky; top: 0; z-index: 1; background: var(--surface); white-space: nowrap; }
+.mon-runs-table td { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .mon-runs-table tbody tr:last-child td { border-bottom: 0; }
 .mon-runs-table-row { cursor: pointer; }
-.mon-runs-table-row:hover { background: var(--hover); }
 .mon-table-workflow { font-weight: 600; max-width: 0; width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .mon-table-failed { color: var(--tone); font-weight: 600; }
 .mon-runs-pagination { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding-top: var(--sp-3); flex-wrap: wrap; }
@@ -3446,7 +3368,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-tree-glyph { flex: none; width: 14px; text-align: center; }
 .mon-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mon-tree-main .mon-pill { margin-left: auto; }
-.mon-tree-main .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); cursor: inherit; }
 .mon-tree.is-static .mon-tree-main { cursor: default; }
 .mon-tree.is-static { opacity: 0.92; }
 
@@ -3456,7 +3377,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-timeline-row:hover { background: var(--hover); }
 .mon-timeline-row.is-active { background: color-mix(in srgb, var(--brand) 9%, transparent); box-shadow: inset 2px 0 0 var(--brand); }
 .mon-timeline-node { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mon-timeline-row .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); cursor: inherit; flex: none; }
+.mon-timeline-row .mon-chip { flex: none; }
 .mon-timeline-attempt { flex: none; }
 .mon-timeline-right { display: flex; align-items: baseline; gap: var(--sp-3); margin-left: auto; flex: none; }
 .mon-timeline-duration { font-variant-numeric: tabular-nums; }
@@ -3567,7 +3488,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-scores-summary::-webkit-details-marker { display: none; }
 .mon-scores-details[open] > .mon-scores-summary .mon-diff-caret { transform: rotate(90deg); }
 .mon-node-scores { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: 0 0 var(--sp-3); }
-.mon-score-chip { color: var(--tone); border-color: color-mix(in srgb, var(--tone) 40%, var(--border)); cursor: default; }
+.mon-score-chip { color: var(--tone); border-color: color-mix(in srgb, var(--tone) 40%, var(--border)); }
 
 /* Metrics view: sections of label/value rows, monospace numbers. */
 .mon-metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-4) var(--sp-6); }
