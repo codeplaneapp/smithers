@@ -21,7 +21,12 @@ pnpm typecheck:evals
 pnpm test
 ```
 
-`pnpm audit:prod` rejects new production advisories and expired security exceptions. `pnpm -r typecheck` runs every workspace typecheck; the following commands cover the workflow pack, examples, and evals explicitly.
+`pnpm audit:prod` rejects new production advisories, expired security exceptions,
+denied licenses, and unreviewed or stale unknown-license metadata. Exact reviews
+for packages that omit metadata cite immutable upstream sources in
+`.github/production-license-reviews.json`. `pnpm -r typecheck` runs every
+workspace typecheck; the following commands cover the workflow pack, examples,
+and evals explicitly.
 
 `pnpm lint` checks `apps/*/src`, `apps/*/tests`, `packages/*/src`, `packages/*/tests`, and `.smithers`.
 

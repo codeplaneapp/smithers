@@ -251,7 +251,8 @@ Defined in the root `package.json` for development:
 | `check:llms` | `node scripts/check-llms.mjs` | Verify generated llms docs are current |
 | `check:sota` | `node scripts/check-sota.mjs` | Verify the SOTA registry's generated docs page and CLI module match `docs/data/sota-models.json` |
 | `check:dts` | `node scripts/check-dts.mjs` | Verify per-file `.d.ts` declarations are freshly regenerated from source |
-| `audit:prod` | `node scripts/audit-production.mjs` | Reject new production advisories and stale, expired, or newly fixable security exceptions |
+| `audit:prod` | `node scripts/audit-production.mjs && node scripts/check-production-licenses.mjs` | Reject production dependency vulnerabilities and denied, unknown, or stale-reviewed licenses |
+| `check:licenses` | `node scripts/check-production-licenses.mjs` | Enforce the production license policy with exact, immutable reviews for missing package metadata |
 | `verify` | `pnpm audit:prod && pnpm lint && pnpm -r typecheck && pnpm --filter ./.smithers typecheck && pnpm typecheck:examples && pnpm typecheck:evals && pnpm test` | Run the complete local pre-PR audit, lint, typecheck, and test gate |
 | `fetch:jj` | `node scripts/fetch-jj-binaries.mjs` | Fetch vendored jj binaries for supported platforms |
 | `docs:components` | `node scripts/generate-component-source.mjs` | Embed composite component source as tabs in their docs pages |

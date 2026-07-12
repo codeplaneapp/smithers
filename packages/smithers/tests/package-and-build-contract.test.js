@@ -262,11 +262,33 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     ]);
     const dependencyReview = text(".github/workflows/dependency-review.yml");
     expect(dependencyReview).toContain("for attempt in 1 2 3");
+    expect(dependencyReview).toContain("id: dependency-graph");
+    expect(dependencyReview).toContain('echo "available=$available" >> "$GITHUB_OUTPUT"');
     expect(dependencyReview).toContain("Dependency graph unavailable");
-    expect(dependencyReview).toContain("exit 1");
     expect(dependencyReview).toContain("actions/dependency-review-action@");
+    expect(dependencyReview).toContain("steps.dependency-graph.outputs.available == 'true'");
+    expect(dependencyReview).toContain("steps.dependency-graph.outputs.available != 'true'");
+    expect(dependencyReview).toContain("Materialize frozen production graph");
+    expect(dependencyReview).toContain("pnpm install --frozen-lockfile --ignore-scripts");
+    expect(dependencyReview).toContain("Enforce local production dependency policy");
+    expect(dependencyReview).toContain("run: pnpm audit:prod");
     expect(dependencyReview).not.toContain("outputs.enabled");
     expect(dependencyReview).not.toContain("enabled=false");
+
+    const rootPackage = json("package.json");
+    expect(rootPackage.scripts["audit:prod"]).toBe(
+      "node scripts/audit-production.mjs && node scripts/check-production-licenses.mjs",
+    );
+    expect(rootPackage.scripts["check:licenses"]).toBe(
+      "node scripts/check-production-licenses.mjs",
+    );
+    expectFile("scripts/check-production-licenses.mjs");
+    const licenseReviews = json(".github/production-license-reviews.json");
+    expect(licenseReviews.schemaVersion).toBe(1);
+    expect(licenseReviews.reviews.length).toBeGreaterThan(0);
+    for (const review of licenseReviews.reviews) {
+      expect(review.source).toMatch(/^https:\/\/.+\/[0-9a-f]{40}\//i);
+    }
   });
 
   test("script guard sources cover docs, release, dependency, SOTA, d.ts, faults, and pack generation", () => {

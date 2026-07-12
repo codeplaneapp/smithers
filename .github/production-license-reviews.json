@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "reviews": [
+    {
+      "package": "khroma",
+      "versions": [
+        "2.1.0"
+      ],
+      "reportedLicense": "Unknown",
+      "reviewedLicense": "MIT",
+      "source": "https://github.com/fabiospampinato/khroma/blob/4968165afb0d3d09be66497e7985a34f7bfe6d42/license",
+      "rationale": "The published package omits license metadata, but the exact v2.1.0 source tag carries the MIT license. Pinning the source commit makes this review reproducible."
+    }
+  ]
+}

@@ -17,7 +17,16 @@ pnpm -r typecheck
 pnpm test
 ```
 
-The default CI workflow (`.github/workflows/ci.yml`) runs the production dependency audit, `check:effect`, `check:deps`, typecheck, and `test` on pull requests and pushes to `main`. Dependency exceptions are limited to upstream advisories with no fixed release and live in `.github/production-advisory-exceptions.json`; CI rejects expired, stale, or newly fixable entries.
+The default CI workflow (`.github/workflows/ci.yml`) runs the production
+dependency audit, license policy, `check:effect`, `check:deps`, typecheck, and
+`test` on pull requests and pushes to `main`. Dependency exceptions are limited
+to upstream advisories with no fixed release and live in
+`.github/production-advisory-exceptions.json`; CI rejects expired, stale, or
+newly fixable entries. Missing license metadata is fail-closed unless the exact
+package versions have an immutable upstream review in
+`.github/production-license-reviews.json`. Dependency review uses GitHub's
+change-level graph when available and runs the same repository-local policy as
+a portable fallback when it is not.
 
 ## Persistence
 
