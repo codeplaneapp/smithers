@@ -7,12 +7,15 @@ export const verifyVerdictsSchema = z.object({
   verdicts: z
     .array(
       z.object({
-        index: z.number().int().default(-1),
+        index: z.number().int().min(-1).max(1_000).default(-1),
         verdict: z.enum(["keep", "drop", "demote"]).default("keep"),
-        severity: reviewCommentSeveritySchema.optional(),
-        reason: z.string().default(""),
+        // Strict structured-output schemas require every property. Null keeps
+        // the semantic "no explicit severity" case representable.
+        severity: reviewCommentSeveritySchema.nullable().optional(),
+        reason: z.string().max(2_000).default(""),
       }),
     )
+    .max(100)
     .default([]),
 });
 

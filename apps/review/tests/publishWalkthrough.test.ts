@@ -35,7 +35,7 @@ describe("publishWalkthrough", () => {
     }) as unknown as typeof fetch;
 
     try {
-      await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("no publish URL");
+      await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("must be set together");
       expect(fetchCalled).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });

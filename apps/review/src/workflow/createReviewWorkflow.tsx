@@ -5,11 +5,13 @@ import { createSmithers, Parallel, Sequence, type AgentLike } from "smithers-orc
 import {
   buildNativeReviewPrompt,
   finalizeNativeReview,
+  MAX_REVIEW_WARNINGS,
   nativeReviewAgentOutputSchema,
   nativeReviewPromptSchema,
   previewOpenCodeReview,
   previewOutputSchema,
   resolveReviewTarget,
+  type ReviewRunOutput,
   reviewRunOutputSchema,
   reviewTargetSchema,
 } from "./openCodeReview";
@@ -23,6 +25,7 @@ import { shouldAutoQuiz } from "../quiz/shouldAutoQuiz";
 import { buildNarratePrompt } from "../walkthrough/buildNarratePrompt";
 import { changesSchema } from "../walkthrough/changesSchema";
 import { collectChanges } from "../walkthrough/collectChanges";
+import { fallbackStory } from "../walkthrough/fallbackStory";
 import { normalizeStory } from "../walkthrough/normalizeStory";
 import { renderWalkthroughHtml } from "../walkthrough/renderWalkthroughHtml";
 import { storySchema } from "../walkthrough/storySchema";
@@ -36,25 +39,64 @@ import { verifyVerdictsSchema } from "./verifyVerdictsSchema";
 // count; a review with hundreds of comments is noise the verifier cannot
 // honestly adjudicate in one pass.
 const MAX_VERIFIABLE_FINDINGS = 40;
+const MAX_WALKTHROUGH_STORY_BYTES = 16 * 1024 * 1024;
+
+type ReviewWarning = ReviewRunOutput["warnings"][number];
+
+/**
+ * Add verifier diagnostics without ever overflowing the durable review row.
+ * On overflow, new verifier warnings take priority over older per-file noise,
+ * and the final slot records the exact number omitted.
+ */
+export function appendReviewWarnings(
+  review: ReviewRunOutput,
+  additions: ReviewWarning[],
+): ReviewRunOutput {
+  if (additions.length === 0) return review;
+  const status = review.status === "success" ? "completed_with_warnings" : review.status;
+  if (review.warnings.length + additions.length <= MAX_REVIEW_WARNINGS) {
+    return reviewRunOutputSchema.parse({ ...review, status, warnings: [...review.warnings, ...additions] });
+  }
+
+  const retainedSlots = MAX_REVIEW_WARNINGS - 1;
+  const retainedAdditions = additions.slice(0, retainedSlots);
+  const retainedExisting = review.warnings.slice(0, retainedSlots - retainedAdditions.length);
+  const omitted = review.warnings.length + additions.length - retainedExisting.length - retainedAdditions.length;
+  return reviewRunOutputSchema.parse({
+    ...review,
+    status,
+    warnings: [
+      ...retainedExisting,
+      ...retainedAdditions,
+      {
+        file: "",
+        type: "warning_limit",
+        message: `Omitted ${omitted} warning(s) above the ${MAX_REVIEW_WARNINGS}-warning output limit.`,
+      },
+    ],
+  });
+}
 
 // Single-word column names on purpose: loadOutputs returns columns camelCased,
 // so single words round-trip unchanged. story/quiz hold JSON strings by design
 // (they are z.string(), not json-mode array columns that loadOutputs parses).
 const walkthroughOutputSchema = z.object({
-  path: z.string(),
-  bytes: z.number().int().nonnegative(),
-  chapters: z.number().int().nonnegative(),
-  files: z.number().int().nonnegative(),
-  findings: z.number().int().nonnegative(),
-  message: z.string().default(""),
+  path: z.string().max(4_096),
+  bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  // A deterministic fallback can create one chapter per distinct changed
+  // package/root area plus the config, test, and docs groups.
+  chapters: z.number().int().nonnegative().max(3_003),
+  files: z.number().int().nonnegative().max(3_000),
+  findings: z.number().int().nonnegative().max(100),
+  message: z.string().max(4_000).default(""),
   // JSON of the normalized story, so the CLI can compose PR review bodies
   // without re-deriving it.
-  story: z.string().default(""),
+  story: z.string().max(MAX_WALKTHROUGH_STORY_BYTES).default(""),
   // JSON of the normalized quiz ("" when the quiz did not run or produced
   // nothing valid), the assessed impact level, and the question count.
-  quiz: z.string().default(""),
-  impact: z.string().default(""),
-  questions: z.number().int().nonnegative().default(0),
+  quiz: z.string().max(1024 * 1024).default(""),
+  impact: z.enum(["low", "moderate", "high", "critical"]),
+  questions: z.number().int().nonnegative().max(6).default(0),
 });
 
 export function createReviewWorkflow(opts: {
@@ -185,17 +227,11 @@ export function createReviewWorkflow(opts: {
               if (verifyRequested && finalized.comments.length > MAX_VERIFIABLE_FINDINGS) {
                 // Silently skipping verification would read as "verified";
                 // surface the cap so downstream consumers show it.
-                return {
-                  ...finalized,
-                  warnings: [
-                    ...finalized.warnings,
-                    {
-                      file: "",
-                      type: "verifier_skipped",
-                      message: `${finalized.comments.length} findings exceeds the ${MAX_VERIFIABLE_FINDINGS}-finding verification cap; findings are unverified.`,
-                    },
-                  ],
-                };
+                return appendReviewWarnings(finalized, [{
+                  file: "",
+                  type: "verifier_skipped",
+                  message: `${finalized.comments.length} findings exceeds the ${MAX_VERIFIABLE_FINDINGS}-finding verification cap; findings are unverified.`,
+                }]);
               }
               return finalized;
             }}
@@ -237,25 +273,20 @@ export function createReviewWorkflow(opts: {
                 if (!verdictsOut) {
                   // Verifier failed (continueOnFail): keep the review as-is but
                   // record that verification did not happen.
-                  return {
-                    ...reviewOut,
-                    warnings: [
-                      ...reviewOut.warnings,
-                      { file: "", type: "verifier_error", message: "Finding verification produced no output; findings are unverified." },
-                    ],
-                  };
+                  return appendReviewWarnings(reviewOut, [
+                    { file: "", type: "verifier_error", message: "Finding verification produced no output; findings are unverified." },
+                  ]);
                 }
                 const applied = applyFindingVerdicts(reviewOut.comments, verdictsOut.verdicts);
-                return {
+                return appendReviewWarnings({
                   ...reviewOut,
                   comments: applied.findings,
-                  warnings: [...reviewOut.warnings, ...applied.warnings],
                   summary: reviewOut.summary ? { ...reviewOut.summary, comments: applied.findings.length } : null,
                   message:
                     applied.dropped > 0
                       ? `${reviewOut.message} Verification dropped ${pluralize(applied.dropped, "finding")}.`
                       : reviewOut.message,
-                };
+                }, applied.warnings);
               }}
             </Task>
           ) : null}
@@ -345,6 +376,10 @@ export function createReviewWorkflow(opts: {
                 impact: { level: changeImpact.level, reasons: changeImpact.reasons },
               };
               const html = await renderWalkthroughHtml(renderArgs);
+              const serializedStory = JSON.stringify(story);
+              const durableStory = Buffer.byteLength(serializedStory) <= MAX_WALKTHROUGH_STORY_BYTES
+                ? serializedStory
+                : JSON.stringify(fallbackStory(changesOut.files));
               const requested = input.out.trim();
               const outPath = requested
                 ? isAbsolute(requested)
@@ -360,7 +395,7 @@ export function createReviewWorkflow(opts: {
                 files: changesOut.files.length,
                 findings: reviewOut.comments.length,
                 message: `Walkthrough written to ${outPath} (${pluralize(story.chapters.length, "chapter")}, ${pluralize(reviewOut.comments.length, "finding")}).`,
-                story: JSON.stringify(story),
+                story: durableStory,
                 quiz: quiz ? JSON.stringify(quiz) : "",
                 impact: changeImpact.level,
                 questions: quiz ? quiz.questions.length : 0,

@@ -5,6 +5,10 @@ import {
   modelPrices,
 } from "../../src/server/proxy/modelPrices.ts";
 import { recordUsage } from "../../src/server/proxy/recordUsage.ts";
+import {
+  estimateMessagesSpend,
+  prepareMessagesRequest,
+} from "../../src/server/proxy/spendReservations.ts";
 import { buildTestEnv } from "./helpers/buildTestEnv.ts";
 
 describe("modelPrices", () => {
@@ -15,18 +19,100 @@ describe("modelPrices", () => {
   });
 
   test("prices the base model id", () => {
-    expect(modelPrices("claude-opus-4-8").input).toBe(15);
+    expect(modelPrices("claude-opus-4-8").input).toBe(5);
   });
 
   test("prices a date-stamped suffix", () => {
-    expect(modelPrices("claude-haiku-4-5-20251001").input).toBe(0.8);
+    expect(modelPrices("claude-haiku-4-5-20251001").input).toBe(1);
   });
 
   test("prices a bracketed context-window alias (not metered as free)", () => {
     // claude-opus-4-8[1m] is a real model; it must not fall through to $0.
     const price = modelPrices("claude-opus-4-8[1m]");
-    expect(price.input).toBe(15);
-    expect(price.output).toBe(75);
+    expect(price.input).toBe(5);
+    expect(price.output).toBe(25);
+  });
+
+  test("applies the published Sonnet 5 introductory window without a future rollover gap", () => {
+    const beforeRollover = Date.UTC(2026, 7, 31, 23, 59, 59, 999);
+    const atRollover = Date.UTC(2026, 8, 1);
+    expect(modelPrices("claude-sonnet-5", beforeRollover)).toEqual({
+      input: 2,
+      output: 10,
+      cacheWrite: 2.5,
+      cacheRead: 0.2,
+    });
+    expect(modelPrices("claude-sonnet-5", atRollover)).toEqual({
+      input: 3,
+      output: 15,
+      cacheWrite: 3.75,
+      cacheRead: 0.3,
+    });
+  });
+
+  test("rejects provider features whose extra billing is not statically bounded", () => {
+    const estimate = (extra: Record<string, unknown>) => estimateMessagesSpend(
+      new TextEncoder().encode(JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 10,
+        messages: [],
+        ...extra,
+      })).buffer as ArrayBuffer,
+    );
+    expect(estimate({ inference_geo: "us" }).unsupportedBillingFeature).toBe("inference_geo");
+    expect(estimate({ speed: "fast" }).unsupportedBillingFeature).toBe("speed");
+    expect(estimate({ service_tier: "auto" }).unsupportedBillingFeature).toBe("service_tier");
+    expect(estimate({ tools: [{ type: "web_search_20260209", name: "web_search" }] }).unsupportedBillingFeature)
+      .toBe("server_tool");
+    expect(estimate({ mcp_servers: [{ url: "https://mcp.example" }] }).unsupportedBillingFeature)
+      .toBe("mcp_servers");
+    expect(estimate({ container: "container_123" }).unsupportedBillingFeature).toBe("container");
+    expect(estimate({
+      messages: [{
+        role: "user",
+        content: [{ type: "image", source: { type: "url", url: "https://mutable.example/image" } }],
+      }],
+    }).unsupportedBillingFeature).toBe("url_source");
+    expect(estimate({
+      system: [{ type: "text", text: "cached", cache_control: { type: "ephemeral", ttl: "1h" } }],
+    }).unsupportedBillingFeature).toBe("cache_control.ttl");
+    expect(estimate({
+      inference_geo: "global",
+      service_tier: "standard_only",
+      tools: [{ name: "read", description: "client-side", input_schema: { type: "object" } }],
+      cache_control: { type: "ephemeral", ttl: "5m" },
+    }).unsupportedBillingFeature).toBeNull();
+  });
+
+  test("normalizes safe provider defaults and preflights provider-expanded inputs", () => {
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).buffer as ArrayBuffer;
+    const plain = prepareMessagesRequest(encode({
+      model: "claude-sonnet-4-6",
+      max_tokens: 10,
+      messages: [{ role: "user", content: "hello" }],
+    }));
+    expect(JSON.parse(new TextDecoder().decode(plain.body))).toMatchObject({
+      service_tier: "standard_only",
+      inference_geo: "global",
+    });
+    expect(plain.countTokensBody).toBeNull();
+
+    const withTool = prepareMessagesRequest(encode({
+      model: "claude-sonnet-4-6",
+      max_tokens: 10,
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "read", description: "read a file", input_schema: { type: "object" } }],
+    }));
+    expect(withTool.countTokensBody).not.toBeNull();
+    const countInput = JSON.parse(new TextDecoder().decode(withTool.countTokensBody!));
+    expect(countInput).toMatchObject({ model: "claude-sonnet-4-6", tools: [{ name: "read" }] });
+    expect(countInput).not.toHaveProperty("max_tokens");
+    expect(countInput).not.toHaveProperty("service_tier");
+    expect(countInput).not.toHaveProperty("inference_geo");
+
+    const estimate = estimateMessagesSpend(withTool.body, Date.now(), 403);
+    expect(estimate.inputTokenUpperBound).toBe(8_998);
+    expect(estimate.unsupportedBillingFeature).toBeNull();
   });
 
   test("request admission accepts only exact, dated, and explicit context aliases", () => {
@@ -69,7 +155,7 @@ describe("modelPrices", () => {
       now: Date.now(),
     });
 
-    // Highest current supported rates: 15 + 75 + 18.75 + 1.5.
+    // Deliberately conservative unknown-model rates: 15 + 75 + 18.75 + 1.5.
     expect(recorded.costUsd).toBeCloseTo(110.25, 8);
     const session = await env.DB
       .prepare("SELECT spent_usd FROM sessions WHERE hash = ?")

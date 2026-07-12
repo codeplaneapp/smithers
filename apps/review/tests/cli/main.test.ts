@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -14,6 +15,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseQuizColumn, runReviewCli, writeReviewSummary } from "../../src/cli/main";
+import { buildCanonicalReviewSummary } from "../../src/cli/reviewSummary";
 
 const MAIN_TS = fileURLToPath(new URL("../../src/cli/main.ts", import.meta.url));
 const PKG_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -189,17 +191,56 @@ describe("review summary output policy", () => {
     const dir = mkdtempSync(join(tmpdir(), "review-summary-policy-"));
     tempDirs.push(dir);
     const summaryPath = join(dir, "summary.json");
-    writeReviewSummary(summaryPath, { status: "finished", findings: 2 });
-    expect(JSON.parse(readFileSync(summaryPath, "utf8"))).toEqual({ status: "finished", findings: 2 });
+    const summary = buildCanonicalReviewSummary({
+      status: "finished",
+      reviewStatus: "success",
+      files: 3,
+      findings: 2,
+      inline: 1,
+      severity: { critical: 0, major: 1, minor: 1, info: 0 },
+      walkthroughReady: true,
+      publishSucceeded: false,
+      publishFailed: true,
+      failedFileReviews: 0,
+      impact: "high",
+      questions: 2,
+    });
+    writeReviewSummary(summaryPath, summary);
+    expect(JSON.parse(readFileSync(summaryPath, "utf8"))).toEqual(summary);
     if (process.platform !== "win32") expect(lstatSync(summaryPath).mode & 0o077).toBe(0);
-    expect(() => writeReviewSummary(join(dir, "oversized.json"), "x".repeat(64 * 1024))).toThrow(/64 KB/);
+    writeReviewSummary(summaryPath, summary);
+    expect(JSON.parse(readFileSync(summaryPath, "utf8"))).toEqual(summary);
+    const replacement = { ...summary, findings: 9, questions: 4 };
+    writeReviewSummary(summaryPath, replacement);
+    expect(JSON.parse(readFileSync(summaryPath, "utf8"))).toEqual(replacement);
 
     const target = join(dir, "target.json");
     const link = join(dir, "summary-link.json");
     writeFileSync(target, "keep-target");
     symlinkSync(target, link);
-    expect(() => writeReviewSummary(link, { replace: true })).toThrow();
+    expect(() => writeReviewSummary(link, summary)).toThrow();
     expect(readFileSync(target, "utf8")).toBe("keep-target");
+
+    const directory = join(dir, "summary-directory");
+    mkdirSync(directory);
+    expect(() => writeReviewSummary(directory, summary)).toThrow(/regular file/);
+    expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  test("requested summary write failure makes the CLI exit nonzero", () => {
+    const repo = tempRepo();
+    const work = mkdtempSync(join(tmpdir(), "review-summary-failure-"));
+    tempDirs.push(work);
+    const target = join(work, "summary-target.json");
+    const link = join(work, "summary-link.json");
+    writeFileSync(target, "must remain unchanged");
+    symlinkSync(target, link);
+    const result = spawnMain([repo, "--no-review", "--no-narrate", "--out", join(work, "walkthrough.html"), "--db", join(work, "review.db")], {
+      SMITHERS_REVIEW_SUMMARY_PATH: link,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(readFileSync(target, "utf8")).toBe("must remain unchanged");
+    expect(result.stderr).toContain("could not write summary file");
   });
 });
 
@@ -235,14 +276,19 @@ describe("main (agentless full run, subprocess)", () => {
       const summary = JSON.parse(readFileSync(summaryPath, "utf8")) as {
         files: number;
         findings: number;
-        publishError: string;
+        walkthroughReady: boolean;
+        publishSucceeded: boolean;
+        publishFailed: boolean;
         severity: Record<string, number>;
         impact: string;
         questions: number;
       };
       expect(summary.files).toBe(1);
       expect(summary.findings).toBe(0);
-      expect(summary.publishError).not.toBe("");
+      expect(summary.walkthroughReady).toBe(true);
+      expect(summary.publishSucceeded).toBe(false);
+      expect(summary.publishFailed).toBe(true);
+      expect(JSON.stringify(summary)).not.toMatch(/publishError|walkthroughPath|walkthroughUrl|ECONNREFUSED/);
       expect(summary.severity).toEqual({ critical: 0, major: 0, minor: 0, info: 0 });
       expect(summary.impact).toBe("low");
       expect(summary.questions).toBe(0);

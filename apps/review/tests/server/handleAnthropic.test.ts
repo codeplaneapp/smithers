@@ -176,6 +176,98 @@ describe("anthropic proxy", () => {
     expect(reservations.results.length).toBe(0);
   });
 
+  test("rejects fee-bearing provider features that static metering does not support", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    let upstreamCalls = 0;
+    const worker = createReviewWorker({
+      anthropicBaseUrl: "https://anthropic.test",
+      fetchUpstream: (async () => {
+        upstreamCalls += 1;
+        return new Response("unreachable");
+      }) as unknown as typeof fetch,
+    });
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ inference_geo: "us" }, "inference_geo"],
+      [{ speed: "fast" }, "speed"],
+      [{ service_tier: "auto" }, "service_tier"],
+      [{ tools: [{ type: "web_search_20260209", name: "web_search" }] }, "server_tool"],
+      [{ mcp_servers: [{ url: "https://mcp.example" }] }, "mcp_servers"],
+      [{ container: "container_123" }, "container"],
+      [{
+        messages: [{
+          role: "user",
+          content: [{ type: "image", source: { type: "url", url: "https://mutable.example/image" } }],
+        }],
+      }, "url_source"],
+      [{
+        system: [{ type: "text", text: "cached", cache_control: { type: "ephemeral", ttl: "1h" } }],
+      }, "cache_control.ttl"],
+    ];
+    for (const [extra, reason] of cases) {
+      const response = await worker.fetch(
+        new Request("https://review.test/anthropic/v1/messages", {
+          method: "POST",
+          headers: { "x-api-key": token, "content-type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-6",
+            max_tokens: 100,
+            messages: [],
+            ...extra,
+          }),
+        }),
+        env,
+      );
+      expect(response.status).toBe(400);
+      expect((await response.json()) as Record<string, unknown>).toMatchObject({ reason });
+    }
+    expect(upstreamCalls).toBe(0);
+    const reservations = await env.DB.prepare("SELECT id FROM spend_reservations").all();
+    expect(reservations.results.length).toBe(0);
+  });
+
+  test("uses provider token counting before admitting client-tool requests", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO, 0.1);
+    const paths: string[] = [];
+    let countBody: Record<string, unknown> | undefined;
+    const worker = createReviewWorker({
+      anthropicBaseUrl: "https://anthropic.test",
+      fetchUpstream: (async (input: string | URL | Request, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        paths.push(path);
+        if (path === "/v1/messages/count_tokens") {
+          countBody = JSON.parse(new TextDecoder().decode(init?.body as ArrayBuffer));
+          return Response.json({ input_tokens: 50_000 });
+        }
+        return new Response("message creation must not be admitted", { status: 500 });
+      }) as unknown as typeof fetch,
+    });
+    const response = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "use the tool" }],
+          tools: [{ name: "read", description: "read", input_schema: { type: "object" } }],
+        }),
+      }),
+      env,
+    );
+    expect(response.status).toBe(402);
+    expect(paths).toEqual(["/v1/messages/count_tokens"]);
+    expect(countBody).toMatchObject({
+      model: "claude-sonnet-4-6",
+      tools: [{ name: "read" }],
+    });
+    expect(countBody).not.toHaveProperty("max_tokens");
+    expect(countBody).not.toHaveProperty("service_tier");
+    const reservations = await env.DB.prepare("SELECT id FROM spend_reservations").all();
+    expect(reservations.results.length).toBe(0);
+  });
+
   test("does not price an arbitrary premium suffix as its cheap base model", async () => {
     const env = await buildTestEnv();
     const token = await seedSession(env, REPO);
@@ -327,6 +419,10 @@ describe("anthropic proxy", () => {
     expect(fixture.requests.length).toBe(1);
     expect(fixture.requests[0].headers["x-api-key"]).toBe("sk-ant-test");
     expect(fixture.requests[0].headers["x-api-key"]).not.toBe(token);
+    expect(JSON.parse(fixture.requests[0].body)).toMatchObject({
+      service_tier: "standard_only",
+      inference_geo: "global",
+    });
     await Promise.all(meterings);
     const usage = await env.DB.prepare("SELECT * FROM usage_events").all();
     expect(usage.results.length).toBe(1);
@@ -690,6 +786,7 @@ describe("anthropic proxy", () => {
         },
         cancel() {
           upstreamCancelled = true;
+          return new Promise<void>(() => undefined);
         },
       }), { headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch,
       now: () => Date.now(),
@@ -712,8 +809,14 @@ describe("anthropic proxy", () => {
     const reader = response.body!.getReader();
     const firstChunk = await reader.read();
     expect(new TextDecoder().decode(firstChunk.value)).toContain("message_start");
-    await reader.cancel("test abort after first SSE frame");
-    await Promise.all(meterings);
+    await Promise.race([
+      reader.cancel("test abort after first SSE frame"),
+      Bun.sleep(500).then(() => { throw new Error("response cancellation did not settle"); }),
+    ]);
+    await Promise.race([
+      Promise.all(meterings),
+      Bun.sleep(500).then(() => { throw new Error("metering did not settle after cancellation"); }),
+    ]);
 
     expect(upstreamCancelled).toBe(true);
     const usage = await env.DB

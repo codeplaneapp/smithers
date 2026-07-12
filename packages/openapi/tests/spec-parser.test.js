@@ -138,15 +138,19 @@ describe("loadSpecEffect", () => {
         expect(fetches).toBe(0);
     });
 
-    test("cancels a non-2xx remote spec body before surfacing the status", async () => {
+    test("does not await hostile cancellation before surfacing a non-2xx status", async () => {
         let cancelled = false;
         globalThis.fetch = async () => new Response(new ReadableStream({
             cancel() {
                 cancelled = true;
+                return new Promise(() => {});
             },
         }), { status: 503, statusText: "Unavailable" });
         await expect(
-            Effect.runPromise(loadSpecEffect("https://example.test/unavailable.json", { resolveHostname: publicDns })),
+            Promise.race([
+                Effect.runPromise(loadSpecEffect("https://example.test/unavailable.json", { resolveHostname: publicDns })),
+                Bun.sleep(500).then(() => { throw new Error("non-2xx status was pinned by body cancellation"); }),
+            ]),
         ).rejects.toThrow("openapi fetch spec");
         expect(cancelled).toBe(true);
     });

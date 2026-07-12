@@ -55,7 +55,12 @@ describe("createReviewAgents", () => {
       OPENAI_API_KEY: "provider-long-lived",
       ANTHROPIC_API_KEY: "provider-key",
     });
-    expect(safe).toEqual({ PATH: "/safe/bin", HOME: "/isolated/home" });
+    expect(safe).toEqual({
+      PATH: "/safe/bin",
+      HOME: "/isolated/home",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+    });
   });
 
   test("defaults to Codex when installed and otherwise falls back to Claude", () => {

@@ -544,11 +544,14 @@ describe("redirect and credential policy", () => {
         return new Response(new ReadableStream({
           cancel() {
             bodyCancelled = true;
+            return new Promise(() => undefined);
           },
         }));
       },
     });
+    const startedAt = Date.now();
     await expect(pending).rejects.toBe(reason);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
     expect(bodyCancelled).toBe(true);
   });
 
@@ -777,6 +780,46 @@ describe("redirect and credential policy", () => {
     expect(DEFAULT_MAX_REDIRECTS).toBe(5);
   });
 
+  test("a hostile redirect-body cancel hook cannot stall rejection", async () => {
+    let cancelCalled = false;
+    const startedAt = Date.now();
+    const pending = fetchWithPolicy("https://source.example/start", {}, {
+      maxRedirects: 0,
+      fetch: async () => new Response(new ReadableStream({
+        cancel() {
+          cancelCalled = true;
+          return new Promise(() => undefined);
+        },
+      }), {
+        status: 302,
+        headers: { location: "https://source.example/next" },
+      }),
+    });
+    await expect(pending).rejects.toMatchObject({ code: "TOO_MANY_REDIRECTS" });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(cancelCalled).toBe(true);
+  });
+
+  test("a hostile redirect-body cancel hook cannot stall the next hop", async () => {
+    let calls = 0;
+    const startedAt = Date.now();
+    const response = await fetchWithPolicy("https://source.example/start", {}, {
+      fetch: async () => {
+        calls += 1;
+        if (calls === 2) return new Response("done");
+        return new Response(new ReadableStream({
+          cancel() { return new Promise(() => undefined); },
+        }), {
+          status: 302,
+          headers: { location: "https://source.example/next" },
+        });
+      },
+    });
+    expect(await response.text()).toBe("done");
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(calls).toBe(2);
+  });
+
   test("uses Fetch-compatible method/body rules for 302, 303, and 307", async () => {
     for (const [status, expectedMethod, expectedBody] of [
       [302, "GET", ""],
@@ -929,11 +972,44 @@ describe("bounded response readers", () => {
     expect(cancelReason).toMatchObject({ code: "RESPONSE_TOO_LARGE" });
   });
 
+  test("does not let a hostile cancel hook stall an overflow rejection", async () => {
+    const response = new Response(new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+      },
+      cancel() {
+        return new Promise(() => undefined);
+      },
+    }));
+    const started = Date.now();
+    await expect(readResponseBytes(response, { maxBytes: 3 })).rejects.toMatchObject({
+      code: "RESPONSE_TOO_LARGE",
+    });
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
   test("parses bounded JSON and preserves JSON syntax errors", async () => {
     expect(await readResponseJson(new Response('{"ok":true}'), { maxBytes: 11 }))
       .toEqual({ ok: true });
     await expect(readResponseJson(new Response("{"), { maxBytes: 1 }))
       .rejects.toBeInstanceOf(SyntaxError);
+  });
+
+  test("rejects invalid UTF-8 instead of decoding replacement characters", async () => {
+    await expect(readResponseText(new Response(Uint8Array.from([0xc3, 0x28])), { maxBytes: 2 }))
+      .rejects.toBeInstanceOf(TypeError);
+  });
+
+  test("preserves an abort deadline when a custom stream ignores cancellation", async () => {
+    const response = new Response(new ReadableStream({
+      pull() { return new Promise(() => undefined); },
+      cancel() { return new Promise(() => undefined); },
+    }));
+    const controller = new AbortController();
+    const reason = new Error("bounded reader deadline");
+    const pending = readResponseText(response, { maxBytes: 5, signal: controller.signal });
+    setTimeout(() => controller.abort(reason), 10);
+    await expect(pending).rejects.toBe(reason);
   });
 
   test("external abort cancels a delayed real response and preserves reason identity", async () => {

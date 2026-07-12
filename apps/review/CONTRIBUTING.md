@@ -12,8 +12,8 @@ OIDC repo auth, metered inference proxy, quota, metrics).
 One durable smithers workflow, run in-process through the engine:
 
 1. The review side reuses `.smithers/lib/open-code-review.ts` (the
-   OpenCodeReview-derived flow): target resolution, file filtering, one
-   parallel review agent per file with the OpenCodeReview prompt, then comment
+   OpenCodeReview-derived flow): target resolution, file filtering, up to 64
+   priority-ordered parallel file-review agents with the OpenCodeReview prompt, then comment
    normalization and line anchoring.
 2. `collect-changes` loads the full diff for every changed file, including
    files the review filters skip (tests, docs, configs). The walkthrough shows
@@ -100,7 +100,10 @@ URL. The live endpoint is `https://review.jjhub.tech`; set
 `SMITHERS_REVIEW_PUBLISH_URL` to the publish service endpoint before using
 `--publish` (see the spec's "Publishing" section). Credentials come from
 `SMITHERS_REVIEW_PUBLISH_URL` / `SMITHERS_REVIEW_PUBLISH_TOKEN` or
-`~/.smithers-review.json`.
+a private `~/.smithers-review.json`. The environment pair is all-or-nothing;
+the file must be a user-owned regular file with mode `0600` (or stricter).
+Configure `SMITHERS_REVIEW_SHARE_ORIGIN` or the file's `shareOrigin` only when
+the public walkthrough origin intentionally differs from the upload origin.
 
 ```sh
 REVIEW_PUBLISH_TOKEN=... pnpm -C apps/review deploy   # alchemy deploy

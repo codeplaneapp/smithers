@@ -1,6 +1,7 @@
 import type { ReviewRunOutput } from "../workflow/openCodeReview";
 import type { Quiz } from "../quiz/quizSchema";
 import { fenceFor } from "../text/fenceFor";
+import { canonicalLineIntervals, intervalContains, type LineInterval } from "./parsePatchCommentableLines";
 import { pluralize } from "../text/pluralize";
 import type { Story } from "../walkthrough/storySchema";
 import type { PullRequestFile } from "./listPullRequestFiles";
@@ -71,6 +72,8 @@ function severityBreakdown(findings: Finding[]): string {
   return parts.join(" · ");
 }
 
+const capabilityIntervalCache = new WeakMap<ReadonlySet<number>, readonly LineInterval[]>();
+
 /**
  * Whether a finding can anchor inline against the PR's actual diff. GitHub
  * rejects the whole review batch when any comment's line is not part of a
@@ -85,17 +88,17 @@ function anchorFor(
   const file = prFiles.get(finding.path);
   if (!file || finding.startLine <= 0) return null;
   const lines = file.commentableLines;
+  let intervals = capabilityIntervalCache.get(lines);
+  if (!intervals) {
+    intervals = canonicalLineIntervals(lines);
+    capabilityIntervalCache.set(lines, intervals);
+  }
   const endLine = finding.endLine >= finding.startLine ? finding.endLine : finding.startLine;
-  if (!lines.has(endLine)) return null;
+  if (!intervalContains(intervals, endLine, endLine)) return null;
   if (endLine > finding.startLine) {
-    let rangeOk = true;
-    for (let line = finding.startLine; line <= endLine; line += 1) {
-      if (!lines.has(line)) {
-        rangeOk = false;
-        break;
-      }
+    if (intervalContains(intervals, finding.startLine, endLine)) {
+      return { line: endLine, startLine: finding.startLine, degraded: false };
     }
-    if (rangeOk) return { line: endLine, startLine: finding.startLine, degraded: false };
     // The multi-line range collapsed to its end line.
     return { line: endLine, degraded: true };
   }

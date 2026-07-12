@@ -1,14 +1,7 @@
 #!/usr/bin/env bun
 import { execFileSync, spawn } from "node:child_process";
-import {
-  closeSync,
-  constants,
-  fchmodSync,
-  fstatSync,
-  openSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadOutputs } from "@smithers-orchestrator/db/snapshot";
 import { runWorkflow } from "@smithers-orchestrator/engine";
@@ -17,7 +10,6 @@ import { buildPullRequestReview } from "../github/buildPullRequestReview";
 import { listPullRequestFiles } from "../github/listPullRequestFiles";
 import { postPullRequestReview } from "../github/postPullRequestReview";
 import { resolvePullRequest, type PullRequestTarget } from "../github/resolvePullRequest";
-import { supersedePriorReviews } from "../github/supersedePriorReviews";
 import { quizSchema, type Quiz } from "../quiz/quizSchema";
 import { fenceFor } from "../text/fenceFor";
 import { storySchema } from "../walkthrough/storySchema";
@@ -27,26 +19,10 @@ import { createProgressReporter } from "./createProgressReporter";
 import { parseJsonColumn } from "./parseJsonColumn";
 import { parseReviewArgs, type ReviewArgs } from "./parseReviewArgs";
 import { publishWalkthrough } from "./publishWalkthrough";
+import { buildCanonicalReviewSummary, writeReviewSummary } from "./reviewSummary";
+import { generateReviewManifest, writeProtectedReviewManifest, parseReviewManifest } from "../reviewManifest";
 
-export function writeReviewSummary(path: string, value: unknown): void {
-  const json = JSON.stringify(value);
-  if (Buffer.byteLength(json) > 64 * 1024) throw new Error("review summary exceeds 64 KB");
-  const fd = openSync(
-    path,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
-    0o600,
-  );
-  try {
-    if (!fstatSync(fd).isFile()) throw new Error("review summary destination is not a regular file");
-    fchmodSync(fd, 0o600);
-    // This is the CLI's single intentional run-summary sink. The operator
-    // selects the path; no final symlink is followed and content is bounded.
-    // codeql[js/http-to-file-access]
-    writeFileSync(fd, json);
-  } finally {
-    closeSync(fd);
-  }
-}
+export { writeReviewSummary } from "./reviewSummary";
 
 function refExists(repoDir: string, ref: string): boolean {
   try {
@@ -162,6 +138,7 @@ Environment
   ANTHROPIC_API_KEY         (otherwise the Claude subscription login is used)
   SMITHERS_REVIEW_PUBLISH_URL    share service base URL for --publish
   SMITHERS_REVIEW_PUBLISH_TOKEN  share service token for --publish
+  SMITHERS_REVIEW_SHARE_ORIGIN   optional distinct HTTPS origin returned in share URLs
   SMITHERS_REVIEW_SUMMARY_PATH   write a machine-readable JSON run summary here
 
 Examples
@@ -260,6 +237,17 @@ export async function runReviewCli(
       // without it every PR review runs context-free.
       args.background = untrustedPullRequestBackground(pr);
     }
+  }
+
+  if (pr && process.env.SMITHERS_REVIEW_TRUSTED_POLICY_ONLY === "1" && !process.env.SMITHERS_REVIEW_IMMUTABLE_MANIFEST?.trim()) {
+    throw new Error("trusted review requires the supplied immutable manifest");
+  } else if (pr && !process.env.SMITHERS_REVIEW_IMMUTABLE_MANIFEST?.trim()) {
+    const baseSha = execFileSync("git", ["rev-parse", "--verify", args.from], { cwd: repoDir, encoding: "utf8" }).trim();
+    const manifestDir = mkdtempSync(join(tmpdir(), "smithers-review-manifest-"));
+    const manifestPath = join(manifestDir, "immutable-diff-manifest.jsonl");
+    writeProtectedReviewManifest(manifestPath, parseReviewManifest(generateReviewManifest(repoDir, baseSha, pr.headSha)));
+    process.env.SMITHERS_REVIEW_IMMUTABLE_MANIFEST = manifestPath;
+    process.env.SMITHERS_REVIEW_EXPECTED_BASE_SHA = baseSha;
   }
 
   const agents = needsAgents ? createReviewAgents(repoDir) : { review: [], narrate: [], verify: [], quiz: [] };
@@ -372,12 +360,13 @@ export async function runReviewCli(
         reviewStatus,
         warnings,
       });
-      const superseded = await supersedePriorReviews(repoDir, pr);
-      if (superseded > 0) {
-        console.error(`[smithers-review] marked ${superseded} earlier smithers review${superseded === 1 ? "" : "s"} superseded`);
-      }
-      const posted = await postPullRequestReview(repoDir, pr, payload);
+      const expectedBaseSha = process.env.SMITHERS_REVIEW_EXPECTED_BASE_SHA;
+      if (!expectedBaseSha) throw new Error("PR publication requires an immutable base SHA");
+      const posted = await postPullRequestReview(repoDir, pr, payload, undefined, { expectedBaseSha, prFiles });
       inlinePosted = posted.inline;
+      if (posted.superseded > 0) {
+        console.error(`[smithers-review] marked ${posted.superseded} earlier smithers review${posted.superseded === 1 ? "" : "s"} superseded`);
+      }
       console.log(`PR review posted (${posted.inline} inline comment${posted.inline === 1 ? "" : "s"}): ${posted.url}`);
     } catch (error) {
       prFailed = true;
@@ -408,33 +397,32 @@ export async function runReviewCli(
   console.log(`Walkthrough: ${shareUrl || String(walkthrough.path)}`);
 
   // Machine-readable outcome for wrappers (the GitHub action's status
-  // comment); best-effort by design.
+  // comment). An explicitly requested summary is part of the contract.
   const summaryPath = process.env.SMITHERS_REVIEW_SUMMARY_PATH?.trim();
+  let summaryWriteFailed = false;
   if (summaryPath) {
     try {
-      writeReviewSummary(
-        summaryPath,
-        {
+      writeReviewSummary(summaryPath, buildCanonicalReviewSummary({
           status: result.status,
           reviewStatus,
           files: filesChanged,
           findings: findings.length,
           inline: inlinePosted,
           severity: severityCounts(findings),
-          walkthroughPath: String(walkthrough.path ?? ""),
-          walkthroughUrl: shareUrl,
-          publishError,
+          walkthroughReady: Boolean(String(walkthrough.path ?? "")),
+          publishSucceeded: Boolean(shareUrl),
+          publishFailed: Boolean(publishError),
           failedFileReviews,
           impact: impactLevel,
           questions: questionCount,
-        },
-      );
+      }));
     } catch (error) {
+      summaryWriteFailed = true;
       console.error(`smithers-review: could not write summary file: ${(error as Error).message}`);
     }
   }
 
-  const failed = result.status === "failed" || result.status === "cancelled" || prFailed || reviewFailed;
+  const failed = result.status === "failed" || result.status === "cancelled" || prFailed || reviewFailed || summaryWriteFailed;
   process.exit(failed ? 1 : 0);
 }
 

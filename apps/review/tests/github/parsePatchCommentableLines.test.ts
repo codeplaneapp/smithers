@@ -1,7 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { parsePatchCommentableLines } from "../../src/github/parsePatchCommentableLines";
+import {
+  canonicalLineIntervals,
+  CanonicalReviewLineSet,
+  parsePatchCommentableLines,
+  reviewLineSet,
+} from "../../src/github/parsePatchCommentableLines";
 
 describe("parsePatchCommentableLines", () => {
+  test("large canonical capabilities stay interval-backed with constant-size membership checks", () => {
+    const lines = reviewLineSet([[1, 5_000_000]]);
+    expect(lines).toBeInstanceOf(CanonicalReviewLineSet);
+    expect(lines.size).toBe(5_000_000);
+    expect(lines.has(1)).toBe(true);
+    expect(lines.has(5_000_000)).toBe(true);
+    expect(lines.has(5_000_001)).toBe(false);
+    expect(canonicalLineIntervals(lines)).toEqual([[1, 5_000_000]]);
+    expect(() => lines.add(5_000_001)).toThrow(/immutable/);
+  });
+
   test("multi-hunk patch yields only added and context new-side line numbers", () => {
     const patch = [
       "@@ -1,3 +1,4 @@",
@@ -47,9 +63,20 @@ describe("parsePatchCommentableLines", () => {
     expect(parsePatchCommentableLines(patch)).toEqual(new Set([1, 2]));
   });
 
+  test("permits markers between the old and new sides of a no-final-newline replacement", () => {
+    const patch = [
+      "@@ -1 +1 @@",
+      "-old",
+      "\\ No newline at end of file",
+      "+new",
+      "\\ No newline at end of file",
+    ].join("\n");
+    expect(parsePatchCommentableLines(patch)).toEqual(new Set([1]));
+  });
+
   test("CRLF patches produce the same line numbers with no off-by-one", () => {
-    const lf = ["@@ -1,3 +1,3 @@", " a", "+b", " c"].join("\n");
-    const crlf = ["@@ -1,3 +1,3 @@", " a", "+b", " c"].join("\r\n");
+    const lf = ["@@ -1,2 +1,3 @@", " a", "+b", " c"].join("\n");
+    const crlf = ["@@ -1,2 +1,3 @@", " a", "+b", " c"].join("\r\n");
     expect(parsePatchCommentableLines(crlf)).toEqual(parsePatchCommentableLines(lf));
     expect(parsePatchCommentableLines(crlf)).toEqual(new Set([1, 2, 3]));
   });

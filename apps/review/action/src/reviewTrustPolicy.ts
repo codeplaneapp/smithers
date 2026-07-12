@@ -1,7 +1,7 @@
 type Obj = Record<string, unknown>;
 
 function obj(value: unknown): Obj | null {
-  return value !== null && typeof value === "object" ? value as Obj : null;
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Obj : null;
 }
 
 function positiveId(value: unknown): string | null {

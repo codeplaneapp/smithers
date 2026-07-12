@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { estimateCostUsd, modelTokenPrices } from "../src/index.js";
 
+const SONNET_5_STANDARD_START_MS = Date.UTC(2026, 8, 1);
+
 describe("modelTokenPrices", () => {
     test("exact id match returns its price table", () => {
         expect(modelTokenPrices("claude-opus-4-8")).toEqual({
-            input: 15,
-            output: 75,
-            cacheWrite: 18.75,
-            cacheRead: 1.5,
+            input: 5,
+            output: 25,
+            cacheWrite: 6.25,
+            cacheRead: 0.5,
         });
     });
 
@@ -33,19 +35,34 @@ describe("modelTokenPrices", () => {
     });
 
     test("date-stamped suffix with a dash still matches the base id", () => {
-        expect(modelTokenPrices("claude-sonnet-5-20250101").input).toBe(3);
+        expect(modelTokenPrices("claude-sonnet-5-20250101", SONNET_5_STANDARD_START_MS).input).toBe(3);
     });
 
     test("underscore-suffixed id matches the base id", () => {
-        expect(modelTokenPrices("claude-haiku-4-5_preview").output).toBe(4);
+        expect(modelTokenPrices("claude-haiku-4-5_preview").output).toBe(5);
     });
 
     test("bracketed context-window alias matches the base id", () => {
-        expect(modelTokenPrices("claude-opus-4-8[1m]").output).toBe(75);
+        expect(modelTokenPrices("claude-opus-4-8[1m]").output).toBe(25);
     });
 
     test("is case-insensitive", () => {
-        expect(modelTokenPrices("CLAUDE-FABLE-5").input).toBe(15);
+        expect(modelTokenPrices("CLAUDE-FABLE-5").input).toBe(10);
+    });
+
+    test("Sonnet 5 rolls from introductory to standard pricing at the published boundary", () => {
+        expect(modelTokenPrices("claude-sonnet-5", SONNET_5_STANDARD_START_MS - 1)).toEqual({
+            input: 2,
+            output: 10,
+            cacheWrite: 2.5,
+            cacheRead: 0.2,
+        });
+        expect(modelTokenPrices("claude-sonnet-5", SONNET_5_STANDARD_START_MS)).toEqual({
+            input: 3,
+            output: 15,
+            cacheWrite: 3.75,
+            cacheRead: 0.3,
+        });
     });
 
     test("unknown id prices at all zeros", () => {
@@ -76,7 +93,11 @@ describe("modelTokenPrices", () => {
 describe("estimateCostUsd", () => {
     test("a single coarse token total prices at the blended input/output midpoint", () => {
         // claude-sonnet-5: input 3, output 15 -> midpoint 9 per million.
-        const cost = estimateCostUsd({ model: "claude-sonnet-5", tokens: 1_000_000 });
+        const cost = estimateCostUsd({
+            model: "claude-sonnet-5",
+            tokens: 1_000_000,
+            pricingAtMs: SONNET_5_STANDARD_START_MS,
+        });
         expect(cost).toBe(9);
     });
 
@@ -86,6 +107,7 @@ describe("estimateCostUsd", () => {
             model: "claude-sonnet-5",
             inputTokens: 1_000_000,
             outputTokens: 1_000_000,
+            pricingAtMs: SONNET_5_STANDARD_START_MS,
         });
         expect(cost).toBe(18);
     });
@@ -143,6 +165,7 @@ describe("estimateCostUsd", () => {
             model: "claude-sonnet-5",
             cacheReadTokens: 1_000_000,
             cacheWriteTokens: 1_000_000,
+            pricingAtMs: SONNET_5_STANDARD_START_MS,
         });
         expect(cost).toBeCloseTo(4.05, 10);
     });
@@ -152,6 +175,7 @@ describe("estimateCostUsd", () => {
             model: "claude-sonnet-5",
             tokens: 5_000_000,
             inputTokens: 1_000_000,
+            pricingAtMs: SONNET_5_STANDARD_START_MS,
         });
         // tokens is ignored once inputTokens is present; only the split is priced.
         expect(cost).toBe(3);
@@ -162,6 +186,7 @@ describe("estimateCostUsd", () => {
             model: "claude-sonnet-5",
             inputTokens: -10,
             outputTokens: Number.NaN,
+            pricingAtMs: SONNET_5_STANDARD_START_MS,
         });
         expect(cost).toBe(0);
     });

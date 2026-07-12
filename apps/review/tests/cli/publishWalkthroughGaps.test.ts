@@ -1,19 +1,28 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { publishWalkthrough } from "../../src/cli/publishWalkthrough";
+import { publishWalkthrough, uploadWalkthrough } from "../../src/cli/publishWalkthrough";
 
 const originalUrl = process.env.SMITHERS_REVIEW_PUBLISH_URL;
 const originalToken = process.env.SMITHERS_REVIEW_PUBLISH_TOKEN;
+const originalShareOrigin = process.env.SMITHERS_REVIEW_SHARE_ORIGIN;
 const originalFetch = globalThis.fetch;
 const dirs: string[] = [];
+
+beforeEach(() => {
+  delete process.env.SMITHERS_REVIEW_PUBLISH_URL;
+  delete process.env.SMITHERS_REVIEW_PUBLISH_TOKEN;
+  delete process.env.SMITHERS_REVIEW_SHARE_ORIGIN;
+});
 
 afterEach(() => {
   if (originalUrl === undefined) delete process.env.SMITHERS_REVIEW_PUBLISH_URL;
   else process.env.SMITHERS_REVIEW_PUBLISH_URL = originalUrl;
   if (originalToken === undefined) delete process.env.SMITHERS_REVIEW_PUBLISH_TOKEN;
   else process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = originalToken;
+  if (originalShareOrigin === undefined) delete process.env.SMITHERS_REVIEW_SHARE_ORIGIN;
+  else process.env.SMITHERS_REVIEW_SHARE_ORIGIN = originalShareOrigin;
   globalThis.fetch = originalFetch;
   while (dirs.length > 0) rmSync(dirs.pop()!, { recursive: true, force: true });
 });
@@ -31,11 +40,13 @@ describe("publishWalkthrough config + upload", () => {
     const { dir, homeDir, htmlPath } = tempSetup();
     delete process.env.SMITHERS_REVIEW_PUBLISH_URL;
     delete process.env.SMITHERS_REVIEW_PUBLISH_TOKEN;
-    require("node:fs").mkdirSync(homeDir, { recursive: true });
+    mkdirSync(homeDir, { recursive: true });
+    const configPath = join(homeDir, ".smithers-review.json");
     writeFileSync(
-      join(homeDir, ".smithers-review.json"),
+      configPath,
       JSON.stringify({ publishUrl: "https://share.test/", publishToken: "cfg-token" }),
     );
+    chmodSync(configPath, 0o600);
 
     const seen: { url?: string; auth?: string; redirect?: string } = {};
     globalThis.fetch = (async (url: string, init: RequestInit) => {
@@ -54,12 +65,18 @@ describe("publishWalkthrough config + upload", () => {
     void dir;
   });
 
-  test("throws when a token is missing everywhere", async () => {
+  test("rejects a partial environment pair instead of mixing sources", async () => {
     const { homeDir, htmlPath } = tempSetup();
+    mkdirSync(homeDir, { recursive: true });
+    const configPath = join(homeDir, ".smithers-review.json");
+    writeFileSync(configPath, JSON.stringify({
+      publishUrl: "https://trusted.test",
+      publishToken: "stored-token",
+    }));
+    chmodSync(configPath, 0o600);
     process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
     delete process.env.SMITHERS_REVIEW_PUBLISH_TOKEN;
-    // homeDir has no config file → no token available.
-    await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("no publish token");
+    await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("must be set together");
   });
 
   test("throws with the HTTP status and body when the upload fails", async () => {
@@ -93,7 +110,7 @@ describe("publishWalkthrough config + upload", () => {
     await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("response had no url");
   });
 
-  test("accepts a separate HTTPS public origin but rejects a non-canonical id path", async () => {
+  test("binds response URLs to an explicitly configured share origin", async () => {
     const { htmlPath, homeDir } = tempSetup();
     process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
     process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
@@ -101,6 +118,9 @@ describe("publishWalkthrough config + upload", () => {
       id: "abcde012345a",
       url: "https://public.test/w/abcde012345a",
     }), { status: 201 })) as unknown as typeof fetch;
+    await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("not a canonical HTTPS walkthrough URL");
+
+    process.env.SMITHERS_REVIEW_SHARE_ORIGIN = "https://public.test";
     await expect(publishWalkthrough(htmlPath, { homeDir })).resolves.toBe("https://public.test/w/abcde012345a");
 
     globalThis.fetch = (async () => new Response(JSON.stringify({
@@ -108,5 +128,73 @@ describe("publishWalkthrough config + upload", () => {
       url: "https://public.test/w/different-id",
     }), { status: 201 })) as unknown as typeof fetch;
     await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("not a canonical HTTPS walkthrough URL");
+  });
+
+  test("supports an explicitly local HTTP publish and share service", async () => {
+    const { htmlPath, homeDir } = tempSetup();
+    process.env.SMITHERS_REVIEW_PUBLISH_URL = "http://127.0.0.1:43210";
+    process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      id: "abcde012345a",
+      url: "http://127.0.0.1:43210/w/abcde012345a",
+    }), { status: 201 })) as unknown as typeof fetch;
+    await expect(publishWalkthrough(htmlPath, { homeDir })).resolves.toBe(
+      "http://127.0.0.1:43210/w/abcde012345a",
+    );
+  });
+
+  test("rejects symlinked, oversized, non-private, and schema-smuggled config files", async () => {
+    const { dir, homeDir, htmlPath } = tempSetup();
+    delete process.env.SMITHERS_REVIEW_PUBLISH_URL;
+    delete process.env.SMITHERS_REVIEW_PUBLISH_TOKEN;
+    mkdirSync(homeDir, { recursive: true });
+    const configPath = join(homeDir, ".smithers-review.json");
+    const target = join(dir, "target.json");
+
+    writeFileSync(target, JSON.stringify({ publishUrl: "https://share.test", publishToken: "secret" }));
+    chmodSync(target, 0o600);
+    symlinkSync(target, configPath);
+    await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow();
+    rmSync(configPath);
+
+    writeFileSync(configPath, "x".repeat(16 * 1024 + 1));
+    chmodSync(configPath, 0o600);
+    await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("16 KB");
+
+    writeFileSync(configPath, JSON.stringify({
+      publishUrl: "https://share.test",
+      publishToken: "secret",
+      redirectTokenTo: "https://attacker.invalid",
+    }));
+    chmodSync(configPath, 0o600);
+    await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("unknown fields");
+
+    if (process.platform !== "win32") {
+      writeFileSync(configPath, JSON.stringify({ publishUrl: "https://share.test", publishToken: "secret" }));
+      chmodSync(configPath, 0o644);
+      await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("private");
+    }
+  });
+
+  test("enforces a real deadline when an injected fetch ignores AbortSignal", async () => {
+    const started = Date.now();
+    await expect(uploadWalkthrough(
+      new TextEncoder().encode("<html></html>"),
+      "https://share.test",
+      "token",
+      {
+        timeoutMs: 10,
+        fetch: (() => new Promise<Response>(() => undefined)) as unknown as typeof fetch,
+      },
+    )).rejects.toThrow(/timed out/);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  test("rejects invalid UTF-8 in the private publish config", async () => {
+    const { homeDir, htmlPath } = tempSetup();
+    mkdirSync(homeDir, { recursive: true });
+    const configPath = join(homeDir, ".smithers-review.json");
+    writeFileSync(configPath, Uint8Array.from([0xff]), { mode: 0o600 });
+    await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow(/UTF-8/);
   });
 });

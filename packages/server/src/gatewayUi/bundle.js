@@ -14,6 +14,10 @@ const monorepoRoot = resolve(thisDir, "../../../..");
 // (portals, flushSync, createRoot in shared components).
 const reactSpecifierRe = /^react(?:-dom)?(?:\/.*)?$/;
 const tanstackSpecifierRe = /^@tanstack\//;
+// Curated workflow UIs may use these rich, browser-only packages without
+// requiring every target repository to install them. They are server runtime
+// dependencies and resolve from the same package that owns the UI bundler.
+const packagedUiSpecifierRe = /^(?:@milkdown\/crepe|mermaid)(?:\/.*)?$/;
 const smithersUiSpecifierRe = /^(?:smithers-orchestrator\/gateway-(?:react|client)|@smithers-orchestrator\/(?:gateway-react|gateway-client|gateway)(?:\/.*)?)$/;
 const INLINE_UI_NAMESPACE = "smithers-inline-ui";
 
@@ -23,6 +27,23 @@ function resolveReactPeer(specifier) {
     }
     catch {
         return null;
+    }
+}
+
+function resolvePackagedUiDependency(specifier) {
+    try {
+        // Use ESM conditions: Crepe's CommonJS entry requires internal Kit
+        // paths that are intentionally import-only package exports.
+        const resolved = import.meta.resolve(specifier);
+        return resolved.startsWith("file:") ? fileURLToPath(resolved) : resolved;
+    }
+    catch {
+        try {
+            return require.resolve(specifier);
+        }
+        catch {
+            return null;
+        }
     }
 }
 
@@ -204,12 +225,12 @@ export async function bundleGatewayUiEntry(config, cache) {
         root: process.cwd(),
         target: "browser",
         format: "esm",
-        // Serve production React: the development build plus inline sourcemaps
-        // made every UI bundle 3.7-6.6 MB. Sourcemaps stay inline (operators
-        // debug against them); minify stays off so stack traces read cleanly.
+        // Serve compact production assets. Development/no-cache mode keeps
+        // readable code and inline sourcemaps; cached production bundles avoid
+        // shipping source maps and unminified dependency trees to every browser.
         define: { "process.env.NODE_ENV": JSON.stringify(noCache ? "development" : "production") },
-        sourcemap: "inline",
-        minify: false,
+        sourcemap: noCache ? "inline" : "none",
+        minify: !noCache,
         jsx: {
             runtime: "automatic",
             importSource: "react",
@@ -225,6 +246,10 @@ export async function bundleGatewayUiEntry(config, cache) {
                     });
                     build.onResolve({ filter: tanstackSpecifierRe }, (args) => {
                         const path = resolveWorkspaceDependency(args.path, args.resolveDir);
+                        return path ? { path } : undefined;
+                    });
+                    build.onResolve({ filter: packagedUiSpecifierRe }, (args) => {
+                        const path = resolvePackagedUiDependency(args.path);
                         return path ? { path } : undefined;
                     });
                     build.onResolve({ filter: smithersUiSpecifierRe }, (args) => {

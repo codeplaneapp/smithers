@@ -1,0 +1,9 @@
+name: smithers/codeql-review-boundaries
+version: 1.0.0
+extractor: javascript
+tests: test
+warnOnImplicitThis: true
+dependencies:
+  codeql/javascript-all: 2.8.0
+  codeql/javascript-queries: 2.4.0
+  codeql/util: 2.0.39

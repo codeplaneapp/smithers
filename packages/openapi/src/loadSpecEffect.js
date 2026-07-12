@@ -20,6 +20,17 @@ import { SPEC_SOURCE_URL } from "./specSourceUrl.js";
 
 const DEFAULT_MAX_SPEC_BYTES = 5 * 1024 * 1024;
 
+/** @param {Response} response */
+function cancelResponseBodyBestEffort(response) {
+    try {
+        void response.body?.cancel().catch(() => undefined);
+    }
+    catch {
+        // Preserve the provider status when a nonstandard stream throws from
+        // cancel(). Cleanup must never delay or replace the primary result.
+    }
+}
+
 /** @param {unknown} configured */
 function maxSpecBytes(configured) {
     const value = configured ?? DEFAULT_MAX_SPEC_BYTES;
@@ -73,7 +84,7 @@ export function loadSpecEffect(input, options = {}) {
                             }),
                     });
                     if (!res.ok) {
-                        await res.body?.cancel().catch(() => undefined);
+                        cancelResponseBodyBestEffort(res);
                         throw new Error(`Failed to fetch OpenAPI spec: ${res.status} ${res.statusText}`);
                     }
                     const text = await readResponseText(res, {

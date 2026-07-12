@@ -28,11 +28,28 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Check CodeQL replacement contract
+        run: |
+          node --test scripts/check-codeql-contract.test.mjs
+          node scripts/check-codeql-contract.mjs
+
+      - name: Verify pinned upstream CodeQL sources
+        if: github.event_name == 'schedule'
+        run: node scripts/check-codeql-contract.mjs --verify-upstream
+
       - name: Initialize CodeQL
+        id: codeql-init
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           languages: javascript-typescript
-          queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
+          tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.26.0/codeql-bundle-linux64.tar.zst
+
+      - name: Test custom CodeQL queries
+        shell: bash
+        run: |
+          test "${{ steps.codeql-init.outputs.codeql-version }}" = "2.26.0"
+          "${{ steps.codeql-init.outputs.codeql-path }}" test run .github/codeql/queries/test --threads=0
 
       - name: Build
         uses: github/codeql-action/autobuild@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0

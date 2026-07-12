@@ -20,7 +20,10 @@ Gotchas:
 - `bundle.js` pins BOTH `react` and `react-dom` to this package's copies via an
   `onResolve` plugin (mixed React copies crash react-dom). The bundle cache is
   keyed by entry path; `SMITHERS_GATEWAY_UI_NO_CACHE=1` rebuilds on every
-  request for dev.
+  request for dev. It also resolves the curated DDD UI's Crepe and Mermaid
+  dependencies from the server package, so a fresh consumer repository does
+  not need to install UI internals. Cached production bundles are minified and
+  omit source maps; no-cache development bundles retain inline maps.
 - Consumers are `gateway.js` and tests, but these modules are also reachable as
   public subpaths through the package's `./*` wildcard export, so keep exported
   names stable.

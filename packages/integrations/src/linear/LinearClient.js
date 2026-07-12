@@ -72,6 +72,17 @@ const MAX_ATTEMPTS = 5;
 const MAX_RETRY_DELAY_MS = 30_000;
 const MAX_LINEAR_RESPONSE_BYTES = 5 * 1024 * 1024;
 
+/** @param {Response} response */
+function cancelResponseBodyBestEffort(response) {
+    try {
+        void response.body?.cancel().catch(() => undefined);
+    }
+    catch {
+        // Retry/failure decisions depend on status and headers, never on a
+        // user-extensible stream cancellation promise settling.
+    }
+}
+
 /**
  * Retry delay from Linear rate-limit headers: `Retry-After` (seconds) or
  * `X-RateLimit-Requests-Reset` (unix epoch ms), clamped to 30s.
@@ -184,12 +195,7 @@ export function makeLinearClient(config) {
                 // Retry decisions use only status/headers. Release the body
                 // before sleeping so a streaming error cannot pin a socket or
                 // bypass the normal response-size bound across attempts.
-                yield* Effect.tryPromise({
-                    try: async () => {
-                        await response.body?.cancel();
-                    },
-                    catch: () => undefined,
-                }).pipe(Effect.ignore);
+                cancelResponseBodyBestEffort(response);
                 const retryable = attempt < MAX_ATTEMPTS;
                 const delayMs = retryDelayFromHeaders(response.headers) ??
                     Math.min(250 * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS);

@@ -9,6 +9,7 @@ import { parseUsageFromSse } from "./parseUsageFromSse.ts";
 import { recordUsage } from "./recordUsage.ts";
 import {
   estimateMessagesSpend,
+  prepareMessagesRequest,
   releaseSpendReservation,
   reserveSpend,
   type SpendReservation,
@@ -18,6 +19,7 @@ import {
   fetchWithPolicy,
   isHttpClientPolicyError,
   readResponseBytes,
+  readResponseJson,
 } from "@smithers-orchestrator/http-client";
 
 export interface HandleAnthropicDeps {
@@ -50,6 +52,7 @@ const FORWARDED_HEADERS = new Set([
 const PASSTHROUGH_RESPONSE_HEADERS = ["retry-after", "x-request-id"];
 const DEFAULT_MAX_REQUEST_BYTES = 16 * 1024 * 1024;
 const DEFAULT_MAX_METERING_BYTES = 16 * 1024 * 1024;
+const MAX_TOKEN_COUNT_RESPONSE_BYTES = 64 * 1024;
 const ALLOWED_PROXY_PATHS = new Set(["/v1/messages", "/v1/messages/count_tokens"]);
 
 function validByteLimit(value: number): boolean {
@@ -62,6 +65,49 @@ function pickForwardHeaders(source: Headers): Headers {
     if (FORWARDED_HEADERS.has(k.toLowerCase())) out.set(k, v);
   }
   return out;
+}
+
+function cancelResponseBodyBestEffort(response: Response, reason?: unknown): void {
+  try {
+    void response.body?.cancel(reason).catch(() => undefined);
+  } catch {
+    // A custom transport may throw synchronously. Cleanup must not replace the
+    // primary provider status or prevent a reservation decision from settling.
+  }
+}
+
+async function countProviderInputTokens(input: {
+  url: URL;
+  headers: Headers;
+  body: ArrayBuffer;
+  signal: AbortSignal;
+  fetchUpstream: typeof fetch;
+  allowedOrigins?: string[];
+}): Promise<number> {
+  const response = await fetchWithPolicy(input.url, {
+    method: "POST",
+    headers: input.headers,
+    body: input.body,
+    signal: input.signal,
+  }, {
+    fetch: input.fetchUpstream,
+    allowedOrigins: input.allowedOrigins,
+  });
+  if (!response.ok) {
+    cancelResponseBodyBestEffort(response);
+    throw new Error(`Anthropic token counting responded ${response.status}`);
+  }
+  const payload = await readResponseJson<{ input_tokens?: unknown }>(response, {
+    maxBytes: MAX_TOKEN_COUNT_RESPONSE_BYTES,
+    signal: input.signal,
+  });
+  if (
+    !Number.isSafeInteger(payload?.input_tokens)
+    || (payload.input_tokens as number) < 0
+  ) {
+    throw new Error("Anthropic token counting returned an invalid input_tokens value");
+  }
+  return payload.input_tokens as number;
 }
 
 type CollectedMeteringBody = {
@@ -141,7 +187,12 @@ function streamForMetering(
   const finish = (complete: boolean) => {
     if (settled) return;
     settled = true;
-    reader.releaseLock();
+    try {
+      reader.releaseLock();
+    } catch {
+      // A concurrent hostile read/cancel may keep the reader pending. Metering
+      // completion must not depend on secondary lock cleanup succeeding.
+    }
     const decoder = new TextDecoder();
     if (totalBytes <= maxBytes) {
       const tailBytes = orderedTail();
@@ -171,6 +222,7 @@ function streamForMetering(
     async pull(controller) {
       try {
         const { value, done } = await reader.read();
+        if (cancelled) return;
         if (done) {
           finish(!cancelled);
           controller.close();
@@ -182,16 +234,17 @@ function streamForMetering(
         }
       } catch (error) {
         finish(false);
-        controller.error(error);
+        if (!cancelled) controller.error(error);
       }
     },
-    async cancel(reason) {
+    cancel(reason) {
       cancelled = true;
       try {
-        await reader.cancel(reason);
-      } finally {
-        finish(false);
+        void reader.cancel(reason).catch(() => undefined);
+      } catch {
+        // Nonstandard stream implementations can throw synchronously.
       }
+      finish(false);
     },
   });
   return { passthrough, collected };
@@ -344,14 +397,44 @@ export async function handleAnthropic(
     return jsonError(400, "failed to read request body");
   }
 
+  let countTokensBody: ArrayBuffer | null = null;
+  if (proxiedPath === "/v1/messages") {
+    const prepared = prepareMessagesRequest(upstreamBody);
+    upstreamBody = prepared.body;
+    countTokensBody = prepared.countTokensBody;
+  }
+
   // Both provider-key routes require an explicitly priced model. Reserve only
   // Messages creation; count_tokens does not produce a billable message.
   let reservation: SpendReservation | null = null;
-  const estimate = estimateMessagesSpend(upstreamBody);
+  let estimate = estimateMessagesSpend(upstreamBody, now);
   if (!estimate.hasStaticPrice) {
     return jsonError(400, "requested model has no static metering price", {
       reason: "unpriced-model",
     });
+  }
+  if (estimate.unsupportedBillingFeature) {
+    return jsonError(400, "request uses a feature without bounded static metering", {
+      reason: estimate.unsupportedBillingFeature,
+    });
+  }
+  if (proxiedPath === "/v1/messages" && countTokensBody) {
+    let countedInputTokens: number;
+    try {
+      countedInputTokens = await countProviderInputTokens({
+        url: assertHttpUrl(`${anthropicBaseUrl.toString().replace(/\/$/, "")}/v1/messages/count_tokens`),
+        headers: upstreamHeaders,
+        body: countTokensBody,
+        signal: request.signal,
+        fetchUpstream: deps.fetchUpstream,
+        allowedOrigins: deps.anthropicAllowedOrigins,
+      });
+    } catch (err) {
+      if (request.signal.aborted) throw request.signal.reason ?? err;
+      const detail = String(err).split(env.ANTHROPIC_API_KEY).join("<redacted>");
+      return jsonError(502, "upstream token counting failed", { detail });
+    }
+    estimate = estimateMessagesSpend(upstreamBody, now, countedInputTokens);
   }
   if (proxiedPath === "/v1/messages") {
     reservation = await reserveSpend(env.DB, {
@@ -425,7 +508,7 @@ export async function handleAnthropic(
             cacheReadTokens: 0,
           },
           kind: "messages",
-          now: deps.now(),
+          now,
           reservationId: reservation.id,
           minimumCostUsd: reservation.amountUsd,
         });
@@ -492,12 +575,26 @@ export async function handleAnthropic(
             cacheReadTokens: 0,
           },
           kind: contentType.includes("text/event-stream") ? "messages_stream" : "messages",
-          now: deps.now(),
+          now,
           reservationId: reservation.id,
           minimumCostUsd: reservation.amountUsd,
         });
       }
       return;
+    }
+    if (
+      (summary.serviceTier && summary.serviceTier !== "standard")
+      || (summary.inferenceGeo && summary.inferenceGeo !== "global")
+    ) {
+      // The request body explicitly pins standard_only/global. Retain and
+      // surface any provider contract breach instead of silently discarding
+      // the authoritative usage fields during settlement.
+      console.error("smithers-review: provider violated the static billing boundary", {
+        repo,
+        pr,
+        serviceTier: summary.serviceTier ?? null,
+        inferenceGeo: summary.inferenceGeo ?? null,
+      });
     }
     await recordUsage(env.DB, {
       sessionHash,
@@ -505,7 +602,7 @@ export async function handleAnthropic(
       pr,
       summary,
       kind: contentType.includes("text/event-stream") ? "messages_stream" : "messages",
-      now: deps.now(),
+      now,
       reservationId: reservation?.id,
       // A client cancellation or transport error can hide the final usage
       // frame. Charge the pre-dispatch bound rather than silently undercount.

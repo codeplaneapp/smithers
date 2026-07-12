@@ -2,7 +2,11 @@
 // file cannot crowd out the rest of the review context.
 const perFileDiffLimit = 20_000;
 
+export function trimPromptContent(content: string, limit: number, marker: string): string {
+  if (content.length <= limit) return content;
+  return `${content.slice(0, limit)}\n${marker}`;
+}
+
 export function trimDiff(diff: string): string {
-  if (diff.length <= perFileDiffLimit) return diff;
-  return `${diff.slice(0, perFileDiffLimit)}\n[diff truncated for prompt size]`;
+  return trimPromptContent(diff, perFileDiffLimit, "[diff truncated for prompt size]");
 }

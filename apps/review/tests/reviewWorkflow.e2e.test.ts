@@ -8,9 +8,43 @@ import { runWorkflow } from "@smithers-orchestrator/engine";
 import type { AgentLike } from "smithers-orchestrator";
 import { Effect } from "effect";
 import { parseJsonColumn } from "../src/cli/parseJsonColumn";
-import { createReviewWorkflow } from "../src/workflow/createReviewWorkflow";
+import { appendReviewWarnings, createReviewWorkflow } from "../src/workflow/createReviewWorkflow";
+import { MAX_REVIEW_WARNINGS, reviewRunOutputSchema } from "../src/workflow/openCodeReview";
 
 const tempDirs: string[] = [];
+
+describe("review workflow warning aggregation", () => {
+  const base = () => reviewRunOutputSchema.parse({
+    status: "success",
+    ok: true,
+    comments: [],
+    warnings: [],
+  });
+
+  test("marks successful reviews as warned when verifier diagnostics are added", () => {
+    const result = appendReviewWarnings(base(), [{ file: "", type: "verifier_error", message: "unverified" }]);
+    expect(result.status).toBe("completed_with_warnings");
+    expect(result.warnings).toHaveLength(1);
+  });
+
+  test("prioritizes verifier diagnostics and reserves an aggregate warning at the output limit", () => {
+    const existing = Array.from({ length: MAX_REVIEW_WARNINGS }, (_, index) => ({
+      file: "",
+      type: "file_warning",
+      message: `old ${index}`,
+    }));
+    const additions = [
+      { file: "", type: "verifier_dropped", message: "new one" },
+      { file: "", type: "verifier_demoted", message: "new two" },
+    ];
+    const result = appendReviewWarnings({ ...base(), warnings: existing }, additions);
+
+    expect(result.warnings).toHaveLength(MAX_REVIEW_WARNINGS);
+    expect(result.warnings).toContainEqual(additions[0]);
+    expect(result.warnings).toContainEqual(additions[1]);
+    expect(result.warnings.at(-1)).toEqual(expect.objectContaining({ type: "warning_limit" }));
+  });
+});
 
 afterEach(() => {
   while (tempDirs.length > 0) {

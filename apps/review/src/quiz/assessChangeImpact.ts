@@ -74,6 +74,16 @@ const weights = {
 
 const churnBumpThreshold = 800;
 const fileCountBumpThreshold = 25;
+const maxImpactReasons = 100;
+
+function boundReasons(reasons: Array<{ signal: string; path: string }>) {
+  if (reasons.length <= maxImpactReasons) return reasons;
+  const retained = reasons.slice(0, maxImpactReasons - 1);
+  return [
+    ...retained,
+    { signal: `${reasons.length - retained.length} additional impact signal(s) omitted`, path: "" },
+  ];
+}
 
 function pathTokens(path: string) {
   return path
@@ -200,5 +210,5 @@ export function assessChangeImpact(files: ImpactFile[], findings: ImpactFinding[
     reasons.push({ signal: `large change (${totalChurn} lines across ${files.length} files)`, path: "" });
   }
 
-  return { level, score, reasons };
+  return { level, score, reasons: boundReasons(reasons) };
 }

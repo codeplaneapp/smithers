@@ -394,6 +394,18 @@ describe("usage parsers", () => {
     expect(parseUsageFromJson("{not json")).toBeNull();
   });
 
+  test("parseUsageFromJson retains provider billing-boundary fields", () => {
+    expect(parseUsageFromJson(JSON.stringify({
+      model: "claude-sonnet-4-6",
+      usage: {
+        input_tokens: 3,
+        output_tokens: 1,
+        service_tier: "standard",
+        inference_geo: "global",
+      },
+    }))).toMatchObject({ serviceTier: "standard", inferenceGeo: "global" });
+  });
+
   test("parseUsageFromSse skips frames with unparseable data or no data line", () => {
     const stream = [
       "event: message_delta",

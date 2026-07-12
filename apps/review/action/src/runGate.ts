@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
 import { gateEvent } from "./gateEvent";
 import { eventCanPublish, reviewCredentialPolicy } from "./reviewTrustPolicy";
 
@@ -15,15 +15,38 @@ function setOutput(key: string, value: string): void {
   appendFileSync(output, `${key}=${value}\n`);
 }
 
+function readEvent(path: string): unknown {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const before = fstatSync(fd);
+    if (!before.isFile() || before.size < 1 || before.size > 5 * 1024 * 1024) throw new Error("event is empty or oversized");
+    const bytes = readFileSync(fd);
+    const after = fstatSync(fd);
+    if (bytes.byteLength !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs
+      || after.dev !== before.dev || after.ino !== before.ino) throw new Error("event changed while being read");
+    let text: string;
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch { throw new Error("event is not valid UTF-8"); }
+    return JSON.parse(text) as unknown;
+  } finally { closeSync(fd); }
+}
+
+function safe(value: unknown): string {
+  return (value instanceof Error ? value.message : String(value))
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ")
+    .replace(/@(?!\u200b)/g, "@\u200b")
+    .slice(0, 200);
+}
+
 const eventName = process.env.GITHUB_EVENT_NAME ?? "";
 const eventPath = process.env.GITHUB_EVENT_PATH ?? "";
 
 let payload: unknown = {};
 if (eventPath) {
   try {
-    payload = JSON.parse(readFileSync(eventPath, "utf8")) as unknown;
+    payload = readEvent(eventPath);
   } catch (error) {
-    console.log(`::notice::smithers review skipped: could not read GITHUB_EVENT_PATH (${(error as Error).message})`);
+    console.log(`::notice::smithers review skipped: could not read GITHUB_EVENT_PATH (${safe(error)})`);
     setOutput("should-run", "false");
     process.exit(0);
   }
@@ -36,6 +59,7 @@ if (decision.run) {
   setOutput("pr-number", String(decision.prNumber));
   setOutput("event-name", decision.eventName);
   if (decision.headSha) setOutput("head-sha", decision.headSha);
+  if (decision.baseSha) setOutput("base-sha", decision.baseSha);
   setOutput("subscription-eligible", trust.subscriptionEligible ? "true" : "false");
   setOutput("can-publish", eventCanPublish(eventName, payload) ? "true" : "false");
   console.log(
@@ -43,5 +67,5 @@ if (decision.run) {
   );
 } else {
   setOutput("should-run", "false");
-  console.log(`::notice::smithers review skipped: ${decision.reason}`);
+  console.log(`::notice::smithers review skipped: ${safe(decision.reason)}`);
 }

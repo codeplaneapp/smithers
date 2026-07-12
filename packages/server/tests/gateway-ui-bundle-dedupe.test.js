@@ -80,5 +80,6 @@ describe("gateway UI bundle react dedupe", () => {
 
     expect(body).toContain('console.log("production")');
     expect(body).not.toContain('console.log("development")');
+    expect(body).not.toContain("sourceMappingURL=data:");
   });
 });

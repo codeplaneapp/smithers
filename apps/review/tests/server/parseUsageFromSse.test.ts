@@ -4,7 +4,7 @@ import { parseUsageFromSse } from "../../src/server/proxy/parseUsageFromSse.ts";
 function stream(lineEnding: "\n" | "\r\n"): string {
   return [
     "event: message_start",
-    'data: {"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":300,"output_tokens":1,"cache_creation_input_tokens":200,"cache_read_input_tokens":4000}}}',
+    'data: {"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":300,"output_tokens":1,"cache_creation_input_tokens":200,"cache_read_input_tokens":4000,"service_tier":"standard","inference_geo":"global"}}}',
     "",
     "event: content_block_delta",
     'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}',
@@ -26,6 +26,8 @@ describe("parseUsageFromSse", () => {
       outputTokens: 42,
       cacheCreationTokens: 200,
       cacheReadTokens: 4000,
+      serviceTier: "standard",
+      inferenceGeo: "global",
     });
   });
 

@@ -95,7 +95,7 @@ describe("fetchOidcToken", () => {
     const env = runnerEnv(`http://127.0.0.1:${server.port}`);
 
     try {
-      await expect(fetchOidcToken({ env })).rejects.toThrow("missing `value`");
+      await expect(fetchOidcToken({ env })).rejects.toThrow(/schema|value/);
     } finally {
       server.stop(true);
     }
@@ -106,7 +106,7 @@ describe("fetchOidcToken", () => {
       Response.json({ value: "injected-token" });
 
     const token = await fetchOidcToken({
-      env: runnerEnv("http://unreachable.invalid"),
+      env: runnerEnv("https://unreachable.invalid"),
       fetchImpl: fakeImpl as typeof fetch,
     });
     expect(token).toBe("injected-token");
@@ -133,5 +133,33 @@ describe("fetchOidcToken", () => {
     } finally {
       server.stop(true);
     }
+  });
+
+  test("rejects hostile URLs, header injection, invalid UTF-8, and oversized bodies", async () => {
+    await expect(fetchOidcToken({
+      env: runnerEnv("https://user:secret@example.test/token"),
+      fetchImpl: (async () => Response.json({ value: "unused" })) as unknown as typeof fetch,
+    })).rejects.toThrow(/credential-free/);
+    await expect(fetchOidcToken({
+      env: { ...runnerEnv("https://example.test/token"), ACTIONS_ID_TOKEN_REQUEST_TOKEN: "bad\nheader" },
+      fetchImpl: (async () => Response.json({ value: "unused" })) as unknown as typeof fetch,
+    })).rejects.toThrow(/invalid/);
+    await expect(fetchOidcToken({
+      env: runnerEnv("https://example.test/token"),
+      fetchImpl: (async () => new Response(Uint8Array.from([0xff]))) as unknown as typeof fetch,
+    })).rejects.toThrow(/UTF-8/);
+    await expect(fetchOidcToken({
+      env: runnerEnv("https://example.test/token"),
+      fetchImpl: (async () => new Response("x", { headers: { "content-length": "70000" } })) as unknown as typeof fetch,
+    })).rejects.toThrow(/oversized/);
+  });
+
+  test("enforces its deadline when an injected transport ignores AbortSignal", async () => {
+    const started = Date.now();
+    await expect(fetchOidcToken({
+      env: runnerEnv("https://example.test/token"), deadlineMs: 10,
+      fetchImpl: (() => new Promise<Response>(() => undefined)) as unknown as typeof fetch,
+    })).rejects.toThrow(/timed out/);
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 });

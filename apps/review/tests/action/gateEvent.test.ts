@@ -11,8 +11,8 @@ describe("gateEvent", () => {
           pull_request: {
             number: 42,
             draft: false,
-            head: { sha: "abc123", repo: { full_name: "octo/widgets" } },
-            base: { repo: { full_name: "octo/widgets" } },
+            head: { sha: "a".repeat(40), repo: { full_name: "octo/widgets" } },
+            base: { sha: "b".repeat(40), repo: { full_name: "octo/widgets" } },
           },
         },
       });
@@ -20,7 +20,8 @@ describe("gateEvent", () => {
       if (decision.run) {
         expect(decision.eventName).toBe("pull_request");
         expect(decision.prNumber).toBe(42);
-        expect(decision.headSha).toBe("abc123");
+        expect(decision.headSha).toBe("a".repeat(40));
+        expect(decision.baseSha).toBe("b".repeat(40));
       }
     });
 
@@ -33,7 +34,7 @@ describe("gateEvent", () => {
             number: 1,
             draft: true,
             head: { repo: { full_name: "octo/widgets" } },
-            base: { repo: { full_name: "octo/widgets" } },
+            base: { sha: "b".repeat(40), repo: { full_name: "octo/widgets" } },
           },
         },
       });
@@ -50,8 +51,8 @@ describe("gateEvent", () => {
             number: 1,
             draft: false,
             author_association: "COLLABORATOR",
-            head: { repo: { full_name: "drive-by/fork" }, sha: "x" },
-            base: { repo: { full_name: "octo/widgets" } },
+            head: { repo: { full_name: "drive-by/fork" }, sha: "c".repeat(40) },
+            base: { sha: "b".repeat(40), repo: { full_name: "octo/widgets" } },
           },
         },
       });
@@ -69,7 +70,7 @@ describe("gateEvent", () => {
             draft: false,
             author_association: "FIRST_TIME_CONTRIBUTOR",
             head: { repo: { full_name: "drive-by/fork" }, sha: "x" },
-            base: { repo: { full_name: "octo/widgets" } },
+            base: { sha: "b".repeat(40), repo: { full_name: "octo/widgets" } },
           },
         },
       });
@@ -87,7 +88,7 @@ describe("gateEvent", () => {
             draft: false,
             author_association: "MEMBER",
             head: { repo: { full_name: "drive-by/fork" }, sha: "a".repeat(40) },
-            base: { repo: { full_name: "octo/widgets" } },
+            base: { sha: "b".repeat(40), repo: { full_name: "octo/widgets" } },
           },
         },
       });
@@ -104,7 +105,7 @@ describe("gateEvent", () => {
             number: 3,
             draft: false,
             head: { sha: "abc", repo: { full_name: "octo/widgets" } },
-            base: { repo: { full_name: "octo/widgets" } },
+            base: { sha: "b".repeat(40), repo: { full_name: "octo/widgets" } },
           },
         },
       });
@@ -120,16 +121,44 @@ describe("gateEvent", () => {
           pull_request: {
             number: 5,
             draft: false,
-            head: { sha: "def456", repo: { full_name: "octo/widgets" } },
-            base: { repo: { full_name: "octo/widgets" } },
+            head: { sha: "d".repeat(40), repo: { full_name: "octo/widgets" } },
+            base: { sha: "b".repeat(40), repo: { full_name: "octo/widgets" } },
           },
         },
       });
       expect(d.run).toBe(true);
       if (d.run) {
         expect(d.prNumber).toBe(5);
-        expect(d.headSha).toBe("def456");
+        expect(d.headSha).toBe("d".repeat(40));
       }
+    });
+
+    test("rejects noncanonical revisions and pull request numbers", () => {
+      const payload = {
+        action: "opened",
+        pull_request: {
+          number: 1,
+          draft: false,
+          head: { sha: "short", repo: { full_name: "octo/widgets" } },
+          base: { sha: "b".repeat(40), repo: { full_name: "octo/widgets" } },
+        },
+      };
+      expect(gateEvent({ eventName: "pull_request", payload }).run).toBe(false);
+      expect(gateEvent({
+        eventName: "pull_request",
+        payload: {
+          ...payload,
+          pull_request: {
+            ...payload.pull_request,
+            head: { ...payload.pull_request.head, sha: "a".repeat(40) },
+            base: { repo: { full_name: "octo/widgets" } },
+          },
+        },
+      }).run).toBe(false);
+      expect(gateEvent({
+        eventName: "pull_request",
+        payload: { ...payload, pull_request: { ...payload.pull_request, number: 1.5, head: { ...payload.pull_request.head, sha: "a".repeat(40) } } },
+      }).run).toBe(false);
     });
 
     test("rejects payload missing pull_request", () => {
@@ -229,6 +258,18 @@ describe("gateEvent", () => {
         payload: {
           issue: issuePr(7),
           comment: { body: "lgtm", author_association: "OWNER" },
+        },
+      });
+      expect(d.run).toBe(false);
+    });
+
+    test("does not treat a longer command word as the review trigger", () => {
+      const d = gateEvent({
+        eventName: "issue_comment",
+        payload: {
+          action: "created",
+          issue: issuePr(7),
+          comment: { body: "@smithers reviewer status", author_association: "OWNER" },
         },
       });
       expect(d.run).toBe(false);

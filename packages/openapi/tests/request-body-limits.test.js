@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { executeRequest } from "../src/tool-factory/_helpers.js";
 
 const originalFetch = globalThis.fetch;
+const originalStreamCancel = ReadableStream.prototype.cancel;
+const originalReaderCancel = ReadableStreamDefaultReader.prototype.cancel;
 
 /**
  * @param {string} mediaType
@@ -39,6 +41,8 @@ describe("OpenAPI outbound request byte limits", () => {
 
     afterEach(() => {
         globalThis.fetch = originalFetch;
+        ReadableStream.prototype.cancel = originalStreamCancel;
+        ReadableStreamDefaultReader.prototype.cancel = originalReaderCancel;
     });
 
     test("rejects an invalid maxRequestBytes option before transport", async () => {
@@ -112,6 +116,48 @@ describe("OpenAPI outbound request byte limits", () => {
             code: "REQUEST_TOO_LARGE",
             details: { maxRequestBytes: 8 },
         });
+        expect(fetchMock).toHaveBeenCalledTimes(0);
+    });
+
+    test("multipart overflow does not await a hostile reader cancellation", async () => {
+        let cancelled = false;
+        ReadableStreamDefaultReader.prototype.cancel = function () {
+            cancelled = true;
+            return new Promise(() => {});
+        };
+        await expect(Promise.race([
+            executeRequest(
+                operationFor("multipart/form-data"),
+                { body: { first: "1234", second: "5678" } },
+                baseOptions.baseUrl,
+                { ...baseOptions, maxRequestBytes: 8 },
+            ),
+            Bun.sleep(500).then(() => { throw new Error("multipart limit awaited cancellation"); }),
+        ])).rejects.toMatchObject({ code: "REQUEST_TOO_LARGE" });
+        expect(cancelled).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(0);
+    });
+
+    test("an already-aborted multipart request does not await stream cancellation", async () => {
+        let cancelled = false;
+        ReadableStream.prototype.cancel = function () {
+            cancelled = true;
+            return new Promise(() => {});
+        };
+        const controller = new AbortController();
+        const reason = new DOMException("cancelled before encoding", "AbortError");
+        controller.abort(reason);
+        await expect(Promise.race([
+            executeRequest(
+                operationFor("multipart/form-data"),
+                { body: { field: "value" } },
+                baseOptions.baseUrl,
+                { ...baseOptions, maxRequestBytes: 1024 },
+                controller.signal,
+            ),
+            Bun.sleep(500).then(() => { throw new Error("multipart abort awaited cancellation"); }),
+        ])).rejects.toBe(reason);
+        expect(cancelled).toBe(true);
         expect(fetchMock).toHaveBeenCalledTimes(0);
     });
 

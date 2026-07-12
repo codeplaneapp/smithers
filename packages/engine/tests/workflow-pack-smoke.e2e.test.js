@@ -16,9 +16,8 @@ function buildWorkflowPackEnv(homeDir) {
         ANTHROPIC_API_KEY: "",
         // Empty so Codex resolves subscription auth from .codex/auth.json below
         // instead of probing a fake env key against the real OpenAI API (401 →
-        // non-retryable Codex preflight failure). The seeded implement workflow
-        // leads with Codex (the "fable sandwich"), so its first task must
-        // authenticate. Mirrors the canonical seeded-workflows-run.e2e setup.
+        // non-retryable Codex preflight failure). This mirrors the canonical
+        // seeded-workflows-run.e2e setup used by the curated authoring pack.
         OPENAI_API_KEY: "",
         GEMINI_API_KEY: "",
         GOOGLE_API_KEY: "",

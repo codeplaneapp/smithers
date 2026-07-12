@@ -80,6 +80,11 @@ export function reviewAgentEnvironment(
     const value = env[key];
     if (typeof value === "string" && value.length > 0) safe[key] = value;
   }
+  // These controls are security policy, not ambient inputs. The review CLI
+  // itself receives them from the hosted sandbox, but agent adapters build a
+  // fresh allowlisted environment and must reassert them explicitly.
+  safe.GIT_CONFIG_NOSYSTEM = "1";
+  safe.GIT_TERMINAL_PROMPT = "0";
   if (safeDirectory) {
     safe.GIT_CONFIG_COUNT = "1";
     safe.GIT_CONFIG_KEY_0 = "safe.directory";

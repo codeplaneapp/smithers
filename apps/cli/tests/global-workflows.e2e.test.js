@@ -111,10 +111,10 @@ test("smithers init --global scaffolds the canonical ~/.smithers pack (no nested
     expect(result.json.install).toMatchObject({ reason: "skip-install" });
 
     // Pack files land directly under ~/.smithers, with no extra `.smithers` nesting.
-    for (const rel of ["package.json", "agents.ts", "agents/claude-code.ts", "prompts/review.mdx"]) {
+    for (const rel of ["package.json", "agents.ts", "agents/claude-code.ts", "prompts/create-workflow-clarify.mdx"]) {
         expect(existsSync(join(smithersHome, rel))).toBe(true);
     }
-    expect(existsSync(join(smithersHome, "workflows", "research.tsx"))).toBe(true);
+    expect(existsSync(join(smithersHome, "workflows", "create-workflow.tsx"))).toBe(true);
     expect(existsSync(join(smithersHome, ".smithers"))).toBe(false);
     // It did NOT scaffold a local pack in the cwd repo.
     expect(repo.exists(".smithers")).toBe(false);

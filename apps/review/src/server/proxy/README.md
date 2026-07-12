@@ -11,7 +11,8 @@ The metered Anthropic proxy. Its provider-key egress allowlist is POST-only:
 - `parseUsageFromJson.ts` / `parseUsageFromSse.ts` — extract token usage from
   the response body (the SSE parser handles CRLF frames).
 - `spendReservations.ts` — estimates a Messages call from request bytes and
-  `max_tokens`, then atomically reserves both session and repository capacity.
+  `max_tokens`, rejects provider features without bounded static accounting,
+  then atomically reserves both session and repository capacity.
 - `recordUsage.ts` — atomically appends `usage_events`, increments `spent_usd`,
   and removes the settled reservation in one transactional D1 batch.
 - `modelPrices.ts` — shared price lookup plus the stricter request-model
@@ -29,7 +30,21 @@ transactional `batch()`: a failed accounting statement rolls the whole batch
 back and leaves the lease active (fail closed) until a retry or expiry.
 
 Only request models with a nonzero static price are dispatched upstream. The
-highest-known-rate fallback in `recordUsage.ts` is intentionally narrower: it
+cautious high-rate fallback in `recordUsage.ts` is intentionally narrower: it
 covers a provider response that names a different/unknown model, but it is not
 an allowlist for sending new request models whose future price could exceed the
 current table.
+
+The proxy accepts standard/global Messages billing with ordinary client-side
+tools and five-minute prompt caching. It writes `service_tier: standard_only`
+and `inference_geo: global` into creation requests when clients omit them, so
+workspace defaults cannot silently select premium capacity or geography.
+Client-tool and rich-content requests are sent through Anthropic's free token
+counting endpoint before admission; the reservation doubles that estimate and
+adds a fixed safety allowance because provider counts can differ slightly from
+final usage. Mutable URL-backed content is rejected because it could change
+between counting and creation. Fast mode, US-only inference, explicit priority
+selection, typed server-side tools, MCP servers, container reuse, and
+non-five-minute cache TTLs are also rejected before dispatch because their
+premiums, remote expansion, or per-use charges are not fully bounded by the
+token-only reservation ledger.

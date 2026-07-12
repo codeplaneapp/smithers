@@ -70,4 +70,36 @@ describe("integration HTTP cancellation", () => {
     expectInterruptionToAbortFetch((origin) =>
       makeGitHubClient({ token: "github-key", apiBaseUrl: origin }).request("GET", "/user"),
     ));
+
+  test("Linear retries without awaiting a hostile response cancel promise", async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    let cancelled = false;
+    globalThis.fetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(new ReadableStream({
+          cancel() {
+            cancelled = true;
+            return new Promise(() => {});
+          },
+        }), { status: 500, headers: { "retry-after": "0" } });
+      }
+      return Response.json({ data: { viewer: { id: "viewer-1" } } });
+    };
+    try {
+      const result = await Promise.race([
+        Effect.runPromise(
+          makeLinearClient({ apiKey: "linear-key", apiBaseUrl: "https://api.linear.app/graphql" })
+            .query("query Viewer { viewer { id } }"),
+        ),
+        Bun.sleep(500).then(() => { throw new Error("Linear retry was pinned by body cancellation"); }),
+      ]);
+      expect(result).toEqual({ viewer: { id: "viewer-1" } });
+      expect(calls).toBe(2);
+      expect(cancelled).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

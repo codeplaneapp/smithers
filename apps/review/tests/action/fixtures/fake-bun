@@ -17,7 +17,7 @@ if [ -n "$log" ]; then
       first=0
       printf '"%s"' "$a"
     done
-    printf '],"trustedPolicy":"%s"}' "$SMITHERS_REVIEW_TRUSTED_POLICY_ONLY"
+    printf '],"trustedPolicy":"%s","manifest":"%s","summary":"%s","gitConfigNoSystem":"%s","gitTerminalPrompt":"%s"}' "$SMITHERS_REVIEW_TRUSTED_POLICY_ONLY" "$SMITHERS_REVIEW_IMMUTABLE_MANIFEST" "$SMITHERS_REVIEW_SUMMARY_PATH" "$GIT_CONFIG_NOSYSTEM" "$GIT_TERMINAL_PROMPT"
   } > "$log"
 fi
 exit "${SMITHERS_FAKE_BUN_EXIT:-0}"

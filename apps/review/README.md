@@ -2,7 +2,7 @@
 
 Agent code review that reads like a story.
 
-`smithers review` runs one review agent per changed file, then a narrator
+`smithers review` runs one review agent per selected reviewable file, then a narrator
 agent writes a walkthrough of the whole change: chapters in logical reading
 order, prose explaining why each group of files changed, diffs embedded at
 the right point in the narrative, and Mermaid diagrams wherever structure
@@ -144,8 +144,11 @@ remains useful for package-level testing in this monorepo.
 The repo path defaults to the current directory. Run `bunx smithers-orchestrator review --help` for all
 options. `--publish` needs a publish service URL in
 `SMITHERS_REVIEW_PUBLISH_URL` and an API key (`srk_…`, operator-issued) in
-`SMITHERS_REVIEW_PUBLISH_TOKEN`; both can also be set in
-`~/.smithers-review.json`.
+`SMITHERS_REVIEW_PUBLISH_TOKEN`. Set the environment variables together; the
+CLI never combines one environment value with one file value. They can instead
+be stored together in a regular, user-owned `~/.smithers-review.json` with mode
+`0600`. A distinct public host must be explicitly bound through `shareOrigin`
+or `SMITHERS_REVIEW_SHARE_ORIGIN`.
 
 ## The service
 
@@ -157,6 +160,33 @@ Design: `.smithers/specs/smithers-review-cloud.md`.
 
 Not built yet, tracked as issues: Stripe subscriptions, self-serve signup
 and key management, the `review.smithers.sh` domain.
+
+## Production review-boundary contract
+
+Hosted reviews derive all changed-file names, statistics, patches, binary
+classification, and inline-comment capability from one protected immutable
+merge-base/head manifest. The manifest is generated before OIDC/session
+creation, stored outside the child-writable output tree, and is the only
+changed-file source consumed by analysis and publication. Trusted hosted
+execution fails closed when that manifest is absent or invalid.
+
+Publication binds the artifact to the exact base and head SHAs and checks the
+fresh pull-request metadata immediately before each write: the PR must be open,
+non-draft, target `main`, and expose a safe `changed_files` value exactly equal
+to the manifest capability count (1–3000). GitHub GETs have finite deadlines
+and bounded GET-only retries; POSTs are never retried. An inline-comment 422
+gets one fresh guarded GET before a bounded body-only fallback, with sanitized
+telemetry reporting retained and omitted counts.
+
+The private run summary remains an allowlisted, mode-0600, atomically replaced
+JSON file. A requested summary write failure makes the CLI exit nonzero.
+
+Agent execution is capped at the 64 highest-priority reviewable files, ordered
+by security-sensitive surface and then churn. Every changed file still appears
+in the deterministic walkthrough; files outside the agent cap are marked
+unreviewed and produce an explicit `review_file_limit` warning, so a large PR
+never masquerades as fully reviewed. Hosted runs use 16-way concurrency and a
+five-minute per-file timeout to stay inside the 30-minute analysis job.
 
 ## Contributing
 

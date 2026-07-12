@@ -13,9 +13,9 @@ describe("priceEstimate", () => {
   });
 
   test("prices at the blended input/output midpoint per model", () => {
-    // sonnet is 3 in / 15 out => midpoint 9 per Mtok; 1M tokens => $9.
+    // Sonnet 4.6 is 3 in / 15 out => midpoint 9 per Mtok; 1M tokens => $9.
     const e = priceEstimate({
-      perTask: [{ nodeId: "a", tokens: 1_000_000, iterations: 1, model: "claude-sonnet-5" }],
+      perTask: [{ nodeId: "a", tokens: 1_000_000, iterations: 1, model: "claude-sonnet-4-6" }],
       confidence: "high",
       assumptions: [],
     });
@@ -27,9 +27,9 @@ describe("priceEstimate", () => {
       { perTask: [{ nodeId: "a", tokens: 1_000_000, iterations: 1 }], confidence: "low", assumptions: [] },
       "claude-haiku-4-5",
     );
-    // haiku 0.8 in / 4 out => midpoint 2.4 per Mtok.
+    // Haiku 4.5 is 1 in / 5 out => midpoint 3 per Mtok.
     expect(e.perTask[0].model).toBe("claude-haiku-4-5");
-    expect(e.costUsd).toBeCloseTo(2.4, 6);
+    expect(e.costUsd).toBeCloseTo(3, 6);
   });
 
   test("uses Luna as the default pricing model", () => {

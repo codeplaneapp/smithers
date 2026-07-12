@@ -1,0 +1,10 @@
+#select
+| SmithersHttpToFileAccess.js:15:32:15:34 | raw | SmithersHttpToFileAccess.js:14:15:14:31 | request.query.raw | SmithersHttpToFileAccess.js:15:32:15:34 | raw | Write to file system depends on $@. | SmithersHttpToFileAccess.js:14:15:14:31 | request.query.raw | Untrusted data |
+edges
+| SmithersHttpToFileAccess.js:14:9:14:11 | raw | SmithersHttpToFileAccess.js:15:32:15:34 | raw | provenance |  |
+| SmithersHttpToFileAccess.js:14:15:14:31 | request.query.raw | SmithersHttpToFileAccess.js:14:9:14:11 | raw | provenance |  |
+nodes
+| SmithersHttpToFileAccess.js:14:9:14:11 | raw | semmle.label | raw |
+| SmithersHttpToFileAccess.js:14:15:14:31 | request.query.raw | semmle.label | request.query.raw |
+| SmithersHttpToFileAccess.js:15:32:15:34 | raw | semmle.label | raw |
+subpaths

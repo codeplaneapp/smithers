@@ -19,7 +19,7 @@ const boundary = {
 };
 const directSpawnRuntime = {
   prepareIsolatedUser: () => undefined,
-  restoreOutputOwnership: () => {
+  cleanupIsolatedUser: () => {
     throw new Error("direct-spawn test runtime must not restore sandbox ownership");
   },
 };
@@ -47,6 +47,7 @@ describe("runReview", () => {
       baseEnv: {
         PATH: "/safe/bin",
         LANG: "C.UTF-8",
+        RUNNER_TEMP: "/runner/shared-temp",
         GH_TOKEN: "write-token",
         GITHUB_TOKEN: "write-token-2",
         ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request",
@@ -60,6 +61,9 @@ describe("runReview", () => {
     });
     expect(env.PATH).toBe("/safe/bin");
     expect(env.HOME).toBe("/isolated/home");
+    for (const key of ["RUNNER_TEMP", "TMPDIR", "TMP", "TEMP"]) {
+      expect(env[key]).toBe("/isolated/home/tmp");
+    }
     expect(env.ANTHROPIC_API_KEY).toBe("srs_short_lived");
     for (const key of [
       "GH_TOKEN",
@@ -70,20 +74,34 @@ describe("runReview", () => {
       "CLAUDE_CODE_OAUTH_TOKEN",
       "DEPLOY_KEY",
     ]) expect(key in env).toBe(false);
+    expect(() => buildReviewProcessEnvironment({
+      baseEnv: {}, isolatedHome: "/isolated/home", explicit: { HOME: "/attacker" },
+    })).toThrow(/HOME/);
+    expect(() => buildReviewProcessEnvironment({
+      baseEnv: {}, isolatedHome: "/isolated/home", explicit: { GITHUB_TOKEN: "reintroduced" },
+    })).toThrow(/GITHUB_TOKEN/);
   });
 
-  test("GitHub Actions invocation crosses a distinct UID with an empty inherited environment", () => {
+  test("GitHub Actions invocation crosses a distinct UID in a descendant-reaping PID namespace", () => {
     const invocation = buildReviewSpawnCommand({
       bunPath: "/trusted/bun",
       args: ["review.ts"],
       env: { PATH: "/safe/bin", ANTHROPIC_API_KEY: "local_dummy_only" },
-      sandboxUser: "smithers-review-sandbox",
+      sandboxIdentity: { user: "smithers-r-test", uid: "2001", gid: "2001" },
     });
-    expect(invocation.command).toBe("sudo");
-    expect(invocation.args.slice(0, 6)).toEqual([
-      "-n", "-u", "smithers-review-sandbox", "--", "env", "-i",
+    expect(invocation.command).toBe("/usr/bin/sudo");
+    expect(invocation.args.slice(0, 8)).toEqual([
+      "-n", "--", "/usr/bin/unshare", "--pid", "--fork", "--kill-child=SIGKILL", "--mount-proc", "/usr/bin/setpriv",
     ]);
+    expect(invocation.args).toContain("--reuid=2001");
+    expect(invocation.args).toContain("--regid=2001");
+    expect(invocation.args).toContain("--no-new-privs");
+    expect(invocation.args).toContain("--bounding-set=-all");
+    expect(invocation.args).toContain("/usr/bin/env");
+    expect(invocation.args).toContain("-i");
     expect(invocation.args).toContain("ANTHROPIC_API_KEY=local_dummy_only");
+    expect(invocation.args).toContain("USER=smithers-r-test");
+    expect(invocation.args).toContain("LOGNAME=smithers-r-test");
     expect(invocation.args).not.toContain("GH_TOKEN=write-token");
     expect(invocation.args).not.toContain("ACTIONS_ID_TOKEN_REQUEST_TOKEN=oidc-request");
   });
@@ -127,9 +145,17 @@ describe("runReview", () => {
         inferenceEnv: { SMITHERS_FAKE_BUN_LOG: log },
         bunPath: FAKE_BUN,
       });
-      const logged = (await Bun.file(log).json()) as { cwd: string; args: string[]; trustedPolicy: string };
+      const logged = (await Bun.file(log).json()) as {
+        cwd: string;
+        args: string[];
+        trustedPolicy: string;
+        gitConfigNoSystem: string;
+        gitTerminalPrompt: string;
+      };
       expect(logged.args[0]).toBe(join(tmp, "apps", "review", "src", "cli", "main.ts"));
       expect(logged.trustedPolicy).toBe("1");
+      expect(logged.gitConfigNoSystem).toBe("1");
+      expect(logged.gitTerminalPrompt).toBe("0");
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
@@ -153,6 +179,33 @@ describe("runReview", () => {
       expect(logged.args[2]).toBe("--pr");
       expect(logged.args[3]).toBe("55");
       expect(logged.args).not.toContain("--publish");
+      expect(logged.args).toContain("--concurrency");
+      expect(logged.args[logged.args.indexOf("--concurrency") + 1]).toBe("16");
+      expect(logged.args).toContain("--timeout");
+      expect(logged.args[logged.args.indexOf("--timeout") + 1]).toBe("5");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("passes protected manifest and summary paths explicitly to the isolated child", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "smithers-root-"));
+    const log = join(tmp, "bun-log.json");
+    process.env.SMITHERS_FAKE_BUN_LOG = log;
+    try {
+      await runReviewFixture({
+        ...boundary,
+        smithersRoot: tmp,
+        workspace: tmpdir(),
+        prNumber: 55,
+        inferenceEnv: { SMITHERS_FAKE_BUN_LOG: log },
+        immutableManifestPath: "/trusted/immutable.jsonl",
+        summaryPath: "/sandbox/summary.json",
+        bunPath: FAKE_BUN,
+      });
+      const logged = (await Bun.file(log).json()) as { manifest: string; summary: string };
+      expect(logged.manifest).toBe("/trusted/immutable.jsonl");
+      expect(logged.summary).toBe("/sandbox/summary.json");
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }

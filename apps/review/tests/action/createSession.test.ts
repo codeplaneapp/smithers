@@ -93,8 +93,8 @@ describe("createSession", () => {
         expiresAt: 0,
         mode: "comment",
         plan: { prsPerMonth: 1, used: 0 },
-        anthropicBaseUrl: "",
-        publishUrl: "",
+        anthropicBaseUrl: "https://review.test/anthropic",
+        publishUrl: "https://review.test",
       });
     });
     const outcome = await createSession({ serviceUrl: `${svc.url}/`, oidcToken: "x" });
@@ -110,8 +110,8 @@ describe("createSession", () => {
         expiresAt: 0,
         mode: "auto",
         plan: { prsPerMonth: 1, used: 0 },
-        anthropicBaseUrl: "",
-        publishUrl: "",
+        anthropicBaseUrl: "https://review.test/anthropic",
+        publishUrl: "https://review.test",
       });
     });
     const outcome = await createSession({ serviceUrl: svc.url, oidcToken: "x" });
@@ -128,5 +128,40 @@ describe("createSession", () => {
     if (outcome.status === "error") {
       expect(outcome.message).toMatch(/request failed/);
     }
+  });
+
+  test("rejects hostile endpoints, invalid schemas, invalid UTF-8, and oversized responses", async () => {
+    expect((await createSession({
+      serviceUrl: "https://user:secret@review.test", oidcToken: "x",
+      fetchImpl: (async () => { throw new Error("must not run"); }) as unknown as typeof fetch,
+    })).status).toBe("error");
+
+    const invalidSchema = await createSession({
+      serviceUrl: "https://review.test", oidcToken: "x",
+      fetchImpl: (async () => Response.json({ token: "unbound" })) as unknown as typeof fetch,
+    });
+    expect(invalidSchema).toMatchObject({ status: "error" });
+
+    const invalidUtf8 = await createSession({
+      serviceUrl: "https://review.test", oidcToken: "x",
+      fetchImpl: (async () => new Response(Uint8Array.from([0xff]))) as unknown as typeof fetch,
+    });
+    expect(invalidUtf8.status).toBe("error");
+
+    const oversized = await createSession({
+      serviceUrl: "https://review.test", oidcToken: "x",
+      fetchImpl: (async () => new Response("x", { headers: { "content-length": "70000" } })) as unknown as typeof fetch,
+    });
+    expect(oversized.status).toBe("error");
+  });
+
+  test("enforces its deadline when an injected transport ignores AbortSignal", async () => {
+    const started = Date.now();
+    const outcome = await createSession({
+      serviceUrl: "https://review.test", oidcToken: "x", deadlineMs: 10,
+      fetchImpl: (() => new Promise<Response>(() => undefined)) as unknown as typeof fetch,
+    });
+    expect(outcome).toMatchObject({ status: "error" });
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 });

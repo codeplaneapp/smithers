@@ -137,19 +137,26 @@ describe("parseReviewArgs", () => {
   });
 
   test("throws when --concurrency is zero", () => {
-    expect(() => parseReviewArgs(["--concurrency", "0"])).toThrow("--concurrency must be a positive number");
+    expect(() => parseReviewArgs(["--concurrency", "0"])).toThrow("--concurrency must be an integer from 1 to 64");
   });
 
   test("throws when --concurrency is not a number", () => {
-    expect(() => parseReviewArgs(["--concurrency", "abc"])).toThrow("--concurrency must be a positive number");
+    expect(() => parseReviewArgs(["--concurrency", "abc"])).toThrow("--concurrency must be an integer from 1 to 64");
   });
 
   test("throws when --timeout is not a number", () => {
-    expect(() => parseReviewArgs(["--timeout", "abc"])).toThrow("--timeout must be a positive number");
+    expect(() => parseReviewArgs(["--timeout", "abc"])).toThrow("--timeout must be an integer from 1 to 120 minutes");
   });
 
   test("throws when --timeout is below 1", () => {
-    expect(() => parseReviewArgs(["--timeout", "0"])).toThrow("--timeout must be a positive number");
+    expect(() => parseReviewArgs(["--timeout", "0"])).toThrow("--timeout must be an integer from 1 to 120 minutes");
+  });
+
+  test("rejects fractional and excessive worker limits", () => {
+    expect(() => parseReviewArgs(["--concurrency", "1.5"])).toThrow("--concurrency must be an integer from 1 to 64");
+    expect(() => parseReviewArgs(["--concurrency", "65"])).toThrow("--concurrency must be an integer from 1 to 64");
+    expect(() => parseReviewArgs(["--timeout", "1.5"])).toThrow("--timeout must be an integer from 1 to 120 minutes");
+    expect(() => parseReviewArgs(["--timeout", "121"])).toThrow("--timeout must be an integer from 1 to 120 minutes");
   });
 
   test("last positional wins as repo path", () => {

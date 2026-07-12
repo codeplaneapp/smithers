@@ -16,6 +16,8 @@ export function parseUsageFromJson(body: string): UsageSummary | null {
         output_tokens?: number;
         cache_creation_input_tokens?: number;
         cache_read_input_tokens?: number;
+        service_tier?: string;
+        inference_geo?: string;
       };
     };
     if (!obj || typeof obj.model !== "string") return null;
@@ -29,6 +31,8 @@ export function parseUsageFromJson(body: string): UsageSummary | null {
       outputTokens: output,
       cacheCreationTokens: cacheCreation,
       cacheReadTokens: cacheRead,
+      ...(typeof obj.usage?.service_tier === "string" ? { serviceTier: obj.usage.service_tier } : {}),
+      ...(typeof obj.usage?.inference_geo === "string" ? { inferenceGeo: obj.usage.inference_geo } : {}),
     };
   } catch {
     return null;

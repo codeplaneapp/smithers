@@ -44,6 +44,10 @@ describe("loopback inference credential broker", () => {
       sessionToken: "srs_real_secret",
     });
     expect((await fetch(`${broker.baseUrl}/v1/messages`, { method: "POST" })).status).toBe(401);
+    expect((await fetch(`${broker.baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: { "x-api-key": "é".repeat(broker.clientKey.length) },
+    })).status).toBe(401);
     expect((await fetch(`${broker.baseUrl}/v1/complete`, {
       method: "POST",
       headers: { "x-api-key": broker.clientKey },
@@ -57,5 +61,69 @@ describe("loopback inference credential broker", () => {
       headers: { "x-api-key": broker.clientKey },
       body: new Uint8Array(33 * 1024 * 1024),
     })).status).toBe(413);
+  });
+
+  test("rejects credential-bearing upstreams and bounds upstream time and response size", async () => {
+    expect(() => startInferenceBroker({
+      upstreamBaseUrl: "https://user:secret@example.test/anthropic",
+      sessionToken: "secret",
+    })).toThrow(/credential-free/);
+    expect(() => startInferenceBroker({
+      upstreamBaseUrl: "https://example.test/anthropic?escape=1",
+      sessionToken: "secret",
+    })).toThrow(/credential-free/);
+    expect(() => startInferenceBroker({
+      upstreamBaseUrl: "https://example.test/anthropic",
+      sessionToken: "bad\nheader",
+    })).toThrow(/token/);
+
+    broker = startInferenceBroker({
+      upstreamBaseUrl: "https://example.test/anthropic",
+      sessionToken: "secret",
+      deadlineMs: 10,
+      fetchImpl: (() => new Promise<Response>(() => undefined)) as unknown as typeof fetch,
+    });
+    const timed = await fetch(`${broker.baseUrl}/v1/messages`, {
+      method: "POST", headers: { "x-api-key": broker.clientKey }, body: "{}",
+    });
+    expect(timed.status).toBe(502);
+    broker.stop();
+    let oversizedSignal: AbortSignal | undefined;
+    broker = startInferenceBroker({
+      upstreamBaseUrl: "https://example.test/anthropic",
+      sessionToken: "secret",
+      fetchImpl: (async (_request: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        oversizedSignal = init?.signal ?? undefined;
+        return new Response("x", { headers: { "content-length": String(65 * 1024 * 1024) } });
+      }) as unknown as typeof fetch,
+    });
+    const oversized = await fetch(`${broker.baseUrl}/v1/messages`, {
+      method: "POST", headers: { "x-api-key": broker.clientKey }, body: "{}",
+    });
+    expect(oversized.status).toBe(502);
+    expect(oversizedSignal?.aborted).toBe(true);
+  });
+
+  test("stop aborts an in-flight upstream request", async () => {
+    let upstreamSignal: AbortSignal | undefined;
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => { started = resolve; });
+    broker = startInferenceBroker({
+      upstreamBaseUrl: "https://example.test/anthropic",
+      sessionToken: "secret",
+      fetchImpl: ((_url, init) => {
+        upstreamSignal = init?.signal ?? undefined;
+        started();
+        return new Promise<Response>(() => undefined);
+      }) as typeof fetch,
+    });
+    const pending = fetch(`${broker.baseUrl}/v1/messages`, {
+      method: "POST", headers: { "x-api-key": broker.clientKey }, body: "{}",
+    }).catch(() => null);
+    await didStart;
+    broker.stop();
+    broker = null;
+    expect(upstreamSignal?.aborted).toBe(true);
+    await Promise.race([pending, new Promise((resolve) => setTimeout(resolve, 500))]);
   });
 });

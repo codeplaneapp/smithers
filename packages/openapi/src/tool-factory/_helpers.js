@@ -429,6 +429,48 @@ function abortReason(signal) {
 }
 
 /**
+ * Cancellation is user-extensible and may reject, throw, or never settle. It
+ * is cleanup only: abort and byte-limit decisions must remain independent.
+ * @param {{ cancel(reason?: unknown): Promise<unknown> }} target
+ * @param {unknown} reason
+ */
+function cancelBestEffort(target, reason) {
+    try {
+        void target.cancel(reason).catch(() => undefined);
+    }
+    catch {
+        // Preserve the primary abort/limit result from nonstandard streams.
+    }
+}
+
+/**
+ * Race a multipart read against the governing signal. Calling reader.cancel()
+ * alone is insufficient because a hostile stream can leave both cancel() and
+ * the outstanding read pending forever.
+ * @param {ReadableStreamDefaultReader<Uint8Array>} reader
+ * @param {AbortSignal | undefined} signal
+ */
+function readMultipartChunk(reader, signal) {
+    if (!signal) return reader.read();
+    if (signal.aborted) return Promise.reject(abortReason(signal));
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const settle = (complete) => {
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener("abort", onAbort);
+            complete();
+        };
+        const onAbort = () => settle(() => reject(abortReason(signal)));
+        signal.addEventListener("abort", onAbort, { once: true });
+        reader.read().then(
+            (result) => settle(() => resolve(result)),
+            (error) => settle(() => reject(signal.aborted ? abortReason(signal) : error)),
+        );
+    });
+}
+
+/**
  * Materialize an already-encoded multipart stream only up to the configured
  * cap. This gives the byte limit the actual generated boundary and part-header
  * overhead. The owned byte snapshot is replayable, so an approved 307/308 can
@@ -442,7 +484,7 @@ function abortReason(signal) {
 async function bufferMultipartBody(stream, limit, signal) {
     if (signal?.aborted) {
         const reason = abortReason(signal);
-        await stream.cancel(reason).catch(() => undefined);
+        cancelBestEffort(stream, reason);
         throw reason;
     }
     const reader = stream.getReader();
@@ -452,7 +494,7 @@ async function bufferMultipartBody(stream, limit, signal) {
     let aborted = false;
     const onAbort = () => {
         aborted = true;
-        void reader.cancel(abortReason(signal)).catch(() => undefined);
+        cancelBestEffort(reader, abortReason(signal));
     };
     signal?.addEventListener("abort", onAbort, { once: true });
     try {
@@ -460,7 +502,7 @@ async function bufferMultipartBody(stream, limit, signal) {
             if (signal?.aborted || aborted) throw abortReason(signal);
             let result;
             try {
-                result = await reader.read();
+                result = await readMultipartChunk(reader, signal);
             }
             catch (error) {
                 if (signal?.aborted || aborted) throw abortReason(signal);
@@ -472,7 +514,7 @@ async function bufferMultipartBody(stream, limit, signal) {
             total += result.value.byteLength;
             if (total > limit) {
                 const error = requestTooLarge(limit, { serializedBytes: total });
-                await reader.cancel(error).catch(() => undefined);
+                cancelBestEffort(reader, error);
                 throw error;
             }
             // Own bytes retained beyond the encoder's next pull. Multipart is
@@ -483,7 +525,13 @@ async function bufferMultipartBody(stream, limit, signal) {
     }
     finally {
         signal?.removeEventListener("abort", onAbort);
-        reader.releaseLock();
+        try {
+            reader.releaseLock();
+        }
+        catch {
+            // A hostile stream may keep an old read pending after cancellation;
+            // never replace the caller's abort or byte-limit error with cleanup.
+        }
     }
     const bytes = new Uint8Array(total);
     let offset = 0;

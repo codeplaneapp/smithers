@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bundleGatewayUiEntry } from "../src/gatewayUi/bundle.js";
 
@@ -65,6 +66,23 @@ describe("gateway UI bundle branch coverage", () => {
     );
     const body = await bundleGatewayUiEntry({ entry }, new Map());
     expect(body.length).toBeGreaterThan(0);
+  });
+
+  test("resolves curated rich-UI dependencies outside a consumer node_modules tree", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "smithers-ui-packaged-deps-"));
+    const entry = join(tempDir, "entry.tsx");
+    writeFileSync(
+      entry,
+      [
+        'import mermaid from "mermaid";',
+        'import { Crepe } from "@milkdown/crepe";',
+        "console.log(mermaid, Crepe);",
+        "",
+      ].join("\n"),
+    );
+    const body = await bundleGatewayUiEntry({ entry }, new Map());
+    expect(body.length).toBeGreaterThan(100_000);
+    expect(body.length).toBeLessThan(10_000_000);
   });
 
   test("throws INVALID_INPUT when react/tanstack/smithers peers cannot resolve (build failure)", async () => {

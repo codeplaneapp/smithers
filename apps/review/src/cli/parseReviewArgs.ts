@@ -78,8 +78,12 @@ export function parseReviewArgs(argv: string[]): ReviewArgs {
     else if (arg.startsWith("-")) throw new Error(`Unknown option: ${arg}`);
     else args.repo = arg;
   }
-  if (!Number.isFinite(args.concurrency) || args.concurrency < 1) throw new Error("--concurrency must be a positive number");
-  if (!Number.isFinite(args.timeout) || args.timeout < 1) throw new Error("--timeout must be a positive number of minutes");
+  if (!Number.isSafeInteger(args.concurrency) || args.concurrency < 1 || args.concurrency > 64) {
+    throw new Error("--concurrency must be an integer from 1 to 64");
+  }
+  if (!Number.isSafeInteger(args.timeout) || args.timeout < 1 || args.timeout > 120) {
+    throw new Error("--timeout must be an integer from 1 to 120 minutes");
+  }
   // Review targets are mutually exclusive; --pr derives its own --from/--to
   // after parsing, so combining them here would silently override the PR diff.
   const targets = [args.commit ? "--commit" : "", args.from || args.to ? "--from/--to" : "", args.pr ? "--pr" : ""].filter(Boolean);

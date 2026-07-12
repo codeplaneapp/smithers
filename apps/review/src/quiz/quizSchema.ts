@@ -4,11 +4,11 @@ import { z } from "zod/v4";
 // output still parses; normalizeQuiz enforces the real invariants (2..5
 // options, in-range correctIndex, known paths, at most 6 questions).
 const quizQuestionSchema = z.object({
-  question: z.string().default(""),
-  options: z.array(z.string()).default([]),
+  question: z.string().max(4_000).default(""),
+  options: z.array(z.string().max(2_000)).max(20).default([]),
   correctIndex: z.number().int().default(0),
-  explanation: z.string().default(""),
-  path: z.string().default(""),
+  explanation: z.string().max(8_000).default(""),
+  path: z.string().max(1_024).default(""),
 });
 
 const quizImpactSchema = z.object({
@@ -16,16 +16,17 @@ const quizImpactSchema = z.object({
   reasons: z
     .array(
       z.object({
-        signal: z.string().default(""),
-        path: z.string().default(""),
+        signal: z.string().max(2_000).default(""),
+        path: z.string().max(1_024).default(""),
       }),
     )
+    .max(100)
     .default([]),
 });
 
 export const quizSchema = z.object({
   impact: quizImpactSchema.default({ level: "low", reasons: [] }),
-  questions: z.array(quizQuestionSchema).default([]),
+  questions: z.array(quizQuestionSchema).max(50).default([]),
 });
 
 export type Quiz = z.infer<typeof quizSchema>;

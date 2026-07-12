@@ -1,48 +1,32 @@
-import { parsePatchCommentableLines } from "./parsePatchCommentableLines";
+import { deriveReviewManifestCapabilities, manifestChangedFiles, readProtectedReviewManifest } from "../reviewManifest";
 import type { PullRequestTarget } from "./resolvePullRequest";
-import { runGh as defaultRunGh, runGhJsonLines } from "./runGh";
 
 export type PullRequestFile = {
   filename: string;
   additions: number;
   deletions: number;
-  /** New-side lines a review comment can anchor to; empty for binary/huge diffs (no patch). */
   commentableLines: Set<number>;
 };
 
-/**
- * Changed files in the PR, keyed by path, with per-file stats and the
- * new-side line numbers present in each file's diff. Findings only anchor
- * inline when their line is actually commentable in the PR's diff; the PR
- * head can differ from the locally reviewed ref, so this boundary check stays
- * even though the review lib validates against its own hunks upstream.
- */
+/** Read only the protected local capability manifest; GitHub's files endpoint
+ * is intentionally not consulted because its pagination is capped and mutable. */
 export async function listPullRequestFiles(
-  repoDir: string,
-  pr: PullRequestTarget,
-  runGh: typeof defaultRunGh = defaultRunGh,
+  _repoDir: string,
+  _pr: PullRequestTarget,
+  manifestPath: string | undefined = process.env.SMITHERS_REVIEW_IMMUTABLE_MANIFEST,
 ): Promise<Map<string, PullRequestFile>> {
-  const records = await runGhJsonLines(
-    repoDir,
-    [
-      "api",
-      "--paginate",
-      `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/files`,
-      "--jq",
-      ".[] | {filename, additions, deletions, patch} | @json",
-    ],
-    runGh,
-  );
+  if (!manifestPath?.trim()) throw new Error("listPullRequestFiles requires a protected review manifest");
+  const records = readProtectedReviewManifest(manifestPath);
   const files = new Map<string, PullRequestFile>();
-  for (const parsed of records) {
-    const record = parsed as { filename?: unknown; additions?: unknown; deletions?: unknown; patch?: unknown };
-    if (typeof record.filename !== "string" || !record.filename) continue;
+  for (const record of records) {
+    if (files.has(record.filename)) throw new Error("protected review manifest contains duplicate filenames");
     files.set(record.filename, {
       filename: record.filename,
-      additions: typeof record.additions === "number" ? record.additions : 0,
-      deletions: typeof record.deletions === "number" ? record.deletions : 0,
-      commentableLines: parsePatchCommentableLines(typeof record.patch === "string" ? record.patch : ""),
+      additions: record.additions,
+      deletions: record.deletions,
+      commentableLines: deriveReviewManifestCapabilities(record).rightLines,
     });
   }
+  if (files.size !== manifestChangedFiles(records).size) throw new Error("protected review manifest capabilities are inconsistent");
   return files;
 }

@@ -8,6 +8,8 @@ Tiny text helpers shared across prompts, PR bodies, and rendering.
 - `pluralize.ts` — `count + noun`; defaults to an `s` suffix, with an optional
   irregular-plural override.
 - `trimDiff.ts` — per-file diff cap for agent prompts.
+- `promptJson.ts` — one-line JSON serialization for untrusted prompt metadata,
+  including explicit C1 and Unicode line-separator escaping.
 
 These are the canonical copies; import from here rather than duplicating them
 in feature directories.

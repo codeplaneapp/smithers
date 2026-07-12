@@ -17,20 +17,26 @@ jobs:
 
     steps:
       - name: Check dependency graph availability
-        id: dependency-graph
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh api --silent "repos/${GITHUB_REPOSITORY}/dependency-graph/sbom"; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Dependency graph unavailable::Enable the repository dependency graph to enforce dependency review findings."
+          available=false
+          for attempt in 1 2 3; do
+            if gh api --silent "repos/${GITHUB_REPOSITORY}/dependency-graph/sbom"; then
+              available=true
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep "$((attempt * 2))"
+            fi
+          done
+          if [ "$available" != true ]; then
+            echo "::error title=Dependency graph unavailable::Enable the repository dependency graph so dependency review can enforce vulnerability and license policy."
+            exit 1
           fi
 
       - name: Review dependency changes
-        if: steps.dependency-graph.outputs.enabled == 'true'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: moderate

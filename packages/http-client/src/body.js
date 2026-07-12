@@ -22,6 +22,25 @@ function abortReason(signal) {
 }
 
 /**
+ * A custom Fetch adapter can ignore stream cancellation. Race each read with
+ * the caller's signal so the response deadline remains real even then.
+ * @param {ReadableStreamDefaultReader<Uint8Array>} reader
+ * @param {AbortSignal | undefined} signal
+ */
+function readChunk(reader, signal) {
+  if (!signal) return reader.read();
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    reader.read().then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
+}
+
+/**
  * @param {Response} response
  * @param {import("./types.ts").ResponseReadOptions} options
  * @returns {Promise<Uint8Array>}
@@ -30,7 +49,7 @@ export async function readResponseBytes(response, options) {
   const { maxBytes, signal } = options;
   assertMaxBytes(maxBytes);
   if (signal?.aborted) {
-    await response.body?.cancel(abortReason(signal)).catch(() => undefined);
+    void response.body?.cancel(abortReason(signal)).catch(() => undefined);
     throw abortReason(signal);
   }
 
@@ -43,7 +62,7 @@ export async function readResponseBytes(response, options) {
         "Outbound response exceeds the configured byte limit.",
         { maxBytes, contentLength },
       );
-      await response.body?.cancel(error).catch(() => undefined);
+      void response.body?.cancel(error).catch(() => undefined);
       throw error;
     }
   }
@@ -54,6 +73,8 @@ export async function readResponseBytes(response, options) {
   const chunks = [];
   let totalBytes = 0;
   let aborted = false;
+  let failed = false;
+  let failure;
   const onAbort = () => {
     aborted = true;
     void reader.cancel(abortReason(/** @type {AbortSignal} */ (signal))).catch(() => undefined);
@@ -65,7 +86,7 @@ export async function readResponseBytes(response, options) {
       if (signal?.aborted || aborted) throw abortReason(/** @type {AbortSignal} */ (signal));
       let result;
       try {
-        result = await reader.read();
+        result = await readChunk(reader, signal);
       } catch (error) {
         if (signal?.aborted || aborted) throw abortReason(/** @type {AbortSignal} */ (signal));
         throw error;
@@ -81,7 +102,7 @@ export async function readResponseBytes(response, options) {
           "Outbound response exceeds the configured byte limit.",
           { maxBytes, receivedBytes: totalBytes + chunkBytes },
         );
-        await reader.cancel(error).catch(() => undefined);
+        void reader.cancel(error).catch(() => undefined);
         throw error;
       }
       // Own the bytes we retain. A custom stream producer may reuse/mutate its
@@ -90,10 +111,24 @@ export async function readResponseBytes(response, options) {
       chunks.push(chunk);
       totalBytes += chunkBytes;
     }
+  } catch (error) {
+    failed = true;
+    failure = error;
   } finally {
     signal?.removeEventListener("abort", onAbort);
-    reader.releaseLock();
+    try {
+      reader.releaseLock();
+    } catch (error) {
+      // A hostile adapter may leave reader.read() pending after cancellation.
+      // Preserve the caller's exact abort reason rather than replacing it with
+      // releaseLock's secondary state error.
+      if (!signal?.aborted && !aborted && !failed) {
+        failed = true;
+        failure = error;
+      }
+    }
   }
+  if (failed) throw failure;
 
   const bytes = new Uint8Array(totalBytes);
   let offset = 0;
@@ -110,7 +145,7 @@ export async function readResponseBytes(response, options) {
  * @returns {Promise<string>}
  */
 export async function readResponseText(response, options) {
-  return new TextDecoder().decode(await readResponseBytes(response, options));
+  return new TextDecoder("utf-8", { fatal: true }).decode(await readResponseBytes(response, options));
 }
 
 /**

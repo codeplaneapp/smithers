@@ -4,8 +4,8 @@ import { isPricedAnthropicRequestModel, modelPrices } from "./modelPrices.ts";
 import type { UsageSummary } from "./parseUsage.ts";
 
 // Unknown upstream model IDs must never become a free-metering bypass. These
-// are the highest rates in the currently supported table, so a newly accepted
-// alias is charged conservatively until its exact price is added.
+// deliberately exceed the highest standard rates in the supported table, so a
+// newly accepted alias is charged conservatively until its exact price is added.
 const UNKNOWN_MODEL_PRICE = {
   input: 15,
   output: 75,
@@ -13,8 +13,8 @@ const UNKNOWN_MODEL_PRICE = {
   cacheRead: 1.5,
 } as const;
 
-export function modelPriceForMetering(model: string, logUnknown = true) {
-  const price = modelPrices(model);
+export function modelPriceForMetering(model: string, logUnknown = true, atMs = Date.now()) {
+  const price = modelPrices(model, atMs);
   if (isPricedAnthropicRequestModel(model)) return price;
   if (logUnknown) {
     console.error("smithers-review: unknown model priced at conservative metering fallback", { model });
@@ -33,9 +33,9 @@ export interface RecordedUsage {
 
 /**
  * Append a usage_events row and increment the session's spent_usd. Cost comes
- * from the static modelPrices table. Unknown models use the highest supported
- * rates so a newly accepted upstream ID cannot bypass spend caps while its
- * exact price is being added.
+ * from the static modelPrices table. Unknown models use deliberately high
+ * fallback rates so a newly accepted upstream ID cannot bypass spend caps
+ * while its exact price is being added.
  */
 export async function recordUsage(
   db: D1Database,
@@ -52,7 +52,7 @@ export async function recordUsage(
     minimumCostUsd?: number;
   },
 ): Promise<RecordedUsage> {
-  const price = modelPriceForMetering(options.summary.model);
+  const price = modelPriceForMetering(options.summary.model, true, options.now);
   const measuredCostUsd =
     (nonNegativeFinite(options.summary.inputTokens) * price.input) / 1_000_000 +
     (nonNegativeFinite(options.summary.outputTokens) * price.output) / 1_000_000 +

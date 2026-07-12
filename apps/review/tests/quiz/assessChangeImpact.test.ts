@@ -214,6 +214,14 @@ describe("assessChangeImpact", () => {
       expect(impact.level).toBe("moderate");
     });
 
+    test("bounds reported reasons without changing the computed score", () => {
+      const files = Array.from({ length: 150 }, (_, index) => file(`src/auth/service-${index}.ts`));
+      const impact = assessChangeImpact(files, []);
+      expect(impact.score).toBe(150 * 3);
+      expect(impact.reasons).toHaveLength(100);
+      expect(impact.reasons.at(-1)).toEqual({ signal: "52 additional impact signal(s) omitted", path: "" });
+    });
+
     test("exactly 25 files and 800 churn lines do not bump", () => {
       const files = Array.from({ length: 25 }, (_, i) => file(`src/mod${i}.ts`, { insertions: 32, deletions: 0 }));
       const impact = assessChangeImpact(files, []);

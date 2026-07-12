@@ -257,6 +257,13 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "pnpm -r build",
       "pnpm --filter @smithers-orchestrator/e2e test:soak",
     ]);
+    const dependencyReview = text(".github/workflows/dependency-review.yml");
+    expect(dependencyReview).toContain("for attempt in 1 2 3");
+    expect(dependencyReview).toContain("Dependency graph unavailable");
+    expect(dependencyReview).toContain("exit 1");
+    expect(dependencyReview).toContain("actions/dependency-review-action@");
+    expect(dependencyReview).not.toContain("outputs.enabled");
+    expect(dependencyReview).not.toContain("enabled=false");
   });
 
   test("script guard sources cover docs, release, dependency, SOTA, d.ts, faults, and pack generation", () => {

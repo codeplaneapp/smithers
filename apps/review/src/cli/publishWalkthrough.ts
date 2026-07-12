@@ -1,7 +1,6 @@
 import {
   closeSync,
   constants,
-  existsSync,
   fstatSync,
   openSync,
   readFileSync,
@@ -18,6 +17,7 @@ export const MAX_WALKTHROUGH_BYTES = 25 * 1024 * 1024;
 const MAX_PUBLISH_RESPONSE_BYTES = 8 * 1024;
 const MAX_PUBLISH_ERROR_BYTES = 1_024;
 const MAX_PUBLISH_TOKEN_CHARS = 8_192;
+const MAX_PUBLISH_CONFIG_BYTES = 16 * 1024;
 const WALKTHROUGH_ID = /^[a-z0-5]{12}$/;
 
 type Obj = Record<string, unknown>;
@@ -35,16 +35,38 @@ function isLoopbackHost(hostname: string): boolean {
 function assertPublishToken(token: string): void {
   if (
     token.length === 0 || token.length > MAX_PUBLISH_TOKEN_CHARS
-    || /[\u0000\r\n]/.test(token)
+    || /[^\x21-\x7e]/.test(token)
   ) throw new Error("publish token is empty, oversized, or contains control bytes");
+}
+
+function safePublishDetail(value: unknown): string {
+  return (value instanceof Error ? value.message : String(value))
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ")
+    .replace(/@(?!\u200b)/g, "@\u200b")
+    .slice(0, 200);
+}
+
+function abortable<T>(promise: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("walkthrough publish timed out"));
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason ?? new Error("walkthrough publish timed out"));
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(promise).then(
+      (value) => { signal.removeEventListener("abort", abort); resolve(value); },
+      (error) => { signal.removeEventListener("abort", abort); reject(error); },
+    );
+  });
 }
 
 export function walkthroughPublishEndpoint(
   value: string,
   options: { expectedOrigin?: string; allowHttpLoopback?: boolean } = {},
 ): URL {
+  if (typeof value !== "string" || value.length < 1 || value.length > 2_048) throw new Error("publish URL is invalid or oversized");
   const base = assertHttpUrl(value);
-  if (base.search || base.hash) throw new Error("publish URL must not include a query or fragment");
+  if (base.username || base.password || base.search || base.hash) {
+    throw new Error("publish URL must not include credentials, a query, or a fragment");
+  }
   if (
     base.protocol !== "https:"
     && !(options.allowHttpLoopback === true && base.protocol === "http:" && isLoopbackHost(base.hostname))
@@ -57,7 +79,21 @@ export function walkthroughPublishEndpoint(
   return base;
 }
 
-export function validateWalkthroughPublishResponse(value: unknown): string {
+function normalizedShareOrigin(
+  value: string,
+  options: { allowHttpLoopback?: boolean } = {},
+): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 2_048) throw new Error("share origin is invalid or oversized");
+  const url = assertHttpUrl(value);
+  if (
+    url.username || url.password || url.search || url.hash || (url.pathname !== "" && url.pathname !== "/")
+    || (url.protocol !== "https:"
+      && !(options.allowHttpLoopback === true && url.protocol === "http:" && isLoopbackHost(url.hostname)))
+  ) throw new Error("share origin must be a credential-free HTTPS origin");
+  return url.origin;
+}
+
+export function validateWalkthroughPublishResponse(value: unknown, expectedShareOrigin: string): string {
   const response = obj(value);
   if (!response || Object.keys(response).some((key) => key !== "id" && key !== "url")) {
     throw new Error("publish failed: response schema is invalid");
@@ -67,9 +103,12 @@ export function validateWalkthroughPublishResponse(value: unknown): string {
     throw new Error("publish failed: response had an invalid walkthrough id");
   }
   if (typeof response.url !== "string") throw new Error("publish failed: response had no url");
+  const canonicalExpectedOrigin = normalizedShareOrigin(expectedShareOrigin, { allowHttpLoopback: true });
   const shareUrl = assertHttpUrl(response.url);
   if (
-    shareUrl.protocol !== "https:" || shareUrl.pathname !== `/w/${id}`
+    (shareUrl.protocol !== "https:" && !(shareUrl.protocol === "http:" && isLoopbackHost(shareUrl.hostname)))
+    || shareUrl.username || shareUrl.password
+    || shareUrl.origin !== canonicalExpectedOrigin || shareUrl.pathname !== `/w/${id}`
     || shareUrl.search || shareUrl.hash
   ) throw new Error("publish failed: response url is not a canonical HTTPS walkthrough URL");
   return shareUrl.toString();
@@ -77,7 +116,7 @@ export function validateWalkthroughPublishResponse(value: unknown): string {
 
 /** Read one immutable regular-file snapshot without following a final symlink. */
 export function readWalkthroughFile(htmlPath: string): Buffer {
-  const fd = openSync(htmlPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const fd = openSync(htmlPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = fstatSync(fd);
     if (!before.isFile()) throw new Error("walkthrough is not a regular file");
@@ -95,82 +134,179 @@ export function readWalkthroughFile(htmlPath: string): Buffer {
   }
 }
 
-export async function uploadWalkthrough(
+export interface AuthorizedWalkthroughUpload {
+  readonly endpoint: URL;
+  readonly token: string;
+  readonly body: Uint8Array<ArrayBuffer>;
+  readonly shareOrigin: string;
+}
+
+/** Bind one validated byte snapshot and credential to fixed request/share origins. */
+export function authorizeWalkthroughUpload(
   html: Uint8Array,
   publishUrl: string,
   token: string,
-  options: { expectedOrigin?: string; allowHttpLoopback?: boolean; fetch?: typeof globalThis.fetch } = {},
-): Promise<string> {
+  options: { expectedOrigin?: string; expectedShareOrigin?: string; allowHttpLoopback?: boolean } = {},
+): AuthorizedWalkthroughUpload {
   if (html.byteLength === 0) throw new Error("walkthrough is empty");
   if (html.byteLength > MAX_WALKTHROUGH_BYTES) throw new Error("walkthrough exceeds 25 MB publish limit");
   assertPublishToken(token);
   // Copy into an ArrayBuffer-backed view so every workspace Fetch type agrees
   // on the request-body contract, even when the caller supplied a Buffer or a
   // view backed by a SharedArrayBuffer.
-  const requestBody = new Uint8Array(html);
   const endpoint = walkthroughPublishEndpoint(publishUrl, options);
+  const shareOrigin = normalizedShareOrigin(options.expectedShareOrigin ?? endpoint.origin, options);
+  const body = new Uint8Array(new ArrayBuffer(html.byteLength));
+  body.set(html);
+  return {
+    endpoint,
+    token,
+    body,
+    shareOrigin,
+  };
+}
+
+export async function uploadWalkthrough(
+  html: Uint8Array,
+  publishUrl: string,
+  token: string,
+  options: {
+    expectedOrigin?: string;
+    expectedShareOrigin?: string;
+    allowHttpLoopback?: boolean;
+    fetch?: typeof globalThis.fetch;
+    timeoutMs?: number;
+  } = {},
+): Promise<string> {
+  const authorized = authorizeWalkthroughUpload(html, publishUrl, token, options);
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw new Error("walkthrough publish timeout is invalid");
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error("walkthrough publish timed out")), 30_000);
+  const timeout = setTimeout(() => controller.abort(new Error("walkthrough publish timed out")), timeoutMs);
   let response: Response;
   try {
     const fetchImpl = options.fetch ?? globalThis.fetch;
-    // This is the single intentional walkthrough-file egress point. The bytes,
-    // credential, HTTPS destination, redirect policy, and response are all
-    // bounded and validated immediately above/below this call.
-    // codeql[js/file-access-to-http]
-    response = await fetchImpl(endpoint, {
+    response = await abortable(fetchImpl(authorized.endpoint, {
       method: "POST",
       redirect: "error",
       signal: controller.signal,
       headers: {
-        authorization: `Bearer ${token}`,
+        authorization: `Bearer ${authorized.token}`,
         "content-type": "text/html; charset=utf-8",
       },
-      body: requestBody,
-    });
+      body: authorized.body,
+    }), controller.signal);
     if (!response.ok) {
       const detail = await readResponseText(response, {
         maxBytes: MAX_PUBLISH_ERROR_BYTES,
         signal: controller.signal,
       }).catch(() => "");
-      throw new Error(`publish failed: HTTP ${response.status}${detail ? ` ${detail.slice(0, 200)}` : ""}`);
+      throw new Error(`publish failed: HTTP ${response.status}${detail ? ` ${safePublishDetail(detail)}` : ""}`);
     }
     const data = await readResponseJson(response, {
       maxBytes: MAX_PUBLISH_RESPONSE_BYTES,
       signal: controller.signal,
     });
-    return validateWalkthroughPublishResponse(data);
+    return validateWalkthroughPublishResponse(data, authorized.shareOrigin);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("publish failed:")) throw error;
+    throw new Error(`publish failed: ${safePublishDetail(error)}`);
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function loadPublishConfig(homeDir = homedir()): { url: string; token: string } {
-  let url = process.env.SMITHERS_REVIEW_PUBLISH_URL?.trim() || "";
-  let token = process.env.SMITHERS_REVIEW_PUBLISH_TOKEN?.trim() || "";
-  if (!url || !token) {
-    const path = join(homeDir, ".smithers-review.json");
-    if (existsSync(path)) {
-      const raw = JSON.parse(readFileSync(path, "utf8")) as { publishUrl?: string; publishToken?: string };
-      url = url || raw.publishUrl?.trim() || "";
-      token = token || raw.publishToken?.trim() || "";
+export interface PublishTarget {
+  url: string;
+  token: string;
+  shareOrigin: string;
+}
+
+function readPublishConfigFile(path: string): unknown {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const before = fstatSync(fd);
+    if (!before.isFile()) throw new Error("publish config is not a regular file");
+    if (before.size === 0 || before.size > MAX_PUBLISH_CONFIG_BYTES) {
+      throw new Error("publish config is empty or exceeds 16 KB");
     }
+    if (process.platform !== "win32") {
+      const uid = process.getuid?.();
+      if ((uid !== undefined && before.uid !== uid) || (before.mode & 0o077) !== 0) {
+        throw new Error("publish config must be owned by the current user and private (mode 0600 or stricter)");
+      }
+    }
+    const contents = readFileSync(fd);
+    const after = fstatSync(fd);
+    if (
+      contents.byteLength !== before.size || after.size !== before.size
+      || after.mtimeMs !== before.mtimeMs || after.ino !== before.ino || after.dev !== before.dev
+    ) throw new Error("publish config changed while it was being read");
+    let text: string;
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(contents); }
+    catch { throw new Error("publish config is not valid UTF-8"); }
+    return JSON.parse(text) as unknown;
+  } finally {
+    closeSync(fd);
   }
+}
+
+export function loadPublishConfig(
+  homeDir = homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+): PublishTarget {
+  const envUrl = env.SMITHERS_REVIEW_PUBLISH_URL?.trim() || "";
+  const envToken = env.SMITHERS_REVIEW_PUBLISH_TOKEN?.trim() || "";
+  if (Boolean(envUrl) !== Boolean(envToken)) {
+    throw new Error("SMITHERS_REVIEW_PUBLISH_URL and SMITHERS_REVIEW_PUBLISH_TOKEN must be set together");
+  }
+
+  let url = envUrl;
+  let token = envToken;
+  let shareOrigin = env.SMITHERS_REVIEW_SHARE_ORIGIN?.trim() || "";
   if (!url) {
-    throw new Error(
-      "no publish URL: set SMITHERS_REVIEW_PUBLISH_URL or write ~/.smithers-review.json with { \"publishUrl\": \"...\" }",
-    );
+    const value = readPublishConfigFile(join(homeDir, ".smithers-review.json"));
+    const config = obj(value);
+    const allowed = new Set(["publishUrl", "publishToken", "shareOrigin"]);
+    if (!config) {
+      throw new Error(
+        "no publish URL/token: set both publish environment variables or create a private ~/.smithers-review.json",
+      );
+    }
+    if (Object.keys(config).some((key) => !allowed.has(key))) {
+      throw new Error("publish config contains unknown fields");
+    }
+    if (typeof config.publishUrl !== "string" || typeof config.publishToken !== "string") {
+      throw new Error("publish config must contain string publishUrl and publishToken fields");
+    }
+    if (config.shareOrigin !== undefined && typeof config.shareOrigin !== "string") {
+      throw new Error("publish config shareOrigin must be a string");
+    }
+    url = config.publishUrl.trim();
+    token = config.publishToken.trim();
+    shareOrigin = config.shareOrigin?.trim() || "";
   }
-  if (!token) {
-    throw new Error(
-      "no publish token: set SMITHERS_REVIEW_PUBLISH_TOKEN or write ~/.smithers-review.json with { \"publishToken\": \"...\" }",
-    );
-  }
-  return { url, token };
+
+  assertPublishToken(token);
+  const endpoint = walkthroughPublishEndpoint(url, { allowHttpLoopback: true });
+  return {
+    url,
+    token,
+    shareOrigin: normalizedShareOrigin(shareOrigin || endpoint.origin, { allowHttpLoopback: true }),
+  };
 }
 
 /** Upload a walkthrough HTML file to the publish service; returns the share URL. */
 export async function publishWalkthrough(htmlPath: string, options: { homeDir?: string } = {}): Promise<string> {
-  const { url, token } = loadPublishConfig(options.homeDir);
-  return uploadWalkthrough(readWalkthroughFile(htmlPath), url, token, { allowHttpLoopback: true });
+  const { url, token, shareOrigin } = loadPublishConfig(options.homeDir);
+  return uploadWalkthrough(readWalkthroughFile(htmlPath), url, token, {
+    allowHttpLoopback: true,
+    expectedShareOrigin: shareOrigin,
+  });
 }

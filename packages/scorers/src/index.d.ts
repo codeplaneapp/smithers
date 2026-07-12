@@ -523,10 +523,15 @@ type Scorer$1 = Scorer$d;
  * `claude-opus-4-8[1m]`, so a real model is never metered as free. Unknown ids
  * return the all-zero price.
  *
+ * Sonnet 5's published introductory rate ends on September 1, 2026; encoding
+ * the transition here prevents a deployment that survives that date from
+ * silently under-metering new requests.
+ *
  * @param {string} model
+ * @param {number} [atMs]
  * @returns {ModelPrice}
  */
-declare function modelTokenPrices(model: string): ModelPrice$1;
+declare function modelTokenPrices(model: string, atMs?: number): ModelPrice$1;
 type ModelPrice$1 = ModelPrice$2;
 
 /**
@@ -541,7 +546,7 @@ type ModelPrice$1 = ModelPrice$2;
  * assumption determines whether a coarse GPT-5.6 forecast crosses the 272K
  * long-context input threshold.
  *
- * @param {{ model: string, tokens?: number, inputTokens?: number, outputTokens?: number, cacheReadTokens?: number, cacheWriteTokens?: number }} usage
+ * @param {{ model: string, tokens?: number, inputTokens?: number, outputTokens?: number, cacheReadTokens?: number, cacheWriteTokens?: number, pricingAtMs?: number }} usage
  * @returns {number} dollars
  */
 declare function estimateCostUsd(usage: {
@@ -551,6 +556,7 @@ declare function estimateCostUsd(usage: {
     outputTokens?: number;
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
+    pricingAtMs?: number;
 }): number;
 
 /**

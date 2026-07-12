@@ -1,0 +1,2 @@
+query: src/SmithersFileAccessToHttp.ql
+postprocess: utils/test/InlineExpectationsTestQuery.ql

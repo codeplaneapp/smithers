@@ -1,0 +1,14 @@
+#select
+| SmithersFileAccessToHttp.js:13:11:18:1 | {\\n  hos ... le },\\n} | SmithersFileAccessToHttp.js:12:15:12:47 | fs.read ... "utf8") | SmithersFileAccessToHttp.js:13:11:18:1 | {\\n  hos ... le },\\n} | Outbound network request depends on $@. | SmithersFileAccessToHttp.js:12:15:12:47 | fs.read ... "utf8") | file data |
+edges
+| SmithersFileAccessToHttp.js:12:5:12:11 | rawFile | SmithersFileAccessToHttp.js:17:23:17:29 | rawFile | provenance |  |
+| SmithersFileAccessToHttp.js:12:15:12:47 | fs.read ... "utf8") | SmithersFileAccessToHttp.js:12:5:12:11 | rawFile | provenance |  |
+| SmithersFileAccessToHttp.js:17:12:17:31 | { Referer: rawFile } [Referer] | SmithersFileAccessToHttp.js:13:11:18:1 | {\\n  hos ... le },\\n} | provenance |  |
+| SmithersFileAccessToHttp.js:17:23:17:29 | rawFile | SmithersFileAccessToHttp.js:17:12:17:31 | { Referer: rawFile } [Referer] | provenance |  |
+nodes
+| SmithersFileAccessToHttp.js:12:5:12:11 | rawFile | semmle.label | rawFile |
+| SmithersFileAccessToHttp.js:12:15:12:47 | fs.read ... "utf8") | semmle.label | fs.read ... "utf8") |
+| SmithersFileAccessToHttp.js:13:11:18:1 | {\\n  hos ... le },\\n} | semmle.label | {\\n  hos ... le },\\n} |
+| SmithersFileAccessToHttp.js:17:12:17:31 | { Referer: rawFile } [Referer] | semmle.label | { Referer: rawFile } [Referer] |
+| SmithersFileAccessToHttp.js:17:23:17:29 | rawFile | semmle.label | rawFile |
+subpaths

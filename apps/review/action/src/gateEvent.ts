@@ -20,6 +20,7 @@
 const MAGIC_PHRASE = "@smithers review";
 const COLLAB_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const REVIEWABLE_PR_ACTIONS = new Set(["opened", "synchronize", "reopened", "ready_for_review"]);
+const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 export type GateInputEvent = "pull_request" | "pull_request_target" | "issue_comment";
 
@@ -29,6 +30,7 @@ export type GateDecision =
       eventName: GateInputEvent;
       prNumber: number;
       headSha?: string;
+      baseSha?: string;
     }
   | {
       run: false;
@@ -41,7 +43,7 @@ export interface GateInput {
 }
 
 function obj(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
 export function gateEvent({ eventName, payload }: GateInput): GateDecision {
@@ -57,7 +59,7 @@ export function gateEvent({ eventName, payload }: GateInput): GateDecision {
     }
     const pr = obj(top.pull_request);
     if (!pr) return { run: false, reason: "pull_request event missing pull_request payload" };
-    if (pr.draft === true) return { run: false, reason: "pull request is a draft" };
+    if (pr.draft !== false) return { run: false, reason: "pull request draft state is missing or draft" };
     const head = obj(pr.head);
     const base = obj(pr.base);
     const headRepo = obj(head?.repo);
@@ -74,12 +76,20 @@ export function gateEvent({ eventName, payload }: GateInput): GateDecision {
       };
     }
     const number = pr.number;
-    if (typeof number !== "number") {
+    if (typeof number !== "number" || !Number.isSafeInteger(number) || number <= 0) {
       return { run: false, reason: "pull_request event missing pull request number" };
     }
-    const sha = typeof head?.sha === "string" && head.sha.length > 0 ? head.sha : undefined;
+    const sha = typeof head?.sha === "string" && SHA.test(head.sha) ? head.sha : undefined;
     if (!sha) return { run: false, reason: "pull_request event missing head SHA" };
-    return { run: true, eventName: eventName as "pull_request" | "pull_request_target", prNumber: number, headSha: sha };
+    const baseSha = typeof base?.sha === "string" && SHA.test(base.sha) ? base.sha : undefined;
+    if (!baseSha) return { run: false, reason: "pull_request event missing base SHA" };
+    return {
+      run: true,
+      eventName: eventName as "pull_request" | "pull_request_target",
+      prNumber: number,
+      headSha: sha,
+      baseSha,
+    };
   }
 
   if (eventName === "issue_comment") {
@@ -100,7 +110,8 @@ export function gateEvent({ eventName, payload }: GateInput): GateDecision {
     }
     const rawBody = comment?.body;
     const body = typeof rawBody === "string" ? rawBody.trim().toLowerCase() : "";
-    if (!body.startsWith(MAGIC_PHRASE)) {
+    if (!body.startsWith(MAGIC_PHRASE)
+      || (body.length > MAGIC_PHRASE.length && /[a-z0-9_]/.test(body[MAGIC_PHRASE.length]))) {
       return { run: false, reason: `comment does not start with "${MAGIC_PHRASE}"` };
     }
     const assoc = comment?.author_association;
@@ -111,7 +122,7 @@ export function gateEvent({ eventName, payload }: GateInput): GateDecision {
       };
     }
     const number = issue.number;
-    if (typeof number !== "number") {
+    if (typeof number !== "number" || !Number.isSafeInteger(number) || number <= 0) {
       return { run: false, reason: "issue_comment payload missing PR number" };
     }
     return { run: true, eventName: "issue_comment", prNumber: number };

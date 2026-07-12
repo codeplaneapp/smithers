@@ -1,0 +1,17 @@
+name: Smithers CodeQL configuration
+
+queries:
+  - uses: security-extended
+  - uses: ./.github/codeql/queries/src/SmithersFileAccessToHttp.ql
+  - uses: ./.github/codeql/queries/src/SmithersHttpToFileAccess.ql
+
+query-filters:
+  - exclude:
+      id: js/file-access-to-http
+  - exclude:
+      id: js/http-to-file-access
+
+# Query-test fixtures intentionally contain vulnerable examples. The dedicated
+# `codeql test run` step analyzes them separately against inline expectations.
+paths-ignore:
+  - .github/codeql/queries/test/**

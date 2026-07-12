@@ -112,8 +112,15 @@ browserTest(
     const gatewayProc = spawn(process.execPath, ["run", ".smithers/gateway.ts"], {
       cwd: repo.dir,
       env: { ...process.env, ...env, PORT: String(port), HOST: "127.0.0.1" },
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    const gatewayLogs = [];
+    for (const stream of [gatewayProc.stdout, gatewayProc.stderr]) {
+      stream?.on("data", (chunk) => {
+        gatewayLogs.push(String(chunk));
+        if (gatewayLogs.length > 100) gatewayLogs.shift();
+      });
+    }
 
     let browser;
     try {
@@ -143,6 +150,11 @@ browserTest(
 
       browser = await CHROMIUM.launch({ headless: true });
       const page = await browser.newPage();
+      const browserErrors = [];
+      page.on("pageerror", (error) => browserErrors.push(`pageerror: ${error.message}`));
+      page.on("console", (message) => {
+        if (message.type() === "error") browserErrors.push(`console: ${message.text()}`);
+      });
 
       // 1b — In a real browser, `/` lands on a real page (it follows the 302),
       // never a JSON error document.
@@ -151,10 +163,19 @@ browserTest(
       expect(rootText).not.toContain('"code":"NOT_FOUND"');
       expect(rootText.trim().length).toBeGreaterThan(0);
 
-      // 2 — A workflow UI bundle builds + boots + mounts. `docs-driven-development`
-      // ships a UI with a stable test id (see workflow-ui-descriptors.json).
+      // 2 — A workflow UI bundle builds + boots + mounts. The seeded DDD UI
+      // ships a stable root test id.
       await page.goto(`${base}/workflows/docs-driven-development`, { waitUntil: "domcontentloaded" });
-      await page.waitForSelector('[data-testid="docs-driven-development-ui"]', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="docs-driven-development-ui"]', { timeout: 30_000 }).catch(async (error) => {
+        const body = ((await page.evaluate(() => document.body.textContent)) ?? "").trim().slice(0, 2_000);
+        const assetResponse = await fetch(`${base}/workflows/docs-driven-development/__smithers_ui/client.js`);
+        const assetError = (await assetResponse.text()).trim().slice(0, 4_000);
+        throw new Error(
+          `${error.message}\nBrowser errors: ${browserErrors.join(" | ") || "none"}\n` +
+          `Asset ${assetResponse.status}: ${assetError || "(empty)"}\n` +
+          `Gateway: ${gatewayLogs.join("").slice(-8_000) || "(no logs)"}\nBody: ${body || "(empty)"}`,
+        );
+      });
 
       // An unknown runId must still serve the bundle (empty-run state handled
       // client-side), not 500 the route.

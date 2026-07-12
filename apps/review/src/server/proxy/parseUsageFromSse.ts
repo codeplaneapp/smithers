@@ -7,6 +7,8 @@ type SseUsage = {
   output_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
+  service_tier?: string;
+  inference_geo?: string;
 };
 
 /**
@@ -23,6 +25,8 @@ export function parseUsageFromSse(stream: string): UsageSummary | null {
   let outputTokens = 0;
   let cacheCreationTokens = 0;
   let cacheReadTokens = 0;
+  let serviceTier: string | undefined;
+  let inferenceGeo: string | undefined;
   let saw = false;
   // Both frame kinds report the same usage fields; keep the latest value seen
   // for each.
@@ -33,6 +37,8 @@ export function parseUsageFromSse(stream: string): UsageSummary | null {
       cacheCreationTokens = usage.cache_creation_input_tokens;
     if (typeof usage.cache_read_input_tokens === "number")
       cacheReadTokens = usage.cache_read_input_tokens;
+    if (typeof usage.service_tier === "string") serviceTier = usage.service_tier;
+    if (typeof usage.inference_geo === "string") inferenceGeo = usage.inference_geo;
   };
   // Split on a blank line between frames. The SSE spec allows CRLF endings, so
   // match one-or-more `\r?\n` pairs — an LF-only split silently turns a CRLF
@@ -64,5 +70,13 @@ export function parseUsageFromSse(stream: string): UsageSummary | null {
     }
   }
   if (!saw) return null;
-  return { model, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens };
+  return {
+    model,
+    inputTokens,
+    outputTokens,
+    cacheCreationTokens,
+    cacheReadTokens,
+    ...(serviceTier ? { serviceTier } : {}),
+    ...(inferenceGeo ? { inferenceGeo } : {}),
+  };
 }

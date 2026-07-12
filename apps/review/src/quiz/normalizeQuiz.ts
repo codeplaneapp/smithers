@@ -19,7 +19,17 @@ const maxQuestions = 6;
 // question and explanation, a path from this change), dedupe near-identical
 // questions, clamp to 6, and return null when nothing valid survives.
 export function normalizeQuiz(raw: unknown, changedPaths: string[]): Quiz | null {
-  const parsed = quizSchema.safeParse(raw);
+  // Preserve the historical tolerant-normalizer contract for callers that
+  // hand us a large candidate directly, while the agent output schema itself
+  // remains capped. Only the prefix can ever contribute to the six results.
+  const rawRecord = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : null;
+  const rawQuestions = rawRecord && Array.isArray(rawRecord.questions) ? rawRecord.questions : null;
+  const boundedRaw = rawRecord && rawQuestions
+    ? { ...rawRecord, questions: rawQuestions.slice(0, 50) }
+    : raw;
+  const parsed = quizSchema.safeParse(boundedRaw);
   if (!parsed.success) return null;
   const knownPaths = new Set(changedPaths);
   const seenKeys = new Set<string>();

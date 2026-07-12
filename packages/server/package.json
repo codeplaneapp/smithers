@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@effect/workflow": "^0.18.2",
+    "@milkdown/crepe": "7.21.2",
     "@smithers-orchestrator/accounts": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
@@ -45,6 +46,7 @@
     "drizzle-orm": "^0.45.2",
     "effect": "3.21.4",
     "hono": "^4.12.27",
+    "mermaid": "^11.16.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "ws": "^8.21.0"

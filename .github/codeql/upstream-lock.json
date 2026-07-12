@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "codeqlAction": {
+    "repository": "github/codeql-action",
+    "commit": "99df26d4f13ea111d4ec1a7dddef6063f76b97e9",
+    "version": "4.37.0"
+  },
+  "bundle": {
+    "version": "2.26.0",
+    "linuxUrl": "https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.26.0/codeql-bundle-linux64.tar.zst",
+    "sha256": "eeaaffa28291513a11565654d9828bac39d9234375a6fc0cd698f61c6d007bae"
+  },
+  "upstream": {
+    "repository": "github/codeql",
+    "commit": "e4a7b4ff515d6f23af5a4b8a837652348657e84b",
+    "packs": {
+      "codeql/javascript-all": "2.8.0",
+      "codeql/javascript-queries": "2.4.0",
+      "codeql/util": "2.0.39"
+    },
+    "files": [
+      {
+        "path": "javascript/ql/src/Security/CWE-200/FileAccessToHttp.ql",
+        "gitBlob": "75a09efb96b21afa9b77fdba10322ee632953945",
+        "sha256": "618c0613936aaf8379200422a944b230d9b39d080fbdfc20f3da8d257e9d0644"
+      },
+      {
+        "path": "javascript/ql/src/Security/CWE-912/HttpToFileAccess.ql",
+        "gitBlob": "88362ce545d7df6ccc784b1e9c16d26efa1f5414",
+        "sha256": "0c4f0d7c9af9e2ffd336a8b03b6517064908e26c6481ee45c79792785ac4d89b"
+      },
+      {
+        "path": "javascript/ql/lib/semmle/javascript/security/dataflow/FileAccessToHttpCustomizations.qll",
+        "gitBlob": "8fac31ddf54defca1f822697e982c2f1155a1580",
+        "sha256": "7b083d38f31060db36f2633075e40cfe0585d7b924b1e93bfa25dce59b53392b"
+      },
+      {
+        "path": "javascript/ql/lib/semmle/javascript/security/dataflow/FileAccessToHttpQuery.qll",
+        "gitBlob": "21efb2b77702459ac4430f95b7cf72025722bd0f",
+        "sha256": "4f82a6c727f4cf138ccadea11bd2cde5eb0e541d54c72fef00bbf64171690d0b"
+      },
+      {
+        "path": "javascript/ql/lib/semmle/javascript/security/dataflow/HttpToFileAccessCustomizations.qll",
+        "gitBlob": "46823c990ef77322c1b7a1528f55837baa424f0b",
+        "sha256": "c59fc4001d9fae2222bc31713a9f4732d5fafa4ed58506c0024f625183f42b65"
+      },
+      {
+        "path": "javascript/ql/lib/semmle/javascript/security/dataflow/HttpToFileAccessQuery.qll",
+        "gitBlob": "0525367d1e22366eb575b3355aa34297f8b0fc49",
+        "sha256": "556fb74362afc78e910e4a052e5e0f9f7099f69f5718cafa92dbc28c129a1d7d"
+      }
+    ]
+  },
+  "replacements": [
+    {
+      "upstreamId": "js/file-access-to-http",
+      "customId": "smithers/js-file-access-to-http",
+      "query": ".github/codeql/queries/src/SmithersFileAccessToHttp.ql",
+      "boundaries": [
+        ["parseValidatedReviewArtifact", "apps/review/action/src/publishReview.ts"],
+        ["authorizeWalkthroughUpload", "apps/review/src/cli/publishWalkthrough.ts"]
+      ]
+    },
+    {
+      "upstreamId": "js/http-to-file-access",
+      "customId": "smithers/js-http-to-file-access",
+      "query": ".github/codeql/queries/src/SmithersHttpToFileAccess.ql",
+      "boundaries": [
+        ["serializeValidatedReviewArtifact", "apps/review/action/src/runAction.ts"],
+        ["buildCanonicalReviewSummary", "apps/review/src/cli/main.ts"]
+      ]
+    }
+  ]
+}

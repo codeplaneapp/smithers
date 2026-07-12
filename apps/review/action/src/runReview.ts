@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const REVIEW_PROCESS_ENV_KEYS = [
@@ -26,11 +26,45 @@ const REVIEW_PROCESS_ENV_KEYS = [
   "COMSPEC",
 ] as const;
 
+const LINUX_TOOLS = {
+  sudo: "/usr/bin/sudo",
+  unshare: "/usr/bin/unshare",
+  setpriv: "/usr/bin/setpriv",
+  env: "/usr/bin/env",
+  useradd: "/usr/sbin/useradd",
+  userdel: "/usr/sbin/userdel",
+  groupdel: "/usr/sbin/groupdel",
+  id: "/usr/bin/id",
+  pgrep: "/usr/bin/pgrep",
+  chown: "/usr/bin/chown",
+  chmod: "/usr/bin/chmod",
+} as const;
+
 export function buildReviewProcessEnvironment(input: {
   baseEnv: NodeJS.ProcessEnv;
   isolatedHome: string;
   explicit: Record<string, string>;
 }): Record<string, string> {
+  const forbiddenExplicit = new Set([
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "RUNNER_TEMP",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "SMITHERS_HOME",
+    "SMITHERS_REVIEW_DISABLE_REGISTERED_ACCOUNTS",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "CODEX_AUTH_JSON",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+  ]);
+  for (const key of Object.keys(input.explicit)) {
+    if (forbiddenExplicit.has(key)) throw new Error(`review process explicit environment cannot set ${key}`);
+  }
   const env: Record<string, string> = {};
   for (const key of REVIEW_PROCESS_ENV_KEYS) {
     const value = input.baseEnv[key];
@@ -38,6 +72,11 @@ export function buildReviewProcessEnvironment(input: {
   }
   env.HOME = input.isolatedHome;
   env.SMITHERS_HOME = join(input.isolatedHome, ".smithers");
+  const isolatedTemp = join(input.isolatedHome, "tmp");
+  env.RUNNER_TEMP = isolatedTemp;
+  env.TMPDIR = isolatedTemp;
+  env.TMP = isolatedTemp;
+  env.TEMP = isolatedTemp;
   env.SMITHERS_REVIEW_DISABLE_REGISTERED_ACCOUNTS = "1";
   Object.assign(env, input.explicit);
   return env;
@@ -47,18 +86,34 @@ export function buildReviewSpawnCommand(input: {
   bunPath: string;
   args: string[];
   env: Record<string, string>;
-  sandboxUser?: string;
+  sandboxIdentity?: ReviewSandboxIdentity;
 }): { command: string; args: string[]; env: Record<string, string> } {
-  if (!input.sandboxUser) return { command: input.bunPath, args: input.args, env: input.env };
-  const assignments = Object.entries(input.env).map(([key, value]) => `${key}=${value}`);
+  if (!input.sandboxIdentity) return { command: input.bunPath, args: input.args, env: input.env };
+  const childEnv = {
+    ...input.env,
+    USER: input.sandboxIdentity.user,
+    LOGNAME: input.sandboxIdentity.user,
+  };
+  const assignments = Object.entries(childEnv).map(([key, value]) => `${key}=${value}`);
   const sudoEnv: Record<string, string> = {};
   for (const key of ["PATH", "LANG", "LC_ALL", "TZ", "TERM"]) {
     const value = process.env[key];
     if (value) sudoEnv[key] = value;
   }
   return {
-    command: "sudo",
-    args: ["-n", "-u", input.sandboxUser, "--", "env", "-i", ...assignments, input.bunPath, ...input.args],
+    command: LINUX_TOOLS.sudo,
+    // The review command is PID 1 in a fresh PID namespace. Linux kills every
+    // descendant when that namespace's init exits, so a daemonized child
+    // cannot outlive the workflow-command fence or race trusted output reads.
+    args: [
+      "-n", "--",
+      LINUX_TOOLS.unshare, "--pid", "--fork", "--kill-child=SIGKILL", "--mount-proc",
+      LINUX_TOOLS.setpriv,
+      `--reuid=${input.sandboxIdentity.uid}`,
+      `--regid=${input.sandboxIdentity.gid}`,
+      "--clear-groups", "--no-new-privs", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all",
+      "--", LINUX_TOOLS.env, "-i", ...assignments, input.bunPath, ...input.args,
+    ],
     env: sudoEnv,
   };
 }
@@ -74,48 +129,94 @@ export function workflowCommandFence(token = crypto.randomUUID().replace(/-/g, "
   };
 }
 
-function prepareIsolatedUser(outputDir: string): string | undefined {
-  if (process.platform !== "linux" || process.env.GITHUB_ACTIONS !== "true") return undefined;
-  const user = "smithers-review-sandbox";
-  try {
-    execFileSync("id", ["-u", user], { stdio: "ignore" });
-  } catch {
-    execFileSync("sudo", [
-      "-n", "useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", user,
-    ], { stdio: "ignore" });
-  }
-  // Fail closed if the runner cannot establish the distinct UID or make the
-  // dedicated output directory writable by it.
-  const uid = execFileSync("id", ["-u", user], { encoding: "utf8" }).trim();
-  const gid = execFileSync("id", ["-g", user], { encoding: "utf8" }).trim();
-  const groups = execFileSync("id", ["-G", user], { encoding: "utf8" }).trim().split(/\s+/);
-  if (
-    !/^\d+$/.test(uid) || !/^\d+$/.test(gid)
-    || uid === "0" || uid === String(process.getuid?.())
-    || groups.length !== 1 || groups[0] !== gid || groups.includes("0")
-  ) {
-    throw new Error("review sandbox did not resolve to a distinct unprivileged UID");
-  }
-  execFileSync("sudo", ["-n", "chown", "-R", `${uid}:${gid}`, outputDir], { stdio: "ignore" });
-  execFileSync("sudo", ["-n", "chmod", "0700", outputDir], { stdio: "ignore" });
-  return user;
+export interface ReviewSandboxIdentity {
+  user: string;
+  uid: string;
+  gid: string;
 }
 
-function restoreOutputOwnership(outputDir: string): void {
+function removeIsolatedUser(user: string): void {
+  try { execFileSync(LINUX_TOOLS.sudo, ["-n", LINUX_TOOLS.userdel, user], { stdio: "ignore" }); } catch { /* best effort during failed setup */ }
+  try { execFileSync(LINUX_TOOLS.sudo, ["-n", LINUX_TOOLS.groupdel, user], { stdio: "ignore" }); } catch { /* userdel often removes its private group */ }
+}
+
+function prepareIsolatedUser(outputDir: string): ReviewSandboxIdentity | undefined {
+  // Protected replay inputs are meaningful only when the reviewer has a
+  // distinct UID.  Production must never silently fall back to the runner's
+  // identity; portable unit tests inject their explicit runtime boundary.
+  if (process.platform !== "linux" || process.env.GITHUB_ACTIONS !== "true") {
+    throw new Error("review sandbox requires a Linux Actions runner with a distinct unprivileged UID");
+  }
+  if (readFileSync("/proc/sys/fs/protected_hardlinks", "utf8").trim() !== "1") {
+    throw new Error("review sandbox requires Linux protected_hardlinks=1");
+  }
+  const user = `smithers-r-${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
+  try {
+    execFileSync(LINUX_TOOLS.sudo, [
+      "-n", LINUX_TOOLS.useradd, "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", user,
+    ], { stdio: "ignore" });
+    // Fail closed if the runner cannot establish the distinct UID or make the
+    // dedicated output directory writable by it.
+    const uid = execFileSync(LINUX_TOOLS.id, ["-u", user], { encoding: "utf8" }).trim();
+    const gid = execFileSync(LINUX_TOOLS.id, ["-g", user], { encoding: "utf8" }).trim();
+    const groups = execFileSync(LINUX_TOOLS.id, ["-G", user], { encoding: "utf8" }).trim().split(/\s+/);
+    if (
+      !/^\d+$/.test(uid) || !/^\d+$/.test(gid)
+      || uid === "0" || uid === String(process.getuid?.())
+      || groups.length !== 1 || groups[0] !== gid || groups.includes("0")
+    ) {
+      throw new Error("review sandbox did not resolve to a distinct unprivileged UID");
+    }
+    execFileSync(LINUX_TOOLS.sudo, ["-n", LINUX_TOOLS.chown, "-R", "--no-dereference", `${uid}:${gid}`, outputDir], { stdio: "ignore" });
+    execFileSync(LINUX_TOOLS.sudo, ["-n", LINUX_TOOLS.chmod, "0700", outputDir], { stdio: "ignore" });
+    return { user, uid, gid };
+  } catch (error) {
+    removeIsolatedUser(user);
+    throw error;
+  }
+}
+
+function cleanupIsolatedUser(outputDir: string, identity: ReviewSandboxIdentity): void {
   const uid = process.getuid?.();
   const gid = process.getgid?.();
   if (uid === undefined || gid === undefined) throw new Error("runner UID/GID is unavailable");
-  execFileSync("sudo", ["-n", "chown", "-R", `${uid}:${gid}`, outputDir], { stdio: "ignore" });
+  let cleanupError: unknown;
+  try {
+    // `unshare` should already have reaped the namespace. Verify that invariant
+    // before trusted code reads or takes ownership of child-controlled files.
+    try {
+      execFileSync(LINUX_TOOLS.pgrep, ["-u", identity.uid], { stdio: "ignore" });
+      throw new Error("review sandbox still has live processes after namespace exit");
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status !== 1) throw error;
+    }
+    execFileSync(LINUX_TOOLS.sudo, ["-n", LINUX_TOOLS.chown, "-R", "--no-dereference", `${uid}:${gid}`, outputDir], { stdio: "ignore" });
+  } catch (error) {
+    cleanupError = error;
+  }
+  try {
+    execFileSync(LINUX_TOOLS.sudo, ["-n", LINUX_TOOLS.userdel, identity.user], { stdio: "ignore" });
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  try {
+    execFileSync(LINUX_TOOLS.sudo, ["-n", LINUX_TOOLS.groupdel, identity.user], { stdio: "ignore" });
+  } catch (error) {
+    // userdel often removes the matching private group first.
+    if ((error as { status?: number }).status !== 6) cleanupError ??= error;
+  }
+  if (cleanupError) throw cleanupError;
 }
 
 export interface RunReviewRuntime {
-  prepareIsolatedUser(outputDir: string): string | undefined;
-  restoreOutputOwnership(outputDir: string): void;
+  prepareIsolatedUser(outputDir: string): ReviewSandboxIdentity | undefined;
+  cleanupIsolatedUser(outputDir: string, identity: ReviewSandboxIdentity): void;
 }
 
 const productionRuntime: RunReviewRuntime = {
   prepareIsolatedUser,
-  restoreOutputOwnership,
+  cleanupIsolatedUser,
 };
 
 /**
@@ -143,6 +244,7 @@ export interface RunReviewInput {
   bunPath?: string;
   /** When set, the CLI writes a machine-readable outcome JSON here. */
   summaryPath?: string;
+  immutableManifestPath?: string;
 }
 
 export async function runReview(
@@ -159,6 +261,12 @@ export async function runReview(
     join(input.outputDir, "walkthrough.html"),
     "--db",
     join(input.outputDir, "review.db"),
+    // The hosted analyze job has a 30-minute wall clock. Four bounded waves of
+    // file reviews leave time for install, verification, narration, and upload.
+    "--concurrency",
+    "16",
+    "--timeout",
+    "5",
   ];
   if (input.quiz) args.push("--quiz", input.quiz);
 
@@ -169,6 +277,7 @@ export async function runReview(
     // workspace is passed as the CLI's positional repo argument instead.
     const isolatedHome = join(input.outputDir, "home");
     mkdirSync(isolatedHome, { recursive: true, mode: 0o700 });
+    mkdirSync(join(isolatedHome, "tmp"), { recursive: true, mode: 0o700 });
     const env = buildReviewProcessEnvironment({
       baseEnv: process.env,
       isolatedHome,
@@ -181,6 +290,8 @@ export async function runReview(
         GIT_CONFIG_COUNT: "1",
         GIT_CONFIG_KEY_0: "safe.directory",
         GIT_CONFIG_VALUE_0: input.workspace,
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_TERMINAL_PROMPT: "0",
         SMITHERS_GH_BIN: join(input.actionPath, "src", "replayGh.ts"),
         SMITHERS_REVIEW_GH_FIXTURE: input.ghFixturePath,
         SMITHERS_REVIEW_CAPTURE_PATH: input.capturePath,
@@ -188,14 +299,16 @@ export async function runReview(
         // .gitignore or .opencodereview/rule.json policy.
         SMITHERS_REVIEW_TRUSTED_POLICY_ONLY: "1",
         ...(input.summaryPath ? { SMITHERS_REVIEW_SUMMARY_PATH: input.summaryPath } : {}),
+        ...(input.immutableManifestPath ? { SMITHERS_REVIEW_IMMUTABLE_MANIFEST: input.immutableManifestPath } : {}),
+        ...(process.env.SMITHERS_REVIEW_EXPECTED_BASE_SHA ? { SMITHERS_REVIEW_EXPECTED_BASE_SHA: process.env.SMITHERS_REVIEW_EXPECTED_BASE_SHA } : {}),
       },
     });
-    const sandboxUser = runtime.prepareIsolatedUser(input.outputDir);
+    const sandboxIdentity = runtime.prepareIsolatedUser(input.outputDir);
     const invocation = buildReviewSpawnCommand({
       bunPath: input.bunPath ?? "bun",
       args,
       env,
-      sandboxUser,
+      sandboxIdentity,
     });
     let resumeCommands = () => {};
     if (process.env.GITHUB_ACTIONS === "true") {
@@ -216,6 +329,11 @@ export async function runReview(
         env: invocation.env,
       });
     } catch (error) {
+      try {
+        if (sandboxIdentity) runtime.cleanupIsolatedUser(input.outputDir, sandboxIdentity);
+      } catch {
+        // Preserve the synchronous spawn failure, which is the primary cause.
+      }
       resumeCommands();
       reject(error);
       return;
@@ -224,22 +342,23 @@ export async function runReview(
     child.on("error", (error) => {
       if (settled) return;
       settled = true;
-      resumeCommands();
       try {
-        if (sandboxUser) runtime.restoreOutputOwnership(input.outputDir);
+        if (sandboxIdentity) runtime.cleanupIsolatedUser(input.outputDir, sandboxIdentity);
       } catch {
         // Preserve the spawn failure, which is the primary cause.
       }
+      resumeCommands();
       reject(error);
     });
     child.on("exit", (code) => {
       if (settled) return;
       settled = true;
-      resumeCommands();
       try {
-        if (sandboxUser) runtime.restoreOutputOwnership(input.outputDir);
+        if (sandboxIdentity) runtime.cleanupIsolatedUser(input.outputDir, sandboxIdentity);
+        resumeCommands();
         resolve(code ?? 1);
       } catch (error) {
+        resumeCommands();
         reject(error);
       }
     });

@@ -69,6 +69,24 @@ function awaitWithAbort(pending, signal) {
 }
 
 /**
+ * Ask an abandoned response body to release its resources without allowing a
+ * hostile or broken stream cancellation algorithm to delay the policy result.
+ * ReadableStream.cancel() is user-extensible and may reject or never settle;
+ * cleanup must therefore remain detached from redirect and abort decisions.
+ *
+ * @param {Response} response
+ * @param {unknown} [reason]
+ */
+function cancelBodyBestEffort(response, reason) {
+  try {
+    void response.body?.cancel(reason).catch(() => undefined);
+  } catch {
+    // Preserve the primary redirect/abort result if a nonstandard stream
+    // implementation throws synchronously from cancel().
+  }
+}
+
+/**
  * @param {unknown} value
  * @param {string} option
  * @returns {number}
@@ -325,7 +343,7 @@ export async function fetchWithPolicy(input, init = {}, options = {}) {
     }
     if (request.signal.aborted) {
       const reason = abortReason(request.signal);
-      await response.body?.cancel(reason).catch(() => undefined);
+      cancelBodyBestEffort(response, reason);
       throw reason;
     }
     if (!REDIRECT_STATUSES.has(response.status)) return response;
@@ -333,7 +351,7 @@ export async function fetchWithPolicy(input, init = {}, options = {}) {
     const location = response.headers.get("location");
     if (!location) return response;
     if (redirectCount >= maxRedirects) {
-      await response.body?.cancel().catch(() => undefined);
+      cancelBodyBestEffort(response);
       throw new HttpClientPolicyError(
         "TOO_MANY_REDIRECTS",
         "Outbound request exceeded the configured redirect limit.",
@@ -345,7 +363,7 @@ export async function fetchWithPolicy(input, init = {}, options = {}) {
     try {
       nextUrl = assertHttpUrl(new URL(location, currentUrl));
     } catch (cause) {
-      await response.body?.cancel().catch(() => undefined);
+      cancelBodyBestEffort(response);
       if (cause instanceof HttpClientPolicyError && cause.code === "UNSUPPORTED_PROTOCOL") {
         throw cause;
       }
@@ -356,7 +374,7 @@ export async function fetchWithPolicy(input, init = {}, options = {}) {
       );
     }
     if (currentUrl.protocol === "https:" && nextUrl.protocol === "http:") {
-      await response.body?.cancel().catch(() => undefined);
+      cancelBodyBestEffort(response);
       throw new HttpClientPolicyError(
         "INSECURE_REDIRECT",
         "Outbound HTTPS request cannot redirect to HTTP.",
@@ -369,7 +387,7 @@ export async function fetchWithPolicy(input, init = {}, options = {}) {
     const { method, dropBody } = redirectedMethod(response.status, request.method);
     const preserveBody = currentHasBody && !dropBody;
     if (preserveBody && replayableBody === null) {
-      await response.body?.cancel().catch(() => undefined);
+      cancelBodyBestEffort(response);
       throw new HttpClientPolicyError(
         "UNREPLAYABLE_BODY",
         "Redirect requires replaying a one-shot request body.",
@@ -377,7 +395,7 @@ export async function fetchWithPolicy(input, init = {}, options = {}) {
       );
     }
     if (preserveBody && crossOrigin && !destinationAuthorized) {
-      await response.body?.cancel().catch(() => undefined);
+      cancelBodyBestEffort(response);
       throw new HttpClientPolicyError(
         "CROSS_ORIGIN_BODY_BLOCKED",
         "Redirect cannot forward a request body to an unauthorized origin.",
@@ -396,7 +414,7 @@ export async function fetchWithPolicy(input, init = {}, options = {}) {
       stripSensitiveQueryParams(nextUrl, sensitiveQueryParams);
     }
 
-    await response.body?.cancel().catch(() => undefined);
+    cancelBodyBestEffort(response);
     fromUrl = currentUrl;
     currentUrl = nextUrl;
     request = redirectRequest(

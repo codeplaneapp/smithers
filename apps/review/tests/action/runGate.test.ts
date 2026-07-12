@@ -74,8 +74,8 @@ describe("runGate (subprocess)", () => {
       pull_request: {
         number: 42,
         draft: false,
-        head: { sha: "deadbeef", repo: { full_name: "octo/widgets" } },
-        base: { repo: { full_name: "octo/widgets" } },
+        head: { sha: "d".repeat(40), repo: { full_name: "octo/widgets" } },
+        base: { sha: "e".repeat(40), repo: { full_name: "octo/widgets" } },
       },
     };
     const eventPath = join(tmp, "event.json");
@@ -90,7 +90,8 @@ describe("runGate (subprocess)", () => {
     const out = await readOutput(outputFile);
     expect(out["should-run"]).toBe("true");
     expect(out["pr-number"]).toBe("42");
-    expect(out["head-sha"]).toBe("deadbeef");
+    expect(out["head-sha"]).toBe("d".repeat(40));
+    expect(out["base-sha"]).toBe("e".repeat(40));
     expect(out["event-name"]).toBe("pull_request");
     expect(out["subscription-eligible"]).toBe("false");
   });

@@ -198,7 +198,9 @@ describe("transaction turn interruption (bun:sqlite)", () => {
     // Releasing #1 must hand the turn off cleanly even though #2 was interrupted
     // mid-queue; #2's release still fires, so the chain keeps advancing.
     latch.resolve("first");
-    await Effect.runPromise(Fiber.await(holder));
+    // Join the successful holder directly; this keeps the same synchronization
+    // point without relying on the keyword-named Fiber.await export.
+    await Effect.runPromise(Fiber.join(holder));
     await interrupted;
 
     const later = await raceWithTimeout(
