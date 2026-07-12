@@ -120,6 +120,7 @@ describe("openCodeReview pure helpers", () => {
   test("reviewFileTaskId slugifies the path and falls back to 'file'", () => {
     expect(reviewFileTaskId("src/Foo Bar.ts", 0)).toBe("review-file-1-src-foo-bar-ts");
     expect(reviewFileTaskId("!!!", 3)).toBe("review-file-4-file");
+    expect(reviewFileTaskId("-".repeat(100_000), 4)).toBe("review-file-5-file");
   });
 
   test("operational file limiting keeps sensitive paths before larger routine files", () => {

@@ -13,7 +13,7 @@ import { openSmithersBackend } from "../src/openSmithersBackend.js";
 import { createSmithersPostgres } from "../src/create.js";
 import { openSmithersStore } from "../src/openSmithersStore.js";
 import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -27,7 +27,7 @@ const MIGRATION_RESULT_MARKER = "__SMITHERS_MIGRATION_RESULT__";
 const MIGRATION_MODULE_URL = new URL("../src/migrateSmithersStore.js", import.meta.url).href;
 
 function makeWorkspace(name) {
-  const dir = join(tmpdir(), `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = mkdtempSync(join(tmpdir(), `${name}-`));
   mkdirSync(join(dir, ".smithers"), { recursive: true });
   tempDirs.push(dir);
   return dir;

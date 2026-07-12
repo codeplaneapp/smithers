@@ -12,7 +12,7 @@
 //
 // Per-suite hand-written CASE lines in evals/suites/<suite>/curated.jsonl are
 // prepended verbatim (and win id collisions).
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { SOTA_MODELS, WEAK_MODELS } from "../agents.js";
 import { repoRoot } from "../lib/paths.js";
@@ -34,9 +34,19 @@ type Task = {
   source?: string; // coverage-map | real-usage | curated
 };
 
+function readOptionalFile(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 function readJsonl(path: string): Task[] {
-  if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8")
+  const contents = readOptionalFile(path);
+  if (contents === null) return [];
+  return contents
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)
@@ -189,7 +199,7 @@ export function main() {
   const staleFiles: string[] = [];
   const syncGeneratedFile = (path: string, contents: string) => {
     if (check) {
-      if (!existsSync(path) || readFileSync(path, "utf8") !== contents) {
+      if (readOptionalFile(path) !== contents) {
         staleFiles.push(relative(ROOT, path));
       }
       return;
@@ -242,9 +252,10 @@ export function main() {
   for (const [suite, genLines] of [...bySuite.entries()].sort()) {
     const dir = join(SUITES, suite);
     const curatedPath = join(dir, "curated.jsonl");
-    const curated = existsSync(curatedPath)
-      ? readFileSync(curatedPath, "utf8").split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-      : [];
+    const curatedText = readOptionalFile(curatedPath);
+    const curated = curatedText === null
+      ? []
+      : curatedText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const seen = new Set<string>();
     const merged: string[] = [];
     for (const line of [...curated, ...genLines]) {
@@ -269,12 +280,17 @@ export function main() {
     // Every generated suite needs an executable entry point. Existing eval.tsx
     // files remain hand-editable; generation owns their presence, not contents.
     const evalFile = join(dir, "eval.tsx");
-    if (check && !existsSync(evalFile)) staleFiles.push(relative(ROOT, evalFile));
-    if (!dry && !check && !existsSync(evalFile)) {
-      writeFileSync(
-        evalFile,
-        `/** @jsxImportSource smithers-orchestrator */\n// ${suite} — generated suite. See evals/README.md.\nimport { createFluencyEval } from "../../lib/eval-kit";\n\nexport default createFluencyEval({ suite: "${suite}" });\n`,
-      );
+    if (check && readOptionalFile(evalFile) === null) staleFiles.push(relative(ROOT, evalFile));
+    if (!dry && !check) {
+      try {
+        writeFileSync(
+          evalFile,
+          `/** @jsxImportSource smithers-orchestrator */\n// ${suite} — generated suite. See evals/README.md.\nimport { createFluencyEval } from "../../lib/eval-kit";\n\nexport default createFluencyEval({ suite: "${suite}" });\n`,
+          { flag: "wx" },
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
     }
   }
 

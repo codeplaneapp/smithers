@@ -73,6 +73,13 @@ describe("TelegramClient.call", () => {
         expect(redactBotToken(`GET http://api/bot${fixture.token}/sendMessage failed`, fixture.token)).not.toContain(fixture.token);
         expect(redactBotToken("http://api/bot99:abc_DEF-123/getMe", "unrelated")).toBe("http://api/bot<redacted>/getMe");
     });
+    test("normalizes an adversarial trailing-slash suffix in bounded time", async () => {
+        const client = makeTelegramClient({
+            botToken: fixture.token,
+            apiBaseUrl: `${fixture.apiBaseUrl}${"/".repeat(100_000)}`,
+        });
+        await expect(Effect.runPromise(client.answerCallbackQuery("cb-linear"))).resolves.toBe(true);
+    });
 });
 
 describe("TelegramClient.sendMessageSmart", () => {

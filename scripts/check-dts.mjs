@@ -30,7 +30,6 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -54,13 +53,15 @@ function collectDeclarations(srcDir) {
   /** @type {Map<string, string>} */
   const out = new Map();
   const walk = (dir) => {
-    for (const entry of readdirSync(dir).sort()) {
-      const path = join(dir, entry);
-      if (statSync(path).isDirectory()) {
+    const entries = readdirSync(dir, { withFileTypes: true })
+      .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
         walk(path);
         continue;
       }
-      if (path.endsWith(".d.ts")) {
+      if (entry.isFile() && path.endsWith(".d.ts")) {
         const rel = relative(srcDir, path).split(sep).join("/");
         out.set(rel, readFileSync(path, "utf8"));
       }

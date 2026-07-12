@@ -502,7 +502,10 @@ async function main(): Promise<void> {
   // PR identity it sees during analysis.
   const fixturePath = join(manifestDir, "github-fixture.json");
   const manifestPath = join(manifestDir, "immutable-diff-manifest.jsonl");
-  const artifactPath = join(tempRoot, `smithers-review-artifact-${process.pid}.json`);
+  // Keep the publisher artifact inside the private, unpredictably named trusted
+  // input directory. A predictable sibling directly under RUNNER_TEMP would let
+  // another local process pre-create the final pathname before exclusive publish.
+  const artifactPath = join(manifestDir, "validated-review.json");
   writeProtectedReviewInput(fixturePath, JSON.stringify({
     repository,
     prNumber: decision.prNumber,

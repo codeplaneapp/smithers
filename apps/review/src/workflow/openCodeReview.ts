@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join, resolve } from "node:path";
 import { z } from "zod/v4";
@@ -24,6 +24,45 @@ const MAX_POLICY_FILE_BYTES = 1024 * 1024;
 const MAX_POLICY_PATTERNS = 10_000;
 const MAX_POLICY_PATTERN_CHARS = 1_024;
 const MAX_BRACE_EXPANSIONS = 256;
+
+function readBoundedRegularFile(
+  path: string,
+  maxBytes: number,
+  label: string,
+  options: { allowMissing?: boolean; skipNonFile?: boolean } = {},
+): Buffer | null {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    if (options.allowMissing && (error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const before = fstatSync(fd);
+    if (!before.isFile()) {
+      if (options.skipNonFile) return null;
+      throw new Error(`${label} is not a regular file`);
+    }
+    if (before.size > maxBytes) throw new Error(`${label} exceeds the policy file limit`);
+    const bytes = Buffer.alloc(before.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+      if (count === 0) throw new Error(`${label} ended while being read`);
+      offset += count;
+    }
+    const after = fstatSync(fd);
+    if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size
+      || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs
+      || after.mode !== before.mode || after.nlink !== before.nlink) {
+      throw new Error(`${label} changed while being read`);
+    }
+    return bytes;
+  } finally {
+    closeSync(fd);
+  }
+}
 
 const providerDirIgnoreDirs = [
   ".idea/",
@@ -520,9 +559,9 @@ function isDefaultExcluded(path: string) {
 
 function loadGitignorePatterns(repoDir: string) {
   const path = join(repoDir, ".gitignore");
-  if (!existsSync(path)) return [];
-  if (statSync(path).size > MAX_POLICY_FILE_BYTES) throw new Error(".gitignore exceeds the policy file limit");
-  const patterns = readFileSync(path, "utf8")
+  const bytes = readBoundedRegularFile(path, MAX_POLICY_FILE_BYTES, ".gitignore", { allowMissing: true });
+  if (bytes === null) return [];
+  const patterns = bytes.toString("utf8")
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
@@ -665,11 +704,13 @@ async function workspaceDiffText(repoDir: string) {
       throw new Error("Git returned an unsafe or unsupported untracked path");
     }
     const fullPath = join(repoDir, relPath);
-    if (!existsSync(fullPath)) continue;
-    const stat = statSync(fullPath);
-    if (stat.isDirectory()) continue;
-    if (stat.size > REVIEW_MANIFEST_MAX_RECORD_BYTES) throw new Error(`untracked review file is oversized: ${relPath}`);
-    const content = readFileSync(fullPath);
+    const content = readBoundedRegularFile(
+      fullPath,
+      REVIEW_MANIFEST_MAX_RECORD_BYTES,
+      `untracked review file ${relPath}`,
+      { allowMissing: true, skipNonFile: true },
+    );
+    if (content === null) continue;
     let text = "";
     let binary = content.includes(0);
     if (!binary) {
@@ -733,9 +774,10 @@ export async function loadDiffs(repoDir: string, input: OpenCodeReviewInput) {
 }
 
 function readProjectRule(path: string): { include?: string[]; exclude?: string[] } | null {
-  if (!path || !existsSync(path)) return null;
-  if (statSync(path).size > MAX_POLICY_FILE_BYTES) throw new Error("review rule exceeds the policy file limit");
-  const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  if (!path) return null;
+  const bytes = readBoundedRegularFile(path, MAX_POLICY_FILE_BYTES, "review rule", { allowMissing: true });
+  if (bytes === null) return null;
+  const raw = JSON.parse(bytes.toString("utf8")) as unknown;
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
   const include = Array.isArray(record.include) ? record.include.filter((v): v is string => typeof v === "string") : [];
@@ -892,11 +934,15 @@ function reviewableDiffs(diffs: DiffRecord[], filter: FileFilter | null) {
 }
 
 export function reviewFileTaskId(path: string, index: number) {
-  const slug = path
+  const untrimmedSlug = path
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
     .slice(0, 72);
+  let start = 0;
+  let end = untrimmedSlug.length;
+  while (start < end && untrimmedSlug.charCodeAt(start) === 45) start += 1;
+  while (end > start && untrimmedSlug.charCodeAt(end - 1) === 45) end -= 1;
+  const slug = untrimmedSlug.slice(start, end);
   return `review-file-${index + 1}-${slug || "file"}`;
 }
 

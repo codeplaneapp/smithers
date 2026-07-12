@@ -418,10 +418,6 @@ export function serializeReviewManifest(records: readonly ReviewManifestRecord[]
 }
 
 export function readProtectedReviewManifest(path: string): readonly ReviewManifestRecord[] {
-  const pathnameBefore = lstatSync(path);
-  if (!pathnameBefore.isFile() || pathnameBefore.nlink !== 1 || (pathnameBefore.mode & 0o222) !== 0) {
-    throw new Error("manifest path is not a protected regular file");
-  }
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = fstatSync(fd);
@@ -438,12 +434,11 @@ export function readProtectedReviewManifest(path: string): readonly ReviewManife
     }
     const after = fstatSync(fd);
     const pathnameAfter = lstatSync(path);
-    if (pathnameBefore.dev !== before.dev || pathnameBefore.ino !== before.ino
-      || pathnameAfter.dev !== after.dev || pathnameAfter.ino !== after.ino
+    if (pathnameAfter.dev !== after.dev || pathnameAfter.ino !== after.ino
       || after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size || after.mtimeMs !== before.mtimeMs
       || after.mode !== before.mode || after.nlink !== before.nlink
-      || pathnameAfter.size !== pathnameBefore.size || pathnameAfter.mtimeMs !== pathnameBefore.mtimeMs
-      || pathnameAfter.mode !== pathnameBefore.mode || pathnameAfter.nlink !== pathnameBefore.nlink) {
+      || pathnameAfter.size !== after.size || pathnameAfter.mtimeMs !== after.mtimeMs
+      || pathnameAfter.mode !== after.mode || pathnameAfter.nlink !== after.nlink) {
       throw new Error("manifest changed while being read");
     }
     return parseReviewManifest(bytes);

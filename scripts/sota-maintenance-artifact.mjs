@@ -3,14 +3,15 @@
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   openSync,
-  readFileSync,
+  readSync,
   readdirSync,
   rmSync,
-  statSync,
   writeFileSync,
   closeSync,
 } from "node:fs";
@@ -181,17 +182,32 @@ function changedPaths(baseDir, sourceDir) {
 function readRegularFile(root, path) {
   assertNoSymlinkComponents(root, path);
   const absolute = resolve(root, path);
-  const before = lstatSync(absolute);
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
-    fail(`changed path must be a regular, singly linked file: ${path}`);
+  const fd = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const before = fstatSync(fd);
+    if (!before.isFile() || before.nlink !== 1) {
+      fail(`changed path must be a regular, singly linked file: ${path}`);
+    }
+    if (before.size > MAX_FILE_BYTES) fail(`file exceeds ${MAX_FILE_BYTES} bytes: ${path}`);
+    const bytes = Buffer.alloc(before.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+      if (count === 0) fail(`file ended while it was being packaged: ${path}`);
+      offset += count;
+    }
+    const after = fstatSync(fd);
+    const named = lstatSync(absolute);
+    if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size
+      || after.mtimeMs !== before.mtimeMs || after.mode !== before.mode || after.nlink !== before.nlink
+      || named.dev !== after.dev || named.ino !== after.ino || named.size !== after.size
+      || named.mtimeMs !== after.mtimeMs || named.mode !== after.mode || named.nlink !== after.nlink) {
+      fail(`file changed while it was being packaged: ${path}`);
+    }
+    return { bytes, mode: before.mode & 0o111 ? "100755" : "100644" };
+  } finally {
+    closeSync(fd);
   }
-  if (before.size > MAX_FILE_BYTES) fail(`file exceeds ${MAX_FILE_BYTES} bytes: ${path}`);
-  const bytes = readFileSync(absolute);
-  const after = lstatSync(absolute);
-  if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
-    fail(`file changed while it was being packaged: ${path}`);
-  }
-  return { bytes, mode: before.mode & 0o111 ? "100755" : "100644" };
 }
 
 export function packArtifact({ baseDir, sourceDir, outputDir, repository, baseSha, runId, runAttempt }) {
@@ -201,7 +217,12 @@ export function packArtifact({ baseDir, sourceDir, outputDir, repository, baseSh
   if (!/^[1-9][0-9]*$/.test(String(runId))) fail("run ID must be a positive integer");
   if (!/^[1-9][0-9]*$/.test(String(runAttempt))) fail("run attempt must be a positive integer");
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) fail("repository must be owner/name");
-  if (existsSync(outputDir)) fail("output directory must not already exist");
+  try {
+    mkdirSync(outputDir, { mode: 0o700 });
+  } catch (error) {
+    if (error?.code === "EEXIST") fail("output directory must not already exist");
+    throw error;
+  }
 
   const baseHead = git(["rev-parse", "HEAD"], baseDir).trim();
   if (baseHead !== baseSha) fail(`trusted base checkout is ${baseHead}, expected ${baseSha}`);
@@ -210,7 +231,7 @@ export function packArtifact({ baseDir, sourceDir, outputDir, repository, baseSh
     fail(`artifact has more than ${MAX_FILES} changed paths`);
   }
 
-  mkdirSync(resolve(outputDir, "files"), { recursive: true, mode: 0o700 });
+  mkdirSync(resolve(outputDir, "files"), { mode: 0o700 });
   const files = [];
   let totalBytes = 0;
   for (const path of changed.files) {
@@ -275,12 +296,11 @@ function parentDirectories(path) {
 export function validateArtifact({ artifactDir, repository, baseSha, runId, runAttempt }) {
   const root = resolve(artifactDir);
   assertSafeRoot(root, "artifact directory");
-  assertNoSymlinkComponents(root, "manifest.json");
-  const manifestInfo = statSync(resolve(root, "manifest.json"));
-  if (!manifestInfo.isFile() || manifestInfo.size > MAX_MANIFEST_BYTES) fail("manifest is missing or too large");
+  const { bytes: manifestBytes } = readRegularFile(root, "manifest.json");
+  if (manifestBytes.length > MAX_MANIFEST_BYTES) fail("manifest is missing or too large");
   let manifest;
   try {
-    manifest = JSON.parse(readFileSync(resolve(root, "manifest.json"), "utf8"));
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
   } catch (error) {
     fail(`manifest is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -316,12 +336,10 @@ export function validateArtifact({ artifactDir, repository, baseSha, runId, runA
     paths.add(path);
 
     const artifactPath = `files/${path}`;
-    assertNoSymlinkComponents(root, artifactPath);
-    const info = lstatSync(resolve(root, artifactPath));
-    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size !== file.size) {
+    const { bytes, mode } = readRegularFile(root, artifactPath);
+    if (bytes.length !== file.size || mode !== file.mode) {
       fail(`artifact metadata does not match ${path}`);
     }
-    const bytes = readFileSync(resolve(root, artifactPath));
     if (sha256(bytes) !== file.sha256) fail(`artifact hash does not match ${path}`);
   }
 
@@ -360,10 +378,13 @@ function ensureCleanCheckout(checkoutDir, baseSha) {
 function prepareDestination(checkoutDir, path) {
   assertNoSymlinkComponents(checkoutDir, dirname(path), { allowMissingLeaf: true });
   const destination = resolve(checkoutDir, path);
-  if (existsSync(destination)) {
-    const info = lstatSync(destination);
-    if (info.isDirectory()) fail(`cannot replace a directory with a file: ${path}`);
+  try {
     rmSync(destination);
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      if (error?.code === "EISDIR" || error?.code === "EPERM") fail(`cannot replace a directory with a file: ${path}`);
+      throw error;
+    }
   }
   mkdirSync(dirname(destination), { recursive: true });
   return destination;
@@ -376,21 +397,22 @@ export function materializeArtifact({ artifactDir, checkoutDir, repository, base
   for (const path of manifest.deletions) {
     assertNoSymlinkComponents(checkoutDir, dirname(path), { allowMissingLeaf: true });
     const destination = resolve(checkoutDir, path);
-    if (existsSync(destination)) {
-      const info = lstatSync(destination);
-      if (info.isDirectory()) fail(`refusing to recursively delete a directory: ${path}`);
+    try {
       rmSync(destination);
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        if (error?.code === "EISDIR" || error?.code === "EPERM") fail(`refusing to recursively delete a directory: ${path}`);
+        throw error;
+      }
     }
   }
   for (const file of manifest.files) {
-    const source = resolve(artifactDir, "files", file.path);
-    const destination = prepareDestination(checkoutDir, file.path);
-    const sourceFd = openSync(source, "r");
-    try {
-      writeFileSync(destination, readFileSync(sourceFd), { mode: file.mode === "100755" ? 0o755 : 0o644, flag: "wx" });
-    } finally {
-      closeSync(sourceFd);
+    const { bytes, mode } = readRegularFile(resolve(artifactDir), `files/${file.path}`);
+    if (bytes.length !== file.size || mode !== file.mode || sha256(bytes) !== file.sha256) {
+      fail(`artifact changed before it could be materialized: ${file.path}`);
     }
+    const destination = prepareDestination(checkoutDir, file.path);
+    writeFileSync(destination, bytes, { mode: file.mode === "100755" ? 0o755 : 0o644, flag: "wx" });
     chmodSync(destination, file.mode === "100755" ? 0o755 : 0o644);
   }
 

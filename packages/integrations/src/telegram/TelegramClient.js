@@ -119,7 +119,12 @@ export function makeTelegramClient(config) {
     if (!botToken || typeof botToken !== "string") {
         throw new SmithersError("INVALID_INPUT", "Telegram client requires a bot token (config.botToken or SMITHERS_TELEGRAM_BOT_TOKEN).");
     }
-    const apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_TELEGRAM_API_BASE_URL).replace(/\/+$/, "");
+    const configuredBaseUrl = config.apiBaseUrl ?? DEFAULT_TELEGRAM_API_BASE_URL;
+    let baseUrlEnd = configuredBaseUrl.length;
+    while (baseUrlEnd > 0 && configuredBaseUrl.charCodeAt(baseUrlEnd - 1) === 47) {
+        baseUrlEnd -= 1;
+    }
+    const apiBaseUrl = configuredBaseUrl.slice(0, baseUrlEnd);
     const maxRateLimitRetries = config.maxRateLimitRetries ?? DEFAULT_MAX_RATE_LIMIT_RETRIES;
     const maxRetryAfterSeconds = config.maxRetryAfterSeconds ?? DEFAULT_MAX_RETRY_AFTER_SECONDS;
     // Retry only 429s, waiting the (capped) server-supplied retry_after.

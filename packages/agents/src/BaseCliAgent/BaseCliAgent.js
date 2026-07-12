@@ -515,7 +515,26 @@ export function resolveAgentAnswerText(sources) {
  * @returns {string}
  */
 function stripOscSequences(raw) {
-    return raw.replace(/\x1b\]0;[^\x07]*\x07/g, "");
+    const marker = "\x1b]0;";
+    let cursor = 0;
+    let cleaned = "";
+    while (cursor < raw.length) {
+        const start = raw.indexOf(marker, cursor);
+        if (start < 0) {
+            cleaned += raw.slice(cursor);
+            break;
+        }
+        const end = raw.indexOf("\x07", start + marker.length);
+        if (end < 0) {
+            // Match the historical behavior: an unterminated sequence is text,
+            // not a control sequence that may consume the remainder of output.
+            cleaned += raw.slice(cursor);
+            break;
+        }
+        cleaned += raw.slice(cursor, start);
+        cursor = end + 1;
+    }
+    return cleaned;
 }
 /**
  * @param {string} raw

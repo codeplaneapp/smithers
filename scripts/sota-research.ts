@@ -17,7 +17,8 @@
  * ids, no floating aliases, one holder per badge).
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { listAccounts } from "@smithers-orchestrator/accounts";
 import { ClaudeCodeAgent, CodexAgent, KimiAgent, type AgentLike } from "smithers-orchestrator";
@@ -25,7 +26,6 @@ import { validateRegistry } from "./generate-sota.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 const REGISTRY_PATH = resolve(ROOT, "docs/data/sota-models.json");
-const SUMMARY_PATH = process.env.SOTA_SUMMARY_PATH ?? "/tmp/sota-research-summary.md";
 
 /** Directories whose pinned model ids get mechanically rewritten on a bump. */
 const SWEEP_DIRS = [
@@ -291,6 +291,8 @@ if (import.meta.main) {
     "Generated surfaces refreshed: docs page, CLI module, llms bundles, init pack, review defaults, and the Agents registry page.",
     "Reviewer checklist: verify the researched ids against provider docs; confirm Sol/Terra/Luna role assignments on CLI, init, review, and Agents surfaces; check apps/review and packages/scorers price tables for any new model.",
   ].join("\n");
-  writeFileSync(SUMMARY_PATH, `${summary}\n`);
+  const summaryPath = process.env.SOTA_SUMMARY_PATH
+    ?? join(mkdtempSync(join(tmpdir(), "smithers-sota-research-")), "summary.md");
+  writeFileSync(summaryPath, `${summary}\n`, { mode: 0o600 });
   console.log(summary);
 }

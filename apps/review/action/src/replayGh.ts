@@ -40,10 +40,6 @@ function decode(bytes: Uint8Array, label: string): string {
 }
 
 function readStableFile(path: string, maxBytes: number, label: string): Buffer {
-  const namedBefore = lstatSync(path);
-  if (!namedBefore.isFile() || namedBefore.nlink !== 1 || (namedBefore.mode & 0o222) !== 0) {
-    throw new Error(`${label} path is not a protected regular file`);
-  }
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = fstatSync(fd);
@@ -59,8 +55,10 @@ function readStableFile(path: string, maxBytes: number, label: string): Buffer {
     const after = fstatSync(fd);
     const namedAfter = lstatSync(path);
     if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs
-      || namedBefore.dev !== before.dev || namedBefore.ino !== before.ino
-      || namedAfter.dev !== after.dev || namedAfter.ino !== after.ino) throw new Error(`${label} changed while being read`);
+      || before.mode !== after.mode || before.nlink !== after.nlink
+      || namedAfter.dev !== after.dev || namedAfter.ino !== after.ino
+      || namedAfter.size !== after.size || namedAfter.mtimeMs !== after.mtimeMs
+      || namedAfter.mode !== after.mode || namedAfter.nlink !== after.nlink) throw new Error(`${label} changed while being read`);
     return bytes;
   } finally { closeSync(fd); }
 }

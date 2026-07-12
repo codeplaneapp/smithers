@@ -291,9 +291,19 @@ describe("GitHub PR posting helpers", () => {
       body: "<!-- smithers-review -->\nReview body",
       comments: [],
     };
-    ghResponses.push(metadata, new Error("gh api failed: HTTP 500"));
+    const privateDetail = "/home/runner/private-token-file";
+    ghResponses.push(metadata, new Error(`gh api failed: HTTP 500\n    at ${privateDetail}:9:2`));
 
-    await expect(postPullRequestReview("/repo", pr, payload, runGhMock, publicationOptions)).rejects.toThrow("gh api failed: HTTP 500");
+    let caught: unknown;
+    try {
+      await postPullRequestReview("/repo", pr, payload, runGhMock, publicationOptions);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("HTTP 500");
+    expect((caught as Error).message).toContain("GitHub CLI request failed");
+    expect((caught as Error).message).not.toContain(privateDetail);
     expect(ghCalls).toHaveLength(2);
   });
 });

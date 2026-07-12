@@ -114,6 +114,18 @@ describe("extractUsageFromOutput", () => {
     expect(usage).toBeUndefined();
   });
 
+  test("handles a long unterminated terminal-title prefix without backtracking", () => {
+    const terminalNoise = "\x1b]0;".repeat(20_000);
+    const completed = JSON.stringify({
+      type: "turn.completed",
+      usage: { input_tokens: 12, output_tokens: 3 },
+    });
+    expect(extractUsageFromOutput(`${terminalNoise}\n${completed}`)).toMatchObject({
+      inputTokens: 12,
+      outputTokens: 3,
+    });
+  });
+
   test("returns undefined for empty output", () => {
     expect(extractUsageFromOutput("")).toBeUndefined();
     expect(extractUsageFromOutput("\n\n")).toBeUndefined();

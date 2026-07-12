@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -13,7 +13,7 @@ setDefaultTimeout(120_000);
 const tempDirs = [];
 
 function makeWorkspace(name) {
-  const dir = join(tmpdir(), `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = mkdtempSync(join(tmpdir(), `${name}-`));
   mkdirSync(join(dir, ".smithers"), { recursive: true });
   tempDirs.push(dir);
   return dir;

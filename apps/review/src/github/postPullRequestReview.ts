@@ -49,7 +49,10 @@ function ghTransport(repoDir: string, runGh: typeof defaultRunGh, result: { url:
       // A HTTP response is not a transport rejection. In particular 422 must
       // reach the core's single guarded fallback path, while POST failures
       // never acquire an adapter retry.
-      if (status) return new Response(detail, { status: Number(status) });
+      // Preserve only the status needed by the guarded 422 path. CLI failures
+      // can include command arguments, local paths, and nested stack details;
+      // none of that belongs in the response body surfaced by the core.
+      if (status) return new Response("GitHub CLI request failed", { status: Number(status) });
       throw error;
     }
   };
