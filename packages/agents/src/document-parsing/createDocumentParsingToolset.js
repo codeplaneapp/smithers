@@ -342,6 +342,40 @@ function abortableDelay(ms, abortSignal) {
     abortSignal?.addEventListener("abort", onAbort, { once: true });
   });
 }
+/**
+ * Wait between poll attempts, rejecting as soon as the signal aborts instead
+ * of sleeping through the rest of the interval.
+ *
+ * @param {number} ms
+ * @param {AbortSignal | undefined} abortSignal
+ * @returns {Promise<void>}
+ */
+function abortableDelay(ms, abortSignal) {
+  return new Promise((resolve, reject) => {
+    if (abortSignal?.aborted) {
+      reject(abortReason(abortSignal));
+      return;
+    }
+    /** @type {ReturnType<typeof setTimeout>} */
+    const timer = setTimeout(() => {
+      abortSignal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      reject(abortReason(/** @type {AbortSignal} */ (abortSignal)));
+    }
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * @param {AbortSignal} abortSignal
+ * @returns {unknown}
+ */
+function abortReason(abortSignal) {
+  return abortSignal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+}
 
 /**
  * @param {typeof fetch} request
