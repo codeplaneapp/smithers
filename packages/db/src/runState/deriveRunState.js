@@ -1,5 +1,6 @@
 import { RUN_STATE_HEARTBEAT_STALE_MS } from "./RUN_STATE_HEARTBEAT_STALE_MS.js";
 import { RUN_STATE_TIMER_OVERDUE_GRACE_MS } from "./RUN_STATE_TIMER_OVERDUE_GRACE_MS.js";
+import { isPidAlive, parseRuntimeOwnerPid } from "./runtimeOwnerLiveness.js";
 
 /** @typedef {import("./DeriveRunStateInput.ts").DeriveRunStateInput} DeriveRunStateInput */
 /** @typedef {import("./RunStateView.ts").RunStateView} RunStateView */
@@ -18,6 +19,7 @@ export function deriveRunState(input) {
         now = Date.now(),
         staleThresholdMs = RUN_STATE_HEARTBEAT_STALE_MS,
         timerOverdueGraceMs = RUN_STATE_TIMER_OVERDUE_GRACE_MS,
+        isOwnerPidAlive = isPidAlive,
     } = input;
 
     const computedAt = new Date(now).toISOString();
@@ -93,7 +95,7 @@ export function deriveRunState(input) {
             };
         }
         case "running":
-            return classifyRunning(run, now, staleThresholdMs, base);
+            return classifyRunning(run, now, staleThresholdMs, base, isOwnerPidAlive);
         default:
             return { ...base, state: "unknown" };
     }
@@ -139,9 +141,10 @@ function timerRunState(base, pendingTimer, now, graceMs) {
  * @param {number} now
  * @param {number} staleThresholdMs
  * @param {{ runId: string; computedAt: string }} base
+ * @param {(pid: number) => boolean} isOwnerPidAlive
  * @returns {RunStateView}
  */
-function classifyRunning(run, now, staleThresholdMs, base) {
+function classifyRunning(run, now, staleThresholdMs, base, isOwnerPidAlive) {
     const heartbeat =
         typeof run.heartbeatAtMs === "number" ? run.heartbeatAtMs : null;
     const startedAt =
@@ -159,9 +162,16 @@ function classifyRunning(run, now, staleThresholdMs, base) {
     }
 
     const lastHeartbeatAt = new Date(lastAlive).toISOString();
-    // Without a registered owner, supervisor has nothing to take over.
-    const orphaned =
-        run.runtimeOwnerId == null || run.runtimeOwnerId.length === 0;
+    // Verify the recorded driver PID before claiming "orphaned":
+    // - no registered owner → orphaned (supervisor has nothing to take over);
+    // - owner PID recorded and demonstrably dead → orphaned;
+    // - owner PID recorded and alive → the engine is busy with a lagging
+    //   heartbeat (e.g. saturated), never orphaned → stale;
+    // - owner recorded without a locally verifiable PID → stale (unproven).
+    const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
+    const hasOwner =
+        run.runtimeOwnerId != null && run.runtimeOwnerId.length > 0;
+    const orphaned = !hasOwner || (ownerPid != null && !isOwnerPidAlive(ownerPid));
     return {
         ...base,
         state: orphaned ? "orphaned" : "stale",

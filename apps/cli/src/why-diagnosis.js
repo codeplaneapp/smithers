@@ -4,6 +4,7 @@
 
 import { Effect } from "effect";
 import { isRunHeartbeatFresh } from "@smithers-orchestrator/engine";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
 import { computeRetryDelayMs } from "@smithers-orchestrator/scheduler/computeRetryDelayMs";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { formatAge } from "./format.js";
@@ -936,16 +937,39 @@ function buildDiagnosis(params) {
     }
     if (status === "running" && !isRunHeartbeatFresh(run, nowMs)) {
         const lastHeartbeatAtMs = typeof run.heartbeatAtMs === "number" ? run.heartbeatAtMs : null;
-        blockers.push({
-            kind: "stale-heartbeat",
-            nodeId: "(run-level)",
-            iteration: null,
-            reason: lastHeartbeatAtMs != null
-                ? `Run appears orphaned (last heartbeat ${formatDuration(Math.max(0, nowMs - lastHeartbeatAtMs))} ago)`
-                : "Run appears orphaned (no heartbeat recorded)",
-            waitingSince: waitingSinceFallback(nowMs, lastHeartbeatAtMs, run.startedAtMs, run.createdAtMs),
-            unblocker: buildResumeUnblocker(run, true),
-        });
+        const heartbeatLag = lastHeartbeatAtMs != null
+            ? `last heartbeat ${formatDuration(Math.max(0, nowMs - lastHeartbeatAtMs))} ago`
+            : "no heartbeat recorded";
+        const waitingSince = waitingSinceFallback(nowMs, lastHeartbeatAtMs, run.startedAtMs, run.createdAtMs);
+        // Verify the recorded driver PID before calling the run orphaned: a
+        // saturated engine can miss heartbeats while its process is alive, and
+        // force-resuming a live run races two engines against each other.
+        const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
+        const ownerAlive = ownerPid != null && isPidAlive(ownerPid);
+        if (ownerAlive) {
+            blockers.push({
+                kind: "engine-busy",
+                nodeId: "(run-level)",
+                iteration: null,
+                reason: `Engine is busy (owner process ${ownerPid} is alive, ${heartbeatLag})`,
+                waitingSince,
+                unblocker: `smithers logs ${runId}`,
+                context: "The owning engine process is still running; its heartbeat is lagging (often a saturated engine). Do not force-resume a live run — watch the logs or wait for the heartbeat to recover.",
+            });
+        }
+        else {
+            blockers.push({
+                kind: "stale-heartbeat",
+                nodeId: "(run-level)",
+                iteration: null,
+                reason: `Run appears orphaned (${heartbeatLag})`,
+                waitingSince,
+                unblocker: buildResumeUnblocker(run, true),
+                ...(ownerPid != null
+                    ? { context: `Owner process ${ownerPid} is not running.` }
+                    : {}),
+            });
+        }
     }
     const dedupedBlockers = dedupeBlockers(blockers);
     let summary;
@@ -1076,6 +1100,7 @@ export function diagnosisCtaCommands(diagnosis) {
         "retry-backoff": "Retry blocked node",
         "retries-exhausted": "Resume run after fixing failure",
         "stale-heartbeat": "Force resume orphaned run",
+        "engine-busy": "Tail busy engine logs",
         "dependency-failed": "Resume after dependency fix",
         "approval-decided-resume-required": "Resume run after recorded approval",
     };

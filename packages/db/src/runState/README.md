@@ -10,8 +10,12 @@ Derives the user-facing `RunStateView` (running / waiting-* / stale / orphaned
   written by the engine's durable-deferred bridge; malformed JSON degrades to
   `null`, never throws.
 - `RUN_STATE_HEARTBEAT_STALE_MS` (30s) is the running→stale threshold; a stale
-  run with no `runtimeOwnerId` is reported `"orphaned"` (nothing for the
-  supervisor to take over).
+  run is only reported `"orphaned"` when its owner is not demonstrably alive:
+  no `runtimeOwnerId` at all (nothing for the supervisor to take over), or a
+  recorded owner PID that fails the liveness probe (`runtimeOwnerLiveness.js`,
+  injectable via `isOwnerPidAlive`). A stale run whose owner PID is alive is
+  `"stale"` — a busy engine with a lagging heartbeat, not a candidate for
+  force-resume.
 - The `.ts` sidecars (`RunState`, `RunStateView`, `ReasonBlocked`,
   `ReasonUnhealthy`, `DeriveRunStateInput`, `ComputeRunStateOptions`) define the
   wire contract pinned by `tests/runState-wire-contract.test.js`. Some
