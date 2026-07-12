@@ -38,6 +38,12 @@ export function createHttpTool(options = {}) {
   });
 }
 
+/** Redirect statuses the tool resolves manually (fetch spec § 4.4). */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/** Hop budget for one logical request, matching the fetch spec's limit. */
+const MAX_REDIRECTS = 20;
+
 /**
  * @param {HttpToolInput} input
  * @param {CreateHttpToolOptions} options
@@ -51,39 +57,123 @@ async function executeHttpRequest(input, options) {
     }
   }
 
+  const controller = input.timeoutMs ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), input.timeoutMs) : null;
+  try {
+    // Resolve every Location hop manually (`redirect: "manual"`). Letting
+    // fetch follow redirects would forward the caller's secret headers
+    // (custom API keys, configured defaults) to whatever host a response
+    // points at; here each hop rebuilds its headers so secrets ride only to
+    // the origin the caller originally authorized or an allowlisted host.
+    const originalOrigin = url.origin;
+    let currentUrl = url;
+    let method = input.method ?? "GET";
+    let sendBody = input.body !== undefined;
+    for (let hop = 0; ; hop++) {
+      const headers = buildHopHeaders(input, options, currentUrl, originalOrigin, hop);
+      const init = /** @type {RequestInit} */ ({ method, headers, redirect: "manual" });
+      if (sendBody && method !== "GET" && method !== "HEAD") {
+        init.body = serializeBody(input.body, headers);
+      }
+      if (controller) {
+        init.signal = controller.signal;
+      }
+      const response = await fetch(currentUrl, init);
+      const location = response.headers.get("location");
+      const nextUrl =
+        REDIRECT_STATUSES.has(response.status) && location !== null
+          ? resolveLocation(location, currentUrl)
+          : null;
+      if (!nextUrl) {
+        return {
+          ok: response.ok,
+          status: response.status,
+          statusText: response.statusText,
+          headers: Object.fromEntries(response.headers.entries()),
+          body: await parseResponseBody(response),
+        };
+      }
+      if (hop + 1 > MAX_REDIRECTS) {
+        throw new Error(`HTTP tool request to ${input.url} exceeded ${MAX_REDIRECTS} redirects`);
+      }
+      // 303 turns any non-HEAD method into a body-less GET; 301/302 do the
+      // same for POST (fetch spec § 4.4 step 13).
+      if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) {
+        if (method !== "HEAD") {
+          method = "GET";
+        }
+        sendBody = false;
+      }
+      await response.body?.cancel();
+      currentUrl = nextUrl;
+    }
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+/**
+ * Build the outgoing headers for one hop of the manually resolved redirect
+ * chain. The first hop gets the standard treatment: host-gated default
+ * headers, then caller headers, then auth. Redirect hops carry those
+ * potentially-secret headers only while they stay on the original request's
+ * origin or land on an explicitly allowlisted host; every other cross-origin
+ * hop is sent bare, so a redirecting (or compromised) endpoint cannot bounce
+ * the request elsewhere and exfiltrate the secrets.
+ *
+ * @param {HttpToolInput} input
+ * @param {CreateHttpToolOptions} options
+ * @param {URL} url
+ * @param {string} originalOrigin
+ * @param {number} hop
+ * @returns {Headers}
+ */
+function buildHopHeaders(input, options, url, originalOrigin, hop) {
   const headers = new Headers();
+  if (hop > 0 && !isTrustedRedirectTarget(url, originalOrigin, options)) {
+    return headers;
+  }
   applyDefaultHeaders(headers, options, url);
   for (const [key, value] of Object.entries(input.headers ?? {})) {
     headers.set(key, value);
   }
   applyAuth(headers, input.auth);
+  return headers;
+}
 
-  const init = /** @type {RequestInit} */ ({
-    method: input.method ?? "GET",
-    headers,
-  });
-  if (input.body !== undefined && init.method !== "GET" && init.method !== "HEAD") {
-    init.body = serializeBody(input.body, headers);
-  }
+/**
+ * A redirect hop may carry the request's secret headers only when it stays on
+ * the origin the caller originally requested or lands on a host the tool
+ * creator allowlisted via `baseUrl`/`allowedHosts`.
+ *
+ * @param {URL} url
+ * @param {string} originalOrigin
+ * @param {CreateHttpToolOptions} options
+ * @returns {boolean}
+ */
+function isTrustedRedirectTarget(url, originalOrigin, options) {
+  if (url.origin === originalOrigin) return true;
+  const allowed = resolveAllowedHosts(options);
+  return allowed !== null && allowed.has(url.host.toLowerCase());
+}
 
-  const controller = input.timeoutMs ? new AbortController() : null;
-  const timeout = controller ? setTimeout(() => controller.abort(), input.timeoutMs) : null;
-  if (controller) {
-    init.signal = controller.signal;
-  }
+/**
+ * Resolve a Location header against the URL that produced it. Returns null
+ * for an unparseable or non-HTTP(S) target, in which case the redirect
+ * response itself is returned to the caller instead of being followed.
+ *
+ * @param {string} location
+ * @param {URL} base
+ * @returns {URL | null}
+ */
+function resolveLocation(location, base) {
   try {
-    const response = await fetch(url, init);
-    return {
-      ok: response.ok,
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
-      body: await parseResponseBody(response),
-    };
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
+    const next = new URL(location, base);
+    return next.protocol === "http:" || next.protocol === "https:" ? next : null;
+  } catch {
+    return null;
   }
 }
 

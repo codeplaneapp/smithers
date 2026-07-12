@@ -18,6 +18,11 @@ export type CreateHttpToolOptions = {
    * host. Each entry is a bare host (`api.example.com`, `api.example.com:8443`)
    * or a full URL, matched as WHATWG `url.host`. When neither this nor `baseUrl`
    * is set the default headers are sent to every host (no restriction).
+   *
+   * The same allowlist gates redirect hops: caller headers, auth, and default
+   * headers follow a redirect only when the hop stays on the original
+   * request's origin or lands on an allowlisted host — any other cross-origin
+   * hop is sent with no headers at all.
    */
   allowedHosts?: string[];
 };
