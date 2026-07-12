@@ -34,7 +34,8 @@ export function createHttpTool(options = {}) {
       options.description ??
       "Call any REST API by providing method, url, headers, query params, body, and optional auth.",
     inputSchema: httpToolInputSchema,
-    execute: async (input) => executeHttpRequest(/** @type {HttpToolInput} */ (input), options),
+    execute: async (input, executionOptions) =>
+      executeHttpRequest(/** @type {HttpToolInput} */ (input), options, executionOptions?.abortSignal),
   });
 }
 
@@ -47,9 +48,11 @@ const MAX_REDIRECTS = 20;
 /**
  * @param {HttpToolInput} input
  * @param {CreateHttpToolOptions} options
+ * @param {AbortSignal} [abortSignal] AI SDK cancellation signal from ToolExecutionOptions.
  * @returns {Promise<HttpToolOutput>}
  */
-async function executeHttpRequest(input, options) {
+async function executeHttpRequest(input, options, abortSignal) {
+  abortSignal?.throwIfAborted();
   const url = new URL(input.url);
   for (const [key, value] of Object.entries(input.query ?? {})) {
     if (value !== null && value !== undefined) {
@@ -59,6 +62,7 @@ async function executeHttpRequest(input, options) {
 
   const controller = input.timeoutMs ? new AbortController() : null;
   const timeout = controller ? setTimeout(() => controller.abort(), input.timeoutMs) : null;
+  const signal = composeAbortSignals(abortSignal, controller?.signal);
   try {
     // Resolve every Location hop manually (`redirect: "manual"`). Letting
     // fetch follow redirects would forward the caller's secret headers
@@ -75,8 +79,8 @@ async function executeHttpRequest(input, options) {
       if (sendBody && method !== "GET" && method !== "HEAD") {
         init.body = serializeBody(input.body, headers);
       }
-      if (controller) {
-        init.signal = controller.signal;
+      if (signal) {
+        init.signal = signal;
       }
       const response = await fetch(currentUrl, init);
       const location = response.headers.get("location");
@@ -112,6 +116,22 @@ async function executeHttpRequest(input, options) {
       clearTimeout(timeout);
     }
   }
+}
+
+/**
+ * Compose the AI SDK's cancellation signal with the tool's own timeout signal
+ * so whichever fires first aborts the underlying fetch. Returns undefined when
+ * neither exists so the request stays signal-free, matching prior behavior.
+ *
+ * @param {AbortSignal | undefined} abortSignal
+ * @param {AbortSignal | undefined} timeoutSignal
+ * @returns {AbortSignal | undefined}
+ */
+function composeAbortSignals(abortSignal, timeoutSignal) {
+  if (abortSignal && timeoutSignal) {
+    return AbortSignal.any([abortSignal, timeoutSignal]);
+  }
+  return abortSignal ?? timeoutSignal;
 }
 
 /**
