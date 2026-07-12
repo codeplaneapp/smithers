@@ -1431,11 +1431,10 @@ describe("DDD tabs and components", () => {
           onChange={(markdown) => edits.push(markdown)}
         />,
       );
-      for (let i = 0; i < 20 && !harness.container.querySelector('[data-testid="ddd-editor-error"]'); i += 1) {
-        await act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        });
-      }
+      await waitFor(
+        () => expect(harness.container.querySelector('[data-testid="ddd-editor-error"]')).toBeTruthy(),
+        10_000,
+      );
 
       expect(text(harness.container)).toContain("Editor failed to load");
       expect(text(harness.container)).toContain("mutation observer unavailable");
