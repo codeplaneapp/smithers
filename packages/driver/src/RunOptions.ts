@@ -34,6 +34,14 @@ export type RunOptions = {
   pauseSignal?: AbortSignal;
   resume?: boolean;
   force?: boolean;
+  /**
+   * Resume this run after its workflow source changed, re-blessing the stored
+   * durability metadata (workflow hashes) in place instead of forking to a new
+   * run id. Skips ONLY the two workflow-hash mismatches; workflow-path and
+   * VCS-root mismatches still reject. Replay determinism becomes the caller's
+   * responsibility. Only meaningful together with {@link resume}.
+   */
+  acceptWorkflowChange?: boolean;
   workflowPath?: string;
   rootDir?: string;
   logDir?: string | null;

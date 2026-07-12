@@ -9,7 +9,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { __engineInternals as I } from "../src/engine.js";
+import { __engineInternals as I, runsDueForQuotaResume } from "../src/engine.js";
 
 const inputPayloadTable = sqliteTable("input_payload", {
     runId: text("run_id").primaryKey(),
@@ -282,6 +282,60 @@ describe("engine internals: scheduler summaries and row shaping", () => {
 });
 
 describe("engine internals: durability, options and graph helpers", () => {
+    test("runsDueForQuotaResume returns only quota parks whose reset has elapsed", async () => {
+        const { sqlite, adapter } = makeContinueDb();
+        try {
+            await insertRun(adapter, "quota-due", {
+                status: "waiting-quota",
+                errorJson: JSON.stringify({ resetAtMs: 1_000 }),
+            });
+            await insertRun(adapter, "quota-future", {
+                status: "waiting-quota",
+                errorJson: JSON.stringify({ resetAtMs: 3_000 }),
+            });
+            await insertRun(adapter, "quota-manual", {
+                status: "waiting-quota",
+                errorJson: JSON.stringify({ quotaBlockedCount: 1 }),
+            });
+
+            const due = await runsDueForQuotaResume(adapter, 2_000);
+            expect(due.map((run) => run.runId)).toEqual(["quota-due"]);
+        } finally {
+            sqlite.close();
+        }
+    });
+
+    test("nextAttemptNumber discounts only reset-cancelled attempts, not crash-recovery cancels", () => {
+        // Attempts are newest-first (as listAttempts returns them).
+        const failed = (attempt) => ({ attempt, state: "failed", metaJson: null });
+        const crashCancel = (attempt) => ({ attempt, state: "cancelled", metaJson: null });
+        const resetCancel = (attempt) => ({
+            attempt,
+            state: "cancelled",
+            metaJson: JSON.stringify({ resetCancelled: true }),
+        });
+
+        // No history -> attempt 1.
+        expect(I.nextAttemptNumber([])).toBe(1);
+        // A normal failed attempt advances the number.
+        expect(I.nextAttemptNumber([failed(1)])).toBe(2);
+        // A crash-recovery cancellation (unmarked) STILL counts -> preserves
+        // crash attempt numbering, tool-resume warnings, and revert anchors.
+        expect(I.nextAttemptNumber([crashCancel(1)])).toBe(2);
+        expect(I.nextAttemptNumber([crashCancel(2), failed(1)])).toBe(3);
+        // A reset-cancelled attempt is discounted -> retry restarts at rung 0.
+        expect(I.nextAttemptNumber([resetCancel(1)])).toBe(1);
+        expect(I.nextAttemptNumber([resetCancel(3), resetCancel(2), resetCancel(1)])).toBe(1);
+        // Mixed: reset-cancels discounted, an unmarked failed row still counts.
+        expect(I.nextAttemptNumber([resetCancel(2), failed(1)])).toBe(2);
+
+        expect(I.isResetCancelledAttempt(resetCancel(1))).toBe(true);
+        expect(I.isResetCancelledAttempt(crashCancel(1))).toBe(false);
+        expect(I.isResetCancelledAttempt(failed(1))).toBe(false);
+        // Marker only counts on a cancelled row, not any other state.
+        expect(I.isResetCancelledAttempt({ attempt: 1, state: "failed", metaJson: JSON.stringify({ resetCancelled: true }) })).toBe(false);
+    });
+
     test("handles carried input rows and durability metadata comparisons", () => {
         expect(I.ralphStateToObject(new Map([
             ["b", { iteration: 2, done: true }],

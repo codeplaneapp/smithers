@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { markResetCancelledMeta } from "./resetCancelMarker.js";
 /** @typedef {import("./RetryTaskOptions.ts").RetryTaskOptions} RetryTaskOptions */
 /** @typedef {import("./RetryTaskResult.ts").RetryTaskResult} RetryTaskResult */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
@@ -166,7 +167,10 @@ export async function retryTask(adapter, opts) {
                     attempt.state !== "waiting-timer") {
                     continue;
                 }
-                const patch = { state: "cancelled" };
+                const patch = {
+                    state: "cancelled",
+                    metaJson: markResetCancelledMeta(attempt.metaJson),
+                };
                 if (attempt.finishedAtMs == null) {
                     patch.finishedAtMs = resetTimestampMs;
                 }

@@ -2,7 +2,9 @@
 import { describe, expect, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { Task } from "../../components/src/components/Task.js";
+import { Workflow } from "../../components/src/components/Workflow.js";
+import { runWorkflow } from "../src/engine.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
@@ -10,6 +12,51 @@ import { Effect } from "effect";
 const TIMEOUT_MS = 30_000;
 
 describe("quota-aware park lifecycle e2e", () => {
+    test("a latest quota failure parks even after a non-quota failure exhausted retries, then resumes", async () => {
+        const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        try {
+            let calls = 0;
+            const agent = {
+                id: "mixed-failure-agent",
+                tools: {},
+                async generate() {
+                    calls += 1;
+                    if (calls === 1) {
+                        throw new Error("ordinary provider timeout");
+                    }
+                    if (calls === 2) {
+                        throw new SmithersError("AGENT_QUOTA_EXCEEDED", "usage window exhausted", {
+                            failureQuota: true,
+                            quotaResetAtMs: Date.now() + 60_000,
+                        });
+                    }
+                    return { output: { value: calls } };
+                },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="mixed-failure-quota-park">
+                    <Task id="q" output={outputs.outputA} agent={agent} retries={calls < 2 ? 1 : 0}>
+                        fail normally, then hit quota
+                    </Task>
+                </Workflow>
+            ));
+            const runId = "mixed-failure-quota-park-run";
+
+            const parked = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
+            expect(parked.status).toBe("waiting-quota");
+            expect((await adapter.getRun(runId))?.status).toBe("waiting-quota");
+
+            const resumed = await Effect.runPromise(
+                runWorkflow(workflow, { input: {}, runId, resume: true }),
+            );
+            expect(resumed.status).toBe("finished");
+            expect(calls).toBe(3);
+        } finally {
+            cleanup();
+        }
+    }, TIMEOUT_MS);
+
     test("quota failure parks the run as waiting-quota with reset metadata and preserves the retry budget", async () => {
         const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
         const adapter = new SmithersDb(db);

@@ -4,7 +4,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventBus } from "../src/events.js";
-import { runWorkflow, Task, Timer, Workflow } from "smithers-orchestrator";
+import { Task } from "../../components/src/components/Task.js";
+import { Timer } from "../../components/src/components/Timer.js";
+import { Workflow } from "../../components/src/components/Workflow.js";
+import { runWorkflow } from "../src/engine.js";
+import { readWorkflowEntryHash, readWorkflowGraphHash } from "../src/workflow-hash.js";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
@@ -191,6 +195,60 @@ describe("Durability", () => {
         expect(run?.status).toBe("finished");
         rmSync(dir, { recursive: true, force: true });
         cleanup();
+    });
+    test("acceptWorkflowChange resumes the same run and re-stamps current workflow hashes", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-accept-workflow-change-"));
+        const workflowPath = join(dir, "workflow.tsx");
+        writeFileSync(workflowPath, "export default 'v1';\n", "utf8");
+        const { smithers, db, cleanup } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        const runId = "accept-workflow-change-same-run";
+        const workflow = smithers(() => (
+            <Workflow name="accept-workflow-change">
+                <Timer id="hold" duration="1h" />
+            </Workflow>
+        ));
+        try {
+            const first = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId,
+                workflowPath,
+            }));
+            expect(first.status).toBe("waiting-timer");
+            const before = await adapter.getRun(runId);
+
+            writeFileSync(workflowPath, "export default 'v2';\n", "utf8");
+            const rejected = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId,
+                resume: true,
+                workflowPath,
+            }));
+            expect(rejected.status).toBe("failed");
+            expect(rejected.error?.code).toBe("RESUME_METADATA_MISMATCH");
+            expect((await adapter.getRun(runId))?.workflowHash).toBe(before?.workflowHash);
+
+            const accepted = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId,
+                resume: true,
+                workflowPath,
+                acceptWorkflowChange: true,
+            }));
+            expect(accepted.runId).toBe(runId);
+            expect(accepted.status).toBe("waiting-timer");
+
+            const currentWorkflowHash = await readWorkflowGraphHash(workflowPath);
+            const currentEntryHash = await readWorkflowEntryHash(workflowPath);
+            const restamped = await adapter.getRun(runId);
+            expect(restamped?.workflowHash).toBe(currentWorkflowHash);
+            const durability = Object.values(JSON.parse(restamped?.configJson ?? "{}"))
+                .find((value) => value && typeof value === "object" && "entryWorkflowHash" in value);
+            expect(durability?.entryWorkflowHash).toBe(currentEntryHash);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+            cleanup();
+        }
     });
     test("supervised timer resume mismatch fails the parked run", async () => {
         const dir = mkdtempSync(join(tmpdir(), "smithers-timer-resume-metadata-"));

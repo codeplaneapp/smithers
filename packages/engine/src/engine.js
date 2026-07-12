@@ -392,6 +392,39 @@ function parseAttemptMetaJson(metaJson) {
     }
 }
 /**
+ * Marker key that the time-travel reset paths (retry-task / rewind) stamp into a
+ * cancelled attempt's meta_json. Must match `RESET_CANCELLED_META_KEY` in
+ * packages/time-travel/src/resetCancelMarker.js — the string is the shared
+ * contract. Engine cannot import time-travel (dependency direction), so the
+ * literal is duplicated deliberately, like other cross-package wire constants.
+ */
+const RESET_CANCELLED_META_KEY = "resetCancelled";
+/**
+ * A reset-cancelled attempt is one a time-travel reset deliberately voided so the
+ * node re-runs from attempt 1. Ordinary crash-recovery cancellations (engine
+ * cancels in-flight attempts on resume / stale-sweep / unmount) are UNMARKED and
+ * are NOT reset-cancelled, so they still count toward the next attempt number.
+ * @param {{ state?: string | null, metaJson?: string | null }} attempt
+ * @returns {boolean}
+ */
+function isResetCancelledAttempt(attempt) {
+    if (!attempt || attempt.state !== "cancelled")
+        return false;
+    return parseAttemptMetaJson(attempt.metaJson)[RESET_CANCELLED_META_KEY] === true;
+}
+/**
+ * Next attempt number for a node given its existing attempts (newest first).
+ * Discounts ONLY reset-cancelled attempts, so a time-travel retry restarts at
+ * attempt 1 (failover rung 0) while normal crash-recovery numbering — and the
+ * tool-resume side-effect warnings and revert anchors keyed on it — is intact.
+ * @param {ReadonlyArray<{ attempt: number, state?: string | null, metaJson?: string | null }>} attempts
+ * @returns {number}
+ */
+function nextAttemptNumber(attempts) {
+    const countedAttempts = attempts.filter((attempt) => !isResetCancelledAttempt(attempt));
+    return (countedAttempts[0]?.attempt ?? 0) + 1;
+}
+/**
  * @param {unknown} value
  * @returns {unknown[] | undefined}
  */
@@ -2020,8 +2053,10 @@ function compareNullableString(left, right, mismatchLabel, mismatches) {
  * @param {Record<string, unknown>} existingConfig
  * @param {RunDurabilityMetadata} current
  * @param {string | null} workflowPath
+ * @param {{ acceptWorkflowChange?: boolean }} [options]
+ * @returns {string[]}
  */
-function assertResumeDurabilityMetadata(existingRun, existingConfig, current, workflowPath) {
+function assertResumeDurabilityMetadata(existingRun, existingConfig, current, workflowPath, options = {}) {
     const mismatches = [];
     const storedDurability = getStoredDurabilityConfig(existingConfig);
     const storedDurabilityVersion = storedDurability?.version ?? 0;
@@ -2060,8 +2095,13 @@ function assertResumeDurabilityMetadata(existingRun, existingConfig, current, wo
         : (existingRun.vcsRoot ?? null) !== (current.vcsRoot ?? null))) {
         mismatches.push("VCS root changed");
     }
-    if (mismatches.length > 0) {
-        const isWorkflowEdit = mismatches.some((m) => m === "workflow entry file changed" || m === "workflow module graph changed");
+    const acceptedWorkflowMismatches = options.acceptWorkflowChange === true
+        ? mismatches.filter((mismatch) => mismatch === "workflow entry file changed" ||
+            mismatch === "workflow module graph changed")
+        : [];
+    const blockingMismatches = mismatches.filter((mismatch) => !acceptedWorkflowMismatches.includes(mismatch));
+    if (blockingMismatches.length > 0) {
+        const isWorkflowEdit = blockingMismatches.some((m) => m === "workflow entry file changed" || m === "workflow module graph changed");
         const hint = isWorkflowEdit
             ? "The workflow source changed since this run started, so it can no longer be resumed safely. " +
                 "To carry the edit forward, fork from a checkpoint: `smithers fork <workflow> --run-id <id> --frame <n>` " +
@@ -2070,8 +2110,8 @@ function assertResumeDurabilityMetadata(existingRun, existingConfig, current, wo
                 "(Note: resume hashes the workflow file content, not git — no commit is required.)"
             : "Run metadata (workflow path or VCS root) no longer matches. Resume from the original location, " +
                 "or start a fresh run with `smithers up <workflow>`.";
-        throw new SmithersError("RESUME_METADATA_MISMATCH", `Cannot resume run because durable metadata changed: ${mismatches.join(", ")}. ${hint}`, {
-            mismatches,
+        throw new SmithersError("RESUME_METADATA_MISMATCH", `Cannot resume run because durable metadata changed: ${blockingMismatches.join(", ")}. ${hint}`, {
+            mismatches: blockingMismatches,
             existing: {
                 workflowPath: existingRun.workflowPath ?? null,
                 workflowHash: existingRun.workflowHash ?? null,
@@ -2082,6 +2122,29 @@ function assertResumeDurabilityMetadata(existingRun, existingConfig, current, wo
             current,
         });
     }
+    return acceptedWorkflowMismatches;
+}
+
+/**
+ * Return quota-parked runs whose known provider reset time has elapsed. Quota
+ * parks without a reset time require manual intervention and are never due.
+ * @param {SmithersDb} adapter
+ * @param {number} nowMs
+ * @returns {Promise<RunRow[]>}
+ */
+export async function runsDueForQuotaResume(adapter, nowMs) {
+    const waitingRuns = await adapter.listRuns(1_000, "waiting-quota");
+    return waitingRuns.filter((run) => {
+        if (!run.errorJson)
+            return false;
+        try {
+            const resetAtMs = Number(JSON.parse(run.errorJson)?.resetAtMs);
+            return Number.isFinite(resetAtMs) && resetAtMs <= nowMs;
+        }
+        catch {
+            return false;
+        }
+    });
 }
 /**
  * Claim-owner prefix the supervisor stamps on runs it resumes:
@@ -2917,7 +2980,11 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         }
         return null;
     })();
-    const attemptNo = (attempts[0]?.attempt ?? 0) + 1;
+    // Discount only reset-cancelled attempts (marked by the time-travel reset
+    // paths) so a deliberate retry restarts at attempt 1 / rung 0. Engine-issued
+    // crash-recovery cancellations are unmarked and still count, preserving
+    // crash attempt numbering, tool-resume warnings, and revert anchors.
+    const attemptNo = nextAttemptNumber(attempts);
     updateCurrentCorrelationContext({ attempt: attemptNo });
     const taskSpanContext = {
         runId,
@@ -4919,7 +4986,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         const failedAttempts = attempts.filter((a) => a.state === "failed");
         const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
         const retryConsumingFailedAttempts = failedAttempts.filter((a) => !isQuotaTaskFailure(a));
-        if (!hasNonRetryableFailure && retryConsumingFailedAttempts.length <= desc.retries) {
+        const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
+        if (latestFailedAttemptIsQuota ||
+            (!hasNonRetryableFailure && retryConsumingFailedAttempts.length <= desc.retries)) {
             await Effect.runPromise(eventBus.emitEventWithPersist({
                 type: "NodeRetrying",
                 runId,
@@ -5919,8 +5988,10 @@ async function runWorkflowBodyDriver(workflow, opts) {
             const failedAttempts = attempts.filter((attempt) => attempt.state === "failed");
             const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
             const retryConsumingFailedAttempts = failedAttempts.filter((attempt) => !isQuotaTaskFailure(attempt));
-            if (hasNonRetryableFailure ||
-                retryConsumingFailedAttempts.length >= task.retries + 1) {
+            const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
+            if (!latestFailedAttemptIsQuota &&
+                (hasNonRetryableFailure ||
+                    retryConsumingFailedAttempts.length >= task.retries + 1)) {
                 await Effect.runPromise(adapter.insertNode({
                     runId,
                     nodeId: task.nodeId,
@@ -6404,7 +6475,15 @@ async function runWorkflowBodyDriver(workflow, opts) {
         });
         if (opts.resume && existingRun) {
             try {
-                assertResumeDurabilityMetadata(existingRun, existingConfig, runMetadata, resolvedWorkflowPath);
+                const acceptedWorkflowMismatches = assertResumeDurabilityMetadata(existingRun, existingConfig, runMetadata, resolvedWorkflowPath, {
+                    acceptWorkflowChange: "acceptWorkflowChange" in opts && opts.acceptWorkflowChange === true,
+                });
+                if (acceptedWorkflowMismatches.length > 0) {
+                    logWarning("resuming after accepting workflow source changes; replay determinism is now the caller's responsibility", {
+                        runId,
+                        acceptedWorkflowMismatches,
+                    }, "engine:run");
+                }
             }
             catch (error) {
                 if (shouldFailTimerWakeResume(existingRun, opts)) {
@@ -6922,6 +7001,8 @@ export const __engineInternals = {
     isAbortError,
     collectErrorMessages,
     isStructuredOutputParseFailure,
+    isResetCancelledAttempt,
+    nextAttemptNumber,
     depsTextAccessHint,
     makeStructuredOutputCompatibilityError,
     makePlainTextOutputError,

@@ -2,7 +2,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { retryTask } from "../src/retry-task.js";
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "../../engine/src/engine.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
@@ -31,6 +31,63 @@ function makeAgent(nodeId, callCounts, behavior) {
     };
 }
 describe("retry-task e2e", () => {
+    test("retry-task restarts at attempt 1 and failover rung 0", async () => {
+        const { smithers, Workflow, Task, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        try {
+            let recovered = false;
+            let primaryCalls = 0;
+            let fallbackCalls = 0;
+            const primary = {
+                id: "reset-primary",
+                tools: {},
+                async generate() {
+                    primaryCalls += 1;
+                    if (!recovered)
+                        throw new Error("primary unavailable");
+                    return { output: { value: 101 } };
+                },
+            };
+            const fallback = {
+                id: "reset-fallback",
+                tools: {},
+                async generate() {
+                    fallbackCalls += 1;
+                    throw new Error("fallback unavailable");
+                },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="retry-attempt-one-rung-zero">
+                    <Task id="target" output={outputs.outputA} agent={[primary, fallback]} retries={2}>
+                        execute on the recovered primary
+                    </Task>
+                </Workflow>
+            ));
+            const runId = "retry-attempt-one-rung-zero-run";
+
+            const failed = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
+            expect(failed.status).toBe("failed");
+            expect((await adapter.listAttempts(runId, "target", 0)).map((attempt) => attempt.attempt)).toEqual([3, 2, 1]);
+
+            const reset = await retryTask(adapter, { runId, nodeId: "target" });
+            expect(reset.success).toBe(true);
+            recovered = true;
+
+            const resumed = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId,
+                resume: true,
+            }));
+            expect(resumed.status).toBe("finished");
+            expect(primaryCalls).toBe(2);
+            expect(fallbackCalls).toBe(2);
+            const attempts = await adapter.listAttempts(runId, "target", 0);
+            expect(attempts.find((attempt) => attempt.state === "finished")?.attempt).toBe(1);
+        } finally {
+            cleanup();
+        }
+    });
+
     test("retry-task resets a failed task and resumes to completion", async () => {
         const { smithers, Workflow, Task, outputs, db, cleanup } = createTestSmithers(outputSchemas);
         const adapter = new SmithersDb(db);

@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
+import { markResetCancelledMeta } from "./resetCancelMarker.js";
 import * as BunContext from "@effect/platform-bun/BunContext";
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./TimeTravelOptions.ts").TimeTravelOptions} TimeTravelOptions */
@@ -206,7 +207,10 @@ export async function timeTravel(adapter, opts) {
                 if ((attempt.startedAtMs ?? 0) < cutoff || attempt.state === "cancelled") {
                     continue;
                 }
-                const patch = { state: "cancelled" };
+                const patch = {
+                    state: "cancelled",
+                    metaJson: markResetCancelledMeta(attempt.metaJson),
+                };
                 if (attempt.finishedAtMs == null) {
                     patch.finishedAtMs = nowMs();
                 }
