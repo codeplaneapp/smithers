@@ -2,52 +2,24 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import crypto from "node:crypto";
 import { SmithersError } from "@smithers-orchestrator/errors";
+import { EVAL_CASE_STATUSES, formatEvalError, isPlainObject, jsonContains, jsonEquals, slugifyEvalToken, } from "@smithers-orchestrator/scorers/evalCases";
 
-export const EVAL_CASE_STATUSES = [
-    "finished",
-    "continued",
-    "failed",
-    "cancelled",
-    "waiting-approval",
-    "waiting-event",
-    "waiting-timer",
-];
+export { EVAL_CASE_STATUSES };
+// `slugifyEvalToken`/`jsonEquals`/`jsonContains`/`formatEvalError` are the
+// ONE shared implementation, also used by the `eval-suite-run` seeded
+// workflow's `evaluateEvalCase` (packages/scorers/src/evalCases.js) — this
+// CLI command re-exports them for backwards-compat call sites instead of
+// keeping a second copy.
+export { slugifyEvalToken };
 
 const RUN_ID_MAX_LENGTH = 64;
 const EVAL_EXPECTED_KEYS = new Set(["status", "output", "outputContains", "errorContains"]);
-
-/**
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-function isPlainObject(value) {
-    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 /**
  * @param {string} value
  */
 function stableHash(value) {
     return crypto.createHash("sha1").update(value).digest("hex").slice(0, 8);
-}
-
-/**
- * @param {string} value
- * @param {string} fallback
- * @param {number} maxLength
- */
-export function slugifyEvalToken(value, fallback = "case", maxLength = 32) {
-    const slug = value
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .replace(/-{2,}/g, "-");
-    const normalized = slug || fallback;
-    if (normalized.length <= maxLength) {
-        return normalized;
-    }
-    return `${normalized.slice(0, Math.max(1, maxLength - 9)).replace(/-+$/g, "")}-${stableHash(normalized)}`;
 }
 
 /**
@@ -103,82 +75,6 @@ function normalizeExpected(value, label) {
         throw new SmithersError("INVALID_INPUT", `${label}.status must be one of ${EVAL_CASE_STATUSES.join(", ")}.`, { status });
     }
     return { ...object, status };
-}
-
-/**
- * @param {unknown} value
- * @returns {string}
- */
-function stableJson(value) {
-    if (Array.isArray(value)) {
-        return `[${value.map(stableJson).join(",")}]`;
-    }
-    if (isPlainObject(value)) {
-        return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
-    }
-    return JSON.stringify(value);
-}
-
-/**
- * @param {unknown} actual
- * @param {unknown} expected
- */
-function jsonEquals(actual, expected) {
-    return stableJson(actual) === stableJson(expected);
-}
-
-/**
- * @param {unknown} actual
- * @param {unknown} expected
- */
-function jsonContains(actual, expected) {
-    if (isPlainObject(expected)) {
-        if (!isPlainObject(actual)) {
-            return false;
-        }
-        for (const [key, value] of Object.entries(expected)) {
-            if (!jsonContains(actual[key], value)) {
-                return false;
-            }
-        }
-        return true;
-    }
-    if (Array.isArray(expected)) {
-        if (!Array.isArray(actual) || actual.length < expected.length) {
-            return false;
-        }
-        const matchedActualIndexes = new Set();
-        return expected.every((entry) => {
-            const matchIndex = actual.findIndex((actualEntry, index) => {
-                return !matchedActualIndexes.has(index) && jsonContains(actualEntry, entry);
-            });
-            if (matchIndex < 0) {
-                return false;
-            }
-            matchedActualIndexes.add(matchIndex);
-            return true;
-        });
-    }
-    return jsonEquals(actual, expected);
-}
-
-/**
- * @param {unknown} error
- */
-function formatEvalError(error) {
-    if (error === undefined || error === null) {
-        return "";
-    }
-    if (error instanceof Error) {
-        return error.message;
-    }
-    if (isPlainObject(error)) {
-        if (typeof error.message === "string") {
-            return error.message;
-        }
-        return stableJson(error);
-    }
-    return String(error);
 }
 
 /**

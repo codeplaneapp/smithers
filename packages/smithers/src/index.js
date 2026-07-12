@@ -212,6 +212,13 @@ export {
 } from "@smithers-orchestrator/engine";
 export { resolveWorktreePath } from "@smithers-orchestrator/graph";
 export { signalRun } from "@smithers-orchestrator/engine/signals";
+// Run an arbitrary workflow as a real, separately-addressable child run with
+// an explicit runId (prefer-resume/attach/idempotent-by-runId) and get back
+// `{ runId, status, output }` WITHOUT throwing on a non-finished status —
+// unlike `<Subflow>`, which throws and hides the child runId. This is the
+// seam a data-driven fan-out (e.g. `eval-suite-run`) uses to launch and
+// score each item's run individually.
+export { executeChildWorkflow } from "@smithers-orchestrator/engine/child-workflow";
 export { usePatched } from "@smithers-orchestrator/engine/effect/versioning";
 // Tools
 export {

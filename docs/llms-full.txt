@@ -1001,6 +1001,8 @@ Five delegation scorers back the delegation-chain workflow: `pocJudgmentScorer` 
 
 The public scorer surface also exports `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smithersScorers` table, token-cost helpers (`modelTokenPrices`, `estimateCostUsd`), and scorer metrics (`scorersStarted`, `scorersFinished`, `scorersFailed`, `scorerDuration`).
 
+The eval-suite domain the `eval-suite-run` seeded workflow and the `evals` gateway extension share: `parseEvalDataset` (JSON array or JSONL dataset parsing), `evaluateEvalCase` (grades a case's status/output/error against its `expected` value — either an assertion spec of `status`/`output`/`outputContains`/`errorContains`, or a literal expected-output value matched by subset/deep-equal), `evalAssertionScorer` (turns a graded case's assertions into a real scored row), `evalCaseRunId` (a readable, collision-free child-run id), the `EVAL_CASE_STATUSES` and `EVAL_PASS_THRESHOLD` constants, and the shared low-level primitives `slugifyEvalToken`, `jsonEquals`, `jsonContains`, `normalizeExpected`, `formatEvalError`, and `isPlainObject`.
+
 ```bash
 bunx smithers-orchestrator scores RUN_ID
 ```
@@ -5007,6 +5009,33 @@ Read the persisted subflow result in the parent exactly like a task output:
 `ctx.outputMaybe(parent.outputs.childSummary, { nodeId: "run-child" })`. The
 `nodeId` is the `<Subflow id>`, and the output target is the parent's schema key.
 
+## What `childRun` persists
+
+With `mode="childRun"` (the default), the value stored under the parent's
+`<Subflow output>` target is the child's normalized `RunResult.output`: the
+child's last task result, not a table-keyed snapshot of the child's output
+tables. When the child run finishes, the engine reads the rows the child wrote
+to its declared result schema (`smithers(build, { output })`, defaulting to
+the schema key literally named `output`), strips the system columns (`runId`,
+`nodeId`, `iteration`) from each row, and normalizes what is left:
+
+- Exactly one row, the common case where the child's final task is the only
+  writer of the result schema, unwraps to that plain row object, like
+  `{ summary: "..." }` above.
+- Zero rows normalize to `null`.
+- Multiple rows (several tasks or loop iterations writing to the result
+  schema) persist as an array of stripped rows.
+
+There is no `{ schemaKey: rows }` wrapper: the parent receives the one result
+value, never a map of the child's output tables. The parent validates that
+value against its `<Subflow output>` schema exactly like a task payload, so
+adding or changing the child's final task changes the parent's expected
+schema: renaming that task's output columns, pointing the child's declared
+result at a different schema, or adding another writer to the result schema
+(one row becomes an array) all change the shape the parent receives. Update
+the parent's `<Subflow output>` schema in the same change, or the subflow task
+fails output validation.
+
 ## Single-file parent and child
 
 For small examples and eval fixtures, define both factories in one `.tsx` file.
@@ -5072,7 +5101,7 @@ value passed through the parent's `<Subflow input={...}>` prop.
 
 ## Notes
 
-- `childRun` (default) gives the child its own DB row; retry/cache/resume scope it as a unit.
+- `childRun` (default) gives the child its own DB row; retry/cache/resume scope it as a unit. The persisted result is the child's last task row, not a table-keyed snapshot (see What `childRun` persists).
 - `inline` renders the child tree as siblings in the parent plan, sharing its scope.
 - Subflows compose; children may contain `<Subflow>` themselves.
 - Declare the child's result via `smithers(build, { output })` unless its result schema is literally named `output`; that is the schema a parent `<Subflow>` persists.
@@ -8996,6 +9025,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/dom/renderer` | `./src/dom/renderer.js` | Internal renderer (advanced use) |
 | `smithers-orchestrator/serve` | `./src/serve.js` | Single-workflow HTTP server via `createServeApp` |
 | `smithers-orchestrator/scorers` | `./src/scorers.js` | Eval scorers: `createScorer`, `llmJudge`, `aggregateScores` |
+| `smithers-orchestrator/evals` | `./src/evals.js` | Eval suites (issue #77): dataset parsing, case grading, `evalAssertionScorer`, and the `readEvalSuite`/`writeEvalCaseRow` store helpers the `eval-suite-run` seeded workflow uses |
 | `smithers-orchestrator/memory` | `./src/memory.js` | Cross-run facts, message history, processors, and metrics |
 | `smithers-orchestrator/openapi` | `./src/openapi.js` | Generate AI SDK tools from OpenAPI specs |
 | `smithers-orchestrator/control-plane` | `./src/control-plane.js` | Organization, project, billing, usage, secret-reference, and audit primitives |

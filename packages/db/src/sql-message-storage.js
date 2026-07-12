@@ -387,6 +387,35 @@ const CREATE_TABLE_STATEMENTS = [
     scored_at_ms INTEGER NOT NULL,
     duration_ms REAL
   )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_eval_suites (
+    suite_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    workflow_key TEXT NOT NULL,
+    workflow_path TEXT NOT NULL,
+    workflow_root TEXT NOT NULL,
+    dataset_json TEXT NOT NULL,
+    case_count INTEGER NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+  )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_eval_cases (
+    id TEXT PRIMARY KEY,
+    eval_run_id TEXT NOT NULL,
+    suite_id TEXT NOT NULL,
+    case_id TEXT NOT NULL,
+    case_index INTEGER NOT NULL,
+    name TEXT,
+    status TEXT NOT NULL,
+    case_run_id TEXT,
+    input_json TEXT,
+    expected_json TEXT,
+    actual_json TEXT,
+    assertions_json TEXT,
+    error TEXT,
+    started_at_ms INTEGER,
+    finished_at_ms INTEGER,
+    duration_ms REAL
+  )`,
     `CREATE TABLE IF NOT EXISTS _smithers_memory_facts (
     namespace TEXT NOT NULL,
     key TEXT NOT NULL,
@@ -475,6 +504,8 @@ const CREATE_INDEX_STATEMENTS = [
     ON _smithers_memory_note_supersessions (supersedes_id)`,
     `CREATE INDEX IF NOT EXISTS _smithers_snapshot_payload_refs_content_hash_idx
     ON _smithers_snapshot_payload_refs (content_hash)`,
+    `CREATE INDEX IF NOT EXISTS _smithers_eval_cases_run_idx
+    ON _smithers_eval_cases (eval_run_id, case_index)`,
 ];
 /**
  * @param {string} identifier

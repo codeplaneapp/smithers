@@ -824,3 +824,57 @@ test("gateway --auth-token keeps the operator token out of the state file but st
     expect(status.exitCode).toBe(0);
     expect(status.json?.auth).toBe("token");
 }, 60_000);
+
+test("gateway registers the evals extension (ext.evals.listSuites/saveSuite/listCases)", async () => {
+    const repo = createTempRepo();
+    const { env } = makeStateDirEnv();
+    const port = await findOpenPort();
+    // Spawn (not the shared `startGateway`, which hardcodes a 20s boot wait)
+    // with a generous wait: this machine's boot time varies a lot under load
+    // and this test needs no custom workflow, so it stays as light as the CLI
+    // itself allows.
+    const gateway = spawnGateway(repo, env, ["--port", String(port)]);
+    try {
+        await waitFor(() => gateway.stderr().includes("Runtime state:"), 60_000);
+
+        // A booted gateway serves the "evals" namespace — not a typed
+        // EXTENSION_METHOD_NOT_FOUND — proving runGatewayCommand really calls
+        // gateway.extend("evals", createEvalsExtension(...)).
+        const listSuites = await fetch(`http://127.0.0.1:${port}/v1/rpc/ext.evals.listSuites`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({}),
+            signal: AbortSignal.timeout(5_000),
+        });
+        expect(listSuites.status).toBe(200);
+        const listSuitesBody = await listSuites.json();
+        expect(listSuitesBody.ok).toBe(true);
+        expect(listSuitesBody.payload).toEqual([]);
+
+        // Unknown workflowKey → honest INVALID_INPUT (proves resolveWorkflowKey
+        // is wired to the booted gateway's real discovered-workflow index).
+        const badSave = await fetch(`http://127.0.0.1:${port}/v1/rpc/ext.evals.saveSuite`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "smoke", workflowKey: "does-not-exist", datasetText: '[{"id":"a","input":{}}]' }),
+            signal: AbortSignal.timeout(5_000),
+        });
+        const badSaveBody = await badSave.json();
+        expect(badSaveBody.ok).toBe(false);
+        expect(badSaveBody.error?.code).toBe("INVALID_INPUT");
+
+        const listCases = await fetch(`http://127.0.0.1:${port}/v1/rpc/ext.evals.listCases`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ evalRunId: "no-such-run" }),
+            signal: AbortSignal.timeout(5_000),
+        });
+        expect(listCases.status).toBe(200);
+        const listCasesBody = await listCases.json();
+        expect(listCasesBody.ok).toBe(true);
+        expect(listCasesBody.payload).toEqual([]);
+    }
+    finally {
+        await stopProcess(gateway.child, gateway.closePromise);
+    }
+}, 75_000);

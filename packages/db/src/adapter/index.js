@@ -5,6 +5,8 @@
 /** @typedef {import("./ApprovalRow.ts").ApprovalRow} ApprovalRow */
 /** @typedef {import("./AttemptRow.ts").AttemptRow} AttemptRow */
 /** @typedef {import("./CacheRow.ts").CacheRow} CacheRow */
+/** @typedef {import("./EvalCaseResultRow.ts").EvalCaseResultRow} EvalCaseResultRow */
+/** @typedef {import("./EvalSuiteRow.ts").EvalSuiteRow} EvalSuiteRow */
 /** @typedef {import("./EventHistoryQuery.ts").EventHistoryQuery} EventHistoryQuery */
 /** @typedef {import("./HumanRequestRow.ts").HumanRequestRow} HumanRequestRow */
 /** @typedef {import("./NodeRow.ts").NodeRow} NodeRow */

@@ -182,7 +182,8 @@
             "pages": [
               "workflows/init",
               "workflows/post-failure",
-              "workflows/upgrade"
+              "workflows/upgrade",
+              "workflows/eval-suite-run"
             ]
           }
         ]
