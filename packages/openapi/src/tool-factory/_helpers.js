@@ -172,6 +172,119 @@ function serializeRequestBody(body, mediaType, headers) {
     }
     return buildRawBody(body);
 }
+// Same ceiling as the WHATWG fetch spec's `redirect: "follow"` behavior.
+const MAX_REDIRECTS = 20;
+/**
+ * @param {number} status
+ * @returns {boolean}
+ */
+function isRedirectStatus(status) {
+    return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+/**
+ * Build the set of origins a redirect may be followed to: the origin of the
+ * request itself (i.e. the configured OpenAPI service) plus any operator
+ * allowlist entries. Entries are normalized via `URL.origin` (lowercased
+ * host, default ports elided), and an unparseable entry fails loudly rather
+ * than silently narrowing the allowlist.
+ *
+ * @param {string} requestUrl
+ * @param {OpenApiToolsOptions} options
+ * @returns {Set<string>}
+ */
+function buildAllowedRedirectOrigins(requestUrl, options) {
+    const allowed = new Set([new URL(requestUrl).origin]);
+    for (const entry of options.allowedRedirectOrigins ?? []) {
+        try {
+            allowed.add(new URL(entry).origin);
+        }
+        catch {
+            throw new Error(`Invalid allowedRedirectOrigins entry "${entry}": must be an absolute URL or origin (e.g. "https://cdn.example.com").`);
+        }
+    }
+    return allowed;
+}
+/**
+ * Copy `headers` minus the body-describing entries, for a redirect hop that
+ * rewrites the method to GET (301/302 on POST, 303) and drops the body.
+ *
+ * @param {Record<string, string>} headers
+ * @returns {Record<string, string>}
+ */
+function stripContentHeaders(headers) {
+    /** @type {Record<string, string>} */
+    const stripped = {};
+    for (const [key, value] of Object.entries(headers)) {
+        const lower = key.toLowerCase();
+        if (lower === "content-type"
+            || lower === "content-length"
+            || lower === "content-encoding"
+            || lower === "content-language"
+            || lower === "content-location") {
+            continue;
+        }
+        stripped[key] = value;
+    }
+    return stripped;
+}
+/**
+ * Fetch with manual redirect handling so EVERY redirect destination is
+ * validated against the configured OpenAPI service origin (the origin of the
+ * request URL) or the operator's `allowedRedirectOrigins` allowlist. The
+ * injected Authorization / API-key headers ride on every hop, so silently
+ * following a redirect to a foreign origin (native `redirect: "follow"`)
+ * would hand the operator's secret to that origin — instead we fail closed
+ * before the cross-origin request is ever sent. Same-origin and allowlisted
+ * redirects behave like standard `redirect: "follow"`, including the
+ * spec-mandated method rewrite to GET on 303 (and 301/302 for POST).
+ *
+ * @param {string} url
+ * @param {string} method
+ * @param {Record<string, string>} headers
+ * @param {BodyInit | undefined} body
+ * @param {OpenApiToolsOptions} options
+ * @returns {Promise<Response>}
+ */
+async function fetchWithRedirectValidation(url, method, headers, body, options) {
+    const allowedOrigins = buildAllowedRedirectOrigins(url, options);
+    let currentUrl = url;
+    let currentMethod = method;
+    let currentHeaders = headers;
+    let currentBody = body;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+        /** @type {RequestInit} */
+        const init = { method: currentMethod, headers: currentHeaders, redirect: "manual" };
+        if (currentBody !== undefined) {
+            init.body = currentBody;
+        }
+        const response = await fetch(currentUrl, init);
+        if (!isRedirectStatus(response.status)) {
+            return response;
+        }
+        const location = response.headers.get("location");
+        if (location === null) {
+            return response;
+        }
+        const nextUrl = new URL(location, currentUrl);
+        await response.body?.cancel();
+        if (!allowedOrigins.has(nextUrl.origin)) {
+            // Name only origins — the full request URL can carry an
+            // apiKey-in-query credential and must never reach the error
+            // message (which is returned to the model as the tool result).
+            throw new Error(`OpenAPI request was redirected (HTTP ${response.status}) to disallowed origin "${nextUrl.origin}" — refusing to follow so the configured credentials cannot leak off "${new URL(currentUrl).origin}". `
+                + `Add the origin to the \`allowedRedirectOrigins\` option if this redirect destination is trusted.`);
+        }
+        const switchToGet = (response.status === 303 && currentMethod !== "GET" && currentMethod !== "HEAD")
+            || ((response.status === 301 || response.status === 302) && currentMethod === "POST");
+        if (switchToGet) {
+            currentMethod = "GET";
+            currentBody = undefined;
+            currentHeaders = stripContentHeaders(currentHeaders);
+        }
+        currentUrl = nextUrl.toString();
+    }
+    throw new Error(`OpenAPI request exceeded ${MAX_REDIRECTS} redirects.`);
+}
 /**
  * @param {ParsedOperation} operation
  * @param {Record<string, unknown>} args
@@ -214,20 +327,18 @@ export async function executeRequest(operation, args, baseUrl, options) {
         ...headerParams,
         ...buildAuthHeaders(options),
     };
-    /** @type {RequestInit} */
-    const fetchInit = {
-        method: operation.method.toUpperCase(),
-        headers,
-    };
     // Request body — read from the SAME non-colliding key the schema used, so a
     // parameter named `body` (or `requestBody`) cannot shadow the actual body.
-    // serializeRequestBody mutates `headers` in place and fetchInit already
-    // references that object, so its Content-Type adjustments apply automatically.
+    // serializeRequestBody mutates `headers` in place, so its Content-Type
+    // adjustments apply to the request automatically.
     const requestBodyArgName = getRequestBodyArgName(operation.parameters);
-    if (args[requestBodyArgName] !== undefined) {
-        fetchInit.body = serializeRequestBody(args[requestBodyArgName], operation.requestBodyMediaType, headers);
-    }
-    const response = await fetch(url, fetchInit);
+    /** @type {BodyInit | undefined} */
+    const body = args[requestBodyArgName] !== undefined
+        ? serializeRequestBody(args[requestBodyArgName], operation.requestBodyMediaType, headers)
+        : undefined;
+    // Redirects are followed manually so injected auth headers can never leak
+    // to an origin outside the configured service origin / allowlist.
+    const response = await fetchWithRedirectValidation(url, operation.method.toUpperCase(), headers, body, options);
     const contentType = response.headers.get("content-type") ?? "";
     /** @type {unknown} */
     const payload = contentType.includes("application/json")

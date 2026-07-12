@@ -19,6 +19,14 @@ export type OpenApiToolsOptions = {
 	baseUrl?: string;
 	headers?: Record<string, string>;
 	auth?: OpenApiAuth;
+	/**
+	 * Extra origins (e.g. "https://cdn.example.com") that redirects may be
+	 * followed to. Redirect destinations are always validated against the
+	 * origin of the request itself (the configured OpenAPI service); any hop
+	 * to another origin is refused unless it is listed here, so the injected
+	 * auth/API-key headers can never leak to an unexpected host.
+	 */
+	allowedRedirectOrigins?: string[];
 	include?: string[];
 	exclude?: string[];
 	namePrefix?: string;
