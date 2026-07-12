@@ -10,6 +10,7 @@ import { MergeQueue } from "smithers-orchestrator";
 type MergeQueueProps = {
   id?: string;
   maxConcurrency?: number;  // default: 1
+  priority?: number;        // default: 1000; inherited by descendant tasks
   skipIf?: boolean;
   children?: ReactNode;
 };
@@ -27,3 +28,7 @@ type MergeQueueProps = {
 
 - Innermost group determines the effective cap for its descendants.
 - Tasks outside the queue are unaffected by its limit.
+- Descendant tasks inherit priority `1000` by default, so ready-to-land queue
+  work outranks ordinary priority-`0` work when both compete for scarce slots.
+  Set `priority` on the queue to change that default, or on a child task to
+  override it. Priority never bypasses dependencies or concurrency caps.

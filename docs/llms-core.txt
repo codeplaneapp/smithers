@@ -3300,6 +3300,7 @@ type TaskProps = {
   heartbeatTimeout?: number; // alias of heartbeatTimeoutMs
   hijack?: boolean; // request an immediate hijack handoff as soon as the task starts running
   onHijackExit?: "complete" | "reopen"; // what Smithers should do after a hijacked session exits
+  priority?: number; // default 0, or the nearest Parallel/MergeQueue priority; higher runs first when slots are scarce
   children?:
     | string
     | Row
@@ -3383,6 +3384,17 @@ downstream `deps`, and works inside `<Loop>`, `<Branch>`, `<Parallel>`, and
 `<Sequence>` just like an agent Task. The only thing it cannot do is be a `fork`
 source (no agent session). Throwing inside a compute function fails the task and
 triggers its retry policy.
+
+## Scheduling priority
+
+`priority` chooses which already-runnable task claims a scarce concurrency slot
+first. Higher numbers run first; equal priorities keep workflow plan order. A
+task defaults to `0`, or inherits the nearest priority set by an enclosing
+`<Parallel>` or `<MergeQueue>`. An explicit task priority always wins.
+
+Priority never bypasses `dependsOn`/`needs`/`deps`, approval gates, retry waits,
+or run/group/subtree concurrency caps. It only orders tasks that are runnable
+and eligible for the same available capacity.
 
 ## Dependencies: dependsOn, needs, deps
 
@@ -3557,6 +3569,7 @@ type ParallelProps = {
   label?: string; // display name for this group in run views (graph, /workflows mirror)
   maxConcurrency?: number; // default: no per-group cap; effective concurrency is min(this, the run-level --max-concurrency, which defaults to 4)
   subtreeConcurrency?: number; // opt-in: cap DIRECT CHILDREN (whole subtrees) in flight, not leaf tasks
+  priority?: number; // inherited default for descendant tasks; higher claims scarce slots first
   skipIf?: boolean;
   children?: ReactNode;
 };
@@ -3631,6 +3644,18 @@ flight":
 
 Here at most 2 tickets are worked at once; within an active ticket at most 3
 reviews run concurrently; the run-level cap still bounds total in-flight tasks.
+
+## Scheduling priority
+
+Set `priority` to give descendant tasks an inherited scheduling priority. An
+explicit priority on a child task wins, and a nested `<Parallel>` or
+`<MergeQueue>` becomes the nearest inherited default for its subtree. Higher
+priority tasks claim scarce slots first; equal priorities keep workflow plan
+order.
+
+Priority does not admit extra work or bypass dependencies. The run-level,
+leaf-group, and subtree caps still decide whether a runnable task is eligible;
+priority only orders eligible tasks competing for available capacity.
 
 ### Subtree cap notes
 
@@ -5752,6 +5777,7 @@ import { MergeQueue } from "smithers-orchestrator";
 type MergeQueueProps = {
   id?: string;
   maxConcurrency?: number;  // default: 1
+  priority?: number;        // default: 1000; inherited by descendant tasks
   skipIf?: boolean;
   children?: ReactNode;
 };
@@ -5769,6 +5795,10 @@ type MergeQueueProps = {
 
 - Innermost group determines the effective cap for its descendants.
 - Tasks outside the queue are unaffected by its limit.
+- Descendant tasks inherit priority `1000` by default, so ready-to-land queue
+  work outranks ordinary priority-`0` work when both compete for scarce slots.
+  Set `priority` on the queue to change that default, or on a child task to
+  override it. Priority never bypasses dependencies or concurrency caps.
 
 ---
 
@@ -7425,6 +7455,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   hijack?: boolean;
   onHijackExit?: "complete" | "reopen";
   allowTools?: string[];            // CLI-agent tool allowlist
+  priority?: number;                // higher runs first when eligible tasks compete for scarce slots
   label?: string;
   meta?: Record<string, unknown>;
   // string = prompt literal; Row = static result; () => Row = compute fn;
@@ -7433,7 +7464,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
 };
 
 type SequenceProps  = { key?: string; skipIf?: boolean; children?: React.ReactNode };
-type ParallelProps  = { id?: string; maxConcurrency?: number; subtreeConcurrency?: number; skipIf?: boolean; children?: React.ReactNode };
+type ParallelProps  = { id?: string; maxConcurrency?: number; subtreeConcurrency?: number; priority?: number; skipIf?: boolean; children?: React.ReactNode };
 type BranchProps    = { if: boolean; then: React.ReactElement; else?: React.ReactElement | null; skipIf?: boolean };
 type LoopProps      = {
   key?: string;
@@ -7738,7 +7769,7 @@ type EscalationChainProps = {
   children?: React.ReactNode;
 };
 
-type MergeQueueProps = { id?: string; maxConcurrency?: number; skipIf?: boolean; children?: React.ReactNode };
+type MergeQueueProps = { id?: string; maxConcurrency?: number; priority?: number; skipIf?: boolean; children?: React.ReactNode };
 
 type OptimizerProps = {
   id?: string;

@@ -583,6 +583,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   hijack?: boolean;
   onHijackExit?: "complete" | "reopen";
   allowTools?: string[];            // CLI-agent tool allowlist
+  priority?: number;                // higher runs first when eligible tasks compete for scarce slots
   label?: string;
   meta?: Record<string, unknown>;
   // string = prompt literal; Row = static result; () => Row = compute fn;
@@ -591,7 +592,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
 };
 
 type SequenceProps  = { key?: string; skipIf?: boolean; children?: React.ReactNode };
-type ParallelProps  = { id?: string; maxConcurrency?: number; subtreeConcurrency?: number; skipIf?: boolean; children?: React.ReactNode };
+type ParallelProps  = { id?: string; maxConcurrency?: number; subtreeConcurrency?: number; priority?: number; skipIf?: boolean; children?: React.ReactNode };
 type BranchProps    = { if: boolean; then: React.ReactElement; else?: React.ReactElement | null; skipIf?: boolean };
 type LoopProps      = {
   key?: string;
@@ -896,7 +897,7 @@ type EscalationChainProps = {
   children?: React.ReactNode;
 };
 
-type MergeQueueProps = { id?: string; maxConcurrency?: number; skipIf?: boolean; children?: React.ReactNode };
+type MergeQueueProps = { id?: string; maxConcurrency?: number; priority?: number; skipIf?: boolean; children?: React.ReactNode };
 
 type OptimizerProps = {
   id?: string;

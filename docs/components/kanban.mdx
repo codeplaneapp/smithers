@@ -165,6 +165,7 @@ export function Parallel(props) {
         subtreeConcurrency: props.subtreeConcurrency,
         id: props.id,
         ...(props.label === undefined ? {} : { label: props.label }),
+        ...(props.priority === undefined ? {} : { priority: props.priority }),
     };
     return React.createElement("smithers:parallel", next, props.children);
 }

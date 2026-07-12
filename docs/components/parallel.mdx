@@ -11,6 +11,7 @@ type ParallelProps = {
   label?: string; // display name for this group in run views (graph, /workflows mirror)
   maxConcurrency?: number; // default: no per-group cap; effective concurrency is min(this, the run-level --max-concurrency, which defaults to 4)
   subtreeConcurrency?: number; // opt-in: cap DIRECT CHILDREN (whole subtrees) in flight, not leaf tasks
+  priority?: number; // inherited default for descendant tasks; higher claims scarce slots first
   skipIf?: boolean;
   children?: ReactNode;
 };
@@ -85,6 +86,18 @@ flight":
 
 Here at most 2 tickets are worked at once; within an active ticket at most 3
 reviews run concurrently; the run-level cap still bounds total in-flight tasks.
+
+## Scheduling priority
+
+Set `priority` to give descendant tasks an inherited scheduling priority. An
+explicit priority on a child task wins, and a nested `<Parallel>` or
+`<MergeQueue>` becomes the nearest inherited default for its subtree. Higher
+priority tasks claim scarce slots first; equal priorities keep workflow plan
+order.
+
+Priority does not admit extra work or bypass dependencies. The run-level,
+leaf-group, and subtree caps still decide whether a runnable task is eligible;
+priority only orders eligible tasks competing for available capacity.
 
 ### Subtree cap notes
 
