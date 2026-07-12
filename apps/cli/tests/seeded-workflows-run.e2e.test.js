@@ -300,7 +300,7 @@ function initWorkflowPack() {
 
 test("every generated init-pack workflow starts and reaches a valid smoke state with fake agents", () => {
   expect(SEEDED_WORKFLOW_IDS).toEqual([
-    "create-skill", "create-workflow", "docs-driven-development", "init", "post-failure", "upgrade",
+    "create-skill", "create-workflow", "docs-driven-development", "eval-suite-run", "init", "post-failure", "upgrade",
   ]);
 });
 
@@ -315,6 +315,11 @@ function isValidSmokeOutcome(id, status, exitCode) {
 
 for (const id of SEEDED_WORKFLOW_IDS) {
   if (id === "create-workflow") continue;
+  // eval-suite-run requires a pre-saved suite (a real `_smithers_eval_suites`
+  // row) to do anything meaningful — this generic single-command fake-agent
+  // smoke harness has no way to seed one. It gets its own dedicated e2e
+  // coverage instead: apps/cli/tests/eval-suite-run.e2e.test.js.
+  if (id === "eval-suite-run") continue;
   if (id === "docs-driven-development") {
     test(`seeded workflow ${id} runs with fake agents and writes spec artifacts`, () => {
       const { repo, env } = initWorkflowPack();

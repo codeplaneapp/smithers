@@ -53,6 +53,7 @@
     "@smithers-orchestrator/protocol": "workspace:*",
     "@smithers-orchestrator/review": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
+    "@smithers-orchestrator/scorers": "workspace:*",
     "@smithers-orchestrator/server": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
     "@smithers-orchestrator/tui": "workspace:*",

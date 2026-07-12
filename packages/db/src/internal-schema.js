@@ -276,3 +276,5 @@ export { smithersWorkspaceCheckpoints } from "./internal-schema/smithersWorkspac
 export { smithersDocs } from "./internal-schema/smithersDocs.js";
 export { smithersIntegrationDeliveries } from "./internal-schema/smithersIntegrationDeliveries.js";
 export { smithersIntegrationCursors } from "./internal-schema/smithersIntegrationCursors.js";
+export { smithersEvalSuites } from "./internal-schema/smithersEvalSuites.js";
+export { smithersEvalCases } from "./internal-schema/smithersEvalCases.js";

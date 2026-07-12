@@ -2,6 +2,8 @@
 /** @typedef {import("./adapter/AlertSeverity.ts").AlertSeverity} AlertSeverity */
 /** @typedef {import("./adapter/ApprovalRow.ts").ApprovalRow} ApprovalRow */
 /** @typedef {import("./adapter/CacheRow.ts").CacheRow} CacheRow */
+/** @typedef {import("./adapter/EvalCaseResultRow.ts").EvalCaseResultRow} EvalCaseResultRow */
+/** @typedef {import("./adapter/EvalSuiteRow.ts").EvalSuiteRow} EvalSuiteRow */
 /** @typedef {import("./adapter/NodeRow.ts").NodeRow} NodeRow */
 /** @typedef {import("./adapter/PendingHumanRequestRow.ts").PendingHumanRequestRow} PendingHumanRequestRow */
 /** @typedef {import("./adapter/RunAncestryRow.ts").RunAncestryRow} RunAncestryRow */
@@ -3500,6 +3502,59 @@ export class SmithersDb {
         return this.read(`get scorer result ${scoreId}`, () => this.internalStorage.queryOne(`SELECT *
          FROM _smithers_scorers
          WHERE run_id = ? AND id = ?`, [runId, scoreId]));
+    }
+    // ---------------------------------------------------------------------------
+    // Eval suites
+    // ---------------------------------------------------------------------------
+    /**
+   * Insert-or-replace a saved eval suite by `suiteId`. Callers that intend an
+   * UPDATE (an existing suiteId) should read the current row first and carry
+   * its original `createdAtMs` forward — this upsert has no update-column
+   * allowlist, so every field present on `row` (including `createdAtMs`) is
+   * written verbatim.
+   * @param {EvalSuiteRow} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertEvalSuite(row) {
+        return this.write(`upsert eval suite ${row.suiteId}`, () => this.internalStorage.upsert("_smithers_eval_suites", row, ["suiteId"]));
+    }
+    /**
+   * @returns {RunnableEffect<EvalSuiteRow[], SmithersError>}
+   */
+    listEvalSuites() {
+        return this.read("list eval suites", () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_eval_suites
+         ORDER BY updated_at_ms DESC`));
+    }
+    /**
+   * @param {string} suiteId
+   * @returns {RunnableEffect<EvalSuiteRow | undefined, SmithersError>}
+   */
+    getEvalSuite(suiteId) {
+        return this.read(`get eval suite ${suiteId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_eval_suites
+         WHERE suite_id = ?`, [suiteId]));
+    }
+    /**
+   * Insert-or-replace one case's live result row, keyed by the caller-composed
+   * `${evalRunId}:${caseId}` id. Every field present on `row` is written
+   * verbatim on conflict (no update-column allowlist), matching
+   * `upsertEvalSuite`.
+   * @param {EvalCaseResultRow} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    upsertEvalCaseResult(row) {
+        return this.write(`upsert eval case result ${row.id}`, () => this.internalStorage.upsert("_smithers_eval_cases", row, ["id"]));
+    }
+    /**
+   * @param {string} evalRunId
+   * @returns {RunnableEffect<EvalCaseResultRow[], SmithersError>}
+   */
+    listEvalCaseResults(evalRunId) {
+        return this.read(`list eval case results ${evalRunId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_eval_cases
+         WHERE eval_run_id = ?
+         ORDER BY case_index ASC`, [evalRunId]));
     }
     /**
    * @param {string} runId

@@ -70,6 +70,11 @@
       "import": "./src/scorers.js",
       "default": "./src/scorers.js"
     },
+    "./evals": {
+      "types": "./src/evals.d.ts",
+      "import": "./src/evals.js",
+      "default": "./src/evals.js"
+    },
     "./gateway-ui": {
       "types": "./src/gateway-ui.d.ts",
       "import": "./src/gateway-ui.js",

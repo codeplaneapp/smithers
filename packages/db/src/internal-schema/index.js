@@ -25,3 +25,5 @@ export { smithersDocs } from "./smithersDocs.js";
 export { smithersSchemaMigrations } from "./smithersSchemaMigrations.js";
 export { smithersWorkspaceStates } from "./smithersWorkspaceStates.js";
 export { smithersWorkspaceCheckpoints } from "./smithersWorkspaceCheckpoints.js";
+export { smithersEvalSuites } from "./smithersEvalSuites.js";
+export { smithersEvalCases } from "./smithersEvalCases.js";

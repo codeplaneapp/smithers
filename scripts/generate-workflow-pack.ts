@@ -29,7 +29,7 @@ const OUTPUT_FILE = resolve(REPO_ROOT, "apps/cli/src/seeded-workflow-pack.genera
 
 /**
  * Workflows whose canonical `.smithers/workflows/<id>.tsx` ships in `smithers
- * init`. The six entries are the curated contract, not an à-la-carte catalog.
+ * init`. The seven entries are the curated contract, not an à-la-carte catalog.
  */
 const SEEDED_WORKFLOW_IDS = [
   "create-workflow",
@@ -41,6 +41,9 @@ const SEEDED_WORKFLOW_IDS = [
   "post-failure",
   // Agent-assisted CLI/plugin upgrade wrapper (system workflow).
   "upgrade",
+  // Parent workflow the `evals` gateway extension launches to run a saved
+  // suite's cases as real child runs (system workflow — issue #77).
+  "eval-suite-run",
 ];
 
 type TemplateFile = { path: string; contents: string };

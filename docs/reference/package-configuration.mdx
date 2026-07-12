@@ -38,6 +38,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/dom/renderer` | `./src/dom/renderer.js` | Internal renderer (advanced use) |
 | `smithers-orchestrator/serve` | `./src/serve.js` | Single-workflow HTTP server via `createServeApp` |
 | `smithers-orchestrator/scorers` | `./src/scorers.js` | Eval scorers: `createScorer`, `llmJudge`, `aggregateScores` |
+| `smithers-orchestrator/evals` | `./src/evals.js` | Eval suites (issue #77): dataset parsing, case grading, `evalAssertionScorer`, and the `readEvalSuite`/`writeEvalCaseRow` store helpers the `eval-suite-run` seeded workflow uses |
 | `smithers-orchestrator/memory` | `./src/memory.js` | Cross-run facts, message history, processors, and metrics |
 | `smithers-orchestrator/openapi` | `./src/openapi.js` | Generate AI SDK tools from OpenAPI specs |
 | `smithers-orchestrator/control-plane` | `./src/control-plane.js` | Organization, project, billing, usage, secret-reference, and audit primitives |

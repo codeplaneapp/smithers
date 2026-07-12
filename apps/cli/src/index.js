@@ -63,6 +63,7 @@ import { openInBrowser } from "./openInBrowser.js";
 import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
+import { createEvalsExtension } from "./evals-extension.js";
 import {
     assertEvalRunIdsAvailable,
     assertEvalReportWritable,
@@ -3293,6 +3294,18 @@ async function runGatewayCommand(options) {
         gateway.register("workspace", workspaceWorkflow);
         workflows.push("workspace");
     }
+    // The `evals` gateway extension (issue #77): every CLI-booted gateway
+    // serves it, backed by the workspace's own DB and its real discovered-
+    // workflow index (so `ext.evals.saveSuite` can validate a target
+    // workflowKey against what this gateway actually serves).
+    const workflowIndex = new Map(loadedWorkflows
+        .filter(({ loadError, workflow }) => !loadError && workflow)
+        .map(({ discovered }) => [discovered.id, discovered]));
+    gateway.extend("evals", createEvalsExtension({
+        adapter: new SmithersDb(workspaceWorkflow.db),
+        resolveWorkflowKey: (key) => workflowIndex.get(key),
+        workspace,
+    }));
     try {
         server = await gateway.listen({ host: options.host, port: options.port });
     }

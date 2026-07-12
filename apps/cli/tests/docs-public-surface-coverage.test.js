@@ -217,7 +217,7 @@ test("workflow overview, catalog, and sidebar cover the curated pack", () => {
 
     expect(overviewWorkflowIds).toEqual(workflowDocIds);
     expect(catalogWorkflowIds).toEqual(workflowDocIds);
-    expect(sidebarWorkflowIds).toEqual([...workflowDocIds, "init", "post-failure", "upgrade"].sort());
+    expect(sidebarWorkflowIds).toEqual([...workflowDocIds, "eval-suite-run", "init", "post-failure", "upgrade"].sort());
 });
 
 test("error reference docs cover current Smithers error registry", () => {

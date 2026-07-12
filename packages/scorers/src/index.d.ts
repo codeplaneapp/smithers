@@ -88,7 +88,7 @@ type ScorerInput$2 = {
 /** An async function that evaluates a scorer input and returns a score result. */
 type ScorerFn$1 = (input: ScorerInput$2) => Promise<ScoreResult$3>;
 /** A named, self-describing scorer. */
-type Scorer$d = {
+type Scorer$e = {
     /** Unique identifier for the scorer. */
     id: string;
     /** Human-readable name. */
@@ -109,7 +109,7 @@ type SamplingConfig$1 = {
 };
 /** Binds a scorer to a task with optional sampling configuration. */
 type ScorerBinding$1 = {
-    scorer: Scorer$d;
+    scorer: Scorer$e;
     sampling?: SamplingConfig$1;
 };
 /** A named map of scorer bindings attached to a task. */
@@ -173,6 +173,31 @@ type LlmJudgeConfig$2 = {
      * The prompt should instruct the judge to respond with JSON: `{ "score": <0-1>, "reason": "<text>" }`.
      */
     promptTemplate: (input: ScorerInput$2) => string;
+};
+
+/** One row of an authored eval dataset — the input (and optional expected
+ *  output) a case run is invoked with. Mirrors multi's `EvalCaseInput`
+ *  (`src/evals/evalReport.ts`) byte-for-byte. */
+type EvalCaseInput$1 = {
+    id: string;
+    name?: string;
+    input: unknown;
+    expected?: unknown;
+};
+
+type EvalDatasetParseResult$2 = {
+    ok: true;
+    cases: EvalCaseInput$1[];
+} | {
+    ok: false;
+    error: string;
+};
+
+/** One assertion result within a graded eval case (a scripted expect(), not
+ *  an LLM scorer). Mirrors multi's `EvalAssertion` (`src/evals/evalReport.ts`). */
+type EvalAssertion$2 = {
+    description: string;
+    passed: boolean;
 };
 
 /** The component keys `delegationRunScore` combines. */
@@ -323,9 +348,9 @@ type AggregateOptions$2 = {
  * @param {CreateScorerConfig} config
  * @returns {Scorer}
  */
-declare function createScorer(config: CreateScorerConfig$1): Scorer$c;
+declare function createScorer(config: CreateScorerConfig$1): Scorer$d;
 type CreateScorerConfig$1 = CreateScorerConfig$2;
-type Scorer$c = Scorer$d;
+type Scorer$d = Scorer$e;
 
 /**
  * Creates an LLM-as-judge scorer that delegates evaluation to an AI agent.
@@ -348,9 +373,9 @@ type Scorer$c = Scorer$d;
  * @param {LlmJudgeConfig} config
  * @returns {Scorer}
  */
-declare function llmJudge(config: LlmJudgeConfig$1): Scorer$b;
+declare function llmJudge(config: LlmJudgeConfig$1): Scorer$c;
 type LlmJudgeConfig$1 = LlmJudgeConfig$2;
-type Scorer$b = Scorer$d;
+type Scorer$c = Scorer$e;
 
 /** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./types.js").Scorer} Scorer */
@@ -361,9 +386,9 @@ type Scorer$b = Scorer$d;
  * @param {AgentLike} judge
  * @returns {Scorer}
  */
-declare function relevancyScorer(judge: AgentLike$3): Scorer$a;
+declare function relevancyScorer(judge: AgentLike$3): Scorer$b;
 type AgentLike$3 = _smithers_orchestrator_agents_AgentLike.AgentLike;
-type Scorer$a = Scorer$d;
+type Scorer$b = Scorer$e;
 
 /** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./types.js").Scorer} Scorer */
@@ -374,9 +399,9 @@ type Scorer$a = Scorer$d;
  * @param {AgentLike} judge
  * @returns {Scorer}
  */
-declare function toxicityScorer(judge: AgentLike$2): Scorer$9;
+declare function toxicityScorer(judge: AgentLike$2): Scorer$a;
 type AgentLike$2 = _smithers_orchestrator_agents_AgentLike.AgentLike;
-type Scorer$9 = Scorer$d;
+type Scorer$a = Scorer$e;
 
 /** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./types.js").Scorer} Scorer */
@@ -387,9 +412,9 @@ type Scorer$9 = Scorer$d;
  * @param {AgentLike} judge
  * @returns {Scorer}
  */
-declare function faithfulnessScorer(judge: AgentLike$1): Scorer$8;
+declare function faithfulnessScorer(judge: AgentLike$1): Scorer$9;
 type AgentLike$1 = _smithers_orchestrator_agents_AgentLike.AgentLike;
-type Scorer$8 = Scorer$d;
+type Scorer$9 = Scorer$e;
 
 /** @typedef {import("./types.js").Scorer} Scorer */
 /**
@@ -398,8 +423,8 @@ type Scorer$8 = Scorer$d;
  *
  * @returns {Scorer}
  */
-declare function schemaAdherenceScorer(): Scorer$7;
-type Scorer$7 = Scorer$d;
+declare function schemaAdherenceScorer(): Scorer$8;
+type Scorer$8 = Scorer$e;
 
 /** @typedef {import("./types.js").Scorer} Scorer */
 /**
@@ -412,8 +437,8 @@ type Scorer$7 = Scorer$d;
 declare function latencyScorer(opts: {
     targetMs: number;
     maxMs: number;
-}): Scorer$6;
-type Scorer$6 = Scorer$d;
+}): Scorer$7;
+type Scorer$7 = Scorer$e;
 
 /**
  * Creates the delegation-chain POC-judgment scorer.
@@ -433,9 +458,9 @@ type Scorer$6 = Scorer$d;
  * @param {PocJudgmentOptions} [opts]
  * @returns {Scorer}
  */
-declare function pocJudgmentScorer(opts?: PocJudgmentOptions$1): Scorer$5;
+declare function pocJudgmentScorer(opts?: PocJudgmentOptions$1): Scorer$6;
 type PocJudgmentOptions$1 = PocJudgmentOptions$2;
-type Scorer$5 = Scorer$d;
+type Scorer$6 = Scorer$e;
 
 /**
  * Creates the delegation-chain plan-solidity scorer.
@@ -455,9 +480,9 @@ type Scorer$5 = Scorer$d;
  * @param {PlanSolidityOptions} [opts]
  * @returns {Scorer}
  */
-declare function planSolidityScorer(opts?: PlanSolidityOptions$1): Scorer$4;
+declare function planSolidityScorer(opts?: PlanSolidityOptions$1): Scorer$5;
 type PlanSolidityOptions$1 = PlanSolidityOptions$2;
-type Scorer$4 = Scorer$d;
+type Scorer$5 = Scorer$e;
 
 /**
  * Creates the delegation-chain estimate-accuracy scorer.
@@ -481,8 +506,8 @@ type Scorer$4 = Scorer$d;
  *
  * @returns {Scorer}
  */
-declare function estimateAccuracyScorer(): Scorer$3;
-type Scorer$3 = Scorer$d;
+declare function estimateAccuracyScorer(): Scorer$4;
+type Scorer$4 = Scorer$e;
 
 /**
  * Creates the delegation-chain tier-fit scorer, an LLM judge that evaluates
@@ -498,9 +523,9 @@ type Scorer$3 = Scorer$d;
  * @param {AgentLike} judge
  * @returns {Scorer}
  */
-declare function tierFitScorer(judge: AgentLike): Scorer$2;
+declare function tierFitScorer(judge: AgentLike): Scorer$3;
 type AgentLike = _smithers_orchestrator_agents_AgentLike.AgentLike;
-type Scorer$2 = Scorer$d;
+type Scorer$3 = Scorer$e;
 
 /**
  * Creates the delegation-chain human-poll scorer.
@@ -514,8 +539,8 @@ type Scorer$2 = Scorer$d;
  *
  * @returns {Scorer}
  */
-declare function humanPollScorer(): Scorer$1;
-type Scorer$1 = Scorer$d;
+declare function humanPollScorer(): Scorer$2;
+type Scorer$2 = Scorer$e;
 
 /**
  * Look up the per-million-token price for a model id. Matches the base id plus
@@ -582,6 +607,125 @@ declare function extractDelegationEvents(input: Pick<ScorerInput$1, "output" | "
 declare function resolvePlanningNodes(payload: DelegationEventsPayload$1): string[];
 type DelegationEventsPayload$1 = DelegationEventsPayload$2;
 type ScorerInput$1 = ScorerInput$2;
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+declare function isPlainObject(value: unknown): value is Record<string, unknown>;
+/**
+ * Slugify a free-form token into a stable, filesystem/run-id-safe form,
+ * hash-suffixing when the slug would exceed `maxLength` so two long-but-
+ * distinct inputs never collide after truncation.
+ * @param {string} value
+ * @param {string} [fallback]
+ * @param {number} [maxLength]
+ * @returns {string}
+ */
+declare function slugifyEvalToken(value: string, fallback?: string, maxLength?: number): string;
+/**
+ * Deep-equal via a canonicalized (key-sorted) JSON encoding.
+ * @param {unknown} actual
+ * @param {unknown} expected
+ * @returns {boolean}
+ */
+declare function jsonEquals(actual: unknown, expected: unknown): boolean;
+/**
+ * Subset match: every key/entry of `expected` must be present (and, for
+ * nested objects/arrays, recursively contained) in `actual`. Scalars fall
+ * back to `jsonEquals`.
+ * @param {unknown} actual
+ * @param {unknown} expected
+ * @returns {boolean}
+ */
+declare function jsonContains(actual: unknown, expected: unknown): boolean;
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+declare function formatEvalError(error: unknown): string;
+/**
+ * Normalize (and validate) an assertion-spec `expected` object: defaults
+ * `status` to `"finished"` when absent, rejects unsupported keys and an
+ * unrecognized `status` value.
+ * @param {unknown} value
+ * @param {string} label
+ * @returns {{ status: string; [key: string]: unknown }}
+ */
+declare function normalizeExpected(value: unknown, label?: string): {
+    status: string;
+    [key: string]: unknown;
+};
+/**
+ * Parse a suite's authored dataset text as a JSON array of case objects, or —
+ * when that fails — JSONL (one JSON object per line). Validates non-empty,
+ * every row is an object, and no two rows resolve to the same case id.
+ * Malformed input (unparseable JSON/JSONL, a non-array/non-object top level,
+ * duplicate ids) is reported as an honest `{ ok: false, error }`, never
+ * silently dropped or coerced. MUST stay byte-for-byte identical to multi's
+ * `parseEvalDataset` (see `packages/scorers/tests/eval-cases.test.js`).
+ * @param {string} text
+ * @returns {EvalDatasetParseResult}
+ */
+declare function parseEvalDataset(text: string): EvalDatasetParseResult$1;
+/**
+ * Grade one case run against its dataset `expected` value. Two modes:
+ *
+ *  - Assertion spec: `expected` is `undefined`/`null`, or a plain object
+ *    whose keys are ALL within `{status, output, outputContains,
+ *    errorContains}` — the established `smithers eval` assertion semantics
+ *    (status defaults to `"finished"`).
+ *  - Expected OUTPUT: any other `expected` value — an object/array matches by
+ *    subset (`jsonContains`), everything else by deep equality
+ *    (`jsonEquals`), PLUS the implicit "case run finished" assertion.
+ *
+ * Never throws: an unparsable assertion spec degrades to a single failed
+ * assertion carrying the validation message, so a malformed dataset case
+ * fails honestly instead of crashing the parent run.
+ * @param {{ expected?: unknown; status?: string; output?: unknown; error?: unknown }} args
+ * @returns {{ assertions: EvalAssertion[]; passed: boolean }}
+ */
+declare function evaluateEvalCase({ expected, status, output, error }: {
+    expected?: unknown;
+    status?: string;
+    output?: unknown;
+    error?: unknown;
+}): {
+    assertions: EvalAssertion$1[];
+    passed: boolean;
+};
+/**
+ * Readable, collision-free run id for ONE case's child workflow run.
+ * Embeds the parent eval run's id (not just the suite+case) so two concurrent
+ * launches of the same suite never mint the same child run id.
+ * @param {string} suiteId
+ * @param {string} caseId
+ * @param {string} evalRunId
+ * @returns {string}
+ */
+declare function evalCaseRunId(suiteId: string, caseId: string, evalRunId: string): string;
+/**
+ * The `eval-suite-run` workflow attaches this scorer to every case `<Task>`.
+ * When the task finishes, the engine's async scorer runner (`runScorersAsync`)
+ * calls `score({ output })` with the task's OWN return value — which the
+ * workflow shapes to include an `assertions: EvalAssertion[]` array — and
+ * writes a real `_smithers_scorers` row (`run_id` = the eval run, `node_id` =
+ * `case-<caseId>`). This is the ONLY place a case's pass/fail becomes a
+ * scored row; `listScoresForRuns`/`getScoreDetail` read it unmodified.
+ * @returns {Scorer}
+ */
+declare function evalAssertionScorer(): Scorer$1;
+/** Case-run statuses the assertion-spec `expected.status` may target — the
+ *  underlying engine/CLI job-state vocabulary (NOT the simplified
+ *  `EvalCaseResult.status` the `evals` extension persists). */
+declare const EVAL_CASE_STATUSES: string[];
+/** The score `scorerVerdict.score` (and `evalAssertionScorer`'s own score)
+ *  must clear to count as a pass. Mirrors multi's `EVAL_PASS_THRESHOLD` in
+ *  `src/evals/evalReport.ts` so "passed" reads the same on both sides. */
+declare const EVAL_PASS_THRESHOLD: 0.8;
+type Scorer$1 = Scorer$e;
+type EvalDatasetParseResult$1 = EvalDatasetParseResult$2;
+type EvalAssertion$1 = EvalAssertion$2;
 
 /**
  * Fire-and-forget scorer execution. Runs all scorers via Effect.runFork
@@ -680,13 +824,16 @@ type DelegationEventsPayload = DelegationEventsPayload$2;
 type DelegationRunComponent = DelegationRunComponent$1;
 type DelegationRunResults = DelegationRunResults$2;
 type DelegationRunScoreOptions = DelegationRunScoreOptions$2;
+type EvalAssertion = EvalAssertion$2;
+type EvalCaseInput = EvalCaseInput$1;
+type EvalDatasetParseResult = EvalDatasetParseResult$2;
 type LlmJudgeConfig = LlmJudgeConfig$2;
 type ModelPrice = ModelPrice$2;
 type PlanSolidityOptions = PlanSolidityOptions$2;
 type PocJudgmentClassification = PocJudgmentClassification$1;
 type PocJudgmentOptions = PocJudgmentOptions$2;
 type SamplingConfig = SamplingConfig$1;
-type Scorer = Scorer$d;
+type Scorer = Scorer$e;
 type ScorerBinding = ScorerBinding$1;
 type ScorerContext = ScorerContext$2;
 type ScoreResult = ScoreResult$3;
@@ -695,4 +842,4 @@ type ScorerInput = ScorerInput$2;
 type ScoreRow = ScoreRow$1;
 type ScorersMap = ScorersMap$2;
 
-export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, extractDelegationEvents, faithfulnessScorer, humanPollScorer, latencyScorer, llmJudge, modelTokenPrices, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, tierFitScorer, toxicityScorer, weightedScore };
+export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, type EvalAssertion, type EvalCaseInput, type EvalDatasetParseResult, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, extractDelegationEvents, faithfulnessScorer, formatEvalError, humanPollScorer, isPlainObject, jsonContains, jsonEquals, latencyScorer, llmJudge, modelTokenPrices, normalizeExpected, parseEvalDataset, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, slugifyEvalToken, tierFitScorer, toxicityScorer, weightedScore };
