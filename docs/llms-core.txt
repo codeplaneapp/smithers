@@ -8524,7 +8524,8 @@ type OpenApiToolsOptions = {
   baseUrl?: string; // exact initial trust origin; required with headers/auth
   headers?: Record<string, string>; // requires baseUrl
   auth?: OpenApiAuth; // requires baseUrl
-  allowedOrigins?: string[]; // redirect credential trust only
+  allowedRedirectOrigins?: string[]; // trusted cross-origin redirect destinations
+  allowedOrigins?: string[]; // compatibility alias for allowedRedirectOrigins
   allowPrivateNetwork?: boolean; // private specs, servers, redirects; defaults false
   resolveHostname?: (hostname: string) => readonly string[] | Promise<readonly string[]>;
   maxRedirects?: number; // defaults to 5

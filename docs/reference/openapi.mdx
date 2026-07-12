@@ -65,19 +65,22 @@ function createOpenApiTools(
       Authentication applied to every request. Requires an explicit `baseUrl`.
       See [Types](#types).
     </ParamField>
+    <ParamField path="allowedRedirectOrigins" type="string[]">
+      Exact cross-origin redirect destinations that may be contacted and
+      receive injected `auth`, sensitive headers, and query API keys. Every
+      other cross-origin redirect fails closed before contact. Origins include
+      scheme, hostname, and port. This is redirect-only and never authorizes a
+      spec-controlled initial server.
+    </ParamField>
     <ParamField path="allowedOrigins" type="string[]">
-      Exact cross-origin redirect destinations allowed to retain injected
-      `auth`, sensitive headers, and query API keys. Other safe cross-origin
-      redirects are followed after those credentials are stripped;
-      body-preserving redirects to an untrusted origin are rejected. Origins
-      include scheme, hostname, and port. This is redirect-only and never
-      authorizes a spec-controlled initial server.
+      Compatibility alias for `allowedRedirectOrigins`.
     </ParamField>
     <ParamField path="allowPrivateNetwork" type="boolean" default="false">
       Permit private/special destinations for remote spec URLs, redirect hops,
       and unpinned credential-free spec servers. Prefer an exact `baseUrl` for
       API requests. This cannot replace `baseUrl` when `auth` or `headers` are
-      configured, and redirect credentials still require `allowedOrigins`.
+      configured, and cross-origin redirects still require
+      `allowedRedirectOrigins`.
     </ParamField>
     <ParamField path="resolveHostname" type="(hostname: string) => readonly string[] | Promise<readonly string[]>">
       Override Node/Bun DNS resolution for controlled runtimes or deterministic
@@ -143,7 +146,7 @@ const tools = await createOpenApiTools("https://api.example.com/openapi.json", {
   baseUrl: "https://api.example.com",
   auth: { type: "bearer", token: process.env.API_TOKEN! },
   include: ["listPets", "getPetById"],
-  allowedOrigins: ["https://downloads.example.com"],
+  allowedRedirectOrigins: ["https://downloads.example.com"],
 });
 
 const agent = new ToolLoopAgent({ model: openai("gpt-5.6-terra"), tools });

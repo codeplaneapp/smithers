@@ -84,6 +84,22 @@ function cancelResponseBodyBestEffort(response) {
 }
 
 /**
+ * Keep one controller attached to both the fetch and response-body Effect
+ * steps. Effect gives each tryPromise its own interruption signal; without a
+ * shared controller, interrupting after headers arrive only cancels the local
+ * reader and may leave the underlying HTTP exchange connected.
+ * @param {AbortSignal} signal
+ * @param {AbortController} controller
+ */
+function linkInterruptSignal(signal, controller) {
+    if (signal.aborted) {
+        controller.abort(signal.reason);
+        return;
+    }
+    signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+}
+
+/**
  * Retry delay from Linear rate-limit headers: `Retry-After` (seconds) or
  * `X-RateLimit-Requests-Reset` (unix epoch ms), clamped to 30s.
  * @param {Headers} headers
@@ -168,8 +184,10 @@ export function makeLinearClient(config) {
             return yield* Effect.fail(new IntegrationError("delivery-failed", "Linear API key is not configured. Pass config.apiKey, call configureLinear({ apiKey }), or set SMITHERS_LINEAR_API_KEY.", { apiBaseUrl: safeApiBaseUrl }));
         }
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+            const controller = new AbortController();
             const response = yield* Effect.tryPromise({
                 try: (signal) => {
+                    linkInterruptSignal(signal, controller);
                     const endpoint = assertHttpUrl(apiBaseUrl);
                     return fetchWithPolicy(endpoint, {
                         method: "POST",
@@ -179,9 +197,9 @@ export function makeLinearClient(config) {
                             Authorization: apiKey,
                         },
                         body: JSON.stringify({ query: gql, variables: variables ?? {} }),
-                        signal,
+                        signal: controller.signal,
                     }, {
-                        validateUrl: createPublicRedirectValidator(endpoint, { signal }),
+                        validateUrl: createPublicRedirectValidator(endpoint, { signal: controller.signal }),
                     });
                 },
                 catch: (cause) => new IntegrationError(
@@ -206,10 +224,13 @@ export function makeLinearClient(config) {
                 continue;
             }
             const json = yield* Effect.tryPromise({
-                try: (signal) => readResponseJson(response, {
-                    maxBytes: MAX_LINEAR_RESPONSE_BYTES,
-                    signal,
-                }),
+                try: (signal) => {
+                    linkInterruptSignal(signal, controller);
+                    return readResponseJson(response, {
+                        maxBytes: MAX_LINEAR_RESPONSE_BYTES,
+                        signal: controller.signal,
+                    });
+                },
                 catch: (cause) => new IntegrationError(
                     "decode-failed",
                     `Linear API returned a non-JSON response (status ${response.status}).`,

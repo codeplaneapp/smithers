@@ -1,4 +1,9 @@
-import { fetchWithPolicy, readResponseText } from "@smithers-orchestrator/http-client";
+import {
+  assertHttpUrl,
+  fetchWithPolicy,
+  HttpClientPolicyError,
+  readResponseText,
+} from "@smithers-orchestrator/http-client";
 import { createPublicRedirectValidator } from "@smithers-orchestrator/http-client/node";
 import { responseByteLimit } from "../responseByteLimit.js";
 
@@ -41,15 +46,30 @@ export async function fetchSearchJson(url, init, options) {
     options.maxResponseBytes,
     DEFAULT_SEARCH_RESPONSE_BYTES,
   );
+  const initialUrl = assertHttpUrl(url);
+  const authorizedOrigins = new Set([initialUrl.origin]);
+  for (const entry of options.allowedOrigins ?? []) {
+    authorizedOrigins.add(assertHttpUrl(entry).origin);
+  }
+  const validatePublicDestination = createPublicRedirectValidator(initialUrl, {
+    allowedOrigins: options.allowedOrigins,
+    resolveHostname: options.resolveHostname,
+    signal: init.signal ?? undefined,
+  });
   const response = await fetchWithPolicy(url, init, {
     fetch: options.fetch,
     allowedOrigins: options.allowedOrigins,
     maxRedirects: options.maxRedirects,
-    validateUrl: createPublicRedirectValidator(url, {
-      allowedOrigins: options.allowedOrigins,
-      resolveHostname: options.resolveHostname,
-      signal: init.signal ?? undefined,
-    }),
+    validateUrl: async (candidate, context) => {
+      if (!context.initial && !authorizedOrigins.has(candidate.origin)) {
+        throw new HttpClientPolicyError(
+          "INVALID_REDIRECT",
+          `${options.provider} API returned a cross-origin redirect; refusing to forward the API key.`,
+          { fromOrigin: context.from?.origin, toOrigin: candidate.origin },
+        );
+      }
+      await validatePublicDestination(candidate, context);
+    },
   });
   const text = await readResponseText(response, {
     maxBytes: maxResponseBytes,

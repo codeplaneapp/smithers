@@ -17,6 +17,7 @@ import {
 import {
   assertHttpUrl,
   fetchWithPolicy,
+  HttpClientPolicyError,
   isHttpClientPolicyError,
   readResponseBytes,
   readResponseJson,
@@ -55,6 +56,21 @@ const DEFAULT_MAX_METERING_BYTES = 16 * 1024 * 1024;
 const MAX_TOKEN_COUNT_RESPONSE_BYTES = 64 * 1024;
 const ALLOWED_PROXY_PATHS = new Set(["/v1/messages", "/v1/messages/count_tokens"]);
 
+function anthropicRedirectValidator(baseUrl: URL, allowedOrigins: string[] | undefined) {
+  const authorized = new Set([baseUrl.origin]);
+  for (const entry of allowedOrigins ?? []) {
+    authorized.add(assertHttpUrl(entry).origin);
+  }
+  return (candidate: URL, context: { initial: boolean; from?: URL }) => {
+    if (context.initial || authorized.has(candidate.origin)) return;
+    throw new HttpClientPolicyError(
+      "INVALID_REDIRECT",
+      "Anthropic upstream returned a cross-origin redirect; refusing to forward credentials.",
+      { fromOrigin: context.from?.origin, toOrigin: candidate.origin },
+    );
+  };
+}
+
 function validByteLimit(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0;
 }
@@ -84,6 +100,7 @@ async function countProviderInputTokens(input: {
   fetchUpstream: typeof fetch;
   allowedOrigins?: string[];
 }): Promise<number> {
+  const validateUrl = anthropicRedirectValidator(input.url, input.allowedOrigins);
   const response = await fetchWithPolicy(input.url, {
     method: "POST",
     headers: input.headers,
@@ -92,6 +109,7 @@ async function countProviderInputTokens(input: {
   }, {
     fetch: input.fetchUpstream,
     allowedOrigins: input.allowedOrigins,
+    validateUrl,
   });
   if (!response.ok) {
     cancelResponseBodyBestEffort(response);
@@ -454,6 +472,10 @@ export async function handleAnthropic(
 
   let upstream: Response;
   try {
+    const validateUrl = anthropicRedirectValidator(
+      anthropicBaseUrl,
+      deps.anthropicAllowedOrigins,
+    );
     upstream = await fetchWithPolicy(upstreamUrl, {
       method: request.method,
       headers: upstreamHeaders,
@@ -462,6 +484,7 @@ export async function handleAnthropic(
     }, {
       fetch: deps.fetchUpstream,
       allowedOrigins: deps.anthropicAllowedOrigins,
+      validateUrl,
     });
   } catch (err) {
     if (reservation) {
@@ -478,6 +501,21 @@ export async function handleAnthropic(
       }
     }
     if (request.signal.aborted) throw request.signal.reason ?? err;
+    if (
+      isHttpClientPolicyError(err) &&
+      (err.code === "INVALID_REDIRECT" || err.code === "CROSS_ORIGIN_BODY_BLOCKED")
+    ) {
+      const location = typeof err.details.toOrigin === "string"
+        ? err.details.toOrigin
+        : typeof err.details.to === "string"
+          ? err.details.to
+          : null;
+      return jsonError(
+        502,
+        "upstream redirected off the anthropic origin; refusing to forward credentials",
+        { location },
+      );
+    }
     const detail = String(err).split(env.ANTHROPIC_API_KEY).join("<redacted>");
     return jsonError(502, "upstream fetch failed", { detail });
   }

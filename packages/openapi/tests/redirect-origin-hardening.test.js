@@ -140,9 +140,14 @@ function makeSpec() {
 
 const bearerAuth = /** @type {const} */ ({ type: "bearer", token: "REDIRECT-SECRET" });
 
+/** @param {Record<string, unknown>} [extra] */
+function pinnedOptions(extra = {}) {
+    return { baseUrl: apiOrigin, ...extra };
+}
+
 describe("same-origin redirects stay authorized", () => {
     test("relative-Location redirect is followed and auth reaches the final hop", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), { auth: bearerAuth });
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({ auth: bearerAuth }));
         const result = await tools.sameRedirect.execute({});
         expect(result).toEqual([{ id: 1, name: "Fido" }]);
         const final = apiRequests.at(-1);
@@ -151,7 +156,7 @@ describe("same-origin redirects stay authorized", () => {
     });
 
     test("multi-hop same-origin redirect chain (relative then absolute) keeps auth on every hop", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), { auth: bearerAuth });
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({ auth: bearerAuth }));
         const result = await tools.multiHop.execute({});
         expect(result).toEqual([{ id: 1, name: "Fido" }]);
         expect(apiRequests.map((r) => r.path)).toEqual(["/hop1", "/hop2", "/pets"]);
@@ -161,7 +166,7 @@ describe("same-origin redirects stay authorized", () => {
     });
 
     test("303 rewrites POST to GET and drops the body, preserving auth", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), { auth: bearerAuth });
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({ auth: bearerAuth }));
         const result = await tools.submit.execute({ body: { name: "Fido" } });
         expect(result).toEqual([{ id: 1, name: "Fido" }]);
         const final = apiRequests.at(-1);
@@ -172,7 +177,7 @@ describe("same-origin redirects stay authorized", () => {
     });
 
     test("307 preserves the POST method and body on a same-origin redirect", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), { auth: bearerAuth });
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({ auth: bearerAuth }));
         const result = await tools.preservePost.execute({ body: { name: "Fido" } });
         expect(result).toEqual({ echoed: true });
         const final = apiRequests.at(-1);
@@ -183,7 +188,7 @@ describe("same-origin redirects stay authorized", () => {
     });
 
     test("a same-origin redirect loop errors out instead of hanging", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), { auth: bearerAuth });
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({ auth: bearerAuth }));
         const result = await tools.loopForever.execute({});
         expect(result).toMatchObject({ error: true, status: "failed" });
         expect(result.message).toContain("redirects");
@@ -192,7 +197,7 @@ describe("same-origin redirects stay authorized", () => {
 
 describe("cross-origin redirects fail closed (no request to the foreign origin)", () => {
     test("bearer token never reaches the foreign origin", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), { auth: bearerAuth });
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({ auth: bearerAuth }));
         const result = await tools.crossRedirect.execute({});
         expect(result).toMatchObject({ error: true, status: "failed" });
         // The refusal names the blocked origin and the escape hatch...
@@ -208,9 +213,9 @@ describe("cross-origin redirects fail closed (no request to the foreign origin)"
     });
 
     test("apiKey-in-header never reaches the foreign origin", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), {
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({
             auth: { type: "apiKey", name: "X-Api-Key", value: "KEY-SECRET", in: "header" },
-        });
+        }));
         const result = await tools.crossRedirect.execute({});
         expect(result).toMatchObject({ error: true });
         expect(otherRequests).toHaveLength(0);
@@ -218,9 +223,9 @@ describe("cross-origin redirects fail closed (no request to the foreign origin)"
     });
 
     test("operator options.headers never reach the foreign origin", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), {
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({
             headers: { "X-Internal-Token": "HEADER-SECRET" },
-        });
+        }));
         const result = await tools.crossRedirect.execute({});
         expect(result).toMatchObject({ error: true });
         expect(otherRequests).toHaveLength(0);
@@ -228,7 +233,7 @@ describe("cross-origin redirects fail closed (no request to the foreign origin)"
     });
 
     test("multi-hop chain is validated on EVERY hop, not just the first", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), { auth: bearerAuth });
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({ auth: bearerAuth }));
         const result = await tools.hopThenCross.execute({});
         expect(result).toMatchObject({ error: true });
         // The intermediate same-origin hop went through, the cross hop did not.
@@ -237,9 +242,9 @@ describe("cross-origin redirects fail closed (no request to the foreign origin)"
     });
 
     test("apiKey-in-query credential is not echoed into the refusal message", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), {
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({
             auth: { type: "apiKey", name: "api_key", value: "QUERY-SECRET", in: "query" },
-        });
+        }));
         const result = await tools.crossRedirect.execute({});
         expect(result).toMatchObject({ error: true });
         expect(JSON.stringify(result)).not.toContain("QUERY-SECRET");
@@ -249,10 +254,10 @@ describe("cross-origin redirects fail closed (no request to the foreign origin)"
 
 describe("allowedRedirectOrigins allowlist", () => {
     test("an allowlisted foreign origin may be redirected to, and keeps the auth header", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), {
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({
             auth: bearerAuth,
             allowedRedirectOrigins: [otherOrigin],
-        });
+        }));
         const result = await tools.crossRedirect.execute({});
         expect(result).toEqual({ reachedOtherOrigin: true });
         expect(otherRequests).toHaveLength(1);
@@ -262,23 +267,23 @@ describe("allowedRedirectOrigins allowlist", () => {
     });
 
     test("allowlist entries are matched as origins (full URLs are normalized)", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), {
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({
             auth: bearerAuth,
             allowedRedirectOrigins: [`${otherOrigin}/some/unrelated/path?x=1`],
-        });
+        }));
         const result = await tools.crossRedirect.execute({});
         expect(result).toEqual({ reachedOtherOrigin: true });
         expect(otherRequests).toHaveLength(1);
     });
 
     test("an unparseable allowlist entry fails loudly instead of silently narrowing", async () => {
-        const tools = createOpenApiToolsSync(makeSpec(), {
+        const tools = createOpenApiToolsSync(makeSpec(), pinnedOptions({
             auth: bearerAuth,
             allowedRedirectOrigins: ["not a url"],
-        });
+        }));
         const result = await tools.sameRedirect.execute({});
         expect(result).toMatchObject({ error: true });
         expect(result.message).toContain("allowedRedirectOrigins");
-        expect(result.message).toContain("not a url");
+        expect(result.message).not.toContain("not a url");
     });
 });

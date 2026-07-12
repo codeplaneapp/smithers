@@ -9,6 +9,7 @@ let api;
 let crossOrigin;
 let apiUrl;
 let crossOriginUrl;
+let crossOriginRequests = 0;
 
 const specFor = (baseUrl, path = "/resource") => ({
   openapi: "3.1.0",
@@ -28,6 +29,7 @@ beforeAll(() => {
   crossOrigin = Bun.serve({
     port: 0,
     fetch: (request) => {
+      crossOriginRequests += 1;
       const url = new URL(request.url);
       if (url.pathname === "/bounce") {
         return new Response(null, { status: 302, headers: { location: `${apiUrl}/target` } });
@@ -110,6 +112,7 @@ afterAll(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  crossOriginRequests = 0;
 });
 
 describe("OpenAPI outbound HTTP policy", () => {
@@ -137,15 +140,17 @@ describe("OpenAPI outbound HTTP policy", () => {
     expect(result.authorization).toBe("Bearer same-origin-secret");
   });
 
-  test("strips configured auth on an unauthorized cross-origin redirect", async () => {
+  test("fails closed on an unauthorized cross-origin redirect", async () => {
     const tool = createOpenApiToolSync(specFor(apiUrl, "/cross-origin"), "readResource", {
       baseUrl: apiUrl,
       auth: { type: "bearer", token: "must-not-leak" },
       allowPrivateNetwork: true,
     });
     const result = await tool.execute({}, callOptions);
-    expect(result.authorization).toBeNull();
+    expect(result).toMatchObject({ error: true, status: "failed" });
+    expect(result.message).toContain("cross-origin");
     expect(JSON.stringify(result)).not.toContain("must-not-leak");
+    expect(crossOriginRequests).toBe(0);
   });
 
   test("retains auth only when the redirect origin is explicitly authorized", async () => {
@@ -157,17 +162,19 @@ describe("OpenAPI outbound HTTP policy", () => {
     });
     const result = await tool.execute({}, callOptions);
     expect(result.authorization).toBe("Bearer authorized-secret");
+    expect(crossOriginRequests).toBe(1);
   });
 
-  test("never reintroduces auth after an unauthorized hop returns to the API origin", async () => {
+  test("refuses an unauthorized hop before it can bounce back to the API origin", async () => {
     const tool = createOpenApiToolSync(specFor(apiUrl, "/multi-origin"), "readResource", {
       baseUrl: apiUrl,
       auth: { type: "bearer", token: "multi-hop-secret" },
       allowPrivateNetwork: true,
     });
     const result = await tool.execute({}, callOptions);
-    expect(result.authorization).toBeNull();
+    expect(result).toMatchObject({ error: true, status: "failed" });
     expect(JSON.stringify(result)).not.toContain("multi-hop-secret");
+    expect(crossOriginRequests).toBe(0);
   });
 
   test("bounds declared and streamed response bodies while accepting the exact cap", async () => {
@@ -278,7 +285,7 @@ describe("OpenAPI outbound HTTP policy", () => {
     await expect(tool.execute({}, callOptions)).resolves.toMatchObject({
       error: true,
       status: "failed",
-      message: expect.stringContaining("ordinary public-unicast space"),
+      message: expect.stringContaining("unauthorized cross-origin redirect"),
     });
     expect(contacted).toEqual(["https://attacker.example/resource"]);
   });

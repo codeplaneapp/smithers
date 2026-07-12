@@ -2,6 +2,7 @@ import { dynamicTool, jsonSchema } from "ai";
 import {
   assertHttpUrl,
   fetchWithPolicy,
+  HttpClientPolicyError,
   readResponseBytes,
   readResponseText,
 } from "@smithers-orchestrator/http-client";
@@ -123,6 +124,17 @@ async function synthesizeSpeech({ apiKey, baseUrl, defaultVoiceId, defaultModelI
     ...(args.voiceSettings ? { voice_settings: args.voiceSettings } : {}),
   };
 
+  const baseOrigin = assertHttpUrl(baseUrl).origin;
+  const authorizedOrigins = new Set([baseOrigin]);
+  for (const entry of allowedOrigins ?? []) {
+    authorizedOrigins.add(assertHttpUrl(entry).origin);
+  }
+  const validatePublicDestination = createPublicRedirectValidator(baseUrl, {
+    allowedOrigins,
+    resolveHostname,
+    signal,
+  });
+
   const response = await fetchWithPolicy(`${baseUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
     method: "POST",
     headers: {
@@ -136,11 +148,16 @@ async function synthesizeSpeech({ apiKey, baseUrl, defaultVoiceId, defaultModelI
     fetch: fetchImpl,
     allowedOrigins,
     maxRedirects,
-    validateUrl: createPublicRedirectValidator(baseUrl, {
-      allowedOrigins,
-      resolveHostname,
-      signal,
-    }),
+    validateUrl: async (candidate, context) => {
+      if (!context.initial && !authorizedOrigins.has(candidate.origin)) {
+        throw new HttpClientPolicyError(
+          "INVALID_REDIRECT",
+          "ElevenLabs API returned a cross-origin redirect; refusing to forward the API key.",
+          { fromOrigin: context.from?.origin, toOrigin: candidate.origin },
+        );
+      }
+      await validatePublicDestination(candidate, context);
+    },
   });
 
   if (!response.ok) {

@@ -99,7 +99,7 @@ describe("Anthropic proxy redirect credential policy", () => {
     expect(receiverCalls).toBe(0);
   });
 
-  test("validates every hop and strips the key before an unauthorized final origin", async () => {
+  test("validates every hop and fails closed before an unauthorized final origin", async () => {
     let receivedKey: string | null = "not-called";
     const receiver = Bun.serve({
       port: 0,
@@ -125,8 +125,8 @@ describe("Anthropic proxy redirect credential policy", () => {
     const env = await buildTestEnv();
     const token = await seedSession(env);
     const response = await callProxy(`http://127.0.0.1:${upstream.port}`, token, env);
-    expect(response.status).toBe(200);
-    expect(receivedKey).toBeNull();
+    expect(response.status).toBe(502);
+    expect(receivedKey).toBe("not-called");
   });
 
   test("retains the key for an explicitly authorized redirect origin", async () => {

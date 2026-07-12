@@ -17,10 +17,9 @@ Behavior notes:
 - Provider failures are tolerated (`Promise.allSettled`) and reflected in the
   returned `providers` list.
 - A configured provider origin and exact `allowedOrigins` remain trusted,
-  including intentional private endpoints. Any other redirect hostname must
-  resolve entirely to public-unicast addresses; `resolveHostname` is available
-  for controlled runtimes and deterministic tests. Network egress must still
-  close the documented DNS-rebinding race between validation and Fetch.
+  including intentional private endpoints. Every other cross-origin redirect
+  fails before contact, so provider keys, queries, and request bodies never
+  reach an unapproved origin.
 - The AI SDK tool-call `abortSignal` is forwarded to every provider as the
   optional second `search` argument and through the built-in providers' fetch
   and response-read paths. Cancellation returns the original `signal.reason`.

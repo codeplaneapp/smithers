@@ -99,13 +99,12 @@ describe("credential-safe web search redirects", () => {
       expect(results[0].snippet).toBe(entry.secret);
     });
 
-    test(`${entry.name} blocks private destinations across every unauthorized redirect hop`, async () => {
+    test(`${entry.name} fails closed across every unauthorized cross-origin redirect hop`, async () => {
       for (const mode of ["cross", "multi"]) {
         receiverHits = 0;
         const provider = entry.create(`${apiUrl}/${mode}/${entry.name.toLowerCase()}`);
         await expect(provider.search({ query: "redirect", maxResults: 1 })).rejects.toMatchObject({
-          code: "INVALID_URL",
-          details: { reason: "non-public-destination" },
+          message: expect.stringContaining("cross-origin"),
         });
         expect(receiverHits).toBe(0);
       }

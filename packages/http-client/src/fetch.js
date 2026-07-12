@@ -354,7 +354,7 @@ export async function fetchWithPolicy(input, init = {}, options = {}) {
       cancelBodyBestEffort(response);
       throw new HttpClientPolicyError(
         "TOO_MANY_REDIRECTS",
-        "Outbound request exceeded the configured redirect limit.",
+        `Outbound request exceeded ${maxRedirects} redirects.`,
         { maxRedirects, url: safeUrlLabel(currentUrl) },
       );
     }
@@ -398,7 +398,7 @@ export async function fetchWithPolicy(input, init = {}, options = {}) {
       cancelBodyBestEffort(response);
       throw new HttpClientPolicyError(
         "CROSS_ORIGIN_BODY_BLOCKED",
-        "Redirect cannot forward a request body to an unauthorized origin.",
+        "Redirect cannot forward a request body to an unauthorized cross-origin destination.",
         { status: response.status, from: safeUrlLabel(currentUrl), to: safeUrlLabel(nextUrl) },
       );
     }

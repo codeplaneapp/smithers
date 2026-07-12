@@ -38,7 +38,7 @@ const tools = await createOpenApiTools("./openapi.yaml", {
   baseUrl: "https://api.example.com",
   auth: { type: "bearer", token: process.env.EXAMPLE_API_TOKEN! },
   include: ["listProjects", "getProject"],
-  allowedOrigins: ["https://downloads.example.com"],
+  allowedRedirectOrigins: ["https://downloads.example.com"],
   maxRequestBytes: 10 * 1024 * 1024,
   maxResponseBytes: 1024 * 1024,
   maxSpecBytes: 5 * 1024 * 1024,
@@ -62,12 +62,11 @@ resolves again after validation, so deployment egress must still block private
 ranges, metadata, and DNS-rebinding races.
 
 Redirects keep injected credentials on the pinned initial origin and
-same-origin hops. A safe cross-origin hop is followed only after configured
-auth, custom headers, header parameters, and query API keys are removed unless
-its exact origin is listed in `allowedOrigins`. That option is redirect-only; it
-does not authorize a spec-controlled initial server. A redirect that would
-preserve a request body to an untrusted origin is rejected, as are
-HTTPS-to-HTTP downgrades. Redirects default to 5 hops. Remote specs default to a
+same-origin hops. Every cross-origin hop fails closed before contact unless its
+exact origin is listed in `allowedRedirectOrigins` (`allowedOrigins` is a
+compatibility alias). The allowlist is redirect-only; it does not authorize a
+spec-controlled initial server. HTTPS-to-HTTP downgrades are always rejected.
+Redirects default to 5 hops. Remote specs default to a
 5 MiB cap (`maxSpecBytes`). Serialized operation request bodies default to a
 10 MiB cap (`maxRequestBytes`) enforced before fetch. JSON, URL-encoded, raw,
 and multipart bodies are measured in their wire representation; multipart

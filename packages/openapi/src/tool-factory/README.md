@@ -33,12 +33,11 @@ unpinned servers; it cannot replace `baseUrl` for credentialed requests.
 tests. Because Fetch resolves again after validation, DNS-rebinding and private
 range policy still belongs at the deployment egress boundary.
 
-Redirect handling preserves credentials on same-origin hops, strips configured
-auth, custom headers, header parameters, and query API keys on other safe
-cross-origin hops unless the destination is in `options.allowedOrigins`, and
-rejects body-preserving redirects to untrusted origins and HTTPS downgrades.
-`allowedOrigins` only controls redirect credential retention and never trusts an
-initial spec server. Non-2xx errors redact configured secret values and the
+Redirect handling preserves credentials on same-origin hops and rejects every
+cross-origin hop before contact unless the destination is in
+`options.allowedRedirectOrigins` (`options.allowedOrigins` is a compatibility
+alias). The redirect allowlist never trusts an initial spec server, and HTTPS
+downgrades always fail. Non-2xx errors redact configured secret values and the
 Basic/query wire forms generated from them before returning the message/body.
 `options.maxRedirects` defaults to 5. `options.maxRequestBytes` defaults to
 10 MiB and rejects request bodies locally before fetch based on their serialized

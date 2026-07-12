@@ -68,11 +68,10 @@ describe("ElevenLabs credential-safe redirects", () => {
     });
   });
 
-  test("blocks a private destination after a multi-hop redirect changes POST to GET", async () => {
+  test("fails closed when a later redirect hop crosses origin", async () => {
     receiverHits = 0;
     await expect(tool("multi").execute({ text: "hello" }, callOptions)).rejects.toMatchObject({
-      code: "INVALID_URL",
-      details: { reason: "non-public-destination" },
+      message: expect.stringContaining("cross-origin"),
     });
     expect(receiverHits).toBe(0);
   });

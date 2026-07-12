@@ -120,36 +120,28 @@ describe("createElevenLabsTextToSpeechTool redirect hardening", () => {
     expect(JSON.parse(requests[1].body).text).toBe("hello");
   });
 
-  test("cross-origin redirects never receive xi-api-key", async () => {
+  test("cross-origin redirects fail before the foreign origin receives a request", async () => {
     requests.length = 0;
 
-    await synthesize("cross_origin");
+    await expect(synthesize("cross_origin")).rejects.toThrow(/cross-origin/);
 
     const authorized = requests.filter((r) => r.server === "authorized");
     expect(authorized).toHaveLength(1);
     expect(authorized[0].xiApiKey).toBe(API_KEY);
 
     const attacker = requests.filter((r) => r.server === "attacker1");
-    expect(attacker).toHaveLength(1);
-    expect(attacker[0].xiApiKey).toBeNull();
-    // 302 downgrades the POST, so the cross-origin hop gets no request body either.
-    expect(attacker[0].method).toBe("GET");
-    expect(attacker[0].body).toBe("");
+    expect(attacker).toHaveLength(0);
   });
 
-  test("multi-hop redirect chains validate every hop and never leak the key", async () => {
+  test("multi-hop redirect chains fail closed at the first foreign origin", async () => {
     requests.length = 0;
 
-    await synthesize("multi_hop");
+    await expect(synthesize("multi_hop")).rejects.toThrow(/cross-origin/);
 
     expect(requests.map((r) => `${r.server}:${r.pathname}`)).toEqual([
       "authorized:/v1/text-to-speech/multi_hop",
-      "attacker1:/hop1",
-      "attacker2:/hop2",
     ]);
     expect(requests[0].xiApiKey).toBe(API_KEY);
-    expect(requests[1].xiApiKey).toBeNull();
-    expect(requests[2].xiApiKey).toBeNull();
   });
 
   test("redirect loops fail instead of following forever", async () => {

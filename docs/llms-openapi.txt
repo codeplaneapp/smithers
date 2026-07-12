@@ -21,7 +21,7 @@ const tools = await createOpenApiTools("./petstore.json", {
   baseUrl: "https://api.petstore.example.com",
   auth: { type: "bearer", token: process.env.PETSTORE_TOKEN! },
   include: ["listPets", "getPetById"],
-  allowedOrigins: ["https://downloads.petstore.example.com"],
+  allowedRedirectOrigins: ["https://downloads.petstore.example.com"],
 });
 
 const agent = new ToolLoopAgent({
@@ -43,7 +43,8 @@ type OpenApiToolsOptions = {
   include?: string[];                // operationId allowlist
   exclude?: string[];                // operationId blocklist
   namePrefix?: string;               // prefix generated tool names
-  allowedOrigins?: string[];         // redirect origins allowed to retain auth
+  allowedRedirectOrigins?: string[]; // trusted cross-origin redirect destinations
+  allowedOrigins?: string[];         // compatibility alias for the option above
   allowPrivateNetwork?: boolean;     // opt in private specs, servers, redirects
   resolveHostname?: (hostname: string) => readonly string[] | Promise<readonly string[]>;
   maxRedirects?: number;             // default: 5
@@ -158,20 +159,21 @@ Smithers applies these network rules to generated calls:
 - `allowPrivateNetwork` deliberately permits private/special remote spec URLs,
   unpinned credential-free API servers, and redirect destinations. It cannot
   replace a credentialed `baseUrl`; redirect credentials still require the
-  exact origin in `allowedOrigins`.
+  exact origin in `allowedRedirectOrigins`.
 - Operator `auth` and `headers` override model-supplied header parameters.
   Configured auth, custom headers, declared header parameters, and query API
   keys stay on the initial origin and same-origin redirects.
-- Other safe cross-origin redirects are followed after those header and query
-  credentials are stripped. A redirect that would preserve a request body to
-  an untrusted origin is rejected. Add the exact destination origin to
-  `allowedOrigins` only when the API intentionally requires credentials there.
-  Origin matching includes the scheme, hostname, and port. `allowedOrigins`
-  never authorizes the initial server selected by a spec.
+- Every cross-origin operation redirect fails before the destination is
+  contacted unless the exact destination origin is listed in
+  `allowedRedirectOrigins`. An authorized destination retains the request's
+  credentials and body, so add it only when the API intentionally requires
+  them there. Origin matching includes the scheme, hostname, and port.
+  `allowedOrigins` remains a compatibility alias; neither option authorizes the
+  initial server selected by a spec.
 
-`allowedOrigins` is not a general destination allowlist and does not make an
-untrusted spec safe. It is a narrow exception for retaining credentials across
-a known cross-origin redirect.
+`allowedRedirectOrigins` is not a general destination allowlist and does not
+make an untrusted spec safe. It is a narrow exception for contacting a known
+cross-origin redirect destination with the operation request.
 
 `resolveHostname` can inject a resolver for controlled runtimes and
 deterministic tests. Destination validation resolves A/AAAA records, but Fetch

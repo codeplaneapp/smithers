@@ -211,6 +211,35 @@ async function assertTrustedInitialDestination(url, options, signal) {
 }
 
 /**
+ * Normalize both the established option name and its compatibility alias.
+ * Invalid entries fail locally with an option-specific diagnostic instead of
+ * being ignored and silently narrowing the operator's policy.
+ * @param {OpenApiToolsOptions} options
+ * @param {URL} pinnedBase
+ */
+function authorizedRedirectOrigins(options, pinnedBase) {
+    const origins = new Set([pinnedBase.origin]);
+    for (const [option, entries] of [
+        ["allowedRedirectOrigins", options.allowedRedirectOrigins],
+        ["allowedOrigins", options.allowedOrigins],
+    ]) {
+        for (const entry of entries ?? []) {
+            try {
+                origins.add(assertHttpUrl(entry).origin);
+            }
+            catch {
+                throw new HttpClientPolicyError(
+                    "INVALID_OPTION",
+                    `${option} entries must be valid HTTP(S) URLs.`,
+                    { option },
+                );
+            }
+        }
+    }
+    return origins;
+}
+
+/**
  * A public spec server must not pivot a generated request into instance
  * metadata, loopback, or another private literal through a redirect. An exact
  * operator-pinned base origin may redirect within itself; broader private
@@ -221,8 +250,19 @@ async function assertTrustedInitialDestination(url, options, signal) {
  * @param {AbortSignal | undefined} signal
  */
 async function assertTrustedRedirectDestination(url, options, pinnedBase, signal) {
+    const origins = authorizedRedirectOrigins(options, pinnedBase);
+    if (!origins.has(url.origin)) {
+        throw new HttpClientPolicyError(
+            "INVALID_REDIRECT",
+            `OpenAPI request received an unauthorized cross-origin redirect to ${url.origin}; add it to allowedRedirectOrigins to permit it.`,
+            { fromOrigin: pinnedBase.origin, toOrigin: url.origin },
+        );
+    }
+    // A base pin and explicit cross-origin allowlist are operator trust
+    // decisions, including for private/special endpoints. An unpinned
+    // same-origin hop still gets a fresh DNS check to resist rebinding.
+    if (options.baseUrl || url.origin !== pinnedBase.origin) return;
     if (options.allowPrivateNetwork) return;
-    if (options.baseUrl && url.origin === pinnedBase.origin) return;
     await assertPublicHostname(url.hostname, {
         resolveHostname: options.resolveHostname,
         signal,
@@ -722,8 +762,9 @@ export async function executeRequest(operation, args, baseUrl, options, signal) 
     }
     assertHttpUrl(url);
     fetchInit.signal = signal;
+    const redirectOrigins = authorizedRedirectOrigins(options, resolvedBaseUrl);
     const response = await fetchWithPolicy(url, fetchInit, {
-        allowedOrigins: [resolvedBaseUrl.origin, ...(options.allowedOrigins ?? [])],
+        allowedOrigins: [...redirectOrigins],
         maxRedirects: options.maxRedirects,
         sensitiveHeaders: [
             ...Object.keys(options.headers ?? {}),

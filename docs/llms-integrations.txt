@@ -1597,12 +1597,13 @@ const http = createHttpTool({
 ```
 
 All built-in outbound HTTP tools accept only HTTP(S) URLs and revalidate every
-redirect. Credentials remain on same-origin redirects; a cross-origin redirect
-receives them only when its exact origin is explicitly trusted with
-`allowedOrigins`. Other safe cross-origin redirects are followed without
-sensitive headers; body-preserving redirects to an untrusted origin and
-HTTPS-to-HTTP downgrades fail. Responses are byte-capped and AI SDK task
-cancellation propagates into fetches and response reads.
+redirect. The generic HTTP tool can follow a safe, bodyless cross-origin hop
+after stripping sensitive headers; `allowedOrigins` is required to retain them.
+Credentialed OpenAPI calls fail closed before every unapproved cross-origin hop
+and use `allowedRedirectOrigins` (`allowedOrigins` is a compatibility alias) for
+explicit exceptions. HTTPS-to-HTTP downgrades always fail. Responses are
+byte-capped and AI SDK task cancellation propagates into fetches and response
+reads.
 
 Non-empty generic HTTP `defaultHeaders` require an exact `baseUrl` or explicit
 `allowedHosts`, so operator credentials can never be attached to an arbitrary
@@ -1611,8 +1612,8 @@ origin; bare hostnames and `hostname:port` entries authorize HTTPS only.
 
 Use the narrowest trust rule available: curate OpenAPI operation IDs and pin an
 exact `baseUrl` whenever OpenAPI `auth` or `headers` are configured. A spec's
-`servers[].url` is not credential trust, and `allowedOrigins` only controls
-redirect credential retention. Allow only the redirect destinations the API
+`servers[].url` is not credential trust, and `allowedRedirectOrigins` only
+authorizes explicit redirect destinations. Allow only the destinations the API
 actually uses, and leave private-network access disabled unless the workflow
 intentionally targets an internal service. Untrusted hostnames are resolved and
 denied when any A/AAAA answer is non-global, but Fetch resolves again while

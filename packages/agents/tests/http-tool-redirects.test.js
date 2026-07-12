@@ -104,6 +104,9 @@ function secretTool(extra = {}) {
   return createHttpTool({
     baseUrl: apiUrl,
     defaultHeaders: { "x-default-secret": "configured-secret" },
+    // These tests intentionally exercise two loopback servers. Production
+    // callers must opt in just as explicitly before reaching private egress.
+    allowPrivateNetwork: true,
     ...extra,
   });
 }
@@ -121,11 +124,16 @@ describe("createHttpTool redirects", () => {
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({
       pathname: "/final",
+      authorization: "[REDACTED]",
+      apiKey: "[REDACTED]",
+      defaultSecret: "[REDACTED]",
+    });
+    expect(requests.map((r) => r.server)).toEqual(["api", "api"]);
+    expect(requests.at(-1)).toMatchObject({
       authorization: "Bearer tok-123",
       apiKey: "caller-secret",
       defaultSecret: "configured-secret",
     });
-    expect(requests.map((r) => r.server)).toEqual(["api", "api"]);
   });
 
   test("cross-origin redirect strips every secret header before the attacker hop", async () => {
@@ -148,14 +156,11 @@ describe("createHttpTool redirects", () => {
     });
   });
 
-  test("cross-origin hops are stripped even when no allowlist is configured", async () => {
-    const http = createHttpTool({ defaultHeaders: { "x-default-secret": "configured-secret" } });
-    const result = await http.execute({ url: `${apiUrl}/cross/hop1`, ...callerSecrets }, callOptions);
-
-    // With no allowlist the DIRECT request still gets the defaults (unchanged
-    // behavior), but the redirect hop to another origin never does.
-    expect(requests[0].defaultSecret).toBe("configured-secret");
-    expect(result.body).toMatchObject({ authorization: null, apiKey: null, defaultSecret: null });
+  test("rejects configured secrets without an operator-pinned destination", () => {
+    expect(() => createHttpTool({
+      defaultHeaders: { "x-default-secret": "configured-secret" },
+    })).toThrow(/require baseUrl or allowedHosts/);
+    expect(requests).toHaveLength(0);
   });
 
   test("multi-hop chain keeps secrets on same-origin hops and bares the cross-origin tail", async () => {
@@ -172,28 +177,33 @@ describe("createHttpTool redirects", () => {
     expect(result.body).toMatchObject({ authorization: null, apiKey: null, defaultSecret: null });
   });
 
-  test("allowlisted cross-origin redirect target still receives the secrets", async () => {
-    const http = secretTool({ allowedHosts: [new URL(attackerUrl).host] });
+  test("explicitly authorized cross-origin redirect target still receives the secrets", async () => {
+    const http = secretTool({ allowedOrigins: [attackerUrl] });
     const result = await http.execute({ url: `${apiUrl}/cross/hop1`, ...callerSecrets }, callOptions);
 
     expect(result.body).toMatchObject({
       pathname: "/steal",
+      authorization: "[REDACTED]",
+      apiKey: "[REDACTED]",
+      defaultSecret: "[REDACTED]",
+    });
+    expect(requests.at(-1)).toMatchObject({
       authorization: "Bearer tok-123",
       apiKey: "caller-secret",
       defaultSecret: "configured-secret",
     });
   });
 
-  test("bouncing through an attacker re-attaches secrets only back on the original origin", async () => {
+  test("never re-attaches secrets after an unauthorized redirect hop", async () => {
     const result = await secretTool().execute({ url: `${apiUrl}/bounce/out`, ...callerSecrets }, callOptions);
 
     const relay = requests.find((r) => r.pathname === "/bounce/relay");
     expect(relay).toMatchObject({ server: "attacker", authorization: null, apiKey: null, defaultSecret: null });
     expect(result.body).toMatchObject({
       pathname: "/final",
-      authorization: "Bearer tok-123",
-      apiKey: "caller-secret",
-      defaultSecret: "configured-secret",
+      authorization: null,
+      apiKey: null,
+      defaultSecret: null,
     });
   });
 
@@ -217,15 +227,16 @@ describe("createHttpTool redirects", () => {
       pathname: "/final",
       method: "POST",
       body: JSON.stringify({ hello: "world" }),
-      authorization: "Bearer tok-123",
+      authorization: "[REDACTED]",
     });
+    expect(requests.at(-1)?.authorization).toBe("Bearer tok-123");
   });
 
-  test("caps runaway redirect chains at the fetch spec's 20-hop limit", async () => {
+  test("caps runaway redirect chains at the shared five-hop limit", async () => {
     await expect(secretTool().execute({ url: `${apiUrl}/loop` }, callOptions)).rejects.toThrow(
-      /exceeded 20 redirects/,
+      /exceeded 5 redirects/,
     );
-    // 1 original request + 20 followed hops, then the budget trips.
-    expect(requests.length).toBe(21);
+    // Initial request plus five followed hops, then the budget trips.
+    expect(requests.length).toBe(6);
   });
 });

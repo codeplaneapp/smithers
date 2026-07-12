@@ -21,7 +21,7 @@ export function assertHttpUrl(input) {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new HttpClientPolicyError(
       "UNSUPPORTED_PROTOCOL",
-      `Only HTTP(S) outbound request protocols are allowed; received ${url.protocol}`,
+      `Outbound request uses an unsupported protocol. Only HTTP(S) is allowed (received ${url.protocol}).`,
       { protocol: url.protocol },
     );
   }

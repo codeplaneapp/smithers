@@ -96,11 +96,13 @@ type OpenApiToolsOptions$6 = {
     headers?: Record<string, string>;
     auth?: OpenApiAuth$1;
     /**
-     * Additional origins that may receive configured auth/custom headers after
-     * a redirect. The resolved API origin is always trusted. Cross-origin
-     * redirects outside this list are followed only after sensitive headers are
-     * stripped; HTTPS-to-HTTP redirects are rejected. This is redirect-only and
-     * never authorizes a spec-controlled initial server.
+     * Additional origins authorized as redirect destinations. Credentialed
+     * requests fail closed on every other cross-origin redirect.
+     */
+    allowedRedirectOrigins?: string[];
+    /**
+     * Compatibility alias for `allowedRedirectOrigins`. This is redirect-only
+     * and never authorizes a spec-controlled initial server.
      */
     allowedOrigins?: string[];
     /**

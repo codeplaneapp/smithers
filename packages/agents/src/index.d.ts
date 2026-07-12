@@ -1351,7 +1351,7 @@ type ElevenLabsTextToSpeechToolOptions = {
     defaultModelId?: string;
     baseUrl?: string;
     fetch?: typeof fetch;
-    /** Origins allowed to retain `xi-api-key` across redirects. */
+    /** Exact cross-origin redirect destinations allowed to receive the request and `xi-api-key`. */
     allowedOrigins?: string[];
     /** Maximum redirect hops. Defaults to 5. */
     maxRedirects?: number;

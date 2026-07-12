@@ -202,6 +202,7 @@ describe("createTranscriptionTool", () => {
     const transcription = createTranscriptionTool({
       provider: "whisper",
       apiKey: "openai-test-key",
+      resolveHostname: () => ["93.184.216.34"],
       fetch: async (url, init) => {
         signals.push(init?.signal);
         if (String(url) === "https://cdn.example.com/audio.mp3") {
