@@ -39,6 +39,102 @@ export function asArray(value: unknown): unknown[] {
   return [];
 }
 
+export type MonitorTheme = "dark" | "light";
+
+export type MonitorEmbedMode = {
+  embed: boolean;
+  runId?: string;
+  nodeId?: string;
+  hostOrigin?: string;
+  theme?: MonitorTheme;
+};
+
+/** Parse monitor bootstrap state once from the URL search string. */
+export function embedModeFromSearch(search: string): MonitorEmbedMode {
+  const params = new URLSearchParams(search);
+  const hostOrigin = params.get("hostOrigin") ?? undefined;
+  let validatedHostOrigin: string | undefined;
+  if (hostOrigin) {
+    try {
+      // Check the original spelling before URL normalization. URL accepts
+      // path traversal, backslashes, and other forms that are not origins.
+      const authorityOnly = /^https?:\/\/[^/?#\\%\s]+\/?$/i.test(hostOrigin);
+      const url = new URL(hostOrigin);
+      if (
+        authorityOnly &&
+        url.origin !== "null" &&
+        !hostOrigin.includes("@") &&
+        !hostOrigin.includes("*") &&
+        !url.username &&
+        !url.password &&
+        url.pathname === "/" &&
+        !url.search &&
+        !url.hash &&
+        (url.protocol === "http:" || url.protocol === "https:")
+      ) {
+        validatedHostOrigin = url.origin;
+      }
+    } catch {
+      // Invalid host origins are intentionally ignored; never post to '*'.
+    }
+  }
+  const theme = params.get("theme");
+  return {
+    embed: params.get("embed") === "1",
+    ...(params.get("runId") ? { runId: params.get("runId")! } : {}),
+    ...(params.get("nodeId") ? { nodeId: params.get("nodeId")! } : {}),
+    ...(validatedHostOrigin ? { hostOrigin: validatedHostOrigin } : {}),
+    ...(theme === "dark" || theme === "light" ? { theme } : {}),
+  };
+}
+
+export type SelectionSinkDecision =
+  | { kind: "postMessage"; targetOrigin: string; message: { type: "smithers-monitor:selection"; runId?: string; nodeId?: string } }
+  | { kind: "url"; runId?: string; nodeId?: string }
+  | { kind: "none" };
+
+/** Decide how selection leaves the monitor without performing browser I/O. */
+export function selectionSinkFor(
+  mode: Pick<MonitorEmbedMode, "embed" | "hostOrigin">,
+  runId: string | undefined,
+  nodeId: string | undefined,
+): SelectionSinkDecision {
+  if (mode.embed) {
+    if (!mode.hostOrigin) return { kind: "none" };
+    return {
+      kind: "postMessage",
+      targetOrigin: mode.hostOrigin,
+      message: { type: "smithers-monitor:selection", runId, nodeId },
+    };
+  }
+  return { kind: "url", runId, nodeId };
+}
+
+export type CancelConfirmationState = { armedAtMs: number | null };
+export type CancelConfirmationAction = "arm" | "confirm" | "keep" | "timeout";
+export type CancelConfirmationDecision = "armed" | "confirmed" | "disarmed";
+
+export function cancelConfirmationStateAt(
+  state: CancelConfirmationState,
+  nowMs: number,
+  timeoutMs = 4_000,
+): CancelConfirmationState {
+  return state.armedAtMs !== null && nowMs - state.armedAtMs >= timeoutMs ? { armedAtMs: null } : state;
+}
+
+/** Pure two-step cancel confirmation state machine. */
+export function cancelConfirmationTransition(
+  state: CancelConfirmationState,
+  action: CancelConfirmationAction,
+  nowMs: number,
+  timeoutMs = 4_000,
+): { state: CancelConfirmationState; decision: CancelConfirmationDecision } {
+  const current = cancelConfirmationStateAt(state, nowMs, timeoutMs);
+  if (action === "arm") return { state: { armedAtMs: nowMs }, decision: "armed" };
+  if (action === "confirm" && current.armedAtMs !== null) return { state: { armedAtMs: null }, decision: "confirmed" };
+  return { state: { armedAtMs: null }, decision: "disarmed" };
+}
+
 /** Node-output hooks return either the row directly or `{ row, schema, status }`. */
 export function rowOf(value: unknown): Record<string, unknown> | null {
   if (!isRecord(value)) return null;

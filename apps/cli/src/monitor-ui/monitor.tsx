@@ -35,7 +35,7 @@ import {
 import {
   Chip,
   MonitorToolbar,
-  RunLifecycleActions,
+  RunLifecycleControls,
   RunRailRow,
   RunsPagination,
   ToneDot,
@@ -54,6 +54,7 @@ import {
   autoExpandKeys,
   buildTimeline,
   canRetryTask,
+  embedModeFromSearch,
   clampFrameNo,
   connectionViewFor,
   cronRowsOf,
@@ -104,6 +105,7 @@ import {
   scoresForNode,
   scoresSummary,
   scoreTone,
+  selectionSinkFor,
   shortRunId,
   splitPatchText,
   statusOptions,
@@ -122,6 +124,17 @@ import {
   type Tone,
   type TreeNodeLike,
 } from "./monitorModel.ts";
+
+const monitorMode = embedModeFromSearch(typeof location === "undefined" ? "" : location.search);
+
+function emitSelection(runId: string | undefined, nodeId: string | undefined): void {
+  const sink = selectionSinkFor(monitorMode, runId, nodeId);
+  if (sink.kind === "url") {
+    writeUrlSelection(sink.runId, sink.nodeId);
+  } else if (sink.kind === "postMessage" && typeof window !== "undefined") {
+    window.parent.postMessage(sink.message, sink.targetOrigin);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // One shared 1-second clock. Only the small label components subscribe, so N
@@ -258,17 +271,6 @@ function CopyableRunId({ runId }: { runId: string }) {
       <span className="mon-dim">{copied ? " copied" : ""}</span>
     </button>
   );
-}
-
-// ---------------------------------------------------------------------------
-// URL deep links: ?runId=…&nodeId=… (replaceState keeps links shareable
-// without polluting history).
-// ---------------------------------------------------------------------------
-
-function readUrlSelection(): { runId?: string; nodeId?: string } {
-  if (typeof location === "undefined") return {};
-  const params = new URLSearchParams(location.search);
-  return { runId: params.get("runId") ?? undefined, nodeId: params.get("nodeId") ?? undefined };
 }
 
 function writeUrlSelection(runId: string | undefined, nodeId: string | undefined): void {
@@ -2901,6 +2903,7 @@ function RunDetail({
     }, 8_000);
     return () => clearInterval(timer);
   }, [creatingUi, workflowsRefetch]);
+
   const run = isRecord(runQuery.data) ? runQuery.data : null;
 
   if (!run && runQuery.loading) return <div className="mon-empty">Loading run…</div>;
@@ -2931,7 +2934,6 @@ function RunDetail({
   const progress = runProgress(run.summary);
 
   const act = async (kind: "cancel" | "resume" | "pause") => {
-    if (kind === "cancel" && !window.confirm(`Cancel run ${shortRunId(runId)} (${workflowKey})?`)) return;
     setBusyAction(kind);
     try {
       if (kind === "cancel") {
@@ -3018,7 +3020,8 @@ function RunDetail({
               {creatingUi ? "Creating UI…" : "Create UI"}
             </Button>
           ) : null}
-          <RunLifecycleActions
+          <RunLifecycleControls
+            runId={runId}
             resumable={isResumable(status)}
             pausable={isPausable(status)}
             cancellable={isCancellable(status)}
@@ -3089,12 +3092,11 @@ function App() {
   const urlResolved = useRef(false);
   const initialNodeId = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (urlResolved.current || allRuns.length === 0) return;
+    if (urlResolved.current || (!monitorMode.runId && allRuns.length === 0)) return;
     urlResolved.current = true;
-    const fromUrl = readUrlSelection();
-    if (fromUrl.runId) {
-      setSelectedRunId(fromUrl.runId);
-      initialNodeId.current = fromUrl.nodeId;
+    if (monitorMode.runId) {
+      setSelectedRunId(monitorMode.runId);
+      initialNodeId.current = monitorMode.nodeId;
     }
   }, [allRuns.length]);
 
@@ -3103,11 +3105,11 @@ function App() {
     setSelectedNode(undefined);
     // Picking a run means "show me the run" — leave the metrics view.
     setShowMetrics(false);
-    writeUrlSelection(runId, undefined);
+    emitSelection(runId, undefined);
   };
   const selectNode = (node: TreeNode | undefined) => {
     setSelectedNode(node);
-    writeUrlSelection(selectedRunId, node ? (node.id ?? treeNodeKey(node)) : undefined);
+    emitSelection(selectedRunId, node ? (node.id ?? treeNodeKey(node)) : undefined);
   };
 
   const showResult = (kind: "ok" | "err", text: string) => {
@@ -3128,10 +3130,10 @@ function App() {
   const statuses = useMemo(() => statusOptions(allRuns), [allRuns]);
 
   return (
-    <main className="mon-shell" data-testid="monitor-root">
+    <main className={`mon-shell${monitorMode.embed ? " mon-embed" : ""}`} data-testid="monitor-root">
       <WorkflowUiStyles mode="theme" />
       <SmithersUiStyles extra={`${monitorCss}\n${xtermCss}`} />
-      <header className="mon-topbar">
+      {!monitorMode.embed ? <header className="mon-topbar">
         <div className="mon-brand">
           <span className="mon-brand-mark" aria-hidden />
           <h1>Smithers Monitor</h1>
@@ -3152,7 +3154,7 @@ function App() {
           onToggleMetrics={() => setShowMetrics((value) => !value)}
           onRefresh={() => void runsQuery.refetch()}
         />
-      </header>
+      </header> : null}
 
       {banner ? (
         <div className={`mon-banner mon-banner-app tone-${banner.kind === "ok" ? "ok" : "failed"}`} role="status">
@@ -3162,7 +3164,7 @@ function App() {
       ) : null}
 
       <div className="mon-body">
-        <div className="mon-rail">
+        {!monitorMode.embed ? <div className="mon-rail">
           <ApprovalsInbox onSelectRun={selectRun} onResult={showResult} />
           <RunsRail
             runs={visibleRuns}
@@ -3171,7 +3173,7 @@ function App() {
             selectedRunId={selectedRunId}
             onSelect={selectRun}
           />
-        </div>
+        </div> : null}
 
         <div className="mon-main">
           {showMetrics ? (
@@ -3202,7 +3204,7 @@ function App() {
           )}
         </div>
 
-        {selectedRunId && selectedNode ? (
+        {!monitorMode.embed && selectedRunId && selectedNode ? (
           <NodeInspector runId={selectedRunId} node={selectedNode} onResult={showResult} />
         ) : null}
       </div>
@@ -3300,6 +3302,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-body { display: grid; grid-template-columns: 320px minmax(420px, 1fr) minmax(0, 380px); flex: 1; overflow: hidden; }
 .mon-rail { border-right: 1px solid var(--border); overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
 .mon-main { overflow-y: auto; padding: var(--sp-4); }
+.mon-embed .mon-body { display: block; }
+.mon-embed .mon-main { height: 100%; padding: var(--sp-4); }
+.mon-embed .mon-inspector { display: none; }
 .mon-inspector { border-left: 1px solid var(--border); overflow-y: auto; padding: var(--panel-pad); animation: mon-in 140ms ease-out; }
 @media (max-width: 1160px) {
   .mon-body { grid-template-columns: 300px 1fr; }
@@ -3509,5 +3514,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
   * { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
 }
 `;
+
+if (typeof document !== "undefined" && monitorMode.theme) {
+  document.documentElement.dataset.theme = monitorMode.theme;
+}
 
 createGatewayReactRoot(<App />);

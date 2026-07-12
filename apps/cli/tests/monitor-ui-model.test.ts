@@ -21,11 +21,14 @@ import {
   autoExpandKeys,
   buildTimeline,
   canRetryTask,
+  cancelConfirmationStateAt,
+  cancelConfirmationTransition,
   clampFrameNo,
   connectionViewFor,
   diagnoseRun,
   diffPatchesOf,
   diffSummaryOf,
+  embedModeFromSearch,
   eventViewFor,
   filterRuns,
   formatDiffSummary,
@@ -55,6 +58,7 @@ import {
   runProgress,
   RUNS_PAGE_SIZE,
   shortRunId,
+  selectionSinkFor,
   splitPatchText,
   statusOptions,
   sumDiffSummaries,
@@ -64,6 +68,68 @@ import {
   waitTone,
   workflowOptions,
 } from "../src/monitor-ui/monitorModel.ts";
+
+describe("embedded monitor bootstrap", () => {
+  test("parses embed selection, validated origin, and explicit theme", () => {
+    expect(embedModeFromSearch("?embed=1&runId=run-1&nodeId=build&hostOrigin=https%3A%2F%2Fhost.example%2F&theme=dark")).toEqual({
+      embed: true,
+      runId: "run-1",
+      nodeId: "build",
+      hostOrigin: "https://host.example",
+      theme: "dark",
+    });
+    expect(embedModeFromSearch("?embed=1&theme=light").theme).toBe("light");
+  });
+
+  test("rejects malformed or non-origin host origins", () => {
+    for (const value of [
+      "https://host.example/path",
+      "https://host.example/?query=1",
+      "https://host.example/?",
+      "https://host.example/#",
+      "https:host.example",
+      "https://host.example/foo/..",
+      "https://host.example/.",
+      "https://host.example/%2e",
+      "https://host.example\\@evil.example",
+      "https://*.example.com",
+      "https://host%2eexample",
+      "https://user:pass@host.example",
+      "not-an-origin",
+      "javascript:alert(1)",
+    ]) {
+      expect(embedModeFromSearch(`?embed=1&hostOrigin=${encodeURIComponent(value)}`).hostOrigin).toBeUndefined();
+    }
+  });
+
+  test("ignores unsupported themes", () => {
+    expect(embedModeFromSearch("?embed=1&theme=system").theme).toBeUndefined();
+  });
+
+  test("selects the safe sink for embed and standalone modes", () => {
+    expect(selectionSinkFor({ embed: true, hostOrigin: "https://host.example" }, "run-1", "node-1")).toEqual({
+      kind: "postMessage",
+      targetOrigin: "https://host.example",
+      message: { type: "smithers-monitor:selection", runId: "run-1", nodeId: "node-1" },
+    });
+    expect(selectionSinkFor({ embed: true }, "run-1", undefined)).toEqual({ kind: "none" });
+    expect(selectionSinkFor({ embed: false }, undefined, "node-1")).toEqual({ kind: "url", nodeId: "node-1" });
+  });
+});
+
+describe("cancel confirmation", () => {
+  test("arms, confirms, keeps, and times out as pure transitions", () => {
+    const armed = cancelConfirmationTransition({ armedAtMs: null }, "arm", 100);
+    expect(armed).toEqual({ state: { armedAtMs: 100 }, decision: "armed" });
+    expect(cancelConfirmationTransition(armed.state, "confirm", 200).decision).toBe("confirmed");
+    expect(cancelConfirmationTransition(armed.state, "keep", 200)).toEqual({
+      state: { armedAtMs: null },
+      decision: "disarmed",
+    });
+    expect(cancelConfirmationStateAt(armed.state, 4_100)).toEqual({ armedAtMs: null });
+    expect(cancelConfirmationTransition(armed.state, "confirm", 4_100).decision).toBe("disarmed");
+  });
+});
 
 describe("status tones", () => {
   test("maps every run lifecycle status to a tone", () => {

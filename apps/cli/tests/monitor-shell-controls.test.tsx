@@ -28,7 +28,7 @@ const { createRoot } = await import("react-dom/client");
 type ReactElement = import("react").ReactElement;
 type Root = import("react-dom/client").Root;
 const { SMITHERS_UI_STYLE_ATTR, smithersUiCss } = await import("smithers-orchestrator/ui");
-const { Chip, MonitorToolbar, RunLifecycleActions, RunRailRow, RunsPagination } = await import(
+const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } = await import(
   "../src/monitor-ui/monitorShell.tsx"
 );
 
@@ -51,6 +51,12 @@ async function render(element: ReactElement): Promise<void> {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
+  const r = root;
+  await act(async () => r.render(element));
+}
+
+async function rerender(element: ReactElement): Promise<void> {
+  if (!root) throw new Error("render() must be called before rerender()");
   const r = root;
   await act(async () => r.render(element));
 }
@@ -302,6 +308,28 @@ describe("RunRailRow", () => {
 });
 
 describe("RunLifecycleActions", () => {
+  test("armed cancel renders an explicit destructive confirmation and keep affordance", async () => {
+    const actions: string[] = [];
+    let kept = 0;
+    await render(
+      <RunLifecycleActions
+        resumable={false}
+        pausable={false}
+        cancellable
+        cancelArmed
+        busyAction={null}
+        onAction={(kind) => actions.push(kind)}
+        onCancelKeep={() => kept++}
+      />,
+    );
+    expect(byTestId("monitor-confirm-cancel-run").textContent).toBe("Confirm cancel?");
+    expect(byTestId("monitor-confirm-cancel-run").className).toContain("sui-button-destructive");
+    await click(byTestId("monitor-confirm-cancel-run"));
+    await click(byTestId("monitor-keep-cancel-run"));
+    expect(actions).toEqual(["cancel"]);
+    expect(kept).toBe(1);
+  });
+
   test("idle: all applicable actions render enabled with their testids", async () => {
     const actions: string[] = [];
     await render(
@@ -354,6 +382,44 @@ describe("RunLifecycleActions", () => {
     expect(document.querySelector('[data-testid="monitor-resume-run"]')).toBeNull();
     expect(document.querySelector('[data-testid="monitor-pause-run"]')).toBeNull();
     expect(document.querySelector('[data-testid="monitor-cancel-run"]')).not.toBeNull();
+  });
+});
+
+describe("RunLifecycleControls", () => {
+  const controls = (runId: string, onAction: (kind: "cancel" | "resume" | "pause") => void) => (
+    <RunLifecycleControls
+      runId={runId}
+      resumable={false}
+      pausable={false}
+      cancellable
+      busyAction={null}
+      onAction={onAction}
+    />
+  );
+
+  test("mounts after a loading state without changing the host's hook order", async () => {
+    const Host = ({ loaded }: { loaded: boolean }) =>
+      loaded ? controls("run-a", () => {}) : <div data-testid="monitor-run-loading">Loading run…</div>;
+
+    await render(<Host loaded={false} />);
+    expect(byTestId("monitor-run-loading").textContent).toBe("Loading run…");
+    await rerender(<Host loaded />);
+    expect(byTestId("monitor-cancel-run")).toBeTruthy();
+  });
+
+  test("does not transfer an armed cancel confirmation between runs", async () => {
+    const actions: string[] = [];
+    const onAction = (kind: "cancel" | "resume" | "pause") => actions.push(kind);
+    await render(controls("run-a", onAction));
+    await click(byTestId("monitor-cancel-run"));
+    expect(byTestId("monitor-confirm-cancel-run")).toBeTruthy();
+
+    await rerender(controls("run-b", onAction));
+    expect(document.querySelector('[data-testid="monitor-confirm-cancel-run"]')).toBeNull();
+    await click(byTestId("monitor-cancel-run"));
+    expect(actions).toEqual([]);
+    await click(byTestId("monitor-confirm-cancel-run"));
+    expect(actions).toEqual(["cancel"]);
   });
 });
 

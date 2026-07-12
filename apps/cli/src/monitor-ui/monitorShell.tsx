@@ -3,11 +3,11 @@
  * Monitor shell controls, built on the shared smithers-orchestrator/ui
  * primitives (Button, Input, Select, RowButton). These are the pure view
  * pieces of the monitor's topbar filters, runs rail, pagination, and run
- * lifecycle actions — prop-driven so tests can exercise focus, disabled,
- * active, and keyboard states without booting a gateway. All state and RPC
- * wiring stays in ./monitor.tsx.
+ * lifecycle actions. The small lifecycle controller owns only the cancel
+ * confirmation state so rendered tests can exercise its wiring without
+ * booting a gateway; RPC wiring stays in ./monitor.tsx.
  */
-import type { ComponentProps, ReactNode } from "react";
+import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import {
   Button,
   Input,
@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "smithers-orchestrator/ui";
-import type { Tone } from "./monitorModel.ts";
+import { cancelConfirmationTransition, type Tone } from "./monitorModel.ts";
 
 export function ToneDot({ tone, pulse }: { tone: Tone; pulse?: boolean }) {
   return <span className={`mon-dot tone-${tone}${pulse ? " mon-dot-pulse" : ""}`} aria-hidden />;
@@ -246,20 +246,26 @@ export function RunsPagination({
 
 export type RunLifecycleKind = "cancel" | "resume" | "pause";
 
+export type RunLifecycleActionsProps = {
+  resumable: boolean;
+  pausable: boolean;
+  cancellable: boolean;
+  busyAction: RunLifecycleKind | null;
+  cancelArmed?: boolean;
+  onAction: (kind: RunLifecycleKind) => void;
+  onCancelKeep?: () => void;
+};
+
 /** Resume / Pause / Cancel — the run detail header's lifecycle actions. */
 export function RunLifecycleActions({
   resumable,
   pausable,
   cancellable,
   busyAction,
+  cancelArmed = false,
   onAction,
-}: {
-  resumable: boolean;
-  pausable: boolean;
-  cancellable: boolean;
-  busyAction: RunLifecycleKind | null;
-  onAction: (kind: RunLifecycleKind) => void;
-}) {
+  onCancelKeep,
+}: RunLifecycleActionsProps) {
   return (
     <>
       {resumable ? (
@@ -284,15 +290,92 @@ export function RunLifecycleActions({
         </Button>
       ) : null}
       {cancellable ? (
-        <Button
-          variant="destructive"
-          data-testid="monitor-cancel-run"
-          disabled={busyAction !== null}
-          onClick={() => onAction("cancel")}
-        >
-          Cancel
-        </Button>
+        cancelArmed ? (
+          <>
+            <Button
+              variant="destructive"
+              data-testid="monitor-confirm-cancel-run"
+              disabled={busyAction !== null}
+              onClick={() => onAction("cancel")}
+            >
+              Confirm cancel?
+            </Button>
+            <Button variant="ghost" data-testid="monitor-keep-cancel-run" disabled={busyAction !== null} onClick={onCancelKeep}>
+              Keep
+            </Button>
+          </>
+        ) : (
+          <Button
+            variant="destructive"
+            data-testid="monitor-cancel-run"
+            disabled={busyAction !== null}
+            onClick={() => onAction("cancel")}
+          >
+            Cancel
+          </Button>
+        )
       ) : null}
     </>
+  );
+}
+
+/** Stateful cancel confirmation shared by RunDetail and rendered regression tests. */
+export function RunLifecycleControls({
+  runId,
+  confirmationTimeoutMs = 4_000,
+  now = Date.now,
+  onAction,
+  ...props
+}: Omit<RunLifecycleActionsProps, "cancelArmed" | "onAction" | "onCancelKeep"> & {
+  runId: string;
+  confirmationTimeoutMs?: number;
+  now?: () => number;
+  onAction: (kind: RunLifecycleKind) => void;
+}) {
+  const [cancelArm, setCancelArm] = useState<{ runId: string; armedAtMs: number } | null>(null);
+  const cancelArmed = cancelArm?.runId === runId;
+
+  useEffect(() => {
+    setCancelArm(null);
+  }, [runId]);
+
+  useEffect(() => {
+    if (!cancelArmed || !cancelArm) return;
+    const armedRunId = cancelArm.runId;
+    const delay = Math.max(0, confirmationTimeoutMs - (now() - cancelArm.armedAtMs));
+    const timer = setTimeout(() => {
+      setCancelArm((current) => (current?.runId === armedRunId ? null : current));
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [cancelArm, cancelArmed, confirmationTimeoutMs, now]);
+
+  const handleAction = (kind: RunLifecycleKind) => {
+    if (kind !== "cancel") {
+      onAction(kind);
+      return;
+    }
+    const transition = cancelConfirmationTransition(
+      { armedAtMs: cancelArmed && cancelArm ? cancelArm.armedAtMs : null },
+      cancelArmed ? "confirm" : "arm",
+      now(),
+      confirmationTimeoutMs,
+    );
+    if (transition.decision === "confirmed") {
+      setCancelArm(null);
+      onAction("cancel");
+      return;
+    }
+    setCancelArm(
+      transition.state.armedAtMs === null ? null : { runId, armedAtMs: transition.state.armedAtMs },
+    );
+  };
+
+  return (
+    <RunLifecycleActions
+      {...props}
+      cancelArmed={cancelArmed}
+      onAction={handleAction}
+      onCancelKeep={() => setCancelArm(null)}
+    />
   );
 }
