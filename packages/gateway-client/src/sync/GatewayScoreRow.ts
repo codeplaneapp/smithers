@@ -16,7 +16,8 @@
  *  - `attempt`     — `_smithers_scorers.attempt`.
  *  - `scorerId`    — `_smithers_scorers.scorer_id`.
  *  - `scorerName`  — `_smithers_scorers.scorer_name` (the human label).
- *  - `source`      — `_smithers_scorers.source` (e.g. 'scorer', 'eval').
+ *  - `source`      — `_smithers_scorers.source` (`live` or `batch` for new rows;
+ *                    the public field remains `string` for legacy rows).
  *  - `score`       — `_smithers_scorers.score` (the numeric verdict).
  *  - `reason`      — `_smithers_scorers.reason` (null when none recorded).
  *  - `scoredAtMs`  — `_smithers_scorers.scored_at_ms`.

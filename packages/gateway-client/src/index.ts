@@ -35,6 +35,8 @@ export type { GatewayCronRow } from "./sync/GatewayCronRow.ts";
 export type { GatewayDocRow } from "./data/GatewayDocRow.ts";
 export type { GatewayMemoryFactRow } from "./sync/GatewayMemoryFactRow.ts";
 export type { GatewayPromptRow } from "./sync/GatewayPromptRow.ts";
+export type { GatewayComparisonScoreRow } from "./sync/GatewayComparisonScoreRow.ts";
+export type { GatewayScoreDetail } from "./sync/GatewayScoreDetail.ts";
 export type { GatewayScoreRow } from "./sync/GatewayScoreRow.ts";
 export type { GatewayDocKind, GatewayTicketRow } from "./sync/GatewayTicketRow.ts";
 export type { GatewayRunEventRow } from "./sync/GatewayRunEventRow.ts";
@@ -52,6 +54,12 @@ export type { SmithersDataClient } from "./data/SmithersDataClient.ts";
 export type { SmithersStreamEvent } from "./data/SmithersStreamEvent.ts";
 export type { SmithersStreamError } from "./data/SmithersStreamError.ts";
 export type { WorkspaceMode } from "./data/WorkspaceMode.ts";
+export type {
+  ListScoresForRunsRequest,
+  ListScoresForRunsResponse,
+  GetScoreDetailRequest,
+  GetScoreDetailResponse,
+} from "@smithers-orchestrator/gateway/rpc";
 export { createSmithersCollections } from "./data/createSmithersCollections.ts";
 export { createSmithersDataClient } from "./data/createSmithersDataClient.ts";
 export { mapSmithersElectricRow } from "./data/mapSmithersElectricRow.ts";

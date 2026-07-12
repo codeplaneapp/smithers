@@ -11467,7 +11467,7 @@ paths:
                           description: "Human scorer name."
                         source:
                           type: string
-                          description: "Where the score came from (e.g. 'scorer', 'eval')."
+                          description: "Persisted score provenance (`live` or `batch` for production scorer rows)."
                         score:
                           type: number
                           description: "The scorer's numeric verdict."
@@ -11514,7 +11514,7 @@ paths:
                     attempt: 0
                     scorerId: correctness
                     scorerName: correctness
-                    source: scorer
+                    source: live
                     score: 0.92
                     scoredAtMs: 1710000000000
         400:
@@ -11800,6 +11800,1107 @@ paths:
                           - Unauthorized
                           - Forbidden
                           - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+  /v1/rpc/listScoresForRuns:
+    post:
+      operationId: listScoresForRuns
+      summary: "List Scores For Runs"
+      description: "List and globally page persisted scorer rows across up to 30 explicit run ids. The caller must supply the scorer-producing run ids; this does not expand an eval wrapper into child case runs or provide experiment/case alignment."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - score:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: score:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: listScoresForRuns
+                params:
+                  type: object
+                  properties:
+                    runIds:
+                      type: array
+                      description: "Up to 30 run-id entries to compare. The server trims values and deduplicates them in first-seen order."
+                      items:
+                        type: string
+                        minLength: 1
+                        maxLength: 256
+                      maxItems: 30
+                    nodeId:
+                      type: string
+                      description: "Optional exact, case-sensitive node id filter."
+                    scorerId:
+                      type: string
+                      description: "Optional exact, case-sensitive scorer id filter."
+                    scorerName:
+                      type: string
+                      description: "Optional exact, case-sensitive scorer name filter."
+                    source:
+                      type: string
+                      enum:
+                        - live
+                        - batch
+                      description: "Optional exact production score provenance filter."
+                    order:
+                      type: string
+                      enum:
+                        - scoredAtAsc
+                        - scoredAtDesc
+                      default: scoredAtAsc
+                      description: "Primary score timestamp order."
+                    offset:
+                      type: integer
+                      minimum: 0
+                      maximum: 9999
+                      default: 0
+                      description: "Global result offset after merging distinct stores. The offset plus limit may not exceed the 10,000-row comparison window."
+                    limit:
+                      type: integer
+                      minimum: 1
+                      maximum: 500
+                      default: 500
+                      description: "Maximum globally merged rows to return. The offset plus limit may not exceed the 10,000-row comparison window."
+                  required:
+                    - runIds
+                  additionalProperties: false
+            example:
+              id: listScoresForRuns-1
+              method: listScoresForRuns
+              params:
+                runIds:
+                  - run_01
+                  - run_02
+                order: scoredAtDesc
+                offset: 0
+                limit: 500
+      responses:
+        200:
+          description: "List Scores For Runs response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: object
+                    properties:
+                      rows:
+                        type: array
+                        description: "Globally ordered persisted scorer rows."
+                        items:
+                          type: object
+                          properties:
+                            scoreId:
+                              type: string
+                              description: "Exact persisted score id."
+                            runId:
+                              type: string
+                              description: "Run id the score belongs to."
+                            nodeId:
+                              type: string
+                              description: "Node id the score was produced for."
+                            iteration:
+                              type: integer
+                              minimum: 0
+                              description: "Node iteration the score belongs to."
+                            attempt:
+                              type: integer
+                              minimum: 0
+                              description: "Node attempt the score belongs to."
+                            scorerId:
+                              type: string
+                              description: "Stable scorer id."
+                            scorerName:
+                              type: string
+                              description: "Human scorer name."
+                            source:
+                              type: string
+                              description: "Persisted score source."
+                            score:
+                              type: number
+                              description: "The scorer's numeric verdict."
+                            reason:
+                              type:
+                                - string
+                                - "null"
+                              description: "Optional human reason for the score."
+                            scoredAtMs:
+                              type: integer
+                              minimum: 0
+                              description: "Unix epoch milliseconds when the score was recorded."
+                            latencyMs:
+                              type:
+                                - number
+                                - "null"
+                              description: "Optional scorer latency in milliseconds."
+                            durationMs:
+                              type:
+                                - number
+                                - "null"
+                              description: "Optional node duration in milliseconds."
+                          required:
+                            - scoreId
+                            - runId
+                            - nodeId
+                            - iteration
+                            - attempt
+                            - scorerId
+                            - scorerName
+                            - source
+                            - score
+                            - scoredAtMs
+                          additionalProperties: false
+                      total:
+                        type: integer
+                        minimum: 0
+                        description: "Total filtered row count before global pagination."
+                    required:
+                      - rows
+                      - total
+                    additionalProperties: false
+              example:
+                type: res
+                id: listScoresForRuns-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  rows:
+                    -
+                      scoreId: run_01:review:correctness
+                      runId: run_01
+                      nodeId: review
+                      iteration: 0
+                      attempt: 0
+                      scorerId: correctness
+                      scorerName: correctness
+                      source: live
+                      score: 0.92
+                      scoredAtMs: 1710000000000
+                  total: 1
+        400:
+          description: "The request shape is invalid."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        404:
+          description: "The run does not exist."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+  /v1/rpc/getScoreDetail:
+    post:
+      operationId: getScoreDetail
+      summary: "Get Score Detail"
+      description: "Read one exact persisted score row with its JSON detail columns decoded."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - score:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: score:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: getScoreDetail
+                params:
+                  type: object
+                  properties:
+                    runId:
+                      type: string
+                      minLength: 1
+                      maxLength: 256
+                      description: "Owning run id (trimmed by the server)."
+                    scoreId:
+                      type: string
+                      minLength: 1
+                      maxLength: 256
+                      description: "Exact persisted score id (trimmed by the server)."
+                  required:
+                    - runId
+                    - scoreId
+                  additionalProperties: false
+            example:
+              id: getScoreDetail-1
+              method: getScoreDetail
+              params:
+                runId: run_01
+                scoreId: run_01:review:correctness
+      responses:
+        200:
+          description: "Get Score Detail response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: object
+                    properties:
+                      scoreId:
+                        type: string
+                        description: "Exact persisted score id."
+                      runId:
+                        type: string
+                        description: "Run id the score belongs to."
+                      nodeId:
+                        type: string
+                        description: "Node id the score was produced for."
+                      iteration:
+                        type: integer
+                        minimum: 0
+                        description: "Node iteration the score belongs to."
+                      attempt:
+                        type: integer
+                        minimum: 0
+                        description: "Node attempt the score belongs to."
+                      scorerId:
+                        type: string
+                        description: "Stable scorer id."
+                      scorerName:
+                        type: string
+                        description: "Human scorer name."
+                      source:
+                        type: string
+                        description: "Persisted score source."
+                      score:
+                        type: number
+                        description: "The scorer's numeric verdict."
+                      reason:
+                        type:
+                          - string
+                          - "null"
+                        description: "Optional human reason for the score."
+                      scoredAtMs:
+                        type: integer
+                        minimum: 0
+                        description: "Unix epoch milliseconds when the score was recorded."
+                      latencyMs:
+                        type:
+                          - number
+                          - "null"
+                        description: "Optional scorer latency in milliseconds."
+                      durationMs:
+                        type:
+                          - number
+                          - "null"
+                        description: "Optional node duration in milliseconds."
+                      meta:
+                        description: "Any JSON value."
+                        nullable: true
+                        oneOf:
+                          -
+                            type: object
+                            additionalProperties: true
+                          -
+                            type: array
+                            items:
+                              nullable: true
+                          -
+                            type: string
+                          -
+                            type: number
+                          -
+                            type: boolean
+                          -
+                            type: "null"
+                      input:
+                        description: "Any JSON value."
+                        nullable: true
+                        oneOf:
+                          -
+                            type: object
+                            additionalProperties: true
+                          -
+                            type: array
+                            items:
+                              nullable: true
+                          -
+                            type: string
+                          -
+                            type: number
+                          -
+                            type: boolean
+                          -
+                            type: "null"
+                      output:
+                        description: "Any JSON value."
+                        nullable: true
+                        oneOf:
+                          -
+                            type: object
+                            additionalProperties: true
+                          -
+                            type: array
+                            items:
+                              nullable: true
+                          -
+                            type: string
+                          -
+                            type: number
+                          -
+                            type: boolean
+                          -
+                            type: "null"
+                      groundTruth:
+                        description: "Any JSON value."
+                        nullable: true
+                        oneOf:
+                          -
+                            type: object
+                            additionalProperties: true
+                          -
+                            type: array
+                            items:
+                              nullable: true
+                          -
+                            type: string
+                          -
+                            type: number
+                          -
+                            type: boolean
+                          -
+                            type: "null"
+                      context:
+                        description: "Any JSON value."
+                        nullable: true
+                        oneOf:
+                          -
+                            type: object
+                            additionalProperties: true
+                          -
+                            type: array
+                            items:
+                              nullable: true
+                          -
+                            type: string
+                          -
+                            type: number
+                          -
+                            type: boolean
+                          -
+                            type: "null"
+                    required:
+                      - scoreId
+                      - runId
+                      - nodeId
+                      - iteration
+                      - attempt
+                      - scorerId
+                      - scorerName
+                      - source
+                      - score
+                      - scoredAtMs
+                      - meta
+                      - input
+                      - output
+                      - groundTruth
+                      - context
+                    additionalProperties: false
+              example:
+                type: res
+                id: getScoreDetail-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  scoreId: run_01:review:correctness
+                  runId: run_01
+                  nodeId: review
+                  iteration: 0
+                  attempt: 0
+                  scorerId: correctness
+                  scorerName: correctness
+                  source: live
+                  score: 0.92
+                  scoredAtMs: 1710000000000
+                  meta:
+                    rubric: correctness
+                  input:
+                    prompt: "Review this."
+                  output:
+                    verdict: pass
+                  groundTruth: null
+                  context: null
+        400:
+          description: "The request shape is invalid."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - ScoreNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - ScoreNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - ScoreNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        404:
+          description: "The score does not exist on the requested run."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - ScoreNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - ScoreNotFound
                           - Internal
                       message:
                         type: string
@@ -17453,6 +18554,844 @@ paths:
                           - ticket:read
                           - ticket:write
                           - observability:read
+  /v1/api/scores/compare:
+    get:
+      operationId: apiListScoresForRuns
+      summary: "List scores across runs."
+      description: "REST domain API wrapper over the listScoresForRuns Gateway RPC internals."
+      tags:
+        - "Gateway REST"
+      security:
+        -
+          bearerAuth:
+            - score:read
+      x-smithers-api-version: v1
+      x-smithers-required-scope: score:read
+      x-smithers-rpc-method: listScoresForRuns
+      parameters:
+        -
+          name: runId
+          in: query
+          description: "Run id entry. Repeat this query parameter for each run to compare."
+          required: false
+          schema:
+            type: array
+            description: "Up to 30 run-id entries to compare. The server trims values and deduplicates them in first-seen order."
+            items:
+              type: string
+              minLength: 1
+              maxLength: 256
+            maxItems: 30
+          style: form
+          explode: true
+        -
+          name: nodeId
+          in: query
+          description: "Optional exact, case-sensitive node id filter."
+          required: false
+          schema:
+            type: string
+            description: "Optional exact, case-sensitive node id filter."
+        -
+          name: scorerId
+          in: query
+          description: "Optional exact, case-sensitive scorer id filter."
+          required: false
+          schema:
+            type: string
+            description: "Optional exact, case-sensitive scorer id filter."
+        -
+          name: scorerName
+          in: query
+          description: "Optional exact, case-sensitive scorer name filter."
+          required: false
+          schema:
+            type: string
+            description: "Optional exact, case-sensitive scorer name filter."
+        -
+          name: source
+          in: query
+          description: "Optional score provenance filter."
+          required: false
+          schema:
+            type: string
+            enum:
+              - live
+              - batch
+            description: "Optional exact production score provenance filter."
+        -
+          name: order
+          in: query
+          description: "Primary score timestamp order."
+          required: false
+          schema:
+            type: string
+            enum:
+              - scoredAtAsc
+              - scoredAtDesc
+            default: scoredAtAsc
+            description: "Primary score timestamp order."
+        -
+          name: offset
+          in: query
+          description: "Global result offset."
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9999
+            default: 0
+            description: "Global result offset after merging distinct stores. The offset plus limit may not exceed the 10,000-row comparison window."
+        -
+          name: limit
+          in: query
+          description: "Maximum globally merged rows to return."
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+            description: "Maximum globally merged rows to return. The offset plus limit may not exceed the 10,000-row comparison window."
+      responses:
+        200:
+          description: "Gateway REST response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - data
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: true
+                  data:
+                    type: object
+                    properties:
+                      rows:
+                        type: array
+                        description: "Globally ordered persisted scorer rows."
+                        items:
+                          type: object
+                          properties:
+                            scoreId:
+                              type: string
+                              description: "Exact persisted score id."
+                            runId:
+                              type: string
+                              description: "Run id the score belongs to."
+                            nodeId:
+                              type: string
+                              description: "Node id the score was produced for."
+                            iteration:
+                              type: integer
+                              minimum: 0
+                              description: "Node iteration the score belongs to."
+                            attempt:
+                              type: integer
+                              minimum: 0
+                              description: "Node attempt the score belongs to."
+                            scorerId:
+                              type: string
+                              description: "Stable scorer id."
+                            scorerName:
+                              type: string
+                              description: "Human scorer name."
+                            source:
+                              type: string
+                              description: "Persisted score source."
+                            score:
+                              type: number
+                              description: "The scorer's numeric verdict."
+                            reason:
+                              type:
+                                - string
+                                - "null"
+                              description: "Optional human reason for the score."
+                            scoredAtMs:
+                              type: integer
+                              minimum: 0
+                              description: "Unix epoch milliseconds when the score was recorded."
+                            latencyMs:
+                              type:
+                                - number
+                                - "null"
+                              description: "Optional scorer latency in milliseconds."
+                            durationMs:
+                              type:
+                                - number
+                                - "null"
+                              description: "Optional node duration in milliseconds."
+                          required:
+                            - scoreId
+                            - runId
+                            - nodeId
+                            - iteration
+                            - attempt
+                            - scorerId
+                            - scorerName
+                            - source
+                            - score
+                            - scoredAtMs
+                          additionalProperties: false
+                      total:
+                        type: integer
+                        minimum: 0
+                        description: "Total filtered row count before global pagination."
+                    required:
+                      - rows
+                      - total
+                    additionalProperties: false
+                  txid:
+                    type: string
+                    pattern: "^\\d+$"
+                  seq:
+                    type: integer
+                    minimum: 0
+        400:
+          description: "Invalid request."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        401:
+          description: "Authentication failed."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        403:
+          description: "Missing required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        404:
+          description: "Route or resource not found."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        500:
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+  /v1/api/scores/{runId}/{scoreId}:
+    get:
+      operationId: apiGetScoreDetail
+      summary: "Read one score with decoded detail."
+      description: "REST domain API wrapper over the getScoreDetail Gateway RPC internals."
+      tags:
+        - "Gateway REST"
+      security:
+        -
+          bearerAuth:
+            - score:read
+      x-smithers-api-version: v1
+      x-smithers-required-scope: score:read
+      x-smithers-rpc-method: getScoreDetail
+      parameters:
+        -
+          name: runId
+          in: path
+          description: "Owning run id."
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            description: "Owning run id (trimmed by the server)."
+        -
+          name: scoreId
+          in: path
+          description: "Exact persisted score id."
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            description: "Exact persisted score id (trimmed by the server)."
+      responses:
+        200:
+          description: "Gateway REST response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - data
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: true
+                  data:
+                    type: object
+                    properties:
+                      scoreId:
+                        type: string
+                        description: "Exact persisted score id."
+                      runId:
+                        type: string
+                        description: "Run id the score belongs to."
+                      nodeId:
+                        type: string
+                        description: "Node id the score was produced for."
+                      iteration:
+                        type: integer
+                        minimum: 0
+                        description: "Node iteration the score belongs to."
+                      attempt:
+                        type: integer
+                        minimum: 0
+                        description: "Node attempt the score belongs to."
+                      scorerId:
+                        type: string
+                        description: "Stable scorer id."
+                      scorerName:
+                        type: string
+                        description: "Human scorer name."
+                      source:
+                        type: string
+                        description: "Persisted score source."
+                      score:
+                        type: number
+                        description: "The scorer's numeric verdict."
+                      reason:
+                        type:
+                          - string
+                          - "null"
+                        description: "Optional human reason for the score."
+                      scoredAtMs:
+                        type: integer
+                        minimum: 0
+                        description: "Unix epoch milliseconds when the score was recorded."
+                      latencyMs:
+                        type:
+                          - number
+                          - "null"
+                        description: "Optional scorer latency in milliseconds."
+                      durationMs:
+                        type:
+                          - number
+                          - "null"
+                        description: "Optional node duration in milliseconds."
+                      meta:
+                        description: "Any JSON value."
+                        nullable: true
+                        oneOf:
+                          -
+                            type: object
+                            additionalProperties: true
+                          -
+                            type: array
+                            items:
+                              nullable: true
+                          -
+                            type: string
+                          -
+                            type: number
+                          -
+                            type: boolean
+                          -
+                            type: "null"
+                      input:
+                        description: "Any JSON value."
+                        nullable: true
+                        oneOf:
+                          -
+                            type: object
+                            additionalProperties: true
+                          -
+                            type: array
+                            items:
+                              nullable: true
+                          -
+                            type: string
+                          -
+                            type: number
+                          -
+                            type: boolean
+                          -
+                            type: "null"
+                      output:
+                        description: "Any JSON value."
+                        nullable: true
+                        oneOf:
+                          -
+                            type: object
+                            additionalProperties: true
+                          -
+                            type: array
+                            items:
+                              nullable: true
+                          -
+                            type: string
+                          -
+                            type: number
+                          -
+                            type: boolean
+                          -
+                            type: "null"
+                      groundTruth:
+                        description: "Any JSON value."
+                        nullable: true
+                        oneOf:
+                          -
+                            type: object
+                            additionalProperties: true
+                          -
+                            type: array
+                            items:
+                              nullable: true
+                          -
+                            type: string
+                          -
+                            type: number
+                          -
+                            type: boolean
+                          -
+                            type: "null"
+                      context:
+                        description: "Any JSON value."
+                        nullable: true
+                        oneOf:
+                          -
+                            type: object
+                            additionalProperties: true
+                          -
+                            type: array
+                            items:
+                              nullable: true
+                          -
+                            type: string
+                          -
+                            type: number
+                          -
+                            type: boolean
+                          -
+                            type: "null"
+                    required:
+                      - scoreId
+                      - runId
+                      - nodeId
+                      - iteration
+                      - attempt
+                      - scorerId
+                      - scorerName
+                      - source
+                      - score
+                      - scoredAtMs
+                      - meta
+                      - input
+                      - output
+                      - groundTruth
+                      - context
+                    additionalProperties: false
+                  txid:
+                    type: string
+                    pattern: "^\\d+$"
+                  seq:
+                    type: integer
+                    minimum: 0
+        400:
+          description: "Invalid request."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        401:
+          description: "Authentication failed."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        403:
+          description: "Missing required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        404:
+          description: "Route or resource not found."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        500:
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
   /v1/api/tickets:
     get:
       operationId: apiListTickets
@@ -19969,6 +21908,7 @@ components:
         - Unauthorized
         - Forbidden
         - RunNotFound
+        - ScoreNotFound
         - RUN_NOT_ACTIVE
         - CronNotFound
         - TicketNotFound

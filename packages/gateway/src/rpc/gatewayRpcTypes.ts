@@ -19,6 +19,10 @@ export type JsonSchema = {
   readonly format?: string;
   readonly minimum?: number;
   readonly maximum?: number;
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly minItems?: number;
+  readonly maxItems?: number;
   readonly default?: unknown;
   readonly nullable?: boolean;
   readonly items?: JsonSchema;
@@ -35,6 +39,7 @@ export type GatewayRpcErrorCode =
   | "Unauthorized"
   | "Forbidden"
   | "RunNotFound"
+  | "ScoreNotFound"
   | "RUN_NOT_ACTIVE"
   | "CronNotFound"
   | "TicketNotFound"
@@ -104,6 +109,8 @@ export type GatewayRpcMethod =
   | "listMemoryFacts"
   | "listPrompts"
   | "listScores"
+  | "listScoresForRuns"
+  | "getScoreDetail"
   | "listTickets"
   | "createTicket"
   | "updateTicket"
@@ -468,6 +475,51 @@ export type ListScoresRequest = {
 };
 
 export type ListScoresResponse = GatewayScoreRow[];
+
+/** One cross-run score row, including the exact persisted score identity. */
+export type GatewayComparisonScoreRow = GatewayScoreRow & {
+  scoreId: string;
+};
+
+/**
+ * Batch score rows for explicit run ids. Callers must already know the scorer-
+ * producing run ids: this does not expand an eval wrapper run into child case
+ * runs or provide experiment/case alignment.
+ */
+export type ListScoresForRunsRequest = {
+  runIds: string[];
+  nodeId?: string;
+  scorerId?: string;
+  scorerName?: string;
+  source?: "live" | "batch";
+  order?: "scoredAtAsc" | "scoredAtDesc";
+  offset?: number;
+  limit?: number;
+};
+
+export type ListScoresForRunsResponse = {
+  rows: GatewayComparisonScoreRow[];
+  total: number;
+};
+
+export type GetScoreDetailRequest = {
+  runId: string;
+  scoreId: string;
+};
+
+/**
+ * One exact persisted score with its JSON detail columns decoded. Every detail
+ * field is present; a SQL NULL (or stored JSON `null`) is returned as JSON null.
+ */
+export type GatewayScoreDetail = GatewayComparisonScoreRow & {
+  meta: unknown;
+  input: unknown;
+  output: unknown;
+  groundTruth: unknown;
+  context: unknown;
+};
+
+export type GetScoreDetailResponse = GatewayScoreDetail;
 
 /**
  * A doc kind stored in `_smithers_docs`; the tickets surface uses `ticket`. The

@@ -1,5 +1,7 @@
 import type {
   CancelRunResponse,
+  ListScoresForRunsRequest,
+  ListScoresForRunsResponse,
   CreateTicketRequest,
   CronCreateRequest,
   CronDeleteRequest,
@@ -7,6 +9,8 @@ import type {
   CronRunRequest,
   DeleteTicketRequest,
   GetSchemaSignatureResponse,
+  GetScoreDetailRequest,
+  GetScoreDetailResponse,
   HijackRunResponse,
   LaunchRunResponse,
   ListApprovalsRequest,
@@ -130,6 +134,19 @@ function listScoresSearch(params: ListScoresRequest = { runId: "" }) {
   const search = new URLSearchParams();
   append(search, "runId", params.runId);
   append(search, "nodeId", params.nodeId);
+  return search;
+}
+
+function listScoresForRunsSearch(params: ListScoresForRunsRequest) {
+  const search = new URLSearchParams();
+  for (const runId of params.runIds) search.append("runId", runId);
+  if (params.nodeId !== undefined) search.set("nodeId", params.nodeId);
+  if (params.scorerId !== undefined) search.set("scorerId", params.scorerId);
+  if (params.scorerName !== undefined) search.set("scorerName", params.scorerName);
+  if (params.source !== undefined) search.set("source", params.source);
+  if (params.order !== undefined) search.set("order", params.order);
+  if (params.offset !== undefined) search.set("offset", String(params.offset));
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
   return search;
 }
 
@@ -417,6 +434,14 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
         return request("GET", withSearch("/v1/api/memory-facts", search));
       },
       listScores: (params = { runId: "" }) => params.runId ? request("GET", withSearch("/v1/api/scores", listScoresSearch(params))) : Promise.resolve([]),
+      listScoresForRuns: (params: ListScoresForRunsRequest) => request<ListScoresForRunsResponse>(
+        "GET",
+        withSearch("/v1/api/scores/compare", listScoresForRunsSearch(params)),
+      ),
+      getScoreDetail: (params: GetScoreDetailRequest) => request<GetScoreDetailResponse>(
+        "GET",
+        `/v1/api/scores/${encodeURIComponent(params.runId)}/${encodeURIComponent(params.scoreId)}`,
+      ),
       listTickets: (params = {}) => request("GET", withSearch("/v1/api/tickets", listTicketsSearch(params))),
       createTicket: (params: CreateTicketRequest) => mutate("POST", "/v1/api/tickets", params),
       updateTicket: (params: UpdateTicketRequest) => mutate("PATCH", `/v1/api/tickets/${encodeURIComponent(params.path)}`, params),

@@ -18,6 +18,8 @@ import type {
   ListApprovalsResponse,
   ListMemoryFactsRequest,
   ListPromptsRequest,
+  ListScoresForRunsRequest,
+  GetScoreDetailRequest,
   ListRunsRequest,
   ListScoresRequest,
   ListTicketsRequest,
@@ -49,6 +51,8 @@ import type {
 import type { GatewayCronRow } from "./sync/GatewayCronRow.ts";
 import type { GatewayMemoryFactRow } from "./sync/GatewayMemoryFactRow.ts";
 import type { GatewayPromptRow } from "./sync/GatewayPromptRow.ts";
+import type { GatewayComparisonScoreRow } from "./sync/GatewayComparisonScoreRow.ts";
+import type { GatewayScoreDetail } from "./sync/GatewayScoreDetail.ts";
 import type { GatewayScoreRow } from "./sync/GatewayScoreRow.ts";
 import type { GatewayTicketRow } from "./sync/GatewayTicketRow.ts";
 
@@ -79,6 +83,8 @@ export type GatewayRpcRequestMap = {
   listMemoryFacts: ListMemoryFactsRequest;
   listPrompts: ListPromptsRequest;
   listScores: ListScoresRequest;
+  listScoresForRuns: ListScoresForRunsRequest;
+  getScoreDetail: GetScoreDetailRequest;
   listTickets: ListTicketsRequest;
   createTicket: CreateTicketRequest;
   updateTicket: UpdateTicketRequest;
@@ -114,6 +120,8 @@ export type GatewayRpcResponseMap = {
   listMemoryFacts: GatewayMemoryFactRow[];
   listPrompts: GatewayPromptRow[];
   listScores: GatewayScoreRow[];
+  listScoresForRuns: { rows: GatewayComparisonScoreRow[]; total: number };
+  getScoreDetail: GatewayScoreDetail;
   listTickets: GatewayTicketRow[];
   createTicket: GatewayTicketRow;
   updateTicket: GatewayTicketRow;

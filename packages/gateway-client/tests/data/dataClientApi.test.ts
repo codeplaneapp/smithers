@@ -82,6 +82,101 @@ describe("createSmithersDataClient api requests", () => {
     client.close();
   });
 
+  test("listScoresForRuns repeats runId values and encodes every filter, order, and page field with auth", async () => {
+    const { client, calls } = capturingClient({ ok: true, data: { rows: [], total: 0 } }, "score-token");
+
+    expect(await client.api.listScoresForRuns({
+      runIds: ["run one", "run/two", "run-three"],
+      nodeId: "node/one",
+      scorerId: "score:exact",
+      scorerName: "Exact match",
+      source: "batch",
+      order: "scoredAtDesc",
+      offset: 0,
+      limit: 25,
+    })).toEqual({ rows: [], total: 0 });
+
+    expect(calls).toHaveLength(1);
+    const call = calls[0]!;
+    const url = urlOf(call);
+    expect(call.method).toBe("GET");
+    expect(url.pathname).toBe("/v1/api/scores/compare");
+    expect(url.searchParams.getAll("runId")).toEqual(["run one", "run/two", "run-three"]);
+    expect(url.searchParams.get("nodeId")).toBe("node/one");
+    expect(url.searchParams.get("scorerId")).toBe("score:exact");
+    expect(url.searchParams.get("scorerName")).toBe("Exact match");
+    expect(url.searchParams.get("source")).toBe("batch");
+    expect(url.searchParams.get("order")).toBe("scoredAtDesc");
+    expect(url.searchParams.get("offset")).toBe("0");
+    expect(url.searchParams.get("limit")).toBe("25");
+    expect(call.headers.get("authorization")).toBe("Bearer score-token");
+    client.close();
+  });
+
+  test("listScoresForRuns with no runIds still authenticates and validates through the gateway", async () => {
+    const { client, calls } = capturingClient({ ok: true, data: { rows: [], total: 0 } }, "score-token");
+    expect(await client.api.listScoresForRuns({ runIds: [] })).toEqual({ rows: [], total: 0 });
+    expect(calls).toHaveLength(1);
+    expect(urlOf(calls[0]!).pathname).toBe("/v1/api/scores/compare");
+    expect(urlOf(calls[0]!).searchParams.getAll("runId")).toEqual([]);
+    expect(calls[0]!.headers.get("authorization")).toBe("Bearer score-token");
+    client.close();
+  });
+
+  test("listScoresForRuns leaves server defaults untouched when optional fields are omitted", async () => {
+    const { client, calls } = capturingClient({ ok: true, data: { rows: [], total: 0 } });
+    await client.api.listScoresForRuns({ runIds: ["run-1"] });
+    const search = urlOf(calls[0]!).searchParams;
+    expect(search.getAll("runId")).toEqual(["run-1"]);
+    expect(search.has("order")).toBe(false);
+    expect(search.has("offset")).toBe(false);
+    expect(search.has("limit")).toBe(false);
+    client.close();
+  });
+
+  test("getScoreDetail URL-encodes both persisted identities and returns decoded detail", async () => {
+    const persisted = {
+      scoreId: "score /?#",
+      runId: "run /?#",
+      nodeId: "node-1",
+      iteration: 0,
+      attempt: 1,
+      scorerId: "exact",
+      scorerName: "Exact",
+      source: "eval",
+      score: 1,
+      reason: null,
+      scoredAtMs: 123,
+      latencyMs: null,
+      durationMs: 10,
+      meta: { model: "judge" },
+      input: { prompt: "hello" },
+      output: "hello",
+      groundTruth: "hello",
+      context: null,
+    };
+    const { client, calls } = capturingClient({ ok: true, data: persisted }, "detail-token");
+
+    const detail = await client.api.getScoreDetail({ runId: "run /?#", scoreId: "score /?#" });
+    expect(detail).toEqual(persisted);
+    expect(detail.context).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(urlOf(calls[0]!).pathname).toBe("/v1/api/scores/run%20%2F%3F%23/score%20%2F%3F%23");
+    expect(calls[0]!.headers.get("authorization")).toBe("Bearer detail-token");
+    client.close();
+  });
+
+  test("listScores keeps its original per-run endpoint and array response", async () => {
+    const { client, calls } = capturingClient({ ok: true, data: [] });
+    expect(await client.api.listScores({ runId: "run-1", nodeId: "node-1" })).toEqual([]);
+    expect(calls).toHaveLength(1);
+    const url = urlOf(calls[0]!);
+    expect(url.pathname).toBe("/v1/api/scores");
+    expect(url.searchParams.get("runId")).toBe("run-1");
+    expect(url.searchParams.get("nodeId")).toBe("node-1");
+    client.close();
+  });
+
   test("listRunEvents normalizes and filters raw event rows", async () => {
     const { client } = capturingClient({
       ok: true,

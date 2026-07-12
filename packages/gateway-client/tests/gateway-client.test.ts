@@ -104,6 +104,8 @@ const typedRpcRequestMethods = {
   listMemoryFacts: "listMemoryFacts",
   listPrompts: "listPrompts",
   listScores: "listScores",
+  listScoresForRuns: "listScoresForRuns",
+  getScoreDetail: "getScoreDetail",
   listTickets: "listTickets",
   createTicket: "createTicket",
   updateTicket: "updateTicket",

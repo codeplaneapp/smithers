@@ -56,6 +56,12 @@
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayScoreRow} GatewayScoreRow */
 /** @typedef {import("./gatewayRpcTypes.ts").ListScoresRequest} ListScoresRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").ListScoresResponse} ListScoresResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayComparisonScoreRow} GatewayComparisonScoreRow */
+/** @typedef {import("./gatewayRpcTypes.ts").ListScoresForRunsRequest} ListScoresForRunsRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").ListScoresForRunsResponse} ListScoresForRunsResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").GetScoreDetailRequest} GetScoreDetailRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayScoreDetail} GatewayScoreDetail */
+/** @typedef {import("./gatewayRpcTypes.ts").GetScoreDetailResponse} GetScoreDetailResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayDocKind} GatewayDocKind */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayTicketRow} GatewayTicketRow */
 /** @typedef {import("./gatewayRpcTypes.ts").ListTicketsRequest} ListTicketsRequest */
@@ -204,6 +210,7 @@ export const GATEWAY_RPC_ERRORS = {
   Unauthorized: { version: SMITHERS_API_VERSION, code: "Unauthorized", httpStatus: 401, description: "Authentication failed or the token expired." },
   Forbidden: { version: SMITHERS_API_VERSION, code: "Forbidden", httpStatus: 403, description: "The token is missing the required scope." },
   RunNotFound: { version: SMITHERS_API_VERSION, code: "RunNotFound", httpStatus: 404, description: "The run does not exist." },
+  ScoreNotFound: { version: SMITHERS_API_VERSION, code: "ScoreNotFound", httpStatus: 404, description: "The score does not exist on the requested run." },
   RUN_NOT_ACTIVE: { version: SMITHERS_API_VERSION, code: "RUN_NOT_ACTIVE", httpStatus: 409, description: "The run is not currently active and cannot be cancelled." },
   CronNotFound: { version: SMITHERS_API_VERSION, code: "CronNotFound", httpStatus: 404, description: "The cron schedule does not exist." },
   TicketNotFound: { version: SMITHERS_API_VERSION, code: "TicketNotFound", httpStatus: 404, description: "The ticket/work doc does not exist." },
@@ -770,7 +777,7 @@ export const GATEWAY_RPC_DEFINITIONS = [
       attempt: integerSchema("Node attempt the score belongs to.", 0),
       scorerId: stringSchema("Stable scorer id."),
       scorerName: stringSchema("Human scorer name."),
-      source: stringSchema("Where the score came from (e.g. 'scorer', 'eval')."),
+      source: stringSchema("Persisted score provenance (`live` or `batch` for production scorer rows)."),
       score: { type: "number", description: "The scorer's numeric verdict." },
       reason: { type: ["string", "null"], description: "Optional human reason for the score." },
       scoredAtMs: integerSchema("Unix epoch milliseconds when the score was recorded.", 0),
@@ -779,7 +786,107 @@ export const GATEWAY_RPC_DEFINITIONS = [
     }, ["runId", "nodeId", "iteration", "attempt", "scorerId", "scorerName", "source", "score", "scoredAtMs"]), "Scorer results."),
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "Internal"],
     exampleRequest: { runId: "run_01", nodeId: "review" },
-    exampleResponse: [{ runId: "run_01", nodeId: "review", iteration: 0, attempt: 0, scorerId: "correctness", scorerName: "correctness", source: "scorer", score: 0.92, scoredAtMs: 1710000000000 }],
+    exampleResponse: [{ runId: "run_01", nodeId: "review", iteration: 0, attempt: 0, scorerId: "correctness", scorerName: "correctness", source: "live", score: 0.92, scoredAtMs: 1710000000000 }],
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "listScoresForRuns",
+    title: "List Scores For Runs",
+    description: "List and globally page persisted scorer rows across up to 30 explicit run ids. The caller must supply the scorer-producing run ids; this does not expand an eval wrapper into child case runs or provide experiment/case alignment.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "score:read",
+    requestSchema: objectSchema({
+      runIds: {
+        type: "array",
+        description: "Up to 30 run-id entries to compare. The server trims values and deduplicates them in first-seen order.",
+        items: { type: "string", minLength: 1, maxLength: 256 },
+        maxItems: 30,
+      },
+      nodeId: stringSchema("Optional exact, case-sensitive node id filter."),
+      scorerId: stringSchema("Optional exact, case-sensitive scorer id filter."),
+      scorerName: stringSchema("Optional exact, case-sensitive scorer name filter."),
+      source: { type: "string", enum: ["live", "batch"], description: "Optional exact production score provenance filter." },
+      order: { type: "string", enum: ["scoredAtAsc", "scoredAtDesc"], default: "scoredAtAsc", description: "Primary score timestamp order." },
+      offset: { type: "integer", minimum: 0, maximum: 9_999, default: 0, description: "Global result offset after merging distinct stores. The offset plus limit may not exceed the 10,000-row comparison window." },
+      limit: { type: "integer", minimum: 1, maximum: 500, default: 500, description: "Maximum globally merged rows to return. The offset plus limit may not exceed the 10,000-row comparison window." },
+    }, ["runIds"]),
+    responseSchema: objectSchema({
+      rows: arraySchema(objectSchema({
+        scoreId: stringSchema("Exact persisted score id."),
+        runId: stringSchema("Run id the score belongs to."),
+        nodeId: stringSchema("Node id the score was produced for."),
+        iteration: integerSchema("Node iteration the score belongs to.", 0),
+        attempt: integerSchema("Node attempt the score belongs to.", 0),
+        scorerId: stringSchema("Stable scorer id."),
+        scorerName: stringSchema("Human scorer name."),
+        source: stringSchema("Persisted score source."),
+        score: { type: "number", description: "The scorer's numeric verdict." },
+        reason: { type: ["string", "null"], description: "Optional human reason for the score." },
+        scoredAtMs: integerSchema("Unix epoch milliseconds when the score was recorded.", 0),
+        latencyMs: { type: ["number", "null"], description: "Optional scorer latency in milliseconds." },
+        durationMs: { type: ["number", "null"], description: "Optional node duration in milliseconds." },
+      }, ["scoreId", "runId", "nodeId", "iteration", "attempt", "scorerId", "scorerName", "source", "score", "scoredAtMs"]), "Globally ordered persisted scorer rows."),
+      total: integerSchema("Total filtered row count before global pagination.", 0),
+    }, ["rows", "total"]),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "Internal"],
+    exampleRequest: { runIds: ["run_01", "run_02"], order: "scoredAtDesc", offset: 0, limit: 500 },
+    exampleResponse: {
+      rows: [{ scoreId: "run_01:review:correctness", runId: "run_01", nodeId: "review", iteration: 0, attempt: 0, scorerId: "correctness", scorerName: "correctness", source: "live", score: 0.92, scoredAtMs: 1710000000000 }],
+      total: 1,
+    },
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "getScoreDetail",
+    title: "Get Score Detail",
+    description: "Read one exact persisted score row with its JSON detail columns decoded.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "score:read",
+    requestSchema: objectSchema({
+      runId: { type: "string", minLength: 1, maxLength: 256, description: "Owning run id (trimmed by the server)." },
+      scoreId: { type: "string", minLength: 1, maxLength: 256, description: "Exact persisted score id (trimmed by the server)." },
+    }, ["runId", "scoreId"]),
+    responseSchema: objectSchema({
+      scoreId: stringSchema("Exact persisted score id."),
+      runId: stringSchema("Run id the score belongs to."),
+      nodeId: stringSchema("Node id the score was produced for."),
+      iteration: integerSchema("Node iteration the score belongs to.", 0),
+      attempt: integerSchema("Node attempt the score belongs to.", 0),
+      scorerId: stringSchema("Stable scorer id."),
+      scorerName: stringSchema("Human scorer name."),
+      source: stringSchema("Persisted score source."),
+      score: { type: "number", description: "The scorer's numeric verdict." },
+      reason: { type: ["string", "null"], description: "Optional human reason for the score." },
+      scoredAtMs: integerSchema("Unix epoch milliseconds when the score was recorded.", 0),
+      latencyMs: { type: ["number", "null"], description: "Optional scorer latency in milliseconds." },
+      durationMs: { type: ["number", "null"], description: "Optional node duration in milliseconds." },
+      meta: anyJsonSchema,
+      input: anyJsonSchema,
+      output: anyJsonSchema,
+      groundTruth: anyJsonSchema,
+      context: anyJsonSchema,
+    }, ["scoreId", "runId", "nodeId", "iteration", "attempt", "scorerId", "scorerName", "source", "score", "scoredAtMs", "meta", "input", "output", "groundTruth", "context"]),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "ScoreNotFound", "Internal"],
+    exampleRequest: { runId: "run_01", scoreId: "run_01:review:correctness" },
+    exampleResponse: {
+      scoreId: "run_01:review:correctness",
+      runId: "run_01",
+      nodeId: "review",
+      iteration: 0,
+      attempt: 0,
+      scorerId: "correctness",
+      scorerName: "correctness",
+      source: "live",
+      score: 0.92,
+      scoredAtMs: 1710000000000,
+      meta: { rubric: "correctness" },
+      input: { prompt: "Review this." },
+      output: { verdict: "pass" },
+      groundTruth: null,
+      context: null,
+    },
   },
   {
     version: SMITHERS_API_VERSION,

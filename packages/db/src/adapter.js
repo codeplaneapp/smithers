@@ -3410,6 +3410,98 @@ export class SmithersDb {
          ORDER BY scored_at_ms ASC`, nodeId ? [runId, nodeId] : [runId]));
     }
     /**
+   * Count scorer rows across a bounded set of runs. Every caller-supplied value
+   * is bound as a placeholder; only the fixed filter column names are composed
+   * into the statement.
+   * @param {{
+   *   runIds: string[];
+   *   nodeId?: string;
+   *   scorerId?: string;
+   *   scorerName?: string;
+   *   source?: string;
+   * }} query
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+    countScorerResultsForRuns(query) {
+        if (query.runIds.length === 0) {
+            return this.read("count scorer results for no runs", () => Promise.resolve(0));
+        }
+        const params = [...query.runIds];
+        const predicates = [`run_id IN (${query.runIds.map(() => "?").join(", ")})`];
+        for (const [column, value] of [
+            ["node_id", query.nodeId],
+            ["scorer_id", query.scorerId],
+            ["scorer_name", query.scorerName],
+            ["source", query.source],
+        ]) {
+            if (value !== undefined) {
+                predicates.push(`${column} = ?`);
+                params.push(value);
+            }
+        }
+        return this.read("count scorer results for runs", async () => {
+            const row = await this.internalStorage.queryOne(`SELECT COUNT(*) AS count
+         FROM _smithers_scorers
+         WHERE ${predicates.join(" AND ")}`, params);
+            return Number(row?.count ?? 0);
+        });
+    }
+    /**
+   * Fetch one globally-sortable candidate page of scorer rows for a set of
+   * runs. The server merges candidates from distinct stores and applies the
+   * final global offset/limit.
+   * @param {{
+   *   runIds: string[];
+   *   nodeId?: string;
+   *   scorerId?: string;
+   *   scorerName?: string;
+   *   source?: string;
+   *   order: "scoredAtAsc" | "scoredAtDesc";
+   *   offset: number;
+   *   limit: number;
+   * }} query
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    listScorerResultsForRuns(query) {
+        if (query.runIds.length === 0) {
+            return this.read("list scorer results for no runs", () => Promise.resolve([]));
+        }
+        const params = [...query.runIds];
+        const predicates = [`run_id IN (${query.runIds.map(() => "?").join(", ")})`];
+        for (const [column, value] of [
+            ["node_id", query.nodeId],
+            ["scorer_id", query.scorerId],
+            ["scorer_name", query.scorerName],
+            ["source", query.source],
+        ]) {
+            if (value !== undefined) {
+                predicates.push(`${column} = ?`);
+                params.push(value);
+            }
+        }
+        const direction = query.order === "scoredAtAsc" ? "ASC" : "DESC";
+        params.push(query.limit, query.offset);
+        return this.read("list scorer results for runs", () => this.internalStorage.queryAll(`SELECT id, run_id, node_id, iteration, attempt,
+                scorer_id, scorer_name, source, score, reason, scored_at_ms,
+                latency_ms, duration_ms
+         FROM _smithers_scorers
+         WHERE ${predicates.join(" AND ")}
+         ORDER BY scored_at_ms ${direction}, run_id ASC, node_id ASC,
+                  iteration ASC, attempt ASC, scorer_id ASC, id ASC
+         LIMIT ? OFFSET ?`, params));
+    }
+    /**
+   * Read one scorer row by its exact persisted id, scoped to its owning run.
+   * @param {string} runId
+   * @param {string} scoreId
+   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+   */
+    getScorerResult(runId, scoreId) {
+        return this.read(`get scorer result ${scoreId}`, () => this.internalStorage.queryOne(`SELECT *
+         FROM _smithers_scorers
+         WHERE run_id = ? AND id = ?`, [runId, scoreId]));
+    }
+    /**
    * @param {string} runId
    * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
    */

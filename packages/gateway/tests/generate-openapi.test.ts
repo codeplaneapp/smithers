@@ -12,7 +12,7 @@ import {
   successSchema,
   requestFrameSchema,
 } from "../scripts/generate-openapi.ts";
-import { GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, SMITHERS_API_VERSION } from "../src/rpc/index.js";
+import { GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, SMITHERS_API_VERSION, getGatewayRpcDefinition } from "../src/rpc/index.js";
 import { GATEWAY_SCOPE_VALUES } from "../src/auth/scopes.js";
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -92,8 +92,70 @@ describe("generate-openapi helpers", () => {
       expect(doc.paths[`/v1/rpc/${def.method}`]).toBeDefined();
     }
     expect(doc.paths["/v1/api/runs"]).toBeDefined();
+    expect(doc.paths["/v1/api/scores/compare"]).toBeDefined();
+    expect(doc.paths["/v1/api/scores/{runId}/{scoreId}"]).toBeDefined();
+    expect((doc.paths["/v1/api/scores/compare"] as any).get["x-smithers-rpc-method"]).toBe("listScoresForRuns");
+    expect((doc.paths["/v1/api/scores/{runId}/{scoreId}"] as any).get["x-smithers-rpc-method"]).toBe("getScoreDetail");
     expect(doc.paths["/v1/api/stream"]).toBeDefined();
     expect(Object.keys(doc.paths).length).toBeGreaterThan(GATEWAY_RPC_DEFINITIONS.length);
+  });
+
+  test("score REST aliases publish exact parameters and RPC response schemas", () => {
+    const doc = buildOpenApiDocument();
+    const compare = (doc.paths["/v1/api/scores/compare"] as any).get;
+    const compareParameters = Object.fromEntries(
+      compare.parameters.map((parameter: any) => [parameter.name, parameter]),
+    );
+    expect(Object.keys(compareParameters)).toEqual([
+      "runId",
+      "nodeId",
+      "scorerId",
+      "scorerName",
+      "source",
+      "order",
+      "offset",
+      "limit",
+    ]);
+    expect(compareParameters.runId).toMatchObject({
+      in: "query",
+      required: false,
+      style: "form",
+      explode: true,
+      schema: {
+        type: "array",
+        maxItems: 30,
+        items: { type: "string", minLength: 1, maxLength: 256 },
+      },
+    });
+    expect(compareParameters.source.schema.enum).toEqual(["live", "batch"]);
+    expect(compareParameters.order.schema).toMatchObject({
+      enum: ["scoredAtAsc", "scoredAtDesc"],
+      default: "scoredAtAsc",
+    });
+    expect(compareParameters.offset.schema).toMatchObject({ minimum: 0, maximum: 9_999, default: 0 });
+    expect(compareParameters.limit.schema).toMatchObject({ minimum: 1, maximum: 500, default: 500 });
+    expect(compare.responses["200"].content["application/json"].schema.properties.data)
+      .toBe(getGatewayRpcDefinition("listScoresForRuns")?.responseSchema);
+
+    const detail = (doc.paths["/v1/api/scores/{runId}/{scoreId}"] as any).get;
+    expect(detail.parameters).toEqual([
+      {
+        name: "runId",
+        in: "path",
+        description: "Owning run id.",
+        required: true,
+        schema: getGatewayRpcDefinition("getScoreDetail")?.requestSchema.properties?.runId,
+      },
+      {
+        name: "scoreId",
+        in: "path",
+        description: "Exact persisted score id.",
+        required: true,
+        schema: getGatewayRpcDefinition("getScoreDetail")?.requestSchema.properties?.scoreId,
+      },
+    ]);
+    expect(detail.responses["200"].content["application/json"].schema.properties.data)
+      .toBe(getGatewayRpcDefinition("getScoreDetail")?.responseSchema);
   });
 });
 

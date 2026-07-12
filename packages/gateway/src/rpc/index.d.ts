@@ -21,6 +21,10 @@ type JsonSchema$1 = {
     readonly format?: string;
     readonly minimum?: number;
     readonly maximum?: number;
+    readonly minLength?: number;
+    readonly maxLength?: number;
+    readonly minItems?: number;
+    readonly maxItems?: number;
     readonly default?: unknown;
     readonly nullable?: boolean;
     readonly items?: JsonSchema$1;
@@ -30,7 +34,7 @@ type JsonSchema$1 = {
     readonly oneOf?: readonly JsonSchema$1[];
     readonly anyOf?: readonly JsonSchema$1[];
 };
-type GatewayRpcErrorCode$1 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "Internal";
+type GatewayRpcErrorCode$1 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "ScoreNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "Internal";
 type GatewayRpcErrorDefinition$1 = {
     readonly version: SmithersApiVersion$1;
     readonly code: GatewayRpcErrorCode$1;
@@ -51,7 +55,7 @@ type GatewayRpcDefinition$1 = {
     readonly exampleRequest: unknown;
     readonly exampleResponse: unknown;
 };
-type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "whatHappened" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket";
+type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "whatHappened" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listMemoryFacts" | "listPrompts" | "listScores" | "listScoresForRuns" | "getScoreDetail" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket";
 type LaunchRunRequest$1 = {
     workflow: string;
     input?: Record<string, unknown>;
@@ -361,6 +365,45 @@ type ListScoresRequest$1 = {
     nodeId?: string;
 };
 type ListScoresResponse$1 = GatewayScoreRow$1[];
+/** One cross-run score row, including the exact persisted score identity. */
+type GatewayComparisonScoreRow$1 = GatewayScoreRow$1 & {
+    scoreId: string;
+};
+/**
+ * Batch score rows for explicit run ids. Callers must already know the scorer-
+ * producing run ids: this does not expand an eval wrapper run into child case
+ * runs or provide experiment/case alignment.
+ */
+type ListScoresForRunsRequest$1 = {
+    runIds: string[];
+    nodeId?: string;
+    scorerId?: string;
+    scorerName?: string;
+    source?: "live" | "batch";
+    order?: "scoredAtAsc" | "scoredAtDesc";
+    offset?: number;
+    limit?: number;
+};
+type ListScoresForRunsResponse$1 = {
+    rows: GatewayComparisonScoreRow$1[];
+    total: number;
+};
+type GetScoreDetailRequest$1 = {
+    runId: string;
+    scoreId: string;
+};
+/**
+ * One exact persisted score with its JSON detail columns decoded. Every detail
+ * field is present; a SQL NULL (or stored JSON `null`) is returned as JSON null.
+ */
+type GatewayScoreDetail$1 = GatewayComparisonScoreRow$1 & {
+    meta: unknown;
+    input: unknown;
+    output: unknown;
+    groundTruth: unknown;
+    context: unknown;
+};
+type GetScoreDetailResponse$1 = GatewayScoreDetail$1;
 /**
  * A doc kind stored in `_smithers_docs`; the tickets surface uses `ticket`. The
  * runtime `DOC_KINDS` tuple in `index.js` (which feeds every ticket-RPC schema
@@ -497,6 +540,12 @@ type ListPromptsResponse = ListPromptsResponse$1;
 type GatewayScoreRow = GatewayScoreRow$1;
 type ListScoresRequest = ListScoresRequest$1;
 type ListScoresResponse = ListScoresResponse$1;
+type GatewayComparisonScoreRow = GatewayComparisonScoreRow$1;
+type ListScoresForRunsRequest = ListScoresForRunsRequest$1;
+type ListScoresForRunsResponse = ListScoresForRunsResponse$1;
+type GetScoreDetailRequest = GetScoreDetailRequest$1;
+type GatewayScoreDetail = GatewayScoreDetail$1;
+type GetScoreDetailResponse = GetScoreDetailResponse$1;
 type GatewayDocKind = GatewayDocKind$1;
 type GatewayTicketRow = GatewayTicketRow$1;
 type ListTicketsRequest = ListTicketsRequest$1;
@@ -506,4 +555,4 @@ type UpdateTicketRequest = UpdateTicketRequest$1;
 type DeleteTicketRequest = DeleteTicketRequest$1;
 type GatewayScope = GatewayScope$1;
 
-export { type CancelRunRequest, type CancelRunResponse, type CreateTicketRequest, type CronCreateRequest, type CronDeleteRequest, type CronListRequest, type CronRunRequest, type DeleteTicketRequest, GATEWAY_EVENT_WINDOW_DEFAULT, GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, GATEWAY_RPC_LEGACY_METHOD_ALIASES, type GatewayAccount, type GatewayApprovalSummary, type GatewayDocKind, type GatewayDocRow, type GatewayMemoryFact, type GatewayPrompt, type GatewayRpcDefinition, type GatewayRpcErrorCode, type GatewayRpcErrorDefinition, type GatewayRpcMethod, type GatewayScope, type GatewayScoreRow, type GatewayTicketRow, type GatewayWorkflowSummary, type GetDevToolsSnapshotRequest, type GetDevToolsSnapshotResponse, type GetRunRequest, type GetSchemaSignatureRequest, type GetSchemaSignatureResponse, type HijackRunRequest, type HijackRunResponse, type JsonSchema, type LaunchRunRequest, type LaunchRunResponse, type ListAccountsRequest, type ListAccountsResponse, type ListApprovalsRequest, type ListApprovalsResponse, type ListDocsRequest, type ListDocsResponse, type ListMemoryFactsRequest, type ListMemoryFactsResponse, type ListPromptsRequest, type ListPromptsResponse, type ListRunsRequest, type ListScoresRequest, type ListScoresResponse, type ListTicketsRequest, type ListTicketsResponse, type ListWorkflowsRequest, type ListWorkflowsResponse, type NodeRequest, type PauseRunRequest, type PauseRunResponse, type ResumeRunRequest, type ResumeRunResponse, type RewindRunRequest, SMITHERS_API_VERSION, type SmithersApiVersion, type StreamDevToolsRequest, type StreamRunEventsRequest, type StreamRunEventsResponse, type SubmitApprovalRequest, type SubmitApprovalResponse, type SubmitSignalRequest, type UpdateTicketRequest, type WhatHappenedRequest, type WhatHappenedResponse, anyJsonSchema, canonicalGatewayRpcMethod, getGatewayRpcDefinition, getGatewayScopeValues, getRequiredScopeForGatewayMethod, isGatewayRpcMethod, listGatewayRpcMethods };
+export { type CancelRunRequest, type CancelRunResponse, type CreateTicketRequest, type CronCreateRequest, type CronDeleteRequest, type CronListRequest, type CronRunRequest, type DeleteTicketRequest, GATEWAY_EVENT_WINDOW_DEFAULT, GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, GATEWAY_RPC_LEGACY_METHOD_ALIASES, type GatewayAccount, type GatewayApprovalSummary, type GatewayComparisonScoreRow, type GatewayDocKind, type GatewayDocRow, type GatewayMemoryFact, type GatewayPrompt, type GatewayRpcDefinition, type GatewayRpcErrorCode, type GatewayRpcErrorDefinition, type GatewayRpcMethod, type GatewayScope, type GatewayScoreDetail, type GatewayScoreRow, type GatewayTicketRow, type GatewayWorkflowSummary, type GetDevToolsSnapshotRequest, type GetDevToolsSnapshotResponse, type GetRunRequest, type GetSchemaSignatureRequest, type GetSchemaSignatureResponse, type GetScoreDetailRequest, type GetScoreDetailResponse, type HijackRunRequest, type HijackRunResponse, type JsonSchema, type LaunchRunRequest, type LaunchRunResponse, type ListAccountsRequest, type ListAccountsResponse, type ListApprovalsRequest, type ListApprovalsResponse, type ListDocsRequest, type ListDocsResponse, type ListMemoryFactsRequest, type ListMemoryFactsResponse, type ListPromptsRequest, type ListPromptsResponse, type ListRunsRequest, type ListScoresForRunsRequest, type ListScoresForRunsResponse, type ListScoresRequest, type ListScoresResponse, type ListTicketsRequest, type ListTicketsResponse, type ListWorkflowsRequest, type ListWorkflowsResponse, type NodeRequest, type PauseRunRequest, type PauseRunResponse, type ResumeRunRequest, type ResumeRunResponse, type RewindRunRequest, SMITHERS_API_VERSION, type SmithersApiVersion, type StreamDevToolsRequest, type StreamRunEventsRequest, type StreamRunEventsResponse, type SubmitApprovalRequest, type SubmitApprovalResponse, type SubmitSignalRequest, type UpdateTicketRequest, type WhatHappenedRequest, type WhatHappenedResponse, anyJsonSchema, canonicalGatewayRpcMethod, getGatewayRpcDefinition, getGatewayScopeValues, getRequiredScopeForGatewayMethod, isGatewayRpcMethod, listGatewayRpcMethods };
