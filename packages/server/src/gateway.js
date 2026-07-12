@@ -159,6 +159,11 @@ const DEFAULT_PROTOCOL = 1;
 const DEFAULT_HEARTBEAT_MS = 15_000;
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_MAX_CONNECTIONS = 1_000;
+// Pre-authenticated websockets (upgraded but not yet past a successful
+// `connect`) are accounted separately from authenticated connections (#1008):
+// a pool of idle unauthenticated sockets can exhaust at most this many slots
+// and never starves `maxConnections` authenticated capacity.
+const DEFAULT_MAX_PRE_AUTH_CONNECTIONS = 64;
 const DEFAULT_HEADERS_TIMEOUT = 30_000;
 const DEFAULT_REQUEST_TIMEOUT = 60_000;
 const DEFAULT_OUT_OF_PROCESS_EVENT_BRIDGE_POLL_MS = 1_000;
@@ -2017,6 +2022,7 @@ export class Gateway {
     maxBodyBytes;
     maxPayload;
     maxConnections;
+    maxPreAuthConnections;
     eventWindowSize;
     outOfProcessEventBridge;
     outOfProcessEventBridgePollMs;
@@ -2037,6 +2043,14 @@ export class Gateway {
     workspaceRoot = null;
     workflows = new Map();
     connections = new Set();
+    /**
+     * Subset of `connections` still awaiting a successful `connect` RPC.
+     * Pre-auth sockets hold a slot in this bounded pool instead of consuming
+     * authenticated `maxConnections` capacity; a successful `connect` promotes
+     * them out and close / failed authentication releases the slot (#1008).
+     * @type {Set<Record<string, unknown>>}
+     */
+    preAuthConnections = new Set();
     runRegistry = new Map();
     activeRuns = new Map();
     inflightRuns = new Map();
@@ -2135,6 +2149,9 @@ export class Gateway {
         this.maxConnections = options.maxConnections === undefined
             ? DEFAULT_MAX_CONNECTIONS
             : Math.floor(assertPositiveFiniteInteger("maxConnections", Number(options.maxConnections)));
+        this.maxPreAuthConnections = options.maxPreAuthConnections === undefined
+            ? DEFAULT_MAX_PRE_AUTH_CONNECTIONS
+            : Math.floor(assertPositiveFiniteInteger("maxPreAuthConnections", Number(options.maxPreAuthConnections)));
         this.eventWindowSize = options.eventWindowSize === undefined
             ? GATEWAY_EVENT_WINDOW_DEFAULT
             : Math.floor(assertPositiveFiniteInteger("eventWindowSize", Number(options.eventWindowSize)));
@@ -4346,15 +4363,23 @@ a { color: var(--brand); }</style>
         server.headersTimeout = this.headersTimeout;
         server.requestTimeout = this.requestTimeout;
         server.on("upgrade", (req, socket, head) => {
-            if (this.connections.size >= this.maxConnections) {
+            // Pre-auth sockets are accounted separately from authenticated
+            // connections (#1008): a new upgrade needs a free slot in the
+            // bounded pre-auth pool, and is turned away early when the
+            // authenticated pool is already full (its `connect` could never
+            // be promoted anyway).
+            const authenticatedFull = this.authenticatedConnectionCount() >= this.maxConnections;
+            if (authenticatedFull || this.preAuthConnections.size >= this.maxPreAuthConnections) {
                 emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
-                    kind: "connection_limit",
+                    kind: authenticatedFull ? "connection_limit" : "preauth_connection_limit",
                     transport: "ws",
                 }));
                 emitGatewayLog("warning", "Gateway connection rejected", {
                     transport: "ws",
                     remoteAddress: req.socket.remoteAddress ?? null,
                     maxConnections: this.maxConnections,
+                    maxPreAuthConnections: this.maxPreAuthConnections,
+                    preAuthConnections: this.preAuthConnections.size,
                 }, "gateway:connect");
                 const body = "Gateway connection limit reached\n";
                 socket.end("HTTP/1.1 503 Service Unavailable\r\n"
@@ -4484,6 +4509,7 @@ a { color: var(--brand); }</style>
             catch { }
         }
         this.connections.clear();
+        this.preAuthConnections.clear();
         if (this.schedulerTimer) {
             clearInterval(this.schedulerTimer);
             this.schedulerTimer = null;
@@ -5174,6 +5200,16 @@ a { color: var(--brand); }</style>
         });
     }
     /**
+   * Authenticated WS connection count. `connections` holds every open RPC
+   * websocket while `preAuthConnections` tracks the subset still awaiting a
+   * successful `connect`, so the difference is the authenticated pool that
+   * `maxConnections` bounds (#1008).
+   * @returns {number}
+   */
+    authenticatedConnectionCount() {
+        return this.connections.size - this.preAuthConnections.size;
+    }
+    /**
    * @param {WebSocket} ws
    * @param {IncomingMessage} req
    */
@@ -5195,6 +5231,9 @@ a { color: var(--brand); }</style>
             runEventHeartbeatTimer: null,
         };
         this.connections.add(connection);
+        // A fresh socket occupies a bounded pre-auth slot until a successful
+        // `connect` promotes it into authenticated capacity (#1008).
+        this.preAuthConnections.add(connection);
         this.markActivity();
         emitGatewayEffect(Effect.all([
             incrementMetric(gatewayConnectionsTotal, { transport: "ws" }),
@@ -5259,6 +5298,10 @@ a { color: var(--brand); }</style>
                 clearInterval(connection.heartbeatTimer);
             }
             this.connections.delete(connection);
+            // Release whichever accounting the socket holds — the pre-auth
+            // slot for a socket that never authenticated, or the
+            // authenticated slot otherwise (#1008).
+            this.preAuthConnections.delete(connection);
             this.cleanupDevToolsSubscribers(connection);
             this.cleanupRunEventSubscribers(connection);
             // Async cleanup runs detached: a malicious or buggy extension
@@ -5348,8 +5391,45 @@ a { color: var(--brand); }</style>
                 authCode: authResult.code,
                 authMessage: authResult.message,
             });
+            // Failed authentication releases the pre-auth slot (#1008): close
+            // the socket once the error response has flushed instead of
+            // letting the client camp on bounded pre-auth capacity and retry
+            // indefinitely. setImmediate runs after the microtask that sends
+            // the response frame, and ws queues the close frame behind it.
+            if (!connection.authenticated) {
+                setImmediate(() => {
+                    try {
+                        connection.ws.close(1008, "authentication failed");
+                    }
+                    catch { }
+                });
+            }
             return responseError(id, authResult.code, authResult.message, authResult.details);
         }
+        // Promotion (#1008): a successful connect moves this socket from the
+        // bounded pre-auth pool into authenticated `maxConnections` capacity.
+        // Refuse when the authenticated pool is already full — closing the
+        // socket frees the pre-auth slot immediately instead of parking an
+        // unbounded queue against authenticated capacity.
+        if (this.preAuthConnections.has(connection)
+            && this.authenticatedConnectionCount() >= this.maxConnections) {
+            emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
+                kind: "connection_limit",
+                transport: "ws",
+            }));
+            emitGatewayLog("warning", "Gateway connect rejected: connection limit reached", {
+                ...gatewayContextAnnotations(connection),
+                maxConnections: this.maxConnections,
+            }, "gateway:connect");
+            setImmediate(() => {
+                try {
+                    connection.ws.close(1013, "connection limit reached");
+                }
+                catch { }
+            });
+            return responseError(id, "CONNECTION_LIMIT", "Gateway connection limit reached");
+        }
+        this.preAuthConnections.delete(connection);
         connection.authenticated = true;
         connection.sessionToken = randomUUID();
         connection.role = authResult.role;

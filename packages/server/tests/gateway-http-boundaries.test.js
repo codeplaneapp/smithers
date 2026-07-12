@@ -422,10 +422,12 @@ describe("auth header edge cases (gateway HTTP)", () => {
 
 describe("connection-limit WS upgrade rejection (503 path)", () => {
     test("WS upgrade is rejected when connection limit is reached", async () => {
-        // Start gateway with limit of 1 so we can saturate it with one real
-        // connection then attempt a second upgrade to exercise the 503 branch
-        // at gateway.js:2441-2460.
-        const g = new Gateway({ heartbeatMs: 100, maxConnections: 1 });
+        // Start gateway with a pre-auth limit of 1 so we can saturate it with
+        // one real (never-authenticating) connection then attempt a second
+        // upgrade to exercise the 503 branch. Pre-auth sockets no longer count
+        // against maxConnections (#1008), so the bound that a bare websocket
+        // saturates is maxPreAuthConnections.
+        const g = new Gateway({ heartbeatMs: 100, maxConnections: 1, maxPreAuthConnections: 1 });
         const srv = await g.listen({ port: 0, host: "127.0.0.1" });
         const p = getPort(srv);
         try {

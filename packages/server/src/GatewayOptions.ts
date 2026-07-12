@@ -88,7 +88,22 @@ export type GatewayOptions = {
   defaults?: GatewayDefaults;
   maxBodyBytes?: number;
   maxPayload?: number;
+  /**
+   * Cap on authenticated WebSocket connections. Pre-authenticated sockets do
+   * not count against this pool — they are bounded separately by
+   * `maxPreAuthConnections` and only consume authenticated capacity once a
+   * successful `connect` promotes them.
+   * @default 1000
+   */
   maxConnections?: number;
+  /**
+   * Cap on upgraded WebSocket connections that have not yet completed a
+   * successful `connect` RPC. Keeps a pool of idle unauthenticated sockets
+   * from exhausting `maxConnections` authenticated capacity; the slot is
+   * released on promotion, close, or failed authentication.
+   * @default 64
+   */
+  maxPreAuthConnections?: number;
   /**
    * Per-run replay window for Gateway run event streams.
    * @default 10000
