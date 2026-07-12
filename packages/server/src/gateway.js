@@ -226,6 +226,14 @@ const API_STREAM_REPLAY_LIMIT = 256;
 const API_STREAM_REPLAY_BYTES = 64 * 1024;
 const API_STREAM_OUTBOUND_QUEUE_LIMIT = 256;
 const API_STREAM_OUTBOUND_BYTES = 64 * 1024;
+// SSE subscriber caps: one hostile or misconfigured client must not be able to
+// grow the subscriber set (and its queues) without bound. Global bounds the
+// whole process; per-user bounds one identity (userId ?? tokenId ?? role);
+// per-connection bounds one declared `x-request-id` identity — 2 tolerates a
+// reconnect that overlaps the server noticing the old socket closed.
+const API_STREAM_MAX_SUBSCRIBERS = 256;
+const API_STREAM_MAX_SUBSCRIBERS_PER_USER = 32;
+const API_STREAM_MAX_SUBSCRIBERS_PER_CONNECTION = 2;
 const API_COLLECTION_NAME_SET = new Set(apiCollectionNames);
 const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "continued"]);
 export const GATEWAY_RPC_MAX_PAYLOAD_BYTES = DEFAULT_MAX_BODY_BYTES;
@@ -1989,6 +1997,19 @@ function formatSseHeartbeat(seq) {
 function byteLengthOfJson(value) {
     return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
+/**
+ * @param {Map<string, number>} counts
+ * @param {string} key
+ */
+function decrementSubscriberCount(counts, key) {
+    const next = (counts.get(key) ?? 0) - 1;
+    if (next > 0) {
+        counts.set(key, next);
+    }
+    else {
+        counts.delete(key);
+    }
+}
 export class Gateway {
     protocol;
     features;
@@ -2031,6 +2052,17 @@ export class Gateway {
     apiStreamPendingCollections = new Set();
     apiStreamPendingResolvers = [];
     apiStreamFlushTimer = null;
+    // Instance copies of the SSE caps so tests can shrink a limit without
+    // opening hundreds of real sockets; production always runs the constants.
+    apiStreamMaxSubscribers = API_STREAM_MAX_SUBSCRIBERS;
+    apiStreamMaxSubscribersPerUser = API_STREAM_MAX_SUBSCRIBERS_PER_USER;
+    apiStreamMaxSubscribersPerConnection = API_STREAM_MAX_SUBSCRIBERS_PER_CONNECTION;
+    /** Active SSE subscriber count per user identity (userId ?? tokenId ?? role). @type {Map<string, number>} */
+    apiStreamSubscribersByUser = new Map();
+    /** Active SSE subscriber count per declared connection id (`x-request-id`). @type {Map<string, number>} */
+    apiStreamSubscribersByConnection = new Map();
+    /** One shared heartbeat interval for every SSE subscriber (never one per subscriber). */
+    apiStreamHeartbeatTimer = null;
     /** Absolute active subscriber count per runId (gauge source of truth). */
     devtoolsSubscriberCounts = new Map();
     /** Flagged subscriber IDs that should force a snapshot on their next emit. */
@@ -3209,7 +3241,8 @@ a { color: var(--brand); }</style>
      * @param {Record<string, unknown>} frame
      */
     sendApiStreamFrame(subscriber, frame) {
-        this.enqueueApiStreamText(subscriber, formatSseEvent("change", frame, Number(frame.seq)), byteLengthOfJson(frame) + 64);
+        const text = formatSseEvent("change", frame, Number(frame.seq));
+        this.enqueueApiStreamText(subscriber, text, Buffer.byteLength(text, "utf8"));
     }
     /**
      * @param {string[]} collections
@@ -3245,11 +3278,58 @@ a { color: var(--brand); }</style>
         this.apiStreamSeq += 1;
         const frame = { seq: this.apiStreamSeq, collections };
         this.recordApiStreamFrame(frame);
+        // One logical copy per subscriber: serialize the frame once and route
+        // the same text through every subscriber's byte-bounded queue. There is
+        // no second direct-write path, so a subscriber can never receive a
+        // duplicate generic copy of the same invalidation.
+        const text = formatSseEvent("change", frame, this.apiStreamSeq);
+        const bytes = Buffer.byteLength(text, "utf8");
         for (const subscriber of this.apiStreamSubscribers) {
-            this.sendApiStreamFrame(subscriber, frame);
+            this.enqueueApiStreamText(subscriber, text, bytes);
         }
         for (const resolve of resolvers) {
             resolve(this.apiStreamSeq);
+        }
+    }
+    /**
+     * First cap an SSE subscription would violate, or null when it fits.
+     * Checked before headers are written so rejected requests get a real
+     * 429 JSON body instead of a half-open stream.
+     * @param {string} userKey
+     * @param {string} connectionKey
+     * @returns {{ scope: "global" | "user" | "connection"; limit: number } | null}
+     */
+    apiStreamCapViolation(userKey, connectionKey) {
+        if (this.apiStreamSubscribers.size >= this.apiStreamMaxSubscribers) {
+            return { scope: "global", limit: this.apiStreamMaxSubscribers };
+        }
+        if ((this.apiStreamSubscribersByUser.get(userKey) ?? 0) >= this.apiStreamMaxSubscribersPerUser) {
+            return { scope: "user", limit: this.apiStreamMaxSubscribersPerUser };
+        }
+        if ((this.apiStreamSubscribersByConnection.get(connectionKey) ?? 0) >= this.apiStreamMaxSubscribersPerConnection) {
+            return { scope: "connection", limit: this.apiStreamMaxSubscribersPerConnection };
+        }
+        return null;
+    }
+    ensureApiStreamHeartbeat() {
+        if (this.apiStreamHeartbeatTimer) {
+            return;
+        }
+        // One shared interval for the whole subscriber set: each tick
+        // serializes the heartbeat once and fans it out through the bounded
+        // per-subscriber queues, instead of allocating a timer per subscriber.
+        this.apiStreamHeartbeatTimer = setInterval(() => {
+            const heartbeat = formatSseHeartbeat(this.apiStreamSeq);
+            const bytes = Buffer.byteLength(heartbeat, "utf8");
+            for (const subscriber of this.apiStreamSubscribers) {
+                this.enqueueApiStreamText(subscriber, heartbeat, bytes);
+            }
+        }, API_STREAM_HEARTBEAT_MS);
+    }
+    stopApiStreamHeartbeatIfIdle() {
+        if (this.apiStreamSubscribers.size === 0 && this.apiStreamHeartbeatTimer) {
+            clearInterval(this.apiStreamHeartbeatTimer);
+            this.apiStreamHeartbeatTimer = null;
         }
     }
     /**
@@ -3286,6 +3366,25 @@ a { color: var(--brand); }</style>
                 error: forbidden.error,
             });
         }
+        const userKey = context.userId ?? context.tokenId ?? context.role ?? "anonymous";
+        const connectionKey = context.connectionId;
+        const violation = this.apiStreamCapViolation(userKey, connectionKey);
+        if (violation) {
+            emitGatewayLog("warning", "Gateway SSE subscriber rejected: cap reached", {
+                requestId,
+                capScope: violation.scope,
+                capLimit: violation.limit,
+                subscriberCount: this.apiStreamSubscribers.size,
+            }, "gateway:api-stream");
+            return sendJson(res, statusForRpcError("RateLimited"), {
+                ok: false,
+                error: {
+                    code: "RateLimited",
+                    message: `Gateway SSE subscriber limit reached (${violation.scope} cap of ${violation.limit}).`,
+                    details: { scope: violation.scope, limit: violation.limit },
+                },
+            });
+        }
         res.writeHead(200, {
             "Content-Type": "text/event-stream; charset=utf-8",
             "Cache-Control": "no-cache, no-transform",
@@ -3302,21 +3401,26 @@ a { color: var(--brand); }</style>
             flushing: false,
             needsReset: false,
             closed: false,
-            heartbeat: null,
         };
         const cleanup = () => {
             if (subscriber.closed) {
                 return;
             }
             subscriber.closed = true;
-            if (subscriber.heartbeat) {
-                clearInterval(subscriber.heartbeat);
+            // Only give back cap slots for a subscriber that actually held
+            // them — delete() is the registration source of truth.
+            if (this.apiStreamSubscribers.delete(subscriber)) {
+                decrementSubscriberCount(this.apiStreamSubscribersByUser, userKey);
+                decrementSubscriberCount(this.apiStreamSubscribersByConnection, connectionKey);
             }
-            this.apiStreamSubscribers.delete(subscriber);
+            this.stopApiStreamHeartbeatIfIdle();
         };
         req.on("close", cleanup);
         res.on("close", cleanup);
         this.apiStreamSubscribers.add(subscriber);
+        this.apiStreamSubscribersByUser.set(userKey, (this.apiStreamSubscribersByUser.get(userKey) ?? 0) + 1);
+        this.apiStreamSubscribersByConnection.set(connectionKey, (this.apiStreamSubscribersByConnection.get(connectionKey) ?? 0) + 1);
+        this.ensureApiStreamHeartbeat();
         const host = headerValue(req, "host") ?? "127.0.0.1";
         const url = new URL(`http://${host}${req.url ?? "/"}`);
         const lastEventIdRaw = headerValue(req, "last-event-id") ?? url.searchParams.get("lastEventId");
@@ -3335,9 +3439,6 @@ a { color: var(--brand); }</style>
             }
         }
         this.enqueueApiStreamText(subscriber, formatSseHeartbeat(this.apiStreamSeq));
-        subscriber.heartbeat = setInterval(() => {
-            this.enqueueApiStreamText(subscriber, formatSseHeartbeat(this.apiStreamSeq));
-        }, API_STREAM_HEARTBEAT_MS);
     }
     /**
      * @param {string} method
@@ -4395,17 +4496,20 @@ a { color: var(--brand); }</style>
             clearTimeout(this.apiStreamFlushTimer);
             this.apiStreamFlushTimer = null;
         }
+        if (this.apiStreamHeartbeatTimer) {
+            clearInterval(this.apiStreamHeartbeatTimer);
+            this.apiStreamHeartbeatTimer = null;
+        }
         for (const subscriber of this.apiStreamSubscribers) {
             subscriber.closed = true;
-            if (subscriber.heartbeat) {
-                clearInterval(subscriber.heartbeat);
-            }
             try {
                 subscriber.res.end();
             }
             catch { }
         }
         this.apiStreamSubscribers.clear();
+        this.apiStreamSubscribersByUser.clear();
+        this.apiStreamSubscribersByConnection.clear();
         // Durability seam teardown: close every `_smithers_docs` file-watcher
         // (`fs.watch` handles) started via `watchTicketsDirectory`, so a closed
         // gateway never leaks watchers (e.g. across e2e boots or test runs).
