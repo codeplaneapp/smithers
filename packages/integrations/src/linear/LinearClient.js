@@ -147,16 +147,30 @@ export function makeLinearClient(config) {
             return yield* Effect.fail(new IntegrationError("delivery-failed", "Linear API key is not configured. Pass config.apiKey, call configureLinear({ apiKey }), or set SMITHERS_LINEAR_API_KEY.", { apiBaseUrl }));
         }
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+            // One controller spans the request AND its body: aborting it
+            // cancels an in-flight fetch and tears down the connection under
+            // a pending response.json(). Effect.tryPromise aborts the signal
+            // it hands us when the fiber is interrupted, so forwarding it to
+            // the controller makes both steps interruptible.
+            const controller = new AbortController();
+            /** @param {AbortSignal} signal */
+            const abortWith = (signal) => {
+                signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+            };
             const response = yield* Effect.tryPromise({
-                try: () => fetch(apiBaseUrl, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        // Personal API keys go raw; OAuth tokens arrive pre-prefixed.
-                        Authorization: apiKey,
-                    },
-                    body: JSON.stringify({ query: gql, variables: variables ?? {} }),
-                }),
+                try: (signal) => {
+                    abortWith(signal);
+                    return fetch(apiBaseUrl, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            // Personal API keys go raw; OAuth tokens arrive pre-prefixed.
+                            Authorization: apiKey,
+                        },
+                        body: JSON.stringify({ query: gql, variables: variables ?? {} }),
+                        signal: controller.signal,
+                    });
+                },
                 catch: (cause) => new IntegrationError("delivery-failed", "Linear API request failed (network error).", { apiBaseUrl }, { cause }),
             });
             if (response.status === 429 || response.status >= 500) {
@@ -170,7 +184,10 @@ export function makeLinearClient(config) {
                 continue;
             }
             const json = yield* Effect.tryPromise({
-                try: () => response.json(),
+                try: (signal) => {
+                    abortWith(signal);
+                    return response.json();
+                },
                 catch: (cause) => new IntegrationError("decode-failed", `Linear API returned a non-JSON response (status ${response.status}).`, { status: response.status }, { cause }),
             });
             if (!response.ok) {
