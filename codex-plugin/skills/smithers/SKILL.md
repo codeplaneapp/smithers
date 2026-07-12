@@ -103,24 +103,28 @@ the complete `llms-full.txt`) or `bunx smithers-orchestrator ask "<question>"`.
 
 ## Durable spawn-tool routing (recommended)
 
-Codex >= 0.144 supports native multi-agent spawn hints. The dependency-free
-configurator at `scripts/configure-codex-routing.mjs` persists Smithers guidance
+Codex >= 0.144 supports the alpha-tested native multi-agent spawn hint fields
+`features.multi_agent_v2.multi_agent_mode_hint_text` and
+`features.multi_agent_v2.usage_hint_text`. The dependency-free configurator at
+`<plugin-dir>/scripts/configure-codex-routing.mjs` persists Smithers guidance
 in the two supported `features.multi_agent_v2` hint fields using Codex App Server:
 
 ```bash
-node scripts/configure-codex-routing.mjs                 # dry-run
-node scripts/configure-codex-routing.mjs --apply          # install
-node scripts/configure-codex-routing.mjs --status         # inspect
-node scripts/configure-codex-routing.mjs --disable        # preview restore
-node scripts/configure-codex-routing.mjs --disable --apply
+node <plugin-dir>/scripts/configure-codex-routing.mjs                 # dry-run
+node <plugin-dir>/scripts/configure-codex-routing.mjs --apply          # install
+node <plugin-dir>/scripts/configure-codex-routing.mjs --status         # inspect
+node <plugin-dir>/scripts/configure-codex-routing.mjs --disable        # preview restore
+node <plugin-dir>/scripts/configure-codex-routing.mjs --disable --apply
 ```
 
-Setup saves exact prior values in `$CODEX_HOME/.smithers-codex-routing.json` and
-preserves the original snapshot on later setup runs. Existing user-authored hint
-text is a conflict and is never overwritten unless `--replace-existing-policy`
-is explicitly supplied. Disable refuses to clobber edits made after setup and
-validates rollback. Use `--status --require-effective` as an automation doctor
-check.
+For an installed plugin, `<plugin-dir>` is the directory containing this
+`skills/smithers/` directory; resolve that directory first if Codex runs from a
+different workspace. Setup saves exact prior values in
+`$CODEX_HOME/.smithers-codex-routing.json` and preserves the original snapshot
+on later setup runs. Existing user-authored hint text is a conflict and is
+never overwritten unless `--replace-existing-policy` is explicitly supplied.
+Disable refuses to clobber edits made after setup and validates rollback. Use
+`--status --require-effective` as an automation doctor check.
 
 ---
 

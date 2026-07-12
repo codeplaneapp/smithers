@@ -61,7 +61,8 @@ repo root.
     │   ├── hooks.json      # SessionStart hook (auto-discovered; NOT a manifest field)
     │   └── session-start.mjs
     ├── scripts/
-    │   └── configure-codex-routing.mjs  # App Server setup/status/disable CLI
+    │   ├── configure-codex-routing.mjs  # App Server setup/status/disable CLI
+    │   └── configure-codex-routing.test.mjs
     ├── skills/
     │   └── smithers/
     │       └── SKILL.md    # the on-ramp + the mandatory-UI authoring contract
@@ -70,7 +71,10 @@ repo root.
 
 The routing configurator uses Codex App Server JSON-RPC and a namespaced snapshot
 in `$CODEX_HOME/.smithers-codex-routing.json`; it never manages model routing or
-spawn metadata. See the durable routing section in the skill for setup commands.
+spawn metadata. Run it using its installed absolute plugin path (the path
+containing `scripts/`, not the current workspace), for example
+`node <plugin-dir>/scripts/configure-codex-routing.mjs --status`. See the durable
+routing section in the skill for setup commands.
 
 > Codex's plugin validator (≥ 0.142) rejects a `hooks` field in `plugin.json`, so
 > hooks are auto-discovered from `hooks/hooks.json` instead, and `.mcp.json` must
