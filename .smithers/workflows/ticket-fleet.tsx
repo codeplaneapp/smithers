@@ -762,11 +762,35 @@ function applySync(
   const openIssueNumbers = new Set(ghIssues.map((i) => i.number));
   const linkedIssueNumbers = new Set(localTickets.map((t) => t.linkedIssue).filter(Boolean));
 
+  // Title -> existing open issue, fetched LIVE (not from the cached `ghIssues`
+  // snapshot). sync-apply is one Task whose retries replay the whole apply body,
+  // and `gh issue create` is irreversible and unkeyed: issues opened by a previous
+  // attempt exist on GitHub but are absent from the snapshot taken before it ran.
+  // Reading current state here is what makes createIssue idempotent across retries
+  // — the title is the idempotency key. (A retry storm once opened 48 duplicates.)
+  const liveIssueByTitle = new Map<string, { issueNumber: number; url: string }>();
+  if (!input.dryRun) {
+    try {
+      const raw = gh(["issue", "list", "--repo", input.repo, "--state", "open", "--limit", "1000", "--json", "number,title,url"]);
+      for (const it of JSON.parse(raw) as Array<{ number: number; title: string; url: string }>) {
+        if (!liveIssueByTitle.has(it.title)) liveIssueByTitle.set(it.title, { issueNumber: it.number, url: it.url });
+      }
+    } catch {
+      // Degrade to create-anyway rather than wedging the sweep; the on-disk
+      // ticket guards still cover the common retry path.
+    }
+  }
+
   const createIssue = (title: string, body: string): { issueNumber: number; url: string } => {
     if (input.dryRun) return { issueNumber: 0, url: "(dry-run)" };
-    const url = gh(["issue", "create", "--repo", input.repo, "--title", title.slice(0, 250), "--body", body.slice(0, 60_000)]);
+    const capped = title.slice(0, 250);
+    const existing = liveIssueByTitle.get(capped);
+    if (existing) return existing;
+    const url = gh(["issue", "create", "--repo", input.repo, "--title", capped, "--body", body.slice(0, 60_000)]);
     const match = url.match(/\/issues\/(\d+)/);
-    return { issueNumber: match ? Number(match[1]) : 0, url };
+    const created = { issueNumber: match ? Number(match[1]) : 0, url };
+    liveIssueByTitle.set(capped, created);
+    return created;
   };
   const closeIssue = (issueNumber: number, evidence: string) => {
     if (input.dryRun || !openIssueNumbers.has(issueNumber)) return;
