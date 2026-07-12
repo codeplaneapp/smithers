@@ -41,6 +41,11 @@ export const providers = {
   claude: new SmithersClaudeCodeAgent({ model: "claude-fable-5" }),
   codex: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }),
 //   openrouter: createOpenRouterAgent(),
+  // Defined for manual/`smithers agent` use, but intentionally NOT wired into
+  // the fallback chains below: OpenCode's `anthropic/*` models authenticate via
+  // ANTHROPIC_API_KEY (paid API) when it is set, whereas ClaudeCodeAgent clears
+  // it to use the Claude subscription. The chains fall back to `providers.claude`
+  // (subscription) instead so an outage-burst fallback never silently bills API.
   opencode: new SmithersOpenCodeAgent({ model: "anthropic/claude-fable-5" }),
 //   antigravity: new SmithersAntigravityAgent(),
 //   pi: new SmithersPiAgent({ provider: "openai", model: "gpt-5.6-luna" }),
@@ -90,7 +95,7 @@ export const agents = {
     providers.codex1Luna,
     providers.claudeSonnet,
     providers.kimi1,
-    providers.opencode,
+    providers.claude,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -114,7 +119,7 @@ export const agents = {
     providers.codex1Terra,
     providers.claudeSonnet,
     providers.kimi1,
-    providers.opencode,
+    providers.claude,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -126,7 +131,7 @@ export const agents = {
     providers.codex1Terra,
     providers.claudeSonnet,
     providers.kimi1,
-    providers.opencode,
+    providers.claude,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -138,7 +143,7 @@ export const agents = {
     providers.codex1Terra,
     providers.claudeSonnet,
     providers.kimi1,
-    providers.opencode,
+    providers.claude,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -150,7 +155,7 @@ export const agents = {
     providers.codex1Sol,
     providers.claude,
     providers.claudeOpus,
-    providers.opencode,
+    providers.claudeSonnet,
     // providers.openclaw,
     // providers.openrouter,
     // providers.antigravity,
