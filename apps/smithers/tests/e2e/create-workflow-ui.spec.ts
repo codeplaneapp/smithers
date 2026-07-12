@@ -47,6 +47,63 @@ test("create-workflow custom UI mounts and renders the tabbed shell", async ({ p
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });
 
+test("create-workflow tabs switch selected state across the whole tab bar", async ({ page }) => {
+  await page.goto("/workflows/create-workflow");
+  await expect(page.getByTestId("create-workflow-ui")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("create-workflow-tabbar")).toBeVisible();
+
+  // The tab bar is a real tablist whose selection state is client-side, so it
+  // works in every run state. Click through every tab and assert the selected
+  // state moves with it (aria-selected drives the is-active styling).
+  for (const id of STEP_TABS) {
+    await page.getByTestId(`create-workflow-tab-${id}`).click();
+    await expect(page.getByTestId(`create-workflow-tab-${id}`)).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    for (const other of STEP_TABS) {
+      if (other === id) continue;
+      await expect(page.getByTestId(`create-workflow-tab-${other}`)).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+    }
+  }
+});
+
+test("create-workflow renders exactly one content surface per state", async ({ page }) => {
+  await page.goto("/workflows/create-workflow");
+  await expect(page.getByTestId("create-workflow-ui")).toBeVisible({ timeout: 30_000 });
+
+  // Once the runs query settles, the content area shows exactly one of the two
+  // state surfaces: the empty-state launch card (no run selected) or the
+  // active step pane of a selected run. Both are valid; showing neither or
+  // both is a rendering bug.
+  const emptyCard = page.getByTestId("create-workflow-empty");
+  const activePane = page.locator("[data-testid^='create-workflow-pane-']:not([hidden])");
+  await expect(emptyCard.or(activePane.first())).toBeVisible({ timeout: 15_000 });
+
+  if (await emptyCard.isVisible()) {
+    // Empty run state: the launch card gates Build Workflow on a prompt, the
+    // same disabled → enabled wiring as the top-bar Build.
+    const launch = page.getByTestId("create-workflow-launch-empty");
+    const prompt = page.getByTestId("create-workflow-prompt-empty");
+    await prompt.fill("");
+    await expect(launch).toBeDisabled();
+    await prompt.fill("Build a workflow that hunts flaky tests and proposes fixes.");
+    await expect(launch).toBeEnabled();
+    // No step panes render without a selected run.
+    expect(await activePane.count()).toBe(0);
+  } else {
+    // Populated state: exactly one pane is visible — the active tab's — and
+    // switching tabs swaps which pane is shown.
+    expect(await activePane.count()).toBe(1);
+    await page.getByTestId("create-workflow-tab-result").click();
+    await expect(page.getByTestId("create-workflow-pane-result")).toBeVisible();
+    expect(await emptyCard.count()).toBe(0);
+  }
+});
+
 test("create-workflow Build is gated on a non-empty prompt", async ({ page }) => {
   await page.goto("/workflows/create-workflow");
   await expect(page.getByTestId("create-workflow-ui")).toBeVisible({ timeout: 30_000 });
