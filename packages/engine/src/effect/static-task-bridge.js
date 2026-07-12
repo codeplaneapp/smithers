@@ -7,6 +7,7 @@ import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { getJjPointer } from "@smithers-orchestrator/vcs/jj";
+import { buildOutputValidationDiagnostics } from "../output-validation-diagnostics.js";
 import { getPlatformLayer } from "../platform-layer.js";
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
 /**
@@ -146,12 +147,15 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
         }
         if (!validation.ok) {
             attemptMeta.failureRetryable = false;
-            throw new SmithersError("INVALID_OUTPUT", `Task output failed validation for ${desc.outputTableName}`, {
+            const diagnostics = buildOutputValidationDiagnostics(validation.error, payload);
+            throw new SmithersError("INVALID_OUTPUT", `Task output failed validation for ${desc.outputTableName}: ${diagnostics.summary}`, {
                 attempt: attemptNo,
                 nodeId: desc.nodeId,
                 iteration: desc.iteration,
                 outputTable: desc.outputTableName,
                 issues: validation.error?.issues,
+                receivedKeys: diagnostics.receivedKeys,
+                receivedDescription: diagnostics.receivedDescription,
             }, { cause: validation.error });
         }
         payload = validation.data;

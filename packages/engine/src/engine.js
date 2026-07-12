@@ -19,6 +19,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertJsonPayloadWithinBounds, assertOptionalStringMaxLength, assertPositiveFiniteInteger, } from "@smithers-orchestrator/db/input-bounds";
 import { buildPlanTree, buildStateKey, } from "./scheduler.js";
 import { buildWorktreeIsolationNotice, WORKTREE_ISOLATION_NOTICE_MARKER } from "./buildWorktreeIsolationNotice.js";
+import { buildOutputValidationDiagnostics } from "./output-validation-diagnostics.js";
 import { resolveForkSessionMessages } from "./resolveForkSessionMessages.js";
 import { getDefinedToolMetadata } from "./getDefinedToolMetadata.js";
 import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot, } from "@smithers-orchestrator/time-travel/snapshot";
@@ -4459,7 +4460,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     schemaRetryAttempts,
                 });
             }
-            return new SmithersError("INVALID_OUTPUT", `Task output failed validation for ${desc.outputTableName}`, {
+            const diagnostics = buildOutputValidationDiagnostics(cause, payload);
+            return new SmithersError("INVALID_OUTPUT", `Task output failed validation for ${desc.outputTableName}: ${diagnostics.summary}`, {
                 attempt: attemptNo,
                 nodeId: desc.nodeId,
                 iteration: desc.iteration,
@@ -4468,6 +4470,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 issues: cause && typeof cause === "object" && "issues" in cause
                     ? cause.issues
                     : undefined,
+                receivedKeys: diagnostics.receivedKeys,
+                receivedDescription: diagnostics.receivedDescription,
             }, { cause });
         };
         // Schema-validation retry: if the agent returned parseable JSON but it
