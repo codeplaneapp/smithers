@@ -11,7 +11,9 @@ Providers:
 - `mistral-ocr` — data-URL documents.
 - `llamaparse` — upload, create job, then poll until COMPLETED (bounded by
   `LLAMAPARSE_POLL_MAX_ATTEMPTS` x `LLAMAPARSE_POLL_INTERVAL_MS`).
-- Any injected object matching `DocumentParsingProvider`.
+- Any injected object matching `DocumentParsingProvider`. Providers are called
+  as `parseDocument(input, { abortSignal })` — the AI SDK per-call abort signal
+  is forwarded so custom providers can cancel in-flight work.
 
 Input sources are `url | base64 | text`; results normalize to
 `{ provider, text, markdown?, pages?, metadata?, raw }`.
