@@ -61,6 +61,39 @@ describe("bundleGatewayUiEntry failure paths", () => {
     ).rejects.toThrow("Failed to build Gateway UI entry /some/entry.tsx");
   });
 
+  test("retries Bun's transient generic build rejection", async () => {
+    originalBuild = Bun.build;
+    const realBuild = originalBuild;
+    let calls = 0;
+    Bun.build = async (options) => {
+      calls += 1;
+      if (calls === 1) throw new Error("Bundle failed");
+      return realBuild(options);
+    };
+    tempDir = mkdtempSync(join(process.cwd(), ".gateway-ui-build-retry-"));
+    const entry = join(tempDir, "entry.tsx");
+    writeFileSync(entry, "console.log('retry-built');\n");
+
+    const body = await bundleGatewayUiEntry({ entry }, new Map());
+
+    expect(calls).toBe(2);
+    expect(body).toContain("retry-built");
+  });
+
+  test("does not retry a specific thrown build error", async () => {
+    originalBuild = Bun.build;
+    let calls = 0;
+    Bun.build = async () => {
+      calls += 1;
+      throw new Error("specific build failure");
+    };
+
+    await expect(
+      bundleGatewayUiEntry({ entry: "/specific/failure.tsx" }, new Map()),
+    ).rejects.toThrow("specific build failure");
+    expect(calls).toBe(1);
+  });
+
   test("restores a working Bun.build after the stubs", () => {
     expect(typeof Bun.build).toBe("function");
   });

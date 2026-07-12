@@ -20,6 +20,12 @@ const tanstackSpecifierRe = /^@tanstack\//;
 const packagedUiSpecifierRe = /^(?:@milkdown\/crepe|mermaid)(?:\/.*)?$/;
 const smithersUiSpecifierRe = /^(?:smithers-orchestrator\/gateway-(?:react|client)|@smithers-orchestrator\/(?:gateway-react|gateway-client|gateway)(?:\/.*)?)$/;
 const INLINE_UI_NAMESPACE = "smithers-inline-ui";
+// Bun can reject a build with only the generic `Bundle failed` error while its
+// native build workers are briefly saturated by other workspace builds. That
+// failure carries no source diagnostic and succeeds once capacity is released.
+// Keep retries narrow and bounded so real syntax/resolution errors still fail
+// immediately through the normal `result.logs` path.
+const TRANSIENT_BUILD_RETRY_DELAYS_MS = [50, 200, 800];
 
 function resolveReactPeer(specifier) {
     try {
@@ -220,7 +226,7 @@ export async function bundleGatewayUiEntry(config, cache) {
     if (typeof Bun === "undefined" || typeof Bun.build !== "function") {
         throw new SmithersError("INVALID_INPUT", "Gateway UI bundling requires Bun.build.");
     }
-    const result = await Bun.build({
+    const buildOptions = {
         entrypoints: [inlineEntry ?? String(config.entry)],
         root: process.cwd(),
         target: "browser",
@@ -259,7 +265,22 @@ export async function bundleGatewayUiEntry(config, cache) {
                 },
             },
         ].filter(Boolean),
-    });
+    };
+    let result;
+    for (let attempt = 0; ; attempt += 1) {
+        try {
+            result = await Bun.build(buildOptions);
+            break;
+        }
+        catch (error) {
+            const transient = error instanceof Error && error.message.trim() === "Bundle failed";
+            const delayMs = TRANSIENT_BUILD_RETRY_DELAYS_MS[attempt];
+            if (!transient || delayMs === undefined) {
+                throw error;
+            }
+            await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+        }
+    }
     if (!result.success) {
         const message = result.logs?.map((entry) => entry.message).filter(Boolean).join("\n")
             || `Failed to build Gateway UI entry ${config.entry}`;
