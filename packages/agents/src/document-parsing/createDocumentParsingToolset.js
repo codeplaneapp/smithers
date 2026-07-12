@@ -118,13 +118,13 @@ function createFirecrawlProvider(options) {
   const apiKey = options.apiKey ?? process.env.FIRECRAWL_API_KEY;
   return {
     name: "firecrawl",
-    async parseDocument(input) {
-      if (input.source.type !== "url") return parseFirecrawlFile(request, baseUrl, apiKey, input);
+    async parseDocument(input, parseOptions) {
+      if (input.source.type !== "url") return parseFirecrawlFile(request, baseUrl, apiKey, input, parseOptions?.abortSignal);
       const json = await postJson(request, `${baseUrl}/scrape`, apiKey, {
         url: input.source.url,
         formats: [input.outputFormat === "text" ? "markdown" : (input.outputFormat ?? "markdown")],
         onlyMainContent: false,
-      });
+      }, parseOptions?.abortSignal);
       const data = pickObject(json, "data") ?? pickObject(json, "result") ?? pickObject(json, undefined);
       const markdown = pickString(data, "markdown");
       const text = pickString(data, "text") ?? pickString(data, "content") ?? markdown ?? "";
@@ -144,9 +144,10 @@ function createFirecrawlProvider(options) {
  * @param {string} baseUrl
  * @param {string | undefined} apiKey
  * @param {Parameters<DocumentParsingProvider["parseDocument"]>[0]} input
+ * @param {AbortSignal | undefined} [abortSignal]
  */
-async function parseFirecrawlFile(request, baseUrl, apiKey, input) {
-  const json = await postMultipart(request, `${baseUrl}/parse`, apiKey, createDocumentFormData(input, createFirecrawlOptions(input)));
+async function parseFirecrawlFile(request, baseUrl, apiKey, input, abortSignal) {
+  const json = await postMultipart(request, `${baseUrl}/parse`, apiKey, createDocumentFormData(input, createFirecrawlOptions(input)), abortSignal);
   const data = pickObject(json, "data") ?? pickObject(json, "result") ?? pickObject(json, undefined);
   const markdown = pickString(data, "markdown");
   const text = pickString(data, "text") ?? pickString(data, "content") ?? markdown ?? "";
@@ -206,18 +207,19 @@ function createLlamaParseProvider(options) {
   const apiKey = options.apiKey ?? process.env.LLAMA_CLOUD_API_KEY;
   return {
     name: "llamaparse",
-    async parseDocument(input) {
-      const fileId = input.source.type === "url" ? undefined : await uploadLlamaParseFile(request, baseUrl, apiKey, input);
+    async parseDocument(input, parseOptions) {
+      const abortSignal = parseOptions?.abortSignal;
+      const fileId = input.source.type === "url" ? undefined : await uploadLlamaParseFile(request, baseUrl, apiKey, input, abortSignal);
       const created = await postJson(request, `${baseUrl}/api/v2/parse`, apiKey, {
         ...(fileId ? { file_id: fileId } : { source_url: input.source.url }),
         tier: "agentic",
         version: "latest",
         expand: input.outputFormat === "text" ? ["text_full", "metadata"] : ["markdown_full", "text_full", "metadata"],
         ...(input.instructions ? { parsing_instruction: input.instructions } : {}),
-      });
+      }, abortSignal);
       const jobId = pickString(pickObject(created, "job") ?? created, "id");
       if (!jobId) throw new Error("LlamaParse did not return a parse job id");
-      const json = await pollLlamaParseJob(request, baseUrl, apiKey, jobId, input.outputFormat);
+      const json = await pollLlamaParseJob(request, baseUrl, apiKey, jobId, input.outputFormat, abortSignal);
       const markdown = pickString(json, "markdown_full") ?? pickString(pickObject(json, "markdown"), "text");
       const text = pickString(json, "text_full") ?? pickString(pickObject(json, "text"), "text") ?? markdown ?? "";
       return {
@@ -236,9 +238,10 @@ function createLlamaParseProvider(options) {
  * @param {string} baseUrl
  * @param {string | undefined} apiKey
  * @param {Parameters<DocumentParsingProvider["parseDocument"]>[0]} input
+ * @param {AbortSignal | undefined} [abortSignal]
  */
-async function uploadLlamaParseFile(request, baseUrl, apiKey, input) {
-  const json = await postMultipart(request, `${baseUrl}/api/v1/files/`, apiKey, createDocumentFormData(input));
+async function uploadLlamaParseFile(request, baseUrl, apiKey, input, abortSignal) {
+  const json = await postMultipart(request, `${baseUrl}/api/v1/files/`, apiKey, createDocumentFormData(input), abortSignal);
   const fileId = pickString(json, "id");
   if (!fileId) throw new Error("LlamaParse did not return an uploaded file id");
   return fileId;
@@ -272,14 +275,16 @@ async function postJson(request, url, apiKey, body, abortSignal) {
  * @param {string} url
  * @param {string | undefined} apiKey
  * @param {FormData} body
+ * @param {AbortSignal | undefined} [abortSignal]
  * @returns {Promise<any>}
  */
-async function postMultipart(request, url, apiKey, body) {
+async function postMultipart(request, url, apiKey, body, abortSignal) {
   if (!apiKey) throw new Error(`Missing API key for ${url}`);
   const response = await request(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
     body,
+    ...(abortSignal ? { signal: abortSignal } : {}),
   });
   if (!response.ok) {
     const message = await response.text().catch(() => "");
@@ -294,34 +299,63 @@ async function postMultipart(request, url, apiKey, body) {
  * @param {string | undefined} apiKey
  * @param {string} jobId
  * @param {"text" | "markdown" | "json" | undefined} outputFormat
+ * @param {AbortSignal | undefined} [abortSignal]
  * @returns {Promise<any>}
  */
-async function pollLlamaParseJob(request, baseUrl, apiKey, jobId, outputFormat) {
+async function pollLlamaParseJob(request, baseUrl, apiKey, jobId, outputFormat, abortSignal) {
   const expand = outputFormat === "text" ? "text_full,metadata" : "markdown_full,text_full,metadata";
   for (let attempt = 0; attempt < LLAMAPARSE_POLL_MAX_ATTEMPTS; attempt += 1) {
-    const json = await getJson(request, `${baseUrl}/api/v2/parse/${encodeURIComponent(jobId)}?expand=${expand}`, apiKey);
+    const json = await getJson(request, `${baseUrl}/api/v2/parse/${encodeURIComponent(jobId)}?expand=${expand}`, apiKey, abortSignal);
     const job = pickObject(json, "job") ?? json;
     const status = pickString(job, "status");
     if (status === "COMPLETED" || status === "completed") return json;
     if (status === "FAILED" || status === "failed" || status === "CANCELLED" || status === "cancelled") {
       throw new Error(`LlamaParse job ${jobId} ${status}: ${pickString(job, "error_message") ?? "no error details"}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, LLAMAPARSE_POLL_INTERVAL_MS));
+    await abortableDelay(LLAMAPARSE_POLL_INTERVAL_MS, abortSignal);
   }
   throw new Error(`LlamaParse job ${jobId} did not complete before timeout`);
+}
+
+/**
+ * Sleep between poll attempts, rejecting with the signal's abort reason the
+ * instant the signal fires so cancelled polls do not wait out the interval.
+ *
+ * @param {number} ms
+ * @param {AbortSignal | undefined} abortSignal
+ * @returns {Promise<void>}
+ */
+function abortableDelay(ms, abortSignal) {
+  return new Promise((resolve, reject) => {
+    if (abortSignal?.aborted) {
+      reject(abortSignal.reason ?? new Error("This operation was aborted"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortSignal?.reason ?? new Error("This operation was aborted"));
+    };
+    const timer = setTimeout(() => {
+      abortSignal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
  * @param {typeof fetch} request
  * @param {string} url
  * @param {string | undefined} apiKey
+ * @param {AbortSignal | undefined} [abortSignal]
  * @returns {Promise<any>}
  */
-async function getJson(request, url, apiKey) {
+async function getJson(request, url, apiKey, abortSignal) {
   if (!apiKey) throw new Error(`Missing API key for ${url}`);
   const response = await request(url, {
     method: "GET",
     headers: { Authorization: `Bearer ${apiKey}` },
+    ...(abortSignal ? { signal: abortSignal } : {}),
   });
   if (!response.ok) {
     const message = await response.text().catch(() => "");
