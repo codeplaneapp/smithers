@@ -207,6 +207,40 @@ export function approvalsShapeWhere(params: ListApprovalsRequest): { where: stri
   if (!runId) return undefined;
   return { where: `run_id = ${runId} AND ${pending}` };
 }
+// Live-row predicate for `_smithers_docs`-backed shapes. Every RPC read hides
+// tombstones (`deleted_at_ms IS NOT NULL`) unless explicitly asked otherwise,
+// so an Electric shape must exclude them too or soft-deleted rows resurface in
+// multiplayer mode.
+const LIVE_DOC_WHERE = "deleted_at_ms IS NULL";
+
+/**
+ * Compile a `listDocs` filter into the equivalent Electric predicate, mirroring
+ * the adapter's `listDocs` semantics: live rows only unless `includeDeleted`,
+ * optional `kind`, and `updated_at_ms > n` for a finite `updatedAfterMs`
+ * (non-finite values are ignored, exactly like the adapter). `limit` is NOT
+ * compiled here — Electric shapes cannot express LIMIT, so limited requests
+ * fall back to the RPC-backed query collection instead.
+ */
+export function docsShapeWhere(filter: NonNullable<ListDocsRequest["filter"]> = {}): string | undefined {
+  const clauses: string[] = [];
+  if (!filter.includeDeleted) clauses.push(LIVE_DOC_WHERE);
+  const kindClause = kindWhere(filter.kind);
+  if (kindClause) clauses.push(kindClause);
+  if (typeof filter.updatedAfterMs === "number" && Number.isFinite(filter.updatedAfterMs)) {
+    clauses.push(`updated_at_ms > ${Math.floor(filter.updatedAfterMs)}`);
+  }
+  return clauses.length > 0 ? clauses.join(" AND ") : undefined;
+}
+
+/**
+ * Compile a `listTickets` request into the equivalent Electric predicate,
+ * mirroring the RPC: tombstones never appear, an omitted kind means EVERY live
+ * doc kind (NOT a forced `ticket`), and an explicit kind restricts the shape.
+ */
+export function ticketsShapeWhere(kind: ListTicketsRequest["kind"]): string {
+  const kindClause = kindWhere(kind);
+  return kindClause ? `${LIVE_DOC_WHERE} AND ${kindClause}` : LIVE_DOC_WHERE;
+}
 
 function txidMatch(result: { txid?: string } | undefined) {
   if (!result?.txid) throw new Error("Postgres domain API mutation did not return txid for Electric matching.");
@@ -501,15 +535,27 @@ function createSmithersCollectionsWithClient(
         (row) => row.key,
         () => client.api.listWorkflows(params),
       ),
-    docs: (params: ListDocsRequest = {}) =>
-      getOrCreate<GatewayDocRow, string>(
+    docs: (params: ListDocsRequest = {}) => {
+      const filter = params.filter ?? {};
+      // Electric shapes cannot express LIMIT, so a limit-bounded request falls
+      // back to the RPC-backed query collection even in multiplayer mode (the
+      // gateway applies the documented clamp server-side).
+      if (typeof filter.limit === "number") {
+        return getOrCreateQuery<GatewayDocRow, string>(
+          smithersCollectionKeys.docs(params),
+          (row) => row.path,
+          () => client.api.listDocs(params),
+        );
+      }
+      return getOrCreate<GatewayDocRow, string>(
         smithersCollectionKeys.docs(params),
         "docs",
         (row) => row.path,
         () => client.api.listDocs(params),
         (row) => mapSmithersElectricRow("docs", row),
-        kindWhere(params.filter?.kind),
-      ),
+        docsShapeWhere(filter),
+      );
+    },
     prompts: () =>
       getOrCreateQuery<GatewayPromptRow, string>(
         smithersCollectionKeys.prompts(),
@@ -532,7 +578,7 @@ function createSmithersCollectionsWithClient(
         (row) => row.path,
         () => client.api.listTickets(params),
         (row) => mapSmithersElectricRow("tickets", row),
-        kindWhere(params.kind ?? "ticket"),
+        ticketsShapeWhere(params.kind),
       ),
     memoryFacts: (params: ListMemoryFactsRequest = {}) =>
       getOrCreate<GatewayMemoryFactRow, string>(
