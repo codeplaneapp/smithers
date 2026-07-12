@@ -22,6 +22,7 @@ import {
   buildTimeline,
   canRetryTask,
   clampFrameNo,
+  connectionViewFor,
   diagnoseRun,
   diffPatchesOf,
   diffSummaryOf,
@@ -90,6 +91,68 @@ describe("status tones", () => {
   test("labelForStatus normalizes underscores and blanks", () => {
     expect(labelForStatus("waiting_approval")).toBe("waiting-approval");
     expect(labelForStatus(undefined)).toBe("unknown");
+  });
+});
+
+describe("connection states", () => {
+  test("online is the only live view: pulsing dot, no hint, no action, no banner", () => {
+    const view = connectionViewFor("online");
+    expect(view.label).toBe("Live");
+    expect(view.tone).toBe("ok");
+    expect(view.pulse).toBe(true);
+    expect(view.hint).toBeNull();
+    expect(view.action).toBeNull();
+    expect(view.banner).toBeNull();
+  });
+
+  test("connecting (and idle, and unknown) explains that queries are still pending", () => {
+    for (const status of ["connecting", "idle", undefined]) {
+      const view = connectionViewFor(status);
+      expect(view.label).toBe("Connecting…");
+      expect(view.tone).toBe("waiting");
+      expect(view.pulse).toBe(false);
+      expect(view.hint).toMatch(/queries are still pending/i);
+      expect(view.action).toBeNull();
+      expect(view.banner).toBeNull();
+    }
+  });
+
+  test("offline keeps last-known data, reconnects automatically, and offers a manual refresh", () => {
+    const view = connectionViewFor("offline");
+    expect(view.label).toBe("Offline");
+    expect(view.tone).toBe("failed");
+    expect(view.pulse).toBe(false);
+    expect(view.hint).toMatch(/last-known data/i);
+    expect(view.hint).toMatch(/reconnecting automatically/i);
+    expect(view.action).toEqual({ kind: "reload", label: "Refresh" });
+    expect(view.banner?.title).toMatch(/gateway/i);
+    expect(view.banner?.detail).toMatch(/automatically/i);
+    expect(view.banner?.detail).toMatch(/refresh|re-open/i);
+  });
+
+  test("unauthorized names credentials/permissions and never reads like a network outage", () => {
+    const view = connectionViewFor("unauthorized");
+    expect(view.label).toBe("Unauthorized");
+    expect(view.tone).toBe("failed");
+    expect(view.pulse).toBe(false);
+    const copy = [view.hint, view.banner?.title, view.banner?.detail].join(" ").toLowerCase();
+    expect(copy).toContain("credentials or permissions are required");
+    expect(copy).toContain("token");
+    // No outage vocabulary: an auth failure must not masquerade as one.
+    for (const outageWord of ["offline", "network", "unreachable", "can't reach", "not responding", "restarted", "outage"]) {
+      expect(copy).not.toContain(outageWord);
+    }
+  });
+
+  test("every degraded state shares the badge treatment: short label, guidance in the hint", () => {
+    for (const status of ["connecting", "idle", "offline", "unauthorized"]) {
+      const view = connectionViewFor(status);
+      expect(view.pulse).toBe(false);
+      expect(view.hint).not.toBeNull();
+      // Guidance belongs in the hint; the badge label stays a short state name.
+      expect(view.label.length).toBeLessThan(16);
+      expect((view.hint ?? "").length).toBeGreaterThan(view.label.length);
+    }
   });
 });
 

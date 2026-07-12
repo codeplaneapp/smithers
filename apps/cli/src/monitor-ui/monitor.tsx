@@ -37,6 +37,7 @@ import {
   buildTimeline,
   canRetryTask,
   clampFrameNo,
+  connectionViewFor,
   cronRowsOf,
   dataRowsOf,
   diagnoseRun,
@@ -188,23 +189,34 @@ function ToneDot({ tone, pulse }: { tone: Tone; pulse?: boolean }) {
 }
 
 /**
- * Transport truth readout — a status, not a control. "Live" only when the
- * gateway link is really streaming; degraded states name themselves.
+ * Transport truth readout. "Live" only when the gateway link is really
+ * streaming; every degraded state gets the same treatment — short label,
+ * one-line guidance, and a manual recovery action where auto-retry alone
+ * isn't enough. Copy lives in {@link connectionViewFor} so it stays testable.
  */
 function ConnectionBadge() {
   const { status } = useGatewayConnectionStatus();
-  const view: Record<string, { label: string; tone: Tone }> = {
-    online: { label: "Live", tone: "ok" },
-    connecting: { label: "Connecting…", tone: "waiting" },
-    idle: { label: "Connecting…", tone: "waiting" },
-    offline: { label: "Offline — showing last-known data", tone: "failed" },
-    unauthorized: { label: "Unauthorized", tone: "failed" },
-  };
-  const { label, tone } = view[status] ?? { label: status, tone: "idle" as Tone };
+  const view = connectionViewFor(status);
   return (
-    <span className={`mon-conn tone-${tone}`} data-testid="monitor-conn" data-conn={status}>
-      <ToneDot tone={tone} pulse={tone === "ok"} />
-      {label}
+    <span className={`mon-conn tone-${view.tone}`} data-testid="monitor-conn" data-conn={status}>
+      <ToneDot tone={view.tone} pulse={view.pulse} />
+      {view.label}
+      {view.hint ? (
+        <span className="mon-conn-hint" data-testid="monitor-conn-hint">
+          {view.hint}
+        </span>
+      ) : null}
+      {view.action ? (
+        <button
+          type="button"
+          className="mon-chip"
+          data-testid="monitor-conn-action"
+          title="Reload the Monitor page"
+          onClick={() => location.reload()}
+        >
+          {view.action.label}
+        </button>
+      ) : null}
     </span>
   );
 }
@@ -388,30 +400,30 @@ function RunListRow({
 function RunsRail({
   runs,
   loading,
-  offline,
+  connStatus,
   selectedRunId,
   onSelect,
 }: {
   runs: RunRow[];
   loading: boolean;
-  offline: boolean;
+  connStatus: string;
   selectedRunId: string | undefined;
   onSelect: (runId: string) => void;
 }) {
   const groups = groupRuns(runs);
+  // Offline and unauthorized carry state-specific banners (an auth failure
+  // must never read like a network outage); connecting states just load.
+  const banner = connectionViewFor(connStatus).banner;
   return (
     <nav className="mon-rail-runs" data-testid="monitor-runs">
-      {offline && runs.length === 0 ? (
-        <div className="mon-banner tone-failed" data-testid="monitor-runs-offline">
-          <div>Can't reach the Smithers gateway.</div>
-          <div className="mon-dim">
-            This tab's gateway isn't responding — it may have been restarted on another port. The page recovers
-            automatically once it's back; otherwise re-open with <code>smithers monitor</code>.
-          </div>
+      {banner && runs.length === 0 ? (
+        <div className="mon-banner tone-failed" data-testid={`monitor-runs-${connStatus}`}>
+          <div>{banner.title}</div>
+          <div className="mon-dim">{banner.detail}</div>
         </div>
       ) : null}
-      {!offline && loading && runs.length === 0 ? <div className="mon-empty">Loading runs…</div> : null}
-      {!offline && !loading && runs.length === 0 ? (
+      {!banner && loading && runs.length === 0 ? <div className="mon-empty">Loading runs…</div> : null}
+      {!banner && !loading && runs.length === 0 ? (
         <div className="mon-empty" data-testid="monitor-empty">
           <div>No runs match.</div>
           <div className="mon-dim">
@@ -3237,7 +3249,7 @@ function App() {
           <RunsRail
             runs={visibleRuns}
             loading={runsQuery.loading ?? false}
-            offline={connStatus === "offline" || connStatus === "unauthorized"}
+            connStatus={connStatus}
             selectedRunId={selectedRunId}
             onSelect={selectRun}
           />
@@ -3318,6 +3330,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: v
 .mon-brand h1 { margin: 0; font-size: var(--fs-3); font-weight: 700; letter-spacing: -0.01em; }
 .mon-brand-mark { width: 10px; height: 10px; border-radius: var(--r-full); background: var(--brand); }
 .mon-conn { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-1); font-weight: 600; color: var(--tone); }
+.mon-conn-hint { color: var(--muted); font-weight: 400; }
+.mon-conn .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); margin-left: var(--sp-1); }
 .mon-toolbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-input, .mon-select { height: var(--ctl-h); padding: 0 var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-1); background: var(--surface); color: var(--text); }
 .mon-input { min-width: 200px; }

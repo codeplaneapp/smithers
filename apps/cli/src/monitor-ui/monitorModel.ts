@@ -323,6 +323,74 @@ export function labelForStatus(status: string | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// Gateway connection states. One view per transport status: the header badge
+// and the runs-rail banner render these verbatim, so every degraded state gets
+// the same treatment (short label + one-line guidance + optional recovery
+// action) and the copy stays testable without a DOM. Unauthorized is a
+// credentials problem, never a network one — its copy must not read like an
+// outage.
+// ---------------------------------------------------------------------------
+
+export type ConnectionView = {
+  /** Short state name for the badge. Guidance lives in `hint`, not the label. */
+  label: string;
+  tone: Tone;
+  /** Pulse the dot only when the link is really streaming. */
+  pulse: boolean;
+  /** One-line operator guidance shown beside the badge for degraded states. */
+  hint: string | null;
+  /** Manual recovery control offered alongside the transport's auto-retry. */
+  action: { kind: "reload"; label: string } | null;
+  /** Empty-rail banner for states where the run list is stale or blocked. */
+  banner: { title: string; detail: string } | null;
+};
+
+export function connectionViewFor(status: string | undefined): ConnectionView {
+  switch (status) {
+    case "online":
+      return { label: "Live", tone: "ok", pulse: true, hint: null, action: null, banner: null };
+    case "offline":
+      return {
+        label: "Offline",
+        tone: "failed",
+        pulse: false,
+        hint: "Showing last-known data — reconnecting automatically.",
+        action: { kind: "reload", label: "Refresh" },
+        banner: {
+          title: "Can't reach the Smithers gateway.",
+          detail:
+            "This tab's gateway isn't responding — it may have been restarted on another port. " +
+            "It reconnects automatically once the gateway is back; otherwise refresh, or re-open with smithers monitor.",
+        },
+      };
+    case "unauthorized":
+      return {
+        label: "Unauthorized",
+        tone: "failed",
+        pulse: false,
+        hint: "Credentials or permissions are required — re-open with smithers monitor to mint a fresh token.",
+        action: null,
+        banner: {
+          title: "This page isn't authorized for the gateway.",
+          detail:
+            "Credentials or permissions are required — the page's gateway token is missing, expired, or revoked. " +
+            "Re-open with smithers monitor to mint a fresh one.",
+        },
+      };
+    // idle (no traffic yet) reads as connecting: the first queries are in flight.
+    default:
+      return {
+        label: "Connecting…",
+        tone: "waiting",
+        pulse: false,
+        hint: "Queries are still pending — results appear once the gateway responds.",
+        action: null,
+        banner: null,
+      };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Run rows: grouping, filtering, sorting.
 // ---------------------------------------------------------------------------
 
