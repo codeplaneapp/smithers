@@ -15,6 +15,7 @@ export type MergeQueueProps = {
 	 * `priority` on a child node wins. Never overrides dependencies or caps.
 	 */
 	priority?: number;
+	failurePolicy?: "halt" | "quarantine";
 	skipIf?: boolean;
 	children?: React.ReactNode;
 };

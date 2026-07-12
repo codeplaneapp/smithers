@@ -28,6 +28,8 @@ function descriptorPriority(descriptor) {
 function isTraversalTerminal(state, descriptor) {
     if (isTerminalState(state, descriptor))
         return true;
+    if (state === "failed" && descriptor.failurePolicy === "quarantine")
+        return true;
     return Boolean(descriptor.waitAsync &&
         (state === "waiting-approval" || state === "waiting-event"));
 }

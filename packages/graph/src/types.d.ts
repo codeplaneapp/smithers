@@ -162,6 +162,8 @@ type TaskDescriptor = {
      * one unless the node sets its own.
      */
     priority?: number;
+    /** Failure handling inherited from the nearest declarative container. */
+    failurePolicy?: "halt" | "quarantine";
     needsApproval: boolean;
     waitAsync?: boolean;
     approvalMode?: "gate" | "decision" | "select" | "rank";

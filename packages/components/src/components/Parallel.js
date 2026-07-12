@@ -15,6 +15,7 @@ export function Parallel(props) {
         id: props.id,
         ...(props.label === undefined ? {} : { label: props.label }),
         ...(props.priority === undefined ? {} : { priority: props.priority }),
+        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
     };
     return React.createElement("smithers:parallel", next, props.children);
 }

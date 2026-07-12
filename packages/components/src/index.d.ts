@@ -223,6 +223,8 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
      * overrides dependencies or group caps.
      */
     priority?: number;
+    /** Override the nearest container failure policy for this task. */
+    failurePolicy?: "halt" | "quarantine";
     label?: string;
     meta?: Record<string, unknown>;
     /** @internal Used by createSmithers() to bind tasks to the correct workflow context. */
@@ -356,6 +358,7 @@ type SequenceProps$2 = {
     key?: string;
     /** Display name for this group in run views (graph, /workflows mirror). */
     label?: string;
+    failurePolicy?: "halt" | "quarantine";
     skipIf?: boolean;
     children?: React__default.ReactNode;
 };
@@ -592,6 +595,7 @@ type ParallelProps$2 = {
      * first; ties keep plan order. Never overrides dependencies or caps.
      */
     priority?: number;
+    failurePolicy?: "halt" | "quarantine";
     skipIf?: boolean;
     children?: React__default.ReactNode;
 };
@@ -669,6 +673,7 @@ type MergeQueueProps$2 = {
      * `priority` on a child node wins. Never overrides dependencies or caps.
      */
     priority?: number;
+    failurePolicy?: "halt" | "quarantine";
     skipIf?: boolean;
     children?: React__default.ReactNode;
 };
@@ -1914,6 +1919,7 @@ type SequenceProps$1 = SequenceProps$2;
 declare function Parallel(props: ParallelProps$1): React__default.ReactElement<{
     label?: string | undefined;
     priority?: number | undefined;
+    failurePolicy?: "halt" | "quarantine" | undefined;
     maxConcurrency: number | undefined;
     subtreeConcurrency: number | undefined;
     id: string | undefined;
@@ -1927,6 +1933,7 @@ type ParallelProps$1 = ParallelProps$2;
 declare function MergeQueue(props: MergeQueueProps$1): React__default.ReactElement<{
     maxConcurrency: number;
     priority: number;
+    failurePolicy?: "halt" | "quarantine" | undefined;
     id: string | undefined;
 }, string | React__default.JSXElementConstructor<any>> | null;
 type MergeQueueProps$1 = MergeQueueProps$2;

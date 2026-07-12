@@ -13,6 +13,7 @@ export function MergeQueue(props) {
         // Landing work outranks starting new work by default: descendant task
         // nodes inherit this priority (an explicit child priority still wins).
         priority: props.priority ?? MERGE_QUEUE_PRIORITY,
+        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
         id: props.id,
     };
     return React.createElement("smithers:merge-queue", next, props.children);

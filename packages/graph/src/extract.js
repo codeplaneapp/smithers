@@ -327,6 +327,10 @@ function parsePriority(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
 }
+/** @param {unknown} value @returns {"halt" | "quarantine" | undefined} */
+function parseFailurePolicy(value) {
+    return value === "halt" || value === "quarantine" ? value : undefined;
+}
 /**
  * Stable key identifying a direct child of a subtree-capped parallel. Prefers
  * an explicit key/id on the child element so resume stays stable across
@@ -399,7 +403,7 @@ export function extractGraph(root, opts) {
     }
     /**
    * @param {HostNode} node
-   * @param {{ readonly path: readonly number[]; readonly iteration: number; readonly ralphId?: string; readonly parentIsRalph: boolean; readonly parallelStack: readonly { readonly id: string; readonly max?: number }[]; readonly worktreeStack: readonly { readonly id: string; readonly path: string; readonly branch?: string; readonly baseBranch?: string; }[]; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; readonly subtree?: { readonly groupId: string; readonly max: number; readonly childKey: string }; readonly priority?: number; }} ctx
+     * @param {{ readonly path: readonly number[]; readonly iteration: number; readonly ralphId?: string; readonly parentIsRalph: boolean; readonly parallelStack: readonly { readonly id: string; readonly max?: number }[]; readonly worktreeStack: readonly { readonly id: string; readonly path: string; readonly branch?: string; readonly baseBranch?: string; }[]; readonly loopStack: readonly { readonly ralphId: string; readonly iteration: number }[]; readonly subtree?: { readonly groupId: string; readonly max: number; readonly childKey: string }; readonly priority?: number; readonly failurePolicy?: "halt" | "quarantine"; }} ctx
    */
     function walk(node, ctx) {
         if (node.kind === "text")
@@ -415,6 +419,10 @@ export function extractGraph(root, opts) {
         // `priority` on a node still wins). <MergeQueue> defaults to
         // MERGE_QUEUE_PRIORITY so landing work outranks starting new work.
         let nextPriority = ctx.priority;
+        let nextFailurePolicy = ctx.failurePolicy;
+        if (node.tag === "smithers:parallel" || node.tag === "smithers:merge-queue" || node.tag === "smithers:sequence") {
+            nextFailurePolicy = parseFailurePolicy(raw.failurePolicy) ?? nextFailurePolicy;
+        }
         if (node.tag === "smithers:ralph") {
             if (ctx.parentIsRalph) {
                 throw new SmithersError("NESTED_LOOP", "Nested <Ralph> is not supported.");
@@ -487,6 +495,7 @@ export function extractGraph(root, opts) {
             subtreeChildKey: ctx.subtree?.childKey,
             subtreeMax: ctx.subtree?.max,
             priority: parsePriority(raw.priority) ?? ctx.priority,
+            failurePolicy: parseFailurePolicy(raw.failurePolicy) ?? ctx.failurePolicy,
         };
         if (node.tag === "smithers:subflow") {
             const logicalNodeId = requireTaskId(raw, "Subflow");
@@ -772,6 +781,7 @@ export function extractGraph(root, opts) {
                     }
                     : ctx.subtree,
                 priority: nextPriority,
+                failurePolicy: nextFailurePolicy,
             });
         }
     }

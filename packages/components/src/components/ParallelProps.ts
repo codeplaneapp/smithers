@@ -19,6 +19,7 @@ export type ParallelProps = {
 	 * first; ties keep plan order. Never overrides dependencies or caps.
 	 */
 	priority?: number;
+	failurePolicy?: "halt" | "quarantine";
 	skipIf?: boolean;
 	children?: React.ReactNode;
 };

@@ -450,6 +450,45 @@ export function makeWorkflowSession(options = {}) {
         return result;
     }
     /**
+     * Mark pending descendants of quarantined failures as skipped. The fixed
+     * point is deliberately based only on authored dependency edges, so plan
+     * siblings with no dependency on the failure remain runnable.
+     */
+    function cascadeQuarantinedFailures() {
+        const blockedKeys = new Set();
+        for (const [key, taskState] of state.states) {
+            if (taskState !== "failed")
+                continue;
+            const parsed = parseStateKey(key);
+            const descriptor = findDescriptor(state.descriptors, parsed.nodeId, parsed.iteration) ??
+                state.failureDescriptors.get(key);
+            if (descriptor?.failurePolicy === "quarantine" && !descriptor.continueOnFail) {
+                blockedKeys.add(key);
+            }
+        }
+        if (blockedKeys.size === 0)
+            return;
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const descriptor of state.descriptors.values()) {
+                const key = stateKeyFor(descriptor);
+                const taskState = state.states.get(key) ?? "pending";
+                if (taskState !== "pending" && taskState !== "cancelled")
+                    continue;
+                const blocked = (descriptor.dependsOn ?? []).some((dependencyId) => {
+                    const dependency = state.descriptors.get(dependencyId);
+                    return dependency ? blockedKeys.has(stateKeyFor(dependency)) : false;
+                });
+                if (!blocked)
+                    continue;
+                state.states.set(key, "skipped");
+                blockedKeys.add(key);
+                changed = true;
+            }
+        }
+    }
+    /**
    * @param {WorkflowGraph} graph
    * @param {{ readonly pruneUnmounted?: boolean }} [opts]
    */
@@ -628,7 +667,7 @@ export function makeWorkflowSession(options = {}) {
             const parsed = parseStateKey(key);
             const descriptor = findDescriptor(state.descriptors, parsed.nodeId, parsed.iteration) ??
                 state.failureDescriptors.get(key);
-            if (taskState === "failed" && !descriptor?.continueOnFail) {
+            if (taskState === "failed" && !descriptor?.continueOnFail && descriptor?.failurePolicy !== "quarantine") {
                 if (recoveryKeys.has(key)) {
                     continue;
                 }
@@ -693,6 +732,7 @@ export function makeWorkflowSession(options = {}) {
         if (!state.graph) {
             return { _tag: "Wait", reason: { _tag: "ExternalTrigger" } };
         }
+        cascadeQuarantinedFailures();
         const schedule = computeSchedule();
         if (schedule.fatalError) {
             return {

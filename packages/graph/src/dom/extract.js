@@ -201,6 +201,10 @@ function parsePriority(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
 }
+/** @param {unknown} value @returns {"halt" | "quarantine" | undefined} */
+function parseFailurePolicy(value) {
+    return value === "halt" || value === "quarantine" ? value : undefined;
+}
 /**
  * Stable key identifying a direct child of a subtree-capped parallel. Prefers
  * an explicit key/id on the child element so resume stays stable across
@@ -281,7 +285,7 @@ export function extractFromHost(root, opts) {
     }
     /**
    * @param {HostNode} node
-   * @param {{ path: number[]; iteration: number; ralphId?: string; parentIsRalph: boolean; parallelStack: { id: string; max?: number }[];  worktreeStack: { id: string; path: string; branch?: string; baseBranch?: string }[];  loopStack: { ralphId: string; iteration: number }[]; subtree?: { groupId: string; max: number; childKey: string }; priority?: number; }} ctx
+     * @param {{ path: number[]; iteration: number; ralphId?: string; parentIsRalph: boolean; parallelStack: { id: string; max?: number }[];  worktreeStack: { id: string; path: string; branch?: string; baseBranch?: string }[];  loopStack: { ralphId: string; iteration: number }[]; subtree?: { groupId: string; max: number; childKey: string }; priority?: number; failurePolicy?: "halt" | "quarantine" }} ctx
    */
     function walk(node, ctx) {
         if (node.kind === "text")
@@ -314,6 +318,10 @@ export function extractFromHost(root, opts) {
         // `priority` on a node still wins). <MergeQueue> defaults to
         // MERGE_QUEUE_PRIORITY so landing work outranks starting new work.
         let nextPriority = ctx.priority;
+        let nextFailurePolicy = ctx.failurePolicy;
+        if (node.tag === "smithers:parallel" || node.tag === "smithers:merge-queue" || node.tag === "smithers:sequence") {
+            nextFailurePolicy = parseFailurePolicy(node.rawProps?.failurePolicy) ?? nextFailurePolicy;
+        }
         // A parallel may also opt into subtree-level concurrency: every
         // descendant leaf task (not just innermost-group members) records the
         // NEAREST such ancestor so the scheduler can cap in-flight direct
@@ -454,6 +462,7 @@ export function extractFromHost(root, opts) {
                     subtreeChildKey: ctx.subtree?.childKey,
                     subtreeMax: ctx.subtree?.max,
                     priority: parsePriority(raw.priority) ?? ctx.priority,
+                    failurePolicy: parseFailurePolicy(raw.failurePolicy) ?? ctx.failurePolicy,
                 };
                 tasks.push(descriptor);
                 mountedTaskIds.push(`${nodeId}::${iteration}`);
@@ -605,6 +614,7 @@ export function extractFromHost(root, opts) {
                 subtreeChildKey: ctx.subtree?.childKey,
                 subtreeMax: ctx.subtree?.max,
                 priority: parsePriority(raw.priority) ?? ctx.priority,
+                failurePolicy: parseFailurePolicy(raw.failurePolicy) ?? ctx.failurePolicy,
             };
             tasks.push(descriptor);
             mountedTaskIds.push(`${nodeId}::${iteration}`);
@@ -689,6 +699,7 @@ export function extractFromHost(root, opts) {
                 subtreeChildKey: ctx.subtree?.childKey,
                 subtreeMax: ctx.subtree?.max,
                 priority: parsePriority(raw.priority) ?? ctx.priority,
+                failurePolicy: parseFailurePolicy(raw.failurePolicy) ?? ctx.failurePolicy,
             };
             tasks.push(descriptor);
             mountedTaskIds.push(`${nodeId}::${iteration}`);
@@ -775,6 +786,7 @@ export function extractFromHost(root, opts) {
                 subtreeChildKey: ctx.subtree?.childKey,
                 subtreeMax: ctx.subtree?.max,
                 priority: parsePriority(raw.priority) ?? ctx.priority,
+                failurePolicy: parseFailurePolicy(raw.failurePolicy) ?? ctx.failurePolicy,
             };
             tasks.push(descriptor);
             mountedTaskIds.push(`${nodeId}::${iteration}`);
@@ -957,6 +969,7 @@ export function extractFromHost(root, opts) {
                 subtreeChildKey: ctx.subtree?.childKey,
                 subtreeMax: ctx.subtree?.max,
                 priority: parsePriority(raw.priority) ?? ctx.priority,
+                failurePolicy: parseFailurePolicy(raw.failurePolicy) ?? ctx.failurePolicy,
                 memoryConfig: raw.memory && typeof raw.memory === "object" && !Array.isArray(raw.memory)
                     ? /** @type {TaskDescriptor["memoryConfig"]} */ (raw.memory)
                     : undefined,
@@ -986,6 +999,7 @@ export function extractFromHost(root, opts) {
                     }
                     : ctx.subtree,
                 priority: nextPriority,
+                failurePolicy: nextFailurePolicy,
             });
         }
     }

@@ -11,6 +11,9 @@ export function Sequence(props) {
     // the sanitizing structural components) so control props don't leak through.
     // `label` names the phase group in run views (graph, the Claude /workflows
     // mirror) and is preserved in the persisted frame XML.
-    const next = props.label === undefined ? {} : { label: props.label };
+    const next = {
+        ...(props.label === undefined ? {} : { label: props.label }),
+        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+    };
     return React.createElement("smithers:sequence", next, props.children);
 }

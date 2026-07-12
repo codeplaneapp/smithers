@@ -85,6 +85,8 @@ export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends
 	 * overrides dependencies or group caps.
 	 */
 	priority?: number;
+	/** Override the nearest container failure policy for this task. */
+	failurePolicy?: "halt" | "quarantine";
 	label?: string;
 	meta?: Record<string, unknown>;
 	/** @internal Used by createSmithers() to bind tasks to the correct workflow context. */
