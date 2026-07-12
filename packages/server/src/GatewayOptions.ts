@@ -132,4 +132,13 @@ export type GatewayOptions = {
    * @default 60000
    */
   requestTimeout?: number;
+  /**
+   * Maximum time (in milliseconds) a WebSocket connection may stay
+   * unauthenticated after upgrade. Sockets hold a `maxConnections` slot from
+   * the moment of upgrade but only authenticate via the `connect` RPC, so a
+   * silent socket is terminated once this deadline elapses, releasing its
+   * slot.
+   * @default 10000
+   */
+  authDeadlineMs?: number;
 };

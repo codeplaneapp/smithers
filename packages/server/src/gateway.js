@@ -166,6 +166,10 @@ const DEFAULT_MAX_CONNECTIONS = 1_000;
 const DEFAULT_MAX_PRE_AUTH_CONNECTIONS = 64;
 const DEFAULT_HEADERS_TIMEOUT = 30_000;
 const DEFAULT_REQUEST_TIMEOUT = 60_000;
+// WS sockets hold a `maxConnections` slot from the moment of upgrade but only
+// authenticate via the `connect` RPC — a silent socket must not pin its slot
+// forever, so unauthenticated connections are terminated after this deadline.
+const DEFAULT_AUTH_DEADLINE_MS = 10_000;
 const DEFAULT_OUT_OF_PROCESS_EVENT_BRIDGE_POLL_MS = 1_000;
 const OUT_OF_PROCESS_EVENT_BRIDGE_PAGE_LIMIT = 500;
 const RUN_EVENT_HEARTBEAT_MS = 1_000;
@@ -2028,6 +2032,7 @@ export class Gateway {
     outOfProcessEventBridgePollMs;
     headersTimeout;
     requestTimeout;
+    authDeadlineMs;
     auth;
     ui;
     operatorUi;
@@ -2165,6 +2170,9 @@ export class Gateway {
         this.requestTimeout = options.requestTimeout === undefined
             ? DEFAULT_REQUEST_TIMEOUT
             : Math.floor(assertPositiveFiniteInteger("requestTimeout", Number(options.requestTimeout)));
+        this.authDeadlineMs = options.authDeadlineMs === undefined
+            ? DEFAULT_AUTH_DEADLINE_MS
+            : Math.floor(assertPositiveFiniteInteger("authDeadlineMs", Number(options.authDeadlineMs)));
         this.auth = options.auth;
         // A deliberate unauthenticated remote bind (`smithers gateway --insecure`)
         // trusts any Host, matching serve.js. Without this, --insecure passes the
@@ -4503,10 +4511,14 @@ a { color: var(--brand); }</style>
                 clearInterval(connection.heartbeatTimer);
             }
             this.stopRunEventHeartbeat(connection);
-            try {
-                connection.ws.close();
+            if (connection.authDeadlineTimer) {
+                clearTimeout(connection.authDeadlineTimer);
+                connection.authDeadlineTimer = null;
             }
-            catch { }
+            try {
+            connection.ws.close();
+        }
+        catch { }
         }
         this.connections.clear();
         this.preAuthConnections.clear();
@@ -5229,6 +5241,7 @@ a { color: var(--brand); }</style>
             devtoolsStreams: new Map(),
             heartbeatTimer: null,
             runEventHeartbeatTimer: null,
+            authDeadlineTimer: null,
         };
         this.connections.add(connection);
         // A fresh socket occupies a bounded pre-auth slot until a successful
@@ -5248,6 +5261,32 @@ a { color: var(--brand); }</style>
             nonce: randomUUID(),
             ts: nowMs(),
         });
+        // Authentication deadline: the socket holds a `maxConnections` slot
+        // from the moment of upgrade, but auth only happens on the `connect`
+        // RPC — a silent client could otherwise pin its slot indefinitely.
+        // terminate() (not close()) because a peer that never sent `connect`
+        // cannot be trusted to finish a close handshake either; terminate
+        // destroys the socket immediately, firing the 'close' cleanup that
+        // releases the slot. (#1007)
+        connection.authDeadlineTimer = setTimeout(() => {
+            connection.authDeadlineTimer = null;
+            if (connection.authenticated) {
+                return;
+            }
+            emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
+                kind: "auth_deadline",
+                transport: "ws",
+            }));
+            emitGatewayLog("warning", "Gateway connection closed: authentication deadline exceeded", {
+                ...gatewayContextAnnotations(connection),
+                remoteAddress: req.socket.remoteAddress ?? null,
+                authDeadlineMs: this.authDeadlineMs,
+            }, "gateway:connect");
+            try {
+                ws.terminate();
+            }
+            catch { }
+        }, this.authDeadlineMs);
         ws.on("message", async (raw) => {
             this.recordMessageReceived("ws", "request");
             /** @type {RequestFrame | undefined} */ let frame;
@@ -5296,6 +5335,10 @@ a { color: var(--brand); }</style>
             cleanedUp = true;
             if (connection.heartbeatTimer) {
                 clearInterval(connection.heartbeatTimer);
+            }
+            if (connection.authDeadlineTimer) {
+                clearTimeout(connection.authDeadlineTimer);
+                connection.authDeadlineTimer = null;
             }
             this.connections.delete(connection);
             // Release whichever accounting the socket holds — the pre-auth
@@ -5405,6 +5448,10 @@ a { color: var(--brand); }</style>
                 });
             }
             return responseError(id, authResult.code, authResult.message, authResult.details);
+        }
+        if (connection.authDeadlineTimer) {
+            clearTimeout(connection.authDeadlineTimer);
+            connection.authDeadlineTimer = null;
         }
         // Promotion (#1008): a successful connect moves this socket from the
         // bounded pre-auth pool into authenticated `maxConnections` capacity.
