@@ -65,7 +65,8 @@ export function createDocumentParsingToolset(options = {}) {
         description:
           "Parse documents and images into readable text/markdown using Firecrawl, Mistral OCR, LlamaParse, or a custom provider.",
         inputSchema: jsonSchema(inputSchema),
-        execute: async (input) => provider.parseDocument(normalizeInput(input)),
+        execute: async (input, callOptions) =>
+          provider.parseDocument(normalizeInput(input), { abortSignal: callOptions?.abortSignal }),
       }),
     },
     toolNames: [toolName],
@@ -168,7 +169,7 @@ function createMistralOcrProvider(options) {
   const apiKey = options.apiKey ?? process.env.MISTRAL_API_KEY;
   return {
     name: "mistral-ocr",
-    async parseDocument(input) {
+    async parseDocument(input, parseOptions) {
       if (input.source.type === "text") {
         return { provider: "mistral-ocr", text: input.source.text, raw: { source: "text" } };
       }
@@ -181,7 +182,7 @@ function createMistralOcrProvider(options) {
         model: "mistral-ocr-latest",
         document,
         ...(input.instructions ? { prompt: input.instructions } : {}),
-      });
+      }, parseOptions?.abortSignal);
       const pages = Array.isArray(json?.pages) ? json.pages.map(normalizePage).filter(Boolean) : undefined;
       const markdown = pages?.map((page) => page.markdown || page.text || "").filter(Boolean).join("\n\n");
       return {
@@ -248,14 +249,16 @@ async function uploadLlamaParseFile(request, baseUrl, apiKey, input) {
  * @param {string} url
  * @param {string | undefined} apiKey
  * @param {unknown} body
+ * @param {AbortSignal | undefined} [abortSignal]
  * @returns {Promise<any>}
  */
-async function postJson(request, url, apiKey, body) {
+async function postJson(request, url, apiKey, body, abortSignal) {
   if (!apiKey) throw new Error(`Missing API key for ${url}`);
   const response = await request(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    ...(abortSignal ? { signal: abortSignal } : {}),
   });
   if (!response.ok) {
     const message = await response.text().catch(() => "");
