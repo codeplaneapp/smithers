@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   materializeArtifact,
@@ -13,6 +13,7 @@ const REPOSITORY = "smithersai/smithers";
 const RUN_ID = "12345";
 const RUN_ATTEMPT = "1";
 const WORKFLOW_PATH = resolve(import.meta.dir, "../.github/workflows/sota-research.yml");
+const GIT_FIXTURE_TIMEOUT_MS = 30_000;
 const roots: string[] = [];
 
 function git(cwd: string, args: string[]): string {
@@ -21,7 +22,11 @@ function git(cwd: string, args: string[]): string {
   // must not create a CRLF checkout that the hardened publisher later sees as
   // dirty after it deliberately ignores global Git configuration.
   const result = spawnSync("git", ["-c", "core.autocrlf=false", ...args], { cwd, encoding: "utf8" });
-  if (result.status !== 0) throw new Error(result.stderr || result.stdout);
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || "no output").trim();
+    throw new Error(`git ${args.join(" ")} failed with exit ${result.status ?? "unknown"}: ${detail}`);
+  }
   return result.stdout.trim();
 }
 
@@ -40,7 +45,7 @@ function fixture() {
   git(base, ["add", "."]);
   git(base, ["-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-qm", "base"]);
   const baseSha = git(base, ["rev-parse", "HEAD"]);
-  cpSync(base, source, { recursive: true, filter: (path) => !path.endsWith("/.git") });
+  cpSync(base, source, { recursive: true, filter: (path) => basename(path) !== ".git" });
   git(root, ["clone", "-q", base, publisher]);
   return { root, base, source, publisher, artifact, baseSha };
 }
@@ -114,7 +119,7 @@ describe("SOTA maintenance publication artifact", () => {
     expect(git(paths.publisher, ["ls-files", "--stage", "--", "scripts/new.mjs"]).split(/\s+/)[0]).toBe(
       newScriptMode,
     );
-  });
+  }, GIT_FIXTURE_TIMEOUT_MS);
 
   test("refuses a dirty publisher checkout before applying an artifact", () => {
     const paths = fixture();
@@ -135,7 +140,7 @@ describe("SOTA maintenance publication artifact", () => {
     expect(readFileSync(resolve(paths.publisher, "docs/existing.mdx"), "utf8")).toBe(
       "unpublished local change\n",
     );
-  });
+  }, GIT_FIXTURE_TIMEOUT_MS);
 
   test("rejects artifacts whose run or base binding does not match", () => {
     const paths = fixture();
@@ -159,7 +164,7 @@ describe("SOTA maintenance publication artifact", () => {
         runAttempt: "2",
       }),
     ).toThrow(/run attempt binding/);
-  });
+  }, GIT_FIXTURE_TIMEOUT_MS);
 
   test("rejects undeclared files, symbolic links, and paths outside the allowlist", () => {
     const paths = fixture();
@@ -202,5 +207,5 @@ describe("SOTA maintenance publication artifact", () => {
         runAttempt: RUN_ATTEMPT,
       }),
     ).toThrow(/outside the publication allowlist/);
-  });
+  }, GIT_FIXTURE_TIMEOUT_MS);
 });
