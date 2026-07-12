@@ -3378,7 +3378,20 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             const allAgents = Array.isArray(desc.agent) ? desc.agent : (desc.agent ? [desc.agent] : []);
             const agents = disabledAgents ? allAgents.filter((a) => !disabledAgents.has(a)) : allAgents;
             const selectionPool = agents.length > 0 ? agents : allAgents; // fall back to disabled agents if all disabled
-            const startIndex = Math.min(attemptNo - 1, Math.max(selectionPool.length - 1, 0));
+            // Which rung of the failover chain this attempt lands on. Attempts are
+            // 1-based, so attempt N normally maps to rung N-1.
+            //
+            // Quota failures are exempt. A provider quota block says nothing about
+            // the AGENT's health — the run pauses and "retries as if the attempt
+            // never occurred" (isQuotaTaskFailure / retryConsumingFailedAttempts).
+            // Counting it here anyway would silently demote the task down the chain:
+            // a Codex quota wall would push every task onto its Claude fallback and
+            // keep it there for the rest of the run, even once the quota reset — so
+            // the run would quietly stop using the agent the user chose. Discount
+            // quota-failed attempts so the rung reflects only genuine agent failures.
+            const quotaFailedAttempts = attempts.filter((a) => a.state === "failed" && isQuotaTaskFailure(a)).length;
+            const rung = Math.max(0, attemptNo - 1 - quotaFailedAttempts);
+            const startIndex = Math.min(rung, Math.max(selectionPool.length - 1, 0));
             // Preflight-aware selection for a multi-agent failover chain. A leading
             // agent that fails preflight (e.g. Codex with an invalid OPENAI_API_KEY
             // → 401) must not sink the task: advance to the next agent that passes
