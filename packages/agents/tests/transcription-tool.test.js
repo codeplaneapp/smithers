@@ -117,6 +117,75 @@ describe("createTranscriptionTool", () => {
     expect(requests[1]).toBe("https://api.openai.com/v1/audio/transcriptions");
   });
 
+  test("forwards the tool-call abortSignal to the Whisper download and transcription fetches", async () => {
+    const signals = [];
+    const controller = new AbortController();
+    const transcription = createTranscriptionTool({
+      provider: "whisper",
+      apiKey: "openai-test-key",
+      fetch: async (url, init) => {
+        signals.push(init?.signal);
+        if (String(url) === "https://cdn.example.com/audio.mp3") {
+          return new Response(new Blob([Buffer.from("audio bytes")]), {
+            headers: { "content-type": "audio/mpeg" },
+          });
+        }
+        return Response.json({ text: "ok" });
+      },
+    });
+
+    await transcription.execute(
+      { audioUrl: "https://cdn.example.com/audio.mp3" },
+      { ...callOptions, abortSignal: controller.signal },
+    );
+
+    expect(signals).toEqual([controller.signal, controller.signal]);
+  });
+
+  test("forwards the tool-call abortSignal to the Deepgram fetch", async () => {
+    const signals = [];
+    const controller = new AbortController();
+    const transcription = createTranscriptionTool({
+      provider: "deepgram",
+      apiKey: "deepgram-test-key",
+      fetch: async (_url, init) => {
+        signals.push(init?.signal);
+        return Response.json({ results: { channels: [{ alternatives: [{ transcript: "ok" }] }] } });
+      },
+    });
+
+    await transcription.execute(
+      { audioBase64: Buffer.from("audio bytes").toString("base64"), mimeType: "audio/wav" },
+      { ...callOptions, abortSignal: controller.signal },
+    );
+
+    expect(signals).toEqual([controller.signal]);
+  });
+
+  for (const provider of /** @type {const} */ (["whisper", "deepgram"])) {
+    test(`a pre-aborted signal rejects promptly without any ${provider} request`, async () => {
+      let called = 0;
+      const transcription = createTranscriptionTool({
+        provider,
+        apiKey: "test-key",
+        fetch: async () => {
+          called += 1;
+          return Response.json({ text: "leaked" });
+        },
+      });
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        transcription.execute(
+          { audioBase64: Buffer.from("audio bytes").toString("base64") },
+          { ...callOptions, abortSignal: controller.signal },
+        ),
+      ).rejects.toThrow(/abort/i);
+      expect(called).toBe(0);
+    });
+  }
+
   test("allowedAudioHosts opts a private host back in on purpose", async () => {
     let downloaded = false;
     const transcription = createTranscriptionTool({
@@ -138,5 +207,141 @@ describe("createTranscriptionTool", () => {
 
     expect(downloaded).toBe(true);
     expect(result.text).toBe("internal transcript");
+  });
+});
+
+describe("createTranscriptionTool cancellation against real servers", () => {
+  /**
+   * Start a real HTTP server that never responds: each request hangs until the
+   * client cancels it, which we observe via the request's abort signal.
+   */
+  function startHangingServer() {
+    const state = { requests: /** @type {string[]} */ ([]), aborted: /** @type {string[]} */ ([]) };
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(request) {
+        const pathname = new URL(request.url).pathname;
+        state.requests.push(pathname);
+        return new Promise((_resolve, reject) => {
+          request.signal.addEventListener("abort", () => {
+            state.aborted.push(pathname);
+            reject(new Error(`client aborted ${pathname}`));
+          });
+        });
+      },
+    });
+    return { server, state, origin: `http://127.0.0.1:${server.port}` };
+  }
+
+  /** @param {() => boolean} predicate */
+  async function waitFor(predicate, timeoutMs = 2000) {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error("timed out waiting for condition");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
+  /**
+   * Await a promise that must reject, returning the rejection error. Attaches
+   * the handler before the abort fires so the rejection is never unhandled.
+   * @param {Promise<unknown>} pending
+   */
+  function captureRejection(pending) {
+    return pending.then(
+      () => {
+        throw new Error("expected the transcription to reject on abort");
+      },
+      (error) => /** @type {Error} */ (error),
+    );
+  }
+
+  test("abort cancels an in-flight Whisper transcription request", async () => {
+    const { server, state, origin } = startHangingServer();
+    try {
+      const controller = new AbortController();
+      const transcription = createTranscriptionTool({
+        provider: "whisper",
+        apiKey: "openai-test-key",
+        baseUrl: `${origin}/v1/audio/transcriptions`,
+      });
+
+      const rejection = captureRejection(
+        transcription.execute(
+          { audioBase64: Buffer.from("audio bytes").toString("base64"), mimeType: "audio/wav" },
+          { ...callOptions, abortSignal: controller.signal },
+        ),
+      );
+      await waitFor(() => state.requests.length === 1);
+      controller.abort();
+
+      const error = await rejection;
+      expect(error.name).toBe("AbortError");
+      await waitFor(() => state.aborted.length === 1);
+      expect(state.aborted).toEqual(["/v1/audio/transcriptions"]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("abort cancels the Whisper audio download and never reaches the transcription endpoint", async () => {
+    const audio = startHangingServer();
+    const whisper = startHangingServer();
+    try {
+      const controller = new AbortController();
+      const transcription = createTranscriptionTool({
+        provider: "whisper",
+        apiKey: "openai-test-key",
+        baseUrl: `${whisper.origin}/v1/audio/transcriptions`,
+        allowedAudioHosts: ["127.0.0.1"],
+      });
+
+      const rejection = captureRejection(
+        transcription.execute(
+          { audioUrl: `${audio.origin}/audio.mp3` },
+          { ...callOptions, abortSignal: controller.signal },
+        ),
+      );
+      await waitFor(() => audio.state.requests.length === 1);
+      controller.abort();
+
+      const error = await rejection;
+      expect(error.name).toBe("AbortError");
+      await waitFor(() => audio.state.aborted.length === 1);
+      expect(audio.state.aborted).toEqual(["/audio.mp3"]);
+      expect(whisper.state.requests).toHaveLength(0);
+    } finally {
+      audio.server.stop(true);
+      whisper.server.stop(true);
+    }
+  });
+
+  test("abort cancels an in-flight Deepgram request", async () => {
+    const { server, state, origin } = startHangingServer();
+    try {
+      const controller = new AbortController();
+      const transcription = createTranscriptionTool({
+        provider: "deepgram",
+        apiKey: "deepgram-test-key",
+        baseUrl: `${origin}/v1/listen`,
+      });
+
+      const rejection = captureRejection(
+        transcription.execute(
+          { audioBase64: Buffer.from("audio bytes").toString("base64"), mimeType: "audio/wav" },
+          { ...callOptions, abortSignal: controller.signal },
+        ),
+      );
+      await waitFor(() => state.requests.length === 1);
+      controller.abort();
+
+      const error = await rejection;
+      expect(error.name).toBe("AbortError");
+      await waitFor(() => state.aborted.length === 1);
+      expect(state.aborted).toEqual(["/v1/listen"]);
+    } finally {
+      server.stop(true);
+    }
   });
 });

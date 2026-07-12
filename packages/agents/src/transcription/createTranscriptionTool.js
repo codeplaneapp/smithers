@@ -46,14 +46,16 @@ export function createTranscriptionTool(options) {
       options.description ??
       "Transcribe speech from an audio URL or base64-encoded audio using a configured transcription provider.",
     inputSchema: jsonSchema(transcriptionInputSchema),
-    execute: async (input) => {
+    execute: async (input, executionOptions) => {
+      const signal = executionOptions?.abortSignal;
+      signal?.throwIfAborted();
       const request = normalizeInput(input);
       if (request.audioUrl) assertSafeAudioUrl(request.audioUrl, options);
       if (provider === "whisper") {
-        return transcribeWithWhisper(options, request, fetchImpl);
+        return transcribeWithWhisper(options, request, fetchImpl, signal);
       }
       if (provider === "deepgram") {
-        return transcribeWithDeepgram(options, request, fetchImpl);
+        return transcribeWithDeepgram(options, request, fetchImpl, signal);
       }
       throw new Error(`Unsupported transcription provider: ${provider}`);
     },
@@ -184,9 +186,10 @@ function stripBrackets(host) {
  * @param {import("./createTranscriptionTool.ts").CreateTranscriptionToolOptions} options
  * @param {import("./createTranscriptionTool.ts").TranscriptionToolInput} input
  * @param {typeof fetch} fetchImpl
+ * @param {AbortSignal} [signal]
  * @returns {Promise<import("./createTranscriptionTool.ts").TranscriptionToolResult>}
  */
-async function transcribeWithWhisper(options, input, fetchImpl) {
+async function transcribeWithWhisper(options, input, fetchImpl, signal) {
   const form = new FormData();
   form.set("model", options.model ?? "whisper-1");
   form.set("response_format", "verbose_json");
@@ -196,7 +199,7 @@ async function transcribeWithWhisper(options, input, fetchImpl) {
   if (input.audioBase64) {
     form.set("file", base64ToFile(input.audioBase64, input.mimeType ?? "application/octet-stream"));
   } else if (input.audioUrl) {
-    const audioResponse = await fetchImpl(input.audioUrl);
+    const audioResponse = await fetchImpl(input.audioUrl, { signal });
     await assertOk(audioResponse, "download audio for Whisper transcription");
     const blob = await audioResponse.blob();
     form.set("file", new File([blob], filenameForMime(input.mimeType ?? blob.type), { type: input.mimeType ?? blob.type }));
@@ -206,6 +209,7 @@ async function transcribeWithWhisper(options, input, fetchImpl) {
     method: "POST",
     headers: { Authorization: `Bearer ${options.apiKey}` },
     body: form,
+    signal,
   });
   await assertOk(response, "transcribe audio with Whisper");
   const payload = /** @type {any} */ (await response.json());
@@ -221,9 +225,10 @@ async function transcribeWithWhisper(options, input, fetchImpl) {
  * @param {import("./createTranscriptionTool.ts").CreateTranscriptionToolOptions} options
  * @param {import("./createTranscriptionTool.ts").TranscriptionToolInput} input
  * @param {typeof fetch} fetchImpl
+ * @param {AbortSignal} [signal]
  * @returns {Promise<import("./createTranscriptionTool.ts").TranscriptionToolResult>}
  */
-async function transcribeWithDeepgram(options, input, fetchImpl) {
+async function transcribeWithDeepgram(options, input, fetchImpl, signal) {
   const body = input.audioUrl
     ? JSON.stringify({ url: input.audioUrl })
     : Buffer.from(input.audioBase64 ?? "", "base64");
@@ -239,6 +244,7 @@ async function transcribeWithDeepgram(options, input, fetchImpl) {
       "Content-Type": input.audioUrl ? "application/json" : (input.mimeType ?? "application/octet-stream"),
     },
     body,
+    signal,
   });
   await assertOk(response, "transcribe audio with Deepgram");
   const payload = /** @type {any} */ (await response.json());
