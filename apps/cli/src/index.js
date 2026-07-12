@@ -1209,6 +1209,10 @@ async function buildPsRows(adapter, limit, status) {
             : [];
         rows.push({
             id: run.runId,
+            // Lifecycle-linked parentage (Subflow children and CLI launches
+            // with --parent-run-id) so list consumers can build run trees
+            // without an `inspect` round-trip per run.
+            ...(run.parentRunId ? { parentRunId: run.parentRunId } : {}),
             workflow: run.workflowName ?? (run.workflowPath ? basename(run.workflowPath) : "—"),
             // Path-first workflow id for CTA probing (mirrors inspect):
             // `.smithers/ui/<id>.tsx` entries are keyed by the file basename,
@@ -1602,6 +1606,7 @@ const upArgs = z.object({
 const upOptions = z.object({
     detach: z.boolean().default(false).describe("Run in background, print run ID, exit"),
     runId: z.string().optional().describe("Explicit run ID"),
+    parentRunId: z.string().optional().describe("Existing run ID to record as this run's parent (persisted lineage, surfaced by inspect/ps and the MCP run tools)"),
     maxConcurrency: z.number().int().min(1).optional().describe("Maximum parallel tasks (default: 4)"),
     root: z.string().optional().describe("Tool sandbox root directory"),
     log: z.boolean().default(true).describe("Enable NDJSON event log file output"),
@@ -2038,7 +2043,73 @@ function validateUpOptionConsistency(options) {
             exitCode: 4,
         };
     }
+    if (options.parentRunId !== undefined) {
+        if (options.parentRunId.trim() === "") {
+            return {
+                code: "INVALID_PARENT_RUN",
+                message: "--parent-run-id must be a non-empty run ID.",
+                exitCode: 4,
+            };
+        }
+        // Parent lineage is persisted once, when the child run row is created.
+        // A resume re-attaches to that existing row, so a conflicting
+        // --parent-run-id would be silently ignored — reject it instead.
+        if (options.resume) {
+            return {
+                code: "PARENT_RUN_WITH_RESUME",
+                message: "--parent-run-id can only be set when creating a run; --resume keeps the parent recorded at creation.",
+                exitCode: 4,
+            };
+        }
+        if (options.runId && options.parentRunId === options.runId) {
+            return {
+                code: "INVALID_PARENT_RUN",
+                message: "--parent-run-id cannot equal the run's own --run-id.",
+                exitCode: 4,
+            };
+        }
+    }
     return null;
+}
+/**
+ * Confirm a declared --parent-run-id exists in the workspace store before the
+ * child run launches. The detached path must fail loud in the foreground
+ * parent process — otherwise a dangling lineage error would only surface in
+ * the detached child's log file.
+ *
+ * @param {string} parentRunId
+ * @returns {Promise<{ code: string; message: string; exitCode: number } | null>}
+ */
+async function findParentRunError(parentRunId) {
+    let opened;
+    try {
+        opened = await findAndOpenDb();
+    }
+    catch (err) {
+        // A workspace without a store cannot contain the parent run.
+        if (err instanceof SmithersError && err.code === "CLI_DB_NOT_FOUND") {
+            return {
+                code: "PARENT_RUN_NOT_FOUND",
+                message: `Parent run not found: ${parentRunId} (no smithers store exists in this workspace yet)`,
+                exitCode: 4,
+            };
+        }
+        throw err;
+    }
+    try {
+        const parentRun = await opened.adapter.getRun(parentRunId);
+        if (!parentRun) {
+            return {
+                code: "PARENT_RUN_NOT_FOUND",
+                message: `Parent run not found: ${parentRunId}`,
+                exitCode: 4,
+            };
+        }
+        return null;
+    }
+    finally {
+        opened.cleanup?.();
+    }
 }
 /**
  * @param {EventsCommandOptions} options
@@ -2136,10 +2207,20 @@ async function executeUpCommand(c, workflowPath, options, fail) {
         const runId = options.runId ?? resumeRunId;
         // Detached mode: spawn ourselves as a background process
         if (options.detach) {
+            // Validate the declared parent BEFORE spawning: the detached child
+            // would otherwise fail in the background with nothing on the
+            // caller's terminal but a runId that never appears in `ps`.
+            if (options.parentRunId) {
+                const parentError = await findParentRunError(options.parentRunId);
+                if (parentError)
+                    return fail(parentError);
+            }
             const cliPath = fileURLToPath(import.meta.url);
             const childArgs = ["up", workflowPath];
             if (runId)
                 childArgs.push("--run-id", runId);
+            if (options.parentRunId)
+                childArgs.push("--parent-run-id", options.parentRunId);
             if (options.input)
                 childArgs.push("--input", options.input === "-" ? JSON.stringify(input) : options.input);
             if (options.annotations)
@@ -2347,6 +2428,21 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 return fail({ code: "RUN_EXISTS", message: `Run already exists: ${runId}`, exitCode: 4 });
             }
         }
+        // A declared parent must exist in the same store this run records
+        // into, or every lineage surface (inspect/ps/MCP) would show a
+        // dangling link. Checked against the workflow's own adapter so the
+        // detached child re-validates even if the workspace store moved
+        // between the parent process's check and this launch.
+        if (options.parentRunId) {
+            const parentRun = await adapter.getRun(options.parentRunId);
+            if (!parentRun) {
+                return fail({
+                    code: "PARENT_RUN_NOT_FOUND",
+                    message: `Parent run not found: ${options.parentRunId}`,
+                    exitCode: 4,
+                });
+            }
+        }
         // Resolve the task root consistently across every launch form (#283).
         // An explicit --root always wins. Resuming without --root re-uses the
         // absolute root persisted on the original run, so detached/supervised
@@ -2480,6 +2576,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             const workflowPromise = Effect.runPromise(runWorkflow(workflow, {
                 input,
                 runId: effectiveRunId,
+                parentRunId: options.parentRunId,
                 resume,
                 resumeClaim,
                 workflowPath: resolvedWorkflowPath,
@@ -2522,6 +2619,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
         const result = await Effect.runPromise(runWorkflow(workflow, {
             input,
             runId,
+            parentRunId: options.parentRunId,
             resume,
             resumeClaim,
             workflowPath: resolvedWorkflowPath,
