@@ -31,6 +31,54 @@ const FORWARDED_HEADERS = new Set([
 // Clients need these to back off correctly and to reference upstream errors.
 const PASSTHROUGH_RESPONSE_HEADERS = ["retry-after", "x-request-id"];
 
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECT_HOPS = 5;
+
+type UpstreamResult =
+  | { kind: "response"; response: Response }
+  | { kind: "cross_origin_redirect"; location: string }
+  | { kind: "too_many_redirects"; hops: number };
+
+/**
+ * fetch(redirect: "follow") replays the request headers — including the
+ * injected x-api-key — to whatever host a Location header names; unlike
+ * `authorization`, custom headers are NOT stripped on cross-origin redirects,
+ * so a compromised or misconfigured upstream could bounce the proxy to an
+ * attacker origin and exfiltrate the real Anthropic key. Follow redirects
+ * manually instead: every hop must stay on the configured upstream origin,
+ * so the key is only ever sent to that origin. A cross-origin Location is
+ * never fetched at all (redirect: "manual" does not follow it).
+ */
+async function fetchUpstreamSameOrigin(
+  fetchUpstream: typeof fetch,
+  allowedOrigin: string,
+  initial: { url: string; method: string; headers: Headers; body: ArrayBuffer | undefined },
+): Promise<UpstreamResult> {
+  let { url, method, body } = initial;
+  const headers = initial.headers;
+  for (let hop = 0; hop < MAX_REDIRECT_HOPS; hop++) {
+    const response = await fetchUpstream(url, { method, headers, body, redirect: "manual" });
+    const location = response.headers.get("location");
+    if (!REDIRECT_STATUSES.has(response.status) || !location) {
+      return { kind: "response", response };
+    }
+    void response.body?.cancel().catch(() => undefined);
+    const next = new URL(location, url);
+    if (next.origin !== allowedOrigin) {
+      return { kind: "cross_origin_redirect", location: next.origin };
+    }
+    // Mirror fetch redirect semantics: 303 always re-issues as a bodyless GET,
+    // as do 301/302 on POST; 307/308 replay the method and body unchanged.
+    if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) {
+      method = "GET";
+      body = undefined;
+      headers.delete("content-type");
+    }
+    url = next.toString();
+  }
+  return { kind: "too_many_redirects", hops: MAX_REDIRECT_HOPS };
+}
+
 function pickForwardHeaders(source: Headers): Headers {
   const out = new Headers();
   for (const [k, v] of source.entries()) {
@@ -175,11 +223,22 @@ export async function handleAnthropic(
 
   let upstream: Response;
   try {
-    upstream = await deps.fetchUpstream(upstreamUrl, {
-      method: request.method,
-      headers: upstreamHeaders,
-      body: upstreamBody,
-    });
+    const result = await fetchUpstreamSameOrigin(
+      deps.fetchUpstream,
+      new URL(deps.anthropicBaseUrl).origin,
+      { url: upstreamUrl, method: request.method, headers: upstreamHeaders, body: upstreamBody },
+    );
+    if (result.kind === "cross_origin_redirect") {
+      // The injected key was NOT sent to (and never will be sent to) the
+      // foreign origin; fail closed rather than forward credentials off-origin.
+      return jsonError(502, "upstream redirected off the anthropic origin; refusing to forward credentials", {
+        location: result.location,
+      });
+    }
+    if (result.kind === "too_many_redirects") {
+      return jsonError(502, "too many upstream redirects", { hops: result.hops });
+    }
+    upstream = result.response;
   } catch (err) {
     return jsonError(502, "upstream fetch failed", { detail: String(err) });
   }
