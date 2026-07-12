@@ -241,6 +241,52 @@ export function ticketsShapeWhere(kind: ListTicketsRequest["kind"]): string {
   const kindClause = kindWhere(kind);
   return kindClause ? `${LIVE_DOC_WHERE} AND ${kindClause}` : LIVE_DOC_WHERE;
 }
+// The Electric proxy's shape where-grammar has no escape syntax inside string
+// literals, so a value containing a single quote or a backslash cannot be
+// expressed as a shape predicate at all. `null` tells the compiling helper —
+// and ultimately the collection factory — to fall back to the RPC-backed
+// collection so the filter is still honored server-side instead of being
+// silently dropped.
+function electricLiteral(value: string): string | null {
+  return value.includes("'") || value.includes("\\") ? null : `'${value}'`;
+}
+
+/**
+ * Compile a scores request into an Electric predicate over `_smithers_scorers`
+ * so multiplayer collections honor both `runId` and the optional `nodeId`.
+ * `undefined` means "no filter" (sync every granted row); `null` means the
+ * filter cannot be expressed in the proxy's where grammar and the caller must
+ * use the RPC-backed collection instead. Exported for tests.
+ */
+export function scoresWhere(params: ListScoresRequest): string | null | undefined {
+  if (!params.runId) return undefined;
+  const run = electricLiteral(params.runId);
+  if (run === null) return null;
+  if (!params.nodeId) return `run_id = ${run}`;
+  const node = electricLiteral(params.nodeId);
+  if (node === null) return null;
+  return `run_id = ${run} AND node_id = ${node}`;
+}
+
+/**
+ * Compile a cron list request into an Electric predicate over `_smithers_cron`
+ * so multiplayer collections honor the `workflow` filter. The wire `workflow`
+ * field is derived from the stored `workflow_path` by stripping an optional
+ * `gateway:` prefix (see serializeCronRow), so the same workflow key matches
+ * both storages. A filter that itself starts with `gateway:` can only be
+ * stored prefixed — a bare path equal to it would serialize with its own
+ * prefix stripped and no longer equal the filter. Same return contract as
+ * scoresWhere. Exported for tests.
+ */
+export function cronsWhere(params: CronListRequest): string | null | undefined {
+  const workflow = params.filter?.workflow;
+  if (!workflow) return undefined;
+  const bare = electricLiteral(workflow);
+  const prefixed = electricLiteral(`gateway:${workflow}`);
+  if (bare === null || prefixed === null) return null;
+  if (workflow.startsWith("gateway:")) return `workflow_path = ${prefixed}`;
+  return `workflow_path IN (${prefixed}, ${bare})`;
+}
 
 function txidMatch(result: { txid?: string } | undefined) {
   if (!result?.txid) throw new Error("Postgres domain API mutation did not return txid for Electric matching.");
@@ -409,6 +455,43 @@ function createSmithersCollectionsWithClient(
       runId ? runWhere(runId) : undefined,
     );
 
+  // Shared between the Electric-backed crons collection and its RPC fallback.
+  const cronMutationHandlers: MutationHandlers<GatewayCronRow, string> = {
+    onInsert: async ({ transaction }) => {
+      let latest: { txid?: string } | undefined;
+      for (const mutation of transaction.mutations) {
+        const row = mutation.modified as GatewayCronRow;
+        latest = await client.api.cronCreate({
+          cronId: row.cronId,
+          workflow: row.workflow,
+          pattern: row.pattern,
+          enabled: row.enabled,
+        });
+      }
+      if (multiplayerMode) return txidMatch(latest);
+    },
+    onUpdate: async ({ transaction }) => {
+      let latest: { txid?: string } | undefined;
+      for (const mutation of transaction.mutations) {
+        const row = mutation.modified as GatewayCronRow;
+        latest = await client.api.cronCreate({
+          cronId: row.cronId,
+          workflow: row.workflow,
+          pattern: row.pattern,
+          enabled: row.enabled,
+        });
+      }
+      if (multiplayerMode) return txidMatch(latest);
+    },
+    onDelete: async ({ transaction }) => {
+      let latest: { txid?: string } | undefined;
+      for (const mutation of transaction.mutations) {
+        latest = await client.api.cronDelete({ cronId: String(mutation.key) });
+      }
+      if (multiplayerMode) return txidMatch(latest);
+    },
+  };
+
   return {
     client,
     runs: (params: ListRunsRequest = {}) => {
@@ -562,15 +645,27 @@ function createSmithersCollectionsWithClient(
         (row) => row.entryFile,
         () => client.api.listPrompts(),
       ),
-    scores: (params: ListScoresRequest = { runId: "" }) =>
-      getOrCreate<GatewayScoreRow, string>(
+    scores: (params: ListScoresRequest = { runId: "" }) => {
+      const where = scoresWhere(params);
+      const scoreKey = (row: GatewayScoreRow) => `${row.runId}:${row.nodeId}:${row.iteration}:${row.scorerId}`;
+      // A filter the proxy grammar cannot express falls back to the RPC-backed
+      // collection so the filter still applies (see electricLiteral).
+      if (where === null) {
+        return getOrCreateQuery<GatewayScoreRow, string>(
+          smithersCollectionKeys.scores(params),
+          scoreKey,
+          () => client.api.listScores(params),
+        );
+      }
+      return getOrCreate<GatewayScoreRow, string>(
         smithersCollectionKeys.scores(params),
         "scores",
-        (row) => `${row.runId}:${row.nodeId}:${row.iteration}:${row.scorerId}`,
+        scoreKey,
         () => client.api.listScores(params),
         (row) => mapSmithersElectricRow("scores", row),
-        params.runId ? runWhere(params.runId) : undefined,
-      ),
+        where,
+      );
+    },
     tickets: (params: ListTicketsRequest = {}) =>
       getOrCreate<GatewayTicketRow, string>(
         smithersCollectionKeys.tickets(params),
@@ -589,50 +684,28 @@ function createSmithersCollectionsWithClient(
         (row) => mapSmithersElectricRow("memoryFacts", row),
         params.namespace ? `namespace = ${quoteSqlLiteral(params.namespace)}` : undefined,
       ),
-    crons: (params: CronListRequest = {}) =>
-      getOrCreate<GatewayCronRow, string>(
+    crons: (params: CronListRequest = {}) => {
+      const where = cronsWhere(params);
+      // A filter the proxy grammar cannot express falls back to the RPC-backed
+      // collection so the filter still applies (see electricLiteral).
+      if (where === null) {
+        return getOrCreateQuery<GatewayCronRow, string>(
+          smithersCollectionKeys.crons(params),
+          (row) => row.cronId,
+          () => client.api.cronList(params),
+          cronMutationHandlers,
+        );
+      }
+      return getOrCreate<GatewayCronRow, string>(
         smithersCollectionKeys.crons(params),
         "crons",
         (row) => row.cronId,
         () => client.api.cronList(params),
         (row) => mapSmithersElectricRow("crons", row),
-        undefined,
-        {
-          onInsert: async ({ transaction }) => {
-            let latest: { txid?: string } | undefined;
-            for (const mutation of transaction.mutations) {
-              const row = mutation.modified as GatewayCronRow;
-              latest = await client.api.cronCreate({
-                cronId: row.cronId,
-                workflow: row.workflow,
-                pattern: row.pattern,
-                enabled: row.enabled,
-              });
-            }
-            if (multiplayerMode) return txidMatch(latest);
-          },
-          onUpdate: async ({ transaction }) => {
-            let latest: { txid?: string } | undefined;
-            for (const mutation of transaction.mutations) {
-              const row = mutation.modified as GatewayCronRow;
-              latest = await client.api.cronCreate({
-                cronId: row.cronId,
-                workflow: row.workflow,
-                pattern: row.pattern,
-                enabled: row.enabled,
-              });
-            }
-            if (multiplayerMode) return txidMatch(latest);
-          },
-          onDelete: async ({ transaction }) => {
-            let latest: { txid?: string } | undefined;
-            for (const mutation of transaction.mutations) {
-              latest = await client.api.cronDelete({ cronId: String(mutation.key) });
-            }
-            if (multiplayerMode) return txidMatch(latest);
-          },
-        },
-      ),
+        where,
+        cronMutationHandlers,
+      );
+    },
     // Deliberate alias of runTree: same cache key, same rows.
     nodes: runTreeCollection,
     runEvents: (runId: string, maxRows = RUN_EVENT_COLLECTION_MAX_ROWS) => {
