@@ -133,13 +133,15 @@ export function makeGitHubClient(config) {
     /**
    * One HTTP attempt: resolves with `{ json, headers }` or fails with an
    * IntegrationError tagged `retryable` for 429/secondary-rate-limit/5xx.
+   * Effect's interruption signal is forwarded to `fetch`, so interrupting the
+   * fiber aborts the in-flight request and any pending body read.
    * @param {GitHubRequestMethod} method
    * @param {string} url
    * @param {unknown} [body]
    * @returns {Effect.Effect<{ json: unknown; headers: Headers }, IntegrationError>}
    */
     const attemptOnce = (method, url, body) => Effect.tryPromise({
-        try: async () => {
+        try: async (signal) => {
             /** @type {Record<string, string>} */
             const headers = {
                 accept: "application/vnd.github+json",
@@ -156,6 +158,7 @@ export function makeGitHubClient(config) {
                 method,
                 headers,
                 body: body === undefined ? undefined : JSON.stringify(body),
+                signal,
             });
             const text = await response.text();
             /** @type {unknown} */
