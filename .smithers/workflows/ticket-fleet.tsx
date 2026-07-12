@@ -19,7 +19,7 @@ import { subscriptionCodexFirst } from "../lib/codexAccounts";
 import { protectedAutomationPaths } from "../lib/codexIssueMergeQueue";
 
 const DEFAULT_REPO = "smithersai/smithers";
-const SWEEP_CONCURRENCY = 6;
+const SWEEP_CONCURRENCY = 32;
 const LANE_CONCURRENCY = 24;
 const LANDING_GATE_COMMAND = "pnpm typecheck && pnpm lint && pnpm test";
 const MAX_REVIEW_DIFF_BYTES = 200_000;
@@ -358,10 +358,12 @@ const {
 
 // ---------------------------------------------------------------------------
 // Agents. luna/sol are Codex GPT-5.6 variants; fable/sonnet are Claude.
-// Role split: sol plans, luna does most work (implement + support: moderation,
-// merge resolution, CI fixes), fable reviews and polishes. Each Codex role
-// keeps a Claude fallback so the fleet rides through a Codex rate-limit:
-// luna->sonnet, sol->fable.
+// Role split: sol PLANS, luna IMPLEMENTS, sol REVIEWS the implement->review
+// fix-loop (it iterates until sol says LGTM + the candidate gate is green),
+// then fable does the FINAL review + polish in the serialized merge queue.
+// Difficult issues (hard/xhard) get sol+fable panels for both plan and review.
+// luna also handles support (merge resolution, CI fixes). Each Codex role keeps
+// a Claude fallback so the fleet rides a Codex rate-limit: luna->sonnet, sol->fable.
 // ---------------------------------------------------------------------------
 
 function codexOptions(model: string, effort: "medium" | "high" | "xhigh", cwd?: string) {
@@ -1637,7 +1639,7 @@ export default smithers((ctx) => {
                       <Panel id={"i" + n + ":plan-panel"}
                         panelists={[
                           { agent: solAgent(), label: "sol", role: "Sol planner" },
-                          { agent: lunaAgent("high"), label: "luna", role: "Luna planner" },
+                          { agent: fableAgent(), label: "fable", role: "Fable planner" },
                         ]}
                         moderator={moderatorAgent()} panelistOutput={outputs.tfPlanSeat} moderatorOutput={outputs.tfPlan}
                         strategy="synthesize" maxConcurrency={2}
@@ -1698,7 +1700,7 @@ export default smithers((ctx) => {
                                   {reviewPrompt(issue, { headSha: candidate.headSha, changedPaths: asStrArray(candidate.changedPaths), reviewDiff: candidate.reviewDiff }, "candidate")}
                                 </Panel>
                               ) : (
-                                <Task id={"i" + n + ":review"} output={outputs.tfReview} agent={fableAgent(cwd)} {...agentTaskProps}>
+                                <Task id={"i" + n + ":review"} output={outputs.tfReview} agent={solAgent(cwd)} {...agentTaskProps}>
                                   {reviewPrompt(issue, { headSha: candidate.headSha, changedPaths: asStrArray(candidate.changedPaths), reviewDiff: candidate.reviewDiff }, "candidate")}
                                 </Task>
                               )}
