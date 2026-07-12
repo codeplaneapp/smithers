@@ -12,7 +12,20 @@ export type SubflowProps = {
 	input?: unknown;
 	/** `"childRun"` gets its own DB row/run; `"inline"` embeds in parent. */
 	mode?: "childRun" | "inline";
-	/** Where to store the subflow's result. */
+	/**
+	 * Where to store the subflow's result in the parent.
+	 *
+	 * In `"childRun"` mode the persisted value is the child's normalized
+	 * `RunResult.output`: the row the child's last task wrote to the child's
+	 * declared result schema (`smithers(build, { output })`, defaulting to the
+	 * schema key literally named `output`), with the system columns (`runId`,
+	 * `nodeId`, `iteration`) stripped. It is not a table-keyed snapshot of the
+	 * child's output tables. Zero result rows normalize to `null`; exactly one
+	 * row unwraps to that plain row object; multiple rows (several writers or
+	 * loop iterations) persist as an array of rows. The value is validated
+	 * against this target's schema like any task output, so adding or changing
+	 * the child's final task changes the shape the parent must expect here.
+	 */
 	output: OutputTarget;
 	skipIf?: boolean;
 	timeoutMs?: number;

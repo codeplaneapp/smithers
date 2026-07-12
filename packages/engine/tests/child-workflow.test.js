@@ -42,6 +42,13 @@ describe("child workflow helpers", () => {
         });
         expect(__childWorkflowInternals.stripSystemColumns([{ runId: "r", value: 1 }])).toEqual([{ value: 1 }]);
         expect(__childWorkflowInternals.normalizeChildOutput({ status: "finished", output: [] })).toBe(null);
+        // The documented childRun contract: a single result row (the child's
+        // last task's row) unwraps to that plain row object, never a
+        // table-keyed snapshot or a one-element array.
+        expect(__childWorkflowInternals.normalizeChildOutput({
+            status: "finished",
+            output: [{ runId: "r", nodeId: "final", iteration: 0, summary: "done" }],
+        })).toEqual({ summary: "done" });
         expect(__childWorkflowInternals.normalizeChildOutput({
             status: "finished",
             output: [

@@ -121,6 +121,33 @@ Read the persisted subflow result in the parent exactly like a task output:
 `ctx.outputMaybe(parent.outputs.childSummary, { nodeId: "run-child" })`. The
 `nodeId` is the `<Subflow id>`, and the output target is the parent's schema key.
 
+## What `childRun` persists
+
+With `mode="childRun"` (the default), the value stored under the parent's
+`<Subflow output>` target is the child's normalized `RunResult.output`: the
+child's last task result, not a table-keyed snapshot of the child's output
+tables. When the child run finishes, the engine reads the rows the child wrote
+to its declared result schema (`smithers(build, { output })`, defaulting to
+the schema key literally named `output`), strips the system columns (`runId`,
+`nodeId`, `iteration`) from each row, and normalizes what is left:
+
+- Exactly one row, the common case where the child's final task is the only
+  writer of the result schema, unwraps to that plain row object, like
+  `{ summary: "..." }` above.
+- Zero rows normalize to `null`.
+- Multiple rows (several tasks or loop iterations writing to the result
+  schema) persist as an array of stripped rows.
+
+There is no `{ schemaKey: rows }` wrapper: the parent receives the one result
+value, never a map of the child's output tables. The parent validates that
+value against its `<Subflow output>` schema exactly like a task payload, so
+adding or changing the child's final task changes the parent's expected
+schema: renaming that task's output columns, pointing the child's declared
+result at a different schema, or adding another writer to the result schema
+(one row becomes an array) all change the shape the parent receives. Update
+the parent's `<Subflow output>` schema in the same change, or the subflow task
+fails output validation.
+
 ## Single-file parent and child
 
 For small examples and eval fixtures, define both factories in one `.tsx` file.
@@ -187,7 +214,7 @@ value passed through the parent's `<Subflow input={...}>` prop.
 
 ## Notes
 
-- `childRun` (default) gives the child its own DB row; retry/cache/resume scope it as a unit.
+- `childRun` (default) gives the child its own DB row; retry/cache/resume scope it as a unit. The persisted result is the child's last task row, not a table-keyed snapshot (see [What `childRun` persists](#what-childrun-persists)).
 - `inline` renders the child tree as siblings in the parent plan, sharing its scope.
 - Subflows compose; children may contain `<Subflow>` themselves.
 - Declare the child's result via `smithers(build, { output })` unless its result schema is literally named `output`; that is the schema a parent `<Subflow>` persists.

@@ -2246,6 +2246,58 @@ function checkComponentPropsDocsMatchSourceTypes() {
   }
 }
 
+function checkSubflowDocsMatchChildRunOutputContract() {
+  const subflowDoc = join(root, "docs/components/subflow.mdx");
+  const subflowPropsSource = join(root, "packages/components/src/components/SubflowProps.ts");
+  const childWorkflowSource = join(root, "packages/engine/src/child-workflow.js");
+  const files = new Map([
+    [subflowDoc, readFileSync(subflowDoc, "utf8")],
+    [subflowPropsSource, readFileSync(subflowPropsSource, "utf8")],
+    [childWorkflowSource, readFileSync(childWorkflowSource, "utf8")],
+  ]);
+  const required = [
+    // The engine behavior the docs describe: `childRun` persists the child's
+    // normalized RunResult.output (last-task rows from the child's declared
+    // result schema) with system columns stripped, normalized 0 -> null,
+    // 1 -> plain row object, n -> array of rows.
+    [childWorkflowSource, "function normalizeChildOutput(runResult)"],
+    [childWorkflowSource, 'key === "runId" || key === "nodeId" || key === "iteration"'],
+    [childWorkflowSource, "if (rows.length === 0)"],
+    [childWorkflowSource, "return rows[0];"],
+    // The Subflow page and the output prop jsdoc must state that contract.
+    [subflowDoc, "not a table-keyed snapshot"],
+    [subflowDoc, "- Zero rows normalize to `null`."],
+    [subflowDoc, "persist as an array of stripped rows."],
+    [subflowDoc, "adding or changing the child's final task changes the parent's expected"],
+    [subflowPropsSource, "not a table-keyed snapshot"],
+    [subflowPropsSource, "Zero result rows normalize to `null`"],
+    [subflowPropsSource, "persist as an array of rows"],
+    [subflowPropsSource, "the child's final task changes the shape the parent must expect here."],
+  ];
+  const forbidden = [
+    // The bare pre-contract comment must not come back.
+    [subflowPropsSource, "/** Where to store the subflow's result. */"],
+  ];
+  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
+  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  if (missing.length || stale.length) {
+    failed = true;
+    console.error("\n✗ Subflow docs must state the childRun last-task output contract:");
+    if (missing.length) {
+      console.error(
+        `    missing: ${missing.map(([file, needle]) => `${displayPath(file)}:${needle}`).join(", ")}`,
+      );
+    }
+    if (stale.length) {
+      console.error(
+        `    stale: ${stale.map(([file, needle]) => `${displayPath(file)}:${needle}`).join(", ")}`,
+      );
+    }
+  } else {
+    console.log("✓ Subflow docs state the childRun last-task output contract");
+  }
+}
+
 function checkTypesReferenceIncludesCompositeComponentProps() {
   const reference = readFileSync(TYPES_REFERENCE, "utf8");
   const trackedTypes = [
@@ -4014,6 +4066,7 @@ checkSandboxEgressDocsMatchRuntime();
 checkServeDocsMatchServerTypes();
 checkHttpServerDocsMatchRuntimeSurface();
 checkComponentPropsDocsMatchSourceTypes();
+checkSubflowDocsMatchChildRunOutputContract();
 checkTypesReferenceIncludesCompositeComponentProps();
 checkPackageConfigurationDocsMatchRootConfig();
 checkPiPluginDocsMatchPackageRuntime();
