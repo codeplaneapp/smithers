@@ -139,7 +139,7 @@ jobs:
 
       - name: Run workspace package tests
         if: runner.os != 'Windows'
-        run: pnpm -r --no-bail test
+        run: node scripts/run-workspace-test-suite.mjs
 
       - name: Run docs-driven-development suite
         if: runner.os == 'Linux'

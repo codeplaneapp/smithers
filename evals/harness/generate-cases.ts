@@ -4,6 +4,7 @@
 //
 //   bun evals/harness/generate-cases.ts            # (re)generate every suite
 //   bun evals/harness/generate-cases.ts --dry      # report counts, write nothing
+//   bun evals/harness/generate-cases.ts --check    # fail if generated files drift
 //
 // Sources (same task schema, merged + deduped by id):
 //   evals/_inventory/task-bank.jsonl       — auto (the 14-way sweep)
@@ -12,7 +13,7 @@
 // Per-suite hand-written CASE lines in evals/suites/<suite>/curated.jsonl are
 // prepended verbatim (and win id collisions).
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { SOTA_MODELS, WEAK_MODELS } from "../agents.js";
 import { repoRoot } from "../lib/paths.js";
 
@@ -182,6 +183,20 @@ function fanCount(t: Task): number {
 
 export function main() {
   const dry = process.argv.includes("--dry");
+  const check = process.argv.includes("--check");
+  if (dry && check) throw new Error("--dry and --check are mutually exclusive");
+
+  const staleFiles: string[] = [];
+  const syncGeneratedFile = (path: string, contents: string) => {
+    if (check) {
+      if (!existsSync(path) || readFileSync(path, "utf8") !== contents) {
+        staleFiles.push(relative(ROOT, path));
+      }
+      return;
+    }
+    if (!dry) writeFileSync(path, contents);
+  };
+
   const tasks = [...readJsonl(join(ROOT, "evals/_inventory/task-bank.jsonl")), ...readJsonl(join(ROOT, "evals/_inventory/curated-tasks.jsonl"))];
   // dedup tasks by id (curated wins)
   const byId = new Map<string, Task>();
@@ -246,26 +261,38 @@ export function main() {
     }
     total += merged.length;
     summary.push([suite, merged.length]);
-    if (!dry) {
+    if (!dry && !check) {
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, "cases.jsonl"), `${merged.join("\n")}\n`);
-      // ensure each suite has an eval.tsx
-      const evalFile = join(dir, "eval.tsx");
-      if (!existsSync(evalFile)) {
-        writeFileSync(
-          evalFile,
-          `/** @jsxImportSource smithers-orchestrator */\n// ${suite} — generated suite. See evals/README.md.\nimport { createFluencyEval } from "../../lib/eval-kit";\n\nexport default createFluencyEval({ suite: "${suite}" });\n`,
-        );
-      }
+    }
+    syncGeneratedFile(join(dir, "cases.jsonl"), `${merged.join("\n")}\n`);
+
+    // Every generated suite needs an executable entry point. Existing eval.tsx
+    // files remain hand-editable; generation owns their presence, not contents.
+    const evalFile = join(dir, "eval.tsx");
+    if (check && !existsSync(evalFile)) staleFiles.push(relative(ROOT, evalFile));
+    if (!dry && !check && !existsSync(evalFile)) {
+      writeFileSync(
+        evalFile,
+        `/** @jsxImportSource smithers-orchestrator */\n// ${suite} — generated suite. See evals/README.md.\nimport { createFluencyEval } from "../../lib/eval-kit";\n\nexport default createFluencyEval({ suite: "${suite}" });\n`,
+      );
     }
   }
 
-  if (!dry) {
-    writeFileSync(join(ROOT, "evals/_inventory/deferred-tasks.jsonl"), deferred.map((t) => JSON.stringify(t)).join("\n") + "\n");
-  }
+  syncGeneratedFile(
+    join(ROOT, "evals/_inventory/deferred-tasks.jsonl"),
+    `${deferred.map((t) => JSON.stringify(t)).join("\n")}\n`,
+  );
 
-  console.log(`Generated ${total} cases across ${summary.length} suites${dry ? " (dry)" : ""}; deferred ${deferred.length} (fixture/ops/no-answer).`);
+  const action = check ? "Checked" : dry ? "Counted" : "Generated";
+  console.log(`${action} ${total} cases across ${summary.length} suites; deferred ${deferred.length} (fixture/ops/no-answer).`);
   for (const [s, n] of summary.sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(4)}  ${s}`);
+
+  if (check && staleFiles.length > 0) {
+    console.error("\nGenerated eval artifacts are stale:");
+    for (const path of staleFiles) console.error(`  - ${path}`);
+    console.error("\nRun `bun evals/harness/generate-cases.ts` and commit the result.");
+    process.exitCode = 1;
+  }
 }
 
 // Exported for the issue→eval generator (new-eval.tsx).

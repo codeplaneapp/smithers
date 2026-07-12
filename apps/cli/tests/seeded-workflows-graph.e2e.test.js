@@ -9,6 +9,7 @@ import {
   writeFakeClaudeBinary,
   writeFakeCodexBinary,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { GENERATED_SEEDED_FILES } from "../src/seeded-workflow-pack.generated.js";
 
 /**
  * Every seeded workflow `smithers init` installs must RENDER its graph without
@@ -26,6 +27,11 @@ import {
  */
 
 const LOAD_ERROR = /reserved field name|Missing 'default' export|Workflow not found|Cannot read properties/i;
+const SEEDED_WORKFLOW_FILES = GENERATED_SEEDED_FILES
+  .map(({ path }) => path)
+  .filter((path) => path.startsWith(".smithers/workflows/") && path.endsWith(".tsx"))
+  .map((path) => path.split("/").at(-1))
+  .sort();
 
 test("every seeded init-pack workflow renders its graph without a load-time error", () => {
   const binDir = createExecutableDir();
@@ -51,17 +57,7 @@ test("every seeded init-pack workflow renders its graph without a load-time erro
   const files = readdirSync(workflowsDir)
     .filter((f) => f.endsWith(".tsx"))
     .sort();
-  expect(files).toEqual([
-    "create-skill.tsx",
-    "create-ui.tsx",
-    "create-workflow.tsx",
-    "docs-driven-development.tsx",
-    "events-probe.tsx",
-    "init.tsx",
-    "post-failure.tsx",
-    "ticket-fleet-monitor.tsx",
-    "upgrade.tsx",
-  ]);
+  expect(files).toEqual(SEEDED_WORKFLOW_FILES);
 
   // `graph` loads the workflow and builds one frame (running createSmithers and
   // the compute tasks needed to resolve the tree) but dispatches no agent, so it

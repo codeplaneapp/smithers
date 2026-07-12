@@ -103,7 +103,7 @@
     "generate:init-pack": "bun scripts/generate-workflow-pack.ts",
     "sota:gen": "bun scripts/generate-sota.ts",
     "sota:research": "bun scripts/sota-research.ts",
-    "test": "node scripts/run-test-gates.mjs && node scripts/check-dts.mjs && pnpm -r --no-bail test",
+    "test": "node scripts/run-test-gates.mjs && node scripts/check-dts.mjs && node scripts/run-workspace-test-suite.mjs",
     "coverage": "node scripts/coverage.mjs",
     "check:effect": "node scripts/check-single-effect-version.mjs",
     "check:deps": "node scripts/check-dependency-boundaries.mjs",

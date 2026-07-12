@@ -94,6 +94,20 @@ describe("bundleGatewayUiEntry failure paths", () => {
     expect(calls).toBe(1);
   });
 
+  test("does not retry Bun's generic wrapper when it carries build diagnostics", async () => {
+    originalBuild = Bun.build;
+    let calls = 0;
+    Bun.build = async () => {
+      calls += 1;
+      throw new AggregateError([new Error("Could not resolve dependency")], "Bundle failed");
+    };
+
+    await expect(
+      bundleGatewayUiEntry({ entry: "/permanent/failure.tsx" }, new Map()),
+    ).rejects.toThrow("Bundle failed");
+    expect(calls).toBe(1);
+  });
+
   test("restores a working Bun.build after the stubs", () => {
     expect(typeof Bun.build).toBe("function");
   });

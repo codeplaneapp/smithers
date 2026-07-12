@@ -199,7 +199,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expect(scripts["fetch:jj"]).toBe("node scripts/fetch-jj-binaries.mjs");
     expect(scripts.observability).toBeUndefined();
     expect(scripts.test).toBe(
-      "node scripts/run-test-gates.mjs && node scripts/check-dts.mjs && pnpm -r --no-bail test",
+      "node scripts/run-test-gates.mjs && node scripts/check-dts.mjs && node scripts/run-workspace-test-suite.mjs",
     );
 
     for (const path of [
@@ -210,9 +210,12 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "scripts/generate-component-source.mjs",
       "scripts/generate-workflow-pack.ts",
       "scripts/check-no-direct-db-access.mjs",
+      "scripts/check-eval-cases.mjs",
       "scripts/check-smithers-test-script.mjs",
       "scripts/run-test-gates.mjs",
       "scripts/run-test-gates.test.mjs",
+      "scripts/run-workspace-test-suite.mjs",
+      "scripts/run-workspace-test-suite.test.mjs",
       "scripts/verify-observability.sh",
     ]) expectFile(path);
 
@@ -239,7 +242,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "choco install ripgrep -y",
       "node scripts/run-test-gates.mjs",
       "node scripts/check-dts.mjs",
-      "pnpm -r --no-bail test",
+      "node scripts/run-workspace-test-suite.mjs",
       "pnpm -C .smithers test:ddd",
       "node scripts/run-workspace-tests.mjs --shard",
       "bun test examples/bun-port-smithers/components/porting-rules.test.ts examples/context-handoff/workflow.test.ts",
@@ -315,12 +318,14 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     ]);
     expectText("scripts/run-test-gates.mjs", [
       "scripts/run-test-gates.test.mjs",
+      "scripts/run-workspace-test-suite.test.mjs",
       "scripts/check-single-effect-version.mjs",
       "scripts/check-dependency-boundaries.mjs",
       "scripts/check-no-direct-db-access.mjs",
       "scripts/check-docs.mjs",
       "scripts/check-llms.mjs",
       "scripts/check-sota.mjs",
+      "scripts/check-eval-cases.mjs",
       "scripts/check-smithers-test-script.mjs",
       "spawnSync",
       "terminated by",
@@ -330,11 +335,30 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "stops immediately and preserves the first nonzero status",
       "treats launch errors and signal termination as failures",
     ]);
+    expectText("scripts/run-workspace-test-suite.mjs", [
+      "!@smithers-orchestrator/cli",
+      "--workspace-concurrency=4",
+      "--no-bail",
+      'Object.freeze(["--dir", "apps/cli", "test"])',
+      "phase is still attempted",
+      "terminated by",
+    ]);
+    expectText("scripts/run-workspace-test-suite.test.mjs", [
+      "pins the parallel workspace phase and exclusive CLI phase",
+      "always attempts both phases and preserves the first failure status",
+      "treats thrown, reported, and signal launch failures as failures",
+    ]);
     expectText("scripts/check-sota.mjs", [
       "docs/reference/sota-models.mdx",
       "apps/cli/src/sota-models.generated.js",
       "scripts/generate-sota.ts",
       "scripts/sota.test.ts",
+    ]);
+    expectText("scripts/check-eval-cases.mjs", [
+      "evals/harness/generate-cases.ts",
+      '"--check"',
+      "could not start Bun",
+      "terminated by",
     ]);
     expectText("scripts/generate-sota.ts", ["SOTA_REGISTRY_VERSION", "SOTA_ROLE_MODELS", "SOTA_DEPRECATED_MODELS"]);
     expectText("scripts/sota-research.ts", ["scripts/generate-sota.ts", 'pnpm", ["docs:llms"]', 'pnpm", ["generate:init-pack"]']);

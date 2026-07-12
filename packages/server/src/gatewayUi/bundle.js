@@ -23,9 +23,17 @@ const INLINE_UI_NAMESPACE = "smithers-inline-ui";
 // Bun can reject a build with only the generic `Bundle failed` error while its
 // native build workers are briefly saturated by other workspace builds. That
 // failure carries no source diagnostic and succeeds once capacity is released.
-// Keep retries narrow and bounded so real syntax/resolution errors still fail
-// immediately through the normal `result.logs` path.
+// Normal compiler/resolver failures are AggregateErrors with nested BuildMessage
+// diagnostics; never retry those permanent failures.
 const TRANSIENT_BUILD_RETRY_DELAYS_MS = [50, 200, 800];
+
+function isTransientBuildFailure(error) {
+    if (!(error instanceof Error) || error.message.trim() !== "Bundle failed") {
+        return false;
+    }
+    const diagnostics = "errors" in error ? error.errors : undefined;
+    return !Array.isArray(diagnostics) || diagnostics.length === 0;
+}
 
 function resolveReactPeer(specifier) {
     try {
@@ -273,7 +281,7 @@ export async function bundleGatewayUiEntry(config, cache) {
             break;
         }
         catch (error) {
-            const transient = error instanceof Error && error.message.trim() === "Bundle failed";
+            const transient = isTransientBuildFailure(error);
             const delayMs = TRANSIENT_BUILD_RETRY_DELAYS_MS[attempt];
             if (!transient || delayMs === undefined) {
                 throw error;

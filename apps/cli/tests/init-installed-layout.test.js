@@ -220,9 +220,11 @@ test("initWorkflowPack succeeds when run from a published install layout", () =>
     // And installed dep versions should be picked up via createRequire.
     expect(generated.dependencies.zod).toBe("4.99.0");
     expect(generated.devDependencies.typescript).toBe("5.99.0");
-    // The curated pack no longer ships the legacy dagre-backed graph UI, so
-    // the published layout has no target-specific graph dependency.
-    expect(generated.devDependencies["@types/dagre"]).toBeUndefined();
+    // create-workflow's graph editor ships in the fixed curated pack, so its
+    // runtime and type dependency closure must also survive a published init.
+    expect(generated.dependencies["@xyflow/react"]).toBe("12.10.2");
+    expect(generated.dependencies.dagre).toBe("0.8.5");
+    expect(generated.devDependencies["@types/dagre"]).toBe("0.7.54");
 
     // init also installed the curated skill into the detected agent (Claude Code,
     // present via the faked ~/.claude credentials) straight from the packaged

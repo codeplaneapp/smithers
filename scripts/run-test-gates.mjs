@@ -8,12 +8,14 @@ const repoRoot = resolve(dirname(scriptPath), "..");
 
 export const TEST_GATE_SCRIPTS = Object.freeze([
   "scripts/run-test-gates.test.mjs",
+  "scripts/run-workspace-test-suite.test.mjs",
   "scripts/check-single-effect-version.mjs",
   "scripts/check-dependency-boundaries.mjs",
   "scripts/check-no-direct-db-access.mjs",
   "scripts/check-docs.mjs",
   "scripts/check-llms.mjs",
   "scripts/check-sota.mjs",
+  "scripts/check-eval-cases.mjs",
   "scripts/check-smithers-test-script.mjs",
 ]);
 

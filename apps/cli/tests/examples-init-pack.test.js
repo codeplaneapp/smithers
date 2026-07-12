@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, symlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
-import { bundleGatewayUiEntry } from "../../../packages/server/src/gatewayUi/bundle.js";
 
 const ROOT = resolve(import.meta.dir, "../../..");
 const FORMER = ["vcs","implement","research-plan-implement","review","plan","research","ticket-create","tickets-create","ralph","improve-test-coverage","debug","grill-me","feature-enum","audit","mission","workflow-skill","kanban","hello","context-engineer","route-task","extract-skill","triage-run","context-doctor","backpressure-plan","eval-author","report-slideshow","smithering","delegation-chain","make-workflow-tutorial"];
@@ -73,27 +73,35 @@ test(
 
 test(
   "every former init workflow's declared UI bundles for real (compiled, not mocked)",
-  async () => {
+  () => {
     // The real Gateway UI bundler (packages/server/src/gatewayUi/bundle.js) —
     // the same Bun.build path the live gateway uses to serve each workflow's
     // <UI>, including its workspace-package resolution for @tanstack/* and
     // smithers-orchestrator/gateway-react. A hand-rolled Bun.build call here
     // would miss that resolution and false-fail on every UI.
-    const cache = new Map();
-    const failures = [];
+    const entries = [];
     for (const id of FORMER) {
       const source = readFileSync(resolve(ROOT, "examples/init-pack", `${id}.tsx`), "utf8");
       const uiMatch = source.match(/<UI entry="(\.\.\/ui\/[^"]+)"/);
       expect(uiMatch, `${id}: no <UI entry=...> declaration to prove UI closure for`).toBeTruthy();
       const uiEntry = resolve(ROOT, "examples/init-pack", uiMatch[1]);
       expect(existsSync(uiEntry), `${id}: declared UI entry ${uiMatch[1]} is missing from examples/ui`).toBe(true);
-      try {
-        await bundleGatewayUiEntry({ entry: uiEntry }, cache);
-      } catch (error) {
-        failures.push(`${id}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      entries.push(uiEntry);
     }
-    expect(failures).toEqual([]);
+
+    // Keep the native compiler in the same clean process boundary as a live
+    // Gateway. The full CLI suite loads 175 test modules into one Bun process;
+    // compiling late in that process can exhaust Bun's native build workers
+    // even though every entry compiles in a fresh Gateway process.
+    const helper = resolve(import.meta.dir, "fixtures/bundle-gateway-ui-entries.mjs");
+    const result = spawnSync(process.execPath, [helper, ...entries], {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    expect(result.status, result.stderr || result.error?.message).toBe(0);
+    const report = JSON.parse(result.stdout);
+    expect(report.failures).toEqual([]);
   },
   120_000,
 );
