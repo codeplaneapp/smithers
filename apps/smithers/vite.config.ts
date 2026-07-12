@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { localWorkspaceDevMiddleware } from "./src/app/localWorkspaceDevServer";
 import { readLocalVcsSnapshot } from "./src/vcs/localAdapter";
 
 /**
@@ -73,6 +74,28 @@ export default defineConfig({
       },
       configurePreviewServer(server) {
         server.middlewares.use(localVcsMiddleware());
+      },
+    },
+    {
+      // The app gates on the local workspace contract (`WorkspacePicker`),
+      // served in production by the CLI local UI server. Serve the same
+      // endpoints in dev/preview or the app never gets past the picker.
+      name: "smithers-local-workspace",
+      configureServer(server) {
+        server.middlewares.use(
+          localWorkspaceDevMiddleware({
+            serverWorkspaceRoot: workspaceRoot,
+            gatewayBase: gatewayTarget,
+          }),
+        );
+      },
+      configurePreviewServer(server) {
+        server.middlewares.use(
+          localWorkspaceDevMiddleware({
+            serverWorkspaceRoot: workspaceRoot,
+            gatewayBase: gatewayTarget,
+          }),
+        );
       },
     },
   ],
