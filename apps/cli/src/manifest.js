@@ -114,7 +114,7 @@ export function renderManifest(manifest) {
 
 /**
  * @param {string} projectRoot
- * @param {Array<{ path: string }>} scaffoldFiles
+ * @param {Array<{ path: string; contents: string }>} scaffoldFiles
  * @returns {SmithersManifest}
  */
 export function buildDefaultManifest(projectRoot, scaffoldFiles) {
@@ -134,8 +134,9 @@ export function buildDefaultManifest(projectRoot, scaffoldFiles) {
         .filter((name, index, names) => names.indexOf(name) === index)
         .sort();
     return {
-        ...DEFAULT_MANIFEST,
+        // name leads so the scaffolded TOON reads identity-first.
         name: basename(resolve(projectRoot)),
+        ...DEFAULT_MANIFEST,
         contents: { workflows, ui },
     };
 }

@@ -611,7 +611,17 @@ export function initWorkflowPack(options = {}) {
     /** @type {TemplateFile[]} */
     let templateFiles;
     if (options.agentsOnly) {
-        templateFiles = renderAgentScaffoldFiles({ scaffoldCustomAgent: options.scaffoldCustomAgent });
+        const agentFiles = renderAgentScaffoldFiles({ scaffoldCustomAgent: options.scaffoldCustomAgent });
+        // Every .smithers is a publishable pack: agents-only init still
+        // scaffolds the manifest (with empty contents — no workflows or UIs
+        // are installed on this path).
+        templateFiles = [
+            ...agentFiles,
+            {
+                path: ".smithers/smithers.toon",
+                contents: renderManifest(buildDefaultManifest(projectRoot, agentFiles)),
+            },
+        ];
     }
     else {
         const versions = readDependencyVersions();

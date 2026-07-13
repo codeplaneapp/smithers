@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
+import { parseManifest } from "../src/manifest.js";
 import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenClawBinary, writeFakeOpenCodeBinary, } from "../../../packages/smithers/tests/e2e-helpers.js";
 /**
  * @param {string} homeDir
@@ -109,6 +110,25 @@ test("smithers init routes every default tier to its Codex 5.6 model", () => {
     expect(agentsSource).toContain('codexLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
     expectCodexFirstDefaultTiers(agentsSource);
     expect(agentsSource).toContain("Codex runs first. Later entries are runtime fallbacks");
+});
+
+test("smithers init --agents-only still scaffolds the pack manifest", () => {
+    const repo = createTempRepo();
+    const binDir = createExecutableDir();
+    writeFakeCodexBinary(binDir);
+    const result = runSmithers(["init", "--agents-only"], {
+        cwd: repo.dir,
+        format: "json",
+        env: buildEnv(repo.dir, binDir, { OPENAI_API_KEY: "sk-test-openai-key" }),
+    });
+    expect(result.exitCode).toBe(0);
+    // Every .smithers is a publishable pack, even when only agent scaffolds
+    // are installed — the manifest must exist with empty contents.
+    const manifest = parseManifest(repo.read(".smithers/smithers.toon"));
+    expect(manifest.name).toBe(basename(repo.dir));
+    expect(manifest.contents.workflows).toEqual([]);
+    expect(manifest.contents.ui).toEqual([]);
+    expect(manifest.capabilities.writes).toBe("none");
 });
 
 test("re-init preserves a customized legacy scaffold while repairing generated Worktree defaults", () => {
