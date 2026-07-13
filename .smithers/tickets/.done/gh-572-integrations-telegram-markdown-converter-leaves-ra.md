@@ -16,3 +16,6 @@ Telegram rejects messages containing NUL bytes, so any bot message whose markdow
 Header bodies contain the converted inner formatting — either expand sentinels recursively until none remain, or run the header pass before the inline passes.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 190437deb169996bf8536cce2b2371554fea1a7f.
