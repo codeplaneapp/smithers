@@ -17,12 +17,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { assertRowForRowEquality, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
+import { chunkedTest, assertRowForRowEquality, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
 
 setDefaultTimeout(120_000);
 
 describe("migrateSmithersStore reverse and inference", () => {
-  test("copies a PGlite Smithers store back to SQLite row-for-row and writes both receipts after verification", async () => {
+  chunkedTest("copies a PGlite Smithers store back to SQLite row-for-row and writes both receipts after verification", async () => {
     const cwd = makeWorkspace("smithers-migrate-pglite-to-sqlite");
     const originalSqlite = await seedPgliteStore(cwd);
     rmSync(originalSqlite, { force: true });
@@ -88,7 +88,7 @@ describe("migrateSmithersStore reverse and inference", () => {
     }
   }, 300_000);
 
-  test("does not provision an existing-but-uninitialized pglite store while inferring --from", async () => {
+  chunkedTest("does not provision an existing-but-uninitialized pglite store while inferring --from", async () => {
     const cwd = makeWorkspace("smithers-migrate-pglite-probe-no-provision");
     const pgliteDir = join(cwd, ".smithers", "pg");
     mkdirSync(pgliteDir, { recursive: true });
@@ -107,7 +107,7 @@ describe("migrateSmithersStore reverse and inference", () => {
     expect(existsSync(join(pgliteDir, "PG_VERSION"))).toBe(false);
   });
 
-  test("refuses to migrate from an uninitialized pglite source without provisioning it", async () => {
+  chunkedTest("refuses to migrate from an uninitialized pglite source without provisioning it", async () => {
     const cwd = makeWorkspace("smithers-migrate-pglite-source-no-provision");
     const pgliteDir = join(cwd, ".smithers", "pg");
     mkdirSync(pgliteDir, { recursive: true });
@@ -124,7 +124,7 @@ describe("migrateSmithersStore reverse and inference", () => {
     expect(existsSync(join(pgliteDir, "PG_VERSION"))).toBe(false);
   });
 
-  test("infers --from when exactly one backend store has runs and refuses ambiguous populated stores", async () => {
+  chunkedTest("infers --from when exactly one backend store has runs and refuses ambiguous populated stores", async () => {
     const pgliteOnly = makeWorkspace("smithers-migrate-infer-pglite");
     const originalSqlite = await seedPgliteStore(pgliteOnly);
     rmSync(originalSqlite, { force: true });
@@ -144,7 +144,7 @@ describe("migrateSmithersStore reverse and inference", () => {
   // prior migration. Reverse-inference (`migrate --to sqlite` with no --from)
   // must trust it over leftover stores on disk, instead of misreading the
   // source as sqlite and failing with "source and target are both sqlite".
-  test("reverse-infers pglite->sqlite from the migrated.json receipt when --from is omitted", async () => {
+  chunkedTest("reverse-infers pglite->sqlite from the migrated.json receipt when --from is omitted", async () => {
     const cwd = makeWorkspace("smithers-migrate-receipt-reverse");
     await seedPgliteStoreWithReceipt(cwd, { keepSqlite: false });
     expect(existsSync(join(cwd, "smithers.db"))).toBe(false);
@@ -160,7 +160,7 @@ describe("migrateSmithersStore reverse and inference", () => {
     expect(sqliteRunIds(join(cwd, "smithers.db"))).toEqual(["run-migrate-1"]);
   });
 
-  test("honors the migrated.json receipt even when a leftover sqlite store still exists", async () => {
+  chunkedTest("honors the migrated.json receipt even when a leftover sqlite store still exists", async () => {
     const cwd = makeWorkspace("smithers-migrate-receipt-leftover-sqlite");
     await seedPgliteStoreWithReceipt(cwd, { keepSqlite: false });
     // A populated leftover sqlite store from before the migration is still on
@@ -176,7 +176,7 @@ describe("migrateSmithersStore reverse and inference", () => {
     expect(sqliteRunIds(join(cwd, "smithers.db"))).toEqual(["run-migrate-1"]);
   });
 
-  test("falls back to the run-count heuristic when there is NO migrated.json receipt", async () => {
+  chunkedTest("falls back to the run-count heuristic when there is NO migrated.json receipt", async () => {
     const single = makeWorkspace("smithers-migrate-receipt-absent-single");
     await seedPgliteStoreWithReceipt(single, { keepSqlite: false });
     rmSync(join(single, ".smithers", "migrated.json"), { force: true });
@@ -197,7 +197,7 @@ describe("migrateSmithersStore reverse and inference", () => {
     });
   });
 
-  test("a receipt whose current backend equals the target still fires the clear both-X guard", async () => {
+  chunkedTest("a receipt whose current backend equals the target still fires the clear both-X guard", async () => {
     const cwd = makeWorkspace("smithers-migrate-receipt-equals-target");
     // Real round-trip: sqlite->pglite (receipt -> pglite), then pglite->sqlite
     // (inferred from that receipt) leaves a receipt whose target.backend is now
@@ -218,7 +218,7 @@ describe("migrateSmithersStore reverse and inference", () => {
     expect(caught.message).toContain("both sqlite");
   });
 
-  test("refuses to merge into a non-empty SQLite target and does not write receipts", async () => {
+  chunkedTest("refuses to merge into a non-empty SQLite target and does not write receipts", async () => {
     const cwd = makeWorkspace("smithers-migrate-nonempty-sqlite-target");
     const sourceDbPath = await seedPgliteStore(cwd);
     rmSync(join(cwd, ".smithers", "migrated.json"), { force: true });
@@ -232,7 +232,7 @@ describe("migrateSmithersStore reverse and inference", () => {
     expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
   });
 
-  test("deterministic migration failures include agent fallback guidance and keep receipts absent", async () => {
+  chunkedTest("deterministic migration failures include agent fallback guidance and keep receipts absent", async () => {
     const cwd = makeWorkspace("smithers-migrate-agent-guidance");
     await seedPgliteStore(cwd);
     rmSync(join(cwd, ".smithers", "migrated.json"), { force: true });
@@ -257,7 +257,7 @@ describe("migrateSmithersStore reverse and inference", () => {
     expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
   });
 
-  test("forward sqlite to pglite failures include agent fallback guidance and keep receipts absent", async () => {
+  chunkedTest("forward sqlite to pglite failures include agent fallback guidance and keep receipts absent", async () => {
     const cwd = makeWorkspace("smithers-migrate-forward-agent-guidance");
     const targetApi = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
     try {

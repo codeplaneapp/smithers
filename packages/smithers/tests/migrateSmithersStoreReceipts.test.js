@@ -17,12 +17,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { assertRowForRowEquality, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
+import { chunkedTest, assertRowForRowEquality, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
 
 setDefaultTimeout(120_000);
 
 describe("migrateSmithersStore targets and receipts", () => {
-  test("a non-empty uninitialized PGlite target is preserved without invoking initdb", async () => {
+  chunkedTest("a non-empty uninitialized PGlite target is preserved without invoking initdb", async () => {
     const cwd = makeWorkspace("smithers-migrate-nonempty-uninitialized-pglite-target");
     const dbPath = seedSqliteStore(cwd);
     const sqliteBefore = readFileSync(dbPath);
@@ -64,7 +64,7 @@ describe("migrateSmithersStore targets and receipts", () => {
     expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
   });
 
-  test("an unreadable initialized PGlite target reports unknown contents and preserves all stores and receipts", async () => {
+  chunkedTest("an unreadable initialized PGlite target reports unknown contents and preserves all stores and receipts", async () => {
     const cwd = makeWorkspace("smithers-migrate-unreadable-pglite-target");
     const dbPath = seedSqliteStore(cwd);
     const dataDir = join(cwd, ".smithers", "pg");
@@ -115,7 +115,7 @@ describe("migrateSmithersStore targets and receipts", () => {
     expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
   });
 
-  test("unsupported or degenerate migration directions fail without writing local receipts", async () => {
+  chunkedTest("unsupported or degenerate migration directions fail without writing local receipts", async () => {
     for (const entry of [
       { from: "pglite", to: "postgres", url: "postgres://user:pass@127.0.0.1:1/db", message: "not implemented yet" },
       { from: "postgres", to: "pglite", url: "postgres://user:pass@127.0.0.1:1/db", message: "not implemented yet" },
@@ -141,7 +141,7 @@ describe("migrateSmithersStore targets and receipts", () => {
     }
   });
 
-  test("resolver uses backend.json receipt after a real migrate and suppresses copied-store conflict", async () => {
+  chunkedTest("resolver uses backend.json receipt after a real migrate and suppresses copied-store conflict", async () => {
     const cwd = makeWorkspace("smithers-migrate-resolver-receipt");
     seedSqliteStore(cwd);
 
@@ -157,7 +157,7 @@ describe("migrateSmithersStore targets and receipts", () => {
     expect(choice.pglite.runCount).toBe(1);
   });
 
-  test("read leaves an older SQLite source untouched; migrate upgrades it before copying to PGlite", async () => {
+  chunkedTest("read leaves an older SQLite source untouched; migrate upgrades it before copying to PGlite", async () => {
     const cwd = makeWorkspace("smithers-migrate-older-sqlite");
     const dbPath = seedOlderSqliteStore(cwd);
 
@@ -225,7 +225,7 @@ describe("migrateSmithersStore targets and receipts", () => {
   // Issue 1: round-trip sqlite→pglite (keepSqlite:true) then pglite→sqlite must
   // succeed. The receipt records the original sqlite source; the reverse migration
   // reads it to allow overwriting that specific populated file.
-  test("round-trip pglite→sqlite succeeds when keepSqlite:true left the source sqlite on disk", async () => {
+  chunkedTest("round-trip pglite→sqlite succeeds when keepSqlite:true left the source sqlite on disk", async () => {
     const cwd = makeWorkspace("smithers-migrate-roundtrip-keepsqlite");
     seedSqliteStore(cwd);
 
@@ -244,7 +244,7 @@ describe("migrateSmithersStore targets and receipts", () => {
     expect(sqliteRunIds(join(cwd, "smithers.db"))).toEqual(["run-migrate-1"]);
   });
 
-  test("reverse migration refuses to overwrite a kept SQLite source modified after migration", async () => {
+  chunkedTest("reverse migration refuses to overwrite a kept SQLite source modified after migration", async () => {
     const cwd = makeWorkspace("smithers-migrate-roundtrip-modified-source");
     seedSqliteStore(cwd);
 
@@ -276,7 +276,7 @@ describe("migrateSmithersStore targets and receipts", () => {
 
   // Issue 5: DB_WRITE_FAILED must not suggest retrying the exact same command
   // because retrying will always hit the same target-has-data guard.
-  test("DB_WRITE_FAILED error message does not suggest retrying the same command", async () => {
+  chunkedTest("DB_WRITE_FAILED error message does not suggest retrying the same command", async () => {
     const cwd = makeWorkspace("smithers-migrate-write-conflict-message");
     await seedPgliteStore(cwd);
     rmSync(join(cwd, ".smithers", "migrated.json"), { force: true });
@@ -302,7 +302,7 @@ describe("migrateSmithersStore targets and receipts", () => {
     expect(caught.message.toLowerCase()).toContain("target store");
   });
 
-  test("a real PGlite target with missing WAL reports the recovery failure without rewriting successful receipts", async () => {
+  chunkedTest("a real PGlite target with missing WAL reports the recovery failure without rewriting successful receipts", async () => {
     const cwd = makeWorkspace("smithers-migrate-real-pglite-missing-wal");
     const dbPath = await seedPgliteStoreWithReceipt(cwd, { keepSqlite: true });
     const dataDir = join(cwd, ".smithers", "pg");

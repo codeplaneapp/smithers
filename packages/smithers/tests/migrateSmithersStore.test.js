@@ -17,12 +17,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { assertRowForRowEquality, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
+import { chunkedTest, assertRowForRowEquality, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
 
 setDefaultTimeout(120_000);
 
 describe("migrateSmithersStore", () => {
-  test("copies a SQLite Smithers store to PGlite row-for-row and writes migrated.json", async () => {
+  chunkedTest("copies a SQLite Smithers store to PGlite row-for-row and writes migrated.json", async () => {
     const cwd = makeWorkspace("smithers-migrate-pglite");
     const dbPath = seedSqliteStore(cwd);
     const progress = [];
@@ -80,7 +80,7 @@ describe("migrateSmithersStore", () => {
     }
   });
 
-  test("infers nested .smithers/smithers.db as the SQLite source when it has runs", async () => {
+  chunkedTest("infers nested .smithers/smithers.db as the SQLite source when it has runs", async () => {
     const cwd = makeWorkspace("smithers-migrate-nested-sqlite");
     const nestedDbPath = seedSqliteStore(cwd, join(cwd, ".smithers", "smithers.db"));
 
@@ -109,7 +109,7 @@ describe("migrateSmithersStore", () => {
     }
   });
 
-  test("migrates every row of every table row-for-row and yields a replayable (fork/time-travel) run on the target", async () => {
+  chunkedTest("migrates every row of every table row-for-row and yields a replayable (fork/time-travel) run on the target", async () => {
     const cwd = makeWorkspace("smithers-migrate-roundtrip");
     const dbPath = seedSqliteStore(cwd);
 
@@ -155,7 +155,7 @@ describe("migrateSmithersStore", () => {
     }
   });
 
-  test("rejects with an actionable SmithersError when the source store is corrupt, leaving no partial output", async () => {
+  chunkedTest("rejects with an actionable SmithersError when the source store is corrupt, leaving no partial output", async () => {
     const cwd = makeWorkspace("smithers-migrate-corrupt");
     const dbPath = join(cwd, "smithers.db");
     // A file that is not a valid SQLite store: bun:sqlite fails to read it with
@@ -188,7 +188,7 @@ describe("migrateSmithersStore", () => {
     expect(existsSync(dbPath)).toBe(true);
   });
 
-  test("rejects with an actionable SmithersError when the source store cannot be opened, leaving no partial output", async () => {
+  chunkedTest("rejects with an actionable SmithersError when the source store cannot be opened, leaving no partial output", async () => {
     const cwd = makeWorkspace("smithers-migrate-unopenable");
     const dbPath = join(cwd, "smithers.db");
     // A file that exists but cannot be opened (no read permission) makes
@@ -220,7 +220,7 @@ describe("migrateSmithersStore", () => {
     expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
   });
 
-  test("migrate --to postgres with no url fails with INVALID_INPUT before opening the source (not masked)", async () => {
+  chunkedTest("migrate --to postgres with no url fails with INVALID_INPUT before opening the source (not masked)", async () => {
     const cwd = makeWorkspace("smithers-migrate-pg-nourl");
     const dbPath = join(cwd, "smithers.db");
     // Even with an UNOPENABLE source, the missing-url validation must win, so
@@ -244,7 +244,7 @@ describe("migrateSmithersStore", () => {
     expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
   });
 
-  test("can remove sqlite files only after a successful copy", async () => {
+  chunkedTest("can remove sqlite files only after a successful copy", async () => {
     const cwd = makeWorkspace("smithers-migrate-remove-sqlite");
     const dbPath = seedSqliteStore(cwd);
     const sqlite = new Database(dbPath);

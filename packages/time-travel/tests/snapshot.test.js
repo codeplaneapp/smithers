@@ -118,8 +118,13 @@ describe("captureSnapshot", () => {
         expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_contents").get().count).toBe(0);
         baseline.close();
         sqlite.close();
-        // Windows: rm of a just-closed sqlite dir races EBUSY without retries.
-        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        try {
+            rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        } catch {
+            // Windows: a just-closed sqlite handle can outlive close() past even
+            // retried rm windows (EBUSY). The dir lives in the ephemeral CI temp
+            // area, so leaking it beats failing the test.
+        }
     }, 60_000);
     test("cleans replaced and deleted payloads without deleting shared references", async () => {
         const { sqlite, adapter } = createTestDb();

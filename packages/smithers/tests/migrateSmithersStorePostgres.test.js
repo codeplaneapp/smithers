@@ -17,11 +17,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { assertRowForRowEquality, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
+import { chunkedTest, assertRowForRowEquality, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
 
 setDefaultTimeout(120_000);
 
-const postgresTest = PG_URL ? test : test.skip;
+const postgresTest = (name, fn, timeoutOrOptions) => {
+  if (!PG_URL) {
+    test.skip(name, fn, timeoutOrOptions);
+    return;
+  }
+  chunkedTest(name, fn, timeoutOrOptions);
+};
 
 describe("migrateSmithersStore real postgres", () => {
   postgresTest("copies a SQLite Smithers store to real Postgres row-for-row", async () => {

@@ -275,3 +275,16 @@ export function assertSqlitePrimaryKeyAndDuplicateRejection(dbPath) {
   }
 }
 
+
+// Index-based chunking so CI can run slices of a migrate suite in separate
+// bun processes (see the header comment). Without SMITHERS_MIGRATE_CHUNKS
+// every test runs; with it, out-of-chunk tests report as skipped so a
+// mis-set chunk count is visible, never a silent coverage loss.
+const MIGRATE_CHUNKS = Number(process.env.SMITHERS_MIGRATE_CHUNKS ?? "0");
+const MIGRATE_CHUNK = Number(process.env.SMITHERS_MIGRATE_CHUNK ?? "0");
+let chunkTestIndex = 0;
+export function chunkedTest(name, fn, timeoutOrOptions) {
+  const index = chunkTestIndex++;
+  const runsHere = !MIGRATE_CHUNKS || index % MIGRATE_CHUNKS === MIGRATE_CHUNK;
+  (runsHere ? test : test.skip)(name, fn, timeoutOrOptions);
+}
