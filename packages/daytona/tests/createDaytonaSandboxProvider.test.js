@@ -344,6 +344,22 @@ describe("createDaytonaSandboxProvider", () => {
 		).rejects.toThrow(/aborted before it started/);
 	});
 
+	test("exec times out locally when the command never settles", async () => {
+		const env = createMockDaytonaSandboxEnvironment(() => new Promise(() => {}));
+		const provider = createDaytonaSandboxProvider({ client: env });
+		const started = Date.now();
+		let error;
+		try {
+			await provider.run(makeRequest({ toolTimeoutMs: 40 }).request);
+		} catch (err) {
+			error = err;
+		}
+		expect(error).toBeDefined();
+		expect(error.code).toBe("SANDBOX_EXECUTION_FAILED");
+		expect(error.message).toContain("timed out");
+		expect(Date.now() - started).toBeLessThan(5_000);
+	});
+
 	test("importSdk providing a Daytona constructor is used to build the client", async () => {
 		const env = createMockDaytonaSandboxEnvironment(() => ({ status: "finished", output: { built: true } }));
 		const provider = createDaytonaSandboxProvider({

@@ -105,7 +105,10 @@ export function createDaytonaSandboxProvider(options = {}) {
 					}
 					const timeoutSecs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.ceil(timeoutMs / 1000) : 0;
 					const execPromise = Promise.resolve(sandbox.process.executeCommand(command, cwd, env, timeoutSecs));
-					const res = signal ? await raceWithAbort(execPromise, signal) : await execPromise;
+					const res = await raceWithAbort(execPromise, signal, {
+						timeoutMs,
+						timeoutMessage: `Daytona sandbox command timed out after ${timeoutMs}ms.`,
+					});
 					// Daytona merges stderr into result; there is no separate stream.
 					return { exitCode: res?.exitCode ?? 0, stdout: String(res?.result ?? ""), stderr: "" };
 				},
