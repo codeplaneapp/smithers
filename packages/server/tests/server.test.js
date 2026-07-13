@@ -436,6 +436,46 @@ const fakeAgent = {
             expect(data.status).toBeDefined();
             expect(["running", "finished", "failed", "waiting-approval"]).toContain(data.status);
         });
+        test("isolates active runs between server instances", async () => {
+            const firstDbPath = resolve(testDir, "first-server.db");
+            const secondDbPath = resolve(testDir, "second-server.db");
+            const firstWorkflowPath = writeTestWorkflow("first-server", firstDbPath, { slow: true });
+            const secondWorkflowPath = writeTestWorkflow("second-server", secondDbPath, { slow: true });
+            server = startServer({ port: 0, host: "127.0.0.1" });
+            const firstRequest = makeRequest(getPort(server));
+            const secondServer = startServer({ port: 0, host: "127.0.0.1" });
+            const secondRequest = makeRequest(getPort(secondServer));
+            try {
+                const firstRun = await firstRequest("/v1/runs", {
+                    method: "POST",
+                    body: { workflowPath: firstWorkflowPath },
+                });
+                const secondRun = await secondRequest("/v1/runs", {
+                    method: "POST",
+                    body: { workflowPath: secondWorkflowPath },
+                });
+                expect(firstRun.status).toBe(200);
+                expect(secondRun.status).toBe(200);
+                await Promise.all([
+                    waitForPersistedRun(firstDbPath, firstRun.data.runId),
+                    waitForPersistedRun(secondDbPath, secondRun.data.runId),
+                ]);
+
+                const crossServerLookup = await firstRequest(`/v1/runs/${secondRun.data.runId}`);
+                expect(crossServerLookup.status).toBe(404);
+
+                await new Promise((resolveClose) => server.close(resolveClose));
+                server = undefined;
+
+                const survivingRun = await secondRequest(`/v1/runs/${secondRun.data.runId}`);
+                expect(survivingRun.status).toBe(200);
+                expect(survivingRun.data.runId).toBe(secondRun.data.runId);
+                expect(survivingRun.data.status).toBe("running");
+            }
+            finally {
+                secondServer.close();
+            }
+        }, 15_000);
         test("returns 404 for non-existent run", async () => {
             startTestServer();
             const { status, data } = await request("/v1/runs/non-existent-run-id");

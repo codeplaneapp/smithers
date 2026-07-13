@@ -1,6 +1,6 @@
 /** @jsxImportSource smithers-orchestrator */
 import { afterEach, describe, expect, test } from "bun:test";
-import { startServer, __serverTestInternals } from "../src/index.js";
+import { startServer } from "../src/index.js";
 import { sleep } from "../../smithers/tests/helpers.js";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -95,6 +95,16 @@ export default smithers(() => (
     throw new Error(`run ${runId} never satisfied predicate (last=${last})`);
   }
 
+  async function waitForRunRemoval(req, runId, timeoutMs = 8000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const got = await req(`/v1/runs/${runId}`);
+      if (got.status === 404) return;
+      await sleep(40);
+    }
+    throw new Error(`run ${runId} remained in the server registry`);
+  }
+
   test("launch .then finalizes a completed run", async () => {
     makeDir();
     const dbPath = resolve(testDir, "launch-then.db");
@@ -129,11 +139,7 @@ export default smithers(() => (
     });
     expect(start.status).toBe(200);
     const runId = start.data.runId;
-    const deadline = Date.now() + 8000;
-    while (__serverTestInternals.runs.has(runId) && Date.now() < deadline) {
-      await sleep(40);
-    }
-    expect(__serverTestInternals.runs.has(runId)).toBe(false);
+    await waitForRunRemoval(req, runId);
   });
 
   test("resume .then finalizes when resuming an already-finished run", async () => {
@@ -179,10 +185,6 @@ export default smithers(() => (
       body: { workflowPath, input: { oversized: Array(600).fill(0) } },
     });
     expect(resumed.status).toBe(200);
-    const deadline = Date.now() + 8000;
-    while (__serverTestInternals.runs.has(runId) && Date.now() < deadline) {
-      await sleep(40);
-    }
-    expect(__serverTestInternals.runs.has(runId)).toBe(false);
+    await waitForRunRemoval(req, runId);
   });
 });

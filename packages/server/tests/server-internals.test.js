@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { __serverTestInternals } from "../src/index.js";
 
-const { getDbIdentity, isSameDb, scheduleRunCleanup, clearRunCleanupTimer, runs } =
+const { getDbIdentity, isSameDb, scheduleRunCleanup, clearRunCleanupTimer } =
     __serverTestInternals;
+const runs = new Map();
 
 afterEach(() => {
     runs.clear();
@@ -75,7 +76,7 @@ describe("isSameDb", () => {
 describe("scheduleRunCleanup", () => {
     test("is a no-op when the run record is unknown", () => {
         // No record registered for this id → returns before scheduling a timer.
-        expect(() => scheduleRunCleanup("ghost-run")).not.toThrow();
+        expect(() => scheduleRunCleanup(runs, "ghost-run")).not.toThrow();
     });
 
     test("evicts the record when the cleanup timer fires and it is unchanged", () => {
@@ -88,7 +89,7 @@ describe("scheduleRunCleanup", () => {
         try {
             const record = { workflow: {}, abort: new AbortController(), cleanupTimer: null };
             runs.set("run-evict", record);
-            scheduleRunCleanup("run-evict");
+            scheduleRunCleanup(runs, "run-evict");
             expect(captured).not.toBeNull();
             expect(captured.ms).toBe(60_000);
             expect(record.cleanupTimer).not.toBeNull();
@@ -111,7 +112,7 @@ describe("scheduleRunCleanup", () => {
         try {
             const original = { workflow: {}, abort: new AbortController(), cleanupTimer: null };
             runs.set("run-replaced", original);
-            scheduleRunCleanup("run-replaced");
+            scheduleRunCleanup(runs, "run-replaced");
             // A brand-new run reuses the id before the retention window elapses.
             const replacement = { workflow: {}, abort: new AbortController(), cleanupTimer: null };
             runs.set("run-replaced", replacement);
@@ -126,10 +127,10 @@ describe("scheduleRunCleanup", () => {
     test("scheduling twice clears the previous timer", () => {
         const record = { workflow: {}, abort: new AbortController(), cleanupTimer: null };
         runs.set("run-twice", record);
-        scheduleRunCleanup("run-twice");
+        scheduleRunCleanup(runs, "run-twice");
         const firstTimer = record.cleanupTimer;
         expect(firstTimer).not.toBeNull();
-        scheduleRunCleanup("run-twice");
+        scheduleRunCleanup(runs, "run-twice");
         expect(record.cleanupTimer).not.toBe(firstTimer);
         clearRunCleanupTimer(record);
         expect(record.cleanupTimer).toBeNull();

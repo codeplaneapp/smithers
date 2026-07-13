@@ -43,7 +43,6 @@ export * from "./gatewayRoutes/streamDevTools.js";
 export * from "./ServerOptions.js";
 export * from "./IntegrationsConfig.js";
 
-const runs = new Map();
 const SERVER_LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"]);
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_MAX_BODY_JSON_DEPTH = 32;
@@ -269,35 +268,37 @@ function clearRunCleanupTimer(record) {
     record.cleanupTimer = null;
 }
 /**
+ * @param {Map<string, RunRecord>} runRegistry
  * @param {string} runId
  */
-function scheduleRunCleanup(runId) {
-    const record = runs.get(runId);
+function scheduleRunCleanup(runRegistry, runId) {
+    const record = runRegistry.get(runId);
     if (!record)
         return;
     clearRunCleanupTimer(record);
     record.cleanupTimer = setTimeout(() => {
-        const current = runs.get(runId);
+        const current = runRegistry.get(runId);
         if (current === record) {
-            runs.delete(runId);
+            runRegistry.delete(runId);
         }
     }, COMPLETED_RUN_RETENTION_MS);
 }
 /**
+ * @param {Map<string, RunRecord>} runRegistry
  * @param {string} runId
  * @param {string} status
  * @param {boolean} hasServerDb
  */
-function finalizeRunRecord(runId, status, hasServerDb) {
+function finalizeRunRecord(runRegistry, runId, status, hasServerDb) {
     if (hasServerDb ||
         (status !== "waiting-approval" && status !== "waiting-timer")) {
         if (hasServerDb) {
-            const record = runs.get(runId);
+            const record = runRegistry.get(runId);
             clearRunCleanupTimer(record);
-            runs.delete(runId);
+            runRegistry.delete(runId);
             return;
         }
-        scheduleRunCleanup(runId);
+        scheduleRunCleanup(runRegistry, runId);
     }
 }
 /**
@@ -842,12 +843,12 @@ export const __serverTestInternals = {
     isSameDb,
     scheduleRunCleanup,
     clearRunCleanupTimer,
-    runs,
 };
 /**
  * @param {ServerOptions} [opts]
  */
 function startServerInternal(opts = {}) {
+    const runs = new Map();
     const port = opts.port ?? 7331;
     const host = opts.host ?? "127.0.0.1";
     const serverDb = opts.db ?? null;
@@ -1027,7 +1028,7 @@ function startServerInternal(opts = {}) {
                     onProgress: mirrorOnProgress,
                 }))
                     .then((result) => {
-                    finalizeRunRecord(result.runId, result.status, Boolean(serverDb));
+                    finalizeRunRecord(runs, result.runId, result.status, Boolean(serverDb));
                 })
                     .catch((err) => {
                     logError("server run execution failed", {
@@ -1105,7 +1106,7 @@ function startServerInternal(opts = {}) {
                     onProgress: mirrorOnProgress,
                 }))
                     .then((result) => {
-                    finalizeRunRecord(runId, result.status, Boolean(serverDb));
+                    finalizeRunRecord(runs, runId, result.status, Boolean(serverDb));
                 })
                     .catch((err) => {
                     logError("server resume execution failed", {
