@@ -1177,7 +1177,7 @@ export class BaseCliAgent {
                 const output = outputFileJson ?? tryParseJson(extractedText);
                 // Extract token usage from raw stdout before text extraction strips it.
                 // Each CLI harness embeds usage differently (NDJSON events, JSON stats, etc.)
-                const cliUsage = extractUsageFromOutput(stdout) ?? usageFromCompletedEvent(completedEvent);
+                const cliUsage = extractUsageFromOutput(result.stdout) ?? usageFromCompletedEvent(completedEvent);
                 const usage = cliUsage ? {
                     inputTokens: cliUsage.inputTokens,
                     inputTokenDetails: {
