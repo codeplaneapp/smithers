@@ -185,19 +185,28 @@ export function lockStatus(home, now = Date.now(), pidAlive = processIsAlive) {
 }
 export function statusSnapshot(home) {
   const path = statePath(home);
-  const before = existsSync(path) ? readFileSync(path, "utf8") : null;
+  let before = null;
+  try { before = readFileSync(path, "utf8"); } catch (error) { if (error.code !== "ENOENT") throw error; }
   const state = readState(home);
   const lock = lockStatus(home);
-  const after = existsSync(path) ? readFileSync(path, "utf8") : null;
-  return { state, lock, journalBefore: before, journalAfter: after };
+  let after = null;
+  try { after = readFileSync(path, "utf8"); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  return { state, lock, journalBefore: before, journalAfter: after, stable: before === after };
 }
 
 export async function readStatus(home, read) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const before = statusSnapshot(home);
-    const data = await read();
-    const after = statusSnapshot(home);
-    if (before.journalAfter === after.journalBefore) return { ...data, state: before.state, lock: after.lock, journalBefore: before.journalBefore, journalAfter: after.journalAfter };
+    try {
+      const before = statusSnapshot(home);
+      if (!before.stable) continue;
+      const data = await read();
+      const after = statusSnapshot(home);
+      if (before.stable && after.stable && before.journalAfter === after.journalBefore) {
+        return { ...data, state: after.state, lock: after.lock, journalBefore: before.journalBefore, journalAfter: after.journalAfter };
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
   }
   throw new Error("Routing journal changed while reading status; please retry.");
 }
@@ -345,7 +354,18 @@ async function main() {
   let releaseLock = () => {};
   try {
     await app.initialize();
-    if (args.action !== "status") releaseLock = withLock(app.codexHome);
+    if (args.action === "status") {
+      const status = await readStatus(app.codexHome, () => readConfig(app));
+      const data = status; const state = status.state; const lock = status.lock;
+      const stateClass = classifyState(data.user, data.effective, state); const compatible = compatibleVersion(version);
+      const pending = state?.phase?.startsWith("pending-") ? `\nPending recovery: ${state.phase} (not modified by --status)` : "";
+      const layer = data.effectiveLayer ? `\nEffective layer: ${data.effectiveLayer.type || "unknown"}${data.effectiveLayer.profile ? `/${data.effectiveLayer.profile}` : ""}` : "";
+      const lockText = lock.locked ? `\nOperation lock: ${lock.path} (${lock.stale ? "stale; reclaimable" : "active"})` : "";
+      printEffectiveFields(data);
+      console.log(`Codex: ${version}\nConfig: ${app.configPath}\nNative policy: ${stateClass}${layer}${pending}${lockText}\nClient compatibility: ${compatible ? "compatible" : "incompatible (requires Codex >= 0.144)"}`);
+      return args.requireEffective && (stateClass !== "installed" || !compatible) ? 1 : 0;
+    }
+    releaseLock = withLock(app.codexHome);
     let data = await readConfig(app); let state = readState(app.codexHome);
     if (state && resolve(state.configPath) !== resolve(app.configPath)) throw new Error("Routing state belongs to a different Codex config file");
     let completedDisableRecovery = false;
@@ -357,17 +377,6 @@ async function main() {
       else if (recovered.action !== "none") writeState(app.codexHome, recovered.state);
       state = recovered.state;
       if (recovered.action !== "none") data = await readConfig(app);
-    }
-    if (args.action === "status") {
-      const status = await readStatus(app.codexHome, () => readConfig(app));
-      data = status; state = status.state; const lock = status.lock;
-      const stateClass = classifyState(data.user, data.effective, state); const compatible = compatibleVersion(version);
-      const pending = state?.phase?.startsWith("pending-") ? `\nPending recovery: ${state.phase} (not modified by --status)` : "";
-      const layer = data.effectiveLayer ? `\nEffective layer: ${data.effectiveLayer.type || "unknown"}${data.effectiveLayer.profile ? `/${data.effectiveLayer.profile}` : ""}` : "";
-      const lockText = lock.locked ? `\nOperation lock: ${lock.path} (${lock.stale ? "stale; reclaimable" : "active"})` : "";
-      printEffectiveFields(data);
-      console.log(`Codex: ${version}\nConfig: ${app.configPath}\nNative policy: ${stateClass}${layer}${pending}${lockText}\nClient compatibility: ${compatible ? "compatible" : "incompatible (requires Codex >= 0.144)"}`);
-      return args.requireEffective && (stateClass !== "installed" || !compatible) ? 1 : 0;
     }
     const stateClass = classifyState(data.user, data.effective, state); const compatible = compatibleVersion(version);
     if (args.action !== "disable" && !compatible) throw new Error(`Codex ${version} is incompatible; requires Codex >= 0.144`);

@@ -130,9 +130,13 @@ describe("Codex routing pure logic", () => {
       mkdirSync(lock);
       writeFileSync(`${lock}/owner`, JSON.stringify({ pid: process.pid, createdAt: Date.now(), nonce: "live-owner" }));
       let readStarted;
+      let reads = 0;
       const started = new Promise((resolve) => { readStarted = resolve; });
       const statusPromise = readStatus(home, async () => {
+        reads += 1;
         readStarted();
+        if (reads === 1) writeFileSync(`${home}/.smithers-codex-routing.json`, `${JSON.stringify({ ...pending, marker: "interleaved" }, null, 2)}\n`);
+        else writeFileSync(`${home}/.smithers-codex-routing.json`, before);
         await Promise.resolve();
         return { user: {}, effective: {}, effectiveLayerByField: {} };
       });
@@ -143,7 +147,8 @@ describe("Codex routing pure logic", () => {
       expect(status.lock.stale).toBe(false);
       expect(status.state).toEqual(pending);
       expect(classifyState(status.user, status.effective, status.state)).toBe("drifted");
-      expect(interleaved.journalBefore).toBe(before);
+      expect(reads).toBeGreaterThan(1);
+      expect(interleaved.journalBefore).toContain('"marker": "interleaved"');
       expect(status.journalAfter).toBe(before);
       expect(readFileSync(`${home}/.smithers-codex-routing.json`, "utf8")).toBe(before);
     } finally { rmSync(home, { recursive: true, force: true }); }
@@ -193,11 +198,12 @@ describe("Codex routing pure logic", () => {
     let persisted = pending;
     let userConfig = config("old policy", "old policy");
     const writes = [];
-    const writeBatch = async (edits, expectedVersion) => {
-      writes.push({ edits, expectedVersion });
+    const writeBatch = async (edits, expectedVersion, options) => {
+      writes.push({ edits, expectedVersion, options });
       userConfig = config(edits[0].value, edits[1].value);
       if (writes.length === 1) return { status: "ok", version: "after-write" };
-      return { status: "ok", version: "rolled-back" };
+      expect(options).toEqual({ allowOverridden: true });
+      return { status: "okOverridden", version: "rolled-back" };
     };
     await expect(executeInstallTransition({
       nextState: pending,
@@ -212,8 +218,8 @@ describe("Codex routing pure logic", () => {
       classify: classifyState,
     })).rejects.toThrow("Effective installation validation failed");
     expect(writes).toHaveLength(2);
-    expect(writes[0]).toEqual({ edits: makeEdits(pending.pending.to), expectedVersion: "before-write" });
-    expect(writes[1]).toEqual({ edits: makeEdits(pending.pending.from), expectedVersion: "after-write" });
+    expect(writes[0]).toEqual({ edits: makeEdits(pending.pending.to), expectedVersion: "before-write", options: undefined });
+    expect(writes[1]).toEqual({ edits: makeEdits(pending.pending.from), expectedVersion: "after-write", options: { allowOverridden: true } });
     expect(userConfig).toEqual(config("old policy", "old policy"));
     expect(persisted).toEqual(JSON.parse(JSON.stringify({ ...pending, phase: "committed", managed: { ...pending.pending.from }, pending: undefined })));
     expect(recoverPendingState(persisted, currentFields(userConfig), currentFields(userConfig)).action).toBe("none");
@@ -240,7 +246,15 @@ describe("Codex routing pure logic", () => {
       writePending: (state) => { events.push("journal"); persisted = JSON.parse(JSON.stringify(state)); },
       writeCommitted: (state) => { persisted = JSON.parse(JSON.stringify(state)); },
       removePending: () => { persisted = null; },
-      writeBatch: async (...args) => { events.push(["write", persisted]); const error = new Error("Unexpected config write status: error"); throw error; },
+      writeBatch: async (edits, expectedVersion, options) => {
+        events.push(["write", persisted, edits, expectedVersion, options]);
+        expect(edits).toEqual(makeEdits(transition.target));
+        expect(expectedVersion).toBe("stale-version");
+        expect(options).toBeUndefined();
+        const error = new Error("Unexpected config write status: error");
+        error.writeResult = { status: "error", version: undefined };
+        throw error;
+      },
       read: async () => ({ user: config("old policy", "old policy"), effective: config("old policy", "old policy") }),
       classify: classifyState,
     })).rejects.toThrow("Unexpected config write status");
