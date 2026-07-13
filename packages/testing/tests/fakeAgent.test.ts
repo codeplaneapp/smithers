@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
@@ -56,6 +58,128 @@ describe("fakeAgent", () => {
 
       await expect(readFile(join(dir, "src/result.ts"), "utf8")).resolves.toBe("export const result = true;\n");
     } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects file paths through a symlinked directory", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "smithers-testing-"));
+    const root = join(dir, "root");
+    const outside = join(dir, "outside");
+    try {
+      await mkdir(root);
+      await mkdir(outside);
+      await symlink(outside, join(root, "link"), "dir");
+      const agent = fakeAgent(resultSchema, {
+        output: { summary: "wrote", passed: true },
+        files: { "link/escaped.txt": "escaped" },
+      });
+
+      await expect(agent.generate({ rootDir: root })).rejects.toThrow("must stay inside rootDir");
+      await expect(readFile(join(outside, "escaped.txt"), "utf8")).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a symlink used as the final file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "smithers-testing-"));
+    const root = join(dir, "root");
+    const outside = join(dir, "outside.txt");
+    try {
+      await mkdir(root);
+      await writeFile(outside, "original");
+      await symlink(outside, join(root, "result.txt"), "file");
+      const agent = fakeAgent(resultSchema, {
+        output: { summary: "wrote", passed: true },
+        files: { "result.txt": "overwritten" },
+      });
+
+      await expect(agent.generate({ rootDir: root })).rejects.toThrow("must stay inside rootDir");
+      await expect(readFile(outside, "utf8")).resolves.toBe("original");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not follow an ancestor swapped to a symlink while writing", async () => {
+    if (process.platform === "win32") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "smithers-testing-"));
+    const root = join(dir, "root");
+    const outside = join(dir, "outside");
+    const outsideFile = join(outside, "escaped.txt");
+    let swapper: ReturnType<typeof spawn> | undefined;
+    try {
+      await mkdir(join(root, "link"), { recursive: true });
+      await mkdir(outside);
+      await writeFile(outsideFile, "original");
+
+      const swapScript = String.raw`
+        const { existsSync, lstatSync, renameSync, symlinkSync, unlinkSync } = require("node:fs");
+        const { join } = require("node:path");
+        const { performance } = require("node:perf_hooks");
+        const [root, outside] = process.argv.slice(1);
+        const link = join(root, "link");
+        const held = join(root, "held");
+        const pause = () => {
+          const end = performance.now() + 0.1;
+          while (performance.now() < end) {}
+        };
+        process.stdout.write("ready\n");
+        while (true) {
+          try {
+            renameSync(link, held);
+            symlinkSync(outside, link, "dir");
+            pause();
+            unlinkSync(link);
+            renameSync(held, link);
+            pause();
+          } catch {
+            try {
+              if (existsSync(link) && lstatSync(link).isSymbolicLink()) unlinkSync(link);
+            } catch {}
+            try {
+              if (!existsSync(link) && existsSync(held)) renameSync(held, link);
+            } catch {}
+          }
+        }
+      `;
+      swapper = spawn(process.execPath, ["-e", swapScript, root, outside], {
+        stdio: ["ignore", "pipe", "inherit"],
+      });
+      await Promise.race([
+        once(swapper.stdout!, "data"),
+        once(swapper, "exit").then(([code]) => {
+          throw new Error(`symlink swapper exited before starting (${code})`);
+        }),
+      ]);
+
+      const agent = fakeAgent(resultSchema, {
+        output: { summary: "wrote", passed: true },
+        files: { "link/escaped.txt": "escaped" },
+      });
+      let writes = 0;
+      let rejections = 0;
+      for (let attempt = 0; attempt < 500; attempt += 1) {
+        try {
+          await agent.generate({ rootDir: root });
+          writes += 1;
+        } catch {
+          // A swap that is observed during path resolution must fail closed.
+          rejections += 1;
+        }
+      }
+
+      expect(writes).toBeGreaterThan(0);
+      expect(rejections).toBeGreaterThan(0);
+      await expect(readFile(outsideFile, "utf8")).resolves.toBe("original");
+    } finally {
+      if (swapper && swapper.exitCode === null && swapper.signalCode === null) {
+        const exited = once(swapper, "exit");
+        swapper.kill();
+        await exited;
+      }
       await rm(dir, { recursive: true, force: true });
     }
   });

@@ -38,6 +38,7 @@
     "@smithers-orchestrator/react-reconciler": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
     "effect": "3.21.4",
+    "koffi": "^2.16.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
