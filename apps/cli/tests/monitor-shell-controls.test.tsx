@@ -8,19 +8,18 @@
  * convention) driving the monitor's own shell components — no mocking of the
  * unit under test. The DOM must exist before radix-ui loads (it decides
  * whether layout effects run at module-load time), so registration happens
- * first and everything DOM-dependent is imported dynamically after it.
+ * first and everything DOM-dependent is imported dynamically after it. The
+ * package test script runs this file in its own Bun process so earlier React
+ * imports cannot poison that ordering and happy-dom cannot leak into CLI tests.
  */
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 
 // happy-dom replaces fetch with a node:http one; keep bun's native fetch so
 // unrelated network-using tests in the same process stay on the real stack.
 const nativeFetch = globalThis.fetch;
-try {
-  GlobalRegistrator.register();
-} catch {
-  /* already registered by another test file in this process */
-}
+const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+GlobalRegistrator.register();
 globalThis.fetch = nativeFetch;
 
 const { act } = await import("react");
@@ -36,6 +35,19 @@ const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRail
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
+
+afterAll(async () => {
+  try {
+    await GlobalRegistrator.unregister();
+  } finally {
+    globalThis.fetch = nativeFetch;
+    if (previousReactActEnvironment === undefined) {
+      delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    } else {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previousReactActEnvironment;
+    }
+  }
+});
 
 afterEach(async () => {
   if (root) {

@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, symlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
-import { bundleGatewayUiEntry } from "../../../packages/server/src/gatewayUi/bundle.js";
 
 const ROOT = resolve(import.meta.dir, "../../..");
+const BUNDLE_FIXTURE = resolve(import.meta.dir, "fixtures/bundle-gateway-ui-entries.js");
 const FORMER = ["vcs","implement","research-plan-implement","review","plan","research","ticket-create","tickets-create","ralph","improve-test-coverage","debug","grill-me","feature-enum","audit","mission","workflow-skill","kanban","hello","context-engineer","route-task","extract-skill","triage-run","context-doctor","backpressure-plan","eval-author","report-slideshow","smithering","delegation-chain","make-workflow-tutorial"];
 
 test("former init workflows remain represented as documented copyable examples", () => {
@@ -73,27 +74,34 @@ test(
 
 test(
   "every former init workflow's declared UI bundles for real (compiled, not mocked)",
-  async () => {
+  () => {
     // The real Gateway UI bundler (packages/server/src/gatewayUi/bundle.js) —
     // the same Bun.build path the live gateway uses to serve each workflow's
     // <UI>, including its workspace-package resolution for @tanstack/* and
     // smithers-orchestrator/gateway-react. A hand-rolled Bun.build call here
     // would miss that resolution and false-fail on every UI.
-    const cache = new Map();
-    const failures = [];
+    // Run it in one clean Bun child, matching the live Gateway process. Bun's
+    // in-process test module graph may already contain another workflow UI;
+    // feeding that graph back into Bun.build makes every build fail before it
+    // can exercise production resolution.
+    const entries = [];
     for (const id of FORMER) {
       const source = readFileSync(resolve(ROOT, "examples/init-pack", `${id}.tsx`), "utf8");
       const uiMatch = source.match(/<UI entry="(\.\.\/ui\/[^"]+)"/);
       expect(uiMatch, `${id}: no <UI entry=...> declaration to prove UI closure for`).toBeTruthy();
       const uiEntry = resolve(ROOT, "examples/init-pack", uiMatch[1]);
       expect(existsSync(uiEntry), `${id}: declared UI entry ${uiMatch[1]} is missing from examples/ui`).toBe(true);
-      try {
-        await bundleGatewayUiEntry({ entry: uiEntry }, cache);
-      } catch (error) {
-        failures.push(`${id}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      entries.push(uiEntry);
     }
-    expect(failures).toEqual([]);
+    const bundled = spawnSync(process.execPath, ["run", BUNDLE_FIXTURE, JSON.stringify(entries)], {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    expect(bundled.status, bundled.stderr || bundled.error?.message || bundled.stdout).toBe(0);
+    const result = JSON.parse(bundled.stdout);
+    expect(result.map((entry) => entry.entry)).toEqual(entries);
+    expect(result.every((entry) => entry.bytes > 0)).toBe(true);
   },
   120_000,
 );
