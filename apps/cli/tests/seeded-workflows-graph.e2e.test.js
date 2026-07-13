@@ -55,6 +55,7 @@ test("every seeded init-pack workflow renders its graph without a load-time erro
     "create-skill.tsx",
     "create-workflow.tsx",
     "docs-driven-development.tsx",
+    "eval-suite-run.tsx",
     "init.tsx",
     "post-failure.tsx",
     "upgrade.tsx",
