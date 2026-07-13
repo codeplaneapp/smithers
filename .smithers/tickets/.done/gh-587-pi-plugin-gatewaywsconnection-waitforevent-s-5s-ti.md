@@ -12,3 +12,6 @@ A gateway (or middlebox) that accepts the WebSocket but never sends any frame ma
 The timeout should bound the whole wait, e.g. `Promise.race` of `nextEvent()` against a deadline timer (cleaning up the waiter on timeout), so a silent gateway surfaces `PI_GATEWAY_TIMEOUT` after 5s and the store's reconnect/backoff path engages.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in e8c87798775dc86165c4c7826192c45bff5f34e7.
