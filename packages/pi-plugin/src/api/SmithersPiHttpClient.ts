@@ -59,7 +59,16 @@ export class SmithersPiHttpClient {
       headers: buildHeaders(this, false),
     });
     if (!res.ok || !res.body) {
-      return;
+      const text = await res.text().catch(() => "");
+      throw new SmithersError(
+        "PI_HTTP_ERROR",
+        `Smithers HTTP ${res.status}${text ? `: ${text}` : ""}`,
+        {
+          baseUrl: this.baseUrl,
+          path,
+          status: res.status,
+        },
+      );
     }
 
     const reader = res.body.getReader();

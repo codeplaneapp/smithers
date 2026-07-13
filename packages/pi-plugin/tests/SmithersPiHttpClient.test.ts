@@ -56,6 +56,49 @@ function sseFrame(payload: string): string {
 }
 
 describe("SmithersPiHttpClient.events", () => {
+  test("throws a SmithersError with HTTP context on non-ok responses", async () => {
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 401,
+      body: null,
+      text: async () => "invalid api key",
+    })) as typeof fetch;
+
+    const client = new SmithersPiHttpClient({ baseUrl: "http://example" });
+
+    await expect(client.events("/stream").next()).rejects.toMatchObject({
+      name: "SmithersError",
+      code: "PI_HTTP_ERROR",
+      summary: "Smithers HTTP 401: invalid api key",
+      details: {
+        baseUrl: "http://example",
+        path: "/stream",
+        status: 401,
+      },
+    });
+  });
+
+  test("throws PI_HTTP_ERROR when an ok response has no stream body", async () => {
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      body: null,
+      text: async () => "",
+    })) as typeof fetch;
+
+    const client = new SmithersPiHttpClient({ baseUrl: "http://example" });
+
+    await expect(client.events("/stream").next()).rejects.toMatchObject({
+      code: "PI_HTTP_ERROR",
+      summary: "Smithers HTTP 200",
+      details: {
+        baseUrl: "http://example",
+        path: "/stream",
+        status: 200,
+      },
+    });
+  });
+
   test("skips malformed data frames instead of throwing out of the generator", async () => {
     const { res } = streamResponse([
       sseFrame(JSON.stringify({ n: 1 })),
