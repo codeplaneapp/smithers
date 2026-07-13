@@ -1,7 +1,8 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createMemoryStore } from "../src/store/index.js";
 import { TtlGarbageCollector, TokenLimiter, Summarizer, } from "../src/processors.js";
@@ -149,6 +150,37 @@ describe("Summarizer", () => {
         const summarizer = Summarizer(mockAgent);
         // Should not throw
         await summarizer.process(store);
+    });
+    test("wraps agent failures as SmithersError", async () => {
+        const sqlite = new Database(":memory:");
+        const db = drizzle(sqlite);
+        ensureSmithersTables(db);
+        const store = createMemoryStore(db);
+        const thread = await store.createThread(WF_NS);
+        for (const [index, role] of [
+            [1, "user"],
+            [2, "assistant"],
+            [3, "user"],
+        ]) {
+            await store.saveMessage({
+                id: `msg-${index}`,
+                threadId: thread.threadId,
+                role,
+                contentJson: JSON.stringify("message"),
+                createdAtMs: index,
+            });
+        }
+
+        const failure = new Error("agent unavailable");
+        const summarizer = Summarizer({ run: async () => { throw failure; } });
+        const exit = await Effect.runPromiseExit(summarizer.processEffect(store));
+        const failureOption = Cause.failureOption(exit.cause);
+        expect(failureOption._tag).toBe("Some");
+        const error = failureOption.value;
+
+        expect(error).toBeInstanceOf(SmithersError);
+        expect(error.code).toBe("INTERNAL_ERROR");
+        expect(error.cause).toBe(failure);
     });
     test("summarizes old messages with the agent and preserves recent messages", async () => {
         const sqlite = new Database(":memory:");

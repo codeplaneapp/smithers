@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 /** @typedef {import("./MemoryProcessor.ts").MemoryProcessor} MemoryProcessor */
 /** @typedef {import("./store/MemoryStore.ts").MemoryStore} MemoryStore */
 /** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
@@ -70,7 +71,10 @@ export function Summarizer(agent) {
                     "",
                     oldMessages.map(renderMessage).join("\n"),
                 ].join("\n");
-                const result = yield* Effect.tryPromise(() => agent.run(prompt));
+                const result = yield* Effect.tryPromise({
+                    try: () => agent.run(prompt),
+                    catch: (cause) => toSmithersError(cause, "memory summarizer agent.run"),
+                });
                 const summary = extractSummary(result);
                 // Save the summary BEFORE deleting the old messages so there is no
                 // data-loss window: if the summary write fails the originals are
