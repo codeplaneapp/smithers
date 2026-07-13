@@ -34,3 +34,6 @@ Classify cancellation from explicit signal state and recognized abort identities
 ## Dedupe notes
 
 #580, #683, and #705 cover different genuine-abort lifecycle bugs.
+
+
+> Closed by ticket-fleet: landed on main in 4832514082210f99ae3cd4a460283364e19d8b13.
