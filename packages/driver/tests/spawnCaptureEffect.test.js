@@ -162,7 +162,7 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
     });
   });
 
-  test("idle timeout fires with PROCESS_IDLE_TIMEOUT", async () => {
+  test("idle timeout fires with PROCESS_IDLE_TIMEOUT", { timeout: 10_000 }, async () => {
     await expect(
       run(
         "node",
@@ -170,10 +170,13 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
           "-e",
           "process.stdout.write('hi'); setTimeout(()=>{}, 10_000)",
         ],
-        { idleTimeoutMs: 150 },
+        { idleTimeoutMs: 1_000 },
       ),
     ).rejects.toMatchObject({
       code: "PROCESS_IDLE_TIMEOUT",
+      message: expect.stringContaining(
+        `CLI idle timed out after ${process.versions.bun ? 5_000 : 1_000}ms`,
+      ),
     });
   });
 

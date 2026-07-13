@@ -177,7 +177,7 @@ export function spawnCaptureEffect(command, args, options) {
                     if (generation !== idleGeneration) {
                         return;
                     }
-                    kill(`CLI idle timed out after ${idleTimeoutMs}ms`, "PROCESS_IDLE_TIMEOUT");
+                    kill(`CLI idle timed out after ${effectiveIdleTimeoutMs}ms`, "PROCESS_IDLE_TIMEOUT");
                 }, effectiveIdleTimeoutMs);
             }
         };
