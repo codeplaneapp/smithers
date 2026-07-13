@@ -12,3 +12,6 @@ A press one hour after the prompt yields a `decidedAt` one hour in the past, cor
 Use the press time. Telegram does not put one on `callback_query`, so the honest value is the delivery `receivedAtMs` or the resolution wall clock — or rename/document the field as "prompt sent at".
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in f1c10c616fb18add322da5939ab275ee87ae614e.
