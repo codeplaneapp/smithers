@@ -33,3 +33,6 @@ Resolve and verify each existing ancestor under the real root, reject symlink co
 ## Dedupe notes
 
 #729 and #728 are different fakeAgent/simulation defects.
+
+
+> Closed by ticket-fleet: landed on main in 792bb5bf602ba04ad359e3ce5b7d3e16f2284f46.
