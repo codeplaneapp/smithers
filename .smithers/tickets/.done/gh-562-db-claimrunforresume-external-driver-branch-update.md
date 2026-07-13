@@ -12,3 +12,6 @@ No `claimed_at_ms`/`claimed_by` columns exist anywhere: `internal-schema.js` def
 The branch should set `runtime_owner_id`/`heartbeat_at_ms` like the other two, or the schema should actually define the claimed_* columns.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 2cc4fd13e984038405fc9c7ad8974cc041a21978.
