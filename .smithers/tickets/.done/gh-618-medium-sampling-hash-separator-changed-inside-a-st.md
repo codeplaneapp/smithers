@@ -28,3 +28,6 @@ Confirmed via `git show 2a94e790a4^:` vs `2a94e790a4:` that this is the only sub
 
 ---
 *Found in the pre-0.28.0 review of `v0.27.0..HEAD` (@0ed2c28710), adversarially verified against the code. Part of the `pre-0.28-review` batch.*
+
+
+> Closed by ticket-fleet: landed on main in 36434bd0f052de2a479464a63be4267e91008756.
