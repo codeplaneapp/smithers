@@ -182,7 +182,7 @@ describe("createSmithers", () => {
     }
   });
 
-  test("reuses hot APIs and rejects hot schema changes", () => {
+  test("rebuilds equivalent hot APIs around the cached database and rejects DDL changes", () => {
     process.env.SMITHERS_HOT = "1";
     const dbPath = makeDbPath("smithers-hot-");
     const schema = { result: z.object({ value: z.string() }) };
@@ -196,7 +196,8 @@ describe("createSmithers", () => {
           alertPolicy: { defaults: { labels: { module: "second" } } },
         },
       );
-      expect(second).toBe(first);
+      expect(second).not.toBe(first);
+      expect(second.db).toBe(first.db);
 
       const workflow = second.smithers(() =>
         React.createElement(second.Workflow, { name: "hot" }),
@@ -206,6 +207,142 @@ describe("createSmithers", () => {
       expect(() =>
         createSmithers({ result: z.object({ value: z.number() }) }, { dbPath }),
       ).toThrow("Schema change detected");
+    } finally {
+      closeApi(first);
+    }
+  });
+
+  test("refreshes hot validators when non-DDL schema semantics change", () => {
+    process.env.SMITHERS_HOT = "1";
+
+    const refinementDbPath = makeDbPath("smithers-hot-refinement-");
+    const firstRefinement = createSmithers(
+      { result: z.object({ value: z.string().min(1) }) },
+      { dbPath: refinementDbPath },
+    );
+    let firstDefault;
+    try {
+      const secondRefinement = createSmithers(
+        { result: z.object({ value: z.string().min(5) }) },
+        { dbPath: refinementDbPath },
+      );
+      expect(secondRefinement).not.toBe(firstRefinement);
+      expect(secondRefinement.outputs.result.safeParse({ value: "x" }).success).toBe(false);
+      expect(secondRefinement.outputs.result.safeParse({ value: "valid" }).success).toBe(true);
+
+      const defaultDbPath = makeDbPath("smithers-hot-default-");
+      firstDefault = createSmithers(
+        { result: z.object({ value: z.string().default("first") }) },
+        { dbPath: defaultDbPath },
+      );
+      const secondDefault = createSmithers(
+        { result: z.object({ value: z.string().default("second") }) },
+        { dbPath: defaultDbPath },
+      );
+      expect(secondDefault).not.toBe(firstDefault);
+      expect(secondDefault.outputs.result.parse({})).toEqual({ value: "second" });
+    } finally {
+      closeApi(firstRefinement);
+      if (firstDefault) closeApi(firstDefault);
+    }
+  });
+
+  test("refreshes hot transforms that cannot be fingerprinted", () => {
+    process.env.SMITHERS_HOT = "1";
+    const dbPath = makeDbPath("smithers-hot-transform-");
+    const first = createSmithers(
+      { result: z.object({ value: z.string().transform((value) => value.toUpperCase()) }) },
+      { dbPath },
+    );
+
+    try {
+      const second = createSmithers(
+        { result: z.object({ value: z.string().transform((value) => value.toLowerCase()) }) },
+        { dbPath },
+      );
+      expect(second.outputs.result.parse({ value: "MiXeD" })).toEqual({ value: "mixed" });
+    } finally {
+      closeApi(first);
+    }
+  });
+
+  test("refreshes hot object policies that share the same JSON Schema", () => {
+    process.env.SMITHERS_HOT = "1";
+    const dbPath = makeDbPath("smithers-hot-object-policy-");
+    const first = createSmithers(
+      { result: z.object({ value: z.string() }).strip() },
+      { dbPath },
+    );
+
+    try {
+      expect(first.outputs.result.parse({ value: "ok", extra: true })).toEqual({ value: "ok" });
+
+      const second = createSmithers(
+        { result: z.object({ value: z.string() }).strict() },
+        { dbPath },
+      );
+      expect(second.outputs.result.safeParse({ value: "ok", extra: true }).success).toBe(false);
+    } finally {
+      closeApi(first);
+    }
+  });
+
+  test("refreshes exact optional semantics that share the same JSON Schema", () => {
+    process.env.SMITHERS_HOT = "1";
+    const dbPath = makeDbPath("smithers-hot-exact-optional-");
+    const first = createSmithers(
+      { result: z.object({ value: z.string().optional() }) },
+      { dbPath },
+    );
+
+    try {
+      expect(first.outputs.result.safeParse({ value: undefined }).success).toBe(true);
+
+      const second = createSmithers(
+        { result: z.object({ value: z.string().exactOptional() }) },
+        { dbPath },
+      );
+      expect(second.outputs.result.safeParse({ value: undefined }).success).toBe(false);
+    } finally {
+      closeApi(first);
+    }
+  });
+
+  test("does not execute default factories while refreshing hot validators", () => {
+    process.env.SMITHERS_HOT = "1";
+    const dbPath = makeDbPath("smithers-hot-default-factory-");
+    let firstCalls = 0;
+    let secondCalls = 0;
+    const first = createSmithers(
+      {
+        result: z.object({
+          value: z.string().default(() => {
+            firstCalls += 1;
+            return "first";
+          }),
+        }),
+      },
+      { dbPath },
+    );
+
+    try {
+      expect(firstCalls).toBe(0);
+      const second = createSmithers(
+        {
+          result: z.object({
+            value: z.string().default(() => {
+              secondCalls += 1;
+              return "second";
+            }),
+          }),
+        },
+        { dbPath },
+      );
+      expect(firstCalls).toBe(0);
+      expect(secondCalls).toBe(0);
+      expect(second.outputs.result.parse({})).toEqual({ value: "second" });
+      expect(firstCalls).toBe(0);
+      expect(secondCalls).toBe(1);
     } finally {
       closeApi(first);
     }

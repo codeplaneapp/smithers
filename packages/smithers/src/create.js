@@ -205,7 +205,7 @@ function buildSmithersApi(config) {
     const { db, tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas, opts, inputSchema } = config;
     const { SmithersContext: RuntimeSmithersContext, useCtx } = createSmithersContext();
     const ctxRef = { current: null };
-    let moduleAlertPolicy = opts?.alertPolicy;
+    const moduleAlertPolicy = opts?.alertPolicy;
     /**
    * @param {WorkflowProps} props
    */
@@ -287,12 +287,6 @@ function buildSmithersApi(config) {
             ambiguousZodSchemas,
         };
     }
-    /**
-   * @param {SmithersAlertPolicy} [alertPolicy]
-   */
-    const setModuleAlertPolicy = (alertPolicy) => {
-        moduleAlertPolicy = alertPolicy;
-    };
     const api = {
         Workflow,
         Approval,
@@ -317,7 +311,7 @@ function buildSmithersApi(config) {
         tables,
         outputs,
     };
-    return { api, setModuleAlertPolicy };
+    return { api };
 }
 /**
  * Schema-driven API — users define only Zod schemas, the framework owns the entire storage layer.
@@ -370,8 +364,26 @@ export function createSmithers(schemas, opts) {
             if (cached.schemaSig !== sig) {
                 throw new SmithersError("SCHEMA_CHANGE_HOT", "[smithers hot] Schema change detected; restart required to apply schema changes.");
             }
-            cached.setModuleAlertPolicy(opts?.alertPolicy);
-            return cached.api;
+            // SQL DDL is safe to compare, but Zod supports semantic behavior
+            // that has no stable, side-effect-free fingerprint. Rebuild the API
+            // around the cached database so every hot import uses its current
+            // validators, defaults, transforms, metadata, and object policy.
+            const { tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas } = prepareSmithersTables(schemas);
+            const { api } = buildSmithersApi({
+                db: cached.api.db,
+                tables,
+                schemaRegistry,
+                outputs,
+                zodToKeyName,
+                ambiguousZodSchemas,
+                opts,
+                inputSchema: schemas.input,
+            });
+            hotCache.set(absDbPath, {
+                api,
+                schemaSig: sig,
+            });
+            return api;
         }
         // Will cache after creating the API below
     }
@@ -434,7 +446,7 @@ export function createSmithers(schemas, opts) {
     // 4. Create Drizzle instance with all tables in the schema
     const db = drizzle(sqlite, { schema: drizzleSchema });
     // 5. Build the public API around the prepared db + table metadata.
-    const { api, setModuleAlertPolicy } = buildSmithersApi({
+    const { api } = buildSmithersApi({
         db,
         tables,
         schemaRegistry,
@@ -449,7 +461,6 @@ export function createSmithers(schemas, opts) {
         hotCache.set(absDbPath, {
             api: api,
             schemaSig: sig,
-            setModuleAlertPolicy,
         });
     }
     return api;
