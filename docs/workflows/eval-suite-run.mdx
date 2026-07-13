@@ -4,7 +4,7 @@ description: Hidden system workflow that fans a saved eval suite's dataset out a
 ---
 
 `eval-suite-run` is a hidden system workflow launched by the `evals` gateway
-extension's client — it is what "Run" does for a saved eval suite. It is not
+extension's client: it is what "Run" does for a saved eval suite. It is not
 meant to be authored by hand; every `smithers gateway` registers it (it ships
 in the global seeded pack), backed by suites saved through
 `ext.evals.saveSuite`.
@@ -13,19 +13,19 @@ in the global seeded pack), backed by suites saved through
 
 Given `{ suiteId }`, the workflow:
 
-1. **`plan`** — reads the saved suite (name, target `workflowKey`, and its
+1. **`plan`** reads the saved suite (name, target `workflowKey`, and its
    parsed dataset of cases) and seeds one `queued` row per case in the
    workspace DB up front, so a live results table has something to render
    from the moment the run starts.
-2. **`cases`** — a `<Parallel>` fan-out with one `<Task>` per dataset case.
+2. **`cases`** is a `<Parallel>` fan-out with one `<Task>` per dataset case.
    Each case launches its OWN real, separately-addressable child workflow run
    (the suite's target workflow, given that case's `input`) via
-   `executeChildWorkflow` with an explicit, collision-free run id — so a
+   `executeChildWorkflow` with an explicit, collision-free run id, so a
    parent resume never re-launches a case that already ran. The task never
    throws: a failed or errored child run is *graded*, not fatal, which is
    what lets its attached scorer (`eval-assertions`) always fire and record a
    real score.
-3. **`verdict`** — rolls every case's pass/fail into `{ pass, paragraph }`,
+3. **`verdict`** rolls every case's pass/fail into `{ pass, paragraph }`,
    the same verifier-output contract every delegated run's settle path
    strict-parses.
 
@@ -34,16 +34,16 @@ Given `{ suiteId }`, the workflow:
 A case's `expected` value (from the authored dataset) is graded one of two
 ways:
 
-- **Assertion spec** — `expected` is absent, or an object whose keys are only
+- **Assertion spec**: `expected` is absent, or an object whose keys are only
   `status` / `output` / `outputContains` / `errorContains` (the same spec
-  `smithers eval` has always supported).
-- **Expected output** — any other `expected` value is treated as the
+  `bunx smithers-orchestrator eval` has always supported).
+- **Expected output**: any other `expected` value is treated as the
   literal/subset expected output: objects and arrays match by subset,
-  everything else by deep equality — plus the implicit "the case run
+  everything else by deep equality, plus the implicit "the case run
   finished" assertion.
 
 **Target workflow requirement for output-value grading:** a case's `actual`
-comes from the target workflow's *designated* output (`RunResult.output` —
+comes from the target workflow's *designated* output (`RunResult.output`,
 the same mechanism `<Subflow>` relies on for its child result), which
 requires either a schema key literally named `output` in the target
 workflow's `createSmithers({...})` call, or an explicit
@@ -60,7 +60,7 @@ bunx smithers-orchestrator workflow run eval-suite-run \
   --input '{"suiteId":"<suite-id>","maxConcurrency":4}'
 ```
 
-`maxConcurrency` (1–16, default 4) caps how many cases run at once.
+`maxConcurrency` (1-16, default 4) caps how many cases run at once.
 
 Like other system workflows, `eval-suite-run` is hidden from default workflow
 listings but remains available with `workflow list --system` and explicit

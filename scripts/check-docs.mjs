@@ -3378,7 +3378,7 @@ function checkMcpToolsetDocsMatchPackageSurface() {
     [MCP_CREATE_TOOLSET_SOURCE, "tools[`${prefix}${mcpTool.name}`]"],
     [MCP_CREATE_TOOLSET_SOURCE, "dynamicTool({"],
     [MCP_CREATE_TOOLSET_SOURCE, "jsonSchema("],
-    [MCP_CREATE_TOOLSET_SOURCE, "const result = await client.callTool({"],
+    [MCP_CREATE_TOOLSET_SOURCE, "const result = await client.callTool("],
     [MCP_CREATE_TOOLSET_SOURCE, "return { error: true, message: text ||"],
     [MCP_CREATE_TOOLSET_SOURCE, "return result.structuredContent ?? text;"],
     [MCP_SERVER_CONFIG_SOURCE, "export type McpServerConfig ="],
