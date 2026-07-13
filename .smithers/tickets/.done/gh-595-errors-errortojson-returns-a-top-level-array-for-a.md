@@ -12,3 +12,6 @@ Effect failures (and `throw`) can carry arbitrary values, including arrays (e.g.
 Wrap non-record objects, e.g. arrays become `{ message: <stringified>, value: [...] }` (or similar), so the declared return type is always true. Alternatively, if array pass-through is desired, fix the declared type — but the durable write path suggests normalizing to a record is the right call.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 82240a06e0e148fa9325c28a828fb5948e9f7281.
