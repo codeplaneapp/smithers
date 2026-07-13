@@ -426,6 +426,18 @@ describe("withCommitRange defensive probe failure", () => {
 		expect(result.output.commitRange).toBeUndefined();
 	});
 
+	test("withCommitRange leaves output untouched when the commit does not change", async () => {
+		let n = 0;
+		const probe = async () => {
+			n += 1;
+			return { commit: "same-head", vcs: "git" };
+		};
+		const inner = { id: "exec", generate: async () => ({ output: { logicalId: "x" } }) };
+		const result = await withCommitRange(inner, probe).generate({ rootDir: "/repo" });
+		expect(n).toBe(2);
+		expect(result.output.commitRange).toBeUndefined();
+	});
+
 	test("withCommitRange swallows a rejecting before-probe and a rejecting after-probe", async () => {
 		const inner = { id: "exec", generate: async () => ({ output: { logicalId: "x" } }) };
 		// before-probe rejects -> `.catch(() => null)` -> before null -> passthrough.

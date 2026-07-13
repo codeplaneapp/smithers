@@ -90,6 +90,8 @@ export function withCommitRange(agent, probe = captureWorkingCopyCommit) {
                 const after = await probe(cwd).catch(() => null);
                 if (!after || after.vcs !== before.vcs)
                     return result;
+                if (after.commit === before.commit)
+                    return result;
                 if (result === null || typeof result !== "object" || Array.isArray(result))
                     return result;
                 const output = /** @type {Record<string, unknown>} */ (result).output;

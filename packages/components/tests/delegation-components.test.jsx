@@ -51,7 +51,7 @@ import {
     synthesizeDelegationEvents,
     triggerTargetOf,
 } from "../src/components/delegation/delegationState.js";
-import { captureWorkingCopyCommit, withCommitRange } from "../src/components/delegation/withCommitRange.js";
+import { withCommitRange } from "../src/components/delegation/withCommitRange.js";
 // The REAL run scorers (packages/scorers) — the synthesized run-score context
 // must satisfy their exact input shapes, so the tests run them unmocked.
 import { pocJudgmentScorer } from "../../scorers/src/pocJudgmentScorer.js";
@@ -908,28 +908,22 @@ describe("DelegationExecution", () => {
 });
 
 describe("withCommitRange", () => {
-    test("merges a measured commitRange into structured outputs when a VCS answers (real probe)", async () => {
-        const probe = await captureWorkingCopyCommit(process.cwd());
+    test("merges a measured commitRange into structured outputs when a VCS answers (injected probe)", async () => {
+        let n = 0;
+        const probe = async () => {
+            n += 1;
+            return { commit: n === 1 ? "before" : "after", vcs: "git" };
+        };
         const inner = {
             id: "exec-agent",
             tools: {},
             generate: async () => ({ output: { logicalId: "root/core/a", attempt: 1, summary: "s", artifacts: [] } }),
         };
-        const wrapped = withCommitRange(inner);
+        const wrapped = withCommitRange(inner, probe);
         expect(wrapped.id).toBe("exec-agent"); // proxy preserves the agent surface
         const result = await wrapped.generate({ rootDir: process.cwd() });
-        if (probe) {
-            // This repo is jj-colocated; CI at least has git — either way a range lands.
-            expect(result.output.commitRange).toBeDefined();
-            expect(result.output.commitRange.vcs).toBe(probe.vcs);
-            expect(typeof result.output.commitRange.from).toBe("string");
-            expect(typeof result.output.commitRange.to).toBe("string");
-            expect(dcExecSchema.safeParse(result.output).success).toBe(true);
-        }
-        else {
-            // No VCS available: capture must be omitted, never a failure.
-            expect(result.output.commitRange).toBeUndefined();
-        }
+        expect(result.output.commitRange).toEqual({ from: "before", to: "after", vcs: "git" });
+        expect(dcExecSchema.safeParse(result.output).success).toBe(true);
     }, 20_000);
 
     test("leaves non-object and text-only results untouched, and never throws without a repo", async () => {
