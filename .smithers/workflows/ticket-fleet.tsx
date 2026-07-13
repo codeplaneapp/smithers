@@ -1305,42 +1305,55 @@ function commitTextFor(issueNumber: number): string {
 }
 function captureCandidate(issueNumber: number, setup: Setup): Candidate {
   if (!setup.ready) return { issueNumber, baseSha: setup.baseSha, headSha: "", patchId: "", changedPaths: [], reviewDiff: "", ready: false, summary: setup.summary };
+  // The lane's base is the CURRENT merge-base with main, not the sha captured at
+  // bootstrap: the engine rebases each lane onto a moving origin/main between
+  // frames, so a stale base makes every unrelated commit that landed meanwhile
+  // look like part of this lane's change (observed: a 5-file fix reported as 222
+  // changed paths, which would hand the reviewer a diff full of other people's
+  // work and get the candidate rejected as out of scope).
+  const laneBase = (() => {
+    try {
+      return git(["merge-base", "HEAD", "origin/main"], setup.cwd);
+    } catch {
+      return setup.baseSha;
+    }
+  })();
   // The implement agent commits its own work (see implementPrompt), so the lane
   // worktree is normally already clean here. This is the safety net for an agent
   // that ignored the instruction or left extra commits: fold whatever is present
-  // into ONE commit off baseSha, because the engine rebases each lane onto
+  // into ONE commit off the lane base, because the engine rebases each lane onto
   // origin/main between frames and `git rebase` hard-fails on a dirty tree.
   const paths = changedWorkingPaths(setup.cwd);
   if (paths.length) git(["add", "--", ...paths], setup.cwd);
   const staged = splitZero(git(["diff", "--cached", "--name-only", "-z"], setup.cwd));
-  const commitCount = Number(git(["rev-list", "--count", setup.baseSha + "..HEAD"], setup.cwd));
+  const commitCount = Number(git(["rev-list", "--count", laneBase + "..HEAD"], setup.cwd));
   if (staged.length) {
-    if (commitCount > 0) git(["reset", "--soft", setup.baseSha], setup.cwd);
+    if (commitCount > 0) git(["reset", "--soft", laneBase], setup.cwd);
     git(["commit", "-m", commitTextFor(issueNumber)], setup.cwd);
   } else if (commitCount > 1) {
-    git(["reset", "--soft", setup.baseSha], setup.cwd);
+    git(["reset", "--soft", laneBase], setup.cwd);
     git(["commit", "-m", commitTextFor(issueNumber)], setup.cwd);
   }
   const headSha = currentHead(setup.cwd);
-  const changedPaths = splitZero(git(["diff", "--name-only", "-z", setup.baseSha + ".." + headSha], setup.cwd));
+  const changedPaths = splitZero(git(["diff", "--name-only", "-z", laneBase + ".." + headSha], setup.cwd));
   const protectedPaths = protectedAutomationPaths(changedPaths);
   if (protectedPaths.length) {
-    return { issueNumber, baseSha: setup.baseSha, headSha, patchId: "", changedPaths, reviewDiff: "", ready: false, summary: "Candidate changes protected automation paths: " + protectedPaths.join(", ") };
+    return { issueNumber, baseSha: laneBase, headSha, patchId: "", changedPaths, reviewDiff: "", ready: false, summary: "Candidate changes protected automation paths: " + protectedPaths.join(", ") };
   }
-  if (headSha === setup.baseSha || !changedPaths.length) {
-    return { issueNumber, baseSha: setup.baseSha, headSha, patchId: "", changedPaths, reviewDiff: "", ready: false, summary: "No implementation changes were committed." };
+  if (headSha === laneBase || !changedPaths.length) {
+    return { issueNumber, baseSha: laneBase, headSha, patchId: "", changedPaths, reviewDiff: "", ready: false, summary: "No implementation changes were committed." };
   }
   const dirty = git(["status", "--porcelain"], setup.cwd);
-  if (dirty) return { issueNumber, baseSha: setup.baseSha, headSha, patchId: "", changedPaths, reviewDiff: "", ready: false, summary: "Worktree dirty after snapshot: " + dirty.slice(0, 2_000) };
+  if (dirty) return { issueNumber, baseSha: laneBase, headSha, patchId: "", changedPaths, reviewDiff: "", ready: false, summary: "Worktree dirty after snapshot: " + dirty.slice(0, 2_000) };
   try {
     return {
-      issueNumber, baseSha: setup.baseSha, headSha,
-      patchId: patchIdFor(setup.baseSha, headSha, setup.cwd),
-      changedPaths, reviewDiff: reviewDiffFor(setup.baseSha, headSha, setup.cwd),
+      issueNumber, baseSha: laneBase, headSha,
+      patchId: patchIdFor(laneBase, headSha, setup.cwd),
+      changedPaths, reviewDiff: reviewDiffFor(laneBase, headSha, setup.cwd),
       ready: true, summary: "Candidate snapshot ready.",
     };
   } catch (error) {
-    return { issueNumber, baseSha: setup.baseSha, headSha, patchId: "", changedPaths, reviewDiff: "", ready: false, summary: String(error) };
+    return { issueNumber, baseSha: laneBase, headSha, patchId: "", changedPaths, reviewDiff: "", ready: false, summary: String(error) };
   }
 }
 
