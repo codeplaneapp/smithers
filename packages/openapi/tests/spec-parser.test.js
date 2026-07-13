@@ -2,6 +2,7 @@
 // Spec parsing and operation extraction tests
 // ---------------------------------------------------------------------------
 import { afterEach, describe, test, expect } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,6 +61,27 @@ paths:
     });
     test("throws on invalid input", () => {
         expect(() => loadSpecSync("not valid json or yaml")).toThrow();
+    });
+});
+describe("parseSpecText", () => {
+    test("parses YAML in the Node ESM runtime", () => {
+        const yaml = `
+openapi: 3.0.0
+info:
+  title: ESM YAML Pets
+  version: 1.0.0
+paths: {}
+`;
+        const moduleUrl = new URL("../src/_specHelpers.js", import.meta.url).href;
+        const output = execFileSync("node", [
+            "--input-type=module",
+            "--eval",
+            `const { parseSpecText } = await import(${JSON.stringify(moduleUrl)});
+const spec = parseSpecText(${JSON.stringify(yaml)});
+console.log(spec.info.title);`,
+        ], { encoding: "utf8" });
+
+        expect(output.trim()).toBe("ESM YAML Pets");
     });
 });
 describe("loadSpecEffect", () => {

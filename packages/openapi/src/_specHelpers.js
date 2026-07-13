@@ -1,6 +1,8 @@
 // ---------------------------------------------------------------------------
 // Shared private helpers for spec parsing
 // ---------------------------------------------------------------------------
+import { parse as parseYaml } from "yaml";
+
 /** @typedef {import("./HttpMethod.ts").HttpMethod} HttpMethod */
 /** @typedef {import("./ParameterObject.ts").ParameterObject} ParameterObject */
 
@@ -18,8 +20,7 @@ export function parseSpecText(text) {
     catch {
         // Try YAML
         try {
-            const yaml = require("yaml");
-            parsed = yaml.parse(text);
+            parsed = parseYaml(text);
         }
         catch {
             throw new Error("Failed to parse OpenAPI spec as JSON or YAML");
