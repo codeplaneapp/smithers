@@ -87,6 +87,28 @@ function isRetryableBridgeTaskFailure(attempt) {
     return true;
 }
 /**
+ * A quota-limited attempt never consumes the retry budget: the engine either
+ * fails the task over to the next agent in its chain or parks the run until the
+ * provider resets. Either way the task must stay dispatchable — a terminal
+ * classification here would cache the failed attempt's result under the bridge
+ * key and the next dispatch would replay it instead of re-executing the task.
+ * @param {{ errorJson?: string | null; metaJson?: string | null } | null} [attempt]
+ */
+function isQuotaBridgeTaskFailure(attempt) {
+    if (parseAttemptErrorCode(attempt?.errorJson) === "AGENT_QUOTA_EXCEEDED") {
+        return true;
+    }
+    if (attempt?.errorJson) {
+        try {
+            if (JSON.parse(attempt.errorJson)?.details?.failureQuota === true) {
+                return true;
+            }
+        }
+        catch { /* ignore parse errors */ }
+    }
+    return parseAttemptMetaJson(attempt?.metaJson)?.failureQuota === true;
+}
+/**
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {_TaskDescriptor} desc
@@ -100,7 +122,10 @@ const classifyTaskAttempt = async (adapter, runId, desc, context) => {
     if (latestState === "failed") {
         const failedAttempts = attempts.filter((attempt) => attempt.state === "failed");
         const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableBridgeTaskFailure(attempt));
-        if (!hasNonRetryableFailure && failedAttempts.length <= desc.retries) {
+        const retryConsumingFailures = failedAttempts.filter((attempt) => !isQuotaBridgeTaskFailure(attempt));
+        if (!hasNonRetryableFailure &&
+            (isQuotaBridgeTaskFailure(latest) ||
+                retryConsumingFailures.length <= desc.retries)) {
             throw new RetriableTaskFailure(desc.nodeId, latestAttempt);
         }
     }

@@ -2876,6 +2876,114 @@ function isQuotaTaskFailure(attempt) {
     return meta?.failureQuota === true;
 }
 /**
+ * @param {Record<string, unknown> | null | undefined} errorJson
+ * @returns {boolean}
+ */
+function isQuotaErrorPayload(errorJson) {
+    if (!errorJson)
+        return false;
+    if (errorJson.code === "AGENT_QUOTA_EXCEEDED")
+        return true;
+    const details = errorJson.details;
+    return Boolean(details &&
+        typeof details === "object" &&
+        /** @type {{ failureQuota?: unknown }} */ (details).failureQuota === true);
+}
+/**
+ * Position in the task's declared agent chain that an attempt ran on. Persisted
+ * in the attempt meta so a quota failover survives a process restart.
+ * @param {{ metaJson?: string | null } | null} [attempt]
+ * @returns {number | null}
+ */
+function attemptAgentChainIndex(attempt) {
+    const index = parseAttemptMetaJson(attempt?.metaJson)?.agentChainIndex;
+    return typeof index === "number" && Number.isInteger(index) && index >= 0
+        ? index
+        : null;
+}
+/**
+ * @param {{ errorJson?: string | null } | null} [attempt]
+ * @returns {number | null}
+ */
+function attemptQuotaResetAtMs(attempt) {
+    if (!attempt?.errorJson)
+        return null;
+    try {
+        const reset = JSON.parse(attempt.errorJson)?.details?.quotaResetAtMs;
+        return typeof reset === "number" && Number.isFinite(reset) ? reset : null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Chain rungs that are rate-limited in the CURRENT failover round, with the
+ * provider reset time each one reported.
+ *
+ * A rate limit is a property of the provider, not of the task: the next attempt
+ * must fail over to the next agent in the chain rather than hammer the blocked
+ * one. Only once every rung is blocked does the run park (waiting-quota), and it
+ * only wakes after a provider resets — so the round ends there and the set
+ * clears, and the resumed run starts back at the head of the chain instead of
+ * ping-ponging between two blocked providers forever.
+ * @param {AttemptRow[]} attempts
+ * @param {number} chainLength
+ * @returns {{ blocked: Set<number>; resetAtMs: Map<number, number> }}
+ */
+function quotaBlockedChainRound(attempts, chainLength) {
+    /** @type {Set<number>} */
+    const blocked = new Set();
+    /** @type {Map<number, number>} */
+    const resetAtMs = new Map();
+    if (chainLength <= 0)
+        return { blocked, resetAtMs };
+    const ordered = [...attempts].sort((a, b) => a.attempt - b.attempt);
+    for (const attempt of ordered) {
+        if (attempt.state !== "failed" || !isQuotaTaskFailure(attempt))
+            continue;
+        const index = attemptAgentChainIndex(attempt);
+        if (index == null || index >= chainLength)
+            continue;
+        blocked.add(index);
+        const reset = attemptQuotaResetAtMs(attempt);
+        if (reset != null)
+            resetAtMs.set(index, reset);
+        if (blocked.size >= chainLength) {
+            blocked.clear();
+            resetAtMs.clear();
+        }
+    }
+    return { blocked, resetAtMs };
+}
+/**
+ * What a rate-limited attempt means for the task's agent chain: fail over to the
+ * next agent that is not itself rate-limited, or — when every agent is blocked —
+ * park with the EARLIEST reset among them so the run wakes as soon as any
+ * provider frees up.
+ * @param {AttemptRow[]} priorAttempts
+ * @param {unknown[]} chain
+ * @param {number | null} chainIndex
+ * @param {number | null} resetAtMs
+ * @param {Set<unknown>} [disabledAgents]
+ * @returns {{ failoverPending: boolean; earliestResetAtMs: number | null }}
+ */
+function resolveQuotaChainFailover(priorAttempts, chain, chainIndex, resetAtMs, disabledAgents) {
+    const round = quotaBlockedChainRound(priorAttempts, chain.length);
+    const blocked = new Set(round.blocked);
+    const resets = new Map(round.resetAtMs);
+    if (chainIndex != null && chainIndex < chain.length) {
+        blocked.add(chainIndex);
+        if (resetAtMs != null)
+            resets.set(chainIndex, resetAtMs);
+    }
+    const failoverPending = chain.some((agent, index) => !blocked.has(index) && !disabledAgents?.has(agent));
+    const resetTimes = [...resets.values()];
+    return {
+        failoverPending,
+        earliestResetAtMs: resetTimes.length > 0 ? Math.min(...resetTimes) : null,
+    };
+}
+/**
  * Effective scheduling priority of a task descriptor (default 0; higher wins
  * when runnable tasks compete for scarce concurrency slots).
  * @param {Pick<TaskDescriptor, "priority">} desc
@@ -3574,6 +3682,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     let cacheJjBase = null;
     let responseText = null;
     let effectiveAgent = null;
+    /** @type {number | null} */
+    let effectiveChainIndex = null;
     let supportsNativeStructuredOutput = false;
     let structuredOutputAccessError;
     // These callbacks are also used by schema-repair generations, which run
@@ -3852,8 +3962,11 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         heartbeatPendingAtMs = nowMs();
         if (!payload) {
             const allAgents = Array.isArray(desc.agent) ? desc.agent : (desc.agent ? [desc.agent] : []);
-            const agents = disabledAgents ? allAgents.filter((a) => !disabledAgents.has(a)) : allAgents;
-            const selectionPool = agents.length > 0 ? agents : allAgents; // fall back to disabled agents if all disabled
+            const chainEntries = allAgents.map((agent, chainIndex) => ({ agent, chainIndex }));
+            const enabledEntries = disabledAgents
+                ? chainEntries.filter((entry) => !disabledAgents.has(entry.agent))
+                : chainEntries;
+            const selectionPool = enabledEntries.length > 0 ? enabledEntries : chainEntries; // fall back to disabled agents if all disabled
             // Which rung of the failover chain this attempt lands on. Attempts are
             // 1-based, so attempt N normally maps to rung N-1.
             //
@@ -3868,6 +3981,10 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             const quotaFailedAttempts = attempts.filter((a) => a.state === "failed" && isQuotaTaskFailure(a)).length;
             const rung = Math.max(0, attemptNo - 1 - quotaFailedAttempts);
             const startIndex = Math.min(rung, Math.max(selectionPool.length - 1, 0));
+            // Rungs already rate-limited in this failover round: skip them so a
+            // quota-blocked provider hands the work to the next agent in the chain
+            // instead of stalling the lane until its window resets.
+            const quotaBlockedRungs = quotaBlockedChainRound(attempts, allAgents.length).blocked;
             // Preflight-aware selection for a multi-agent failover chain. A leading
             // agent that fails preflight (e.g. Codex with an invalid OPENAI_API_KEY
             // → 401) must not sink the task: advance to the next agent that passes
@@ -3878,7 +3995,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             // keep the original pick so the preflight block below (cache hit → same
             // rejection) reproduces the terminal error. Single-agent tasks and
             // fully-broken chains are therefore unchanged.
-            effectiveAgent = selectionPool[startIndex] ?? null;
+            effectiveAgent = selectionPool[startIndex]?.agent ?? null;
+            effectiveChainIndex = selectionPool[startIndex]?.chainIndex ?? null;
             const preflightSelectOptions = {
                 rootDir: taskRoot,
                 maxOutputBytes: toolConfig.maxOutputBytes,
@@ -3892,8 +4010,12 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             };
             let selectedHealthyAgent = false;
             for (let i = startIndex; i < selectionPool.length; i++) {
-                const candidate = selectionPool[i];
+                const { agent: candidate, chainIndex } = selectionPool[i];
+                if (quotaBlockedRungs.has(chainIndex)) {
+                    continue;
+                }
                 effectiveAgent = candidate;
+                effectiveChainIndex = chainIndex;
                 if (!isPreflightCapableAgent(candidate)) {
                     selectedHealthyAgent = true;
                     break;
@@ -3924,14 +4046,19 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             // does the original terminal pick survive to reproduce the error.
             if (!selectedHealthyAgent && startIndex > 0) {
                 for (let i = startIndex - 1; i >= 0; i--) {
-                    const candidate = selectionPool[i];
+                    const { agent: candidate, chainIndex } = selectionPool[i];
+                    if (quotaBlockedRungs.has(chainIndex)) {
+                        continue;
+                    }
                     if (!isPreflightCapableAgent(candidate)) {
                         effectiveAgent = candidate;
+                        effectiveChainIndex = chainIndex;
                         break;
                     }
                     try {
                         await runAgentPreflightOnce(candidate, preflightSelectOptions, toolConfig.agentPreflightCache);
                         effectiveAgent = candidate;
+                        effectiveChainIndex = chainIndex;
                         break;
                     }
                     catch {
@@ -3964,6 +4091,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             // Capture the agent result at this scope so schema-retry can build
             // conversation history from the original response messages.
             if (effectiveAgent) {
+                if (effectiveChainIndex != null) {
+                    attemptMeta.agentChainIndex = effectiveChainIndex;
+                }
                 attemptMeta.agentId =
                     effectiveAgent.id ??
                         effectiveAgent.constructor?.name ??
@@ -5459,8 +5589,33 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 : String(effectiveError),
         }, "engine:task");
         const failedAtMs = nowMs();
+        const failureErrorJson = errorToJson(effectiveError);
+        // A rate limit on one rung of a failover chain is not a reason to stall the
+        // whole lane: tell the scheduler to retry the task on the next agent that
+        // is not itself rate-limited. The run only parks (waiting-quota) once every
+        // agent in the chain is blocked, and then on the EARLIEST reset among them.
+        const agentChain = Array.isArray(desc.agent) ? desc.agent : (desc.agent ? [desc.agent] : []);
+        if (agentChain.length > 1 && isQuotaErrorPayload(failureErrorJson)) {
+            const priorAttempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
+            const details = /** @type {Record<string, unknown>} */ ({
+                ...(typeof failureErrorJson.details === "object" && failureErrorJson.details
+                    ? failureErrorJson.details
+                    : {}),
+            });
+            const quotaResetAtMs = typeof details.quotaResetAtMs === "number" && Number.isFinite(details.quotaResetAtMs)
+                ? details.quotaResetAtMs
+                : null;
+            const { failoverPending, earliestResetAtMs } = resolveQuotaChainFailover(priorAttempts, agentChain, effectiveChainIndex, quotaResetAtMs, disabledAgents);
+            if (failoverPending) {
+                details.quotaFailoverPending = true;
+            }
+            else if (earliestResetAtMs != null) {
+                details.quotaResetAtMs = earliestResetAtMs;
+            }
+            failureErrorJson.details = details;
+        }
         const failureClaimed = await adapter.withTransaction("task-fail", Effect.gen(function* () {
-            const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "failed", failedAtMs, JSON.stringify(errorToJson(effectiveError)));
+            const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "failed", failedAtMs, JSON.stringify(failureErrorJson));
             if (!claimed) return false;
             yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
                 metaJson: JSON.stringify(attemptMeta), responseText,
@@ -5502,7 +5657,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             nodeId: desc.nodeId,
             iteration: desc.iteration,
             attempt: attemptNo,
-            error: errorToJson(effectiveError),
+            error: failureErrorJson,
             timestampMs: nowMs(),
         }));
         await annotateTaskSpan({

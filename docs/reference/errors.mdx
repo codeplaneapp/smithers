@@ -164,7 +164,7 @@ try {
 | Code | When | Details |
 |---|---|---|
 | `AGENT_CLI_ERROR` | A CLI-backed agent exits unsuccessfully, streams an explicit error, or its RPC transport fails. | -- |
-| `AGENT_QUOTA_EXCEEDED` | An agent provider returns a usage-limit or quota error. The failure is transient; retries are preserved and the run pauses until the reset time. | `{ agentId?, agentEngine?, agentModel?, quotaResetAtMs?, resetHint? }` |
+| `AGENT_QUOTA_EXCEEDED` | An agent provider returns a usage-limit or quota error. The failure is transient and never consumes the retry budget: the task fails over to the next agent in its `agent={[...]}` chain, and the run only pauses (`waiting-quota`) once every agent in the chain is rate-limited, then until the earliest reset time among them. | `{ agentId?, agentEngine?, agentModel?, quotaResetAtMs?, resetHint? }` |
 | `AGENT_CONFIG_INVALID` | A CLI-backed agent fails with a non-retryable configuration error such as an unknown model, missing LLM, or unsupported model. | -- |
 | `AGENT_RPC_FILE_ARGS` | Pi RPC mode is used with file arguments that the transport does not support. | -- |
 | `AGENT_BUILD_COMMAND` | An agent implementation forbids `buildCommand()` because it uses a custom `generate()` transport. | -- |

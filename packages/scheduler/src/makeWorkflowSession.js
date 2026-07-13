@@ -258,6 +258,20 @@ function isQuotaFailure(error) {
     return Boolean(details && typeof details === "object" && details.failureQuota === true);
 }
 /**
+ * The engine sets this on a quota error when the task's agent chain still has an
+ * agent that is NOT rate-limited: the task retries on that agent instead of
+ * parking the run behind one blocked provider.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isQuotaFailoverPending(error) {
+    const payloadDetails = error && typeof error === "object" && error.details && typeof error.details === "object"
+        ? error.details
+        : undefined;
+    const details = payloadDetails ?? toSmithersError(error).details;
+    return Boolean(details && typeof details === "object" && details.quotaFailoverPending === true);
+}
+/**
  * @param {unknown} error
  * @returns {number | undefined}
  */
@@ -619,8 +633,17 @@ export function makeWorkflowSession(options = {}) {
         const key = stateKeyFor(descriptor);
         // Quota/usage-limit errors do not consume the task's retry budget.
         // Instead, put the task into "waiting-quota" so the run can pause
-        // durably and resume cleanly after the provider resets.
+        // durably and resume cleanly after the provider resets — unless the
+        // task's agent chain still has a rung that is not rate-limited, in which
+        // case the engine fails over to it on the next attempt rather than
+        // stalling the lane until the blocked provider's window resets.
         if (isQuotaFailure(error)) {
+            if (isQuotaFailoverPending(error)) {
+                state.states.set(key, "pending");
+                state.retryWait.delete(key);
+                state.failures.set(key, error);
+                return decide();
+            }
             state.states.set(key, "waiting-quota");
             state.failures.set(key, error);
             const resetAtMs = getQuotaResetAtMs(error);
