@@ -1,5 +1,5 @@
 // smithers-display-name: Ticket fleet: sync → triage → research → plan → implement → merge queue
-// smithers-source: two-way ticket/GitHub sync + difficulty-tiered backlog burndown; lands on main via a serialized local merge queue with per-landing pushes. Landing runs concurrently with the lanes (land-as-you-go), and triage verdicts are memoized across runs in .smithers/executions/ticket-fleet/triage-ledger.json.
+// smithers-source: two-way ticket/GitHub sync + difficulty-tiered backlog burndown; lands on main via a serialized local merge queue with per-landing pushes. Landing runs concurrently with the lanes (land-as-you-go), and triage verdicts are memoized across runs in .smithers/executions/ticket-fleet/triage-ledger.json. Pass solNumbers/fableNumbers to split implementers explicitly (Sol vs Fable, each fix reviewed by the opposite model).
 /** @jsxImportSource smithers-orchestrator */
 import {
   ApprovalGate,
@@ -61,6 +61,13 @@ const inputSchema = z.object({
   reviewIterations: z.number().int().min(1).max(8).default(4),
   issueNumbers: z.array(z.number().int()).default([]),
   excludeNumbers: z.array(z.number().int()).default([]),
+  // Explicit implementer split. When either is non-empty the workflow runs in
+  // "assigned" mode: issues in solNumbers are implemented by Codex Sol, issues
+  // in fableNumbers by Claude Fable, and the reviewer in each fix-loop is the
+  // OTHER model (Sol's work reviewed by Fable and vice versa). Selection is
+  // pinned to sol+fable (union) so exactly those issues run.
+  solNumbers: z.array(z.number().int()).default([]),
+  fableNumbers: z.array(z.number().int()).default([]),
   skipSync: z.boolean().default(false),
   skipCiLane: z.boolean().default(false),
   dryRun: z.boolean().default(false),
@@ -405,6 +412,20 @@ function implementerFor(difficulty: Triage["difficulty"]) {
   if (difficulty === "hard") return lunaAgent("high");
   return lunaAgent("medium");
 }
+// Explicit-split mode: Sol implements its assigned issues, Fable implements
+// its own, and the reviewer is always the opposite strong model so no agent
+// grades its own homework. Falls back to the difficulty-tiered luna
+// implementer / sol reviewer for any issue not in either list.
+function assignedImplementer(input: Input, n: number, difficulty: Triage["difficulty"], cwd?: string) {
+  if (input.fableNumbers.includes(n)) return fableAgent(cwd);
+  if (input.solNumbers.includes(n)) return solAgent(cwd);
+  return implementerFor(difficulty);
+}
+function assignedReviewer(input: Input, n: number, cwd?: string) {
+  if (input.fableNumbers.includes(n)) return solAgent(cwd);
+  if (input.solNumbers.includes(n)) return fableAgent(cwd);
+  return solAgent(cwd);
+}
 
 const agentTaskProps = {
   retries: AGENT_RETRIES,
@@ -650,13 +671,23 @@ function parseInput(raw: unknown): Input {
   for (const key of Object.keys(value)) {
     if (value[key] === null || value[key] === undefined) delete value[key];
   }
-  for (const key of ["issueNumbers", "excludeNumbers"]) {
+  for (const key of ["issueNumbers", "excludeNumbers", "solNumbers", "fableNumbers"]) {
     if (typeof value[key] === "string") value[key] = asStrArray(value[key]).map(Number);
   }
   for (const key of ["skipSync", "skipCiLane", "dryRun", "retriage"]) {
     if (typeof value[key] === "number") value[key] = value[key] !== 0;
   }
-  return inputSchema.parse(value);
+  const parsed = inputSchema.parse(value);
+  // In explicit-split mode, pin selection to the sol+fable union and make sure
+  // the implement cap and triage scan cover all of them, so exactly the
+  // assigned issues run regardless of difficulty ordering.
+  if (parsed.solNumbers.length || parsed.fableNumbers.length) {
+    const union = [...new Set([...parsed.solNumbers, ...parsed.fableNumbers])];
+    if (!parsed.issueNumbers.length) parsed.issueNumbers = union;
+    parsed.maxImplement = Math.max(parsed.maxImplement, union.length);
+    parsed.maxTriage = Math.max(parsed.maxTriage, union.length);
+  }
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1627,7 +1658,12 @@ export default smithers((ctx) => {
           <Task id="triage-scan" output={outputs.tfGhScan} timeoutMs={5 * 60_000}>
             {() => {
               const scan = scanGithubIssues(input);
-              const issues = scan.issues.filter((i) => !i.labels.includes("difficulty:beyond-xhard")).slice(0, input.maxTriage);
+              // In explicit-split mode only the assigned issues are ever
+              // implemented, so triage exactly those instead of the whole
+              // backlog.
+              const assigned = new Set([...input.solNumbers, ...input.fableNumbers]);
+              const pool = assigned.size ? scan.issues.filter((i) => assigned.has(i.number)) : scan.issues;
+              const issues = pool.filter((i) => !i.labels.includes("difficulty:beyond-xhard")).slice(0, input.maxTriage);
               return { issues, summary: "Triaging " + issues.length + " open issue(s)." };
             }}
           </Task>
@@ -1782,7 +1818,7 @@ export default smithers((ctx) => {
                       <Loop id={"i" + n + ":fix-loop"} until={candidateReady(ctx, n, hardTier)} maxIterations={input.reviewIterations} onMaxReached="return-last">
                         <Sequence>
                           <Task id={"i" + n + ":implement"} output={outputs.tfImplementation}
-                            agent={implementerFor(triage.difficulty)} {...agentTaskProps}>
+                            agent={assignedImplementer(input, n, triage.difficulty, cwd)} {...agentTaskProps}>
                             {implementPrompt(issue, triage, plan, research, feedbackFor(ctx, n, hardTier))}
                           </Task>
                           <Task id={"i" + n + ":candidate"} output={outputs.tfCandidate} continueOnFail>
@@ -1805,7 +1841,7 @@ export default smithers((ctx) => {
                                   {reviewPrompt(issue, { headSha: candidate.headSha, changedPaths: asStrArray(candidate.changedPaths), reviewDiff: candidate.reviewDiff }, "candidate")}
                                 </Panel>
                               ) : (
-                                <Task id={"i" + n + ":review"} output={outputs.tfReview} agent={solAgent(cwd)} {...agentTaskProps}>
+                                <Task id={"i" + n + ":review"} output={outputs.tfReview} agent={assignedReviewer(input, n, cwd)} {...agentTaskProps}>
                                   {reviewPrompt(issue, { headSha: candidate.headSha, changedPaths: asStrArray(candidate.changedPaths), reviewDiff: candidate.reviewDiff }, "candidate")}
                                 </Task>
                               )}
