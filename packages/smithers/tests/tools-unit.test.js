@@ -229,6 +229,15 @@ describe("file tools", () => {
     });
   });
 
+  test("greps patterns that begin with a dash", async () => {
+    const root = await makeRoot();
+    writeFileSync(join(root, "flags.txt"), "-world\nhello\n", "utf8");
+
+    await withToolCtx(root, {}, async () => {
+      expect(await grepTool("-world", ".")).toContain("flags.txt");
+    });
+  });
+
   test("rejects oversized content, files, patches, and bad patches", async () => {
     const root = await makeRoot();
     writeFileSync(join(root, "large.txt"), "abcdef", "utf8");

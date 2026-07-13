@@ -10,7 +10,7 @@ import {
 export async function grepTool(pattern, path = ".") {
   const { rootDir, maxOutputBytes, timeoutMs } = getToolRuntimeOptions();
   const resolvedRoot = await resolveToolPath(rootDir, path);
-  const result = await captureProcess("rg", ["-n", pattern, resolvedRoot], {
+  const result = await captureProcess("rg", ["-n", "--", pattern, resolvedRoot], {
     cwd: rootDir,
     detached: true,
     maxOutputBytes,
