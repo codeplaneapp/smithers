@@ -361,7 +361,6 @@ async function copyTable(sqlite, pgConn, table, batchSize, opts) {
     const selectSql = `SELECT ${columns.map(sqliteQuote).join(", ")} FROM ${sqliteQuote(table.name)} LIMIT ? OFFSET ?`;
     const select = sqlite.query(selectSql);
     const effectiveBatchSize = sourceHasBlobColumn(sqlite, table.name) ? 1 : batchSize;
-    await pgConn.query({ text: "BEGIN" });
     try {
         if (table.name === "_smithers_schema_migrations") {
             await pgConn.query({ text: `DELETE FROM ${quoteIdentifier(table.name)}` });
@@ -385,7 +384,6 @@ async function copyTable(sqlite, pgConn, table, batchSize, opts) {
             offset += rows.length;
         }
         await resetSequences(pgConn, table.name, autoincrementColumns(table.sql));
-        await pgConn.query({ text: "COMMIT" });
         const targetRows = await countPgRows(pgConn, table.name);
         const durationMs = Date.now() - startedAt;
         await emitProgress({
@@ -406,12 +404,6 @@ async function copyTable(sqlite, pgConn, table, batchSize, opts) {
         return { table: table.name, sourceRows, targetRows, durationMs };
     }
     catch (error) {
-        try {
-            await pgConn.query({ text: "ROLLBACK" });
-        }
-        catch {
-            // Preserve the original copy failure.
-        }
         await emitMigrationLog("error", "smithers.migration.table.failed", {
             table: table.name,
             sourceRows,
@@ -1276,6 +1268,7 @@ export async function migrateSmithersStore(opts = {}) {
     let sqlite;
     /** @type {(import("./CreateSmithersApi.ts").CreateSmithersApi<Record<string, import("zod").ZodObject<any>>> & { close?: () => Promise<void> }) | undefined} */
     let targetApi;
+    let targetTransactionOpen = false;
     try {
         upgradeSqliteSourceStore(dbPath);
         const source = openSourceStore(dbPath);
@@ -1325,6 +1318,11 @@ export async function migrateSmithersStore(opts = {}) {
             }
         }
         const pgConn = /** @type {{ query: (config: { text: string; values?: readonly unknown[] }) => Promise<{ rows?: readonly Record<string, unknown>[] } | unknown> }} */ (targetApi.db.connection);
+        // Target DDL, every table copy, indexes, verification, and per-table
+        // progress callbacks succeed or roll back together, leaving an empty
+        // retryable target after any late migration failure.
+        await pgConn.query({ text: "BEGIN" });
+        targetTransactionOpen = true;
         await prepareTargetTables(pgConn, tables);
         /** @type {MigrationTableResult[]} */
         const tableResults = [];
@@ -1341,6 +1339,8 @@ export async function migrateSmithersStore(opts = {}) {
                 });
             }
         }
+        await pgConn.query({ text: "COMMIT" });
+        targetTransactionOpen = false;
         sourceStats = sourceFileStats(dbPath);
         const durationMs = Date.now() - startedAt;
         const result = {
@@ -1383,6 +1383,15 @@ export async function migrateSmithersStore(opts = {}) {
         return result;
     }
     catch (error) {
+        if (targetTransactionOpen) {
+            try {
+                await targetApi?.db.connection.query({ text: "ROLLBACK" });
+            }
+            catch {
+                // Preserve the original migration failure.
+            }
+            targetTransactionOpen = false;
+        }
         await emitMigrationLog("error", "smithers.migration.failed", {
             dbPath,
             target,

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { createSmithers } from "../src/create.js";
+import { createSmithers, createSmithersPostgres } from "../src/create.js";
 import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
 
 setDefaultTimeout(120_000);
@@ -97,6 +97,39 @@ describe("migrateSmithersStore — postgres target/source over a real wire", () 
     expect(result.target).toMatchObject({ backend: "postgres", url: "set" });
     expect(result.runCount).toBe(1);
     expect(existsSync(result.markerPath)).toBe(true);
+  });
+
+  test("rolls back a late Postgres-wire insert failure so the migration can be retried", async () => {
+    const cwd = makeWorkspace("migrate-sqlite-to-pg-atomic");
+    seedSqliteStore(cwd);
+    const { connectionString } = await startPgServer();
+
+    const target = await createSmithersPostgres({}, { provider: "postgres", connectionString });
+    try {
+      await target.db.connection.query({
+        text: `ALTER TABLE "_smithers_nodes" ADD CONSTRAINT "reject_migration_node" CHECK (run_id <> 'run-migrate-1')`,
+      });
+    } finally {
+      await target.close();
+    }
+
+    await expect(migrateSmithersStore({ cwd, from: "sqlite", to: "postgres", url: connectionString, env: {} }))
+      .rejects.toThrow("reject_migration_node");
+
+    const rolledBack = await createSmithersPostgres({}, { provider: "postgres", connectionString });
+    try {
+      const count = await rolledBack.db.connection.query({ text: `SELECT COUNT(*) AS count FROM "_smithers_runs"` });
+      expect(Number(count.rows[0].count)).toBe(0);
+      await rolledBack.db.connection.query({
+        text: `ALTER TABLE "_smithers_nodes" DROP CONSTRAINT "reject_migration_node"`,
+      });
+    } finally {
+      await rolledBack.close();
+    }
+    expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
+
+    const result = await migrateSmithersStore({ cwd, from: "sqlite", to: "postgres", url: connectionString, env: {} });
+    expect(result.runCount).toBe(1);
   });
 
   test("copies a Postgres store back to SQLite with keys and indexes", async () => {
