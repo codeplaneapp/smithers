@@ -32,7 +32,7 @@ const TRAIN_MAX_BATCH = 12;
 const TRAIN_GATE_CONCURRENCY = 6;
 const TRAIN_MAX_ROUNDS = 200;
 const TRAIN_MAX_EVICTIONS = 2;
-const TRAIN_IDLE_SLEEP_MS = 90_000;
+const TRAIN_IDLE_SLEEP_MS = 120_000;
 const MAX_REVIEW_DIFF_BYTES = 200_000;
 const AGENT_RETRIES = 2;
 const HEARTBEAT_MS = 10 * 60_000;
@@ -1617,9 +1617,21 @@ function trainWorktree(key: string): string {
   }
   return cwd;
 }
-function landedOnMain(issueNumber: number): string {
+// Adoption must be patch-verified: a bare "Fixes #N" message match could be an
+// OLD fix for a reopened issue, and adopting it would close the issue without
+// the new reviewed candidate ever landing. Returns the main commit whose
+// content is patch-identical to the reviewed candidate, "" when the candidate
+// is not on main, and "ambiguous" when Fixes-commits exist but none match.
+function landedOnMain(issueNumber: number, reviewedSha: string): string {
   try {
-    return git(["log", "origin/main", "-1", "--grep", "^Fixes #" + issueNumber + "$", "--format=%H"]);
+    const candidates = git(["log", "origin/main", "-8", "--grep", "^Fixes #" + issueNumber + "$", "--format=%H"]).split("\n").filter(Boolean);
+    if (!candidates.length) return "";
+    const reviewedPatchId = patchIdFor(reviewedSha + "~1", reviewedSha, repoRoot);
+    if (!reviewedPatchId) return "";
+    for (const c of candidates) {
+      if (patchIdFor(c + "~1", c, repoRoot) === reviewedPatchId) return c;
+    }
+    return "ambiguous";
   } catch {
     return "";
   }
@@ -1635,13 +1647,18 @@ async function trainSnapshot(round: number, readyLanes: { issueNumber: number; s
     if (landedAllNumbers.includes(n)) continue;
     if (evictedAllNumbers.filter((x) => x === n).length >= TRAIN_MAX_EVICTIONS) { skipped.push(n + ":evicted-" + TRAIN_MAX_EVICTIONS + "x-parked"); continue; }
     try {
-      const landedSha = landedOnMain(n);
-      if (landedSha) { adopted.push({ issueNumber: n, sha: landedSha }); continue; }
       // Board the EXACT sha the cross-model review and candidate gate
       // approved (readiness.headSha) — never a mutable branch ref that a
       // stray process could have advanced past the reviewed content.
       git(["cat-file", "-e", lane.sha + "^{commit}"]);
       if (git(["merge-base", lane.sha, "origin/main"]) === lane.sha) { adopted.push({ issueNumber: n, sha: lane.sha }); continue; }
+      const landedSha = landedOnMain(n, lane.sha);
+      if (landedSha === "ambiguous") {
+        strikes.push(n);
+        skipped.push(n + ":fixes-commit-on-main-but-not-patch-identical(reopened?)-parked-for-human");
+        continue;
+      }
+      if (landedSha) { adopted.push({ issueNumber: n, sha: landedSha }); continue; }
       if (entries.length >= TRAIN_MAX_BATCH) { skipped.push(n + ":over-batch-cap"); continue; }
       entries.push({ issueNumber: n, fixSha: lane.sha });
     } catch (error) {
@@ -1652,7 +1669,7 @@ async function trainSnapshot(round: number, readyLanes: { issueNumber: number; s
   if (!entries.length && !adopted.length) await sleep(TRAIN_IDLE_SLEEP_MS);
   return { round, entries, skipped, adopted, strikes, summary: "Round " + round + ": boarded " + entries.length + ", adopted " + adopted.length + ", skipped " + skipped.length + "." };
 }
-function trainStack(key: string, round: number, entries: TrainEntry[]): TrainStack {
+async function trainStack(key: string, round: number, entries: TrainEntry[]): Promise<TrainStack> {
   // Any failure before the per-entry loop must still produce a row, or the
   // round can never reach train:land and the loop wedges.
   let cwd = "";
@@ -1668,6 +1685,9 @@ function trainStack(key: string, round: number, entries: TrainEntry[]): TrainSta
   } catch (error) {
     // "infra:" evictions requeue WITHOUT an eviction strike — a transient
     // fetch/worktree failure is not the entry's fault and must never park it.
+    // Back off before yielding the round so a hard-down remote cannot burn
+    // through the loop's iteration budget at full speed.
+    await sleep(TRAIN_IDLE_SLEEP_MS);
     return {
       round, baseSha, stacked: [],
       evicted: entries.map((e) => ({ issueNumber: e.issueNumber, reason: "infra: train worktree unavailable: " + String(error).slice(0, 200) })),
@@ -1710,34 +1730,35 @@ async function trainGate(n: number, key: string, baseSha: string, stackedSha: st
   const cwd = worktreePath("issue", n, key);
   const branch = branchName("issue", n, key);
   try {
-    if (git(["status", "--porcelain"], cwd)) {
-      // A crashed prior gate can leave the lane dirty or detached. The lane is
-      // finished (its reviewed sha is pinned by readiness), so a hard restore
-      // to its branch is always safe.
-      git(["reset", "--hard", branch], cwd);
-      git(["clean", "-fdq"], cwd);
+    try {
+      if (git(["status", "--porcelain"], cwd)) {
+        // A crashed prior gate can leave the lane dirty or detached. The lane
+        // is finished (its reviewed sha is pinned by readiness), so a hard
+        // restore to its branch is always safe.
+        git(["reset", "--hard", branch], cwd);
+        git(["clean", "-fdq"], cwd);
+      }
+      git(["checkout", "--detach", stackedSha], cwd);
+      // Validate the CUMULATIVE prefix: this stacked state contains every
+      // entry ahead of us, so test all packages the prefix touched — entry B
+      // must not pass while breaking a package entry A changed. Always run the
+      // frozen install first: the engine may have rebased this lane without
+      // reinstalling, so node_modules is not guaranteed to match ANY ref's
+      // lockfile, and a warm-store install costs seconds.
+      const prefixPaths = splitZero(git(["diff", "--name-only", "-z", baseSha + ".." + stackedSha], cwd));
+      const command = "pnpm install --frozen-lockfile --ignore-scripts && " + landingGateCommand(prefixPaths);
+      const gate = await runGate(n, "train", cwd, stackedSha, command, 45 * 60_000);
+      return gate.headSha === stackedSha ? gate : { ...gate, headSha: stackedSha, passed: false };
+    } catch (error) {
+      // EVERY failure path must persist a verdict row for this stacked sha,
+      // or trainGatesDone can never settle and the round wedges.
+      return failed("Stacked validation threw: " + String(error).slice(0, 400));
     }
-    git(["checkout", "--detach", stackedSha], cwd);
-  } catch (error) {
-    return failed("Could not check out the stacked state in the lane worktree: " + String(error).slice(0, 300));
-  }
-  try {
-    // Validate the CUMULATIVE prefix: this stacked state contains every entry
-    // ahead of us, so test all packages the prefix touched — entry B must not
-    // pass while breaking a package entry A changed.
-    const prefixPaths = splitZero(git(["diff", "--name-only", "-z", baseSha + ".." + stackedSha], cwd));
-    // node_modules in this lane matches the lane branch's lockfile, not
-    // necessarily the stacked state's (an earlier batch may have landed a
-    // lockfile change): reinstall whenever they differ.
-    const lockDrift = git(["diff", "--name-only", branch + ".." + stackedSha, "--", "pnpm-lock.yaml"], cwd).length > 0;
-    const command = (lockDrift ? "pnpm install --frozen-lockfile --ignore-scripts && " : "") + landingGateCommand(prefixPaths);
-    const gate = await runGate(n, "train", cwd, stackedSha, command, 45 * 60_000);
-    return gate.headSha === stackedSha ? gate : { ...gate, headSha: stackedSha, passed: false };
   } finally {
     // Restore the lane exactly: tests may leave stray files that would make a
     // bare checkout refuse. The branch ref itself never moved.
     try {
-      git(["reset", "--hard", stackedSha], cwd);
+      git(["reset", "--hard", "HEAD"], cwd);
       git(["clean", "-fdq"], cwd);
       git(["checkout", branch], cwd);
     } catch { /* recovered by the next gate's dirty-lane restore */ }
@@ -1766,12 +1787,23 @@ async function trainLand(input: Input, round: number, snapshot: TrainSnapshot | 
   }
   const requeued = stacked.slice(prefix.length + (popped ? 1 : 0)).map((e) => Number(e.issueNumber));
   if (popped) evictedAllNumbers.push(Number(popped.issueNumber));
-  if (!prefix.length || input.dryRun) {
+  if (input.dryRun) {
+    // Record the simulated landings in the cumulative ledger so trainDone
+    // converges instead of re-stacking and re-gating the same green prefix
+    // for the entire round budget. Nothing external happens: no push, no gh
+    // close, no ticket write (all are dryRun-guarded downstream).
+    for (const e of prefix) landedAll.push({ issueNumber: Number(e.issueNumber), sha: String(e.stackedSha) });
+    return {
+      round, landedIssues: prefix.map((e) => Number(e.issueNumber)), landedTip: "", pushed: false,
+      requeued, landedAll, evictedAllNumbers,
+      summary: "Dry run: simulated landing of " + prefix.length + " issue(s).",
+    };
+  }
+  if (!prefix.length) {
     return {
       round, landedIssues: [], landedTip: "", pushed: false,
-      requeued: input.dryRun ? stacked.map((e) => Number(e.issueNumber)) : requeued,
-      landedAll, evictedAllNumbers,
-      summary: input.dryRun ? "Dry run: would land " + prefix.length + "." : "Round " + round + ": no green prefix" + (popped ? " (first failure #" + popped.issueNumber + ")" : "") + ".",
+      requeued, landedAll, evictedAllNumbers,
+      summary: "Round " + round + ": no green prefix" + (popped ? " (first failure #" + popped.issueNumber + ")" : "") + ".",
     };
   }
   const tipSha = String(prefix[prefix.length - 1].stackedSha);
@@ -1829,18 +1861,28 @@ async function closeAfterLanding(input: Input, issue: Issue, merge: Merge, local
       if (candidates.length) ticketPath = "smithers/" + candidates[0];
     } catch { /* no smithers dir */ }
   }
-  if (ticketPath && existsSync(join(ticketsDir, ticketPath)) && !input.dryRun) {
+  if (ticketPath && existsSync(join(ticketsDir, ticketPath)) && !input.dryRun && closed) {
     mkdirSync(join(ticketsDir, ".done"), { recursive: true });
     const content = readFileSync(join(ticketsDir, ticketPath), "utf8");
     writeFileSync(join(ticketsDir, ".done", basename(ticketPath)),
       content + "\n\n> Closed by ticket-fleet: landed on main in " + merge.headSha + ".\n", "utf8");
     rmSync(join(ticketsDir, ticketPath), { force: true });
-    commitPathsToMain([".smithers/tickets"],
-      "🚚 chore(tickets): close " + basename(ticketPath) + " (#" + issue.number + ")\n\nCo-Authored-By: Smithers ticket-fleet <noreply@smithers.sh>");
-    const ticketPush = await pushMain(input.dryRun);
-    // Only claim the move when origin actually has it: an unpushed local
-    // ticket commit can be orphaned by the next merge-train ref update.
-    ticketMoved = ticketPush.pushed || input.dryRun;
+    // A concurrent merge-train landing can move refs/heads/main between our
+    // ticket commit and its push, orphaning the commit. Only the exact ticket
+    // commit becoming an ancestor of origin/main counts as moved; retry the
+    // commit+push cycle a few times to ride out landings.
+    for (let attempt = 0; attempt < 3 && !ticketMoved; attempt++) {
+      const ticketCommit = commitPathsToMain([".smithers/tickets"],
+        "🚚 chore(tickets): close " + basename(ticketPath) + " (#" + issue.number + ")\n\nCo-Authored-By: Smithers ticket-fleet <noreply@smithers.sh>");
+      await pushMain(input.dryRun);
+      try {
+        git(["fetch", "origin", "main"]);
+        git(["merge-base", "--is-ancestor", ticketCommit.sha, "refs/remotes/origin/main"]);
+        ticketMoved = true;
+      } catch {
+        await sleep(5_000);
+      }
+    }
   }
   return { issueNumber: issue.number, closed, ticketMoved, summary: (closed ? "Issue closed." : "Close skipped.") + (ticketMoved ? " Local ticket moved to .done." : "") };
 }
