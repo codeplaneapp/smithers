@@ -441,6 +441,9 @@ importers:
       '@smithers-orchestrator/vcs':
         specifier: workspace:*
         version: link:../../packages/vcs
+      '@toon-format/toon':
+        specifier: 2.3.0
+        version: 2.3.0
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0

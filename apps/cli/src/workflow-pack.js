@@ -8,6 +8,7 @@ import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { generateAgentsTs } from "./agent-detection.js";
 import { installCuratedSkill, loadSkillDeselections, saveSkillDeselections, skillTargets } from "./installCuratedSkill.js";
 import { noteWorkflowPreferenceInAgentDocs } from "./noteWorkflowPreferenceInAgentDocs.js";
+import { buildDefaultManifest, renderManifest } from "./manifest.js";
 // Seeded workflows authored as canonical files in .smithers/ and emitted by
 // scripts/generate-workflow-pack.ts (single source of truth — no hand-embedding).
 import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
@@ -426,7 +427,7 @@ function renderGatewayFile() {
     };
 }
 function renderTemplateFiles(versions, env, projectRoot, options = {}) {
-    return [
+    const files = [
         { path: ".smithers/.gitignore", contents: "node_modules/\nexecutions/\nruns/\nreports/\nsandboxes/\nstate\ntmp\n*.db\n*.sqlite\npg/\n" },
         { path: ".smithers/workflows/.gitignore", contents: "*.log\nrun-*.log\n" },
         { path: ".smithers/package.json", contents: renderPackageJson(versions) },
@@ -442,6 +443,11 @@ function renderTemplateFiles(versions, env, projectRoot, options = {}) {
         { path: ".smithers/skills/.gitkeep", contents: "" },
         { path: ".smithers/tickets/.gitkeep", contents: "" },
     ];
+    files.push({
+        path: ".smithers/smithers.toon",
+        contents: renderManifest(buildDefaultManifest(projectRoot, files)),
+    });
+    return files;
 }
 /**
  * Agent doc filenames that can receive the smithers-workflow guidance block.

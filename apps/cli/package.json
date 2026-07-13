@@ -59,6 +59,7 @@
     "@smithers-orchestrator/tui": "workspace:*",
     "@smithers-orchestrator/usage": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
+    "@toon-format/toon": "2.3.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "cron-parser": "^5.6.1",
