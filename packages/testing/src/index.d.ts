@@ -5,7 +5,591 @@ export { renderPromptToText as renderPrompt } from '@smithers-orchestrator/compo
 export { RunTaskOptions, runTask } from './runTask.js';
 export { Sim, SimTaskRecord, SimulateMockFunction, SimulateOptions, simulate } from './simulate.js';
 export { simMatchers, toHaveExecuted, toHaveExecutedInOrder, toHaveFinished } from './matchers.js';
+import { SmithersDb } from '@smithers-orchestrator/db/adapter';
+import { ChildProcess } from 'node:child_process';
 import '@smithers-orchestrator/driver/SmithersCtx';
 import '@smithers-orchestrator/react-reconciler';
 import '@smithers-orchestrator/driver/WorkflowDefinition';
 import '@smithers-orchestrator/graph';
+
+type ScenarioValue = null | boolean | number | string | readonly ScenarioValue[] | {
+    readonly [key: string]: ScenarioValue;
+};
+type ScenarioStep = Readonly<{
+    readonly kind: "step";
+    readonly id: string;
+    readonly input?: ScenarioValue;
+    readonly dependsOn: readonly string[];
+    readonly capabilities: readonly string[];
+    readonly extension?: string;
+    readonly runnerBinding?: string;
+}>;
+type ScenarioBarrier = Readonly<{
+    readonly kind: "barrier";
+    readonly id: string;
+    readonly parties: readonly string[];
+    readonly budget: number;
+}>;
+type ScenarioFault = Readonly<{
+    readonly kind: "fault";
+    readonly id: string;
+    readonly phase: "before-task" | "during-task" | "after-task" | "after-effect-before-journal" | "after-journal-before-ack" | "after-ack";
+    readonly operation: "task" | "effect" | "attempt-write" | "event-append" | "completion-cas" | "heartbeat" | "lease" | "resume" | "cancellation";
+    readonly outcome?: ScenarioValue;
+}>;
+type ScenarioExtension = Readonly<{
+    readonly kind: "extension";
+    readonly name: string;
+    readonly value: ScenarioValue;
+}>;
+type ScenarioAst = Readonly<{
+    readonly version: 1;
+    readonly name: string;
+    readonly seed?: number;
+    readonly steps: readonly ScenarioStep[];
+    readonly barriers: readonly ScenarioBarrier[];
+    readonly faults: readonly ScenarioFault[];
+    readonly extensions: readonly ScenarioExtension[];
+}>;
+
+type TaskRuntime = Readonly<{
+    effect: <T>(name: string, operation: () => T | Promise<T>) => Promise<T>;
+    sleep: (ms: number) => Promise<void>;
+    log: (message: string, data?: ScenarioValue) => void;
+    opaque: <T>(name: string, operation: () => T | Promise<T>) => Promise<T>;
+}>;
+type StepRunner = (runtime: TaskRuntime, input: ScenarioValue | undefined) => unknown | Promise<unknown>;
+declare const step: (id: string, options?: {
+    input?: ScenarioValue;
+    dependsOn?: readonly string[];
+    capabilities?: readonly string[];
+    extension?: string;
+    runnerBinding?: string;
+    run?: StepRunner;
+}) => ScenarioStep;
+declare const barrier: (id: string, parties: readonly string[], budget?: number) => ScenarioBarrier;
+declare const fault: (id: string, phase: ScenarioFault["phase"], operation: ScenarioFault["operation"], outcome?: ScenarioValue) => ScenarioFault;
+declare const extension: (name: string, value: ScenarioValue) => ScenarioExtension;
+declare const scenario: (name: string, options?: {
+    steps?: readonly ScenarioStep[];
+    barriers?: readonly ScenarioBarrier[];
+    faults?: readonly ScenarioFault[];
+    extensions?: readonly ScenarioExtension[];
+    seed?: number;
+}) => ScenarioAst;
+
+type Capability = "virtual-time" | "seeded-interleaving" | "explicit-interleaving" | "barriers" | "mediated-effects" | "real-db" | "real-process" | "native-error-parity" | "durability-faults";
+type CapabilityDecision = Readonly<{
+    readonly kind: "supported" | "capability-failure" | "capability-skip";
+    readonly harness: string;
+    readonly capability: Capability;
+    readonly hint?: string;
+}>;
+declare const requiredCapabilities: (ast: {
+    readonly steps: readonly {
+        readonly capabilities: readonly string[];
+    }[];
+    readonly barriers: readonly unknown[];
+    readonly faults: readonly unknown[];
+    readonly extensions: readonly {
+        readonly name: string;
+    }[];
+}) => readonly Capability[];
+
+type CompileDiagnostic = Readonly<{
+    readonly code: string;
+    readonly message: string;
+    readonly node: string;
+}>;
+type CompileResult = Readonly<{
+    readonly ok: true;
+    readonly requiredCapabilities: readonly Capability[];
+} | {
+    readonly ok: false;
+    readonly diagnostics: readonly CompileDiagnostic[];
+    readonly requiredCapabilities: readonly Capability[];
+}>;
+declare const compileScenario: (ast: ScenarioAst, registeredExtensions?: ReadonlySet<string>) => CompileResult;
+
+declare class CanonicalizeError extends Error {
+    readonly details?: unknown | undefined;
+    readonly code = "CANONICALIZE_UNSUPPORTED";
+    constructor(message: string, details?: unknown | undefined);
+}
+declare const canonicalize: (value: ScenarioValue | object) => string;
+
+type ControlMessage = Readonly<{
+    readonly type: "advance-clock";
+    readonly ms: number;
+} | {
+    readonly type: "release-barrier";
+    readonly barrier: string;
+} | {
+    readonly type: "pin-interleaving";
+    readonly choice: string;
+} | {
+    readonly type: "inject-fault";
+    readonly fault: string;
+    readonly payload?: ScenarioValue;
+} | {
+    readonly type: "resolve-effect";
+    readonly effect: string;
+    readonly outcome: "succeed" | "fail" | "hang" | "duplicate";
+    readonly value?: ScenarioValue;
+} | {
+    readonly type: "cancel";
+    readonly reason?: string;
+} | {
+    readonly type: "task-restart";
+    readonly step: string;
+}>;
+
+declare const replayIdentity: (input: {
+    ast: ScenarioAst;
+    seed: number;
+    controlLog?: readonly ControlMessage[];
+}) => string;
+
+type TraceEvent = Readonly<{
+    readonly seq: number;
+    readonly at: number;
+    readonly type: "schedule" | "barrier" | "fault" | "task" | "effect" | "opaque-effect" | "capability" | "wait" | "ambiguity" | "adapter";
+    readonly id?: string;
+    readonly data?: ScenarioValue;
+}>;
+
+type Timer = Readonly<{
+    readonly id: number;
+    readonly at: number;
+    readonly callback: () => void;
+}>;
+declare class VirtualClock {
+    private current;
+    private nextId;
+    private timers;
+    now(): number;
+    sleep(ms: number, callback: () => void): number;
+    cancel(id: number): void;
+    advance(ms: number): void;
+    advanceToNextTimer(): boolean;
+    runUntilIdle(limit?: number): void;
+    pending(): readonly Timer[];
+    clear(): void;
+    private flush;
+}
+
+declare class SeededScheduler {
+    private state;
+    private readonly decisions;
+    constructor(seed: number);
+    choose<T>(ready: readonly T[], forcedIndex?: number): T;
+    snapshot(): readonly number[];
+    private next;
+}
+
+declare class ControlBus {
+    private readonly pending;
+    private readonly observed;
+    constructor(input?: readonly ControlMessage[]);
+    /** Record a generated command, consuming its replay counterpart when present. */
+    append(message: ControlMessage): number;
+    log(): readonly ControlMessage[];
+    find<T extends ControlMessage["type"]>(type: T): Extract<ControlMessage, {
+        readonly type: T;
+    }>[];
+    /** Consume a command at its actual rendezvous and retain it in the replay log. */
+    take<T extends ControlMessage["type"]>(type: T): Extract<ControlMessage, {
+        readonly type: T;
+    }> | undefined;
+    /** Consume only the next command. Runtime commands are ordered. */
+    takeNext<T extends ControlMessage["type"]>(type: T): Extract<ControlMessage, {
+        readonly type: T;
+    }> | undefined;
+    peek(): ControlMessage | undefined;
+    takeResolve(effect: string): Extract<ControlMessage, {
+        readonly type: "resolve-effect";
+    }> | undefined;
+    consumed(): number;
+}
+
+declare class TraceCollector {
+    private readonly clock;
+    private readonly events;
+    constructor(clock: {
+        now(): number;
+    });
+    emit(event: Omit<TraceEvent, "seq" | "at">): TraceEvent;
+    snapshot(): readonly TraceEvent[];
+}
+
+type WaitBudget = Readonly<{
+    readonly steps: number;
+    readonly ms?: number;
+}>;
+declare class BoundedWaitError extends Error {
+    readonly budget: WaitBudget;
+    readonly code = "WAIT_BUDGET_EXHAUSTED";
+    constructor(budget: WaitBudget);
+}
+declare const boundedWait: <T>(budget: WaitBudget, operation: (remaining: Readonly<{
+    readonly steps: number;
+}>) => T | Promise<T>) => Promise<T>;
+
+type HarnessError = Readonly<{
+    readonly name: string;
+    readonly code: string;
+    readonly message: string;
+    readonly fidelity?: "simulation" | "native";
+    readonly tag?: string;
+    readonly summary?: string;
+    readonly docsUrl?: string;
+    readonly serialized?: unknown;
+    readonly details?: unknown;
+    readonly cause?: unknown;
+}>;
+
+type HarnessKind = "unit-sim" | "integration-real-db" | "e2e-real-process";
+type HarnessAdapter = Readonly<{
+    readonly identity: string;
+    readonly verifiedProductionIdentity?: string;
+    readonly admissionProbe: () => void | Promise<void>;
+    readonly cleanup?: () => void | Promise<void>;
+    readonly runStep?: (...args: readonly unknown[]) => unknown | Promise<unknown>;
+    readonly injectFault?: (fault: ScenarioFault) => void | Promise<void>;
+    readonly supportedCutPoints?: ReadonlySet<string>;
+    readonly serializeError?: (error: unknown) => unknown;
+    readonly extensions?: ReadonlySet<string>;
+    readonly extensionExecutors?: Readonly<Record<string, (...args: readonly unknown[]) => unknown | Promise<unknown>>>;
+}>;
+type HarnessConfig = Readonly<{
+    readonly name?: string;
+    readonly policy?: "fail" | "skip";
+    readonly capabilities?: readonly Capability[];
+    readonly adapter?: HarnessAdapter;
+}>;
+type Harness = Readonly<{
+    readonly name: string;
+    readonly kind: HarnessKind;
+    readonly capabilities: ReadonlySet<Capability>;
+    readonly config: HarnessConfig;
+    readonly adapter?: HarnessAdapter;
+    readonly admit: (requested: readonly Capability[]) => readonly CapabilityDecision[];
+    readonly admitScenario: (ast: Parameters<typeof requiredCapabilities>[0], requested?: readonly Capability[]) => readonly CapabilityDecision[];
+}>;
+declare const makeHarness: (kind: HarnessKind, config?: HarnessConfig) => Harness;
+declare const unitSimHarness: (config?: HarnessConfig) => Harness;
+declare const integrationHarness: (config?: HarnessConfig) => Harness;
+declare const e2eHarness: (config?: HarnessConfig) => Harness;
+
+declare const e2eDescriptor: (config?: HarnessConfig) => Harness;
+
+declare class SimulationError extends Error {
+    readonly code: string;
+    readonly details?: unknown | undefined;
+    readonly fidelity = "simulation";
+    constructor(message: string, code: string, details?: unknown | undefined);
+}
+
+type AmbiguityOutcome = "duplicate-delivery" | "effect-applied-journal-missing" | "journal-applied-ack-missing" | "lease-lost" | "cancellation-race" | "restart-in-task" | "lost-wakeup";
+type AmbiguityResult = Readonly<{
+    readonly outcome: AmbiguityOutcome;
+    readonly guaranteed: "journal-cas-only" | "at-least-once";
+    readonly details: Readonly<Record<string, unknown>>;
+}>;
+declare const ambiguity: (outcome: AmbiguityOutcome, details?: Record<string, unknown>) => AmbiguityResult;
+
+type DeterminismReport = Readonly<{
+    readonly deterministic: boolean;
+    readonly residues: readonly string[];
+}>;
+type ScenarioStatus = "finished" | "failed" | "capability-failure" | "capability-skip";
+type ScenarioResult = Readonly<{
+    readonly status: ScenarioStatus;
+    readonly outputs: Readonly<Record<string, unknown>>;
+    readonly trace: readonly TraceEvent[];
+    readonly replayIdentity: string;
+    readonly controlLog: readonly ControlMessage[];
+    readonly capabilityReport: readonly unknown[];
+    readonly ambiguity: readonly AmbiguityResult[];
+    readonly determinismReport: DeterminismReport;
+    readonly error?: HarnessError;
+}>;
+type RunScenarioOptions = Readonly<{
+    readonly harness?: Harness;
+    readonly seed?: number;
+    readonly controlLog?: readonly ControlMessage[];
+    readonly capabilities?: readonly Parameters<Harness["admit"]>[0][number][];
+    readonly stepRunners?: Readonly<Record<string, (runtime: TaskRuntime, input: ScenarioValue | undefined) => unknown | Promise<unknown>>>;
+    readonly cleanupBudget?: number;
+    readonly waitBudget?: number;
+}>;
+declare const runScenario: (ast: ScenarioAst, options?: RunScenarioOptions) => Promise<ScenarioResult>;
+
+declare const dryRun: (ast: ScenarioAst, options?: RunScenarioOptions) => {
+    canonicalAst: string;
+    replayIdentity: string;
+    admissions: readonly Readonly<{
+        readonly kind: "supported" | "capability-failure" | "capability-skip";
+        readonly harness: string;
+        readonly capability: Capability;
+        readonly hint?: string;
+    }>[];
+    diagnostics: readonly Readonly<{
+        readonly code: string;
+        readonly message: string;
+        readonly node: string;
+    }>[];
+    requiredCapabilities: readonly Capability[];
+    replayBundle: Readonly<{
+        readonly version: 1;
+        readonly ast: ScenarioAst;
+        readonly seed: number;
+        readonly controlLog: readonly ControlMessage[];
+        readonly trace: readonly TraceEvent[];
+        readonly ambiguity: readonly unknown[];
+        readonly determinism: Readonly<{
+            readonly deterministic: boolean;
+            readonly residues: readonly string[];
+        }>;
+        readonly harness: string;
+        readonly runnerBindings: Readonly<Record<string, string>>;
+        readonly replayIdentity: string;
+    }>;
+    plannedSteps: string[];
+    executesAgents: boolean;
+    run: () => Promise<Readonly<{
+        readonly status: ScenarioStatus;
+        readonly outputs: Readonly<Record<string, unknown>>;
+        readonly trace: readonly TraceEvent[];
+        readonly replayIdentity: string;
+        readonly controlLog: readonly ControlMessage[];
+        readonly capabilityReport: readonly unknown[];
+        readonly ambiguity: readonly AmbiguityResult[];
+        readonly determinismReport: DeterminismReport;
+        readonly error?: HarnessError;
+    }>>;
+};
+
+type JournalState = "none" | "effect-applied" | "journaled" | "acked";
+type LeaseState = "unclaimed" | "owned" | "lost";
+type WakeupState = "none" | "registered" | "delivered" | "lost";
+declare class JournalModel {
+    private readonly states;
+    private readonly leases;
+    private readonly owners;
+    private readonly wakeups;
+    state(id: string): JournalState;
+    effectApplied(id: string): void;
+    journal(id: string): boolean;
+    ack(id: string): void;
+    claimLease(id: string, owner: string): boolean;
+    assertLease(id: string, owner: string): void;
+    loseLease(id: string): void;
+    leaseState(id: string): LeaseState;
+    registerWakeup(id: string): void;
+    deliverWakeup(id: string): void;
+    loseWakeup(id: string): void;
+    wakeupState(id: string): WakeupState;
+    snapshot(): Readonly<Record<string, unknown>>;
+}
+
+type DurabilityPhase = "before-task" | "during-task" | "after-task" | "after-effect-before-journal" | "after-journal-before-ack" | "after-ack";
+type DurabilityOperation = "task" | "effect" | "attempt-write" | "event-append" | "completion-cas" | "heartbeat" | "lease" | "resume" | "cancellation";
+type DurabilityCutPoint = Readonly<{
+    readonly phase: DurabilityPhase;
+    readonly operation: DurabilityOperation;
+}>;
+declare const cutPoint: (phase: DurabilityPhase, operation: DurabilityOperation) => DurabilityCutPoint;
+
+type EffectOutcome = Readonly<{
+    readonly kind: "succeed" | "fail" | "duplicate" | "hang";
+    readonly value?: unknown;
+}>;
+type EffectRequest = Readonly<{
+    readonly id: string;
+    readonly name: string;
+    readonly input?: unknown;
+}>;
+declare class EffectLedger {
+    private readonly requests;
+    private readonly outcomes;
+    private readonly journal;
+    request(request: EffectRequest): void;
+    resolve(id: string, outcome: EffectOutcome): void;
+    get(id: string): EffectOutcome | undefined;
+    recordJournal(id: string): void;
+    journalCount(id: string): number;
+    snapshot(): Readonly<{
+        readonly requests: readonly EffectRequest[];
+        readonly outcomes: Readonly<Record<string, EffectOutcome>>;
+        readonly journal: Readonly<Record<string, number>>;
+    }>;
+}
+declare const mediatedEffect: <T>(ledger: EffectLedger, request: EffectRequest, execute: () => T | Promise<T>) => Promise<T>;
+
+declare const opaqueEffect: (description?: string) => Readonly<{
+    readonly kind: "opaque-effect";
+    readonly description: string;
+}>;
+declare const isOpaqueEffect: (value: unknown) => value is {
+    readonly kind: "opaque-effect";
+    readonly description: string;
+};
+
+type BoundaryShape = Readonly<{
+    readonly name: string;
+    readonly className: string;
+    readonly tag?: string;
+    readonly code?: string;
+    readonly message?: string;
+    readonly summary?: string;
+    readonly hasCause: boolean;
+    readonly cause?: BoundaryShape;
+    readonly details?: unknown;
+    readonly detailsKeys: readonly string[];
+    readonly docsUrl?: string;
+    readonly serialized?: unknown;
+}>;
+declare const boundaryShape: (error: unknown, serialized?: unknown) => BoundaryShape;
+declare const compareBoundaryShape: (expected: BoundaryShape, actual: BoundaryShape) => readonly string[];
+
+type ProbeReport = Readonly<{
+    readonly name: string;
+    readonly passed: boolean;
+    readonly expected: BoundaryShape;
+    readonly actual: BoundaryShape;
+    readonly differences: readonly string[];
+}>;
+declare const contractProbe: (name: string, production: () => unknown | Promise<unknown>, simulated: () => unknown | Promise<unknown>, options?: Readonly<{
+    readonly serializeProduction?: (value: unknown) => unknown;
+    readonly serializeSimulation?: (value: unknown) => unknown;
+}>) => Promise<ProbeReport>;
+
+type CleanupResource = Readonly<{
+    readonly kind: string;
+    readonly id: string;
+}>;
+declare class CleanupScope {
+    private readonly entries;
+    private closed;
+    add(resource: CleanupResource, dispose: () => void | Promise<void>): () => void;
+    register(kind: string, id: string, dispose: () => void | Promise<void>): () => void;
+    pending(): readonly CleanupResource[];
+    close(budget?: number, timeoutMs?: number): Promise<void>;
+}
+
+declare const assertNoLeaks: (scope: CleanupScope, extra?: readonly {
+    readonly kind: string;
+    readonly id: string;
+}[]) => void;
+
+declare class ExactlyOnceUnsupportedError extends Error {
+    readonly code = "EXACTLY_ONCE_UNSUPPORTED";
+    constructor();
+}
+declare const expectEffect: (name: string) => {
+    name: string;
+    exactlyOnce: () => never;
+    atLeastOnce: () => {
+        name: string;
+        guarantee: "at-least-once";
+    };
+    idempotencyKey: (key: string) => {
+        name: string;
+        key: string;
+        guarantee: "idempotency-key";
+    };
+    journalCas: () => {
+        name: string;
+        guarantee: "journal-cas";
+    };
+};
+
+type ReplayBundle = Readonly<{
+    readonly version: 1;
+    readonly ast: ScenarioAst;
+    readonly seed: number;
+    readonly controlLog: readonly ControlMessage[];
+    readonly trace: readonly TraceEvent[];
+    readonly ambiguity: readonly unknown[];
+    readonly determinism: Readonly<{
+        readonly deterministic: boolean;
+        readonly residues: readonly string[];
+    }>;
+    readonly harness: string;
+    readonly runnerBindings: Readonly<Record<string, string>>;
+    readonly replayIdentity: string;
+}>;
+declare const makeReplayBundle: (input: {
+    ast: ScenarioAst;
+    seed: number;
+    controlLog: readonly ControlMessage[];
+    trace?: readonly TraceEvent[];
+    ambiguity?: readonly unknown[];
+    determinism?: Readonly<{
+        readonly deterministic: boolean;
+        readonly residues: readonly string[];
+    }>;
+    harness?: string;
+}) => ReplayBundle;
+declare const serializeReplayBundle: (bundle: ReplayBundle) => string;
+declare const loadReplayBundle: (serialized: string) => ReplayBundle;
+declare const replayBundle: (bundle: ReplayBundle, options?: Omit<RunScenarioOptions, "seed" | "controlLog">) => Promise<ScenarioResult>;
+
+type Divergence = Readonly<{
+    readonly index: number;
+    readonly sequence: number;
+    readonly field?: string;
+    readonly left?: TraceEvent;
+    readonly right?: TraceEvent;
+    readonly message: string;
+}>;
+declare const firstDivergence: (left: readonly TraceEvent[], right: readonly TraceEvent[]) => Divergence | null;
+
+declare const shrink: (ast: ScenarioAst, controls: readonly ControlMessage[], failure: (ast: ScenarioAst, controls: readonly ControlMessage[]) => boolean | Promise<boolean>, options?: {
+    maxCandidates?: number;
+}) => Promise<{
+    ast: Readonly<{
+        readonly version: 1;
+        readonly name: string;
+        readonly seed?: number;
+        readonly steps: readonly ScenarioStep[];
+        readonly barriers: readonly ScenarioBarrier[];
+        readonly faults: readonly ScenarioFault[];
+        readonly extensions: readonly ScenarioExtension[];
+    }>;
+    controls: ControlMessage[];
+    candidatesTried: number;
+}>;
+
+type RealDbResource = SmithersDb & Readonly<{
+    readonly path?: string;
+    readonly productionIdentity?: "SmithersDb";
+    readonly close: () => void | Promise<void>;
+    readonly operations?: Readonly<Record<string, (...args: readonly unknown[]) => unknown | Promise<unknown>>>;
+}>;
+type RealDbAdapterOptions = Readonly<{
+    readonly open: () => RealDbResource | Promise<RealDbResource>;
+    readonly identity?: string;
+}>;
+declare const realDbAdapter: (options: RealDbAdapterOptions) => HarnessAdapter;
+
+/** The runner must implement this challenge through its production protocol.
+ * A caller-supplied `productionIdentity` string is deliberately not proof. */
+type RealProcessResource = Readonly<{
+    readonly pid: number;
+    readonly child: ChildProcess;
+    readonly handshake: () => boolean | Promise<boolean>;
+    readonly verifyProductionIdentity: () => boolean | Promise<boolean>;
+    readonly productionIdentity: "runWorkflow";
+    readonly kill: (signal?: string) => void | Promise<void>;
+    readonly close: () => void | Promise<void>;
+    readonly healthy?: () => boolean | Promise<boolean>;
+}>;
+type RealProcessAdapterOptions = Readonly<{
+    readonly spawn: () => RealProcessResource | Promise<RealProcessResource>;
+    readonly identity?: string;
+}>;
+declare const realProcessAdapter: (options: RealProcessAdapterOptions) => HarnessAdapter;
+
+export { type AmbiguityOutcome, type AmbiguityResult, type BoundaryShape, BoundedWaitError, CanonicalizeError, type Capability, type CapabilityDecision, CleanupScope, type CompileDiagnostic, type CompileResult, ControlBus, type ControlMessage, type DurabilityCutPoint, type DurabilityOperation, type DurabilityPhase, EffectLedger, type EffectOutcome, type EffectRequest, ExactlyOnceUnsupportedError, type Harness, type HarnessAdapter, type HarnessConfig, type HarnessError, type HarnessKind, JournalModel, type ProbeReport, type RealDbAdapterOptions, type RealDbResource, type RealProcessAdapterOptions, type RealProcessResource, type ReplayBundle, type RunScenarioOptions, type ScenarioAst, type ScenarioBarrier, type ScenarioExtension, type ScenarioFault, type ScenarioResult, type ScenarioStep, type ScenarioValue, SeededScheduler, SimulationError, type StepRunner, type TaskRuntime, TraceCollector, type TraceEvent, VirtualClock, ambiguity, assertNoLeaks, barrier, boundaryShape, boundedWait, canonicalize, compareBoundaryShape, compileScenario, contractProbe, cutPoint, dryRun, e2eDescriptor, e2eHarness, expectEffect, extension, fault, firstDivergence, integrationHarness, isOpaqueEffect, loadReplayBundle, makeHarness, makeReplayBundle, mediatedEffect, opaqueEffect, realDbAdapter, realProcessAdapter, replayBundle, replayIdentity, requiredCapabilities, runScenario, scenario, serializeReplayBundle, shrink, step, unitSimHarness };

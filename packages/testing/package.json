@@ -31,6 +31,7 @@
   },
   "dependencies": {
     "@smithers-orchestrator/components": "workspace:*",
+    "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
     "@smithers-orchestrator/graph": "workspace:*",

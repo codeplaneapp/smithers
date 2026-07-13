@@ -844,6 +844,9 @@ importers:
       '@smithers-orchestrator/server':
         specifier: workspace:*
         version: link:../packages/server
+      '@smithers-orchestrator/testing':
+        specifier: workspace:*
+        version: link:../packages/testing
       '@smithers-orchestrator/time-travel':
         specifier: workspace:*
         version: link:../packages/time-travel
@@ -2029,6 +2032,9 @@ importers:
       '@smithers-orchestrator/components':
         specifier: workspace:*
         version: link:../components
+      '@smithers-orchestrator/db':
+        specifier: workspace:*
+        version: link:../db
       '@smithers-orchestrator/driver':
         specifier: workspace:*
         version: link:../driver

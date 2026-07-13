@@ -100,6 +100,7 @@
         "react": "^19.2.7",
         "smithers-orchestrator": "workspace:*",
         "twitter-api-v2": "^1.29.0",
+        "yaml": "^2.8.2",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -167,6 +168,7 @@
         "@smithers-orchestrator/protocol": "workspace:*",
         "@smithers-orchestrator/review": "workspace:*",
         "@smithers-orchestrator/scheduler": "workspace:*",
+        "@smithers-orchestrator/scorers": "workspace:*",
         "@smithers-orchestrator/server": "workspace:*",
         "@smithers-orchestrator/time-travel": "workspace:*",
         "@smithers-orchestrator/tui": "workspace:*",
@@ -517,7 +519,7 @@
         "zod": "^4.4.3",
       },
       "devDependencies": {
-        "@electric-sql/pglite": "0.5.3",
+        "@electric-sql/pglite": "0.5.4",
         "@electric-sql/pglite-socket": "0.2.6",
         "@types/bun": "latest",
         "pg": "^8.22.0",
@@ -601,7 +603,7 @@
         "typescript": "~6.0.3",
       },
       "optionalDependencies": {
-        "@electric-sql/pglite": "0.5.3",
+        "@electric-sql/pglite": "0.5.4",
         "@electric-sql/pglite-socket": "0.2.6",
         "pg": "^8.22.0",
       },
@@ -999,7 +1001,7 @@
         "typescript": "~6.0.3",
       },
       "optionalDependencies": {
-        "@electric-sql/pglite": "0.5.3",
+        "@electric-sql/pglite": "0.5.4",
         "@electric-sql/pglite-socket": "0.2.6",
         "pg": "^8.22.0",
       },
@@ -1017,6 +1019,7 @@
       "version": "0.28.0",
       "dependencies": {
         "@smithers-orchestrator/components": "workspace:*",
+        "@smithers-orchestrator/db": "workspace:*",
         "@smithers-orchestrator/driver": "workspace:*",
         "@smithers-orchestrator/engine": "workspace:*",
         "@smithers-orchestrator/graph": "workspace:*",
@@ -1414,7 +1417,7 @@
 
     "@electric-sql/client": ["@electric-sql/client@1.5.22", "", { "dependencies": { "@microsoft/fetch-event-source": "^2.0.1" }, "optionalDependencies": { "@rollup/rollup-darwin-arm64": "^4.18.1" }, "bin": { "intent": "bin/intent.mjs" } }, "sha512-bOlxcMHc39OUnvXNKa/rxtBTPwpxk/SerasFFi8Psw3825/uGvsT7br8YTWzMaETxWu6kvaPc5CXdYTyx5eJgw=="],
 
-    "@electric-sql/pglite": ["@electric-sql/pglite@0.5.3", "", {}, "sha512-iTTYbA5Uesrl+N7zss0J5LopT7KE4j9aymYo+EZZh+rZbARQCUQOs+n2pay64JRUpc3fCkpfrniTNJnvYzOE+g=="],
+    "@electric-sql/pglite": ["@electric-sql/pglite@0.5.4", "", {}, "sha512-yYZUyyXrHU7tPlCjwZQJ6hIG9DscdCCn7Uk0mYKwC1FeHX286AbcmFveMiRBEak8e9iPupjsoVImN3yJZVed2g=="],
 
     "@electric-sql/pglite-age": ["@electric-sql/pglite-age@0.0.2", "", { "peerDependencies": { "@electric-sql/pglite": "0.5.1" } }, "sha512-0Q+QnbSSZjJt3aF/wycuXpC1HxyemkAumYSodKlIkjobx/Cu/U9a9lazuwlAzB1GOZuCuB6JUiYjGcJMnvN7zA=="],
 
@@ -4377,6 +4380,8 @@
     "@electric-sql/pglite-pgtap/@electric-sql/pglite": ["@electric-sql/pglite@0.5.1", "", {}, "sha512-h2Vc+qkQqsEL5kvyN5nBAxn3Vbyvka7QfDW7Io+CdcwU1+X8JbCAN2og+5dI11S3eJuDfroUCxzJaap6k+ezEw=="],
 
     "@electric-sql/pglite-pgvector/@electric-sql/pglite": ["@electric-sql/pglite@0.5.1", "", {}, "sha512-h2Vc+qkQqsEL5kvyN5nBAxn3Vbyvka7QfDW7Io+CdcwU1+X8JbCAN2og+5dI11S3eJuDfroUCxzJaap6k+ezEw=="],
+
+    "@electric-sql/pglite-socket/@electric-sql/pglite": ["@electric-sql/pglite@0.5.3", "", {}, "sha512-iTTYbA5Uesrl+N7zss0J5LopT7KE4j9aymYo+EZZh+rZbARQCUQOs+n2pay64JRUpc3fCkpfrniTNJnvYzOE+g=="],
 
     "@elizaos/core/uuid": ["uuid@13.0.2", "", { "bin": { "uuid": "dist-node/bin/uuid" } }, "sha512-vzi9uRZ926x4XV73S/4qQaTwPXM2JBj6/6lI/byHH1jOpCzb0zDbfytgA9LcN/hzb2l7WQSQnxITOVx5un/wGw=="],
 

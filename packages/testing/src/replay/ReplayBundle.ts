@@ -1,0 +1,20 @@
+import { canonicalize } from "../scenario/canonicalize.ts";
+import { replayIdentity } from "../scenario/replayIdentity.ts";
+import type { ScenarioAst } from "../scenario/ast.ts";
+import type { ControlMessage } from "../control/ControlMessage.ts";
+import type { TraceEvent } from "../trace/TraceEvent.ts";
+import type { RunScenarioOptions, ScenarioResult } from "../runScenario.ts";
+import { stepRunner } from "../scenario/builder.ts";
+export type ReplayBundle = Readonly<{ readonly version: 1; readonly ast: ScenarioAst; readonly seed: number; readonly controlLog: readonly ControlMessage[]; readonly trace: readonly TraceEvent[]; readonly ambiguity: readonly unknown[]; readonly determinism: Readonly<{ readonly deterministic: boolean; readonly residues: readonly string[] }>; readonly harness: string; readonly runnerBindings: Readonly<Record<string, string>>; readonly replayIdentity: string }>;
+export const makeReplayBundle = (input: { ast: ScenarioAst; seed: number; controlLog: readonly ControlMessage[]; trace?: readonly TraceEvent[]; ambiguity?: readonly unknown[]; determinism?: Readonly<{ readonly deterministic: boolean; readonly residues: readonly string[] }>; harness?: string }): ReplayBundle => Object.freeze({ version: 1, ast: JSON.parse(canonicalize(input.ast)) as ScenarioAst, seed: input.seed, controlLog: JSON.parse(JSON.stringify(input.controlLog)) as readonly ControlMessage[], trace: JSON.parse(JSON.stringify(input.trace ?? [])) as readonly TraceEvent[], ambiguity: JSON.parse(JSON.stringify(input.ambiguity ?? [])) as readonly unknown[], determinism: input.determinism ?? { deterministic: true, residues: [] }, harness: input.harness ?? "unit-sim", runnerBindings: Object.fromEntries(input.ast.steps.filter((step) => step.runnerBinding).map((step) => [step.id, step.runnerBinding!])), replayIdentity: replayIdentity(input) });
+export const serializeReplayBundle = (bundle: ReplayBundle): string => JSON.stringify(bundle);
+export const loadReplayBundle = (serialized: string): ReplayBundle => { const value = JSON.parse(serialized) as ReplayBundle; if (value.version !== 1 || !value.ast || !Array.isArray(value.controlLog) || typeof value.seed !== "number") throw new Error("INVALID_REPLAY_BUNDLE"); const bundle = makeReplayBundle(value); if (bundle.replayIdentity !== value.replayIdentity) throw new Error("REPLAY_IDENTITY_MISMATCH"); return Object.freeze({ ...bundle, runnerBindings: value.runnerBindings ?? {} }); };
+export const replayBundle = async (bundle: ReplayBundle, options: Omit<RunScenarioOptions, "seed" | "controlLog"> = {}): Promise<ScenarioResult> => {
+  const { runScenario } = await import("../runScenario.ts");
+  const selectedHarness = options.harness?.name ?? "unit-sim";
+  if (selectedHarness !== bundle.harness) throw new Error(`REPLAY_HARNESS_MISMATCH: bundle=${bundle.harness} selected=${selectedHarness}`);
+  const runners = options.stepRunners ?? {};
+  const missing = bundle.ast.steps.filter((step) => step.runnerBinding && !runners[step.id] && !stepRunner(step)).map((step) => step.id);
+  if (missing.length) throw new Error(`REPLAY_RUNNER_MISSING: ${missing.join(", ")}`);
+  return runScenario(bundle.ast, { ...options, ...(Object.keys(runners).length ? { stepRunners: runners } : {}), seed: bundle.seed, controlLog: bundle.controlLog });
+};

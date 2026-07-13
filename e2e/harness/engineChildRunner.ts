@@ -47,6 +47,10 @@ async function main(): Promise<void> {
     fail(`invalid mode ${modeArg}; expected "initial" or "resume"`);
   }
   const mode: EngineChildMode = modeArg;
+  // This is the authenticated production-runner protocol marker consumed by
+  // realProcessAdapter admission; an arbitrary long-lived child cannot pass
+  // real-process admission by merely claiming a name in memory.
+  process.stdout.write("SMITHERS_ENGINE_HANDSHAKE=runWorkflow\n");
   const bSleepMs = bSleepMsArg ? Number(bSleepMsArg) : undefined;
 
   const { workflow, db } = buildKillResumeWorkflow({
