@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
+import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { GENERATED_SEEDED_FILES } from "../src/seeded-workflow-pack.generated.js";
 import {
   createExecutableDir,
@@ -193,6 +195,12 @@ function writeFakeAgentBinaries(binDir) {
     'const path = require("node:path");',
     'let stdin = ""; try { stdin = fs.readFileSync(0, "utf8"); } catch {}',
     'const invocation = (process.argv.slice(2).join(" ") + "\\n" + stdin).toLowerCase();',
+    // Match the distinct prompt headers plus their opening instructions. The
+    // invocation includes every workflow prompt, so broad words such as
+    // "scaffold" and "document" would make this fixture write at the wrong
+    // stage and conceal retry regressions.
+    'const scaffoldStage = invocation.includes("# scaffold the workflow files\\n\\nyou are the scaffolder.");',
+    'const documentStage = invocation.includes("# document the new workflow\\n\\nthe new workflow verifies cleanly.");',
     "function writeFixtureFiles() {",
     "  const root = process.cwd();",
     '  const workflowDir = path.join(root, ".smithers", "workflows");',
@@ -212,6 +220,9 @@ function writeFakeAgentBinaries(binDir) {
     '    "));",',
     '    "",',
     '  ].join("\\n"), "utf8");',
+    '  const countPath = path.join(root, ".smithers", "test-scaffold-count");',
+    '  const count = Number(fs.existsSync(countPath) ? fs.readFileSync(countPath, "utf8") : "0") + 1;',
+    '  fs.writeFileSync(countPath, String(count), "utf8");',
     "}",
     "function writeSkillFixture() {",
     "  const root = process.cwd();",
@@ -227,8 +238,8 @@ function writeFakeAgentBinaries(binDir) {
     '  if (mode === "mismatched") { fs.writeFileSync(path.join(skillsDir, "mock-workflow.md"), "---\\nname: other-workflow\\nworkflow: mock-workflow\\n---\\n", "utf8"); return; }',
     '  fs.writeFileSync(path.join(skillsDir, "mock-workflow.md"), "---\\nname: mock-workflow\\ndescription: Test fixture skill.\\nworkflow: mock-workflow\\n---\\n\\n# Mock Workflow\\n", "utf8");',
     "}",
-    'if (invocation.includes("scaffold")) writeFixtureFiles();',
-    'if (invocation.includes("document")) writeSkillFixture();',
+    'if (scaffoldStage) writeFixtureFiles();',
+    'if (documentStage) writeSkillFixture();',
   ].join("\n");
   const responseLiteral = JSON.stringify(AGENT_RESPONSE);
   writeExecutable(binDir, "claude", [
@@ -240,7 +251,7 @@ function writeFakeAgentBinaries(binDir) {
     "  process.exit(0);",
     "}",
     `let payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
-    'if (invocation.includes("document") && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
+    'if (documentStage && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
     'process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "```json\\n" + payload + "\\n```\\n" }] } }) + "\\n");',
     "",
   ].join("\n"));
@@ -248,7 +259,7 @@ function writeFakeAgentBinaries(binDir) {
     "#!/usr/bin/env bun",
     fixtureScript,
     `let payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
-    'if (invocation.includes("document") && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
+    'if (documentStage && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
     "const args = process.argv.slice(2);",
     'const outputIndex = args.indexOf("--output-last-message");',
     "if (outputIndex >= 0 && args[outputIndex + 1]) {",
@@ -261,7 +272,7 @@ function writeFakeAgentBinaries(binDir) {
     "#!/usr/bin/env bun",
     fixtureScript,
     `let payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
-    'if (invocation.includes("document") && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
+    'if (documentStage && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
     'process.stdout.write(payload + "\\n");',
     "",
   ].join("\n"));
@@ -357,6 +368,47 @@ for (const id of SEEDED_WORKFLOW_IDS) {
 }
 
 const EXPECTED_SKILL = "---\nname: mock-workflow\ndescription: Test fixture skill.\nworkflow: mock-workflow\n---\n\n# Mock Workflow\n";
+const EXPECTED_WORKFLOW = [
+  "// smithers-source: generated",
+  "// smithers-metadata-version: 1",
+  "// smithers-display-name: Mock Workflow",
+  "/** @jsxImportSource smithers-orchestrator */",
+  "import { createSmithers } from \"smithers-orchestrator\";",
+  "import { z } from \"zod/v4\";",
+  "const { Workflow, Task, smithers, outputs } = createSmithers({ output: z.object({ summary: z.string() }) });",
+  "export default smithers(() => (",
+  "  <Workflow name=\"mock-workflow\">",
+  "    <Task id=\"output\" output={outputs.output}>{() => ({ summary: \"mock workflow ok\" })}</Task>",
+  "  </Workflow>",
+  "));",
+  "",
+].join("\n");
+
+function jsonOutput(result) {
+  return JSON.parse(result.stdout);
+}
+
+function skillFrontmatter(contents) {
+  const match = contents.match(/^---\n([\s\S]*?)\n---\n/);
+  return match ? parseYaml(match[1]) : null;
+}
+
+function workflowMetadata(contents) {
+  const fields = Object.fromEntries(
+    [...contents.matchAll(/^\/\/ smithers-([^:]+): (.+)$/gm)].map((match) => [match[1], match[2]]),
+  );
+  return {
+    source: fields.source,
+    metadataVersion: fields["metadata-version"],
+    displayName: fields["display-name"],
+  };
+}
+
+function companionSkillPaths(repo) {
+  return readdirSync(repo.path(".smithers/skills"))
+    .filter((name) => name !== ".gitkeep")
+    .sort();
+}
 
 function runCreateWorkflowSkillCase(mode) {
   const { repo, env } = initWorkflowPack();
@@ -379,39 +431,86 @@ test("create-workflow accepts exactly one valid companion skill and reports its 
   const { repo, result, runId, env } = runCreateWorkflowSkillCase("positive");
   expect(result.exitCode).toBe(0);
   expect(result.json?.status).toBe("finished");
+  expect(repo.read(".smithers/test-scaffold-count")).toBe("1");
+  expect(repo.read(".smithers/workflows/mock-workflow.tsx")).toBe(EXPECTED_WORKFLOW);
+  expect(workflowMetadata(repo.read(".smithers/workflows/mock-workflow.tsx"))).toEqual({
+    source: "generated", metadataVersion: "1", displayName: "Mock Workflow",
+  });
   expect(repo.read(".smithers/skills/mock-workflow.md")).toBe(EXPECTED_SKILL);
   expect(repo.exists(".smithers/skills/mock-workflow/SKILL.md")).toBe(false);
+  expect(skillFrontmatter(repo.read(".smithers/skills/mock-workflow.md"))).toEqual({
+    name: "mock-workflow", description: "Test fixture skill.", workflow: "mock-workflow",
+  });
+  expect(companionSkillPaths(repo)).toEqual(["mock-workflow.md"]);
+  expect(readdirSync(repo.path(".smithers/skills")).sort()).toEqual([".gitkeep", "mock-workflow.md"]);
+  expect(repo.read(".smithers/test-document-attempts")).toBe("1");
   const terminal = runSmithers(["output", runId, "output"], { cwd: repo.dir, format: "json", env, timeoutMs: SMOKE_COMMAND_TIMEOUT_MS });
   expect(terminal.exitCode).toBe(0);
-  expect(terminal.stdout).toContain('"skill_path":".smithers/skills/mock-workflow.md"');
+  expect(jsonOutput(terminal)).toMatchObject({ skill_path: ".smithers/skills/mock-workflow.md" });
 }, SMOKE_TEST_TIMEOUT_MS);
 
 test("create-workflow retries an invalid skill document and succeeds with exact metadata", () => {
   const { repo, result, runId, env } = runCreateWorkflowSkillCase("retry");
   expect(result.exitCode).toBe(0);
+  expect(result.json?.status).toBe("finished");
   expect(repo.read(".smithers/test-document-attempts")).toBe("2");
+  expect(repo.read(".smithers/test-scaffold-count")).toBe("1");
+  expect(repo.read(".smithers/workflows/mock-workflow.tsx")).toBe(EXPECTED_WORKFLOW);
+  expect(workflowMetadata(repo.read(".smithers/workflows/mock-workflow.tsx"))).toEqual({
+    source: "generated", metadataVersion: "1", displayName: "Mock Workflow",
+  });
   expect(repo.read(".smithers/skills/mock-workflow.md")).toBe(EXPECTED_SKILL);
+  expect(repo.exists(".smithers/skills/mock-workflow/SKILL.md")).toBe(false);
+  expect(skillFrontmatter(repo.read(".smithers/skills/mock-workflow.md"))).toEqual({
+    name: "mock-workflow", description: "Test fixture skill.", workflow: "mock-workflow",
+  });
+  expect(companionSkillPaths(repo)).toEqual(["mock-workflow.md"]);
+  expect(readdirSync(repo.path(".smithers/skills")).sort()).toEqual([".gitkeep", "mock-workflow.md"]);
   const terminal = runSmithers(["output", runId, "output"], { cwd: repo.dir, format: "json", env, timeoutMs: SMOKE_COMMAND_TIMEOUT_MS });
-  expect(terminal.stdout).toContain('"skill_path":".smithers/skills/mock-workflow.md"');
+  expect(terminal.exitCode).toBe(0);
+  expect(jsonOutput(terminal)).toMatchObject({ skill_path: ".smithers/skills/mock-workflow.md" });
 }, SMOKE_TEST_TIMEOUT_MS);
 
 for (const mode of ["missing", "malformed", "mismatched", "wrong-path"]) {
   test(`create-workflow fails after bounded retries for a ${mode} companion skill`, () => {
     const { repo, result, verification } = runCreateWorkflowSkillCase(mode);
     expect(result.exitCode).not.toBe(0);
+    expect(result.json?.status).not.toBe("finished");
     expect(repo.read(".smithers/test-document-attempts")).toBe("3");
+    expect(repo.read(".smithers/test-scaffold-count")).toBe("1");
+    expect(repo.read(".smithers/workflows/mock-workflow.tsx")).toBe(EXPECTED_WORKFLOW);
+    expect(workflowMetadata(repo.read(".smithers/workflows/mock-workflow.tsx"))).toEqual({
+      source: "generated", metadataVersion: "1", displayName: "Mock Workflow",
+    });
     expect(verification.exitCode).toBe(0);
+    const verificationOutput = jsonOutput(verification);
+    expect(verificationOutput).toMatchObject({
+      skill_path: mode === "wrong-path" ? ".smithers/skills/wrong.md" : ".smithers/skills/mock-workflow.md",
+      exists: mode !== "missing" && mode !== "wrong-path",
+      contains_workflow_metadata: false,
+    });
+    expect(repo.exists(".smithers/skills/mock-workflow/SKILL.md")).toBe(false);
     if (mode === "missing") {
       expect(repo.exists(".smithers/skills/mock-workflow.md")).toBe(false);
-      expect(verification.stdout).toContain('"skill_path":".smithers/skills/mock-workflow.md"');
+      expect(companionSkillPaths(repo)).toEqual([]);
+      expect(readdirSync(repo.path(".smithers/skills")).sort()).toEqual([".gitkeep"]);
     } else if (mode === "wrong-path") {
       expect(repo.exists(".smithers/skills/mock-workflow.md")).toBe(false);
-      expect(repo.read(".smithers/skills/wrong.md")).toContain("workflow: mock-workflow");
-      expect(verification.stdout).toContain('"skill_path":".smithers/skills/wrong.md"');
+      expect(repo.read(".smithers/skills/wrong.md")).toBe("---\nname: mock-workflow\nworkflow: mock-workflow\n---\nwrong path\n");
+      expect(skillFrontmatter(repo.read(".smithers/skills/wrong.md"))).toMatchObject({ name: "mock-workflow", workflow: "mock-workflow" });
+      expect(companionSkillPaths(repo)).toEqual(["wrong.md"]);
+      expect(readdirSync(repo.path(".smithers/skills")).sort()).toEqual([".gitkeep", "wrong.md"]);
     } else {
       expect(repo.exists(".smithers/skills/mock-workflow.md")).toBe(true);
-      expect(verification.stdout).toContain('"skill_path":".smithers/skills/mock-workflow.md"');
+      const expected = mode === "malformed"
+        ? "---\nname: [unterminated\nworkflow: mock-workflow\n---\n"
+        : "---\nname: other-workflow\nworkflow: mock-workflow\n---\n";
+      expect(repo.read(".smithers/skills/mock-workflow.md")).toBe(expected);
+      expect(companionSkillPaths(repo)).toEqual(["mock-workflow.md"]);
+      expect(readdirSync(repo.path(".smithers/skills")).sort()).toEqual([".gitkeep", "mock-workflow.md"]);
+      if (mode === "mismatched") {
+        expect(skillFrontmatter(expected)).toMatchObject({ name: "other-workflow", workflow: "mock-workflow" });
+      }
     }
-    expect(verification.stdout).toContain('"contains_workflow_metadata":false');
   }, SMOKE_TEST_TIMEOUT_MS);
 }
