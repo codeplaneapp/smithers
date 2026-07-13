@@ -514,6 +514,12 @@ describe("network probe error and success branches", () => {
         expect(ok.error).toBeUndefined();
         expect(ok.windows[0]).toMatchObject({ id: "requests-per-min", remaining: 40 });
 
+        globalThis.fetch = mock(async () => jsonResponse(400, {}));
+        await expect(anthropicHeaderUsage({ apiKey: "bad-model" })).resolves.toEqual({
+            source: "none",
+            error: "Anthropic returned 400 with no rate-limit headers",
+        });
+
         globalThis.fetch = mock(async () => { throw new Error("boom"); });
         await expect(anthropicHeaderUsage({ apiKey: "x" })).resolves.toMatchObject({
             source: "none",

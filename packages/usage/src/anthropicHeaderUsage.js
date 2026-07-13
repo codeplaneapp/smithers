@@ -47,6 +47,9 @@ export async function anthropicHeaderUsage(account) {
                 error: `Rate limited (429)${retryAfter ? ` — retry after ${retryAfter}s` : ""}`,
             };
         }
+        if (!res.ok && windows.length === 0) {
+            return { source: "none", error: `Anthropic returned ${res.status} with no rate-limit headers` };
+        }
         return { source: "headers", windows };
     } catch (err) {
         return { source: "none", error: `Anthropic header probe failed: ${err instanceof Error ? err.message : String(err)}` };
