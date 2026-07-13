@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createReviewWorker } from "../../src/server/worker.ts";
 import type { ReviewWorkerEnv } from "../../src/server/env.ts";
+import { buildTestEnv } from "./helpers/buildTestEnv.ts";
 import { memoryBucket } from "./helpers/memoryBucket.ts";
 
 function envWithoutDb(): ReviewWorkerEnv {
@@ -45,5 +46,37 @@ describe("worker without a DB binding", () => {
     const worker = makeWorker();
     const res = await worker.fetch(new Request("https://review.test/"), envWithoutDb());
     expect(res.status).toBe(200);
+  });
+});
+
+describe("worker without a walkthrough storage binding", () => {
+  test("serves walkthrough requests with a 503 JSON error instead of crashing", async () => {
+    const worker = makeWorker();
+    const env = envWithoutDb();
+    env.DB = {} as ReviewWorkerEnv["DB"];
+    env.WALKTHROUGHS = undefined as unknown as ReviewWorkerEnv["WALKTHROUGHS"];
+
+    const response = await worker.fetch(new Request("https://review.test/w/abc12345"), env);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "walkthrough storage unavailable" });
+  });
+
+  test("rejects walkthrough publishes with a 503 JSON error instead of crashing", async () => {
+    const worker = makeWorker();
+    const env = await buildTestEnv();
+    env.WALKTHROUGHS = undefined as unknown as ReviewWorkerEnv["WALKTHROUGHS"];
+
+    const response = await worker.fetch(
+      new Request("https://review.test/api/walkthroughs", {
+        method: "POST",
+        headers: { authorization: "Bearer test-publish", "content-type": "text/html" },
+        body: "<p>walkthrough</p>",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "walkthrough storage unavailable" });
   });
 });

@@ -80,6 +80,7 @@ export function createReviewWorker(overrides?: Partial<ReviewWorkerDeps>) {
 
       // GET /w/<id> works without a DB round trip — keep before ensureSchema.
       if (request.method === "GET" && /^\/w\/[a-z0-9]{8,32}$/.test(url.pathname)) {
+        if (!env.WALKTHROUGHS) return jsonError(503, "walkthrough storage unavailable");
         const id = url.pathname.slice("/w/".length);
         const object = await env.WALKTHROUGHS.get(`walkthroughs/${id}.html`);
         if (!object) {
@@ -133,6 +134,9 @@ export function createReviewWorker(overrides?: Partial<ReviewWorkerDeps>) {
         (url.pathname === "/api/walkthroughs" && (request.method === "POST" || request.method === "GET")) ||
         (request.method === "DELETE" && url.pathname.startsWith("/api/walkthroughs/"))
       ) {
+        if (request.method === "POST" && !env.WALKTHROUGHS) {
+          return jsonError(503, "walkthrough storage unavailable");
+        }
         return handleWalkthroughs(request, env, url, deps.now());
       }
 
