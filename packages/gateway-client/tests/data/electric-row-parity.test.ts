@@ -41,6 +41,7 @@ describe("Electric row-shape parity", () => {
     const connection = (api.db as { connection: { query: (query: { text: string; values?: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> } }).connection;
     const now = 1_718_000_000_000;
     const runId = "run-parity-real";
+    const approvalRunId = "run-parity-approval";
 
     await adapter.insertRun({
       runId,
@@ -49,6 +50,13 @@ describe("Electric row-shape parity", () => {
       createdAtMs: now,
       startedAtMs: now + 1,
       finishedAtMs: now + 2,
+      configJson: JSON.stringify({ gatewayWorkflowKey: "value" }),
+    });
+    await adapter.insertRun({
+      runId: approvalRunId,
+      workflowName: "value",
+      status: "waiting-approval",
+      createdAtMs: now,
       configJson: JSON.stringify({ gatewayWorkflowKey: "value" }),
     });
     await adapter.insertEventWithNextSeq({
@@ -61,7 +69,7 @@ describe("Electric row-shape parity", () => {
       text: `INSERT INTO _smithers_approvals
         (run_id, node_id, iteration, status, requested_at_ms, request_json, auto_approved)
         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      values: [runId, "approval", 0, "requested", now + 4, JSON.stringify({
+      values: [approvalRunId, "approval", 0, "requested", now + 4, JSON.stringify({
         title: "Approve",
         summary: "Approve the action",
         mode: "manual",
@@ -113,7 +121,7 @@ describe("Electric row-shape parity", () => {
 
     const apiRun = serializeRunRow(await adapter.getRun(runId) as Record<string, unknown>);
     const apiEvent = serializeRunEventRow((await adapter.listEvents(runId, -1, 10))[0] as Record<string, unknown>);
-    const apiApproval = serializeApprovalRow((await adapter.listPendingApprovals(runId))[0] as Record<string, unknown>);
+    const apiApproval = serializeApprovalRow((await adapter.listPendingApprovals(approvalRunId))[0] as Record<string, unknown>);
     const apiDoc = serializeDocRow((await adapter.listDocs({ kind: "doc" }))[0] as Record<string, unknown>);
     const apiTicket = serializeTicketRow((await adapter.listDocs({ kind: "ticket" }))[0] as Record<string, unknown>);
     const apiScore = serializeScoreRow((await adapter.listScorerResults(runId))[0] as Record<string, unknown>);
@@ -123,7 +131,7 @@ describe("Electric row-shape parity", () => {
     expect(mapSmithersElectricRow("runs", await rawOne(connection, "SELECT * FROM _smithers_runs WHERE run_id = $1", [runId]))).toEqual(apiRun);
     expect(mapSmithersElectricRow("run", await rawOne(connection, "SELECT * FROM _smithers_runs WHERE run_id = $1", [runId]))).toEqual(apiRun);
     expect(mapSmithersElectricRow("events", await rawOne(connection, "SELECT * FROM _smithers_events WHERE run_id = $1", [runId]))).toEqual(apiEvent);
-    expect(mapSmithersElectricRow("approvals", await rawOne(connection, "SELECT * FROM _smithers_approvals WHERE run_id = $1", [runId]))).toEqual(apiApproval);
+    expect(mapSmithersElectricRow("approvals", await rawOne(connection, "SELECT * FROM _smithers_approvals WHERE run_id = $1", [approvalRunId]))).toEqual(apiApproval);
     expect(mapSmithersElectricRow("docs", await rawOne(connection, "SELECT * FROM _smithers_docs WHERE path = $1", ["docs/readme.md"]))).toEqual(apiDoc);
     expect(mapSmithersElectricRow("tickets", await rawOne(connection, "SELECT * FROM _smithers_docs WHERE path = $1", ["tickets/t-1.md"]))).toEqual(apiTicket);
     const electricScore = await rawOne(connection, "SELECT * FROM _smithers_scorers WHERE run_id = $1", [runId]);

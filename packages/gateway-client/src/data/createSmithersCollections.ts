@@ -191,21 +191,15 @@ export function runsShapeWhere(params: ListRunsRequest): { where?: string } | un
 }
 
 /**
- * Electric pushdown for the documented listApprovals filters. The RPC returns
- * PENDING approvals only, so every approvals shape carries the
- * requested-status predicate (decided rows must be absent); a runId filter
- * narrows it further. workflow (JS workflow-key resolution) and limit cannot
- * be represented and fall back to the RPC-backed query collection. Exported
- * for the filter-parity regression tests.
+ * `listApprovals` cannot be represented by an Electric shape over
+ * `_smithers_approvals`: pending rows are actionable requests, so the DB also
+ * excludes terminal runs and synthesizes rows for waiting approval nodes whose
+ * request row has not arrived yet. A single-table shape can do neither. Keep
+ * approvals RPC-backed until Electric can express that join/union exactly.
+ * Exported for the filter-parity regression tests.
  */
-export function approvalsShapeWhere(params: ListApprovalsRequest): { where: string } | undefined {
-  const filter = params.filter ?? {};
-  if (filter.limit !== undefined || filter.workflow !== undefined) return undefined;
-  const pending = "status = 'requested'";
-  if (filter.runId === undefined) return { where: pending };
-  const runId = shapeLiteral(filter.runId);
-  if (!runId) return undefined;
-  return { where: `run_id = ${runId} AND ${pending}` };
+export function approvalsShapeWhere(_params: ListApprovalsRequest): undefined {
+  return undefined;
 }
 // Live-row predicate for `_smithers_docs`-backed shapes. Every RPC read hides
 // tombstones (`deleted_at_ms IS NOT NULL`) unless explicitly asked otherwise,
@@ -562,14 +556,11 @@ function createSmithersCollectionsWithClient(
       ),
     runTree: runTreeCollection,
     approvals: (params: ListApprovalsRequest = {}) => {
-      const pushdown = approvalsShapeWhere(params);
-      const electric = Boolean(multiplayerMode && pushdown);
       const handlers: MutationHandlers<GatewayApprovalRow, string> = {
         onUpdate: async ({ transaction }) => {
-          let latest: { txid?: string } | undefined;
           for (const mutation of transaction.mutations) {
             const row = mutation.modified as GatewayApprovalRow & { decision?: SubmitApprovalDecision };
-            latest = await client.api.submitApproval({
+            await client.api.submitApproval({
               runId: row.runId,
               nodeId: row.nodeId,
               iteration: row.iteration,
@@ -577,13 +568,11 @@ function createSmithersCollectionsWithClient(
               decision: row.decision ?? { approved: true },
             });
           }
-          if (electric) return txidMatch(latest);
         },
         onDelete: async ({ transaction }) => {
-          let latest: { txid?: string } | undefined;
           for (const mutation of transaction.mutations) {
             const row = mutation.original as GatewayApprovalRow;
-            latest = await client.api.submitApproval({
+            await client.api.submitApproval({
               runId: row.runId,
               nodeId: row.nodeId,
               iteration: row.iteration,
@@ -591,24 +580,12 @@ function createSmithersCollectionsWithClient(
               decision: { approved: false },
             });
           }
-          if (electric) return txidMatch(latest);
         },
       };
-      if (!pushdown) {
-        return getOrCreateQuery<GatewayApprovalRow, string>(
-          smithersCollectionKeys.approvals(params),
-          (row) => `${row.runId}:${row.nodeId}:${row.iteration}`,
-          () => client.api.listApprovals(params),
-          handlers,
-        );
-      }
-      return getOrCreate<GatewayApprovalRow, string>(
+      return getOrCreateQuery<GatewayApprovalRow, string>(
         smithersCollectionKeys.approvals(params),
-        "approvals",
         (row) => `${row.runId}:${row.nodeId}:${row.iteration}`,
         () => client.api.listApprovals(params),
-        (row) => mapSmithersElectricRow("approvals", row),
-        pushdown.where,
         handlers,
       );
     },

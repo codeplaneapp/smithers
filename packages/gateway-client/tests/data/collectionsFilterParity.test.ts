@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { serializeApprovalRow, serializeRunRow } from "@smithers-orchestrator/gateway/api";
+import { serializeRunRow } from "@smithers-orchestrator/gateway/api";
 import { QueryClient } from "@tanstack/react-query";
 import { createSmithersPostgres } from "smithers-orchestrator";
 
@@ -13,17 +13,16 @@ import { createSmithersDataClient } from "../../src/data/createSmithersDataClien
 import { mapSmithersElectricRow } from "../../src/data/mapSmithersElectricRow.ts";
 import { smithersElectricCollectionOptions } from "../../src/data/smithersElectricCollectionOptions.ts";
 import type { SmithersCollections } from "../../src/data/SmithersCollections.ts";
-import type { GatewayApprovalRow } from "../../src/sync/GatewayApprovalRow.ts";
 
 /**
- * Issue #1014: Electric-backed runs and approvals collections must honor the
+ * Issue #1014: multiplayer run and approval collections must honor the
  * documented RPC filters. Two layers are exercised here, both for real:
  *
- * 1. The pushed-down shape `where` predicates are executed as actual SQL over
- *    a seeded PGlite database (the same evaluation Electric performs in
- *    Postgres) and compared row-for-row with the local RPC data source
- *    (adapter.listRuns / adapter.listPendingApprovals) — excluded rows must be
- *    absent from both sides.
+ * 1. The pushed-down run-shape `where` predicates are executed as actual SQL
+ *    over a seeded PGlite database (the same evaluation Electric performs in
+ *    Postgres) and compared row-for-row with the local RPC data source. The
+ *    approval case proves why a single-table shape is insufficient and must
+ *    fall back to the RPC.
  *
  * 2. The collection factories route each documented filter either to a real
  *    Electric collection carrying the validated predicate, or — when the
@@ -136,34 +135,23 @@ describe("Electric pushdown predicates match the RPC rows on a seeded dataset", 
     expect(electricAll).toEqual(localAll);
   }, 120_000);
 
-  test("approvals shapes return pending rows only and honor the runId filter", async () => {
+  test("approvals stay RPC-backed because requested rows on terminal runs are not pending", async () => {
     const { adapter, shapeRows } = await seededPglite();
 
-    // No filter — the RPC returns pending approvals only, so the shape must
-    // exclude decided rows.
-    const pendingWhere = approvalsShapeWhere({});
-    expect(pendingWhere).toEqual({ where: "status = 'requested'" });
-    const electricPending = (await shapeRows("_smithers_approvals", pendingWhere?.where))
+    // A status-only shape sees both requested rows, including the stranded row
+    // on the finished run. The DB correctly exposes only the actionable one.
+    const shapeRequested = (await shapeRows("_smithers_approvals", "status = 'requested'"))
       .map((row) => mapSmithersElectricRow("approvals", row));
-    const localPending = [
-      ...(await adapter.listPendingApprovals("run-running")),
-      ...(await adapter.listPendingApprovals("run-finished")),
-    ].map((row) => serializeApprovalRow(row as Record<string, unknown>));
-    expect(new Set(electricPending.map(approvalKey))).toEqual(new Set(localPending.map(approvalKey)));
-    expect(electricPending.map(approvalKey)).not.toContain("run-running:gate-decided:0");
+    expect(new Set(shapeRequested.map(approvalKey))).toEqual(new Set([
+      "run-running:gate-pending:0",
+      "run-finished:gate-other-run:0",
+    ]));
+    expect((await adapter.listPendingApprovals("run-running")).map(approvalKey))
+      .toEqual(["run-running:gate-pending:0"]);
+    expect(await adapter.listPendingApprovals("run-finished")).toEqual([]);
 
-    // runId filter — narrows to that run's pending approvals only.
-    const runWhere = approvalsShapeWhere({ filter: { runId: "run-running" } });
-    expect(runWhere).toEqual({ where: "run_id = 'run-running' AND status = 'requested'" });
-    const electricRun = (await shapeRows("_smithers_approvals", runWhere?.where))
-      .map((row) => mapSmithersElectricRow("approvals", row));
-    const localRun = (await adapter.listPendingApprovals("run-running"))
-      .map((row) => serializeApprovalRow(row as Record<string, unknown>) as GatewayApprovalRow);
-    expect(electricRun).toEqual(localRun);
-    const electricRunKeys = electricRun.map(approvalKey);
-    expect(electricRunKeys).toEqual(["run-running:gate-pending:0"]);
-    expect(electricRunKeys).not.toContain("run-running:gate-decided:0");
-    expect(electricRunKeys).not.toContain("run-finished:gate-other-run:0");
+    expect(approvalsShapeWhere({})).toBeUndefined();
+    expect(approvalsShapeWhere({ filter: { runId: "run-running" } })).toBeUndefined();
   }, 120_000);
 });
 
@@ -179,11 +167,12 @@ describe("pushdown validation falls back to the RPC-backed collection", () => {
     expect(runsShapeWhere({ filter: { status: "fin'ished" } })).toBeUndefined();
     expect(runsShapeWhere({ filter: { status: "has space" } })).toBeUndefined();
     expect(approvalsShapeWhere({ filter: { runId: "run' OR 1=1 --" } })).toBeUndefined();
-    // Safe values push down.
+    // Safe run values push down. Approval reads remain RPC-backed because run
+    // liveness and waiting-node fallback cannot be expressed by their shape.
     expect(runsShapeWhere({ filter: { status: "waiting-approval" } }))
       .toEqual({ where: "status = 'waiting-approval'" });
     expect(approvalsShapeWhere({ filter: { runId: "wf_18a3.run:1" } }))
-      .toEqual({ where: "run_id = 'wf_18a3.run:1' AND status = 'requested'" });
+      .toBeUndefined();
   });
 });
 
@@ -245,23 +234,26 @@ async function recordingCollections(fetchImpl: typeof fetch) {
 }
 
 describe("multiplayer collections honor run and approval filters", () => {
-  test("safe status/runId filters become validated Electric predicates", async () => {
-    const { fetchImpl } = routingFetch();
+  test("safe run filters use Electric while approvals preserve RPC semantics", async () => {
+    const { fetchImpl, calls } = routingFetch();
     const { collections, shapes } = await recordingCollections(fetchImpl);
 
     collections.runs();
     collections.runs({ filter: { status: "failed" } });
     collections.runs({ filter: { status: "running" } });
-    collections.approvals();
-    collections.approvals({ filter: { runId: "run-1" } });
+    const approvals = collections.approvals();
+    const runApprovals = collections.approvals({ filter: { runId: "run-1" } });
 
     expect(shapes).toEqual([
       { shape: "runs" },
       { shape: "runs", where: "status = 'failed'" },
       { shape: "runs", where: "(status = 'running' OR status = 'continued')" },
-      { shape: "approvals", where: "status = 'requested'" },
-      { shape: "approvals", where: "run_id = 'run-1' AND status = 'requested'" },
     ]);
+
+    await approvals.preload();
+    await runApprovals.preload();
+    expect(calls.filter((call) => call.path === "/v1/api/approvals").map((call) => call.search.toString()))
+      .toEqual(["", "runId=run-1"]);
   });
 
   test("limit, workflow, and unsafe filters use the RPC-backed collection with the filter forwarded", async () => {

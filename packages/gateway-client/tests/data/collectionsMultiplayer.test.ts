@@ -6,11 +6,11 @@ import { createSmithersDataClient } from "../../src/data/createSmithersDataClien
 import { smithersElectricCollectionOptions } from "../../src/data/smithersElectricCollectionOptions.ts";
 
 /**
- * Multiplayer collections build TanStack DB Electric collections. Constructing
- * them requires no live Electric server (the shape only syncs lazily), so these
- * tests drive the real Electric option builders — shape lookup, URL assembly,
- * auth headers, and the lazy loader — plus the optimistic mutation handlers'
- * txid-matching path.
+ * Multiplayer collections combine TanStack DB Electric and RPC-backed query
+ * collections. Constructing the Electric-backed subset requires no live
+ * Electric server (the shape only syncs lazily), so these tests drive the real
+ * option builders — shape lookup, URL assembly, auth headers, and the lazy
+ * loader — plus the optimistic mutation handlers' txid-matching path.
  */
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -70,19 +70,19 @@ describe("createSmithersCollections multiplayer", () => {
     });
     expect(collections.client.mode.kind).toBe("multiplayer");
 
-    // Each factory routes through getOrCreateElectric, exercising the shape
+    // Each shape-backed factory routes through getOrCreateElectric, exercising the shape
     // lookup, electric URL assembly, and auth-header builders.
     expect(collections.runs().id).toContain("runs");
     expect(collections.run("run-1").id).toContain("run-1");
     expect(collections.runTree("run-1").id).toContain("runTree");
-    expect(collections.approvals({ filter: { runId: "run-1" } }).id).toContain("approvals");
     expect(collections.docs({ filter: { kind: "doc" } }).id).toContain("docs");
     expect(collections.scores({ runId: "run-1" }).id).toContain("scores");
     expect(collections.tickets().id).toContain("tickets");
     expect(collections.memoryFacts({ namespace: "workspace" }).id).toContain("memoryFacts");
     expect(collections.crons().id).toContain("crons");
     expect(collections.runEvents("run-1", 10).id).toContain("events");
-    // Query-backed factories (no Electric shape) still work in multiplayer mode.
+    // Query-backed factories (no exact Electric shape) still work in multiplayer mode.
+    expect(collections.approvals({ filter: { runId: "run-1" } }).id).toContain("approvals");
     expect(collections.workflows().id).toContain("workflows");
     expect(collections.prompts().id).toContain("prompts");
   });

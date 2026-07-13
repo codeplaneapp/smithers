@@ -228,7 +228,7 @@ describe("createSmithersCollections multiplayer shape mapping", () => {
     collections.runEvents("run-1", 10);
 
     expect([...shapes].sort()).toEqual(
-      ["approvals", "crons", "docs", "docs", "events", "memory_facts", "nodes", "runs", "runs", "scores"].sort(),
+      ["crons", "docs", "docs", "events", "memory_facts", "nodes", "runs", "runs", "scores"].sort(),
     );
     collections.close();
     queryClient.clear();
