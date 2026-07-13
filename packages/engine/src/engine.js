@@ -375,6 +375,31 @@ function abortPromise(signal) {
         });
     });
 }
+
+/**
+ * @param {Promise<unknown>[]} races
+ * @param {number} timeoutMs
+ * @param {() => unknown} onTimeout
+ * @param {{ setTimeoutFn?: typeof setTimeout; clearTimeoutFn?: typeof clearTimeout }} [timers]
+ */
+async function raceWithTimeout(races, timeoutMs, onTimeout, {
+    setTimeoutFn = setTimeout,
+    clearTimeoutFn = clearTimeout,
+} = {}) {
+    let timeoutId;
+    try {
+        return await Promise.race([
+            ...races,
+            new Promise((_, reject) => {
+                timeoutId = setTimeoutFn(() => reject(onTimeout()), timeoutMs);
+            }),
+        ]);
+    }
+    finally {
+        if (timeoutId !== undefined)
+            clearTimeoutFn(timeoutId);
+    }
+}
 /**
  * @param {string | null} [metaJson]
  * @returns {Record<string, unknown>}
@@ -4930,17 +4955,19 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     lastHeartbeat: previousHeartbeat,
                 }, () => desc.computeFn()));
                 const races = [computePromise];
-                if (desc.timeoutMs) {
-                    races.push(new Promise((_, reject) => setTimeout(() => reject(new SmithersError("TASK_TIMEOUT", `Compute callback timed out after ${desc.timeoutMs}ms`, {
-                        attempt: attemptNo,
-                        nodeId: desc.nodeId,
-                        timeoutMs: desc.timeoutMs,
-                    })), desc.timeoutMs)));
-                }
                 const abort = abortPromise(taskSignal);
                 if (abort)
                     races.push(abort);
-                payload = await Promise.race(races);
+                if (desc.timeoutMs) {
+                    payload = await raceWithTimeout(races, desc.timeoutMs, () => new SmithersError("TASK_TIMEOUT", `Compute callback timed out after ${desc.timeoutMs}ms`, {
+                        attempt: attemptNo,
+                        nodeId: desc.nodeId,
+                        timeoutMs: desc.timeoutMs,
+                    }));
+                }
+                else {
+                    payload = await Promise.race(races);
+                }
             }
             else {
                 payload = desc.staticPayload;
@@ -7512,6 +7539,7 @@ export const __engineInternals = {
     makeStructuredOutputCompatibilityError,
     makePlainTextOutputError,
     abortPromise,
+    raceWithTimeout,
     parseAttemptMetaJson,
     asConversationMessages,
     cloneJsonValue,

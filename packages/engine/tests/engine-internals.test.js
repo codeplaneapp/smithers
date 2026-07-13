@@ -155,6 +155,25 @@ describe("engine internals: errors, heartbeat and continuation helpers", () => {
         await expect(I.runPromisePreservingFailure(Effect.fail(failure))).rejects.toBe(failure);
     });
 
+    test("clears compute timeout timers when another race settles first", async () => {
+        let scheduledId;
+        let clearedId;
+        const result = await I.raceWithTimeout([Promise.resolve("done")], 600_000, () => new Error("timed out"), {
+            setTimeoutFn: (callback, delay) => {
+                expect(delay).toBe(600_000);
+                scheduledId = callback;
+                return 42;
+            },
+            clearTimeoutFn: (id) => {
+                clearedId = id;
+            },
+        });
+
+        expect(result).toBe("done");
+        expect(scheduledId).toBeInstanceOf(Function);
+        expect(clearedId).toBe(42);
+    });
+
     test("extracts nested error messages and structured-output parse failures", () => {
         const nested = new Error("outer", { cause: new Error("inner") });
         expect(I.collectErrorMessages(nested)).toEqual(["Error", "outer", "Error", "inner"]);
