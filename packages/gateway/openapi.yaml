@@ -2777,7 +2777,6 @@ paths:
                           description: "Whether the approval is granted."
                         value:
                           description: "Any JSON value."
-                          nullable: true
                           oneOf:
                             -
                               type: object
@@ -3298,7 +3297,6 @@ paths:
                       description: "Optional explicit signal name."
                     payload:
                       description: "Any JSON value."
-                      nullable: true
                       oneOf:
                         -
                           type: object
@@ -3772,15 +3770,17 @@ paths:
                         minimum: 0
                         description: "Unix epoch milliseconds."
                       startedAtMs:
-                        type: integer
+                        type:
+                          - integer
+                          - "null"
                         minimum: 0
                         description: "Unix epoch milliseconds."
-                        nullable: true
                       finishedAtMs:
-                        type: integer
+                        type:
+                          - integer
+                          - "null"
                         minimum: 0
                         description: "Unix epoch milliseconds."
-                        nullable: true
                       summary:
                         type: object
                         description: "Counts keyed by persisted node state."
@@ -12482,7 +12482,6 @@ paths:
                         description: "Optional node duration in milliseconds."
                       meta:
                         description: "Any JSON value."
-                        nullable: true
                         oneOf:
                           -
                             type: object
@@ -12501,7 +12500,6 @@ paths:
                             type: "null"
                       input:
                         description: "Any JSON value."
-                        nullable: true
                         oneOf:
                           -
                             type: object
@@ -12520,7 +12518,6 @@ paths:
                             type: "null"
                       output:
                         description: "Any JSON value."
-                        nullable: true
                         oneOf:
                           -
                             type: object
@@ -12539,7 +12536,6 @@ paths:
                             type: "null"
                       groundTruth:
                         description: "Any JSON value."
-                        nullable: true
                         oneOf:
                           -
                             type: object
@@ -12558,7 +12554,6 @@ paths:
                             type: "null"
                       context:
                         description: "Any JSON value."
-                        nullable: true
                         oneOf:
                           -
                             type: object
@@ -19074,7 +19069,6 @@ paths:
                         description: "Optional node duration in milliseconds."
                       meta:
                         description: "Any JSON value."
-                        nullable: true
                         oneOf:
                           -
                             type: object
@@ -19093,7 +19087,6 @@ paths:
                             type: "null"
                       input:
                         description: "Any JSON value."
-                        nullable: true
                         oneOf:
                           -
                             type: object
@@ -19112,7 +19105,6 @@ paths:
                             type: "null"
                       output:
                         description: "Any JSON value."
-                        nullable: true
                         oneOf:
                           -
                             type: object
@@ -19131,7 +19123,6 @@ paths:
                             type: "null"
                       groundTruth:
                         description: "Any JSON value."
-                        nullable: true
                         oneOf:
                           -
                             type: object
@@ -19150,7 +19141,6 @@ paths:
                             type: "null"
                       context:
                         description: "Any JSON value."
-                        nullable: true
                         oneOf:
                           -
                             type: object

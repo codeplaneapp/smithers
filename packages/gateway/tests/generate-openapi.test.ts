@@ -157,6 +157,33 @@ describe("generate-openapi helpers", () => {
     expect(detail.responses["200"].content["application/json"].schema.properties.data)
       .toBe(getGatewayRpcDefinition("getScoreDetail")?.responseSchema);
   });
+
+  test("getRun timestamps use OpenAPI 3.1 nullable type unions", () => {
+    const doc = buildOpenApiDocument();
+    const getRunResponse = (doc.paths["/v1/rpc/getRun"] as {
+      post: {
+        responses: {
+          "200": { content: { "application/json": { schema: { properties: Record<string, unknown> } } } };
+        };
+      };
+    }).post.responses["200"].content["application/json"].schema;
+    const payload = getRunResponse.properties.payload as {
+      properties: Record<string, { type?: string | string[]; minimum?: number; description?: string; nullable?: boolean }>;
+    };
+
+    expect(payload.properties.startedAtMs).toEqual({
+      type: ["integer", "null"],
+      minimum: 0,
+      description: "Unix epoch milliseconds.",
+    });
+    expect(payload.properties.finishedAtMs).toEqual({
+      type: ["integer", "null"],
+      minimum: 0,
+      description: "Unix epoch milliseconds.",
+    });
+    expect(payload.properties.startedAtMs.nullable).toBeUndefined();
+    expect(payload.properties.finishedAtMs.nullable).toBeUndefined();
+  });
 });
 
 describe("scalarToYaml", () => {

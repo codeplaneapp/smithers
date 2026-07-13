@@ -147,7 +147,6 @@ export const anyJsonSchema = {
   // (an integer is a JSON number), so a separate `integer` branch would make
   // every integer match two branches and fail `oneOf` validation.
   description: "Any JSON value.",
-  nullable: true,
   oneOf: [
     { type: "object", additionalProperties: true },
     { type: "array", items: { nullable: true } },
@@ -193,8 +192,8 @@ const runRecord = objectSchema(
     workflowKey: workflow,
     status: stringSchema("Persisted run status."),
     createdAtMs: integerSchema("Unix epoch milliseconds.", 0),
-    startedAtMs: { ...integerSchema("Unix epoch milliseconds.", 0), nullable: true },
-    finishedAtMs: { ...integerSchema("Unix epoch milliseconds.", 0), nullable: true },
+    startedAtMs: { type: ["integer", "null"], minimum: 0, description: "Unix epoch milliseconds." },
+    finishedAtMs: { type: ["integer", "null"], minimum: 0, description: "Unix epoch milliseconds." },
     summary: objectSchema({}, [], "Counts keyed by persisted node state.", true),
     runState: runStateView,
   },

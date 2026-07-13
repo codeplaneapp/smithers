@@ -173,6 +173,22 @@ function jsonType(value: unknown): string {
 }
 
 describe("Gateway RPC contract", () => {
+  test("getRun accepts null timestamps before a run starts or finishes", () => {
+    const getRun = getGatewayRpcDefinition("getRun");
+    if (!getRun) throw new Error("getRun RPC definition is missing");
+    const errors = validateAgainstSchema({
+      runId: "run_01",
+      workflowKey: "deploy",
+      status: "pending",
+      createdAtMs: 1710000000000,
+      startedAtMs: null,
+      finishedAtMs: null,
+      summary: {},
+    }, getRun.responseSchema);
+
+    expect(errors).toEqual([]);
+  });
+
   test("freezes every stable v1 RPC with typed schemas and versioned errors", () => {
     expect(listGatewayRpcMethods()).toEqual([
       "launchRun",
