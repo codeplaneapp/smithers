@@ -661,6 +661,16 @@ describe("ratio sampling determinism", () => {
         const unique = new Set(decisions);
         expect(unique.size).toBe(1);
     });
+    it("preserves the historical space-separated seed decision across versions", async () => {
+        const ctx = makeContext({
+            runId: "run-abc",
+            nodeId: "node-1",
+            iteration: 0,
+            attempt: 0,
+        });
+        const result = await runScorersBatch(ratioScorers("scorer-x", 0.7), ctx, null);
+        expect(result.r).toBeNull();
+    });
     it("persists exactly the same number of rows on replay of the same identity", async () => {
         const ctx = makeContext({ runId: "det-rows", nodeId: "det-node", attempt: 1 });
         const counts = [];

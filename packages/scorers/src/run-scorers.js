@@ -33,7 +33,7 @@ function samplingValue(binding, ctx) {
         ctx.iteration,
         ctx.attempt,
         binding.scorer.id,
-    ].join("\0"); // NUL separator keeps field boundaries unambiguous even if ids contain spaces.
+    ].join(" "); // Preserve the historical seed format so existing runs replay deterministically.
     const digest = crypto.createHash("sha256").update(seed).digest();
     // Take the first 6 bytes (48 bits) as an integer and normalize to [0, 1).
     const value = digest.readUIntBE(0, 6);
