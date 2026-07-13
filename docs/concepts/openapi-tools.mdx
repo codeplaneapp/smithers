@@ -33,6 +33,9 @@ type OpenApiToolsOptions = {
     | { type: "apiKey"; name: string; in: "header" | "query"; value: string }
     | { type: "bearer"; token: string }
     | { type: "basic"; username: string; password: string };
+  allowedRedirectOrigins?: string[]; // extra origins redirects may follow;
+                                     // other cross-origin hops are refused so
+                                     // injected auth headers cannot leak
   include?: string[];                // operationId allowlist
   exclude?: string[];                // operationId blocklist
   namePrefix?: string;               // prefix generated tool names
