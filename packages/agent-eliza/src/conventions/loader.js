@@ -94,6 +94,17 @@ function nameFromFile(filePath) {
 }
 
 /**
+ * Validate a frontmatter list field at runtime. YAML values are untrusted and
+ * may not match the static WorkflowFrontmatter type.
+ *
+ * @param {unknown} value
+ * @returns {string[] | undefined}
+ */
+function stringArrayFromFrontmatter(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : undefined;
+}
+
+/**
  * Build a WorkflowDefinition from an imported module, its source text, and
  * pre-parsed frontmatter.
  *
@@ -122,8 +133,8 @@ function buildDefinition(filePath, baseDir, exported, source, frontmatter) {
       raw.description ??
       (typeof frontmatter.description === "string" ? frontmatter.description : undefined) ??
       "",
-    tags: raw.tags ?? /** @type {string[] | undefined} */ (frontmatter.tags),
-    aliases: raw.aliases ?? /** @type {string[] | undefined} */ (frontmatter.aliases),
+    tags: raw.tags ?? stringArrayFromFrontmatter(frontmatter.tags),
+    aliases: raw.aliases ?? stringArrayFromFrontmatter(frontmatter.aliases),
     disableModelInvocation:
       raw.disableModelInvocation ??
       (typeof frontmatter["disable-model-invocation"] === "boolean"

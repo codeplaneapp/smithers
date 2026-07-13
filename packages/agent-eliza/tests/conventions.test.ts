@@ -464,6 +464,26 @@ describe("loadWorkflowsFromDir", () => {
     expect(result.workflows[0]!.tags).toEqual(["test"]);
   });
 
+  test("ignores non-array and non-string frontmatter tags and aliases", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    writeFileSync(
+      join(dir, "malformed-metadata.js"),
+      `export default { workflow: {}, name: "malformed-metadata", description: "d" };`,
+      "utf8"
+    );
+    writeFileSync(
+      join(dir, "malformed-metadata.md"),
+      `---\ntags: not-an-array\naliases:\n  - valid\n  - 42\n---\n`,
+      "utf8"
+    );
+
+    const result = await loadWorkflowsFromDir({ dir, source: "test" });
+    const workflow = result.workflows[0]!;
+    expect(workflow.tags).toBeUndefined();
+    expect(workflow.aliases).toEqual(["valid"]);
+    expect(() => formatWorkflowsForPrompt(result.workflows)).not.toThrow();
+  });
+
   test("yields error diagnostic for a malformed file instead of throwing", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
     writeFileSync(join(dir, "bad.js"), "this is not valid js !!@#$%", "utf8");
