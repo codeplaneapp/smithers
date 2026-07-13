@@ -229,6 +229,22 @@ describe("DevToolsClient", () => {
     await expectSmithersError(stream.next(), "BROKEN", "broken stream");
   });
 
+  test("times out when the gateway accepts a connection without sending a challenge", async () => {
+    const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+    servers.push(server);
+    server.on("connection", () => {
+      // Keep the socket open and silent so connect() must enforce its deadline.
+    });
+    const address = server.address();
+    if (typeof address === "string" || address === null) {
+      throw new Error("expected TCP server address");
+    }
+    const stream = new DevToolsClient({ baseUrl: `http://127.0.0.1:${address.port}` })
+      .streamDevTools("run-client");
+
+    await expectSmithersError(stream.next(), "PI_GATEWAY_TIMEOUT", "connect.challenge");
+  }, 10_000);
+
   test("a clean WS close while a request is in flight rejects the stream instead of hanging forever", async () => {
     // Regression: ws.on("close") only drained event waiters via closeWaiters(),
     // never the pending request map (only ws.on("error")/parse-failure did). A

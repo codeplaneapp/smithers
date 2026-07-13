@@ -224,7 +224,7 @@ class GatewayWsConnection {
     });
   }
 
-  async nextEvent() {
+  async nextEvent(timeoutMs?: number) {
     if (this.messages.length > 0) {
       return this.messages.shift();
     }
@@ -232,7 +232,23 @@ class GatewayWsConnection {
       return undefined;
     }
     return new Promise<EventFrame | undefined>((resolve) => {
-      this.waiters.push(resolve);
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const waiter = (message: EventFrame | undefined) => {
+        if (timeout !== undefined) {
+          clearTimeout(timeout);
+        }
+        resolve(message);
+      };
+      this.waiters.push(waiter);
+      if (timeoutMs !== undefined) {
+        timeout = setTimeout(() => {
+          const index = this.waiters.indexOf(waiter);
+          if (index >= 0) {
+            this.waiters.splice(index, 1);
+          }
+          resolve(undefined);
+        }, timeoutMs);
+      }
     });
   }
 
@@ -250,7 +266,7 @@ class GatewayWsConnection {
   private async waitForEvent(event: string, timeoutMs: number) {
     const timeoutAt = Date.now() + timeoutMs;
     while (Date.now() < timeoutAt) {
-      const frame = await this.nextEvent();
+      const frame = await this.nextEvent(Math.max(0, timeoutAt - Date.now()));
       if (!frame) {
         break;
       }
