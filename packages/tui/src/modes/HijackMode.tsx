@@ -162,7 +162,7 @@ export function Returned({
     <box width="100%" height="100%" flexDirection="column" justifyContent="center" alignItems="center">
       <box
         width={64}
-        height={6}
+        height={7}
         flexDirection="column"
         border={true}
         borderColor="#00d7ff"

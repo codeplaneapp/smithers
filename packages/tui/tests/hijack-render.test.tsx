@@ -116,6 +116,7 @@ describeHeadlessRender("HijackMode phase components", () => {
     const f = captureCharFrame();
     expect(f).toContain("from hijack: fetch-data");
     expect(f).toContain("Smithers automation resumed");
+    expect(f).toContain("[d] dismiss");
     act(() => { mockInput.pressKey("d"); });
     await flush();
     expect(dismissed).toBe(1);
