@@ -100,10 +100,32 @@ describe("trackEvent", () => {
         expect(metricValueDelta(before, after, "smithers.tokens.reasoning_total", labels)).toBe(500);
         expect(histogramDelta(before, after, "smithers.tokens.input_per_call", labels)).toEqual({ count: 1, sum: 125_000 });
         expect(histogramDelta(before, after, "smithers.tokens.output_per_call", labels)).toEqual({ count: 1, sum: 7_500 });
-        expect(histogramDelta(before, after, "smithers.tokens.context_window_per_call", labels)).toEqual({ count: 1, sum: 125_000 });
+        expect(histogramDelta(before, after, "smithers.tokens.context_window_per_call", labels)).toEqual({ count: 1, sum: 128_000 });
         expect(metricValueDelta(before, after, "smithers.tokens.context_window_bucket_total", {
             ...labels,
             bucket: "gte_100k_lt_200k",
+        })).toBe(1);
+    });
+    test("includes fresh and cached input tokens in context window metrics", async () => {
+        const labels = { agent: "claude-code", model: "claude-sonnet-5" };
+        const before = await snapshotMetrics();
+        await runTrack({
+            type: "TokenUsageReported",
+            runId: "run-cached-context-metrics",
+            nodeId: "node-cached-context-metrics",
+            model: labels.model,
+            agent: labels.agent,
+            inputTokens: 2_000,
+            outputTokens: 500,
+            cacheReadTokens: 200_000,
+            cacheWriteTokens: 1_000,
+            timestampMs: Date.now(),
+        });
+        const after = await snapshotMetrics();
+        expect(histogramDelta(before, after, "smithers.tokens.context_window_per_call", labels)).toEqual({ count: 1, sum: 203_000 });
+        expect(metricValueDelta(before, after, "smithers.tokens.context_window_bucket_total", {
+            ...labels,
+            bucket: "gte_200k_lt_500k",
         })).toBe(1);
     });
     test("emits OpenAPI tool count, error count, and duration values", async () => {

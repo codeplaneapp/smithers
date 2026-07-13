@@ -108,13 +108,10 @@ function asFiniteMetricCount(value) {
  * @returns {number | undefined}
  */
 function resolveContextWindowTokens(event) {
-    const inputTokens = asFiniteMetricCount(event.inputTokens);
-    if (inputTokens) {
-        return inputTokens;
-    }
-    const cachedInputTokens = (asFiniteMetricCount(event.cacheReadTokens) ?? 0)
+    const contextWindowTokens = (asFiniteMetricCount(event.inputTokens) ?? 0)
+        + (asFiniteMetricCount(event.cacheReadTokens) ?? 0)
         + (asFiniteMetricCount(event.cacheWriteTokens) ?? 0);
-    return cachedInputTokens > 0 ? cachedInputTokens : undefined;
+    return contextWindowTokens > 0 ? contextWindowTokens : undefined;
 }
 /**
  * @param {number} tokens
