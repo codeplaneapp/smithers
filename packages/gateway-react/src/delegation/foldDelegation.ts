@@ -165,6 +165,8 @@ function compareRecords(left: DelegationRecord, right: DelegationRecord): number
   if (seq !== 0) return seq;
   const node = left.nodeId.localeCompare(right.nodeId);
   if (node !== 0) return node;
+  const pending = Number((left as { pending?: boolean }).pending ?? false) - Number((right as { pending?: boolean }).pending ?? false);
+  if (pending !== 0) return pending;
   return stableStringify(leftRow).localeCompare(stableStringify(rightRow));
 }
 

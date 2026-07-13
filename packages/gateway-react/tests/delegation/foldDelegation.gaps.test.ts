@@ -36,6 +36,17 @@ describe("foldDelegation — deterministic tiebreak (stableStringify)", () => {
     expect(graph).toBeDefined();
     expect(graph.phase).toBeDefined();
   });
+
+  test("seq-less approval markers with different pending flags are order-insensitive", () => {
+    const resolved = { table: "_approval", nodeId: "dc:root:approve", iteration: 1, pending: false };
+    const pending = { table: "_approval", nodeId: "dc:root:approve", iteration: 1, pending: true };
+
+    const forward = foldDelegation([resolved, pending]);
+    const reverse = foldDelegation([pending, resolved]);
+
+    expect(reverse).toEqual(forward);
+    expect(forward.nodes.root!.status).toBe("awaiting-human");
+  });
 });
 
 describe("foldDelegation — cascade reaffirm by a replanned parent", () => {
