@@ -1,0 +1,80 @@
+---
+title: "0.28.0"
+description: "The Smithers Monitor grows into a full operations console with live transcripts, in-browser agent hijack, and one-click recovery; workflows declare their own UI/TUI views; delegation chains ship as first-class composites; the scheduler auto-raises concurrency on demand; and terminal cancellation becomes a single-owner durable claim."
+---
+
+Smithers 0.28.0 turns the Monitor into the place you operate runs from: it opens automatically when a run starts, diagnoses stuck runs on a live health strip with a one-click Resume, streams per-node agent transcripts, and can hand you the agent's actual session in an embedded terminal. Around that: `<UI>` and `<TUI>` primitives let a workflow declare its own views, delegation chains land as first-class composites with scorers, the scheduler raises `maxConcurrency` on demand instead of starving tasks, cancellation becomes a claim-based single-owner transition that can never leave ghost approval gates behind, and a long security pass hardens cross-origin credential handling across every integration.
+
+---
+
+## Monitor: a full operations console
+
+The Monitor is no longer a read-only dashboard. It opens automatically when a run starts and gives you the tools to understand and unstick a run without leaving the browser.
+
+- **Always-on health strip with live diagnosis** and a one-click Resume button for stalled or orphaned runs.
+- **Hijack a node's agent session in an embedded terminal.** A PTY websocket channel on the gateway surfaces per-node hijack candidates; the session opens in the Monitor itself.
+- **Streaming per-node transcripts** with readable per-field node output, plus a Create UI button for one-off run views.
+- **Activity event view and a frame-by-frame scrubber**, an interactive DevTools-style XML tree, a diff view, and a timeline tab with run/task controls.
+- **Scores, crons, ops stats, and `/metrics`** get first-class Monitor surfaces, alongside quota visibility and an embedded custom-UI modal.
+- **Container rollups, failure reasons, and a notable-events filter** make big fan-outs scannable; the landing view gains a paginated all-runs table.
+- **Embedded-guest mode:** `?embed=1` renders chrome-less views (pinned-run detail or rail-less overview) with fail-closed `postMessage` selection to an explicit host origin and `?theme=` stamping, so other apps can host the Monitor safely.
+- **Agent attribution everywhere:** devtools snapshots and the Monitor inspector show each task's declared agent, acting engine, model, chain position, and attempt history.
+
+## Workflows declare their own views
+
+- **`<UI>` and `<TUI>` components** declare workflow-owned views inline; the gateway resolves them via the run's `entryFile`, and `ui/<key>.tsx` files are picked up by convention at request time.
+- **`@smithers-orchestrator/ui`** is a token-native component library (shadcn anatomy) shared by the seeded workflow UIs and the init pack templates, with pre-first-paint theming and production React in gateway UI bundles.
+- **The `create-ui` workflow** has one agent author and verify a custom UI for an existing workflow.
+
+## Delegation chains
+
+- **`DelegationChain` composites, schemas, and prompts** ship in `@smithers-orchestrator/components`, with a seeded `delegation-chain` workflow and multi-file UI in the init pack.
+- **Delegation scorers with weighted run aggregation** grade each hop; model token prices are centralized with a cost estimator.
+
+## Engine and scheduler
+
+- **Demand-driven `maxConcurrency` auto-raise:** the scheduler raises the ceiling when runnable tasks would otherwise starve, and warns once when tasks sit on the cap.
+- **Numeric node `priority`** orders concurrency-limited scheduling.
+- **`failurePolicy="quarantine"`** on containers isolates a failing child instead of failing the run.
+- **Claim-based terminal cancellation:** cancel is now a compare-and-set claim owned by exactly one caller. Every pending external wait (approvals, human requests, events, timers) resolves durably, so a cancelled run can never advertise an approval gate that cannot resume. Attempt heartbeats and completions verify run ownership, closing a family of races between concurrent engines, the gateway, and the CLI.
+- **Content-addressed snapshot payloads** deduplicate identical multi-megabyte states across frames.
+- **Quota-parked runs are hardened** against resets, workflow edits, and agent-chain demotion mid-failover.
+
+## Gateway and server
+
+- **`pauseRun` RPC** for graceful pause: in-flight tasks finish, then the run parks resumably.
+- **Cross-run score comparison:** `listScoresForRuns` and `getScoreDetail` RPCs plus `GET /v1/api/scores/compare`.
+- **Evals extension:** save suites, list cases, and launch the seeded `eval-suite-run` system workflow, which fans a suite's dataset out as real child runs and grades each against its expected value or assertions.
+- **`retryTask` RPC and a node-states read route** round out run recovery over the wire.
+
+## CLI
+
+- **`smithers what`:** a cheap fast agent narrates what happened in a run or node from the recorded facts.
+- **Run status, scoped supervision, and observability:** `bunx smithers-orchestrator supervise` watches a scope of runs and auto-resumes stale ones; status output is structured and consistent.
+- **`smithers upgrade`:** an agent-assisted upgrade workflow that reads changelogs, upgrades with a cheap agent, and escalates only when needed.
+- **Init redesign:** one agent question, then a hijacked tutorial session; the init pack is slimmed to focused authoring workflows with the old starters preserved under `examples/`; the global `~/.smithers` pack is served from the gateway.
+- **`up --dry-run` now redirects to `bunx smithers-orchestrator graph`**, the non-executing construct check.
+- **SOTA model registry:** a canonical model registry with benchmark results, a daily research cron, a drift check, and a CLI notice when a newer registry ships.
+
+## Agents and plugins
+
+- **Codex plugin: durable spawn-tool routing** via the Codex App Server, with crash-safe journaling, stale-lock reclaim, ABA-proof status transitions, and Windows launch fixes.
+- **Claude Code plugin:** the monitor scopes to session-subscribed runs, streams only actionable transitions, and never surfaces approval gates for terminal runs.
+- **Cross-provider agent failover** chains route around a failed provider preflight run-wide.
+- **Vercel joins the sandbox providers** as a first-class package, with a shared provider-kit extracted for all sandbox adapters.
+
+## Security hardening
+
+- **Cross-origin credential defense across every integration:** redirects can no longer leak API keys or auth headers in the generic HTTP tool, OpenAPI tools, Exa and API-key search providers, ElevenLabs TTS, or the Anthropic review proxy.
+- **Abort-signal propagation end to end:** AI SDK abort signals now flow through HTTP tools, OpenAPI tools, MCP tool calls, document parsing (LlamaParse, Firecrawl, Mistral OCR), transcription, and the Telegram, Linear, and GitHub integrations, so cancelled tasks stop their network work immediately.
+- **Gateway websocket hardening:** a server-side authentication deadline, isolated unauthenticated connection capacity, capped run-event subscriptions, and one shared heartbeat scheduler per socket.
+- **Bounded response bodies** on HTTP, OpenAPI, and transcription tools.
+
+## Reliability
+
+- Hundreds of fixes across the engine, time travel, the DB layer, and the CLI, including: replay re-blesses workflow hashes so an edited replay resumes, `bunx smithers-orchestrator cancel` no longer cascade-cancels time-travel forks, PGlite upgraded to 0.5.4 with eager WASM memory reclamation, camelCase output keys resolve to snake_case physical tables in deletes, and stale schema-prototype triggers are dropped by migration.
+
+## Behavior changes
+
+- **`up --dry-run`** prints the graph via `bunx smithers-orchestrator graph` instead of partially booting a run.
+- **The init pack is curated:** fresh installs get the focused authoring workflows plus hidden system workflows (`eval-suite-run`, `init`, `post-failure`, `upgrade`); the old starter workflows live on as `examples/`.
