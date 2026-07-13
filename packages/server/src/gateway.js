@@ -43,7 +43,7 @@ import { retryTask as retryTaskReset } from "@smithers-orchestrator/time-travel/
 import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRewindAuditRow";
 import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-travel/recoverInProgressRewindAudits";
 import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
-import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
+import { hasGatewayScope, isGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
 import { apiCollectionNames, serializeAccountRow, serializeApprovalRow, serializeComparisonScoreRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreDetailRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow, } from "@smithers-orchestrator/gateway/api";
 import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
 import { EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, GatewayExtensions, isExtensionMethod, } from "./GatewayExtensions.js";
@@ -1408,6 +1408,22 @@ function requiredScopeForMethod(method, registry) {
  */
 function hasScope(scopes, method, registry) {
     return hasGatewayScope(scopes.map((scope) => scope.trim()), requiredScopeForMethod(method, registry), method);
+}
+/**
+ * @param {string[]} scopes
+ * @param {string} allowedScope
+ * @returns {boolean}
+ */
+function hasApprovalScope(scopes, allowedScope) {
+    const required = allowedScope.trim();
+    if (!required) {
+        return false;
+    }
+    const granted = scopes.map((scope) => scope.trim()).filter(Boolean);
+    if (!isGatewayScope(required)) {
+        return granted.includes("*") || granted.includes(required);
+    }
+    return hasGatewayScope(granted, required);
 }
 /**
  * @param {unknown} value
@@ -8157,7 +8173,7 @@ a { color: var(--brand); }</style>
                     return responseError(frame.id, "FORBIDDEN", "User is not allowed to decide this approval");
                 }
                 if (request.allowedScopes.length > 0 &&
-                    !request.allowedScopes.some((scope) => hasScope(connection.scopes, scope))) {
+                    !request.allowedScopes.some((scope) => hasApprovalScope(connection.scopes, scope))) {
                     return responseError(frame.id, "FORBIDDEN", "Connection is missing required approval scope");
                 }
                 const decision = stableDecision && "value" in stableDecision ? stableDecision.value : params.decision;

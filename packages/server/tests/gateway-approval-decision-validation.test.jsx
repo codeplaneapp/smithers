@@ -27,11 +27,12 @@ function makeDbPath(name) {
     return join(tmpdir(), `smithers-gateway-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 /**
- * A select-mode approval whose allowedScopes require elevated (run:admin)
- * access, with no allowedUsers restriction — so the scope branch is what gates.
+ * A select-mode approval with no allowedUsers restriction, so the scope branch
+ * is what gates.
  * @param {string} dbPath
+ * @param {string[]} [allowedScopes]
  */
-function createSelectApprovalWorkflow(dbPath) {
+function createSelectApprovalWorkflow(dbPath, allowedScopes = ["run:admin"]) {
     const api = createSmithers({
         selection: z.object({
             selected: z.string(),
@@ -45,7 +46,7 @@ function createSelectApprovalWorkflow(dbPath) {
         }} options={[
             { key: "light", label: "Light" },
             { key: "balanced", label: "Balanced" },
-        ]} allowedScopes={["run:admin"]} continueOnFail/>
+        ]} allowedScopes={allowedScopes} continueOnFail/>
     </api.Workflow>));
     return { workflow, db: api.db };
 }
@@ -160,6 +161,11 @@ const TOKENS = {
         role: "approver",
         scopes: ["approve", "approvals.list", "runs.get"],
         userId: "user:will",
+    },
+    "deployment-approver-token": {
+        role: "approver",
+        scopes: ["approve", "approvals.list", "runs.get", "deploy:approve"],
+        userId: "user:deployer",
     },
 };
 describe("Gateway approval decision validation", () => {
@@ -291,6 +297,34 @@ describe("Gateway approval decision validation", () => {
         });
         await operator.close();
         await approver.close();
+    });
+    test("custom allowedScopes require a literal grant instead of falling back to run:read", async () => {
+        const dbPath = makeDbPath("custom-scope");
+        dbPaths.push(dbPath);
+        const bundle = createSelectApprovalWorkflow(dbPath, ["deploy:approve"]);
+        const port = await startGateway(bundle, "custom-scope-approval");
+        const operator = await connectGateway(port, "operator-token");
+        const approver = await connectGateway(port, "approver-token");
+        const deploymentApprover = await connectGateway(port, "deployment-approver-token");
+        const runId = await createRunAndAwaitApproval(operator, "custom-scope-approval");
+        const decision = {
+            runId,
+            nodeId: "pick-plan",
+            iteration: 0,
+            approved: true,
+            decision: { selected: "balanced" },
+        };
+        const forbidden = await approver.request("approvals.decide", decision);
+        expect(forbidden.ok).toBe(false);
+        expect(forbidden.error.code).toBe("FORBIDDEN");
+        const adapter = new SmithersDb(bundle.db);
+        expect((await adapter.getApproval(runId, "pick-plan", 0))?.status).toBe("requested");
+        const decided = await decideWithRetry(deploymentApprover, decision);
+        expect(decided.ok).toBe(true);
+        expect((await adapter.getApproval(runId, "pick-plan", 0))?.status).toBe("approved");
+        await operator.close();
+        await approver.close();
+        await deploymentApprover.close();
     });
     test("select approvals: denials skip decision-schema validation", async () => {
         const dbPath = makeDbPath("select-deny");
