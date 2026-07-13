@@ -197,20 +197,21 @@ export function telegramApproverLabel(callbackQuery) {
 }
 
 /**
- * @param {{ message?: { date?: number } }} callbackQuery
- * @returns {string | null} ISO-8601 decided-at, from the message date if present
+ * Telegram callback queries do not include the button-press time. Use the
+ * resolution wall clock instead; callbackQuery.message.date is when Telegram
+ * sent the prompt and can be zero for an inaccessible message.
+ * @returns {string} ISO-8601 decided-at
  */
-function decidedAtFromCallback(callbackQuery) {
-  const date = callbackQuery?.message?.date;
-  return typeof date === "number" ? new Date(date * 1000).toISOString() : null;
+function decidedAtFromResolution() {
+  return new Date(Date.now()).toISOString();
 }
 
 /**
- * Map a delivered callback query to an approval decision. Deterministic from
- * the persisted payload. A press that is not this approval's own (wrong or
- * missing token) or is otherwise unrecognized fails safe: a non-approval
- * (`approved: false`) in approve mode, or an empty selection in select mode. A
- * stale/foreign press can therefore never produce a false approval.
+ * Map a delivered callback query to an approval decision. A press that is not
+ * this approval's own (wrong or missing token) or is otherwise unrecognized
+ * fails safe: a non-approval (`approved: false`) in approve mode, or an empty
+ * selection in select mode. A stale/foreign press can therefore never produce
+ * a false approval.
  * @param {{ data?: string; from?: object; message?: { date?: number } }} callbackQuery
  * @param {TelegramApprovalKeyboardSpec} spec
  * @returns {TelegramApprovalDecision | TelegramApprovalSelection}
@@ -230,6 +231,6 @@ export function telegramApprovalDecision(callbackQuery, spec) {
     approved: own && choice?.kind === "approve",
     note: own ? null : "press did not match this approval's prompt",
     decidedBy,
-    decidedAt: decidedAtFromCallback(callbackQuery),
+    decidedAt: decidedAtFromResolution(),
   });
 }

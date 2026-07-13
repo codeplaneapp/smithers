@@ -65,11 +65,11 @@ declare function telegramApproverLabel(callbackQuery: {
     };
 }): string | null;
 /**
- * Map a delivered callback query to an approval decision. Deterministic from
- * the persisted payload. A press that is not this approval's own (wrong or
- * missing token) or is otherwise unrecognized fails safe: a non-approval
- * (`approved: false`) in approve mode, or an empty selection in select mode. A
- * stale/foreign press can therefore never produce a false approval.
+ * Map a delivered callback query to an approval decision. A press that is not
+ * this approval's own (wrong or missing token) or is otherwise unrecognized
+ * fails safe: a non-approval (`approved: false`) in approve mode, or an empty
+ * selection in select mode. A stale/foreign press can therefore never produce
+ * a false approval.
  * @param {{ data?: string; from?: object; message?: { date?: number } }} callbackQuery
  * @param {TelegramApprovalKeyboardSpec} spec
  * @returns {TelegramApprovalDecision | TelegramApprovalSelection}

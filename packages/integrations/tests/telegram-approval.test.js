@@ -97,14 +97,26 @@ describe("approvalInlineKeyboard / webAppButton", () => {
 });
 
 describe("telegramApprovalDecision mapping", () => {
-  test("approve press → { approved: true, decidedBy, decidedAt }", () => {
-    const decision = telegramApprovalDecision(callbackQuery(`sap:${TOK}:a`), { mode: "approve", token: TOK });
-    expect(decision).toEqual({
-      approved: true,
-      note: null,
-      decidedBy: "@will",
-      decidedAt: new Date(1_700_000_000 * 1000).toISOString(),
-    });
+  test("approve press uses resolution time instead of the prompt's message date", () => {
+    const realNow = Date.now;
+    Date.now = () => 1_700_003_600_000;
+    try {
+      const decision = telegramApprovalDecision(callbackQuery(`sap:${TOK}:a`), { mode: "approve", token: TOK });
+      expect(decision).toEqual({
+        approved: true,
+        note: null,
+        decidedBy: "@will",
+        decidedAt: new Date(1_700_003_600_000).toISOString(),
+      });
+
+      const inaccessibleMessage = callbackQuery(`sap:${TOK}:a`);
+      inaccessibleMessage.message.date = 0;
+      expect(telegramApprovalDecision(inaccessibleMessage, { mode: "approve", token: TOK }).decidedAt).toBe(
+        new Date(1_700_003_600_000).toISOString(),
+      );
+    } finally {
+      Date.now = realNow;
+    }
   });
   test("reject press → { approved: false }", () => {
     expect(telegramApprovalDecision(callbackQuery(`sap:${TOK}:d`), { mode: "approve", token: TOK }).approved).toBe(false);
