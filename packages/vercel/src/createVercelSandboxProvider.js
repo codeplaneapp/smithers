@@ -155,12 +155,12 @@ export function createVercelSandboxProvider(options = {}) {
 						args: ["-c", command],
 						cwd: opts.cwd,
 						env: opts.env,
+						signal: opts.signal,
 					};
-					// Forward a per-command timeout to the SDK when one is set. The SDK
-					// ignores fields it does not recognize; we also race a local timeout
-					// below so the deadline is enforced regardless.
+					// Forward a per-command timeout to the SDK when one is set. We also
+					// race a local timeout below so the deadline is enforced promptly.
 					if (Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0) {
-						runInput.timeout = opts.timeoutMs;
+						runInput.timeoutMs = opts.timeoutMs;
 					}
 					const done = await raceCommand(sandbox.runCommand(runInput), opts.signal, opts.timeoutMs);
 					return {

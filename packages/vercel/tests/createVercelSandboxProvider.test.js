@@ -209,7 +209,15 @@ describe("createVercelSandboxProvider", () => {
 			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
 			const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
 			await provider.run(makeRequest({ toolTimeoutMs: 42_000 }).request);
-			expect(env.sandboxes[0]?.lastRunInput?.timeout).toBe(42_000);
+			expect(env.sandboxes[0]?.lastRunInput?.timeoutMs).toBe(42_000);
+		});
+
+		test("forwards the command abort signal to the SDK runCommand input", async () => {
+			const controller = new AbortController();
+			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+			const provider = createVercelSandboxProvider({ client: env, oidcToken: "t" });
+			await provider.run(makeRequest({ signal: controller.signal, toolTimeoutMs: undefined }).request);
+			expect(env.sandboxes[0]?.lastRunInput?.signal).toBe(controller.signal);
 		});
 
 		test("local timeout rejects when the command never settles", async () => {
@@ -461,7 +469,7 @@ describe("createVercelSandboxProvider", () => {
 		const result = await provider.run(makeRequest({ toolTimeoutMs: undefined }).request);
 		expect(result).toMatchObject({ status: "finished", output: { ok: true } });
 		// No per-command timeout was forwarded to the SDK.
-		expect("timeout" in (env.sandboxes[0]?.lastRunInput ?? {})).toBe(false);
+		expect("timeoutMs" in (env.sandboxes[0]?.lastRunInput ?? {})).toBe(false);
 	});
 
 	describe("teardown variants", () => {
