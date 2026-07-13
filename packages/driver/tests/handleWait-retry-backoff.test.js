@@ -57,6 +57,36 @@ describe("WorkflowDriver.handleWait — RetryBackoff", () => {
     expect(submitted).toEqual({ nodes: [] });
     expect(result).toEqual({ runId: "r1", status: "waiting-timer" });
   });
+
+  test("cancels the run when aborted during the backoff", async () => {
+    const controller = new AbortController();
+    let cancellations = 0;
+    const driver = new WorkflowDriver({
+      workflow: { db: {} },
+      db: {},
+      runtime: { runPromise: async (value) => value },
+      session: {
+        cancelRequested: () => {
+          cancellations += 1;
+          return { runId: "r1", status: "cancelled" };
+        },
+      },
+    });
+    driver.activeRunId = "r1";
+    driver.activeOptions = { input: {}, signal: controller.signal };
+
+    const resultPromise = driver.handleWait({
+      _tag: "RetryBackoff",
+      waitMs: 60_000,
+    });
+    controller.abort();
+
+    await expect(resultPromise).resolves.toEqual({
+      runId: "r1",
+      status: "cancelled",
+    });
+    expect(cancellations).toBe(1);
+  });
 });
 
 describe("WorkflowDriver.nextCompletionDecision — deadline racer", () => {
@@ -105,5 +135,36 @@ describe("WorkflowDriver.nextCompletionDecision — deadline racer", () => {
 
     const result = await driver.nextCompletionDecision(15);
     expect(result).toEqual({ runId: "r1", status: "waiting-event" });
+  });
+
+  test("cancels the run when aborted during the deadline wait", async () => {
+    const controller = new AbortController();
+    let cancellations = 0;
+    const driver = new WorkflowDriver({
+      workflow: { db: {} },
+      db: {},
+      runtime: { runPromise: async (value) => value },
+      session: {
+        cancelRequested: () => {
+          cancellations += 1;
+          return { runId: "r1", status: "cancelled" };
+        },
+      },
+    });
+    driver.activeRunId = "r1";
+    driver.activeOptions = { input: {}, signal: controller.signal };
+    driver.inflightTasks = new Map([["k", new Promise(() => {})]]);
+    driver.inflightTaskDescriptors = new Map([
+      ["k", { nodeId: "a", iteration: 0 }],
+    ]);
+
+    const resultPromise = driver.nextCompletionDecision(60_000);
+    controller.abort();
+
+    await expect(resultPromise).resolves.toEqual({
+      runId: "r1",
+      status: "cancelled",
+    });
+    expect(cancellations).toBe(1);
   });
 });

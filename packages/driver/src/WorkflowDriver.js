@@ -557,7 +557,14 @@ export class WorkflowDriver {
                 if (deadlineMs != null) {
                     racers.push(sleepWithAbort(deadlineMs, this.activeOptions?.signal).then(() => null));
                 }
-                await Promise.race(racers);
+                try {
+                    await Promise.race(racers);
+                }
+                catch (error) {
+                    if (!this.activeOptions?.signal?.aborted || !isAbortError(error)) {
+                        throw error;
+                    }
+                }
             }
         }
         finally {
@@ -657,7 +664,14 @@ export class WorkflowDriver {
             case "Quota":
                 return { runId: this.activeRunId, status: "waiting-quota" };
             case "RetryBackoff": {
-                await sleepWithAbort(reason.waitMs, this.activeOptions?.signal);
+                try {
+                    await sleepWithAbort(reason.waitMs, this.activeOptions?.signal);
+                }
+                catch (error) {
+                    if (!this.activeOptions?.signal?.aborted || !isAbortError(error)) {
+                        throw error;
+                    }
+                }
                 if (this.activeOptions?.signal?.aborted) {
                     return this.cancelRun();
                 }
