@@ -32,7 +32,8 @@ describe("buildQuizPrompt", () => {
     expect(prompt).toContain("which callers are affected");
     expect(prompt).toContain("why an approach was chosen");
     expect(prompt).toContain("what invariant the new code protects");
-    expect(prompt).toContain("answerable from the walkthrough and diffs alone");
+    expect(prompt).toContain("answerable from the diffs alone");
+    expect(prompt).not.toContain("answerable from the walkthrough");
     expect(prompt).toContain("Tie every question to a concrete file path from this change");
     expect(prompt).toContain("2-5 options with exactly one correct option");
     expect(prompt).toContain("plausible distractors");

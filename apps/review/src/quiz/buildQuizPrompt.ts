@@ -51,7 +51,7 @@ export function buildQuizPrompt(args: {
     "Goal:",
     "- Write 3-6 multiple-choice questions that a human reviewer can answer if and only if they actually understood this change.",
     "- Ask what breaks under specific inputs, which callers are affected, why an approach was chosen over the alternative, and what invariant the new code protects.",
-    "- Every question must be answerable from the walkthrough and diffs alone; no outside knowledge, no guessing games.",
+    "- Every question must be answerable from the diffs alone; no outside knowledge, no guessing games.",
     "- Tie every question to a concrete file path from this change; set the question's path field to that file.",
     "- Give each question 2-5 options with exactly one correct option (correctIndex) and plausible distractors a skimming reviewer would fall for.",
     "- Write an explanation that teaches: after reading it, the reviewer should understand the code, not just the answer.",
