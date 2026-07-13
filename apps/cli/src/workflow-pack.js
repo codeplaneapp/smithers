@@ -610,7 +610,6 @@ export function initWorkflowPack(options = {}) {
     else {
         const versions = readDependencyVersions();
         ensureDir(resolve(rootDir, "prompts"));
-        ensureDir(resolve(rootDir, "components"));
         ensureDir(resolve(rootDir, "ui"));
         ensureDir(resolve(rootDir, "workflows"));
         ensureDir(resolve(rootDir, "tickets"));

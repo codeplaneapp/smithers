@@ -80,11 +80,14 @@ function linkRepoRuntimeDeps(repoDir) {
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "typescript"), join(nodeModulesDir, "typescript"));
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "@types"), join(nodeModulesDir, "@types"));
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "@mdx-js"), join(nodeModulesDir, "@mdx-js"));
-    // Runtime deps of the seeded multi-file UIs (delegation-chain): the temp
-    // repo's gateway bundles .smithers/ui/*.tsx, which imports these.
+    // Runtime deps of the seeded multi-file UIs: the temp repo's gateway
+    // bundles .smithers/ui/*.tsx, which imports these.
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "@xyflow"), join(nodeModulesDir, "@xyflow"));
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "@milkdown"), join(nodeModulesDir, "@milkdown"));
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "dagre"), join(nodeModulesDir, "dagre"));
+    // mermaid is not hoisted to the root; use the .smithers copy — the seeded
+    // pack's own manifest is what the temp repo's package.json mirrors.
+    symlinkIfMissing(resolve(REPO_ROOT, ".smithers/node_modules/mermaid"), join(nodeModulesDir, "mermaid"));
     // create-workflow parses the skill doc it writes as real YAML frontmatter.
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "yaml"), join(nodeModulesDir, "yaml"));
     symlinkIfMissing(resolve(ROOT_NODE_MODULES, "typescript", "bin", "tsc"), join(binDir, "tsc"), "file");

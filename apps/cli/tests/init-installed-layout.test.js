@@ -15,6 +15,7 @@ import { expect, onTestFinished, test } from "bun:test";
 import {
     chmodSync,
     cpSync,
+    existsSync,
     mkdirSync,
     mkdtempSync,
     realpathSync,
@@ -145,6 +146,17 @@ function buildFakeInstallTree() {
         JSON.stringify({ name: "typescript", version: "5.99.0" }) + "\n",
     );
 
+    for (const [packageName, version] of [
+        ["react", "19.99.0"], ["react-dom", "19.99.0"],
+        ["mermaid", "11.99.0"], ["@milkdown/crepe", "7.99.0"],
+        ["@xyflow/react", "12.99.0"], ["dagre", "0.99.0"],
+        ["yaml", "2.99.0"], ["@types/react", "19.99.0"],
+        ["@types/react-dom", "19.99.0"], ["@types/mdx", "2.99.0"],
+        ["@types/node", "25.99.0"], ["@types/dagre", "0.99.0"],
+    ]) {
+        writeFile(join(nm, packageName, "package.json"), JSON.stringify({ name: packageName, version }) + "\n");
+    }
+
     // Fake claude binary so init has an agent to write into agents.ts.
     const binDir = join(root, "bin");
     writeFile(join(binDir, "claude"), [
@@ -217,12 +229,34 @@ test("initWorkflowPack succeeds when run from a published install layout", () =>
     const generated = JSON.parse(readFileSync(join(tree.cwd, ".smithers/package.json"), "utf8"));
     // The CLI's own version (99.0.0) should be pinned, not "latest".
     expect(generated.dependencies["smithers-orchestrator"]).toBe("^99.0.0");
+    expect(generated.dependencies["@smithers-orchestrator/cli"]).toBe("^99.0.0");
     // And installed dep versions should be picked up via createRequire.
+    expect(generated.dependencies.react).toBe("19.99.0");
+    expect(generated.dependencies["react-dom"]).toBe("19.99.0");
     expect(generated.dependencies.zod).toBe("4.99.0");
+    expect(generated.dependencies["@milkdown/crepe"]).toBe("7.99.0");
+    expect(generated.dependencies.mermaid).toBe("11.99.0");
+    expect(generated.dependencies["@xyflow/react"]).toBe("12.99.0");
+    expect(generated.dependencies.dagre).toBe("0.99.0");
+    expect(generated.dependencies.yaml).toBe("2.99.0");
     expect(generated.devDependencies.typescript).toBe("5.99.0");
-    // The curated pack no longer ships the legacy dagre-backed graph UI, so
-    // the published layout has no target-specific graph dependency.
-    expect(generated.devDependencies["@types/dagre"]).toBeUndefined();
+    expect(generated.devDependencies["@types/react"]).toBe("19.99.0");
+    expect(generated.devDependencies["@types/react-dom"]).toBe("19.99.0");
+    expect(generated.devDependencies["@types/mdx"]).toBe("2.99.0");
+    expect(generated.devDependencies["@types/node"]).toBe("25.99.0");
+    expect(generated.devDependencies["@types/dagre"]).toBe("0.99.0");
+    for (const file of [
+        "ui/docs-driven-development.tsx",
+        "ui/ddd-shared.tsx",
+        "lib/ddd/build.ts",
+        "lib/ddd/dddRoot.ts",
+        "lib/ddd/validateFeatures.ts",
+    ]) {
+        const installed = join(tree.cwd, ".smithers", file);
+        expect(existsSync(installed), `published pack omitted ${file}`).toBe(true);
+        expect(readFileSync(installed, "utf8").length).toBeGreaterThan(0);
+    }
+    expect(existsSync(join(tree.cwd, ".smithers/components"))).toBe(false);
 
     // init also installed the curated skill into the detected agent (Claude Code,
     // present via the faked ~/.claude credentials) straight from the packaged

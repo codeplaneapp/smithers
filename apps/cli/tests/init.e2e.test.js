@@ -71,6 +71,7 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "  export const grep: any;",
         "  export const bash: any;",
         "  export function createSmithers(...args: any[]): any;",
+        "  export function executeChildWorkflow(...args: any[]): any;",
         "  export function defineTool(...args: any[]): any;",
         "  export function mdxPlugin(...args: any[]): any;",
         "}",
@@ -120,9 +121,9 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "}",
         "",
     ].join("\n"));
-    // Seeded multi-file UIs (delegation-chain) import browser-only npm deps that
-    // the pack smoke typecheck doesn't install; declare their imported surface
-    // as `any`, mirroring how the smithers-orchestrator stubs work above.
+    // Seeded multi-file UI dependency declarations are browser-only coverage
+    // inputs: the pack smoke typecheck doesn't install them, so declare their
+    // imported surface as `any`, mirroring the smithers-orchestrator stubs above.
     // (Shorthand ambient modules are not enough: generic TYPE usage like
     // `Node<T>` needs explicit type declarations.)
     repo.write(".smithers/types/seeded-ui-deps.d.ts", [
@@ -182,8 +183,6 @@ function writeWorkflowPackTypecheckHarness(repo) {
         include: [
             "./agents.ts",
             "./agents/**/*.ts",
-            "./components/**/*.ts",
-            "./components/**/*.tsx",
             "./preload.ts",
             "./gateway.ts",
             "./smithers.config.ts",

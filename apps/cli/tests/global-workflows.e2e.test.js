@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { createExecutableDir, createTempRepo, runSmithers, writeFakeCodexBinary, writeTestWorkflow, } from "../../../packages/smithers/tests/e2e-helpers.js";
 
@@ -110,11 +110,26 @@ test("smithers init --global scaffolds the canonical ~/.smithers pack (no nested
     expect(result.json.rootDir).toBe(smithersHome);
     expect(result.json.install).toMatchObject({ reason: "skip-install" });
 
-    // Pack files land directly under ~/.smithers, with no extra `.smithers` nesting.
-    for (const rel of ["package.json", "agents.ts", "agents/claude-code.ts", "prompts/review.mdx"]) {
+    // Pack files land directly under ~/.smithers, with no extra `.smithers`
+    // nesting or legacy components directory.
+    for (const rel of [
+        "package.json",
+        "agents.ts",
+        "agents/claude-code.ts",
+        "prompts/create-workflow-clarify.mdx",
+    ]) {
         expect(existsSync(join(smithersHome, rel))).toBe(true);
     }
-    expect(existsSync(join(smithersHome, "workflows", "research.tsx"))).toBe(true);
+    expect(readdirSync(join(smithersHome, "workflows")).filter((name) => name.endsWith(".tsx")).sort()).toEqual([
+        "create-skill.tsx",
+        "create-workflow.tsx",
+        "docs-driven-development.tsx",
+        "eval-suite-run.tsx",
+        "init.tsx",
+        "post-failure.tsx",
+        "upgrade.tsx",
+    ]);
+    expect(existsSync(join(smithersHome, "components"))).toBe(false);
     expect(existsSync(join(smithersHome, ".smithers"))).toBe(false);
     // It did NOT scaffold a local pack in the cwd repo.
     expect(repo.exists(".smithers")).toBe(false);
