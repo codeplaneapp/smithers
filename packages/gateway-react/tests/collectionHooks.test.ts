@@ -156,6 +156,33 @@ async function mountHarness(): Promise<Harness> {
 }
 
 describe("collection-backed gateway hooks over a real in-memory gateway", () => {
+  test("keeps run event results stable across renders without new collection data", async () => {
+    const { baseUrl } = await bootGateway();
+    const runId = await launchRun(baseUrl, 3);
+    const captured: { events?: any; rerender?: () => void } = {};
+
+    function Probe() {
+      const [renderCount, setRenderCount] = React.useState(0);
+      captured.events = useGatewayRunEvents(runId).events;
+      captured.rerender = () => setRenderCount((count) => count + 1);
+      // Keep the state update observable to React while avoiding an unused
+      // state variable in the regression harness.
+      return createElement("span", { "data-render-count": renderCount });
+    }
+
+    const harness = await mountHarness();
+    await harness.render(createElement(SmithersGatewayProvider, { client: makeClient(baseUrl) }, createElement(Probe)));
+    await waitFor(() => (captured.events?.length ?? 0) > 0, "run events");
+
+    const firstEvents = captured.events;
+    await act(async () => {
+      captured.rerender!();
+    });
+
+    expect(captured.events).toBe(firstEvents);
+    await harness.unmount();
+  });
+
   test("every collection hook loads real data, refetches, and exposes the actions surface", async () => {
     const { baseUrl } = await bootGateway();
     const runId = await launchRun(baseUrl, 3);

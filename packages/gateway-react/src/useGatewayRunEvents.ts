@@ -50,7 +50,10 @@ export function useGatewayRunEvents(
     [collection],
   );
 
-  const rows = ((live.data ?? []) as GatewayRunEventRow[]).filter((row) => row.runId === runId);
+  const rows = useMemo(
+    () => ((live.data ?? []) as GatewayRunEventRow[]).filter((row) => row.runId === runId),
+    [live.data, runId],
+  );
   const { events, lastHeartbeat } = useMemo(() => {
     const sorted = [...rows].sort((left, right) => left.seq - right.seq);
     const eligible = typeof afterSeq === "number" ? sorted.filter((row) => row.seq > afterSeq) : sorted;
