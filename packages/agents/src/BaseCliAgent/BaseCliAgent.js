@@ -22,7 +22,7 @@ const QUOTA_PATTERNS = [
     /\busage\s+limit\s+exceeded\b/i,
     /\bquota\s+exceeded\b/i,
     /\brate\s+limit\s+exceeded\b/i,
-    /\byou('ve| have)\s+reached\s+(your\s+)?(usage|rate|quota|session|weekly|daily|monthly)\b/i,
+    /\byou('ve| have)\s+reached\s+(your\s+)?(usage|rate|quota|session|weekly|daily|monthly)\s+(limit|exceeded|cap|ceiling)\b/i,
     /\b(usage|quota|rate|session|weekly|daily|monthly)\s+(cap|ceiling|limit)\s+(reached|exceeded|hit)\b/i,
     /\btoo\s+many\s+requests\b/i,
     /\b(429|rate.limit)\b[\s\S]{0,100}?try\s+again\b/i,

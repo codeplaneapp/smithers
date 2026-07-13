@@ -28,14 +28,27 @@ describe("classifyQuotaError — pattern detection", () => {
         expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
     });
 
-    test("detects 'you have reached your usage'", () => {
+    test("detects 'you have reached your usage limit'", () => {
         const err = classifyQuotaError("you have reached your usage limit", "codex", ctx);
         expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
     });
 
-    test("detects 'you've reached your quota'", () => {
-        const err = classifyQuotaError("you've reached your quota", "codex", ctx);
+    test("detects 'you've reached your quota ceiling'", () => {
+        const err = classifyQuotaError("you've reached your quota ceiling", "codex", ctx);
         expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+    });
+
+    test("does not classify benign weekly, daily, or monthly milestones", () => {
+        const messages = [
+            "You've reached your weekly goal!",
+            "You've reached your daily standup",
+            "You have reached your weekly summary",
+            "You've reached your monthly target",
+        ];
+
+        for (const message of messages) {
+            expect(classifyQuotaError(message, "claude-code", ctx)).toBeNull();
+        }
     });
 
     test("detects 'usage cap reached'", () => {
