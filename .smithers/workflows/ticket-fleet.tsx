@@ -1236,13 +1236,19 @@ function planPrompt(issue: Issue, triage: Triage, research: Research | undefined
     "Set issueNumber to exactly " + issue.number + ".",
   ].filter(Boolean).join("\n");
 }
-function implementPrompt(issue: Issue, triage: Triage, plan: Plan | undefined, research: Research | undefined, feedback: string): string {
+function implementPrompt(issue: Issue, triage: Triage, plan: Plan | undefined, research: Research | undefined, feedback: string, reusePriorWork?: { repo: string }): string {
   return [
     UNTRUSTED,
     "Implement the fix for issue #" + issue.number + " (" + JSON.stringify(issue.title) + ") in this worktree (cwd). Difficulty: " + triage.difficulty + ".",
     "Body:", "---", issue.body, "---",
     research ? "Research:\n" + JSON.stringify({ report: research.report.slice(0, 8_000), relevantFiles: research.relevantFiles }) : "",
-    plan ? "Approved plan:\n" + JSON.stringify(plan) : "No formal plan (trivial/easy tier): implement directly, smallest complete change.",
+    plan ? "Approved plan:\n" + JSON.stringify(plan) : "",
+    // Direct split mode: research and an implementation plan were already
+    // produced for most of these issues on earlier runs and posted as issue
+    // comments. Reuse them; do NOT redo research or planning.
+    reusePriorWork && !plan && !research
+      ? "Research and an implementation plan for this issue were most likely already posted as GitHub comments by an earlier run. Read them first with `gh issue view " + issue.number + " --repo " + reusePriorWork.repo + " --comments` and follow the existing plan. Do NOT redo research or write a new plan; go straight to implementing the smallest complete change. If no prior plan comment exists, implement directly."
+      : (!plan ? "No formal plan: implement directly, smallest complete change." : ""),
     feedback ? "Previous review / local-gate feedback to address:\n" + feedback : "",
     "Add focused tests. Follow repo conventions (CLAUDE.md/AGENTS.md). Do not commit, push, alter VCS metadata, or touch files outside this worktree. Return an accurate summary.",
   ].filter(Boolean).join("\n");
@@ -1510,9 +1516,23 @@ export default smithers((ctx) => {
     const issue = issueByNumber.get(n);
     return issue ? memoizedTriage(triageLedger, issue) : undefined;
   };
-  const triageOf = (n: number) => latest<Triage>(ctx, outputs.tfTriage, "i" + n + ":triage") ?? memoTriageOf(n);
-  const issuesToTriage = triageIssues.filter((issue) => !memoTriageOf(issue.number));
-  const selected = selectedNumbers
+  // Direct split mode: solNumbers/fableNumbers were given, so we skip the whole
+  // triage / research / planning pipeline (those were already done for these
+  // issues on earlier runs) and go straight to per-issue worktree lanes that
+  // implement -> review-loop -> land. Every assigned issue gets a synthetic
+  // "easy" verdict, which makes needsPlan / needsResearch / needsHumanApproval
+  // all false so none of those phases render.
+  const splitMode = input.solNumbers.length > 0 || input.fableNumbers.length > 0;
+  const directTriage = (n: number): Triage => ({
+    issueNumber: n, difficulty: "easy", needsHumanApproval: false, approvalReason: "",
+    needsResearch: false, researchKind: "none", rationale: "direct split-mode fix (triage/research/plan skipped; reuse prior plan from issue comments)",
+  });
+  const triageOf = (n: number) => splitMode
+    ? directTriage(n)
+    : (latest<Triage>(ctx, outputs.tfTriage, "i" + n + ":triage") ?? memoTriageOf(n));
+  const issuesToTriage = splitMode ? [] : triageIssues.filter((issue) => !memoTriageOf(issue.number));
+  const assignedNumbers = [...new Set([...input.solNumbers, ...input.fableNumbers])];
+  const selected = (splitMode ? assignedNumbers : selectedNumbers)
     .map((n) => ({ issue: issueByNumber.get(n), triage: triageOf(n) }))
     .filter((s): s is { issue: Issue; triage: Triage } => !!s.issue && !!s.triage);
 
@@ -1678,7 +1698,7 @@ export default smithers((ctx) => {
             ))}
           </Parallel>
         ) : null}
-        {triageIssues.length ? (
+        {!splitMode && triageIssues.length ? (
           <Task id="triage-apply" output={outputs.tfTriageApply} timeoutMs={30 * 60_000}>
             {() => {
               const triages = triageIssues.map((i) => triageOf(i.number)).filter((t): t is Triage => !!t);
@@ -1819,7 +1839,7 @@ export default smithers((ctx) => {
                         <Sequence>
                           <Task id={"i" + n + ":implement"} output={outputs.tfImplementation}
                             agent={assignedImplementer(input, n, triage.difficulty, cwd)} {...agentTaskProps}>
-                            {implementPrompt(issue, triage, plan, research, feedbackFor(ctx, n, hardTier))}
+                            {implementPrompt(issue, triage, plan, research, feedbackFor(ctx, n, hardTier), splitMode ? { repo: input.repo } : undefined)}
                           </Task>
                           <Task id={"i" + n + ":candidate"} output={outputs.tfCandidate} continueOnFail>
                             {() => setup ? captureCandidate(n, setup) : { issueNumber: n, baseSha: "", headSha: "", patchId: "", changedPaths: [], reviewDiff: "", ready: false, summary: "No setup output." }}
