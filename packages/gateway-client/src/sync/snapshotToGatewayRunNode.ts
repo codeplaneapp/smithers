@@ -148,6 +148,7 @@ function toRunStatus(state: string | undefined): string {
     case "waiting-timer":
     case "waiting":
     case "blocked":
+    case "paused":
       return "waiting";
     default:
       // Any other waiting-* variant (waiting-quota, future park states) is

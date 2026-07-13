@@ -362,6 +362,7 @@ describe("snapshotToGatewayRunNode", () => {
       ["waiting-timer", "waiting"],
       ["waiting", "waiting"],
       ["blocked", "waiting"],
+      ["paused", "waiting"],
       ["mystery", "queued"],
       [undefined, "queued"],
     ];
