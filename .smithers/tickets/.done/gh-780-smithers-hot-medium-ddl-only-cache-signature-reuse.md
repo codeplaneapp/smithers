@@ -34,3 +34,6 @@ Separate physical DDL compatibility from semantic schema identity. Rebuild valid
 ## Dedupe notes
 
 No matching issue or PR.
+
+
+> Closed by ticket-fleet: landed on main in 65e397854932aaf3a22eda22212c023bfd29e525.
