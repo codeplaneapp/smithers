@@ -12,3 +12,6 @@ The `server.on("close")` handler (index.js:1357-1364) iterates the shared map, c
 The run registry should be created inside `startServerInternal` so each server owns (and on close, aborts) only its own runs.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 755dfbeb6559aecaf4ddb8b35c0ce60b8afab330.
