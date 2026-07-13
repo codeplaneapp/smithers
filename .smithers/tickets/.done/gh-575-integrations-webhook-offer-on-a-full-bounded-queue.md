@@ -16,3 +16,6 @@ The dead error handling indicates non-blocking offer semantics were assumed when
 Either a sliding/dropping strategy (or explicit capacity check) with a typed queue-full failure so ingress can return 429/503, plus proper shutdown detection (`Queue.isShutdown`) — or an explicit comment documenting that ingress intentionally applies backpressure.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 160ba20c3e4386c07a5d840739c60cbac6f9f5f0.
