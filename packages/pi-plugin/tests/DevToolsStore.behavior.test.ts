@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { diffSnapshots } from "@smithers-orchestrator/devtools";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { DevToolsStore } from "../src/runtime/DevToolsStore.js";
 import type { DevToolsClient } from "../src/runtime/DevToolsClient.js";
 import type { DevToolsNode, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
@@ -194,7 +195,7 @@ describe("DevToolsStore reconnect state", () => {
         streamDevTools: async function* (_runId, afterSeq) {
           attempts.push(afterSeq);
           if (attempts.length === 1) {
-            throw new Error("DevTools event must be an object.");
+            throw new SmithersError("PI_DEVTOOLS_DECODE_ERROR", "The event payload is invalid.");
           }
         },
       }),
@@ -205,6 +206,29 @@ describe("DevToolsStore reconnect state", () => {
 
     expect(store.decodeErrorCount).toBe(1);
     expect(attempts).toEqual([undefined, undefined]);
+    store.disconnect();
+  });
+
+  test("message-only matches do not count as decode errors or force a fresh stream", async () => {
+    const attempts: Array<number | undefined> = [];
+    const store = new DevToolsStore({
+      staleBannerDelayMs: 5,
+      client: fakeClient({
+        streamDevTools: async function* (_runId, afterSeq) {
+          attempts.push(afterSeq);
+          if (attempts.length === 1) {
+            yield { version: 1, kind: "snapshot", snapshot: snapshot(3, [task(2, "task:a", "running")]) };
+            throw new Error("DevTools event must be an object.");
+          }
+        },
+      }),
+    });
+
+    store.connect("run-store");
+    await waitFor(() => attempts.length >= 2);
+
+    expect(store.decodeErrorCount).toBe(0);
+    expect(attempts).toEqual([undefined, 3]);
     store.disconnect();
   });
 });

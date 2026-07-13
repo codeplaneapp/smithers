@@ -539,7 +539,7 @@ export class DevToolsStore {
           return;
         }
         const err = error instanceof Error ? error : new Error(String(error));
-        if (err.message.includes("DevTools event")) {
+        if (err instanceof SmithersError && err.code === "PI_DEVTOOLS_DECODE_ERROR") {
           this.decodeErrorCount += 1;
           nextAfterSeq = undefined;
         }
