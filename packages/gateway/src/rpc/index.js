@@ -378,6 +378,7 @@ export const GATEWAY_RPC_DEFINITIONS = [
       nodeId,
       iteration,
       approved: booleanSchema("Whether the approval is granted."),
+      note: stringSchema("Optional approval note."),
       decision: objectSchema({
         approved: booleanSchema("Whether the approval is granted."),
         value: anyJsonSchema,

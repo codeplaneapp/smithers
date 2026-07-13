@@ -332,6 +332,24 @@ describe("Gateway RPC contract", () => {
     expect(hasGatewayScope(["unknown"], "run:read", "getRun")).toBe(false);
   });
 
+  test("submitApproval accepts an optional top-level note", () => {
+    const definition = getGatewayRpcDefinition("submitApproval");
+    expect(definition).toBeDefined();
+    if (!definition) return;
+    expect(definition.requestSchema.properties?.note).toEqual({
+      type: "string",
+      description: "Optional approval note.",
+    });
+
+    const request = {
+      runId: "r1",
+      nodeId: "n1",
+      decision: { approved: true },
+      note: "operator context",
+    };
+    expect(validateAgainstSchema(request, definition.requestSchema)).toEqual([]);
+  });
+
   test("every exampleRequest/exampleResponse validates against its own schema", () => {
     for (const definition of GATEWAY_RPC_DEFINITIONS) {
       const requestErrors = validateAgainstSchema(definition.exampleRequest, definition.requestSchema);
@@ -587,7 +605,7 @@ describe("Gateway RPC contract", () => {
       },
       {
         method: "submitApproval",
-        request: { runId: "r1", nodeId: "n1", decision: { approved: true, note: "ok" } } satisfies SubmitApprovalRequest,
+        request: { runId: "r1", nodeId: "n1", note: "ok", decision: { approved: true } } satisfies SubmitApprovalRequest,
         response: { runId: "r1", nodeId: "n1", iteration: 0, approved: true } satisfies SubmitApprovalResponse,
       },
       {

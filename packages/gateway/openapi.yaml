@@ -2765,6 +2765,9 @@ paths:
                     approved:
                       type: boolean
                       description: "Whether the approval is granted."
+                    note:
+                      type: string
+                      description: "Optional approval note."
                     decision:
                       type: object
                       description: "Approval decision payload."
