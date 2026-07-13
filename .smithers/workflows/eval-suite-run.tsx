@@ -131,7 +131,7 @@ export default smithers((ctx) => {
                 </Task>
 
                 <Parallel id="cases" maxConcurrency={maxConcurrency}>
-                    {cases.map((c, index) => (
+                    {!suite ? null : cases.map((c, index) => (
                         <Task
                             key={c.id}
                             id={`case-${c.id}`}
