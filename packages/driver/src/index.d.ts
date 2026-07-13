@@ -72,6 +72,14 @@ type RunOptions$2 = {
     acceptWorkflowChange?: boolean;
     workflowPath?: string;
     rootDir?: string;
+    /**
+     * Keep the `<Worktree>` directories this run created instead of reaping them
+     * when it finishes (default false: a successful run removes its own worktrees,
+     * except any holding uncommitted or unpushed work, which are always kept).
+     * Failed and cancelled runs never auto-reap. `SMITHERS_KEEP_WORKTREES=1` is
+     * the process-wide equivalent.
+     */
+    keepWorktrees?: boolean;
     logDir?: string | null;
     allowNetwork?: boolean;
     maxOutputBytes?: number;

@@ -11,6 +11,8 @@ export { finalizeCancelledRun } from "./engine.js";
 
 // Top-level public modules
 export * from "./alert-runtime.js";
+export * from "./listSmithersWorktrees.js";
+export * from "./reapWorktrees.js";
 export * from "./approvals.js";
 export * from "./child-workflow.js";
 export * from "./events.js";

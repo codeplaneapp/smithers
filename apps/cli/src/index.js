@@ -27,6 +27,9 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { runFork, runPromise, runSync } from "./smithersRuntime.js";
 import { trackEvent } from "@smithers-orchestrator/observability/metrics";
 import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
+import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
+import { listSmithersWorktrees } from "@smithers-orchestrator/engine/listSmithersWorktrees";
+import { reapWorktrees } from "@smithers-orchestrator/engine/reapWorktrees";
 import { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";
 import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
 import { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
@@ -4530,6 +4533,137 @@ const tokenCli = Cli.create({
         });
     },
 });
+/**
+ * @param {number} bytes
+ * @returns {string}
+ */
+function formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit += 1;
+    }
+    return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+}
+/**
+ * @returns {string}
+ */
+function resolveWorktreeRootDir() {
+    const vcs = findVcsRoot(process.cwd());
+    if (!vcs) {
+        throw new SmithersError("VCS_NOT_FOUND", `No git or jj repository found from ${process.cwd()}. Run \`smithers worktree\` inside a repository.`, { cwd: process.cwd() });
+    }
+    return vcs.root;
+}
+const worktreeCli = Cli.create({
+    name: "worktree",
+    description: "Inspect and reclaim the worktrees Smithers created for <Worktree> lanes.",
+})
+    .command("list", {
+    description: "List every worktree Smithers created in this repository and the run that owns it.",
+    async run(c) {
+        const fail = makeFail(c);
+        let rootDir;
+        try {
+            rootDir = resolveWorktreeRootDir();
+        }
+        catch (err) {
+            return fail({ code: "VCS_NOT_FOUND", message: err?.message ?? String(err), exitCode: 1 });
+        }
+        const worktrees = await listSmithersWorktrees(rootDir);
+        const { adapter, cleanup } = await findAndOpenDb();
+        try {
+            const rows = [];
+            for (const worktree of worktrees) {
+                const run = await adapter.getRun(worktree.owner.runId);
+                rows.push({
+                    path: worktree.path,
+                    runId: worktree.owner.runId,
+                    workflow: worktree.owner.workflowName ?? null,
+                    status: run?.status ?? "unknown",
+                    exists: worktree.exists,
+                    updatedAtMs: worktree.owner.updatedAtMs,
+                });
+            }
+            if (c.format !== "json") {
+                if (rows.length === 0) {
+                    console.log("No Smithers worktrees in this repository.");
+                }
+                for (const row of rows) {
+                    console.log(`${row.status.padEnd(16)} ${row.runId}  ${row.path}${row.exists ? "" : "  (missing)"}`);
+                }
+            }
+            return c.ok({ worktrees: rows });
+        }
+        finally {
+            cleanup();
+        }
+    },
+})
+    .command("prune", {
+    description: "Remove the worktrees of runs that are over (finished, failed, or cancelled).",
+    options: z.object({
+        run: z.string().optional().describe("Only prune worktrees owned by this run id"),
+        olderThan: z.string().optional().describe("Only prune worktrees untouched for at least this long, e.g. 24h"),
+        dryRun: z.boolean().default(false).describe("Report what would be removed without removing anything"),
+        force: z.boolean().default(false).describe("Also remove worktrees holding uncommitted or unpushed work"),
+    }),
+    async run(c) {
+        const fail = makeFail(c);
+        let rootDir;
+        let olderThanMs;
+        try {
+            rootDir = resolveWorktreeRootDir();
+            olderThanMs = c.options.olderThan ? parseDurationMs(c.options.olderThan, "older-than") : undefined;
+        }
+        catch (err) {
+            return fail({
+                code: err instanceof SmithersError ? err.code : "WORKTREE_PRUNE_FAILED",
+                message: err?.message ?? String(err),
+                exitCode: 1,
+            });
+        }
+        const { adapter, cleanup } = await findAndOpenDb();
+        try {
+            const result = await reapWorktrees({
+                rootDir,
+                runId: c.options.run,
+                force: c.options.force,
+                dryRun: c.options.dryRun,
+                olderThanMs,
+                getRunStatus: async (runId) => (await adapter.getRun(runId))?.status ?? null,
+            });
+            if (c.format !== "json") {
+                const verb = result.dryRun ? "Would remove" : "Removed";
+                for (const entry of result.removed) {
+                    console.log(`${verb} ${entry.path} (${entry.runId}, ${formatBytes(entry.bytes)})`);
+                }
+                for (const entry of result.skipped) {
+                    console.log(`Keeping ${entry.path} (${entry.runId}): ${entry.reason}`);
+                }
+                console.log(`${verb.toLowerCase()} ${result.removed.length} worktree(s), ${formatBytes(result.bytesFreed)}${result.dryRun ? "" : " reclaimed"}.`);
+                const unsaved = result.skipped.filter((entry) => entry.reason === "unsaved-work").length;
+                if (unsaved > 0 && !c.options.force) {
+                    console.log(`${unsaved} worktree(s) hold uncommitted or unpushed work and were kept. Pass --force to remove them anyway.`);
+                }
+            }
+            return c.ok(result);
+        }
+        catch (err) {
+            return fail({
+                code: err instanceof SmithersError ? err.code : "WORKTREE_PRUNE_FAILED",
+                message: err?.message ?? String(err),
+                exitCode: 1,
+            });
+        }
+        finally {
+            cleanup();
+        }
+    },
+});
 // ---------------------------------------------------------------------------
 // DevTools live-run commands (tree / diff / output / rewind / snapshots / restore)
 // ---------------------------------------------------------------------------
@@ -8361,7 +8495,8 @@ const cli = Cli.create({
     .command(agentsCli)
     .command(memoryCli)
     .command(openapiCli)
-    .command(tokenCli);
+    .command(tokenCli)
+    .command(worktreeCli);
 const cliCommands = Cli.toCommands?.get(cli);
 if (!(cliCommands instanceof Map)) {
     throw new Error("Could not resolve Smithers CLI commands for input bounds.");

@@ -29,6 +29,9 @@ import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj
 import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
 import { createSlotGovernor } from "./slotGovernor.js";
 import { createWorktreeSyncCache } from "./worktreeSyncCache.js";
+import { writeWorktreeOwner } from "./worktreeOwnerFile.js";
+import { reapWorktrees } from "./reapWorktrees.js";
+import { runGit } from "./runGit.js";
 import { startDurability } from "./startDurability.js";
 import { startDocFileSync } from "./startDocFileSync.js";
 import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
@@ -135,7 +138,6 @@ function resolveBinary(cmd) {
     }
     return null;
 }
-const gitBinary = resolveBinary("git");
 const caffeinateBinary = resolveBinary("caffeinate");
 const RUN_WORKFLOW_RUN_ID_MAX_LENGTH = 256;
 const RUN_WORKFLOW_WORKFLOW_PATH_MAX_LENGTH = 4096;
@@ -773,18 +775,7 @@ function prependToolResumeWarningMessage(prompt, warningMessage) {
  * @returns {Promise<{ code: number; stdout: string; stderr: string }>}
  */
 async function runGitCommand(cwd, args) {
-    return await new Promise((res) => {
-        const child = nodeSpawn(gitBinary ?? "git", args, {
-            cwd,
-            stdio: ["ignore", "pipe", "pipe"],
-        });
-        let stdout = "";
-        let stderr = "";
-        child.stdout?.on("data", (chunk) => (stdout += chunk.toString()));
-        child.stderr?.on("data", (chunk) => (stderr += chunk.toString()));
-        child.on("error", (err) => res({ code: 127, stdout: "", stderr: err.message }));
-        child.on("close", (code) => res({ code: code ?? 1, stdout, stderr }));
-    });
+    return await runGit(cwd, args);
 }
 /**
  * @param {string} filePath
@@ -978,8 +969,31 @@ async function resolveWorktreeBaseTip(vcs, base) {
  * if necessary. When `branch` is provided, a jj bookmark or git branch is
  * created/updated in the new worktree. Safe to call multiple times for the
  * same path.
+ *
+ * `owner` stamps the run that last entered the worktree into git's admin area,
+ * which is what makes the worktree reapable once that run is over. Reuse of one
+ * path across runs is last-writer-wins on purpose: whoever is still working in
+ * the worktree is its owner, so a finished run never reaps a live run's lane.
+ *
+ * @param {string} rootDir
+ * @param {string} worktreePath
+ * @param {string} [branch]
+ * @param {string} [baseBranch]
+ * @param {{ runId: string; workflowName?: string }} [owner]
  */
-async function ensureWorktree(rootDir, worktreePath, branch, baseBranch) {
+async function ensureWorktree(rootDir, worktreePath, branch, baseBranch, owner) {
+    /** @param {"git" | "jj"} vcsType */
+    const recordOwner = async (vcsType) => {
+        if (!owner)
+            return;
+        await writeWorktreeOwner(worktreePath, {
+            runId: owner.runId,
+            ...(owner.workflowName ? { workflowName: owner.workflowName } : {}),
+            vcsType,
+            ...(vcsType === "jj" ? { workspaceName: basename(worktreePath) } : {}),
+            ...(baseBranch ? { baseBranch } : {}),
+        });
+    };
     if (existsSync(worktreePath)) {
         // Worktree exists — rebase onto the configured base branch so work
         // starts from tip. The sync cache bounds how often that costs a
@@ -1025,6 +1039,7 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch) {
                 }
             }
         }
+        await recordOwner(vcs?.type === "jj" ? "jj" : "git");
         createdWorktrees.add(worktreePath);
         return;
     }
@@ -1119,7 +1134,53 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch) {
     finally {
         releaseCreationSlot();
     }
+    await recordOwner(vcs.type);
     createdWorktrees.add(worktreePath);
+}
+/**
+ * Reap the `<Worktree>` lanes a run created, once that run has finished.
+ *
+ * Only a successful run auto-reaps. A failed or cancelled run keeps its lanes:
+ * that is the state you go and look at, and the checkout is most of the
+ * evidence. `smithers worktree prune` reclaims those explicitly, on demand.
+ *
+ * Worktrees holding uncommitted, untracked, or unpushed work are retained
+ * regardless — {@link reapWorktrees} refuses them — so a green run whose agent
+ * left work behind still leaves that work on disk.
+ *
+ * Best effort: a failure here never changes the outcome of the run.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {string} rootDir
+ * @param {boolean | undefined} keepWorktrees
+ * @returns {Promise<void>}
+ */
+async function reapFinishedRunWorktrees(adapter, runId, rootDir, keepWorktrees) {
+    const keep = keepWorktrees ?? ["1", "true"].includes((process.env.SMITHERS_KEEP_WORKTREES ?? "").toLowerCase());
+    if (keep)
+        return;
+    try {
+        const result = await reapWorktrees({
+            rootDir,
+            runId,
+            getRunStatus: async (id) => (await Effect.runPromise(adapter.getRun(id)))?.status ?? null,
+        });
+        const retained = result.skipped.filter((entry) => entry.reason === "unsaved-work");
+        if (result.removed.length > 0) {
+            logInfo("reaped run worktrees", {
+                runId,
+                removed: result.removed.length,
+                bytesFreed: result.bytesFreed,
+            }, "engine:worktree");
+        }
+        for (const entry of retained) {
+            console.warn(`[smithers] keeping worktree ${entry.path}: it holds uncommitted or unpushed work. Reclaim it with \`smithers worktree prune --force\` once the work is saved.`);
+        }
+    }
+    catch {
+        // Reclaiming disk is never worth failing a finished run over.
+    }
 }
 const DEFAULT_MAX_CONCURRENCY = 4;
 const STALE_ATTEMPT_MS = 15 * 60 * 1000;
@@ -3781,7 +3842,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 return Effect.void;
             }), Schedule.spaced(Duration.millis(TASK_HEARTBEAT_TIMEOUT_CHECK_MS))).pipe(Effect.flatMap(() => Effect.never)));
         if (desc.worktreePath) {
-            await ensureWorktree(toolConfig.rootDir, desc.worktreePath, desc.worktreeBranch, desc.worktreeBaseBranch);
+            await ensureWorktree(toolConfig.rootDir, desc.worktreePath, desc.worktreeBranch, desc.worktreeBaseBranch, { runId, workflowName });
             // Safety net for a silent, expensive footgun: a worker's working dir resolves as
             // `agent.cwd ?? worktreePath ?? repoRoot`, so an agent constructed with a pinned
             // `cwd` (e.g. `cwd: process.cwd()`) OVERRIDES this <Worktree>. The worker then
@@ -7079,6 +7140,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             runId,
             ...(failedChildren > 0 ? { failedChildren } : {}),
         }, "engine:run");
+        await reapFinishedRunWorktrees(adapter, runId, rootDir, opts.keepWorktrees);
         await annotateRunSpan({ status: "finished", ...(failedChildren > 0 ? { failedChildren } : {}) });
         const outputTable = resolveWorkflowOutputTable(workflowRef, schema);
         let output = undefined;

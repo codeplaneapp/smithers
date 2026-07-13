@@ -2343,7 +2343,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[92]:
+commands[94]:
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal init asks one question (your preferred coding agent), installs the pack with defaults plus that agent's plugin (or skill if no plugin), then opens a hijacked tutorial session hosted by that agent; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -2857,6 +2857,15 @@ commands[92]:
     flags[2]{name,short,type,default,desc}:
       iteration,,number,,Loop iteration
       seq,,number,,Checkpoint seq; latest if omitted
+  - name: worktree.list
+    purpose: List every worktree Smithers created in this repository and the run that owns it
+  - name: worktree.prune
+    purpose: Remove the worktrees of runs that are over (finished, failed, or cancelled)
+    flags[4]{name,short,type,default,desc}:
+      run,,string,,Only prune worktrees owned by this run id
+      older-than,,string,,Only prune worktrees untouched for at least this long e.g. 24h
+      dry-run,,boolean,false,Report what would be removed without removing anything
+      force,,boolean,false,Also remove worktrees holding uncommitted or unpushed work
   - name: snapshot-hook
     purpose: "Internal: PostToolUse hook that requests a Tier 1 durability snapshot"
   - name: observability
@@ -7090,6 +7099,7 @@ type RunOptions = {
   acceptWorkflowChange?: boolean;   // resume same run id after workflow source changed, re-blessing hashes
   workflowPath?: string;
   rootDir?: string;
+  keepWorktrees?: boolean;          // default false; keep this run's <Worktree> dirs instead of reaping on success (SMITHERS_KEEP_WORKTREES=1 process-wide)
   logDir?: string | null;
   allowNetwork?: boolean;           // default false; bash tool network access
   maxOutputBytes?: number;          // default 200000
