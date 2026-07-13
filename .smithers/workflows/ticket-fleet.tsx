@@ -1285,7 +1285,16 @@ function reviewPrompt(issue: Issue, candidate: { headSha: string; changedPaths: 
 }
 
 async function setupWorktree(issueNumber: number, cwd: string): Promise<Setup> {
-  const result = await runProcess("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"], cwd, 30 * 60_000);
+  // A wide fleet runs dozens of `pnpm install`s at once and they contend on the
+  // shared content-addressed store, so an install can fail for reasons that have
+  // nothing to do with this lane. A failed bootstrap silently kills the lane
+  // (no implement, no candidate, nothing to land), so retry with backoff before
+  // giving up.
+  let result = await runProcess("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"], cwd, 30 * 60_000);
+  for (let attempt = 1; attempt <= 3 && result.exitCode !== 0; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, attempt * 20_000));
+    result = await runProcess("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"], cwd, 30 * 60_000);
+  }
   return {
     issueNumber,
     cwd,
