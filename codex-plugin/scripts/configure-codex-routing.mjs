@@ -3,6 +3,7 @@
 // Dependency-free: this file intentionally uses only Node built-ins.
 
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, unlinkSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, resolve, win32 } from "node:path";
@@ -68,8 +69,9 @@ export function classifyState(userConfig, effectiveConfig, state) {
   const user = currentFields(userConfig);
   const effective = currentFields(effectiveConfig);
   if (!state) {
+    if (FIELD_PATHS.some((path) => !absent(user[path]))) return "user-conflict";
     if (FIELD_PATHS.some((path) => !absent(effective[path]))) return "effective-conflict";
-    return FIELD_PATHS.some((path) => !absent(user[path])) ? "user-conflict" : "not installed";
+    return "not installed";
   }
   const managed = state.managed;
   const userMatches = FIELD_PATHS.every((path) => fieldsEqual(user[path], managed[path]));
@@ -153,17 +155,33 @@ export function lockStatus(home, now = Date.now(), pidAlive = processIsAlive) {
 }
 function withLock(home) {
   const path = `${statePath(home)}.lock`;
+  const nonce = randomUUID();
+  const ownerPath = join(path, "owner");
+  const owner = { pid: process.pid, createdAt: Date.now(), nonce };
   for (;;) {
-    try { mkdirSync(path); writeFileSync(join(path, "owner"), `${JSON.stringify({ pid: process.pid, createdAt: Date.now() })}\n`, "utf8"); break; }
+    try { mkdirSync(path); writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`, { encoding: "utf8", mode: 0o600 }); break; }
     catch (error) {
       if (error.code !== "EEXIST") throw error;
       const status = lockStatus(home);
       if (!status.stale) throw new Error(`Another routing operation owns ${path}`);
-      try { rmSync(path, { recursive: true, force: true }); } catch {}
+      const reclaimPath = `${path}.reclaim-${randomUUID()}`;
+      try {
+        renameSync(path, reclaimPath);
+        rmSync(reclaimPath, { recursive: true, force: true });
+      } catch (reclaimError) {
+        if (reclaimError.code !== "ENOENT" && reclaimError.code !== "EEXIST") throw reclaimError;
+      }
     }
   }
-  return () => { try { rmSync(path, { recursive: true, force: true }); } catch {} };
+  return () => {
+    try {
+      const current = JSON.parse(readFileSync(ownerPath, "utf8"));
+      if (current.nonce === nonce) rmSync(path, { recursive: true, force: true });
+    } catch (error) { if (error.code !== "ENOENT") throw error; }
+  };
 }
+
+export { withLock };
 
 export function resolveExecutable(name, { platform = process.platform, path = process.env.PATH || "", pathext = process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD", exists = existsSync } = {}) {
   if (name.includes("/") || name.includes("\\")) return resolve(name);
@@ -175,13 +193,18 @@ export function resolveExecutable(name, { platform = process.platform, path = pr
   throw new Error(`Codex binary is not on PATH: ${name}`);
 }
 function findBinary(name) { return resolveExecutable(name); }
+export function spawnSpec(binary, args, platform = process.platform, comspec = process.env.ComSpec || process.env.COMSPEC || "cmd.exe") {
+  const lower = binary.toLowerCase();
+  if (platform === "win32" && (lower.endsWith(".cmd") || lower.endsWith(".bat"))) return { command: comspec, args: ["/d", "/s", "/c", binary, ...args] };
+  return { command: binary, args };
+}
 export function compatibleVersion(version) {
   const match = String(version).match(/(?:^|\s)v?(\d+)\.(\d+)(?:\.(\d+))?/);
   return !!match && (Number(match[1]) > 0 || Number(match[2]) >= 144);
 }
 function runVersion(binary) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(binary, ["--version"], { stdio: ["ignore", "pipe", "pipe"] }); let output = ""; let done = false;
+    const spec = spawnSpec(binary, ["--version"]); const child = spawn(spec.command, spec.args, { stdio: ["ignore", "pipe", "pipe"] }); let output = ""; let done = false;
     const finish = (error, value) => { if (done) return; done = true; clearTimeout(timer); if (error) reject(error); else resolvePromise(value); };
     child.stdout.on("data", (chunk) => { output += chunk; }); child.stderr.on("data", (chunk) => { output += chunk; });
     child.on("error", (error) => finish(error)); child.on("close", (code) => code === 0 ? finish(null, output.trim() || `exit ${code}`) : finish(new Error(output.trim() || `exit ${code}`)));
@@ -192,7 +215,7 @@ function runVersion(binary) {
 export class AppServer {
   constructor(binary) {
     this.binary = binary; this.nextId = 0; this.pending = new Map(); this.buffer = ""; this.stderr = ""; this.closed = false;
-    this.child = spawn(binary, ["app-server", "--stdio"], { stdio: ["pipe", "pipe", "pipe"] });
+    const spec = spawnSpec(binary, ["app-server", "--stdio"]); this.child = spawn(spec.command, spec.args, { stdio: ["pipe", "pipe", "pipe"] });
     this.child.stderr.on("data", (chunk) => { this.stderr += chunk; }); this.child.stdout.setEncoding("utf8"); this.child.stdout.on("data", (chunk) => this.receive(chunk));
     this.child.on("error", (error) => this.fail(error)); this.child.on("close", () => this.fail(new Error(`Codex App Server closed${this.stderr ? `: ${this.stderr.trim()}` : ""}`)));
   }
@@ -209,11 +232,12 @@ async function readConfig(app) {
   const result = await app.request("config/read", { includeLayers: true, cwd: process.cwd() }); const layers = Array.isArray(result.layers) ? result.layers : [];
   const layer = layers.find((item) => item?.name?.type === "user" && item.name.profile == null);
   const effective = result.config ?? {};
-  const winningLayer = layers.slice().reverse().find((item) => FIELD_PATHS.some((path) => !absent(getNested(item?.config ?? {}, path)) && Object.is(getNested(item.config, path), getNested(effective, path))));
-  return { result, user: layer?.config ?? {}, version: typeof layer?.version === "string" ? layer.version : null, hasUserLayer: Boolean(layer), effective, effectiveLayer: winningLayer?.name ?? null };
+  const effectiveLayerByField = Object.fromEntries(FIELD_PATHS.map((path) => [path, layers.slice().reverse().find((item) => !absent(getNested(item?.config ?? {}, path)) && Object.is(getNested(item.config, path), getNested(effective, path)))?.name ?? null]));
+  return { result, user: layer?.config ?? {}, version: typeof layer?.version === "string" ? layer.version : null, hasUserLayer: Boolean(layer), effective, effectiveLayerByField, effectiveLayer: Object.values(effectiveLayerByField).find(Boolean) ?? null };
 }
 export async function batchWrite(app, edits, expectedVersion, { allowOverridden = false } = {}) { const result = await app.request("config/batchWrite", { edits, expectedVersion, reloadUserConfig: true }); if (result.status === "okOverridden" && !allowOverridden) { const error = new Error("Codex reported okOverridden; the managed fields are not effective"); error.writeResult = result; throw error; } if (result.status !== "ok" && result.status !== "okOverridden") { const error = new Error(`Unexpected config write status: ${result.status}`); error.writeResult = result; throw error; } if (typeof result.version !== "string") throw new Error("Codex config write did not return a version"); return result; }
 function printFields(label, fields) { console.log(`${label}:`); for (const path of FIELD_PATHS) console.log(`  ${path}: ${absent(fields[path]) ? "<absent>" : JSON.stringify(fields[path])}`); }
+function printEffectiveFields(data) { console.log("Effective values:"); for (const path of FIELD_PATHS) { const layer = data.effectiveLayerByField?.[path]; const name = layer ? `${layer.type || "unknown"}${layer.profile ? `/${layer.profile}` : ""}` : "none"; console.log(`  ${path}: ${absent(currentFields(data.effective)[path]) ? "<absent>" : JSON.stringify(currentFields(data.effective)[path])} (layer: ${name})`); } }
 export function restoreValues(state) { return Object.fromEntries(FIELD_PATHS.map((path) => [path, state.previous[path].present ? state.previous[path].value : ABSENT])); }
 async function rollback(app, expectedVersion, values) { const result = await batchWrite(app, makeEdits(values), expectedVersion, { allowOverridden: true }); const verified = await readConfig(app); if (!restoreMatchesUser(verified.user, values)) throw new Error("Rollback validation failed; managed fields may remain."); return result; }
 export function restoreMatchesUser(userConfig, values) { return FIELD_PATHS.every((path) => fieldsEqual(currentFields(userConfig)[path], values[path])); }
@@ -231,8 +255,10 @@ async function main() {
     if (args.action !== "status") releaseLock = withLock(app.codexHome);
     let data = await readConfig(app); let state = readState(app.codexHome);
     if (state && resolve(state.configPath) !== resolve(app.configPath)) throw new Error("Routing state belongs to a different Codex config file");
+    let completedDisableRecovery = false;
     if (args.action !== "status" && state?.phase?.startsWith("pending-")) {
       const recovered = recoverPendingState(state, currentFields(data.user));
+      completedDisableRecovery = state.phase === "pending-disable" && recovered.action === "remove";
       if (recovered.action === "remove") removeState(app.codexHome);
       else if (recovered.action !== "none") writeState(app.codexHome, recovered.state);
       state = recovered.state;
@@ -244,6 +270,7 @@ async function main() {
       const pending = state?.phase?.startsWith("pending-") ? `\nPending recovery: ${state.phase} (not modified by --status)` : "";
       const layer = data.effectiveLayer ? `\nEffective layer: ${data.effectiveLayer.type || "unknown"}${data.effectiveLayer.profile ? `/${data.effectiveLayer.profile}` : ""}` : "";
       const lockText = lock.locked ? `\nOperation lock: ${lock.path} (${lock.stale ? "stale; reclaimable" : "active"})` : "";
+      printEffectiveFields(data);
       console.log(`Codex: ${version}\nConfig: ${app.configPath}\nNative policy: ${stateClass}${layer}${pending}${lockText}\nClient compatibility: ${compatible ? "compatible" : "incompatible (requires Codex >= 0.144)"}`);
       return args.requireEffective && (stateClass !== "installed" || !compatible) ? 1 : 0;
     }
@@ -252,6 +279,7 @@ async function main() {
     if (existsSync(app.configPath) && typeof data.version !== "string") throw new Error("Codex config/read did not provide a user-layer version; refusing an unprotected write.");
     const current = currentFields(data.user);
     if (args.action === "disable") {
+      if (completedDisableRecovery) { console.log("Native routing disabled; snapshot already restored."); return 0; }
       if (!state) throw new Error("No Smithers snapshot found; refusing to disable user-authored fields.");
       if (!FIELD_PATHS.every((path) => fieldsEqual(current[path], state.managed[path]))) throw new Error("Managed fields were edited after setup; refusing to clobber the user edit.");
       const restore = restoreValues(state); printFields("Current values", current); printFields("Restore values", restore); if (!args.apply) { console.log("Dry run only. Re-run with --disable --apply to restore the snapshot."); return 0; }
@@ -261,7 +289,7 @@ async function main() {
     if (state && !FIELD_PATHS.every((path) => fieldsEqual(current[path], state.managed[path]))) throw new Error("Managed fields drifted outside this plugin; refusing to overwrite them.");
     if (!state && FIELD_PATHS.some((path) => !absent(current[path])) && !args.replaceExistingPolicy) { printFields("User-authored conflict", current); throw new Error("A user-authored managed hint exists; review it and pass --replace-existing-policy to replace and snapshot it."); }
     const nextState = state ? mergeSnapshot(state, app.configPath) : buildSnapshot(data.user, app.configPath, data.version);
-    printFields("Current values", current); printFields("Proposed values", Object.fromEntries(FIELD_PATHS.map((path) => [path, HINT_TEXT]))); console.log(`Snapshot: ${JSON.stringify(nextState, null, 2)}`); if (!args.apply) { console.log("Dry run only. Re-run with --apply to install the policy."); return 0; }
+    printFields("Current values", current); printEffectiveFields(data); printFields("Proposed values", Object.fromEntries(FIELD_PATHS.map((path) => [path, HINT_TEXT]))); console.log(`Snapshot: ${JSON.stringify(nextState, null, 2)}`); if (!args.apply) { console.log("Dry run only. Re-run with --apply to install the policy."); return 0; }
     const createdState = !state;
     writeState(app.codexHome, { ...nextState, phase: "pending-install" });
     let written;

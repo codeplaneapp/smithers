@@ -20,6 +20,8 @@ import {
   isStaleLock,
   lockStatus,
   batchWrite,
+  spawnSpec,
+  withLock,
 } from "./configure-codex-routing.mjs";
 
 const config = (mode, usage) => ({ features: { multi_agent_v2: { multi_agent_mode_hint_text: mode, usage_hint_text: usage } } });
@@ -43,6 +45,7 @@ describe("Codex routing pure logic", () => {
     expect(classifyState(config(HINT_TEXT, HINT_TEXT), config(HINT_TEXT, HINT_TEXT), installedState)).toBe("installed");
     expect(classifyState(config("changed", HINT_TEXT), config("changed", HINT_TEXT), installedState)).toBe("drifted");
     expect(classifyState({}, config("higher-layer", undefined), null)).toBe("effective-conflict");
+    expect(classifyState(config("user", undefined), config("user", undefined), null)).toBe("user-conflict");
   });
 
   test("snapshots absent values and creates replace edits that delete them", () => {
@@ -104,9 +107,33 @@ describe("Codex routing pure logic", () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
+  test("reclaims a stale lock and never releases another owner's lock", () => {
+    const home = mkdtempSync(`${tmpdir()}/smithers-routing-reclaim-`);
+    try {
+      const lock = `${home}/${".smithers-codex-routing.json"}.lock`;
+      mkdirSync(lock);
+      writeFileSync(`${lock}/owner`, JSON.stringify({ pid: 999999, createdAt: 1, nonce: "dead-owner" }));
+      const release = withLock(home);
+      const owner = JSON.parse(readFileSync(`${lock}/owner`, "utf8"));
+      expect(owner.nonce).not.toBe("dead-owner");
+      writeFileSync(`${lock}/owner`, JSON.stringify({ pid: process.pid, createdAt: Date.now(), nonce: "new-owner" }));
+      release();
+      expect(readFileSync(`${lock}/owner`, "utf8")).toContain("new-owner");
+      rmSync(lock, { recursive: true, force: true });
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
   test("resolves Windows PATHEXT entries from PATH", () => {
     const seen = new Set(["C:\\bin\\codex.CMD"]);
     expect(resolveExecutable("codex", { platform: "win32", path: "C:\\bin", pathext: ".EXE;.CMD", exists: (path) => seen.has(path) })).toBe("C:\\bin\\codex.CMD");
+  });
+
+  test("launches Windows command wrappers through ComSpec", () => {
+    expect(spawnSpec("C:\\bin\\codex.CMD", ["--version"], "win32", "C:\\Windows\\System32\\cmd.exe")).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", "C:\\bin\\codex.CMD", "--version"],
+    });
+    expect(spawnSpec("/usr/local/bin/codex", ["--version"], "linux")).toEqual({ command: "/usr/local/bin/codex", args: ["--version"] });
   });
 
   test("aborts on an optimistic expectedVersion mismatch", async () => {
@@ -124,6 +151,20 @@ describe("Codex routing pure logic", () => {
     const afterRollback = recoverPendingState(pending, currentFields(config("old policy", "old policy")));
     expect(afterRollback.action).toBe("rollback");
     expect(afterRollback.state.managed[FIELD_PATHS[0]]).toBe("old policy");
+  });
+
+  test("version mismatch leaves an upgrade journal recoverable at the prior policy", async () => {
+    const old = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, "old policy"])) };
+    const pending = { ...mergeSnapshot(old, old.configPath), phase: "pending-install" };
+    const app = { request: async () => ({ status: "error", message: "version mismatch" }) };
+    await expect(batchWrite(app, makeEdits(Object.fromEntries(FIELD_PATHS.map((path) => [path, HINT_TEXT]))), "stale-version")).rejects.toThrow("Unexpected config write status");
+    expect(recoverPendingState(pending, currentFields(config("old policy", "old policy")))).toMatchObject({ action: "rollback", state: { managed: old.managed } });
+  });
+
+  test("completed disable recovery is idempotent", () => {
+    const state = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), phase: "pending-disable" };
+    expect(recoverPendingState(state, currentFields({}))).toEqual({ state: null, action: "remove" });
+    expect(recoverPendingState(state, currentFields({}))).toEqual({ state: null, action: "remove" });
   });
 
   test("detects conflicts, post-install edits, and scalar parents", () => {
