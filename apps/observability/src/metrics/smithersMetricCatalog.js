@@ -303,7 +303,7 @@ export const smithersMetricCatalog = [
     metricDefinition("agentActionsTotal", agentActionsTotal, "smithers.agent_actions_total", "counter", {
         label: "Agent actions",
         unit: "count",
-        labels: ["action_name", "action_type", "engine", "source"],
+        labels: ["action_kind", "engine", "entry_type", "level", "ok", "phase", "source"],
     }),
     metricDefinition("gatewayConnectionsTotal", gatewayConnectionsTotal, "smithers.gateway.connections_total", "counter", {
         label: "Gateway connections opened",

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { metricsServiceAdapter, trackEvent } from "@smithers-orchestrator/observability/metrics";
+import { metricsServiceAdapter, smithersMetricCatalog, trackEvent } from "@smithers-orchestrator/observability/metrics";
 // trackEvent returns an Effect — we test that it produces an Effect for each event type
 // without throwing, and that the returned effect is well-formed.
 /**
@@ -49,6 +49,11 @@ function histogramDelta(before, after, name, labels = {}) {
     };
 }
 describe("trackEvent", () => {
+    test("catalogs agent action labels emitted by trackEvent", () => {
+        const definition = smithersMetricCatalog.find((metric) => metric.key === "agentActionsTotal");
+        expect(definition?.labels).toEqual(["action_kind", "engine", "entry_type", "level", "ok", "phase", "source"]);
+    });
+
     test("emits run lifecycle counter and active-run gauge values", async () => {
         const before = await snapshotMetrics();
         await runTrack({

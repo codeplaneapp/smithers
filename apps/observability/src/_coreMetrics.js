@@ -125,7 +125,7 @@ export const smithersMetricCatalog = [
     metricDefinition("agentRetriesTotal", "smithers.agent_retries_total", "counter", { label: "Agent retries", unit: "count", labels: ["engine", "model", "reason", "source"] }),
     metricDefinition("agentEventsTotal", "smithers.agent_events_total", "counter", { label: "Agent events", unit: "count", labels: ["engine", "event_type", "source"] }),
     metricDefinition("agentSessionsTotal", "smithers.agent_sessions_total", "counter", { label: "Agent sessions", unit: "count", labels: ["engine", "model", "resume", "source", "status"] }),
-    metricDefinition("agentActionsTotal", "smithers.agent_actions_total", "counter", { label: "Agent actions", unit: "count", labels: ["action_name", "action_type", "engine", "source"] }),
+    metricDefinition("agentActionsTotal", "smithers.agent_actions_total", "counter", { label: "Agent actions", unit: "count", labels: ["action_kind", "engine", "entry_type", "level", "ok", "phase", "source"] }),
     metricDefinition("gatewayConnectionsTotal", "smithers.gateway.connections_total", "counter", { label: "Gateway connections opened", unit: "count", labels: ["transport"] }),
     metricDefinition("gatewayConnectionsClosedTotal", "smithers.gateway.connections_closed_total", "counter", { label: "Gateway connections closed", unit: "count", labels: ["code", "reason", "transport"] }),
     metricDefinition("gatewayMessagesReceivedTotal", "smithers.gateway.messages_received_total", "counter", { label: "Gateway messages received", unit: "count", labels: ["kind", "transport"] }),
