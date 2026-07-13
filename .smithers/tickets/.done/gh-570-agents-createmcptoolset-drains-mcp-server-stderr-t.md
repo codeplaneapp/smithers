@@ -12,3 +12,6 @@ Node delivers each 'data' event to all listeners: a user-supplied `onStderr` cal
 Exactly one drain path. The inline block at :43-56 looks like the pre-extraction original that should have been removed when `drainStderr` was added — note it is the only one with a `stream.on("error")` handler, so the fix must keep that handler.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 7900216bf94f54778b522fa1f9a737737cc33993.
