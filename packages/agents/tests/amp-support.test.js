@@ -106,6 +106,24 @@ describe("AmpAgent", () => {
     expect(command.args[command.args.indexOf("--execute") + 1]).toBe("Hello");
   });
 
+  test("enables IDE integrations when explicitly requested", async () => {
+    const ideCommand = await new AmpAgent({ ide: true }).buildCommand({
+      cwd: "/tmp/project",
+      prompt: "Hello",
+      options: {},
+    });
+    const jetbrainsCommand = await new AmpAgent({ jetbrains: true }).buildCommand({
+      cwd: "/tmp/project",
+      prompt: "Hello",
+      options: {},
+    });
+
+    expect(ideCommand.args).not.toContain("--no-ide");
+    expect(ideCommand.args).toContain("--no-jetbrains");
+    expect(jetbrainsCommand.args).toContain("--no-ide");
+    expect(jetbrainsCommand.args).not.toContain("--no-jetbrains");
+  });
+
   test("interprets Amp JSON stream lifecycle events", () => {
     const agent = new AmpAgent();
     const interpreter = agent.createOutputInterpreter();

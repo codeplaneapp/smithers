@@ -223,8 +223,10 @@ export class AmpAgent extends BaseCliAgent {
         // Log file
         pushFlag(args, "--log-file", this.opts.logFile);
         // IDE integration — disable by default for headless execution
-        args.push("--no-ide");
-        args.push("--no-jetbrains");
+        if (this.opts.ide !== true)
+            args.push("--no-ide");
+        if (this.opts.jetbrains !== true)
+            args.push("--no-jetbrains");
         // Color handling
         args.push("--no-color");
         // Archive thread after execution to keep things clean (new threads only)
