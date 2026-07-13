@@ -199,9 +199,8 @@ function describeDeferredDeadlock(deferred) {
 function isAbortError(error) {
     return Boolean(error &&
         typeof error === "object" &&
-        ("name" in error || "message" in error) &&
-        (/abort/i.test(String(error.name ?? "")) ||
-            /abort/i.test(String(error.message ?? ""))));
+        "name" in error &&
+        error.name === "AbortError");
 }
 /**
  * @param {number} ms

@@ -754,6 +754,69 @@ describe("WorkflowDriver", () => {
     expect(failed).toEqual([{ nodeId: "boom", error: failure }]);
   });
 
+  test("reports ordinary failures containing abort through taskFailed", async () => {
+    const messageFailure = new Error(
+      "database transaction aborted due to serialization conflict",
+    );
+    const namedFailure = new Error("provider request failed");
+    namedFailure.name = "ProviderAbortFailure";
+
+    for (const failure of [messageFailure, namedFailure]) {
+      const failed = [];
+      const driver = makeDriver({
+        executeTask: () => {
+          throw failure;
+        },
+        session: makeSession({
+          taskFailed: ({ nodeId, error }) => {
+            failed.push({ nodeId, error });
+            return {
+              _tag: "Finished",
+              result: { runId: "run-ordinary-failure", status: "finished" },
+            };
+          },
+        }),
+      });
+      driver.activeRunId = "run-ordinary-failure";
+      driver.activeOptions = { input: {}, signal: new AbortController().signal };
+
+      const decision = await driver.executeTasks([{ nodeId: "boom", iteration: 0 }]);
+
+      expect(decision).toEqual({
+        _tag: "Finished",
+        result: { runId: "run-ordinary-failure", status: "finished" },
+      });
+      expect(failed).toEqual([{ nodeId: "boom", error: failure }]);
+    }
+  });
+
+  test("still cancels exact AbortError and signal-driven task interruption", async () => {
+    const abortError = new Error("The operation was aborted");
+    abortError.name = "AbortError";
+    const abortErrorDriver = makeDriver({
+      executeTask: () => {
+        throw abortError;
+      },
+    });
+    abortErrorDriver.activeRunId = "run-abort-error";
+    abortErrorDriver.activeOptions = { input: {} };
+
+    await expect(abortErrorDriver.executeTasks([{ nodeId: "abort", iteration: 0 }]))
+      .resolves.toEqual({ runId: "run-abort-error", status: "cancelled" });
+
+    const controller = new AbortController();
+    const signalDriver = makeDriver({ executeTask: () => new Promise(() => {}) });
+    signalDriver.activeRunId = "run-signal-abort";
+    signalDriver.activeOptions = { input: {}, signal: controller.signal };
+    const decision = signalDriver.executeTasks([{ nodeId: "pending", iteration: 0 }]);
+    controller.abort();
+
+    await expect(decision).resolves.toEqual({
+      runId: "run-signal-abort",
+      status: "cancelled",
+    });
+  });
+
   test("rerenders, continues as new, and drains in-flight work before terminal exits", async () => {
     const slow = deferred();
     const decisions = [
