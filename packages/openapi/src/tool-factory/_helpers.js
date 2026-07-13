@@ -23,6 +23,37 @@ const FALLBACK_BASE_URL = "http://localhost";
 // HTTP execution
 // ---------------------------------------------------------------------------
 /**
+ * Set a header using HTTP's case-insensitive name semantics. Keeping a plain
+ * object is convenient for request-body serialization and redirects, but a
+ * plain object otherwise allows differently-cased duplicates that `Headers`
+ * later combines into one value.
+ *
+ * @param {Record<string, string>} headers
+ * @param {string} name
+ * @param {string} value
+ */
+function setHeader(headers, name, value) {
+    const normalizedName = name.toLowerCase();
+    const matchingNames = Object.keys(headers).filter((key) => key.toLowerCase() === normalizedName);
+    const targetName = matchingNames.shift() ?? name;
+    for (const duplicateName of matchingNames) {
+        delete headers[duplicateName];
+    }
+    headers[targetName] = value;
+}
+/**
+ * @param {Record<string, string>} headers
+ * @param {string} name
+ */
+function deleteHeader(headers, name) {
+    const normalizedName = name.toLowerCase();
+    for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === normalizedName) {
+            delete headers[key];
+        }
+    }
+}
+/**
  * @param {OpenApiToolsOptions} options
  * @returns {Record<string, string>}
  */
@@ -31,22 +62,24 @@ export function buildAuthHeaders(options) {
     if (options.auth) {
         switch (options.auth.type) {
             case "bearer":
-                headers["Authorization"] = `Bearer ${options.auth.token}`;
+                setHeader(headers, "Authorization", `Bearer ${options.auth.token}`);
                 break;
             case "basic": {
                 const encoded = btoa(`${options.auth.username}:${options.auth.password}`);
-                headers["Authorization"] = `Basic ${encoded}`;
+                setHeader(headers, "Authorization", `Basic ${encoded}`);
                 break;
             }
             case "apiKey":
                 if (options.auth.in === "header") {
-                    headers[options.auth.name] = options.auth.value;
+                    setHeader(headers, options.auth.name, options.auth.value);
                 }
                 break;
         }
     }
     if (options.headers) {
-        Object.assign(headers, options.headers);
+        for (const [name, value] of Object.entries(options.headers)) {
+            setHeader(headers, name, value);
+        }
     }
     return headers;
 }
@@ -159,14 +192,14 @@ function buildRawBody(body) {
 function serializeRequestBody(body, mediaType, headers) {
     const requestMediaType = mediaType ?? "application/json";
     if (requestMediaType.includes("multipart/form-data")) {
-        delete headers["Content-Type"];
+        deleteHeader(headers, "Content-Type");
         return buildFormData(body);
     }
     if (requestMediaType.includes("application/x-www-form-urlencoded")) {
-        headers["Content-Type"] = requestMediaType;
+        setHeader(headers, "Content-Type", requestMediaType);
         return buildUrlEncodedBody(body);
     }
-    headers["Content-Type"] = requestMediaType;
+    setHeader(headers, "Content-Type", requestMediaType);
     if (requestMediaType.includes("application/json") || requestMediaType.includes("+json")) {
         return JSON.stringify(body);
     }
@@ -303,8 +336,11 @@ export async function executeRequest(operation, args, baseUrl, options, signal) 
     const pathParams = {};
     /** @type {Record<string, string>} */
     const queryParams = {};
-    /** @type {Record<string, string>} */
-    const headerParams = {};
+    // Reserve every operator-controlled header before accepting model-supplied
+    // parameters. Header names are case-insensitive, regardless of how the
+    // OpenAPI operation spells them.
+    const headers = buildAuthHeaders(options);
+    const reservedHeaderNames = new Set(Object.keys(headers).map((name) => name.toLowerCase()));
     // Sort parameters into buckets
     for (const param of operation.parameters) {
         const value = args[param.name];
@@ -319,20 +355,13 @@ export async function executeRequest(operation, args, baseUrl, options, signal) 
                 queryParams[param.name] = strValue;
                 break;
             case "header":
-                headerParams[param.name] = strValue;
+                if (!reservedHeaderNames.has(param.name.toLowerCase())) {
+                    setHeader(headers, param.name, strValue);
+                }
                 break;
         }
     }
     const url = buildUrl(baseUrl, operation.path, pathParams, queryParams, options);
-    // Trust boundary: spread LLM-controlled header *parameters* FIRST, then the
-    // operator-injected auth/headers, so an LLM-supplied header param (e.g. a
-    // spec that declares an `Authorization` header parameter, or an apiKey
-    // header name) can never override or strip the operator-injected secret.
-    /** @type {Record<string, string>} */
-    const headers = {
-        ...headerParams,
-        ...buildAuthHeaders(options),
-    };
     // Request body — read from the SAME non-colliding key the schema used, so a
     // parameter named `body` (or `requestBody`) cannot shadow the actual body.
     // serializeRequestBody mutates `headers` in place, so its Content-Type
