@@ -18,3 +18,6 @@ Since `typeof null === "object"`, an op `{ op: "updateTask", id, task: null }` p
 Treat `null` like `undefined` (delete the field), or reject it with InvalidDeltaError. Add a test either way.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 9c49aac49cab952cd3af15d82d76095aa185da77.
