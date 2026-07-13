@@ -1739,15 +1739,22 @@ async function trainGate(n: number, key: string, baseSha: string, stackedSha: st
         git(["clean", "-fdq"], cwd);
       }
       git(["checkout", "--detach", stackedSha], cwd);
+      // Always run the frozen install first: the engine may have rebased this
+      // lane without reinstalling, so node_modules is not guaranteed to match
+      // ANY ref's lockfile, and a warm-store install costs seconds. Spawn pnpm
+      // DIRECTLY (inheriting the driver's node) — running it through
+      // `bash -lc` re-sources the login profile, which can select an older
+      // default node whose pnpm prunes engine-gated deps (observed: node v20
+      // dropping koffi, failing typecheck repo-wide for every later gate).
+      const install = await runProcess("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"], cwd, 15 * 60_000);
+      if (install.exitCode !== 0) {
+        return failed("infra: frozen install failed in lane worktree", (install.stderr + "\n" + install.stdout).slice(-4_000));
+      }
       // Validate the CUMULATIVE prefix: this stacked state contains every
       // entry ahead of us, so test all packages the prefix touched — entry B
-      // must not pass while breaking a package entry A changed. Always run the
-      // frozen install first: the engine may have rebased this lane without
-      // reinstalling, so node_modules is not guaranteed to match ANY ref's
-      // lockfile, and a warm-store install costs seconds.
+      // must not pass while breaking a package entry A changed.
       const prefixPaths = splitZero(git(["diff", "--name-only", "-z", baseSha + ".." + stackedSha], cwd));
-      const command = "pnpm install --frozen-lockfile --ignore-scripts && " + landingGateCommand(prefixPaths);
-      const gate = await runGate(n, "train", cwd, stackedSha, command, 45 * 60_000);
+      const gate = await runGate(n, "train", cwd, stackedSha, landingGateCommand(prefixPaths), 45 * 60_000);
       return gate.headSha === stackedSha ? gate : { ...gate, headSha: stackedSha, passed: false };
     } catch (error) {
       // EVERY failure path must persist a verdict row for this stacked sha,
@@ -1786,7 +1793,15 @@ async function trainLand(input: Input, round: number, snapshot: TrainSnapshot | 
     else { popped = e; break; }
   }
   const requeued = stacked.slice(prefix.length + (popped ? 1 : 0)).map((e) => Number(e.issueNumber));
-  if (popped) evictedAllNumbers.push(Number(popped.issueNumber));
+  if (popped) {
+    // Gate failures caused by infrastructure (install failed, worktree
+    // unavailable) requeue without a strike, same as infra stack evictions —
+    // only a genuine red verdict on the entry's own content counts.
+    const poppedGate = gates.find((g) => g.headSha === popped!.stackedSha);
+    if (!poppedGate || !String(poppedGate.summary ?? "").startsWith("infra:")) {
+      evictedAllNumbers.push(Number(popped.issueNumber));
+    }
+  }
   if (input.dryRun) {
     // Record the simulated landings in the cumulative ledger so trainDone
     // converges instead of re-stacking and re-gating the same green prefix
