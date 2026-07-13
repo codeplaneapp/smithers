@@ -10,6 +10,36 @@ import { toTaggedErrorPayload } from "../src/toTaggedErrorPayload.js";
 // does `JSON.stringify(errorToJson(error))` (engine.js, *-task-bridge.js). An
 // error while recording an error must never corrupt the durable log.
 describe("errorToJson is JSON-safe on the error path", () => {
+  test("preserves a plain Error cause and own enumerable properties", () => {
+    const root = new Error("root cause");
+    const err = new Error("wrapped", { cause: root });
+    err.customField = { important: true };
+
+    const round = JSON.parse(JSON.stringify(errorToJson(err)));
+    expect(round.name).toBe("Error");
+    expect(round.message).toBe("wrapped");
+    expect(round.cause).toMatchObject({ name: "Error", message: "root cause" });
+    expect(round.customField).toEqual({ important: true });
+  });
+
+  test("survives a throwing cause getter on a top-level plain Error", () => {
+    const err = new Error("wrapped");
+    Object.defineProperty(err, "cause", {
+      enumerable: true,
+      get() {
+        throw new Error("cause getter boom");
+      },
+    });
+    err.customField = "kept";
+
+    const json = errorToJson(err);
+    expect(() => JSON.stringify(json)).not.toThrow();
+    const round = JSON.parse(JSON.stringify(json));
+    expect(round.message).toBe("wrapped");
+    expect(round.customField).toBe("kept");
+    expect(round.cause).toBeUndefined();
+  });
+
   test("does not throw on a circular cause (SmithersError includes cause)", () => {
     const inner = new Error("inner boom");
     const outer = new SmithersError("INTERNAL_ERROR", "outer boom", undefined, inner);

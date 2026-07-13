@@ -36,8 +36,15 @@ function toJsonSafe(value, seen) {
                 message: obj.message,
                 stack: obj.stack,
             };
-            if (obj.cause !== undefined)
-                out.cause = toJsonSafe(obj.cause, seen);
+            let cause;
+            try {
+                cause = obj.cause;
+            }
+            catch {
+                cause = undefined;
+            }
+            if (cause !== undefined)
+                out.cause = toJsonSafe(cause, seen);
             for (const key of Object.keys(obj)) {
                 if (key in out)
                     continue;
@@ -120,11 +127,7 @@ function buildErrorJson(error) {
         };
     }
     if (error instanceof Error) {
-        return {
-            name: error.name,
-            message: error.message,
-            stack: error.stack,
-        };
+        return error;
     }
     if (error && typeof error === "object") {
         return error;
