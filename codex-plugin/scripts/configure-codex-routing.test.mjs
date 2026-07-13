@@ -14,6 +14,7 @@ import {
   parseArgs,
   parentIsScalar,
   restoreValues,
+  restoreMatchesUser,
 } from "./configure-codex-routing.mjs";
 
 const config = (mode, usage) => ({ features: { multi_agent_v2: { multi_agent_mode_hint_text: mode, usage_hint_text: usage } } });
@@ -24,6 +25,8 @@ describe("Codex routing pure logic", () => {
     expect(parseArgs(["--apply", "--replace-existing-policy", "--codex-bin", "/tmp/codex"]).apply).toBe(true);
     expect(parseArgs(["--status", "--require-effective"]).requireEffective).toBe(true);
     expect(parseArgs(["--disable"]).action).toBe("disable");
+    expect(() => parseArgs(["--status", "--disable"])).toThrow();
+    expect(() => parseArgs(["--disable", "--replace-existing-policy"])).toThrow();
   });
 
   test("classifies absent, user conflict, installed, and drifted states", () => {
@@ -53,6 +56,7 @@ describe("Codex routing pure logic", () => {
     expect(restored[FIELD_PATHS[0]]).toBe("a user's exact text");
     expect(restored[FIELD_PATHS[1]]).toEqual({ present: false });
     expect(fieldsEqual(undefined, undefined)).toBe(true);
+    expect(restoreMatchesUser(original, restored)).toBe(true);
   });
 
   test("detects conflicts, post-install edits, and scalar parents", () => {
@@ -79,36 +83,41 @@ describe("Codex routing pure logic", () => {
   });
 });
 
-test("real Codex App Server reads an isolated temporary home when available", async () => {
+const realTest = Bun.which("codex") ? test : test.skip;
+realTest("real Codex CLI lifecycle uses an isolated temporary home", async () => {
   const binary = Bun.which("codex");
-  if (!binary) {
-    console.info("SKIP: codex binary is not installed");
-    return;
-  }
   const home = mkdtempSync(`${tmpdir()}/smithers-codex-routing-test-`);
+  const script = new URL("./configure-codex-routing.mjs", import.meta.url).pathname;
+  const run = (args) => Bun.spawnSync({ cmd: ["node", script, "--codex-bin", binary, ...args], env: { ...process.env, CODEX_HOME: home }, stdout: "pipe", stderr: "pipe" });
+  const output = (result) => `${result.stdout.toString()}${result.stderr.toString()}`;
   const oldHome = process.env.CODEX_HOME;
   try {
     process.env.CODEX_HOME = home;
+    expect(run([]).exitCode).toBe(0);
+    expect(run(["--apply"]).exitCode).toBe(0);
+    expect(run(["--status", "--require-effective"]).exitCode).toBe(0);
+    expect(run(["--apply"]).exitCode).toBe(0); // re-apply preserves the original snapshot
     const app = new AppServer(binary);
-    try {
-      await app.initialize();
-      expect(app.codexHome).toBe(await Bun.$`realpath ${home}`.text().then((value) => value.trim()));
-      const read = await app.request("config/read", { includeLayers: true, cwd: process.cwd() });
-      const user = read.layers.find((layer) => layer.name?.type === "user");
-      expect(user?.config).toEqual({});
-      const written = await app.request("config/batchWrite", {
-        edits: makeEdits(Object.fromEntries(FIELD_PATHS.map((path) => [path, HINT_TEXT]))),
-        expectedVersion: user.version,
-        reloadUserConfig: true,
-      });
-      expect(written.status).toBe("ok");
-      expect(written.version).toStartWith("sha256:");
-    } finally {
-      app.close();
-    }
+    await app.initialize();
+    let read = await app.request("config/read", { includeLayers: true, cwd: process.cwd() });
+    const user = read.layers.find((layer) => layer.name?.type === "user");
+    const changed = await app.request("config/batchWrite", { edits: [{ keyPath: FIELD_PATHS[0], value: "hand edited", mergeStrategy: "replace" }], expectedVersion: user.version, reloadUserConfig: true });
+    expect(changed.status).toBe("ok");
+    app.close();
+    expect(run(["--disable", "--apply"]).exitCode).not.toBe(0);
+    expect(run(["--status"]).exitCode).toBe(0);
+    const repair = new AppServer(binary);
+    await repair.initialize();
+    read = await repair.request("config/read", { includeLayers: true, cwd: process.cwd() });
+    const repairedUser = read.layers.find((layer) => layer.name?.type === "user");
+    const repaired = await repair.request("config/batchWrite", { edits: makeEdits(Object.fromEntries(FIELD_PATHS.map((path) => [path, HINT_TEXT]))), expectedVersion: repairedUser.version, reloadUserConfig: true });
+    expect(repaired.status).toBe("ok");
+    repair.close();
+    expect(run(["--disable", "--apply"]).exitCode).toBe(0);
+    expect(run(["--status", "--require-effective"]).exitCode).not.toBe(0);
   } finally {
     if (oldHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = oldHome;
     rmSync(home, { recursive: true, force: true });
   }
-});
+}, 30_000);
