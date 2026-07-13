@@ -20,3 +20,6 @@ Add `case "paused": return "waiting";` to `toRunStatus`. For completeness, `wait
 
 ---
 *Found in the pre-0.28.0 review of `v0.27.0..HEAD` (@0ed2c28710), adversarially verified against the code. Part of the `pre-0.28-review` batch.*
+
+
+> Closed by ticket-fleet: landed on main in 6dd333b957c683c5014ebe41ed27bfd2e53f29f4.
