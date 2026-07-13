@@ -78,6 +78,7 @@ function buildFakeInstallTree() {
         }) + "\n",
     );
     cpSync(join(CLI_SRC, "workflow-pack.js"), join(cliDir, "src/workflow-pack.js"));
+    cpSync(join(CLI_SRC, "manifest.js"), join(cliDir, "src/manifest.js"));
     cpSync(join(CLI_SRC, "agent-detection.js"), join(cliDir, "src/agent-detection.js"));
     cpSync(join(CLI_SRC, "sota-models.generated.js"), join(cliDir, "src/sota-models.generated.js"));
     cpSync(join(CLI_SRC, "installCuratedSkill.js"), join(cliDir, "src/installCuratedSkill.js"));
@@ -156,6 +157,11 @@ function buildFakeInstallTree() {
     ]) {
         writeFile(join(nm, packageName, "package.json"), JSON.stringify({ name: packageName, version }) + "\n");
     }
+    cpSync(
+        realpathSync(resolve(REPO_ROOT, "apps/cli/node_modules/@toon-format/toon")),
+        join(nm, "@toon-format/toon"),
+        { recursive: true },
+    );
 
     // Fake claude binary so init has an agent to write into agents.ts.
     const binDir = join(root, "bin");

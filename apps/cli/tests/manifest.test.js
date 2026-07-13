@@ -60,6 +60,13 @@ test("present non-object contents and capabilities fail clearly", () => {
     expect(() => parseManifest("name: broken\ncapabilities[1]: nope")).toThrow(/Invalid smithers\.toon: capabilities must be an object/);
 });
 
+test("present null values fail schema validation instead of receiving defaults", () => {
+    expect(() => parseManifest("name: broken\nversion: null")).toThrow(/version must be a string/);
+    expect(() => parseManifest("name: broken\ncontents:\n  workflows: null")).toThrow(/contents\.workflows must be an array of strings/);
+    expect(() => parseManifest("name: broken\ncapabilities:\n  bins: null")).toThrow(/capabilities\.bins must be an array of strings/);
+    expect(() => parseManifest("name: broken\ncapabilities:\n  writes: null")).toThrow(/capabilities\.writes must be one of/);
+});
+
 test("init scaffolds a manifest enumerating the generated workflows and UIs", () => {
     const root = tempProject();
     const result = initWorkflowPack({ rootDir: root, installSkill: false, skipInstall: true, env: seededAgentEnv() });
@@ -68,8 +75,16 @@ test("init scaffolds a manifest enumerating the generated workflows and UIs", ()
     const manifest = loadManifest(path);
     expect(manifest.name).toBe(basename(root));
     expect(manifest.version).toBe("0.0.0");
-    expect(manifest.contents.workflows).toContain("create-workflow");
-    expect(manifest.contents.ui).toContain("create-workflow");
+    expect(manifest.contents.workflows).toEqual([
+        "create-skill",
+        "create-workflow",
+        "docs-driven-development",
+        "eval-suite-run",
+        "init",
+        "post-failure",
+        "upgrade",
+    ]);
+    expect(manifest.contents.ui).toEqual(["create-skill", "create-workflow", "docs-driven-development"]);
 });
 
 test("re-init reports drift for a customized manifest", () => {

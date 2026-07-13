@@ -23,14 +23,14 @@ function manifestError(message, cause) {
 
 /** @param {unknown} value @param {string} field */
 function stringValue(value, field) {
-    if (value === undefined || value === null) return "";
+    if (value === undefined) return "";
     if (typeof value !== "string") throw manifestError(`${field} must be a string`);
     return value;
 }
 
 /** @param {unknown} value @param {string} field */
 function stringArray(value, field) {
-    if (value === undefined || value === null) return [];
+    if (value === undefined) return [];
     if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
         throw manifestError(`${field} must be an array of strings`);
     }
@@ -73,16 +73,16 @@ export function parseManifest(source) {
             : (() => {
                 throw manifestError("capabilities must be an object");
             })();
-    const writes = capabilities.writes ?? DEFAULT_MANIFEST.capabilities.writes;
+    const writes = capabilities.writes === undefined ? DEFAULT_MANIFEST.capabilities.writes : capabilities.writes;
     if (writes !== "repo" && writes !== "sandbox" && writes !== "none") {
         throw manifestError("capabilities.writes must be one of repo, sandbox, or none");
     }
     return {
         name: input.name.trim(),
-        version: stringValue(input.version ?? DEFAULT_MANIFEST.version, "version"),
+        version: stringValue(input.version === undefined ? DEFAULT_MANIFEST.version : input.version, "version"),
         description: stringValue(input.description, "description"),
         repository: stringValue(input.repository, "repository"),
-        smithers: stringValue(input.smithers ?? DEFAULT_MANIFEST.smithers, "smithers"),
+        smithers: stringValue(input.smithers === undefined ? DEFAULT_MANIFEST.smithers : input.smithers, "smithers"),
         contents: {
             workflows: stringArray(contents.workflows, "contents.workflows"),
             ui: stringArray(contents.ui, "contents.ui"),
@@ -122,9 +122,16 @@ export function buildDefaultManifest(projectRoot, scaffoldFiles) {
         .map((file) => file.path.match(/^\.smithers\/workflows\/(.+)\.tsx$/)?.[1])
         .filter(Boolean)
         .sort();
+    const uiFiles = new Set(
+        scaffoldFiles
+            .map((file) => file.path.match(/^\.smithers\/ui\/(.+)\.tsx$/)?.[1])
+            .filter(Boolean),
+    );
     const ui = scaffoldFiles
-        .map((file) => file.path.match(/^\.smithers\/ui\/(.+)\.tsx$/)?.[1])
-        .filter(Boolean)
+        .filter((file) => /^\.smithers\/workflows\/.+\.tsx$/.test(file.path))
+        .flatMap((file) => [...file.contents.matchAll(/<UI\s+entry=["']\.\.\/ui\/([^"']+?)\.tsx["']/g)].map((match) => match[1]))
+        .filter((name) => uiFiles.has(name))
+        .filter((name, index, names) => names.indexOf(name) === index)
         .sort();
     return {
         ...DEFAULT_MANIFEST,
