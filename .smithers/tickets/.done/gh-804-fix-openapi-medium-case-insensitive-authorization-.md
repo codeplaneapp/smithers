@@ -32,3 +32,6 @@ Merge headers case-insensitively. Reserve configured auth/header names before ac
 ## Dedupe notes
 
 No matching issue or open PR.
+
+
+> Closed by ticket-fleet: landed on main in 0e951829df90f66307809f5fa9e687b10fc689a7.
