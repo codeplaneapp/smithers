@@ -934,6 +934,10 @@ async function pgliteRunCountAt(cwd, workspaceRoot, opts) {
     }
     finally {
         try { await pglite?.close?.(); } catch { /* best-effort read-only probe cleanup */ }
+        // WASM allocations apply no JS heap pressure; reclaim the probe's >1GB
+        // instance now so the migration target that opens next cannot stack on
+        // it and Bus-error at the WASM ceiling (bun only).
+        globalThis.Bun?.gc?.(true);
     }
 }
 

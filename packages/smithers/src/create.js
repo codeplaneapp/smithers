@@ -583,6 +583,13 @@ export async function createSmithersPostgres(schemas, opts) {
         teardown.push(async () => {
             await server.stop().catch(() => {});
             await pglite.close().catch(() => {});
+            // A PGlite instance maps >1GB of WASM memory under bun, and WASM
+            // memory.grow applies no JS heap pressure, so without an explicit
+            // collection here a follow-up embedded instance (re-open, second
+            // migration, verification pass) stacks on top of this one's
+            // still-resident memory and the process dies with a Bus error
+            // near the ~2GB WASM ceiling.
+            globalThis.Bun?.gc?.(true);
         });
         connectionString = `postgres://postgres@127.0.0.1:${port}/postgres`;
     }
