@@ -590,9 +590,44 @@ function isUnopenableSqliteError(error) {
  * deterministic copy opens its read-only transaction. This preserves the
  * rollback-friendly copy path while avoiding a stale schema on the target.
  *
+ * A WAL-mode store's sidecars have fixed minimum shapes: a non-empty `-wal`
+ * starts with a 32-byte header carrying the 0x377f0682/0x377f0683 magic, and a
+ * non-empty `-shm` is at least one 32KB shared-memory region. SQLite mmaps
+ * both, and under bun a malformed (truncated/garbage) sidecar does not surface
+ * as SQLITE_CORRUPT: the mmap'd access past EOF kills the whole process with a
+ * Bus error. Refuse malformed sidecars up front with the same actionable
+ * migration error a corrupt main file gets.
+ *
+ * @param {string} dbPath
+ */
+function assertSqliteSidecarsSane(dbPath) {
+    const walPath = `${dbPath}-wal`;
+    if (existsSync(walPath)) {
+        const size = statSync(walPath).size;
+        let magicOk = size === 0;
+        if (size >= 32) {
+            const header = readFileSync(walPath).subarray(0, 4);
+            const magic = header.readUInt32BE(0);
+            magicOk = magic === 0x377f0682 || magic === 0x377f0683;
+        }
+        if (!magicOk) {
+            throw new SmithersError("DB_QUERY_FAILED", `The write-ahead log sidecar at ${walPath} is malformed (not a valid SQLite WAL file). The store cannot be opened safely with it present. If the WAL is a leftover from a crashed copy, restore the matching smithers.db-wal and smithers.db-shm from the same backup as smithers.db, or remove BOTH sidecar files only if you accept losing un-checkpointed writes. The original files were left untouched.`, { dbPath, sidecar: walPath });
+        }
+    }
+    const shmPath = `${dbPath}-shm`;
+    if (existsSync(shmPath)) {
+        const size = statSync(shmPath).size;
+        if (size !== 0 && size < 32768) {
+            throw new SmithersError("DB_QUERY_FAILED", `The shared-memory sidecar at ${shmPath} is malformed (smaller than one SQLite shm region). The store cannot be opened safely with it present. If it is a leftover from a crashed copy, restore the matching smithers.db-wal and smithers.db-shm from the same backup as smithers.db, or remove BOTH sidecar files only if you accept losing un-checkpointed writes. The original files were left untouched.`, { dbPath, sidecar: shmPath });
+        }
+    }
+}
+
+/**
  * @param {string} dbPath
  */
 function upgradeSqliteSourceStore(dbPath) {
+    assertSqliteSidecarsSane(dbPath);
     /** @type {Database | undefined} */
     let sqlite;
     try {
@@ -632,6 +667,7 @@ function upgradeSqliteSourceStore(dbPath) {
  * @returns {{ sqlite: Database; runCount: number; schemaVersion: string; tables: Array<{ name: string; sql: string }>; indexes: Array<{ name: string; sql: string }> }}
  */
 function openSourceStore(dbPath) {
+    assertSqliteSidecarsSane(dbPath);
     /** @type {Database | undefined} */
     let sqlite;
     try {
@@ -868,6 +904,7 @@ function assertSqliteTargetValid(sqlite) {
 }
 
 function sqliteRunCountAt(dbPath) {
+    assertSqliteSidecarsSane(dbPath);
     if (!existsSync(dbPath)) return 0;
     try {
         const sqlite = new Database(dbPath, { readonly: true });
@@ -887,6 +924,7 @@ function sqliteRunCountAt(dbPath) {
 // table). Used to refuse overwriting an unrelated/corrupt SQLite file at the
 // target path during the atomic publish.
 function sqliteHasRunsTableAt(dbPath) {
+    assertSqliteSidecarsSane(dbPath);
     if (!existsSync(dbPath)) return false;
     let sqlite;
     try {

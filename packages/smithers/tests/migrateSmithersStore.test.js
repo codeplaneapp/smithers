@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { chunkedTest, assertRowForRowEquality, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
+import { chunkedTest, assertRowForRowEquality, canonicalRows, listSourceTables, normalizeCell, sourceColumns, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
 
 setDefaultTimeout(120_000);
 
@@ -252,9 +252,17 @@ describe("migrateSmithersStore", () => {
     sqlite.close();
     // Some SQLite builds checkpoint and remove WAL/SHM sidecars when the last
     // connection closes. The migration cleanup promise is filesystem-level:
-    // if sidecars exist after a successful copy, they must be removed.
-    writeFileSync(`${dbPath}-wal`, "sidecar", "utf8");
-    writeFileSync(`${dbPath}-shm`, "sidecar", "utf8");
+    // if sidecars exist after a successful copy, they must be removed. The
+    // fixture sidecars must be validly SHAPED (a WAL header with the real
+    // magic, one zeroed shm region): garbage content is refused up front with
+    // an actionable error (its own test below), because letting SQLite mmap a
+    // malformed wal/shm kills the whole process under bun with a Bus error.
+    const walHeader = Buffer.alloc(32);
+    walHeader.writeUInt32BE(0x377f0682, 0); // WAL magic (little-endian checksums)
+    walHeader.writeUInt32BE(3007000, 4); // format version
+    walHeader.writeUInt32BE(4096, 8); // page size
+    writeFileSync(`${dbPath}-wal`, walHeader);
+    writeFileSync(`${dbPath}-shm`, Buffer.alloc(32768));
     expect(existsSync(`${dbPath}-wal`)).toBe(true);
     expect(existsSync(`${dbPath}-shm`)).toBe(true);
 
@@ -265,5 +273,36 @@ describe("migrateSmithersStore", () => {
     expect(existsSync(`${dbPath}-wal`)).toBe(false);
     expect(existsSync(`${dbPath}-shm`)).toBe(false);
     expect(existsSync(result.markerPath)).toBe(true);
+  });
+
+  chunkedTest("malformed WAL/SHM sidecars are refused with an actionable error, never a crash", async () => {
+    const cwd = makeWorkspace("smithers-migrate-bad-sidecars");
+    const dbPath = seedSqliteStore(cwd);
+    // A truncated/garbage sidecar used to SIGBUS the whole bun process when
+    // SQLite mmapped it during the migration's source open.
+    writeFileSync(`${dbPath}-wal`, "sidecar", "utf8");
+
+    let caught;
+    try {
+      await migrateSmithersStore({ cwd, to: "pglite" });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(SmithersError);
+    expect(String(caught?.message)).toContain("malformed");
+    // Source files are untouched so the user can repair or remove them.
+    expect(existsSync(dbPath)).toBe(true);
+    expect(existsSync(`${dbPath}-wal`)).toBe(true);
+
+    rmSync(`${dbPath}-wal`, { force: true });
+    writeFileSync(`${dbPath}-shm`, "sidecar", "utf8");
+    caught = undefined;
+    try {
+      await migrateSmithersStore({ cwd, to: "pglite" });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(SmithersError);
+    expect(String(caught?.message)).toContain("malformed");
   });
 });
