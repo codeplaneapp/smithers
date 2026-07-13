@@ -82,15 +82,58 @@ describe("task heartbeats", () => {
         });
         cleanup();
     });
+    test("activity after a checkpoint preserves the checkpoint payload", async () => {
+        const { smithers, outputs, db, cleanup } = buildSmithers();
+        const workflow = smithers(() => (<Workflow name="heartbeat-checkpoint-stream">
+        <Task id="stream" output={outputs.outputA} cache={{ key: "checkpoint-stream" }}>
+          {async () => {
+                const runtime = requireTaskRuntime();
+                runtime.heartbeat({ cursor: "page-5" });
+                await sleep(20);
+                runtime.heartbeat();
+                return { value: 1 };
+            }}
+        </Task>
+      </Workflow>));
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("finished");
+        const adapter = new SmithersDb(db);
+        const attempts = await adapter.listAttempts(result.runId, "stream", 0);
+        expect(JSON.parse(attempts[0]?.heartbeatDataJson ?? "null")).toEqual({ cursor: "page-5" });
+        cleanup();
+    });
+    test("a dead unresolved legacy execution times out without synthetic liveness", async () => {
+        const { smithers, outputs, db, cleanup } = buildSmithers();
+        const workflow = smithers(() => (<Workflow name="heartbeat-silent-legacy-execution">
+        <Task id="silent" output={outputs.outputA} cache={{ key: "silent-legacy" }} retries={0} heartbeatTimeoutMs={10_300}>
+          {async () => {
+                // `cache` deliberately selects the legacy execution path. It
+                // produces no output or explicit heartbeat for longer than the
+                // execution liveness pulse, but remains genuinely in flight.
+                await sleep(10_800);
+                return { value: 1 };
+            }}
+        </Task>
+      </Workflow>));
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("failed");
+        const attempts = await new SmithersDb(db).listAttempts(result.runId, "silent", 0);
+        expect(attempts[0]?.errorJson).toContain("TASK_HEARTBEAT_TIMEOUT");
+        cleanup();
+    }, 20_000);
     test("heartbeat timeout marks attempt failed and retries", async () => {
         const { smithers, outputs, db, cleanup } = buildSmithers();
         let calls = 0;
         const workflow = smithers(() => (<Workflow name="heartbeat-timeout-retry">
-        <Task id="timeout" output={outputs.outputA} retries={1} heartbeatTimeoutMs={200}>
+        <Task id="timeout" output={outputs.outputA} cache={{ key: "dead-legacy" }} retries={1} heartbeatTimeoutMs={200}>
           {async () => {
                 calls += 1;
                 const runtime = requireTaskRuntime();
                 if (calls === 1) {
+                    // Establish the timeout baseline from inside the execution.
+                    // Test-file setup can otherwise consume most of the short
+                    // 200ms window before this compute callback gets a turn.
+                    runtime.heartbeat({ phase: "started" });
                     await sleep(350);
                     return { value: 1 };
                 }
@@ -109,7 +152,7 @@ describe("task heartbeats", () => {
         expect(attempts.some((attempt) => attempt.state === "failed")).toBe(true);
         expect(attempts.some((attempt) => attempt.state === "finished")).toBe(true);
         cleanup();
-    });
+    }, 20_000);
     test("task without heartbeat timeout can run without heartbeats", async () => {
         const { smithers, outputs, cleanup } = buildSmithers();
         const workflow = smithers(() => (<Workflow name="heartbeat-no-timeout">

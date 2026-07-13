@@ -34,7 +34,10 @@ export const CancelPayloadSchema = Schema.Struct({
 });
 export const CancelResultSchema = Schema.Struct({
     runId: Schema.String,
-    status: Schema.Literal("cancelling", "cancelled"),
+    status: Schema.Literal("cancelling", "cancelled", "already-terminal", "not-found"),
+    won: Schema.Boolean,
+    terminalStatus: Schema.optional(Schema.String),
+    repaired: Schema.Boolean,
 });
 export const SignalPayloadSchema = Schema.Struct({
     runId: Schema.String,

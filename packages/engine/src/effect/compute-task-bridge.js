@@ -240,13 +240,16 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
     const removeAbortForwarder = wireAbortSignal(taskAbortController, signal);
     const taskSignal = taskAbortController.signal;
     const startedAtMs = nowMs();
+    const executionOwnerId = (await Effect.runPromise(adapter.getRun(runId)))?.runtimeOwnerId ?? null;
     let taskCompleted = false;
     let taskExecutionReturned = false;
     let heartbeatClosed = false;
     let heartbeatWriteInFlight = false;
-    let heartbeatPendingDataJson = null;
-    let heartbeatPendingDataSizeBytes = 0;
+    let heartbeatPendingDataJson = previousHeartbeat === null ? null : JSON.stringify(previousHeartbeat);
+    let heartbeatPendingDataSizeBytes = heartbeatPendingDataJson === null ? 0 : Buffer.byteLength(heartbeatPendingDataJson, "utf8");
     let heartbeatPendingAtMs = startedAtMs;
+    let heartbeatEvidenceAtMs = startedAtMs;
+    let heartbeatTimeoutWon = false;
     let heartbeatHasPendingWrite = false;
     let heartbeatLastPersistedWriteAtMs = 0;
     let heartbeatLastReceivedAtMs = null;
@@ -280,7 +283,14 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             : Math.max(0, heartbeatAtMs - heartbeatLastReceivedAtMs);
         heartbeatLastReceivedAtMs = heartbeatAtMs;
         try {
-            await Effect.runPromise(adapter.heartbeatAttempt(runId, desc.nodeId, desc.iteration, attemptNo, heartbeatAtMs, heartbeatDataJson));
+            const persisted = await Effect.runPromise(adapter.heartbeatAttempt(runId, desc.nodeId, desc.iteration, attemptNo, heartbeatAtMs, heartbeatDataJson, executionOwnerId));
+            if (!persisted) {
+                heartbeatHasPendingWrite = false;
+                heartbeatEvidenceAtMs = Math.max(startedAtMs, heartbeatLastPersistedWriteAtMs);
+                return;
+            }
+            heartbeatPendingAtMs = heartbeatAtMs;
+            heartbeatEvidenceAtMs = heartbeatAtMs;
             heartbeatLastPersistedWriteAtMs = nowMs();
             logDebug("bridge-managed compute task heartbeat recorded", {
                 runId,
@@ -327,14 +337,15 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             return;
         }
         const heartbeatAtMs = nowMs();
-        let nextHeartbeatDataJson = null;
-        let dataSizeBytes = 0;
+        let nextHeartbeatDataJson = heartbeatPendingDataJson;
+        let dataSizeBytes = heartbeatPendingDataSizeBytes;
         if (data !== undefined) {
             const serialized = serializeHeartbeatPayload(data);
             nextHeartbeatDataJson = serialized.heartbeatDataJson;
             dataSizeBytes = serialized.dataSizeBytes;
         }
         heartbeatPendingAtMs = heartbeatAtMs;
+        heartbeatEvidenceAtMs = heartbeatAtMs;
         heartbeatPendingDataJson = nextHeartbeatDataJson;
         heartbeatPendingDataSizeBytes = dataSizeBytes;
         heartbeatHasPendingWrite = true;
@@ -370,7 +381,7 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             return await runTaskEffect(taskEffect);
         }
         const checkHeartbeat = Effect.suspend(() => {
-            const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatPendingAtMs);
+            const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatEvidenceAtMs);
             const staleForMs = nowMs() - lastHeartbeatAtMs;
             if (staleForMs <= heartbeatTimeoutMs) {
                 return Effect.void;
@@ -403,6 +414,7 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
                 timeoutMs: heartbeatTimeoutMs,
                 timestampMs: nowMs(),
             });
+            heartbeatTimeoutWon = true;
             taskAbortController.abort(timeoutError);
             return Effect.fail(timeoutError);
         });
@@ -470,7 +482,7 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
         timestampMs: nowMs(),
     }));
     try {
-        if (taskSignal.aborted) {
+        if (taskSignal.aborted || heartbeatTimeoutWon) {
             throw taskSignal.reason ?? makeAbortError();
         }
         logDebug("bridge-managed compute task execution starting", {
@@ -539,14 +551,32 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             }, { cause: validation.error });
         }
         payload = validation.data;
+        if (desc.heartbeatTimeoutMs && nowMs() - heartbeatEvidenceAtMs > desc.heartbeatTimeoutMs) {
+            heartbeatTimeoutWon = true;
+            throw new SmithersError("TASK_HEARTBEAT_TIMEOUT", `Task ${desc.nodeId} exceeded its heartbeat timeout before completion.`, {
+                nodeId: desc.nodeId,
+                iteration: desc.iteration,
+                attempt: attemptNo,
+                timeoutMs: desc.heartbeatTimeoutMs,
+            });
+        }
         taskExecutionReturned = true;
         await Effect.runPromise(eventBus.flush());
         const jjPointer = await Effect.runPromise(getJjPointer(toolConfig.rootDir).pipe(Effect.provide(getPlatformLayer())));
         await waitForHeartbeatWriteDrain();
         await flushHeartbeat(true);
+        // Timeout/abort is a terminal contender; a late resolved Promise is
+        // not allowed to commit output after it has won.
+        if (taskSignal.aborted) {
+            throw taskSignal.reason ?? makeAbortError();
+        }
         taskCompleted = true;
         const completedAtMs = nowMs();
-        await adapter.withTransaction("task-completion", Effect.gen(function* () {
+        const completionClaimed = await adapter.withTransaction("task-completion", Effect.gen(function* () {
+            const claimed = yield* adapter.claimAttemptCompletion(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, completedAtMs);
+            if (!claimed) {
+                return false;
+            }
             yield* adapter.upsertOutputRow(desc.outputTable, { runId, nodeId: desc.nodeId, iteration: desc.iteration }, payload);
             yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
                 state: "finished",
@@ -566,7 +596,11 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
                 outputTable: desc.outputTableName,
                 label: desc.label ?? null,
             });
+            return true;
         }));
+        if (!completionClaimed) {
+            return;
+        }
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "NodeFinished",
             runId,
@@ -624,6 +658,8 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             attemptMeta.failureRetryable = false;
         }
         if (aborted) {
+            const currentAttempt = await Effect.runPromise(adapter.getAttempt(runId, desc.nodeId, desc.iteration, attemptNo));
+            if (currentAttempt?.state === "cancelled") return;
             await waitForHeartbeatWriteDrain();
             await flushHeartbeat(true);
             taskCompleted = true;
@@ -667,6 +703,8 @@ export const executeComputeTaskBridge = async (adapter, db, runId, desc, eventBu
             }, "engine:task");
             return;
         }
+        const currentAttempt = await Effect.runPromise(adapter.getAttempt(runId, desc.nodeId, desc.iteration, attemptNo));
+        if (currentAttempt?.state === "cancelled") return;
         await waitForHeartbeatWriteDrain();
         await flushHeartbeat(true);
         taskCompleted = true;

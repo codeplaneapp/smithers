@@ -226,6 +226,13 @@ describe("compute task bridge execution branches", () => {
     test("continues when heartbeat persistence fails", async () => {
         const harness = makeHarness();
         const eventBus = makeEventBus();
+        await harness.adapter.insertRun({
+            runId: "heartbeat-write-fails-run",
+            workflowName: "compute-bridge-internals",
+            workflowHash: "test",
+            status: "running",
+            createdAtMs: Date.now(),
+        });
         const desc = makeDesc(harness.tables, {
             nodeId: "heartbeat-write-fails",
             computeFn: () => {

@@ -1008,7 +1008,11 @@ export class SmithersDb {
 	                    try: async () => {
 	                        await runControl(beginTransactionSql(self.internalStorage.dialect));
 	                        transactionState.depth += 1;
-                        transactionState.ownerThread = currentFiberThread;
+                        // Operations composed through an async finalizer may
+                        // resume on a child Effect fiber. Treat the active
+                        // transaction as owned by this adapter until COMMIT;
+                        // the transaction turn still serializes entry.
+                        transactionState.ownerThread = "*";
                         self.transactionDepth = transactionState.depth;
                         self.transactionOwnerThread = transactionState.ownerThread;
                         self.transactionTail = transactionState.tail;
@@ -1078,7 +1082,7 @@ export class SmithersDb {
     }
     /**
    * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
+     * @returns {RunnableEffect<boolean, SmithersError>}
    */
     insertRun(row) {
         validateRunRow(row);
@@ -1101,6 +1105,11 @@ export class SmithersDb {
     updateRunEffect(runId, patch) {
         return this.updateRun(runId, patch);
     }
+    /** @returns {RunnableEffect<boolean, SmithersError>} */
+    updateRunIfNotCancelled(runId, patch) {
+        validateRunPatch(patch);
+        return this.write(`guarded update run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", patch, "run_id = ? AND status NOT IN (?, ?, ?, ?, ?) AND cancel_requested_at_ms IS NULL", [runId, "finished", "failed", "cancelled", "canceled", "continued"]).then((count) => count > 0));
+    }
     /**
    * @param {string} runId
    * @param {string} runtimeOwnerId
@@ -1116,7 +1125,42 @@ export class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
     requestRunCancel(runId, cancelRequestedAtMs) {
-        return this.write(`cancel run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", { cancelRequestedAtMs }, "run_id = ?", [runId]));
+        return this.write(`cancel run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", { cancelRequestedAtMs }, "run_id = ? AND status = ? AND cancel_requested_at_ms IS NULL", [runId, "running"]).then((count) => count > 0));
+    }
+    /**
+     * Atomically claim terminal cancellation. Observable cleanup belongs only
+     * to the caller that receives true.
+     * @param {string} runId
+     * @param {number} cancelledAtMs
+     * @param {string | null} [errorJson]
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    claimRunCancellation(runId, cancelledAtMs, errorJson = null) {
+        return this.write(`claim cancellation ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", {
+            status: "cancelled",
+            finishedAtMs: cancelledAtMs,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            // Keep a durable cancellation signal for an owner in another
+            // process. It is cleared only by a later lifecycle transition,
+            // never as part of the terminal claim itself.
+            cancelRequestedAtMs: cancelledAtMs,
+            errorJson,
+        }, `run_id = ? AND status NOT IN (?, ?, ?, ?, ?)`, [runId, "finished", "failed", "cancelled", "canceled", "continued"])
+            .then((count) => count > 0));
+    }
+    /** @returns {RunnableEffect<boolean, SmithersError>} */
+    completeRun(runId, runtimeOwnerId, finishedAtMs) {
+        return this.write(`complete run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", {
+            status: "finished",
+            finishedAtMs,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            cancelRequestedAtMs: null,
+            hijackRequestedAtMs: null,
+            hijackTarget: null,
+        }, "run_id = ? AND status = ? AND cancel_requested_at_ms IS NULL AND runtime_owner_id = ?", [runId, "running", runtimeOwnerId])
+            .then((count) => count > 0));
     }
     /**
    * @param {string} runId
@@ -1749,19 +1793,55 @@ export class SmithersDb {
         return this.updateAttempt(runId, nodeId, iteration, attempt, patch);
     }
     /**
+     * Compare-and-set the attempt terminal state. Output and node rows must be
+     * written in the same transaction only after this claim succeeds.
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    claimAttemptCompletion(runId, nodeId, iteration, attempt, runtimeOwnerId, finishedAtMs) {
+        return this.write(`claim attempt completion ${nodeId}#${attempt}`, () => this.internalStorage.updateWhere("_smithers_attempts", {
+            state: "finished",
+            finishedAtMs,
+        }, `run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND state = 'in-progress'
+            AND EXISTS (SELECT 1 FROM _smithers_runs r
+              WHERE r.run_id = _smithers_attempts.run_id
+                AND r.status = 'running'
+                AND r.cancel_requested_at_ms IS NULL
+                AND ((r.runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR r.runtime_owner_id = ?))
+        `, [runId, nodeId, iteration, attempt, runtimeOwnerId, runtimeOwnerId]).then((count) => count > 0));
+    }
+    /**
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
    * @param {number} attempt
    * @param {number} heartbeatAtMs
-   * @param {string | null} heartbeatDataJson
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
-    heartbeatAttempt(runId, nodeId, iteration, attempt, heartbeatAtMs, heartbeatDataJson) {
-        return this.write(`heartbeat attempt ${nodeId}#${attempt}`, () => this.internalStorage.updateWhere("_smithers_attempts", {
-            heartbeatAtMs,
-            heartbeatDataJson,
-        }, "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND state = ?", [runId, nodeId, iteration, attempt, "in-progress"]));
+     * @param {string | null} heartbeatDataJson
+     * @param {string} runtimeOwnerId
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    heartbeatAttempt(runId, nodeId, iteration, attempt, heartbeatAtMs, heartbeatDataJson, runtimeOwnerId) {
+        return this.write(`heartbeat attempt ${nodeId}#${attempt}`, () => {
+            const updated = this.internalStorage.updateWhere("_smithers_attempts", {
+                heartbeatAtMs,
+                ...(heartbeatDataJson === null ? {} : { heartbeatDataJson }),
+            }, `run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND state = ?
+                AND EXISTS (SELECT 1 FROM _smithers_runs r
+                  WHERE r.run_id = _smithers_attempts.run_id
+                    AND r.status = 'running'
+                    AND r.cancel_requested_at_ms IS NULL
+                    AND ((r.runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR r.runtime_owner_id = ?))
+                `, [runId, nodeId, iteration, attempt, "in-progress", runtimeOwnerId, runtimeOwnerId]);
+            // Task output/tool callbacks are the durable proof that the engine is
+            // alive. Refresh the run heartbeat from the same write path so the
+            // monitor does not depend solely on the scheduler timer, which can be
+            // starved while a live stream or subprocess is consuming CPU.
+            return updated.then((count) => {
+                if (count > 0) {
+                    return this.internalStorage.updateWhere("_smithers_runs", { heartbeatAtMs }, "run_id = ? AND status = ? AND cancel_requested_at_ms IS NULL AND ((runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR runtime_owner_id = ?)", [runId, "running", runtimeOwnerId, runtimeOwnerId]).then((runCount) => runCount > 0);
+                }
+                return false;
+            });
+        });
     }
     /**
    * @param {string} runId
@@ -2552,6 +2632,22 @@ export class SmithersDb {
     insertEventWithNextSeq(row) {
         const label = `insert event ${row.type}`;
         const self = this;
+        // Finalization owns the surrounding transaction.  Do not open a
+        // second transaction (or silently queue this write after COMMIT) when
+        // an event is part of that atomic lifecycle transition.
+        if (this.transactionDepth > 0) {
+            return this.write(label, async () => {
+                const existing = await this.internalStorage.queryOne(`SELECT seq
+                   FROM _smithers_events
+                   WHERE run_id = ? AND timestamp_ms = ? AND type = ? AND payload_json = ?
+                   ORDER BY seq DESC LIMIT 1`, [row.runId, row.timestampMs, row.type, row.payloadJson]);
+                if (existing?.seq !== undefined) return Number(existing.seq);
+                const lastSeq = (await this.internalStorage.getLastEventSeq(row.runId)) ?? -1;
+                const seq = lastSeq + 1;
+                await this.internalStorage.insertIgnore("_smithers_events", { ...row, seq });
+                return seq;
+            });
+        }
         return runnableEffect(withSqliteWriteRetryEffect(() => Effect.gen(function* () {
             const existing = yield* self.read(label, () => self.internalStorage.queryOne(`SELECT seq
                FROM _smithers_events

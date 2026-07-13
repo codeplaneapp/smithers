@@ -441,7 +441,7 @@ declare class SqlMessageStorage {
    * @param {ReadonlyArray<SqliteParam>} [params]
    * @returns {Promise<void>}
    */
-    updateWhere(table: string, patch: Record<string, unknown>, whereSql: string, params?: ReadonlyArray<SqliteParam>): Promise<void>;
+    updateWhere(table: string, patch: Record<string, unknown>, whereSql: string, params?: ReadonlyArray<SqliteParam>): Promise<number>;
     /**
    * @param {string} table
    * @param {string} whereSql
@@ -658,6 +658,7 @@ declare class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
     updateRunEffect(runId: string, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
+    updateRunIfNotCancelled(runId: string, patch: Record<string, unknown>): RunnableEffect<boolean, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} runtimeOwnerId
@@ -668,9 +669,11 @@ declare class SmithersDb {
     /**
    * @param {string} runId
    * @param {number} cancelRequestedAtMs
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
-    requestRunCancel(runId: string, cancelRequestedAtMs: number): RunnableEffect<void, SmithersError$1>;
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    requestRunCancel(runId: string, cancelRequestedAtMs: number): RunnableEffect<boolean, SmithersError$1>;
+    claimRunCancellation(runId: string, cancelledAtMs: number, errorJson?: string | null): RunnableEffect<boolean, SmithersError$1>;
+    completeRun(runId: string, runtimeOwnerId: string, finishedAtMs: number): RunnableEffect<boolean, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {number} pauseRequestedAtMs
@@ -863,6 +866,7 @@ declare class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
     updateAttemptEffect(runId: string, nodeId: string, iteration: number, attempt: number, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
+    claimAttemptCompletion(runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string, finishedAtMs: number): RunnableEffect<boolean, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
@@ -870,9 +874,9 @@ declare class SmithersDb {
    * @param {number} attempt
    * @param {number} heartbeatAtMs
    * @param {string | null} heartbeatDataJson
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
-    heartbeatAttempt(runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null): RunnableEffect<void, SmithersError$1>;
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    heartbeatAttempt(runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null, runtimeOwnerId: string): RunnableEffect<boolean, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId

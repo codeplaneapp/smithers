@@ -8205,11 +8205,27 @@ a { color: var(--brand); }</style>
                     return responseError(frame.id, "INVALID_REQUEST", "runId is required");
                 }
                 const active = this.activeRuns.get(runId);
-                if (!active) {
+                if (active) {
+                    const resolved = await this.resolveRun(runId).catch(() => null);
+                    if (!resolved) {
+                        return responseError(frame.id, "RunNotFound", "Run not found");
+                    }
+                    const { finalizeCancelledRun } = await loadEngineRuntime();
+                    const claimed = await finalizeCancelledRun(resolved.adapter, runId, { now: Date.now() });
+                    if (claimed.won) active.abort.abort();
+                    return responseOk(frame.id, claimed);
+                }
+                const resolved = await this.resolveRun(runId).catch(() => null);
+                const run = resolved ? await resolved.adapter.getRun(runId) : null;
+                if (!resolved || !run) {
+                    return responseError(frame.id, "RunNotFound", "Run not found");
+                }
+                if (!["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "cancelled", "canceled"].includes(run.status)) {
                     return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently active");
                 }
-                active.abort.abort();
-                return responseOk(frame.id, { runId, status: "cancelling" });
+                const { finalizeCancelledRun } = await loadEngineRuntime();
+                const result = await finalizeCancelledRun(resolved.adapter, runId);
+                return responseOk(frame.id, result);
             }
             case "runs.pause":
             case "pauseRun": {

@@ -271,6 +271,7 @@ describe("SmithersDb adapter", () => {
     });
     test("heartbeatAttempt updates heartbeat columns for in-progress attempt", async () => {
         const { adapter } = createTestDb();
+        await adapter.insertRun(runRow("r1"));
         await adapter.insertAttempt({
             runId: "r1",
             nodeId: "n1",
@@ -283,6 +284,7 @@ describe("SmithersDb adapter", () => {
         const attempt = await adapter.getAttempt("r1", "n1", 0, 1);
         expect(attempt?.heartbeatAtMs).toBe(now + 500);
         expect(attempt?.heartbeatDataJson).toBe(JSON.stringify({ progress: 50 }));
+        expect((await adapter.getRun("r1"))?.heartbeatAtMs).toBe(now + 500);
     });
     test("listAttempts returns attempts in descending order", async () => {
         const { adapter } = createTestDb();

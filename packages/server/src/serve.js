@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { Effect, Metric } from "effect";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
-import { isRunHeartbeatFresh } from "@smithers-orchestrator/engine";
+import { finalizeCancelledRun, isRunHeartbeatFresh } from "@smithers-orchestrator/engine";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { prometheusContentType, renderPrometheusMetrics, } from "@smithers-orchestrator/observability";
 import { logWarning } from "@smithers-orchestrator/observability/logging";
@@ -314,65 +314,14 @@ export function createServeApp(opts) {
         }
         if (run.status === "waiting-approval" || run.status === "waiting-timer") {
             const cancelledAtMs = nowMs();
-            const cancelEvent = {
-                type: "RunCancelled",
-                runId,
-                timestampMs: cancelledAtMs,
-            };
-            if (run.status === "waiting-timer") {
-                const nodes = await adapter.listNodes(runId);
-                for (const node of nodes.filter((entry) => entry.state === "waiting-timer")) {
-                    const attempts = await runPromise(adapter.listAttempts(runId, node.nodeId, node.iteration ?? 0));
-                    const waitingAttempt = attempts.find((attempt) => attempt.state === "waiting-timer");
-                    if (!waitingAttempt)
-                        continue;
-                    await adapter.updateAttempt(runId, node.nodeId, node.iteration ?? 0, waitingAttempt.attempt, { state: "cancelled", finishedAtMs: cancelledAtMs });
-                    await adapter.insertNode({
-                        runId,
-                        nodeId: node.nodeId,
-                        iteration: node.iteration ?? 0,
-                        state: "cancelled",
-                        lastAttempt: waitingAttempt.attempt,
-                        updatedAtMs: cancelledAtMs,
-                        outputTable: node.outputTable ?? "",
-                        label: node.label ?? null,
-                    });
-                    const timerCancelledEvent = {
-                        type: "TimerCancelled",
-                        runId,
-                        timerId: node.nodeId,
-                        timestampMs: cancelledAtMs,
-                    };
-                    await adapter.insertEventWithNextSeq({
-                        runId,
-                        timestampMs: cancelledAtMs,
-                        type: "TimerCancelled",
-                        payloadJson: JSON.stringify(timerCancelledEvent),
-                    });
-                    await runPromise(trackEvent(timerCancelledEvent));
-                }
-            }
-            await adapter.updateRun(runId, {
-                status: "cancelled",
-                finishedAtMs: cancelledAtMs,
-                heartbeatAtMs: null,
-                runtimeOwnerId: null,
-                cancelRequestedAtMs: null,
-            });
-            await adapter.insertEventWithNextSeq({
-                runId,
-                timestampMs: cancelledAtMs,
-                type: "RunCancelled",
-                payloadJson: JSON.stringify(cancelEvent),
-            });
-            await runPromise(trackEvent(cancelEvent));
-            return c.json({ runId });
+            const result = await finalizeCancelledRun(adapter, runId, { now: cancelledAtMs });
+            return c.json({ runId, status: result.status, won: result.won, repaired: result.repaired });
         }
         if (run.status !== "running" || !isRunHeartbeatFresh(run)) {
             throw new HttpError(409, "RUN_NOT_ACTIVE", "Run is not currently active");
         }
-        await adapter.requestRunCancel(runId, nowMs());
-        abort.abort();
+        const result = await finalizeCancelledRun(adapter, runId, { now: nowMs() });
+        if (result.won) abort.abort();
         return c.json({ runId });
     });
     // GET /metrics

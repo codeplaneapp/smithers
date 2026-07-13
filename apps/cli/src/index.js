@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { Effect, Fiber } from "effect";
 import { Cli, SyncSkills, z } from "incur";
-import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
+import { finalizeCancelledRun, isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
 import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smithers-orchestrator/engine/workflow-hash";
 import { mdxPlugin } from "./mdx-plugin.js";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
@@ -7076,7 +7076,15 @@ const cli = Cli.create({
                             break;
                         }
                     }
-                    if (!hasCancellableDescendant) {
+                    let needsCancellationRepair = false;
+                    if (run.status === "cancelled" || run.status === "canceled") {
+                        const pendingApprovals = await adapter.listPendingApprovals(c.args.runId);
+                        const pendingHumans = (await adapter.listPendingHumanRequests()).some((request) => request.runId === c.args.runId && request.status === "pending");
+                        const activeAttempts = (await adapter.listAttemptsForRun(c.args.runId)).some((attempt) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(attempt.state));
+                        const waitingNodes = (await adapter.listNodes(c.args.runId)).some((node) => ["in-progress", "waiting-approval", "waiting_approval", "waiting-event", "waiting-timer"].includes(node.state));
+                        needsCancellationRepair = pendingApprovals.length > 0 || pendingHumans || activeAttempts || waitingNodes;
+                    }
+                    if (!hasCancellableDescendant && !needsCancellationRepair) {
                         return fail({ code: "RUN_NOT_ACTIVE", message: `Run is not active (status: ${run.status})`, exitCode: 4 });
                     }
                 }
@@ -7232,28 +7240,27 @@ const cli = Cli.create({
                     // (dead-engine) and suspended waiting-* runs fall through to the
                     // direct flip below, which is correct as no engine is polling.
                     if (run.status === "running" && isRunHeartbeatFresh(run)) {
-                        await adapter.requestRunCancel(run.runId, now);
-                        process.stderr.write(`⊘ Cancel requested (live): ${run.runId}\n`);
-                        cancelled++;
+                        const requested = await adapter.requestRunCancel(run.runId, now);
+                        if (requested) {
+                            process.stderr.write(`⊘ Cancel requested (live): ${run.runId}\n`);
+                            cancelled++;
+                        }
+                        else {
+                            skipped++;
+                        }
                         continue;
                     }
-                    const inProgress = await adapter.listInProgressAttempts(run.runId);
-                    const attempts = await adapter.listAttemptsForRun(run.runId);
-                    for (const attempt of inProgress) {
-                        await adapter.updateAttempt(run.runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-                            state: "cancelled",
-                            finishedAtMs: now,
-                        });
+                    // Keep direct cancellation on the same terminal path as the
+                    // engine and gateway. A status-only flip leaves external
+                    // approvals/human requests and their waiting nodes alive.
+                    const result = await finalizeCancelledRun(adapter, run.runId, { now });
+                    if (result.won || result.repaired) {
+                        process.stderr.write(`⊘ Cancelled: ${run.runId}\n`);
+                        cancelled++;
                     }
-                    for (const attempt of attempts.filter((entry) => entry.state === "waiting-timer")) {
-                        await adapter.updateAttempt(run.runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-                            state: "cancelled",
-                            finishedAtMs: now,
-                        });
+                    else {
+                        skipped++;
                     }
-                    await adapter.updateRun(run.runId, { status: "cancelled", finishedAtMs: now });
-                    process.stderr.write(`⊘ Cancelled: ${run.runId}\n`);
-                    cancelled++;
                 }
                 if (cancelled === 0 && skipped > 0) {
                     return c.ok({ cancelled, skipped, message: "All active runs are still live. Use --force to cancel them." });

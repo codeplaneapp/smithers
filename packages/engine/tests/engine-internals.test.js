@@ -80,6 +80,61 @@ async function insertRun(adapter, runId, overrides = {}) {
 }
 
 describe("engine internals: errors, heartbeat and continuation helpers", () => {
+    test("cancellation resolves pending approvals and human requests", async () => {
+        const { adapter, sqlite } = makeContinueDb();
+        try {
+            await insertRun(adapter, "cancel-waits", { status: "waiting-approval" });
+            await Effect.runPromise(adapter.insertNode({
+                runId: "cancel-waits",
+                nodeId: "gate",
+                iteration: 0,
+                state: "waiting-approval",
+                updatedAtMs: 1,
+                outputTable: "task_output",
+                label: "Gate",
+            }));
+            await Effect.runPromise(adapter.insertOrUpdateApproval({
+                runId: "cancel-waits",
+                nodeId: "gate",
+                iteration: 0,
+                status: "requested",
+                requestedAtMs: 1,
+                decidedAtMs: null,
+                note: null,
+                decidedBy: null,
+                requestJson: '{"title":"Gate"}',
+                decisionJson: null,
+                autoApproved: false,
+            }));
+            await Effect.runPromise(adapter.insertHumanRequest({
+                requestId: "human:cancel-waits:ask:0",
+                runId: "cancel-waits",
+                nodeId: "ask",
+                iteration: 0,
+                kind: "ask",
+                status: "pending",
+                prompt: "Continue?",
+                schemaJson: null,
+                optionsJson: null,
+                responseJson: null,
+                requestedAtMs: 1,
+                answeredAtMs: null,
+                answeredBy: null,
+                timeoutAtMs: null,
+            }));
+
+            await I.cancelPendingExternalWaits(adapter, "cancel-waits");
+
+            expect((await adapter.listPendingApprovals("cancel-waits"))).toEqual([]);
+            expect((await adapter.getApproval("cancel-waits", "gate", 0))?.status).toBe("denied");
+            expect((await adapter.getNode("cancel-waits", "gate", 0))?.state).toBe("cancelled");
+            expect((await adapter.getHumanRequest("human:cancel-waits:ask:0"))?.status).toBe("cancelled");
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
     test("classifies abort-like errors and preserves Effect failures", async () => {
         expect(I.isAbortError(null)).toBe(false);
         expect(I.isAbortError({ name: "AbortError" })).toBe(true);

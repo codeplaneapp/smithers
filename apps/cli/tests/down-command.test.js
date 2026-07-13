@@ -135,6 +135,49 @@ describe("smithers down --force staleness check", () => {
         }
     }, CLI_COMMAND_TIMEOUT_MS);
 
+    test("direct stale cancellation closes approval and human waits", async () => {
+        const repo = createTempRepo();
+        const { sqlite, adapter } = openRepoDb(repo);
+        try {
+            const runId = "stale-waits";
+            await insertRunningRun(adapter, runId, {
+                status: "waiting-approval",
+                heartbeatAtMs: null,
+            });
+            await adapter.insertNode({
+                runId, nodeId: "gate", iteration: 0, state: "waiting-approval",
+                lastAttempt: null, updatedAtMs: Date.now(), outputTable: "", label: "Gate",
+            });
+            await adapter.insertOrUpdateApproval({
+                runId, nodeId: "gate", iteration: 0, status: "requested",
+                requestedAtMs: Date.now(), decidedAtMs: null, note: null, decidedBy: null,
+                requestJson: '{"title":"Gate"}', decisionJson: null, autoApproved: false,
+            });
+            await adapter.insertHumanRequest({
+                requestId: "human:stale-waits:ask:0", runId, nodeId: "ask", iteration: 0,
+                kind: "ask", status: "pending", prompt: "Continue?", schemaJson: null, optionsJson: null,
+                responseJson: null, requestedAtMs: Date.now(), answeredAtMs: null, answeredBy: null, timeoutAtMs: null,
+            });
+
+            const result = runSmithers(["down"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
+
+            expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+            expect((await adapter.getRun(runId))?.status).toBe("cancelled");
+            expect(await adapter.listPendingApprovals(runId)).toEqual([]);
+            expect((await adapter.getApproval(runId, "gate", 0))?.status).toBe("denied");
+            expect((await adapter.getNode(runId, "gate", 0))?.state).toBe("cancelled");
+            expect((await adapter.getHumanRequest("human:stale-waits:ask:0"))?.status).toBe("cancelled");
+            expect((await adapter.listEventHistory(runId, { afterSeq: -1, limit: 50 })).map((row) => row.type)).toContain("RunCancelled");
+        }
+        finally {
+            sqlite.close();
+        }
+    }, CLI_COMMAND_TIMEOUT_MS);
+
     test("cancels 101 stale running rows in one json invocation", async () => {
         const repo = createTempRepo();
         const { sqlite, adapter } = openRepoDb(repo);

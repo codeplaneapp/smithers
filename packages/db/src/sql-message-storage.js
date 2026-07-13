@@ -977,7 +977,7 @@ export class SqlMessageStorage {
         });
     }
     /**
-   * @returns {Promise<void>}
+     * @returns {Promise<number>}
    */
     ensureSchema() {
         return this.runtime.runPromise(this.ensureSchemaEffect());
@@ -1030,7 +1030,7 @@ export class SqlMessageStorage {
     /**
    * @param {string} statement
    * @param {ReadonlyArray<SqliteParam>} [params]
-   * @returns {Promise<void>}
+     * @returns {Promise<number>}
    */
     execute(statement, params = []) {
         return this.withConnection((connection) => connection.executeRaw(statement, params.map(encodeParam)).pipe(Effect.asVoid));
@@ -1038,7 +1038,7 @@ export class SqlMessageStorage {
     /**
    * @param {string} table
    * @param {Record<string, unknown>} row
-   * @returns {Promise<void>}
+     * @returns {Promise<number>}
    */
     insertIgnore(table, row) {
         const filteredRow = this.filterKnownColumns(table, row);
@@ -1065,14 +1065,27 @@ export class SqlMessageStorage {
    * @param {Record<string, unknown>} patch
    * @param {string} whereSql
    * @param {ReadonlyArray<SqliteParam>} [params]
-   * @returns {Promise<void>}
-   */
+     * @returns {Promise<number>}
+     */
     updateWhere(table, patch, whereSql, params = []) {
         const built = buildUpdateSql(table, this.filterKnownColumns(table, patch), whereSql, params);
         if (!built) {
-            return Promise.resolve();
+            return Promise.resolve(0);
         }
-        return this.execute(built.statement, built.params);
+        // Return the affected-row count from the same conditional statement.
+        // This is the primitive used by durable compare-and-set callers; a
+        // follow-up SELECT would reintroduce the race this result is meant to
+        // close.
+        if (this.dialect === POSTGRES || this.externalSqlite) {
+            return this.queryAllRaw(`${built.statement} RETURNING 1`, built.params)
+                .then((rows) => rows.length);
+        }
+        const client = this.sqlite;
+        // Bun returns the affected-row count from the same synchronous UPDATE
+        // statement. Reading changes() in a second operation is racy when two
+        // adapters share a database connection.
+        const result = client.query(built.statement).run(...built.params.map(encodeParam));
+        return Promise.resolve(Number(result?.changes ?? 0));
     }
     /**
    * @param {string} table

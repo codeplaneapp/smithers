@@ -5,7 +5,7 @@ import { isIntegrationError, makeIntegrationRuntime, readJsonPath, verifySignatu
 import { pathToFileURL } from "node:url";
 import { resolve, dirname, sep, basename } from "node:path";
 import { Effect, Metric } from "effect";
-import { isRunHeartbeatFresh, runWorkflow } from "@smithers-orchestrator/engine";
+import { finalizeCancelledRun, isRunHeartbeatFresh, runWorkflow } from "@smithers-orchestrator/engine";
 import { escapeSmithersDir } from "@smithers-orchestrator/graph/escapeSmithersDir";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
@@ -1132,67 +1132,7 @@ function startServerInternal(opts = {}) {
                         error: { code: "NOT_FOUND", message: "Run not found" },
                     });
                 }
-                if (run.status === "waiting-approval" || run.status === "waiting-timer") {
-                    const cancelledAtMs = nowMs();
-                    const cancelEvent = {
-                        type: "RunCancelled",
-                        runId,
-                        timestampMs: cancelledAtMs,
-                    };
-                    if (run.status === "waiting-timer") {
-                        const nodes = await adapter.listNodes(runId);
-                        for (const node of nodes.filter((entry) => entry.state === "waiting-timer")) {
-                            const attempts = await runPromise(adapter.listAttempts(runId, node.nodeId, node.iteration ?? 0));
-                            const waitingAttempt = attempts.find((attempt) => attempt.state === "waiting-timer");
-                            if (waitingAttempt) {
-                                await adapter.updateAttempt(runId, node.nodeId, node.iteration ?? 0, waitingAttempt.attempt, { state: "cancelled", finishedAtMs: cancelledAtMs });
-                                await adapter.insertNode({
-                                    runId,
-                                    nodeId: node.nodeId,
-                                    iteration: node.iteration ?? 0,
-                                    state: "cancelled",
-                                    lastAttempt: waitingAttempt.attempt,
-                                    updatedAtMs: cancelledAtMs,
-                                    outputTable: node.outputTable ?? "",
-                                    label: node.label ?? null,
-                                });
-                                const timerCancelledEvent = {
-                                    type: "TimerCancelled",
-                                    runId,
-                                    timerId: node.nodeId,
-                                    timestampMs: cancelledAtMs,
-                                };
-                                await adapter.insertEventWithNextSeq({
-                                    runId,
-                                    timestampMs: cancelledAtMs,
-                                    type: "TimerCancelled",
-                                    payloadJson: JSON.stringify(timerCancelledEvent),
-                                });
-                                await runPromise(trackEvent(timerCancelledEvent));
-                            }
-                        }
-                    }
-                    logInfo("cancelling paused run", {
-                        runId,
-                        status: run.status,
-                    }, "server:cancel");
-                    await adapter.updateRun(runId, {
-                        status: "cancelled",
-                        finishedAtMs: cancelledAtMs,
-                        heartbeatAtMs: null,
-                        runtimeOwnerId: null,
-                        cancelRequestedAtMs: null,
-                    });
-                    await adapter.insertEventWithNextSeq({
-                        runId,
-                        timestampMs: cancelledAtMs,
-                        type: "RunCancelled",
-                        payloadJson: JSON.stringify(cancelEvent),
-                    });
-                    await runPromise(trackEvent(cancelEvent));
-                    return sendJson(res, 200, { runId });
-                }
-                if (run.status !== "running" || !isRunHeartbeatFresh(run)) {
+                if (!["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "cancelled", "canceled"].includes(run.status)) {
                     logWarning("cancel rejected for inactive run", {
                         runId,
                         status: run.status,
@@ -1206,9 +1146,9 @@ function startServerInternal(opts = {}) {
                     runId,
                     status: run.status,
                 }, "server:cancel");
-                await adapter.requestRunCancel(runId, nowMs());
-                record?.abort.abort();
-                return sendJson(res, 200, { runId });
+                const claimed = await finalizeCancelledRun(adapter, runId, { now: nowMs() });
+                if (claimed.won) record?.abort.abort();
+                return sendJson(res, 200, { runId, status: claimed.status });
             }
             const runEventsMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/events$/);
             if (method === "GET" && runEventsMatch) {

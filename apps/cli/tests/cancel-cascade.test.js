@@ -219,9 +219,8 @@ describe("cascadeCancelRun (real sqlite store)", () => {
                 expect.objectContaining({ runId: "live-child", action: "cancel-requested" }),
             ]);
             const child = await adapter.getRun("live-child");
-            expect(child.cancelRequestedAtMs ?? 0).toBeGreaterThan(0);
-            // Status is left for the child's engine to settle.
             expect(child.status).toBe("running");
+            expect(child.cancelRequestedAtMs ?? 0).toBeGreaterThan(0);
         }
         finally {
             sqlite.close();
@@ -251,6 +250,42 @@ describe("cascadeCancelRun (real sqlite store)", () => {
             // Terminal rows are untouched — same finishedAtMs, no double flip.
             expect((await adapter.getRun("root")).finishedAtMs).toBe(afterFirst.root.finishedAtMs);
             expect((await adapter.getRun("child")).finishedAtMs).toBe(afterFirst.child.finishedAtMs);
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("the real stale-run cancellation entry point finalizes approval and human waits", async () => {
+        const { sqlite, adapter } = createMemoryDb();
+        try {
+            await insertRun(adapter, "stale-waits", { heartbeatAtMs: stale(), status: "waiting-approval" });
+            await adapter.insertNode({
+                runId: "stale-waits", nodeId: "gate", iteration: 0, state: "waiting-approval",
+                lastAttempt: null, updatedAtMs: Date.now(), outputTable: "", label: "Gate",
+            });
+            await adapter.insertNode({
+                runId: "stale-waits", nodeId: "orphan-gate", iteration: 0, state: "waiting-approval",
+                lastAttempt: null, updatedAtMs: Date.now(), outputTable: "", label: "Orphan gate",
+            });
+            await adapter.insertOrUpdateApproval({
+                runId: "stale-waits", nodeId: "gate", iteration: 0, status: "requested",
+                requestedAtMs: Date.now(), decidedAtMs: null, note: null, decidedBy: null,
+                requestJson: '{"title":"Gate"}', decisionJson: null, autoApproved: false,
+            });
+            await adapter.insertHumanRequest({
+                requestId: "human:stale-waits:ask:0", runId: "stale-waits", nodeId: "ask", iteration: 0,
+                kind: "ask", status: "pending", prompt: "Continue?", schemaJson: null, optionsJson: null,
+                responseJson: null, requestedAtMs: Date.now(), answeredAtMs: null, answeredBy: null, timeoutAtMs: null,
+            });
+            await cascadeCancelRun(adapter, "stale-waits");
+            expect((await adapter.getRun("stale-waits")).status).toBe("cancelled");
+            expect(await adapter.listPendingApprovals("stale-waits")).toEqual([]);
+            expect((await adapter.getApproval("stale-waits", "gate", 0)).status).toBe("denied");
+            expect((await adapter.getNode("stale-waits", "gate", 0)).state).toBe("cancelled");
+            expect((await adapter.getNode("stale-waits", "orphan-gate", 0)).state).toBe("cancelled");
+            expect((await adapter.getHumanRequest("human:stale-waits:ask:0")).status).toBe("cancelled");
+            expect((await adapter.listEventHistory("stale-waits", { afterSeq: -1, limit: 50 })).map((row) => row.type)).toContain("RunCancelled");
         }
         finally {
             sqlite.close();

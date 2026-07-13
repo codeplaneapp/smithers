@@ -40,7 +40,7 @@ import { sleep } from "./sleep.js";
 import { getTableName, isTable } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { Cause, Duration, Effect, Exit, Fiber, Metric, Schedule } from "effect";
-import { attemptDuration, cacheHits, cacheMisses, nodeDuration, promptSizeBytes, responseSizeBytes, runDuration, runsResumedTotal, schedulerConcurrencyUtilization, schedulerWaitDuration, trackEvent, } from "@smithers-orchestrator/observability/metrics";
+import { approvalWaitDuration, attemptDuration, cacheHits, cacheMisses, nodeDuration, promptSizeBytes, responseSizeBytes, runDuration, runsResumedTotal, schedulerConcurrencyUtilization, schedulerWaitDuration, trackEvent, updateAsyncExternalWaitPending, } from "@smithers-orchestrator/observability/metrics";
 import { runScorersAsync } from "@smithers-orchestrator/scorers/run-scorers";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -53,7 +53,8 @@ import { platform } from "node:os";
 import { annotateSmithersTrace, smithersSpanNames, withSmithersSpan, } from "@smithers-orchestrator/observability";
 import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { hashCapabilityRegistry } from "@smithers-orchestrator/agents/capability-registry";
-import { cancelPendingTimersBridge, executeTaskBridgeEffect, isBridgeManagedTimerTask as isTimerTask, resolveDeferredTaskStateBridge, } from "./effect/workflow-bridge.js";
+import { bridgeApprovalResolve, bridgeWaitForEventResolve, cancelPendingTimersBridge, executeTaskBridgeEffect, isBridgeManagedTimerTask as isTimerTask, resolveDeferredTaskStateBridge, } from "./effect/workflow-bridge.js";
+import { parseWaitForEventAttemptSnapshot } from "@smithers-orchestrator/db/waitForEventAttempt";
 import { AlertRuntime } from "./alert-runtime.js";
 import { attachSandboxComputeFns, attachSubflowComputeFns } from "./task-compute-fns.js";
 import { buildCacheScopeIdentity, isFreshCacheRow, normalizeCacheScope } from "./cache-policy.js";
@@ -2953,6 +2954,226 @@ async function cancelStaleAttempts(adapter, runId) {
         }
     }
 }
+
+/**
+ * Make cancellation terminal for every external wait owned by the run. The
+ * status write can race the approval/human request rows, so leaving those rows
+ * pending makes a fresh monitor advertise an action that can never be resumed.
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
+async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(), eventBus, resolveWaiters = true, onPersisted) {
+    const deferredWaiters = [];
+    const existingEventRows = await Promise.all([
+        "NodeCancelled", "TimerCancelled", "ApprovalDenied",
+    ].map((type) => Effect.runPromise(adapter.listEventsByType(runId, type))));
+    const existingEvents = existingEventRows.flat();
+    const emittedKeys = new Set(existingEvents.map((row) => {
+        let payload = {};
+        try { payload = JSON.parse(row.payloadJson ?? "{}"); } catch { /* retain type-only key */ }
+        return `${row.type}:${payload.nodeId ?? ""}:${payload.iteration ?? ""}:${payload.attempt ?? ""}:${payload.timerId ?? ""}`;
+    }));
+    const emitCancellationEvent = async (event) => {
+        const key = `${event.type}:${event.nodeId ?? ""}:${event.iteration ?? ""}:${event.attempt ?? ""}:${event.timerId ?? ""}`;
+        if (emittedKeys.has(key)) return;
+        emittedKeys.add(key);
+        if (eventBus) {
+            await Effect.runPromise(eventBus.emitEventWithPersist(event));
+        }
+        else {
+            await Effect.runPromise(adapter.insertEventWithNextSeq({ runId, timestampMs: event.timestampMs, type: event.type, payloadJson: JSON.stringify(event) }));
+            onPersisted?.(event);
+        }
+    };
+    const nodes = await Effect.runPromise(adapter.listNodes(runId));
+    const nodeByKey = new Map(nodes.map((node) => [`${node.nodeId}:${node.iteration ?? 0}`, node]));
+    const allAttempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
+    const waitingNodes = nodes.filter((node) => node.state === "in-progress" ||
+        node.state === "waiting-approval" ||
+        node.state === "waiting_approval" ||
+        node.state === "waiting-event" ||
+        node.state === "waiting-timer");
+    const cancelledAttemptKeys = new Set();
+    for (const attempt of allAttempts.filter((entry) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(entry.state))) {
+        const key = `${attempt.nodeId}:${attempt.iteration ?? 0}`;
+        cancelledAttemptKeys.add(key);
+        await Effect.runPromise(adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration ?? 0, attempt.attempt, {
+            state: "cancelled",
+            finishedAtMs: cancelledAtMs,
+        }));
+        const nodeEvent = { type: "NodeCancelled", runId, nodeId: attempt.nodeId, iteration: attempt.iteration ?? 0, attempt: attempt.attempt, reason: "run-cancelled", timestampMs: cancelledAtMs };
+        await emitCancellationEvent(nodeEvent);
+        if (attempt.state === "waiting-timer") {
+            const timerEvent = { type: "TimerCancelled", runId, timerId: attempt.nodeId, timestampMs: cancelledAtMs };
+            await emitCancellationEvent(timerEvent);
+        }
+        if (attempt.state === "waiting-event") {
+            const waitResolution = {
+                signalName: "__run_cancelled__",
+                correlationId: null,
+                payloadJson: JSON.stringify({ cancelled: true }),
+                seq: -1,
+                receivedAtMs: cancelledAtMs,
+            };
+            if (resolveWaiters) {
+                await bridgeWaitForEventResolve(adapter, runId, attempt.nodeId, attempt.iteration ?? 0, waitResolution).catch(() => undefined);
+            }
+            else {
+                deferredWaiters.push({ kind: "event", nodeId: attempt.nodeId, iteration: attempt.iteration ?? 0, resolution: waitResolution });
+            }
+        }
+        const node = nodeByKey.get(key);
+        if (node) {
+            await Effect.runPromise(adapter.insertNode({ ...node, state: "cancelled", lastAttempt: attempt.attempt, updatedAtMs: cancelledAtMs }));
+        }
+    }
+    const approvals = await Effect.runPromise(adapter.listPendingApprovals(runId));
+    for (const approval of approvals) {
+        const existingApproval = await Effect.runPromise(adapter.getApproval(runId, approval.nodeId, approval.iteration));
+        await Effect.runPromise(adapter.insertOrUpdateApproval({
+            runId,
+            nodeId: approval.nodeId,
+            iteration: approval.iteration,
+            status: "denied",
+            requestedAtMs: existingApproval?.requestedAtMs ?? approval.requestedAtMs ?? cancelledAtMs,
+            decidedAtMs: cancelledAtMs,
+            note: "Run cancelled",
+            decidedBy: "smithers:cancel",
+            requestJson: existingApproval?.requestJson ?? approval.requestJson ?? null,
+            decisionJson: JSON.stringify({ cancelled: true }),
+            autoApproved: false,
+        }));
+        if (existingApproval?.requestedAtMs) {
+            await Effect.runPromise(Effect.ignore(Metric.update(approvalWaitDuration, Math.max(0, cancelledAtMs - existingApproval.requestedAtMs))));
+        }
+        const approvalResolution = {
+            approved: false,
+            note: "Run cancelled",
+            decidedBy: "smithers:cancel",
+            decisionJson: JSON.stringify({ cancelled: true }),
+        };
+        if (resolveWaiters) {
+            await bridgeApprovalResolve(adapter, runId, approval.nodeId, approval.iteration, approvalResolution).catch(() => undefined);
+        }
+        else {
+            deferredWaiters.push({ kind: "approval", nodeId: approval.nodeId, iteration: approval.iteration, resolution: approvalResolution });
+        }
+        const approvalEvent = { type: "ApprovalDenied", runId, nodeId: approval.nodeId, iteration: approval.iteration, timestampMs: cancelledAtMs };
+        await emitCancellationEvent(approvalEvent);
+        let asyncApproval = false;
+        try { asyncApproval = JSON.parse(existingApproval?.requestJson ?? approval.requestJson ?? "{}").waitAsync === true; } catch { /* malformed request is not async */ }
+        if (existingApproval?.status === "requested" && asyncApproval) {
+            await Effect.runPromise(updateAsyncExternalWaitPending("approval", -1));
+        }
+    }
+    const humanRequests = await Effect.runPromise(adapter.listPendingHumanRequests());
+    for (const request of humanRequests) {
+        if (request.runId === runId) {
+            await Effect.runPromise(adapter.cancelHumanRequest(request.requestId));
+        }
+    }
+    // The approval/request rows are separate from node state. A crash or a
+    // partially committed wait can therefore leave a durable waiting node
+    // without a matching external-wait row; terminal cancellation must still
+    // close that node so fresh monitors and resumes cannot observe a live gate.
+    for (const node of waitingNodes) {
+        const attempts = await Effect.runPromise(adapter.listAttempts(runId, node.nodeId, node.iteration ?? 0));
+        for (const attempt of attempts.filter((entry) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(entry.state))) {
+            await Effect.runPromise(adapter.updateAttempt(runId, node.nodeId, node.iteration ?? 0, attempt.attempt, {
+                state: "cancelled",
+                finishedAtMs: cancelledAtMs,
+            }));
+        }
+        await Effect.runPromise(adapter.insertNode({
+            ...node,
+            state: "cancelled",
+            updatedAtMs: cancelledAtMs,
+        }));
+        if (!cancelledAttemptKeys.has(`${node.nodeId}:${node.iteration ?? 0}`)) {
+            await emitCancellationEvent({
+                type: "NodeCancelled",
+                runId,
+                nodeId: node.nodeId,
+                iteration: node.iteration ?? 0,
+                attempt: node.lastAttempt ?? null,
+                reason: "run-cancelled",
+                timestampMs: cancelledAtMs,
+            });
+        }
+    }
+    return deferredWaiters;
+}
+
+/**
+ * Complete a cancellation that is being applied by a caller that does not
+ * have a live engine (CLI/Gateway waiting-run paths). Keeping this here makes
+ * the durable wait cleanup and the cancellation event/metric inseparable.
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {{ now?: number; eventBus?: EventBus; errorJson?: string | null }} [options]
+ */
+export async function finalizeCancelledRun(adapter, runId, options = {}) {
+    let cancelledAtMs = options.now ?? nowMs();
+    let claimed = false;
+    let insertedCancellationEvent = false;
+    const persistedEvents = [];
+    let deferredWaiters = [];
+    let current;
+    await adapter.withTransaction("cancel-finalization", Effect.promise(async () => {
+        claimed = await Effect.runPromise(adapter.claimRunCancellation(runId, cancelledAtMs, options.errorJson ?? null));
+        current = await Promise.resolve(adapter.getRun(runId));
+        if (current && (current.status === "cancelled" || current.status === "canceled")) {
+            // The terminal row retains cancelRequestedAtMs as a durable
+            // finalization marker. Any caller can safely replay this entire
+            // transaction after a crash, including legacy terminal rows.
+            if (typeof current.finishedAtMs === "number") cancelledAtMs = current.finishedAtMs;
+            deferredWaiters = await cancelPendingExternalWaits(adapter, runId, cancelledAtMs, undefined, false, (event) => persistedEvents.push(event));
+            const cancelEvent = { type: "RunCancelled", runId, timestampMs: cancelledAtMs };
+            const existing = await Effect.runPromise(adapter.listEventsByType(runId, "RunCancelled"));
+            const legacy = await Effect.runPromise(adapter.listEventsByType(runId, "RunCanceled"));
+            if (existing.length === 0 && legacy.length === 0) {
+                await Effect.runPromise(adapter.insertEventWithNextSeq({
+                    runId,
+                    timestampMs: cancelledAtMs,
+                    type: cancelEvent.type,
+                    payloadJson: JSON.stringify(cancelEvent),
+                }));
+                persistedEvents.push(cancelEvent);
+                insertedCancellationEvent = true;
+            }
+        }
+    }));
+    if (!current) return { runId, won: false, status: "not-found", terminalStatus: undefined, repaired: false };
+    if (current.status !== "cancelled" && current.status !== "canceled") {
+        return { runId, won: false, status: "already-terminal", terminalStatus: current.status, repaired: false };
+    }
+    const cancelEvent = { type: "RunCancelled", runId, timestampMs: cancelledAtMs };
+    if (!options.eventBus) {
+        for (const event of persistedEvents) await Effect.runPromise(trackEvent(event));
+    }
+    for (const waiter of deferredWaiters) {
+        if (waiter.kind === "event") {
+            await bridgeWaitForEventResolve(adapter, runId, waiter.nodeId, waiter.iteration, waiter.resolution).catch(() => undefined);
+        }
+        else {
+            await bridgeApprovalResolve(adapter, runId, waiter.nodeId, waiter.iteration, waiter.resolution).catch(() => undefined);
+        }
+    }
+    if (options.eventBus && insertedCancellationEvent) {
+        // The durable row was inserted above; notify in-process subscribers
+        // without persisting a second row.
+        await Effect.runPromise(options.eventBus.emitAndTrack(cancelEvent));
+    }
+    return {
+        won: claimed,
+        status: claimed ? "cancelled" : "already-terminal",
+        terminalStatus: "cancelled",
+        repaired: true,
+        runId,
+        // `won` is the claim result; repaired tells callers that a legacy or
+        // crash-interrupted terminal run was made fully quiescent.
+    };
+}
 /**
  * @param {SmithersDb} adapter
  * @param {BunSQLiteDatabase} db
@@ -3005,13 +3226,16 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     const removeAbortForwarder = wireAbortSignal(taskAbortController, signal);
     const taskSignal = taskAbortController.signal;
     const startedAtMs = nowMs();
+    const executionOwnerId = (await Effect.runPromise(adapter.getRun(runId)))?.runtimeOwnerId ?? null;
     let taskCompleted = false;
     let taskExecutionReturned = false;
     let heartbeatClosed = false;
     let heartbeatWriteInFlight = false;
-    let heartbeatPendingDataJson = null;
-    let heartbeatPendingDataSizeBytes = 0;
+    let heartbeatPendingDataJson = previousHeartbeat === null ? null : JSON.stringify(previousHeartbeat);
+    let heartbeatPendingDataSizeBytes = heartbeatPendingDataJson === null ? 0 : Buffer.byteLength(heartbeatPendingDataJson, "utf8");
     let heartbeatPendingAtMs = startedAtMs;
+    let heartbeatEvidenceAtMs = startedAtMs;
+    let heartbeatTimeoutWon = false;
     let heartbeatHasPendingWrite = false;
     let heartbeatLastPersistedWriteAtMs = 0;
     let heartbeatLastReceivedAtMs = null;
@@ -3045,7 +3269,17 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             : Math.max(0, heartbeatAtMs - heartbeatLastReceivedAtMs);
         heartbeatLastReceivedAtMs = heartbeatAtMs;
         try {
-            await Effect.runPromise(adapter.heartbeatAttempt(runId, desc.nodeId, desc.iteration, attemptNo, heartbeatAtMs, heartbeatDataJson));
+            const persisted = await Effect.runPromise(adapter.heartbeatAttempt(runId, desc.nodeId, desc.iteration, attemptNo, heartbeatAtMs, heartbeatDataJson, executionOwnerId));
+            if (!persisted) {
+                // A stale owner/attempt is not liveness evidence. In particular,
+                // do not let a callback from a previous execution keep the local
+                // watchdog alive or emit a misleading heartbeat event.
+                heartbeatHasPendingWrite = false;
+                heartbeatEvidenceAtMs = Math.max(startedAtMs, heartbeatLastPersistedWriteAtMs);
+                return;
+            }
+            heartbeatPendingAtMs = heartbeatAtMs;
+            heartbeatEvidenceAtMs = heartbeatAtMs;
             heartbeatLastPersistedWriteAtMs = nowMs();
             logDebug("task heartbeat recorded", {
                 runId,
@@ -3097,8 +3331,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             return;
         }
         const heartbeatAtMs = nowMs();
-        let heartbeatDataJson = null;
-        let dataSizeBytes = 0;
+        let heartbeatDataJson = heartbeatPendingDataJson;
+        let dataSizeBytes = heartbeatPendingDataSizeBytes;
         try {
             if (data !== undefined) {
                 const serialized = serializeHeartbeatPayload(data);
@@ -3120,6 +3354,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             return;
         }
         heartbeatPendingAtMs = heartbeatAtMs;
+        heartbeatEvidenceAtMs = heartbeatAtMs;
         heartbeatPendingDataJson = heartbeatDataJson;
         heartbeatPendingDataSizeBytes = dataSizeBytes;
         heartbeatHasPendingWrite = true;
@@ -3210,6 +3445,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         ? Math.max(0, desc.cachePolicy.ttlMs)
         : null;
     let heartbeatWatchdogFiber = null;
+    let executionStarted = false;
     try {
         if (taskSignal.aborted) {
             throw makeAbortError();
@@ -3227,7 +3463,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         await annotateTaskSpan({ status: "running" });
         if (desc.heartbeatTimeoutMs) {
             heartbeatWatchdogFiber = Effect.runFork(Effect.repeat(Effect.suspend(() => {
-                const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatPendingAtMs);
+                const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatEvidenceAtMs);
                 const staleForMs = nowMs() - lastHeartbeatAtMs;
                 if (staleForMs <= desc.heartbeatTimeoutMs) {
                     return Effect.void;
@@ -3259,6 +3495,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     timeoutMs: desc.heartbeatTimeoutMs,
                     timestampMs: nowMs(),
                 });
+                heartbeatTimeoutWon = true;
                 taskAbortController.abort(timeoutError);
                 return Effect.fail(timeoutError);
             }), Schedule.spaced(Duration.millis(TASK_HEARTBEAT_TIMEOUT_CHECK_MS))).pipe(Effect.flatMap(() => Effect.never)));
@@ -3441,6 +3678,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
      * @param {"stdout" | "stderr"} _stream
      */
         let emitOutput = (_text, _stream) => { };
+        executionStarted = true;
+        heartbeatPendingAtMs = nowMs();
         if (!payload) {
             const allAgents = Array.isArray(desc.agent) ? desc.agent : (desc.agent ? [desc.agent] : []);
             const agents = disabledAgents ? allAgents.filter((a) => !disabledAgents.has(a)) : allAgents;
@@ -4508,6 +4747,14 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 payload = desc.staticPayload;
             }
         }
+        // A completion and an abort can settle in the same event-loop turn.
+        // Promise.race is allowed to pick the completion in that tie, but a
+        // watchdog cancellation is still authoritative: otherwise a task that
+        // crossed its heartbeat deadline can be recorded as successfully
+        // finished instead of entering the normal timeout/retry path.
+        if (taskSignal.aborted) {
+            throw taskSignal.reason instanceof Error ? taskSignal.reason : makeAbortError();
+        }
         payload = stripAutoColumns(payload);
         const payloadWithKeys = buildOutputRow(desc.outputTable, runId, desc.nodeId, desc.iteration, payload);
         let validation = validateOutput(desc.outputTable, payloadWithKeys);
@@ -4741,15 +4988,37 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             throw toInvalidOutputError(validation.error, schemaRetry);
         }
         payload = validation.data;
+        // A callback can resolve after the watchdog's abort boundary (for
+        // example a Promise that does not observe AbortSignal). Re-check the
+        // absolute evidence deadline immediately before any terminal claim so
+        // late success cannot bypass timeout/retry handling.
+        if (desc.heartbeatTimeoutMs && nowMs() - heartbeatEvidenceAtMs > desc.heartbeatTimeoutMs) {
+            heartbeatTimeoutWon = true;
+            throw new SmithersError("TASK_HEARTBEAT_TIMEOUT", `Task ${desc.nodeId} exceeded its heartbeat timeout before completion.`, {
+                nodeId: desc.nodeId,
+                iteration: desc.iteration,
+                attempt: attemptNo,
+                timeoutMs: desc.heartbeatTimeoutMs,
+            });
+        }
         taskExecutionReturned = true;
         await Effect.runPromise(eventBus.flush());
         // Reuse the resolved taskRoot for JJ pointer capture to avoid recomputing.
         const jjPointer = await Effect.runPromise(getJjPointer(taskRoot).pipe(Effect.provide(getPlatformLayer())));
         await waitForHeartbeatWriteDrain();
         await flushHeartbeat(true);
+        // The watchdog may win while the result is being finalized. Never let
+        // a late successful value cross that durable terminal boundary.
+        if (taskSignal.aborted || heartbeatTimeoutWon) {
+            throw taskSignal.reason ?? makeAbortError();
+        }
         taskCompleted = true;
         const completedAtMs = nowMs();
-        await adapter.withTransaction("task-completion", Effect.gen(function* () {
+        const completionClaimed = await adapter.withTransaction("task-completion", Effect.gen(function* () {
+            const claimed = yield* adapter.claimAttemptCompletion(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, completedAtMs);
+            if (!claimed) {
+                return false;
+            }
             yield* adapter.upsertOutputRow(desc.outputTable, { runId, nodeId: desc.nodeId, iteration: desc.iteration }, payload);
             if (stepCacheEnabled && cacheKey && !cached) {
                 yield* adapter.insertCache({
@@ -4786,7 +5055,11 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 outputTable: desc.outputTableName,
                 label: desc.label ?? null,
             });
+            return true;
         }));
+        if (!completionClaimed) {
+            return;
+        }
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "NodeFinished",
             runId,
@@ -4873,6 +5146,11 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             attemptMeta.discardResumeSession = true;
         }
         if (!heartbeatTimeoutError && (taskSignal.aborted || isAbortError(err))) {
+            const currentAttempt = await Effect.runPromise(adapter.getAttempt(runId, desc.nodeId, desc.iteration, attemptNo));
+            if (currentAttempt?.state === "cancelled") {
+                await annotateTaskSpan({ status: "cancelled" });
+                return;
+            }
             await waitForHeartbeatWriteDrain();
             await flushHeartbeat(true);
             taskCompleted = true;
@@ -4917,6 +5195,11 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     ? effectiveError.message
                     : String(effectiveError),
             }, "engine:task");
+            return;
+        }
+        const currentAttempt = await Effect.runPromise(adapter.getAttempt(runId, desc.nodeId, desc.iteration, attemptNo));
+        if (currentAttempt?.state === "cancelled") {
+            await annotateTaskSpan({ status: "cancelled" });
             return;
         }
         await waitForHeartbeatWriteDrain();
@@ -6287,7 +6570,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             // Graceful pause: the driver already drained in-flight tasks and left
             // remaining work pending. Park the run resumably — do NOT set
             // finishedAtMs, and clear the pause request so a resume starts clean.
-            await Effect.runPromise(adapter.updateRun(runId, {
+            const paused = await Effect.runPromise(adapter.updateRunIfNotCancelled(runId, {
                 status: "paused",
                 heartbeatAtMs: null,
                 runtimeOwnerId: null,
@@ -6296,6 +6579,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 hijackRequestedAtMs: null,
                 hijackTarget: null,
             }));
+            if (!paused) {
+                const authoritative = await Effect.runPromise(adapter.getRun(runId));
+                if (authoritative?.status === "cancelled" || authoritative?.status === "canceled") {
+                    const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+                    await annotateRunSpan({ status: cancellation.terminalStatus ?? authoritative.status });
+                    return { runId, status: cancellation.terminalStatus ?? authoritative.status };
+                }
+            }
             await Effect.runPromise(eventBus.emitEventWithPersist({
                 type: "RunStatusChanged",
                 runId,
@@ -6313,30 +6604,18 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 }
                 : null;
             await waitForAbortedTasksToSettle();
-            await cancelPendingTimersBridge(adapter, runId, eventBus, "run-cancelled");
-            await Effect.runPromise(adapter.updateRun(runId, {
-                status: "cancelled",
-                finishedAtMs: nowMs(),
-                heartbeatAtMs: null,
-                runtimeOwnerId: null,
-                cancelRequestedAtMs: null,
-                hijackRequestedAtMs: null,
-                hijackTarget: null,
+            const cancellation = await finalizeCancelledRun(adapter, runId, {
+                eventBus,
                 errorJson: hijackError ? JSON.stringify(hijackError) : null,
-            }));
-            await Effect.runPromise(eventBus.emitEventWithPersist({
-                type: "RunCancelled",
-                runId,
-                timestampMs: nowMs(),
-            }));
-            await annotateRunSpan({ status: "cancelled" });
-            return { runId, status: "cancelled" };
+            });
+            await annotateRunSpan({ status: cancellation.terminalStatus ?? cancellation.status });
+            return { runId, status: cancellation.terminalStatus ?? cancellation.status };
         }
         if (result.status === "failed") {
             const errorInfo = errorToJson(result.error ?? driverTaskError);
             if (runOwnedByCurrentProcess) {
                 await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
-                await Effect.runPromise(adapter.updateRun(runId, {
+                await Effect.runPromise(adapter.updateRunIfNotCancelled(runId, {
                     status: "failed",
                     finishedAtMs: nowMs(),
                     heartbeatAtMs: null,
@@ -6356,15 +6635,12 @@ async function runWorkflowBodyDriver(workflow, opts) {
             await annotateRunSpan({ status: "failed" });
             return { runId, status: "failed", error: errorInfo };
         }
-        await Effect.runPromise(adapter.updateRun(runId, {
-            status: "finished",
-            finishedAtMs: nowMs(),
-            heartbeatAtMs: null,
-            runtimeOwnerId: null,
-            cancelRequestedAtMs: null,
-            hijackRequestedAtMs: null,
-            hijackTarget: null,
-        }));
+        const completedAtMs = nowMs();
+        const completed = await Effect.runPromise(adapter.completeRun(runId, runtimeOwnerId, completedAtMs));
+        if (!completed) {
+            const authoritativeRun = await Effect.runPromise(adapter.getRun(runId));
+            return { runId, status: authoritativeRun?.status ?? "cancelled" };
+        }
         // A `finished` run can still have tolerated child failures (continueOnFail
         // tasks, transient agent failures) that the binary status cannot express.
         // Carry the count onto the result and the RunFinished event row so callers
@@ -6570,7 +6846,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             runOwnedByCurrentProcess = true;
         }
         else {
-            await Effect.runPromise(adapter.updateRun(runId, {
+            await Effect.runPromise(adapter.updateRunIfNotCancelled(runId, {
                 status: "running",
                 startedAtMs: existingRun.startedAtMs ?? nowMs(),
                 finishedAtMs: null,
@@ -6915,24 +7191,12 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 }
                 : errorToJson(err);
             await waitForAbortedTasksToSettle();
-            await cancelPendingTimersBridge(adapter, runId, eventBus, "run-cancelled");
-            await Effect.runPromise(adapter.updateRun(runId, {
-                status: "cancelled",
-                finishedAtMs: nowMs(),
-                heartbeatAtMs: null,
-                runtimeOwnerId: null,
-                cancelRequestedAtMs: null,
-                hijackRequestedAtMs: null,
-                hijackTarget: null,
+            const cancellation = await finalizeCancelledRun(adapter, runId, {
+                eventBus,
                 errorJson: JSON.stringify(hijackError),
-            }));
-            await Effect.runPromise(eventBus.emitEventWithPersist({
-                type: "RunCancelled",
-                runId,
-                timestampMs: nowMs(),
-            }));
-            await annotateRunSpan({ status: "cancelled" });
-            return { runId, status: "cancelled" };
+            });
+            await annotateRunSpan({ status: cancellation.terminalStatus ?? cancellation.status });
+            return { runId, status: cancellation.terminalStatus ?? cancellation.status };
         }
         logError("workflow run failed with unhandled error", {
             runId,
@@ -7076,6 +7340,7 @@ export const __engineInternals = {
     isQuotaTaskFailure,
     cancelInProgress,
     cancelStaleAttempts,
+    cancelPendingExternalWaits,
     ensureWorktree,
     resolveWorktreeBaseTip,
     resolveWorktreeFetchTtlMs,

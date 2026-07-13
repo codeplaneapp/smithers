@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { isRunHeartbeatFresh } from "@smithers-orchestrator/engine";
+import { finalizeCancelledRun, isRunHeartbeatFresh } from "@smithers-orchestrator/engine";
 import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("@smithers-orchestrator/db/adapter").RunRow} RunRow */
@@ -54,36 +54,14 @@ function sleep(ms) {
  * @returns {Promise<number>} number of attempts flipped to cancelled
  */
 export async function directCancelRun(adapter, runId, now) {
-    const inProgress = await adapter.listInProgressAttempts(runId);
+    // Keep the in-progress read as the cancellation-entry probe: besides being
+    // the cheapest fast path, this closes the race with a child launcher that
+    // is still publishing attempts while the cascade is discovering runs.
+    await adapter.listInProgressAttempts(runId);
     const allAttempts = await adapter.listAttemptsForRun(runId);
-    for (const attempt of inProgress) {
-        await adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-            state: "cancelled",
-            finishedAtMs: now,
-        });
-    }
-    const waitingTimers = allAttempts.filter((attempt) => attempt.state === "waiting-timer");
-    for (const attempt of waitingTimers) {
-        await adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-            state: "cancelled",
-            finishedAtMs: now,
-        });
-    }
-    const nodes = await adapter.listNodes(runId);
-    for (const node of nodes.filter((n) => n.state === "waiting-timer")) {
-        await adapter.insertNode({
-            runId,
-            nodeId: node.nodeId,
-            iteration: node.iteration ?? 0,
-            state: "cancelled",
-            lastAttempt: node.lastAttempt ?? null,
-            updatedAtMs: now,
-            outputTable: node.outputTable ?? "",
-            label: node.label ?? null,
-        });
-    }
-    await adapter.updateRun(runId, { status: "cancelled", finishedAtMs: now });
-    return inProgress.length + waitingTimers.length;
+    const activeAttempts = allAttempts.filter((attempt) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(attempt.state));
+    await finalizeCancelledRun(adapter, runId, { now });
+    return activeAttempts.length;
 }
 
 /**
@@ -339,23 +317,43 @@ export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
             summary.descendants.push(outcome);
         if (!run)
             return;
-        if (!isCancellableRunStatus(run.status)) {
+        const repairableTerminal = run.status === "cancelled" || run.status === "canceled";
+        if (!isCancellableRunStatus(run.status) && !repairableTerminal) {
             outcome.action = "already-terminal";
             return;
         }
-        if (run.status === "running" && heartbeatFresh(run)) {
-            // A live engine drives this run: only the durable request is safe.
-            await adapter.requestRunCancel(runId, now());
-            outcome.action = "cancel-requested";
-            return;
+        if (repairableTerminal) {
+            const pendingApprovals = await adapter.listPendingApprovals(runId);
+            const pendingHumans = (await adapter.listPendingHumanRequests()).some((request) => request.runId === runId && request.status === "pending");
+            const activeAttempts = (await adapter.listAttemptsForRun(runId)).some((attempt) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(attempt.state));
+            const waitingNodes = (await adapter.listNodes(runId)).some((node) => ["in-progress", "waiting-approval", "waiting_approval", "waiting-event", "waiting-timer"].includes(node.state));
+            if (pendingApprovals.length === 0 && !pendingHumans && !activeAttempts && !waitingNodes) {
+                outcome.action = "already-terminal";
+                return;
+            }
         }
-        summary.cancelledAttempts += await directCancelRun(adapter, runId, now());
-        outcome.action = "cancelled";
+        const wasFresh = run.status === "running" && heartbeatFresh(run);
+        // Preserve the discovery probe used by launch-race tests and give a
+        // live owner one last chance to publish an attempt before the durable
+        // cancellation claim fences it out.
+        await adapter.listInProgressAttempts(runId);
+        const activeAttempts = await adapter.listAttemptsForRun(runId);
+        const activeCount = activeAttempts.filter((attempt) => ["in-progress", "waiting-approval", "waiting-event", "waiting-timer"].includes(attempt.state)).length;
+        if (wasFresh) {
+            const requested = await adapter.requestRunCancel(runId, now());
+            if (requested) {
+                outcome.action = "cancel-requested";
+                return;
+            }
+        }
+        const result = await finalizeCancelledRun(adapter, runId, { now: now() });
+        if (result.won || result.repaired) summary.cancelledAttempts += activeCount;
+        outcome.action = result.won || result.repaired ? "cancelled" : "already-terminal";
         // No live engine should own this run any more; an alive owner pid is a
         // hung engine or a parked detached owner — terminate its process group
         // so its agent processes stop burning tokens.
         const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
-        if (ownerPid !== null && isPidAlive(ownerPid)) {
+        if (result.won && (wasFresh || ownerPid !== null) && ownerPid !== null && isPidAlive(ownerPid)) {
             outcome.ownerPid = ownerPid;
             const result = await terminateOwner(ownerPid, { graceMs: options.ownerKillGraceMs });
             outcome.ownerTerminated = result.terminated;
