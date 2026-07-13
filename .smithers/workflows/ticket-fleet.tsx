@@ -222,15 +222,6 @@ const candidateSchema = z.object({
   summary: z.string().default(""),
 });
 type Candidate = z.infer<typeof candidateSchema>;
-// Luna writes the atomic emoji + conventional-commit message for each lane's
-// fix, so landed history reads like hand-authored work instead of a templated
-// "resolve tracked issue" stub.
-const commitMessageSchema = z.object({
-  issueNumber: z.number().int(),
-  subject: z.string().min(10).max(100),
-  body: z.string().default(""),
-});
-type CommitMessage = z.infer<typeof commitMessageSchema>;
 const reviewFields = {
   issueNumber: z.number().int(),
   headSha: z.string(),
@@ -358,7 +349,6 @@ const {
   tfMergeApproval: approvalDecisionSchema,
   tfSetup: setupSchema,
   tfImplementation: implementationSchema,
-  tfCommitMessage: commitMessageSchema,
   tfCandidate: candidateSchema,
   tfReviewSeat: reviewSeatSchema,
   tfReview: reviewSchema,
@@ -1266,20 +1256,16 @@ function implementPrompt(issue: Issue, triage: Triage, plan: Plan | undefined, r
       ? "Research and an implementation plan for this issue were most likely already posted as GitHub comments by an earlier run. Read them first with `gh issue view " + issue.number + " --repo " + reusePriorWork.repo + " --comments` and follow the existing plan. Do NOT redo research or write a new plan; go straight to implementing the smallest complete change. If no prior plan comment exists, implement directly."
       : (!plan ? "No formal plan: implement directly, smallest complete change." : ""),
     feedback ? "Previous review / local-gate feedback to address:\n" + feedback : "",
-    "Add focused tests. Follow repo conventions (CLAUDE.md/AGENTS.md). Do not commit, push, alter VCS metadata, or touch files outside this worktree. Return an accurate summary.",
+    "Add focused tests. Follow repo conventions (CLAUDE.md/AGENTS.md). Do not touch files outside this worktree.",
+    // The engine rebases each lane worktree onto origin/main between frames and
+    // `git rebase` hard-fails on a dirty tree ("cannot rebase: You have unstaged
+    // changes"), which wedges the lane in a retry loop. So the agent must leave
+    // the worktree CLEAN: it commits its own work before returning.
+    "When you are done, COMMIT your work in this worktree as exactly ONE atomic commit, so the worktree is left clean (`git status --porcelain` empty).",
+    "Stage only your own changes (`git add -- <paths you touched>`), then commit. If you end up with several commits, squash them into one (`git reset --soft " + "$(git merge-base HEAD origin/main)" + "` then commit once).",
+    "Commit message: an emoji, then a conventional-commit subject describing what the change does (e.g. \"🐛 fix(gateway): reject cross-origin PTY upgrades\"), then a blank line, then 1-3 plain sentences on the root cause and the fix, then a blank line, then the trailer \"Fixes #" + issue.number + "\". No em-dashes, no marketing.",
+    "Do NOT push, do NOT rebase, and do NOT otherwise alter VCS metadata (no branch/tag/remote changes). Just the one commit. Return an accurate summary.",
   ].filter(Boolean).join("\n");
-}
-function commitMessagePrompt(issue: Issue): string {
-  return [
-    UNTRUSTED,
-    "Write the commit message for the fix just implemented in this worktree (cwd) for issue #" + issue.number + " (" + JSON.stringify(issue.title) + ").",
-    "Inspect the actual change first: `git status --porcelain` and `git diff` (the edits are uncommitted).",
-    "Repo convention: an emoji, then a conventional-commit subject, e.g. \"🐛 fix(gateway): reject cross-origin PTY upgrades\" or \"✨ feat(cli): add ui command\".",
-    "subject: the full emoji + conventional-commit subject line, under 100 characters, describing what the change actually does (not the issue number).",
-    "body: 1-3 plain sentences on the root cause and the fix. No bullet lists, no marketing, no em-dashes. Leave empty if the subject says it all.",
-    "Do not include a Fixes/Refs trailer or a Co-Authored-By line; those are appended automatically. Do not commit or edit any files.",
-    "Set issueNumber to exactly " + issue.number + ".",
-  ].join("\n");
 }
 function reviewPrompt(issue: Issue, candidate: { headSha: string; changedPaths: string[]; reviewDiff: string }, phase: string): string {
   return [
@@ -1303,42 +1289,32 @@ async function setupWorktree(issueNumber: number, cwd: string): Promise<Setup> {
     summary: result.exitCode === 0 ? "Dependencies ready." : (result.stderr || result.stdout).slice(-8_000),
   };
 }
-function commitTextFor(issueNumber: number, message: CommitMessage | undefined): string {
-  const subject = message?.subject?.trim()
-    || "🐛 fix(issue-" + issueNumber + "): resolve tracked issue";
-  const body = message?.body?.trim();
+function commitTextFor(issueNumber: number): string {
   return [
-    subject,
+    "🐛 fix(issue-" + issueNumber + "): resolve tracked issue",
     "",
-    ...(body ? [body, ""] : []),
     "Fixes #" + issueNumber,
     "",
     "Co-Authored-By: Smithers ticket-fleet <noreply@smithers.sh>",
   ].join("\n");
 }
-function captureCandidate(issueNumber: number, setup: Setup, message?: CommitMessage): Candidate {
+function captureCandidate(issueNumber: number, setup: Setup): Candidate {
   if (!setup.ready) return { issueNumber, baseSha: setup.baseSha, headSha: "", patchId: "", changedPaths: [], reviewDiff: "", ready: false, summary: setup.summary };
-  // Commit the agent's edits into ONE atomic commit immediately. The engine's
-  // worktree sync rebases each lane onto origin/main between frames, and
-  // `git rebase` hard-fails ("cannot rebase: You have unstaged changes") on a
-  // dirty tree, which used to wedge the lane into an endless retry loop. The
-  // tree must therefore be clean the moment the implement agent returns.
+  // The implement agent commits its own work (see implementPrompt), so the lane
+  // worktree is normally already clean here. This is the safety net for an agent
+  // that ignored the instruction or left extra commits: fold whatever is present
+  // into ONE commit off baseSha, because the engine rebases each lane onto
+  // origin/main between frames and `git rebase` hard-fails on a dirty tree.
   const paths = changedWorkingPaths(setup.cwd);
   if (paths.length) git(["add", "--", ...paths], setup.cwd);
   const staged = splitZero(git(["diff", "--cached", "--name-only", "-z"], setup.cwd));
+  const commitCount = Number(git(["rev-list", "--count", setup.baseSha + "..HEAD"], setup.cwd));
   if (staged.length) {
-    const count = Number(git(["rev-list", "--count", setup.baseSha + "..HEAD"], setup.cwd));
-    if (count > 0) git(["reset", "--soft", setup.baseSha], setup.cwd);
-    git(["commit", "-m", commitTextFor(issueNumber, message)], setup.cwd);
-  } else {
-    // Re-word an existing lane commit (e.g. a retry after the message task ran).
-    const count = Number(git(["rev-list", "--count", setup.baseSha + "..HEAD"], setup.cwd));
-    if (count > 1) {
-      git(["reset", "--soft", setup.baseSha], setup.cwd);
-      git(["commit", "-m", commitTextFor(issueNumber, message)], setup.cwd);
-    } else if (count === 1 && message) {
-      git(["commit", "--amend", "-m", commitTextFor(issueNumber, message)], setup.cwd);
-    }
+    if (commitCount > 0) git(["reset", "--soft", setup.baseSha], setup.cwd);
+    git(["commit", "-m", commitTextFor(issueNumber)], setup.cwd);
+  } else if (commitCount > 1) {
+    git(["reset", "--soft", setup.baseSha], setup.cwd);
+    git(["commit", "-m", commitTextFor(issueNumber)], setup.cwd);
   }
   const headSha = currentHead(setup.cwd);
   const changedPaths = splitZero(git(["diff", "--name-only", "-z", setup.baseSha + ".." + headSha], setup.cwd));
@@ -1892,13 +1868,9 @@ export default smithers((ctx) => {
                             agent={assignedImplementer(input, n, triage.difficulty, cwd)} {...agentTaskProps}>
                             {implementPrompt(issue, triage, plan, research, feedbackFor(ctx, n, hardTier), splitMode ? { repo: input.repo } : undefined)}
                           </Task>
-                          <Task id={"i" + n + ":commit-message"} output={outputs.tfCommitMessage}
-                            agent={supportAgent(cwd)} {...agentTaskProps}>
-                            {commitMessagePrompt(issue)}
-                          </Task>
                           <Task id={"i" + n + ":candidate"} output={outputs.tfCandidate} continueOnFail>
                             {() => setup
-                              ? captureCandidate(n, setup, latest<CommitMessage>(ctx, outputs.tfCommitMessage, "i" + n + ":commit-message"))
+                              ? captureCandidate(n, setup)
                               : { issueNumber: n, baseSha: "", headSha: "", patchId: "", changedPaths: [], reviewDiff: "", ready: false, summary: "No setup output." }}
                           </Task>
                           <Task id={"i" + n + ":guard"} output={outputs.tfGuard}>
