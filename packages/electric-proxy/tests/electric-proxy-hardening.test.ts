@@ -6,6 +6,7 @@ import {
   type SmithersElectricAuthContext,
   type SmithersElectricProxyEvent,
   type SmithersElectricProxySpan,
+  type SmithersElectricShapeDefinition,
 } from "../src/index.js";
 
 function auth(overrides: Partial<SmithersElectricAuthContext> = {}): SmithersElectricAuthContext {
@@ -128,6 +129,95 @@ describe("an unscopable shape (no row-level scoping) is fail-closed to scoped pr
     const response = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_docs"));
     expect(response.status).toBe(200);
     expect(forwardedWhere).toBeNull();
+  });
+});
+
+describe("a template-only shape treats its whereTemplate as authoritative", () => {
+  // Regression: a shape whose ONLY scoping mechanism is `whereTemplate` (no
+  // runIdColumn/workspaceIdColumn/userPrivateColumn) counted as row-scoped, but
+  // a client-supplied `where` replaced the template outright and none of the
+  // ensureValuesAllowed checks applied — the template's scoping was silently
+  // bypassed after nothing but syntactic parsing.
+  const templateOnlyShape: SmithersElectricShapeDefinition = {
+    name: "template-only",
+    table: "_smithers_template_only",
+    requiredScope: "run:read",
+    whereTemplate: "run_id IN ({run_ids})",
+    description: "template-only fixture",
+  };
+
+  test("a scoped principal cannot replace the template with a client where", async () => {
+    let upstreamHits = 0;
+    const proxy = createSmithersElectricProxy({
+      electricUrl: "http://electric.local/v1/shape",
+      catalog: [templateOnlyShape],
+      authenticate: () => auth(),
+      fetchClient: async () => {
+        upstreamHits += 1;
+        return new Response("[]");
+      },
+    });
+
+    const response = await proxy.fetch(
+      new Request("http://proxy.local/v1/shape?table=_smithers_template_only&where=run_id+%3D+%27run-99%27"),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("scoped only by its where template");
+    expect(upstreamHits).toBe(0);
+  });
+
+  test("a scoped principal without a client where gets the filled template", async () => {
+    let forwardedWhere = "";
+    const proxy = createSmithersElectricProxy({
+      electricUrl: "http://electric.local/v1/shape",
+      catalog: [templateOnlyShape],
+      authenticate: () => auth(),
+      fetchClient: async (url) => {
+        forwardedWhere = new URL(String(url)).searchParams.get("where") ?? "";
+        return new Response("[]");
+      },
+    });
+
+    const response = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_template_only"));
+    expect(response.status).toBe(200);
+    expect(forwardedWhere).toBe("run_id IN ('run-1','run-2')");
+  });
+
+  test("a scoped principal whose template cannot be filled is rejected, not given the whole table", async () => {
+    let upstreamHits = 0;
+    const proxy = createSmithersElectricProxy({
+      electricUrl: "http://electric.local/v1/shape",
+      catalog: [templateOnlyShape],
+      authenticate: () => auth({ grantedRunIds: undefined }),
+      fetchClient: async () => {
+        upstreamHits += 1;
+        return new Response("[]");
+      },
+    });
+
+    const response = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_template_only"));
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("cannot be filled");
+    expect(upstreamHits).toBe(0);
+  });
+
+  test("an explicitly unscoped single-tenant principal may still supply its own where", async () => {
+    let forwardedWhere = "";
+    const proxy = createSmithersElectricProxy({
+      electricUrl: "http://electric.local/v1/shape",
+      catalog: [templateOnlyShape],
+      authenticate: () => auth({ grantedRunIds: undefined, unscoped: true }),
+      fetchClient: async (url) => {
+        forwardedWhere = new URL(String(url)).searchParams.get("where") ?? "";
+        return new Response("[]");
+      },
+    });
+
+    const response = await proxy.fetch(
+      new Request("http://proxy.local/v1/shape?table=_smithers_template_only&where=run_id+%3D+%27run-99%27"),
+    );
+    expect(response.status).toBe(200);
+    expect(forwardedWhere).toBe("run_id = 'run-99'");
   });
 });
 

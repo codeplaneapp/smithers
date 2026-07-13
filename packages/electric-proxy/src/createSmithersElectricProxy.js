@@ -283,12 +283,23 @@ function validateWhere(shape, where, auth) {
   if (!hasRowScoping && !unscoped) {
     throw new Error(`shape "${shape.name}" has no row-level scoping and cannot be served to a scoped principal`);
   }
+  // When the whereTemplate is the shape's ONLY scoping mechanism, there is no
+  // scoping column for the value checks below to re-verify, so a client
+  // `where` would replace the template with an arbitrary predicate after
+  // nothing but syntactic parsing. The template is authoritative: reject the
+  // client where outright for scoped principals.
+  const templateOnly =
+    Boolean(shape.whereTemplate) && !shape.runIdColumn && !shape.workspaceIdColumn && !shape.userPrivateColumn;
+  if (templateOnly && !unscoped && where && where.trim()) {
+    throw new Error(`shape "${shape.name}" is scoped only by its where template; a client where clause is not allowed`);
+  }
   const effectiveWhere = where && where.trim() ? where.trim() : fillWhereTemplate(shape, auth);
   if (!effectiveWhere) {
     // No client where and the template could not be filled. For a scoped shape
-    // that is only acceptable when the principal is explicitly unscoped; a
-    // scoped principal with no concrete grants gets nothing.
-    if ((shape.runIdColumn || shape.workspaceIdColumn || shape.userPrivateColumn) && !unscoped) {
+    // (scoping column or template) that is only acceptable when the principal
+    // is explicitly unscoped; a scoped principal with no concrete grants gets
+    // nothing rather than the whole table.
+    if (hasRowScoping && !unscoped) {
       throw new Error("where clause cannot be filled from the authenticated grants");
     }
     return null;
