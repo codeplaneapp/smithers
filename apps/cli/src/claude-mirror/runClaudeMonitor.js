@@ -11,6 +11,7 @@ const NOTABLE_EVENT_KINDS = new Map([
     ["RunFailed", "run-failed"],
     ["RunFinished", "run-finished"],
     ["RunCancelled", "run-cancelled"],
+    ["RunCanceled", "run-cancelled"],
     ["RunContinuedAsNew", "run-continued"],
 ]);
 
@@ -18,6 +19,7 @@ const TERMINAL_STATUS_KINDS = new Map([
     ["failed", "run-failed"],
     ["finished", "run-finished"],
     ["cancelled", "run-cancelled"],
+    ["canceled", "run-cancelled"],
     ["continued", "run-continued"],
 ]);
 
@@ -143,6 +145,16 @@ export async function runClaudeMonitor(adapter, options = {}) {
                     }
                     const payload = parsePayload(row.payloadJson);
                     if (kind === "approval-pending") {
+                        if (finalScan || isTerminalClaudeMirrorRunStatus(run.status)) {
+                            continue;
+                        }
+                        // The request event and terminal run status are separate
+                        // durable rows. Re-read immediately before publishing so
+                        // cancellation cannot turn a just-read request into a ghost.
+                        const beforeApprovalEmit = await Promise.resolve(adapter.getRun?.(runId)).catch(() => undefined);
+                        if (beforeApprovalEmit && isTerminalClaudeMirrorRunStatus(beforeApprovalEmit.status)) {
+                            continue;
+                        }
                         // Dedupe against emitPendingGates (below), which surfaces the
                         // same still-pending gate each tick. Use the identical key so a
                         // gate requested while we are watching a run is announced once,
@@ -184,8 +196,13 @@ export async function runClaudeMonitor(adapter, options = {}) {
                 // registry so no future monitor re-inspects it.
                 removeClaudeMirrorSubscription(subscriptionsPath, { runId, nowMs: now() });
             }
-            await emitPendingGates(adapter, runId, emitOnce);
-            trackStall(run, stalledAfterMs, stalledRuns, emit, now, eventActivityAt.get(runId));
+            // A terminal status is authoritative. Pending rows can be stale from
+            // the cancellation/status-write race and must never become an
+            // approval-pending notification for a run that can no longer resume.
+            if (!finalScan) {
+                await emitPendingGates(adapter, runId, emitOnce);
+                trackStall(run, stalledAfterMs, stalledRuns, emit, now, eventActivityAt.get(runId));
+            }
         }
         if (options.ticks !== undefined && tick >= options.ticks) {
             break;
@@ -220,8 +237,21 @@ async function listSubscribedRuns(adapter, subscriptionsPath, sessionId, nowMs) 
  * @param {(key: string, entry: Record<string, unknown>) => void} emitOnce
  */
 async function emitPendingGates(adapter, runId, emitOnce) {
+    // Status and gate rows are separate durable records. Cancellation can win
+    // between the monitor's run scan and these reads, so status is authoritative
+    // at the point where an actionable notification would otherwise be emitted.
+    const currentRun = await Promise.resolve(adapter.getRun?.(runId)).catch(() => undefined);
+    if (currentRun && isTerminalClaudeMirrorRunStatus(currentRun.status)) {
+        return;
+    }
     const approvals = await Promise.resolve(adapter.listPendingApprovals(runId)).catch(() => []);
+    const afterApprovalRead = await Promise.resolve(adapter.getRun?.(runId)).catch(() => undefined);
+    if (afterApprovalRead && isTerminalClaudeMirrorRunStatus(afterApprovalRead.status)) {
+        return;
+    }
     for (const approval of approvals) {
+        const beforeApprovalEmit = await Promise.resolve(adapter.getRun?.(runId)).catch(() => undefined);
+        if (beforeApprovalEmit && isTerminalClaudeMirrorRunStatus(beforeApprovalEmit.status)) return;
         emitOnce(`approval:${runId}:${approval.nodeId}:${approval.iteration ?? 0}`, {
             kind: "approval-pending",
             runId,
@@ -232,10 +262,14 @@ async function emitPendingGates(adapter, runId, emitOnce) {
         });
     }
     const humans = await Promise.resolve(adapter.listPendingHumanRequests()).catch(() => []);
+    const beforeHumanEmit = await Promise.resolve(adapter.getRun?.(runId)).catch(() => undefined);
+    if (beforeHumanEmit && isTerminalClaudeMirrorRunStatus(beforeHumanEmit.status)) return;
     for (const request of humans) {
         if (request.runId !== runId) {
             continue;
         }
+        const beforeRequestEmit = await Promise.resolve(adapter.getRun?.(runId)).catch(() => undefined);
+        if (beforeRequestEmit && isTerminalClaudeMirrorRunStatus(beforeRequestEmit.status)) return;
         emitOnce(`human:${request.requestId}`, {
             kind: "human-request",
             runId,

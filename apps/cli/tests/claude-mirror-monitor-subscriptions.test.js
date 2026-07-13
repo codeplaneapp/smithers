@@ -190,6 +190,40 @@ describe("runClaudeMonitor subscription scoping", () => {
         expect(lines).toEqual([]);
         expect(readClaudeMirrorSubscriptions(path, NOW)).toEqual([]);
     });
+
+    test("a cancelled run with a stale approval row stays silent on first sight", async () => {
+        const workspace = tempWorkspace();
+        const path = resolveClaudeMirrorSubscriptionsPath(workspace);
+        upsertClaudeMirrorSubscription(path, { runId: "cancelled-run", sessionId: "session-a", nowMs: NOW });
+        const adapter = makeAdapter({
+            "cancelled-run": { status: "cancelled", events: [{ seq: 1, type: "RunCancelled", payloadJson: "{}" }] },
+        });
+        adapter.listPendingApprovals = async () => [{ runId: "cancelled-run", nodeId: "gate", iteration: 0, requestJson: '{"title":"stale"}' }];
+
+        const lines = await collectLines(adapter, { subscriptionsPath: path, sessionId: "session-a" });
+
+        expect(lines).toEqual([]);
+        expect(readClaudeMirrorSubscriptions(path, NOW)).toEqual([]);
+    });
+
+    test("cancellation winning during gate reads does not emit stale approval", async () => {
+        const workspace = tempWorkspace();
+        const path = resolveClaudeMirrorSubscriptionsPath(workspace);
+        upsertClaudeMirrorSubscription(path, { runId: "racing-cancel", sessionId: "session-a", nowMs: NOW });
+        let status = "running";
+        const adapter = makeAdapter({
+            "racing-cancel": { status, events: [] },
+        });
+        adapter.getRun = async () => ({ runId: "racing-cancel", status });
+        adapter.listPendingApprovals = async () => {
+            status = "CANCELLED";
+            return [{ runId: "racing-cancel", nodeId: "gate", iteration: 0, requestJson: '{"title":"stale"}' }];
+        };
+
+        const lines = await collectLines(adapter, { subscriptionsPath: path, sessionId: "session-a" });
+
+        expect(lines).toEqual([]);
+    });
 });
 
 describe("claude-mirror subscription registry helpers", () => {

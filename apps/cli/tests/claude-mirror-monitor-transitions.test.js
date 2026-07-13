@@ -60,11 +60,34 @@ describe("runClaudeMonitor transition filtering", () => {
         for (const [status, eventType] of [
             ["finished", "RunFinished"],
             ["cancelled", "RunCancelled"],
+            ["canceled", "RunCanceled"],
             ["continued", "RunContinuedAsNew"],
         ]) {
             const lines = await collectLines(makeTerminalAdapter(status, eventType));
             expect(lines, JSON.stringify(lines)).toEqual([]);
         }
+    });
+
+    test("both cancelled spellings normalize to one run-cancelled transition", async () => {
+        for (const [status, eventType] of [["cancelled", "RunCancelled"], ["canceled", "RunCanceled"]]) {
+            const lines = await collectLines(makeTerminalAdapter(status, eventType), { transitions: "all" });
+            expect(lines.filter((line) => line.kind === "run-cancelled")).toHaveLength(1);
+        }
+    });
+
+    test("a fresh monitor never advertises approval from a canceled run", async () => {
+        const adapter = {
+            async listRuns() { return [{ runId: RUN_ID, status: "canceled" }]; },
+            async getLastEventSeq() { return 3; },
+            async listPendingApprovals() {
+                return [{ nodeId: "gate", iteration: 0, requestJson: '{"title":"stale"}' }];
+            },
+            async listPendingHumanRequests() { return []; },
+            async getRun() { return { runId: RUN_ID, status: "canceled" }; },
+        };
+        const lines = [];
+        await runClaudeMonitor(adapter, { ticks: 1, intervalMs: 250, transitions: "all", write: (line) => lines.push(JSON.parse(line)) });
+        expect(lines.filter((line) => line.kind === "approval-pending")).toEqual([]);
     });
 
     test("finished is not synthesized from a status flip either", async () => {
