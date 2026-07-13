@@ -197,7 +197,7 @@
     "zod": "^4.4.3"
   },
   "optionalDependencies": {
-    "@electric-sql/pglite": "0.5.3",
+    "@electric-sql/pglite": "0.5.4",
     "@electric-sql/pglite-socket": "0.2.6",
     "pg": "^8.22.0"
   },
