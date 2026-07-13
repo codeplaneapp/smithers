@@ -53,6 +53,13 @@ test("malformed TOON and missing names fail clearly", () => {
     expect(() => parseManifest("version: 1.0.0")).toThrow(/Invalid smithers\.toon: missing required name/);
 });
 
+test("present non-object contents and capabilities fail clearly", () => {
+    expect(() => parseManifest("name: broken\ncontents: nope")).toThrow(/Invalid smithers\.toon: contents must be an object/);
+    expect(() => parseManifest("name: broken\ncapabilities: nope")).toThrow(/Invalid smithers\.toon: capabilities must be an object/);
+    expect(() => parseManifest("name: broken\ncontents[1]: nope")).toThrow(/Invalid smithers\.toon: contents must be an object/);
+    expect(() => parseManifest("name: broken\ncapabilities[1]: nope")).toThrow(/Invalid smithers\.toon: capabilities must be an object/);
+});
+
 test("init scaffolds a manifest enumerating the generated workflows and UIs", () => {
     const root = tempProject();
     const result = initWorkflowPack({ rootDir: root, installSkill: false, skipInstall: true, env: seededAgentEnv() });

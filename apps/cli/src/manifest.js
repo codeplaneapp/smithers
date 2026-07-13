@@ -59,12 +59,20 @@ export function parseManifest(source) {
     if (typeof input.name !== "string" || input.name.trim() === "") {
         throw manifestError("missing required name");
     }
-    const contents = input.contents && typeof input.contents === "object" && !Array.isArray(input.contents)
-        ? input.contents
-        : {};
-    const capabilities = input.capabilities && typeof input.capabilities === "object" && !Array.isArray(input.capabilities)
-        ? input.capabilities
-        : {};
+    const contents = input.contents === undefined
+        ? {}
+        : input.contents && typeof input.contents === "object" && !Array.isArray(input.contents)
+            ? input.contents
+            : (() => {
+                throw manifestError("contents must be an object");
+            })();
+    const capabilities = input.capabilities === undefined
+        ? {}
+        : input.capabilities && typeof input.capabilities === "object" && !Array.isArray(input.capabilities)
+            ? input.capabilities
+            : (() => {
+                throw manifestError("capabilities must be an object");
+            })();
     const writes = capabilities.writes ?? DEFAULT_MANIFEST.capabilities.writes;
     if (writes !== "repo" && writes !== "sandbox" && writes !== "none") {
         throw manifestError("capabilities.writes must be one of repo, sandbox, or none");

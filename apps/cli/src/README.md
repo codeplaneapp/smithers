@@ -15,6 +15,33 @@ monitor), `workflows.js`/`workflow-pack.js` (discovery + pack install),
 `gateway-runtime.js` (singleton-gateway state files/locks, spec:
 `.smithers/specs/singleton-gateway.md`), `find-db.js` (store resolution).
 
+## Publishable pack manifest
+
+Every `.smithers/` directory initialized by `smithers init` is a publishable
+pack and contains `smithers.toon`. The manifest uses TOON format and requires a
+non-empty `name`; `version`, `description`, `repository`, `smithers`,
+`contents`, and `capabilities` are optional and receive defaults when omitted.
+
+```toon
+name: kanban-suite
+version: 0.3.0
+description: Kanban workflows
+repository: github.com/someuser/kanban-suite
+smithers: ">=0.28"
+contents:
+  workflows[1]: kanban
+  ui[1]: kanban
+capabilities:
+  bins[1]: git
+  env[0]:
+  writes: repo
+```
+
+`contents.workflows` and `contents.ui` enumerate pack files. Capabilities
+declare requested binaries, environment variables, and writes (`repo`,
+`sandbox`, or `none`). Malformed TOON and non-object `contents` or
+`capabilities` values fail validation with an actionable error.
+
 Conventions and gotchas:
 - Never convert `.js` <-> `.ts`; `// @smithers-type-exports-begin/end` blocks
   are tool-managed — preserve them byte-for-byte.
