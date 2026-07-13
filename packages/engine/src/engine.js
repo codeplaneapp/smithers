@@ -3230,7 +3230,7 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
  * @param {Map<string, TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
- * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; agentPreflightCache?: WeakMap<object, Promise<void>>; }} toolConfig
+ * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; agentPreflightCache?: WeakMap<object, Promise<void>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
  * @param {string} workflowName
  * @param {boolean} cacheEnabled
  * @param {AbortSignal} [signal]
