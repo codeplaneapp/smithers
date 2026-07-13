@@ -22,6 +22,7 @@ const ignoredDirs = new Set([
   ".smithers",
   ".turbo",
   ".worktrees",
+  "worktrees",
   "coverage",
   "dist",
   "node_modules",
