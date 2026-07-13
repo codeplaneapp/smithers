@@ -17,3 +17,6 @@ These prices feed `recordUsage` cost_usd, which drives both the per-session spen
 PRICES matches current Anthropic list pricing; spend caps trip at the intended dollar amounts.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 2f7a246e431e030d2f3d334e04f5fbe04ea5d485.
