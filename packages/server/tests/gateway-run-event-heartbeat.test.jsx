@@ -159,7 +159,14 @@ describe("run event stream shared heartbeat", () => {
       });
     }
 
-    const errors = connection.sent.filter((frame) => frame.event === "run.error");
+    // On a congested socket the run.error frame goes through the bounded
+    // connection event writer instead of an immediate ws.send, so it lands in
+    // the writer queue until the socket drains.
+    const queuedErrors = (connection.eventWriter?.queue ?? [])
+      .map((entry) => JSON.parse(entry.data))
+      .filter((frame) => frame.event === "run.error");
+    const sentErrors = connection.sent.filter((frame) => frame.event === "run.error");
+    const errors = [...sentErrors, ...queuedErrors];
     expect(errors).toHaveLength(1);
     expect(errors[0].payload.error.code).toBe("BackpressureDisconnect");
     expect(connection.runEventStreams.has("stream-slow")).toBe(false);
