@@ -466,6 +466,10 @@ function App() {
 
 // Guard the mount so this module can be imported by unit tests (which exercise
 // the exported pure helpers); in the browser `document` is defined and it mounts.
-if (typeof document !== "undefined") {
+// Guarding on document alone is not enough: unit tests that import this
+// module's pure helpers may run after another test file installed happy-dom
+// (a document with no #root). Only mount when the gateway-served page's real
+// root element exists.
+if (typeof document !== "undefined" && document.getElementById("root")) {
   createGatewayReactRoot(<App />);
 }

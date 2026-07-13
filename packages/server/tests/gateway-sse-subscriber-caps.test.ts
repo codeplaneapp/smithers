@@ -295,10 +295,13 @@ describe("Gateway SSE subscriber caps", () => {
     ) as any;
     expect(serverSideSlow).toBeDefined();
 
-    // Pump far more invalidation bytes than the 64 KiB queue bound through the
-    // real flush path, yielding periodically so the in-process healthy reader
-    // can keep consuming.
-    for (let batch = 0; batch < 200; batch += 1) {
+    // Pump invalidation bytes through the real flush path until the paused
+    // socket's server-side queue overflows, yielding periodically so the
+    // in-process healthy reader can keep consuming. How many frames that
+    // takes depends on the host kernel's socket buffers (Linux runners
+    // absorb megabytes before the userspace queue backs up), so pump until
+    // overflow with a generous hard cap instead of a fixed frame count.
+    for (let batch = 0; batch < 2000 && !serverSideSlow.needsReset; batch += 1) {
       for (let i = 0; i < 100; i += 1) {
         gateway.apiStreamPendingCollections.add("runs");
         gateway.flushApiInvalidation();
@@ -307,8 +310,8 @@ describe("Gateway SSE subscriber caps", () => {
       expect(serverSideSlow.queueBytes).toBeLessThanOrEqual(64 * 1024);
       if (batch % 20 === 0) await sleep(5);
     }
-    // 20k frames against a paused socket must have overflowed the bounded
-    // queue at least once (dropping to a reset marker instead of buffering).
+    // The paused socket must have overflowed the bounded queue at least once
+    // (dropping to a reset marker instead of buffering without bound).
     expect(serverSideSlow.needsReset).toBe(true);
     expect(serverSideSlow.queue.length).toBeLessThanOrEqual(256);
     expect(serverSideSlow.queueBytes).toBeLessThanOrEqual(64 * 1024);
