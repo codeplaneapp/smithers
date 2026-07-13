@@ -12,3 +12,6 @@ Latent today: every current catalog entry with a `whereTemplate` also sets `runI
 Either reject client `where` on template-only shapes (template is authoritative), require a scoping column whenever `whereTemplate` is set (validate the catalog at construction), or verify the client predicate is a subset of the filled template.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 3101beb5aca018f1480653e6140752fcc834ee3e.
