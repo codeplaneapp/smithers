@@ -162,6 +162,19 @@ describe("createCloudflareSandboxProvider result decoding", () => {
 		await expect(provider.run(makeRequest())).rejects.toThrow("produced invalid result JSON");
 	});
 
+	for (const value of [null, "ok", 123, true]) {
+		test(`throws a helpful message when result JSON is ${JSON.stringify(value)}`, async () => {
+			const { getSandbox } = customSandbox({
+				exec: () => ({ success: true, exitCode: 0, stdout: "", stderr: "" }),
+				readFile: () => ({ content: JSON.stringify(value) }),
+			});
+			const provider = createCloudflareSandboxProvider({ binding: {}, getSandbox, command: "node run.js" });
+			await expect(provider.run(makeRequest())).rejects.toThrow(
+				"result JSON value that is not an object",
+			);
+		});
+	}
+
 	test("decodes result JSON read from a Uint8Array file", async () => {
 		const payload = JSON.stringify({ status: "finished", output: { via: "bytes" } });
 		const { getSandbox } = customSandbox({

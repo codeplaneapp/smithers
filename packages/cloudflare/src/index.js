@@ -177,6 +177,9 @@ function parseCloudflareSandboxResult(rawResult, { command, remoteSandboxId, res
 	} catch (error) {
 		throw new Error(`Cloudflare sandbox command "${command}" produced invalid result JSON for sandbox "${remoteSandboxId}" at ${resultPath}: ${error instanceof Error ? error.message : String(error)}. Raw output: ${rawResult.slice(0, 500)}`);
 	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error(`Cloudflare sandbox command "${command}" produced a result JSON value that is not an object for sandbox "${remoteSandboxId}" at ${resultPath}: the workflow entry must write a JSON object.`);
+	}
 	const remoteRunId = "bundlePath" in parsed
 		? parsed.remoteRunId ?? remoteSandboxId
 		: parsed.remoteRunId ?? parsed.runId ?? remoteSandboxId;
