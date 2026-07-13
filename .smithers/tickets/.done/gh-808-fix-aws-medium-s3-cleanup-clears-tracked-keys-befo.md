@@ -32,3 +32,6 @@ Remove keys only after successful deletion and retain exactly any per-object fai
 ## Dedupe notes
 
 #721 concerns StopBuild cleanup, not S3 object deletion.
+
+
+> Closed by ticket-fleet: landed on main in 94860834d5ac3af53174ec3fcfb867e4efa8f59d.
