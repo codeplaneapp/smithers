@@ -12,3 +12,6 @@ A gateway returning 401 (bad/missing API key), 404, or 500 produces a stream tha
 Throw `PI_HTTP_ERROR` (with status/path details, matching `json()`) when the response is non-OK or has no body, so stream consumers can surface or retry the failure.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 36523d54e4c731ca4b69ab870a249f4c4cd99508.
