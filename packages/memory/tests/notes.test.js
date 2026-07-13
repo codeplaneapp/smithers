@@ -89,9 +89,14 @@ describe("P1 provenance (criterion a)", () => {
 });
 
 describe("notes: append-only + default read contract", () => {
+    let db;
     let store;
+    let sqlite;
     beforeEach(() => {
-        store = createMemoryStore(createTestDb().db);
+        const ctx = createTestDb();
+        db = ctx.db;
+        sqlite = ctx.sqlite;
+        store = createMemoryStore(db);
     });
 
     test("saveNote defaults status to accepted; default read returns it", async () => {
@@ -121,6 +126,66 @@ describe("notes: append-only + default read contract", () => {
         expect(resaved.body).toBe("original");
         const note = await store.getNote("fixed-id");
         expect(note.body).toBe("original");
+    });
+
+    test("a losing same-id save cannot add supersession edges", async () => {
+        const originalVictim = await store.saveNote({ namespace: USER_NS, body: "original victim" });
+        const losingVictim = await store.saveNote({ namespace: USER_NS, body: "losing victim" });
+        await store.saveNote({
+            namespace: USER_NS,
+            body: "winner",
+            id: "fixed-id",
+            supersedes: [originalVictim.id],
+        });
+
+        await store.saveNote({
+            namespace: USER_NS,
+            body: "loser",
+            id: "fixed-id",
+            supersedes: [losingVictim.id],
+        });
+
+        const edges = sqlite
+            .query("SELECT note_id, supersedes_id FROM _smithers_memory_note_supersessions WHERE note_id = ?")
+            .all("fixed-id");
+        expect(edges).toEqual([{ note_id: "fixed-id", supersedes_id: originalVictim.id }]);
+        expect((await store.listNotes(USER_NS)).map((note) => note.body).sort()).toEqual([
+            "losing victim",
+            "winner",
+        ]);
+    });
+
+    test("concurrent same-id writers persist only the winning writer's supersession edge", async () => {
+        const secondWriter = createMemoryStore(db);
+        const firstVictim = await store.saveNote({ namespace: USER_NS, body: "first victim" });
+        const secondVictim = await store.saveNote({ namespace: USER_NS, body: "second victim" });
+
+        const [firstResult, secondResult] = await Promise.all([
+            secondWriter.saveNote({
+                namespace: USER_NS,
+                body: "first writer",
+                id: "shared-id",
+                supersedes: [firstVictim.id],
+            }),
+            store.saveNote({
+                namespace: USER_NS,
+                body: "second writer",
+                id: "shared-id",
+                supersedes: [secondVictim.id],
+            }),
+        ]);
+
+        expect(firstResult.body).toBe(secondResult.body);
+        const winningVictimId = firstResult.body === "first writer" ? firstVictim.id : secondVictim.id;
+        const losingVictimBody = firstResult.body === "first writer" ? "second victim" : "first victim";
+        const edges = sqlite
+            .query("SELECT note_id, supersedes_id FROM _smithers_memory_note_supersessions WHERE note_id = ?")
+            .all("shared-id");
+        expect(edges).toEqual([{ note_id: "shared-id", supersedes_id: winningVictimId }]);
+        expect((await store.listNotes(USER_NS)).map((note) => note.body).sort()).toEqual([
+            losingVictimBody,
+            firstResult.body,
+        ].sort());
     });
 
     test("setNoteStatus flips status + stamps status_changed_at; missing note fails loud", async () => {

@@ -463,7 +463,10 @@ function makeMemoryStore(db) {
         };
         const nsKind = parseNamespace(nsStr).kind;
         return requireSqliteNotesEffect("DB_WRITE_FAILED", "memory saveNote").pipe(Effect.zipRight(writeEffect("memory saveNote", () => Promise.resolve(db.transaction((tx) => {
-            tx.insert(smithersMemoryNotes).values(note).onConflictDoNothing().run();
+            const inserted = tx.insert(smithersMemoryNotes).values(note).onConflictDoNothing().run();
+            if (inserted.changes === 0) {
+                return;
+            }
             for (const supersedesId of input.supersedes ?? []) {
                 tx.insert(smithersMemoryNoteSupersessions)
                     .values({ noteId: id, supersedesId, createdAtMs: now })
