@@ -1,6 +1,6 @@
 # Expose cancellation attribution through Gateway contracts
 
-GitHub: https://github.com/smithersai/smithers/issues/1122
+GitHub: https://github.com/smithersai/smithers/issues/1317
 
 Parent: smithers/gh-1063-record-gateway-rpc-cancellation-attribution.md
 

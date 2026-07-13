@@ -1,6 +1,6 @@
 # Propagate HTTP and WebSocket cancellation context
 
-GitHub: https://github.com/smithersai/smithers/issues/1121
+GitHub: https://github.com/smithersai/smithers/issues/1316
 
 Parent: smithers/gh-1063-record-gateway-rpc-cancellation-attribution.md
 

@@ -1,6 +1,6 @@
 # Add Gateway cancellation attribution integration tests
 
-GitHub: https://github.com/smithersai/smithers/issues/1124
+GitHub: https://github.com/smithersai/smithers/issues/1318
 
 Parent: smithers/gh-1063-record-gateway-rpc-cancellation-attribution.md
 

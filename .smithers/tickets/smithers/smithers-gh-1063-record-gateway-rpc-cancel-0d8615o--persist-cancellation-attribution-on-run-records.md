@@ -1,6 +1,6 @@
 # Persist cancellation attribution on run records
 
-GitHub: https://github.com/smithersai/smithers/issues/1119
+GitHub: https://github.com/smithersai/smithers/issues/1315
 
 Parent: smithers/gh-1063-record-gateway-rpc-cancellation-attribution.md
 
