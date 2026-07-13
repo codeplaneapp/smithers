@@ -149,6 +149,30 @@ describe("errorToJson is JSON-safe on the error path", () => {
     value.cycle = value;
     expect(() => JSON.stringify(errorToJson(value))).not.toThrow();
   });
+
+  test("a top-level array is wrapped into a record, not passed through", () => {
+    // Effect failures / `throw` can carry arrays (e.g. validation errors); the
+    // durable write path stores errorToJson output as a JSON object.
+    const json = errorToJson([1, "two"]);
+    expect(Array.isArray(json)).toBe(false);
+    expect(typeof json).toBe("object");
+    expect(typeof json.message).toBe("string");
+    expect(json.message).toBe('[1,"two"]');
+    const round = JSON.parse(JSON.stringify(json));
+    expect(round.value).toEqual([1, "two"]);
+  });
+
+  test("wrapped array values are still sanitized (undefined, bigint, cycles)", () => {
+    /** @type {unknown[]} */
+    const list = [undefined, 7n, () => 1];
+    list.push(list);
+    const json = errorToJson(list);
+    expect(Array.isArray(json)).toBe(false);
+    expect(() => JSON.stringify(json)).not.toThrow();
+    const round = JSON.parse(JSON.stringify(json));
+    expect(round.value).toEqual([null, "7", null, "[Circular]"]);
+    expect(typeof round.message).toBe("string");
+  });
 });
 
 describe("tagged-error payloads keep numeric fields finite across a round-trip", () => {

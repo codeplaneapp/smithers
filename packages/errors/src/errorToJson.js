@@ -130,6 +130,15 @@ function buildErrorJson(error) {
         return error;
     }
     if (error && typeof error === "object") {
+        if (Array.isArray(error)) {
+            // An array passed through here would survive toJsonSafe as a
+            // top-level array, breaking the Record<string, unknown> contract
+            // the durable failed-task write path relies on.
+            return {
+                message: JSON.stringify(toJsonSafe(error, new WeakSet())),
+                value: error,
+            };
+        }
         return error;
     }
     return { message: String(error) };
