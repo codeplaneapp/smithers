@@ -1455,6 +1455,43 @@ describe("Gateway", () => {
         expect(empty.payload).toEqual([]);
         await client.close();
     });
+    test("lists shared-database cron schedules only once", async () => {
+        const dbPath = makeDbPath("cron-shared");
+        dbPaths.push(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["cron"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                tokens: {
+                    "operator-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                    },
+                },
+            },
+        });
+        gateway.register("first", createValueWorkflow(dbPath));
+        gateway.register("second", createValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+        const { client } = await connectGateway(port, "operator-token");
+        const added = await client.request("cron.add", {
+            workflow: "first",
+            pattern: "0 8 * * 5",
+        });
+        expect(added.ok).toBe(true);
+
+        const listed = await client.request("cron.list");
+        expect(listed.ok).toBe(true);
+        expect(listed.payload).toHaveLength(1);
+        expect(listed.payload[0]).toMatchObject({
+            cronId: added.payload.cronId,
+            workflow: "first",
+        });
+        await client.close();
+    });
     test("supports hijackRun and reruns a finished run with the original input", async () => {
         const dbPath = makeDbPath("rerun");
         dbPaths.push(dbPath);

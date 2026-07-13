@@ -6975,8 +6975,13 @@ a { color: var(--brand); }</style>
     }
     async listCrons() {
         const rows = [];
+        const seenAdapters = new Set();
         for (const entry of this.workflows.values()) {
             const adapter = this.adapterForWorkflow(entry.workflow);
+            if (seenAdapters.has(adapter)) {
+                continue;
+            }
+            seenAdapters.add(adapter);
             const crons = await adapter.listCrons(false);
             for (const cron of crons) {
                 const workflowKey = workflowKeyFromCronPath(cron.workflowPath) ?? entry.key;
