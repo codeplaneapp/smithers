@@ -12,3 +12,6 @@ In `approvals.submit` (packages/server/src/gateway.js:6600-6603) the gate is `re
 Unknown `allowedScopes` entries should be matched literally against the connection's granted scopes, or rejected — never defaulted to run:read.
 
 Found during the 2026-07 repo-wide cleanup sweep (automated analyzer, human-unverified).
+
+
+> Closed by ticket-fleet: landed on main in 58eb3757b3002c18b936fcbef872f3248cf379f0.
