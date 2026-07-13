@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 
 import {
   PUBLIC_ISSUE_CODEX_EXTRA_ARGS,
@@ -11,6 +11,8 @@ import {
   buildPublicIssueCodexPolicy,
   buildLocalGateCodexPolicy,
   buildPublicIssueSafeEnv,
+  resolveHomebrewDynamicLibraryReadPathClosure,
+  resolveHomebrewDynamicLibraryReadPaths,
   resolvePublicIssueToolchainReadPaths,
 } from "../lib/publicIssueAgentPolicy";
 
@@ -29,6 +31,7 @@ const hostileEnv = {
   ADMIN_API_KEY: "admin-secret-value",
   TF_VAR_github_token: "terraform-secret-value",
   NODE_OPTIONS: "--require /tmp/ambient-code.js",
+  OPENSSL_CONF: "/secret/openssl.cnf",
 } as const;
 
 const AMBIENT_SECRET_NAMES = [
@@ -45,6 +48,108 @@ const AMBIENT_SECRET_NAMES = [
 ] as const;
 const repoRoot = join(import.meta.dir, "../..");
 
+function pathContains(root: string, candidate: string): boolean {
+  const child = relative(root, candidate);
+  return child === "" || (!child.startsWith("..") && !isAbsolute(child));
+}
+
+async function firstRegularFile(
+  root: string,
+  predicate: (path: string) => boolean,
+  depth = 3,
+): Promise<string | undefined> {
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isFile() && predicate(path)) return path;
+  }
+  if (depth <= 0) return undefined;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const found = await firstRegularFile(
+      join(root, entry.name),
+      predicate,
+      depth - 1,
+    );
+    if (found) return found;
+  }
+  return undefined;
+}
+
+async function homebrewSandboxCanaries(toolchainReadPaths: readonly string[]): Promise<{
+  linkedLibrary?: string;
+  unrelatedFormulaFile?: string;
+}> {
+  if (process.platform !== "darwin") return {};
+  const admittedRoots: string[] = [];
+  for (const path of toolchainReadPaths) {
+    try {
+      admittedRoots.push(await realpath(path));
+    } catch {
+      // Ignore paths that disappeared after toolchain discovery.
+    }
+  }
+
+  let linkedLibrary: string | undefined;
+  let unrelatedFormulaFile: string | undefined;
+
+  for (const optRoot of toolchainReadPaths.filter((path) => path.endsWith("/opt"))) {
+    let entries;
+    try {
+      entries = await readdir(optRoot, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const formulaPath = join(optRoot, entry.name);
+      let formulaRoot: string;
+      try {
+        formulaRoot = await realpath(formulaPath);
+      } catch {
+        continue;
+      }
+      const admitted = admittedRoots.some((root) =>
+        pathContains(root, formulaRoot) || pathContains(formulaRoot, root)
+      );
+      if (admitted && !linkedLibrary) {
+        const canonicalLibrary = await firstRegularFile(
+          formulaRoot,
+          (path) => path.endsWith(".dylib"),
+        );
+        if (canonicalLibrary) {
+          linkedLibrary = join(
+            formulaPath,
+            relative(formulaRoot, canonicalLibrary),
+          );
+        }
+      } else if (!admitted && !unrelatedFormulaFile) {
+        const canonicalFile = await firstRegularFile(
+          formulaRoot,
+          () => true,
+          2,
+        );
+        if (canonicalFile) {
+          unrelatedFormulaFile = join(
+            formulaPath,
+            relative(formulaRoot, canonicalFile),
+          );
+        }
+      }
+      if (linkedLibrary && unrelatedFormulaFile) {
+        return { linkedLibrary, unrelatedFormulaFile };
+      }
+    }
+  }
+  return { linkedLibrary, unrelatedFormulaFile };
+}
+
 describe("public issue agent policy", () => {
   test("copies only the explicit operational environment allowlist", () => {
     const safe = buildPublicIssueSafeEnv(hostileEnv);
@@ -55,6 +160,8 @@ describe("public issue agent policy", () => {
       LANG: "C.UTF-8",
       TMPDIR: "/safe/tmp",
       GIT_TERMINAL_PROMPT: "0",
+      OPENSSL_CONF: process.platform === "win32" ? "NUL" : "/dev/null",
+      npm_config_manage_package_manager_versions: "false",
     });
     expect(Object.keys(safe).every((name) =>
       (PUBLIC_ISSUE_SAFE_ENV_NAMES as readonly string[]).includes(name)
@@ -62,6 +169,7 @@ describe("public issue agent policy", () => {
     for (const name of AMBIENT_SECRET_NAMES) expect(safe).not.toHaveProperty(name);
     expect(JSON.stringify(safe)).not.toContain("secret-value");
     expect(JSON.stringify(safe)).not.toContain("postgres://");
+    expect(JSON.stringify(safe)).not.toContain("/secret/openssl.cnf");
   });
 
   test("builds exact read and write Codex permission profiles without legacy escape hatches", () => {
@@ -266,6 +374,164 @@ describe("public issue agent policy", () => {
     expect(combined.codex.extraArgs).not.toBe(PUBLIC_ISSUE_CODEX_EXTRA_ARGS);
   });
 
+  test("reopens only the exact package for a pnpm-managed project-version binary", async () => {
+    const pnpmHome = await mkdtemp(join(tmpdir(), "smithers-pnpm-policy-"));
+    const versionRoot = join(pnpmHome, ".tools", "pnpm", "10.6.1");
+    const packageRoot = join(versionRoot, "node_modules", "pnpm");
+    const binaryDirectory = join(versionRoot, "bin");
+    await Promise.all([
+      mkdir(join(packageRoot, "bin"), { recursive: true }),
+      mkdir(join(packageRoot, "dist"), { recursive: true }),
+      mkdir(binaryDirectory, { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(packageRoot, "bin", "pnpm.cjs"), "require('../dist/pnpm.cjs')\n"),
+      writeFile(join(packageRoot, "dist", "pnpm.cjs"), "module.exports = {}\n"),
+      symlink("../node_modules/pnpm/bin/pnpm.cjs", join(binaryDirectory, "pnpm"), "file"),
+    ]);
+
+    try {
+      const canonicalPackageRoot = await realpath(packageRoot);
+      const roots = resolvePublicIssueToolchainReadPaths(
+        { PATH: binaryDirectory },
+        ["pnpm"],
+      );
+
+      expect(roots).toContain(binaryDirectory);
+      expect(roots).toContain(canonicalPackageRoot);
+      expect(roots).not.toContain(pnpmHome);
+      expect(roots).not.toContain(join(pnpmHome, ".tools"));
+      expect(roots).not.toContain(join(versionRoot, "node_modules"));
+    } finally {
+      await rm(pnpmHome, { recursive: true, force: true });
+    }
+  });
+
+  test("adds only Homebrew opt traversal and exact linked Cellar roots", async () => {
+    const prefix = await mkdtemp(join(tmpdir(), "smithers-homebrew-policy-"));
+    const llhttpCellarRoot = join(prefix, "Cellar", "llhttp", "9.3.1");
+    const llhttpLibrary = join(llhttpCellarRoot, "lib", "libllhttp.9.3.dylib");
+    const llhttpOptRoot = join(prefix, "opt", "llhttp");
+    await mkdir(join(llhttpCellarRoot, "lib"), { recursive: true });
+    await mkdir(join(prefix, "opt"), { recursive: true });
+    await writeFile(llhttpLibrary, "fixture");
+    await symlink(llhttpCellarRoot, llhttpOptRoot, "dir");
+
+    try {
+      const binary = join(prefix, "Cellar", "node", "25.6.1", "bin", "node");
+      const roots = resolveHomebrewDynamicLibraryReadPaths(binary, [
+        `${binary}:`,
+        `\t${join(llhttpOptRoot, "lib", "libllhttp.9.3.dylib")} (compatibility version 9.3.0, current version 9.3.1)`,
+        "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)",
+        "\t/other/homebrew/opt/private/lib/private.dylib (compatibility version 1.0.0, current version 1.0.0)",
+      ].join("\n"));
+
+      expect(roots).toEqual([
+        join(prefix, "opt"),
+        join(await realpath(prefix), "Cellar", "llhttp", "9.3.1"),
+      ].sort());
+      expect(roots).not.toContain(prefix);
+      expect(roots).not.toContain(join(prefix, "Cellar"));
+      expect(roots).not.toContain(llhttpOptRoot);
+    } finally {
+      await rm(prefix, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects empty and traversing Homebrew formula or version segments", async () => {
+    const prefix = await mkdtemp(join(tmpdir(), "smithers-homebrew-traversal-"));
+    try {
+      const binary = join(prefix, "Cellar", "node", "25.6.1", "bin", "node");
+      const roots = resolveHomebrewDynamicLibraryReadPaths(binary, [
+        `${binary}:`,
+        `\t${prefix}/opt/../private/lib/private.dylib (compatibility version 1.0.0, current version 1.0.0)`,
+        `\t${prefix}/opt/./lib/private.dylib (compatibility version 1.0.0, current version 1.0.0)`,
+        `\t${prefix}/opt//lib/private.dylib (compatibility version 1.0.0, current version 1.0.0)`,
+        `\t${prefix}/Cellar/../1.0/lib/private.dylib (compatibility version 1.0.0, current version 1.0.0)`,
+        `\t${prefix}/Cellar/private/../lib/private.dylib (compatibility version 1.0.0, current version 1.0.0)`,
+        `\t${prefix}/Cellar//1.0/lib/private.dylib (compatibility version 1.0.0, current version 1.0.0)`,
+      ].join("\n"));
+
+      expect(roots).toEqual([]);
+    } finally {
+      await rm(prefix, { recursive: true, force: true });
+    }
+  });
+
+  test("admits no logical root when a Homebrew load command cannot be resolved", async () => {
+    const prefix = await mkdtemp(join(tmpdir(), "smithers-homebrew-missing-"));
+    try {
+      const binary = join(prefix, "Cellar", "node", "25.6.1", "bin", "node");
+      const roots = resolveHomebrewDynamicLibraryReadPaths(binary, [
+        `${binary}:`,
+        `\t${prefix}/opt/missing/lib/libmissing.dylib (compatibility version 1.0.0, current version 1.0.0)`,
+        `\t${prefix}/Cellar/missing/1.0/lib/libmissing.dylib (compatibility version 1.0.0, current version 1.0.0)`,
+      ].join("\n"));
+
+      expect(roots).toEqual([]);
+      expect(roots).not.toContain(join(prefix, "opt"));
+      expect(roots).not.toContain(join(prefix, "Cellar", "missing", "1.0"));
+    } finally {
+      await rm(prefix, { recursive: true, force: true });
+    }
+  });
+
+  test("walks transitive Homebrew dylibs once even when the graph cycles", async () => {
+    const temporaryPrefix = await mkdtemp(join(tmpdir(), "smithers-homebrew-closure-"));
+    try {
+      const prefix = await realpath(temporaryPrefix);
+      const binary = join(prefix, "Cellar", "node", "25.6.1", "bin", "node");
+      const llhttpRoot = join(prefix, "Cellar", "llhttp", "9.3.1");
+      const llhttpLibrary = join(llhttpRoot, "lib", "libllhttp.9.3.dylib");
+      const brotliRoot = join(prefix, "Cellar", "brotli", "1.2.0");
+      const brotliLibrary = join(brotliRoot, "lib", "libbrotlicommon.1.dylib");
+      await Promise.all([
+        mkdir(join(binary, ".."), { recursive: true }),
+        mkdir(join(llhttpRoot, "lib"), { recursive: true }),
+        mkdir(join(brotliRoot, "lib"), { recursive: true }),
+        mkdir(join(prefix, "opt"), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(binary, "fixture"),
+        writeFile(llhttpLibrary, "fixture"),
+        writeFile(brotliLibrary, "fixture"),
+        symlink(llhttpRoot, join(prefix, "opt", "llhttp"), "dir"),
+        symlink(brotliRoot, join(prefix, "opt", "brotli"), "dir"),
+      ]);
+
+      const loadCommand = (owner: string, dependencies: string[]) => [
+        `${owner}:`,
+        ...dependencies.map((dependency) =>
+          `\t${dependency} (compatibility version 1.0.0, current version 1.0.0)`
+        ),
+      ].join("\n");
+      const outputs = new Map([
+        [binary, loadCommand(binary, [join(prefix, "opt", "llhttp", "lib", "libllhttp.9.3.dylib")])],
+        [llhttpLibrary, loadCommand(llhttpLibrary, [join(prefix, "opt", "brotli", "lib", "libbrotlicommon.1.dylib")])],
+        [brotliLibrary, loadCommand(brotliLibrary, [join(prefix, "opt", "llhttp", "lib", "libllhttp.9.3.dylib")])],
+      ]);
+      const inspected: string[] = [];
+
+      const roots = resolveHomebrewDynamicLibraryReadPathClosure(binary, (path) => {
+        inspected.push(path);
+        return outputs.get(path);
+      });
+
+      expect(roots).toEqual([
+        join(prefix, "opt"),
+        llhttpRoot,
+        brotliRoot,
+      ].sort());
+      expect(inspected.sort()).toEqual([
+        binary,
+        llhttpLibrary,
+        brotliLibrary,
+      ].sort());
+    } finally {
+      await rm(temporaryPrefix, { recursive: true, force: true });
+    }
+  });
+
   test.skipIf(!Bun.which("codex"))(
     "runs the required toolchain inside the real Codex sandbox without home or network access",
     async () => {
@@ -282,6 +548,13 @@ describe("public issue agent policy", () => {
 
       try {
         const toolchainReadPaths = resolvePublicIssueToolchainReadPaths();
+        const { linkedLibrary, unrelatedFormulaFile } =
+          await homebrewSandboxCanaries(toolchainReadPaths);
+        if (toolchainReadPaths.some((path) => path.endsWith("/opt"))) {
+          expect(linkedLibrary).toBeDefined();
+        }
+        if (linkedLibrary) expect(linkedLibrary).toContain("/opt/");
+        if (unrelatedFormulaFile) expect(unrelatedFormulaFile).toContain("/opt/");
         const policy = buildPublicIssueCodexPolicy("write", {
           ...process.env,
           TMPDIR: safeTmp,
@@ -309,6 +582,12 @@ describe("public issue agent policy", () => {
             "git --version",
             "(cd \"$TMPDIR\" && jj --version)",
             "rg --version >/dev/null",
+            ...(linkedLibrary
+              ? [`test -r ${JSON.stringify(linkedLibrary)}`]
+              : []),
+            ...(unrelatedFormulaFile
+              ? [`test ! -r ${JSON.stringify(unrelatedFormulaFile)}`]
+              : []),
             "test -r package.json",
             "touch \"$TMPDIR/policy-canary\"",
             `test ! -r ${JSON.stringify(join(homedir(), ".ssh"))}`,

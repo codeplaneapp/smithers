@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 
@@ -46,6 +47,8 @@ export const PUBLIC_ISSUE_SAFE_ENV_NAMES = [
   "COMSPEC",
   "PATHEXT",
   "GIT_TERMINAL_PROMPT",
+  "OPENSSL_CONF",
+  "npm_config_manage_package_manager_versions",
   "SMITHERS_BIN",
 ] as const;
 
@@ -251,6 +254,12 @@ export function buildPublicIssueSafeEnv(
     safe.USERPROFILE = options.safeHome;
   }
   safe.GIT_TERMINAL_PROMPT = "0";
+  // Homebrew-linked runtimes otherwise load host-controlled OpenSSL config
+  // outside their formula root. Network is denied, so use an inert config.
+  safe.OPENSSL_CONF = process.platform === "win32" ? "NUL" : "/dev/null";
+  // An empty disposable HOME cannot contain pnpm's project-version downloads,
+  // and the network policy intentionally prevents fetching them.
+  safe.npm_config_manage_package_manager_versions = "false";
   return safe;
 }
 
@@ -264,9 +273,181 @@ function readablePackageRoot(path: string): string {
   if (nvm?.[1]) return nvm[1];
   const bun = normalized.match(/^(.*\/\.bun\/bin)(?:\/|$)/);
   if (bun?.[1]) return bun[1];
+  // A parent pnpm process prepends its selected project-version binary to
+  // PATH. That binary is a symlink into a self-contained package whose entry
+  // point requires ../dist/pnpm.cjs, so admitting only its bin directory makes
+  // a valid install look corrupt inside the sandbox. Reopen this exact package
+  // root, never the containing PNPM_HOME or shared .tools directory.
+  const managedPnpm = normalized.match(
+    /^(.*\/\.tools\/pnpm\/[^/]+\/node_modules\/pnpm)(?:\/|$)/,
+  );
+  if (managedPnpm?.[1]) return managedPnpm[1];
   const cellar = normalized.match(/^(.*\/Cellar\/[^/]+\/[^/]+)/);
   if (cellar?.[1]) return cellar[1];
   return dirname(path);
+}
+
+function homebrewPrefix(path: string): string | undefined {
+  const normalized = path.replaceAll("\\", "/");
+  const marker = "/Cellar/";
+  const index = normalized.indexOf(marker);
+  if (index <= 0) return undefined;
+  return normalized.slice(0, index);
+}
+
+function safeHomebrewPathSegment(segment: string | undefined): segment is string {
+  return Boolean(
+    segment
+    && segment !== "."
+    && segment !== ".."
+    && segment.trim() === segment
+    && !segment.includes("\0"),
+  );
+}
+
+function homebrewPackageRoot(path: string, prefix: string): string | undefined {
+  const normalized = path.replaceAll("\\", "/");
+  const optPrefix = `${prefix}/opt/`;
+  if (normalized.startsWith(optPrefix)) {
+    const formula = normalized.slice(optPrefix.length).split("/", 1)[0];
+    return safeHomebrewPathSegment(formula) ? `${optPrefix}${formula}` : undefined;
+  }
+
+  const cellarPrefix = `${prefix}/Cellar/`;
+  if (!normalized.startsWith(cellarPrefix)) return undefined;
+  const [formula, version] = normalized.slice(cellarPrefix.length).split("/", 3);
+  return safeHomebrewPathSegment(formula) && safeHomebrewPathSegment(version)
+    ? `${cellarPrefix}${formula}/${version}`
+    : undefined;
+}
+
+function homebrewDynamicLibraryPaths(
+  binaryPath: string,
+  otoolOutput: string,
+): string[] {
+  const prefix = homebrewPrefix(binaryPath);
+  if (!prefix) return [];
+  return otoolOutput.split(/\r?\n/).slice(1)
+    .map((line) => line.trim().split(/\s+\(/, 1)[0])
+    .filter((dependency): dependency is string =>
+      Boolean(dependency && homebrewPackageRoot(dependency, prefix))
+    );
+}
+
+/**
+ * Convert a Homebrew Mach-O dependency list into exact formula roots.
+ *
+ * Homebrew executables commonly load versioned libraries through
+ * `<prefix>/opt/<formula>` symlinks. Codex's path policy has no traversal-only
+ * mode and canonicalizes an individual formula symlink, so the real opt
+ * directory must be readable for traversal. Only named formulas' canonical
+ * Cellar roots are then reopened; other formula contents remain denied. Paths
+ * outside the executable's own Homebrew prefix are deliberately ignored.
+ */
+export function resolveHomebrewDynamicLibraryReadPaths(
+  binaryPath: string,
+  otoolOutput: string,
+): string[] {
+  const prefix = homebrewPrefix(binaryPath);
+  if (!prefix) return [];
+  let canonicalPrefix: string;
+  try {
+    canonicalPrefix = realpathSync(prefix);
+  } catch {
+    return [];
+  }
+
+  const roots = new Set<string>();
+  for (const dependency of homebrewDynamicLibraryPaths(binaryPath, otoolOutput)) {
+    const logicalRoot = homebrewPackageRoot(dependency, prefix);
+    if (!logicalRoot) continue;
+
+    try {
+      const canonicalDependency = realpathSync(dependency);
+      const canonicalRoot = homebrewPackageRoot(canonicalDependency, canonicalPrefix);
+      if (
+        !canonicalRoot
+        || !canonicalRoot.startsWith(`${canonicalPrefix}/Cellar/`)
+        || !canonicalDependency.startsWith(`${canonicalRoot}/`)
+      ) continue;
+
+      roots.add(canonicalRoot);
+      if (logicalRoot.startsWith(`${prefix}/opt/`)) {
+        // Codex canonicalizes configured roots. Reopen the real opt directory
+        // so dyld can traverse the named symlink; the proven canonical Cellar
+        // root above still decides which formula contents are readable.
+        roots.add(`${prefix}/opt`);
+      }
+    } catch {
+      // Unresolved load commands never contribute even a logical read root.
+    }
+  }
+  return [...roots].sort();
+}
+
+const MAX_HOMEBREW_MACHO_FILES = 128;
+
+/** Resolve a bounded, cycle-safe closure of same-prefix Mach-O dependencies. */
+export function resolveHomebrewDynamicLibraryReadPathClosure(
+  binaryPath: string,
+  inspect: (path: string) => string | undefined,
+): string[] {
+  let canonicalBinary = binaryPath;
+  try {
+    canonicalBinary = realpathSync(binaryPath);
+  } catch {
+    // Let the inspector decide whether the unresolved starting path is usable.
+  }
+  const prefix = homebrewPrefix(canonicalBinary);
+  if (!prefix) return [];
+
+  const roots = new Set<string>();
+  const queue = [canonicalBinary];
+  const visited = new Set<string>();
+  while (queue.length > 0 && visited.size < MAX_HOMEBREW_MACHO_FILES) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    const output = inspect(current);
+    if (!output) continue;
+    for (const root of resolveHomebrewDynamicLibraryReadPaths(current, output)) {
+      roots.add(root);
+    }
+    for (const dependency of homebrewDynamicLibraryPaths(current, output)) {
+      let canonicalDependency: string;
+      try {
+        canonicalDependency = realpathSync(dependency);
+      } catch {
+        continue;
+      }
+      if (
+        homebrewPrefix(canonicalDependency) === prefix
+        && !visited.has(canonicalDependency)
+        && !queue.includes(canonicalDependency)
+      ) {
+        queue.push(canonicalDependency);
+      }
+    }
+  }
+  return [...roots].sort();
+}
+
+function inspectDarwinMachO(path: string): string | undefined {
+  const result = spawnSync("/usr/bin/otool", ["-L", path], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  if (result.status !== 0 || typeof result.stdout !== "string") return undefined;
+  return result.stdout;
+}
+
+function darwinDynamicLibraryReadPaths(binaryPath: string): string[] {
+  if (process.platform !== "darwin" || !homebrewPrefix(binaryPath)) return [];
+  return resolveHomebrewDynamicLibraryReadPathClosure(
+    binaryPath,
+    inspectDarwinMachO,
+  );
 }
 
 /** Resolve only the installed runtime roots needed by repo checks. */
@@ -299,7 +480,12 @@ export function resolvePublicIssueToolchainReadPaths(
       }
       if (resolved) break;
     }
-    if (resolved) roots.add(readablePackageRoot(resolved));
+    if (resolved) {
+      roots.add(readablePackageRoot(resolved));
+      for (const dependencyRoot of darwinDynamicLibraryReadPaths(resolved)) {
+        roots.add(dependencyRoot);
+      }
+    }
   }
 
   if (process.platform === "darwin" && existsSync("/System/Library/OpenSSL")) {
