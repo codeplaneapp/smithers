@@ -5,6 +5,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
+import { dirname } from "node:path";
 
 // MAX_SCHEMA_RETRIES is hard-coded to 3 in engine.js. The retry mechanism
 // re-invokes the SAME agent with a corrective prompt up to 3 times before
@@ -44,6 +45,59 @@ function makeFlakyAgent(failures) {
 }
 
 describe("MAX_SCHEMA_RETRIES (3) - schema-retry mechanism", () => {
+    test("repair and schema retries preserve task execution context", async () => {
+        const { smithers, outputs, dbPath, cleanup } = createTestSmithers({
+            out: z.object({ value: z.number() }),
+        });
+        const calls = [];
+        let generateCount = 0;
+        const agent = {
+            id: "context-aware-retries",
+            tools: {},
+            generate: async (args) => {
+                calls.push(args);
+                generateCount += 1;
+                if (generateCount === 1) {
+                    return { text: "I completed the work, but forgot the JSON." };
+                }
+                if (generateCount === 2) {
+                    return { text: '{"value":"wrong"}' };
+                }
+                return { text: '{"value":42}' };
+            },
+        };
+        const workflow = smithers(() => (
+            <Workflow name="retry-context">
+                <Task id="t" output={outputs.out} agent={agent}>
+                    do work
+                </Task>
+            </Workflow>
+        ));
+        const runId = "retry-context-run";
+        const rootDir = dirname(dbPath);
+        const result = await Effect.runPromise(runWorkflow(workflow, {
+            input: {},
+            runId,
+            rootDir,
+            maxOutputBytes: 12345,
+        }));
+        expect(result.status).toBe("finished");
+        expect(calls).toHaveLength(3);
+        for (const args of calls.slice(1)) {
+            expect(args).toMatchObject({
+                rootDir,
+                maxOutputBytes: 12345,
+                taskContext: {
+                    runId,
+                    nodeId: "t",
+                    iteration: 0,
+                    attempt: 1,
+                },
+            });
+        }
+        cleanup();
+    }, TIMEOUT_MS);
+
     test("agent recovers within retry budget (failures=2 < MAX) succeeds", async () => {
         const { smithers, outputs, cleanup } = createTestSmithers({
             out: z.object({ value: z.number() }),

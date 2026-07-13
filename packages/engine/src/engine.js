@@ -4800,6 +4800,14 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             options: undefined,
                             abortSignal: taskSignal,
                             prompt: jsonPrompt,
+                            rootDir: taskRoot,
+                            maxOutputBytes: toolConfig.maxOutputBytes,
+                            taskContext: {
+                                runId,
+                                nodeId: desc.nodeId,
+                                iteration: desc.iteration,
+                                attempt: attemptNo,
+                            },
                             timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                             onStdout: (text) => {
                                 if (heartbeatOwnerLost) return;
@@ -5068,6 +5076,12 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 messages: retryMessages,
                 rootDir: taskRoot,
                 maxOutputBytes: toolConfig.maxOutputBytes,
+                taskContext: {
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                },
                 timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                 onStdout: (text) => {
                     if (heartbeatOwnerLost) return;
