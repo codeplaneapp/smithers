@@ -1507,19 +1507,40 @@ function finalizeRebase(n: number, cwd: string, rebase: Rebase, resolution: Reso
     return { issueNumber: n, ready: false, baseSha: rebase.baseSha, headSha, patchId: "", sameAsCandidate: false, changedPaths, reviewDiff: "", summary: String(error) };
   }
 }
-async function landAndPush(input: Input, n: number, prep: LandingPrep, reviewApproved: boolean, gatePassed: boolean): Promise<Merge> {
+// Merge-train landing: rebase the lane's fix onto the CURRENT origin/main tip
+// and fast-forward push it. Retry on a lost race. The old one-shot CAS
+// (update-ref main head base) gave up the moment main moved — so once one queue
+// entry landed (or a concurrent push advanced main), every later land returned
+// merged:false and the serial queue wedged. Re-rebasing onto the live tip makes
+// each entry land regardless of how many landed before it.
+async function landAndPush(input: Input, n: number, prep: LandingPrep, reviewApproved: boolean, gatePassed: boolean, cwd: string): Promise<Merge> {
   const valid = prep.ready && reviewApproved && gatePassed;
   if (!valid) return { issueNumber: n, merged: false, pushed: false, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: "", summary: "Final review or landing gate did not pass on the exact rebased head." };
-  try {
-    git(["update-ref", "refs/heads/main", prep.headSha, prep.baseSha]);
-  } catch (error) {
-    return { issueNumber: n, merged: false, pushed: false, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: "", summary: "Local main moved; queue entry must retry: " + String(error).slice(0, 4_000) };
+  if (input.dryRun) return { issueNumber: n, merged: true, pushed: false, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: "", summary: "Dry run: landing skipped." };
+  let base = prep.baseSha;
+  let head = prep.headSha;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    git(["fetch", "origin", "main"]);
+    const tip = git(["rev-parse", "refs/remotes/origin/main"]);
+    if (base !== tip) {
+      try {
+        git(["rebase", "--onto", tip, base, head], cwd);
+      } catch {
+        try { git(["rebase", "--abort"], cwd); } catch { /* not mid-rebase */ }
+        return { issueNumber: n, merged: false, pushed: false, baseSha: tip, headSha: head, remoteSha: "", summary: "Rebase onto the latest main conflicted; queue entry needs conflict resolution." };
+      }
+      base = tip;
+      head = currentHead(cwd);
+    }
+    const push = await runProcess("git", ["push", "origin", head + ":refs/heads/main"], repoRoot, 15 * 60_000);
+    if (push.exitCode === 0) {
+      git(["update-ref", "refs/heads/main", head]);
+      git(["fetch", "origin", "main"]);
+      return { issueNumber: n, merged: true, pushed: true, baseSha: base, headSha: head, remoteSha: git(["rev-parse", "refs/remotes/origin/main"]), summary: "Landed on main (merge-train push at attempt " + (attempt + 1) + ")." };
+    }
+    // Non-fast-forward: origin advanced during our window. Loop to re-rebase.
   }
-  const push = await pushMain(input.dryRun);
-  return {
-    issueNumber: n, merged: true, pushed: push.pushed, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: push.remoteSha,
-    summary: "Landed on local main. " + push.summary,
-  };
+  return { issueNumber: n, merged: false, pushed: false, baseSha: base, headSha: head, remoteSha: "", summary: "Lost the main landing race after 6 attempts." };
 }
 async function closeAfterLanding(input: Input, issue: Issue, merge: Merge, localTickets: LocalTicket[]): Promise<z.infer<typeof dispositionSchema>> {
   if (!merge.merged || (!merge.pushed && !input.dryRun)) {
@@ -1711,7 +1732,7 @@ export default smithers((ctx) => {
                           ) : null}
                           {prep?.ready && gate ? (
                             <Task id="ci-fix:land" output={outputs.tfMerge} timeoutMs={30 * 60_000} continueOnFail>
-                              {() => landAndPush(input, 0, prep, true, gate.passed === true && gate.headSha === prep.headSha)}
+                              {() => landAndPush(input, 0, prep, true, gate.passed === true && gate.headSha === prep.headSha, cwd)}
                             </Task>
                           ) : null}
                         </Sequence>
@@ -2039,7 +2060,7 @@ export default smithers((ctx) => {
                     ) : null}
                     {prep ? (
                       <Task id={"i" + n + ":land"} output={outputs.tfMerge} timeoutMs={30 * 60_000} continueOnFail>
-                        {() => landAndPush(input, n, prep, reviewApproved, gatePassed)}
+                        {() => landAndPush(input, n, prep, reviewApproved, gatePassed, cwd)}
                       </Task>
                     ) : null}
                     {merge?.merged ? (
