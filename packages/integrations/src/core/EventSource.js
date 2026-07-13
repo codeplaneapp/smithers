@@ -26,7 +26,8 @@ export function makeWebhookSource(options) {
     const { id, capacity = DEFAULT_WEBHOOK_CAPACITY, verify, decode } = options;
     return Effect.gen(function* () {
         /** @type {Queue.Queue<import("./ExternalEventTypes.ts").ExternalEvent>} */
-        const queue = yield* Queue.bounded(capacity);
+        const queue = yield* Queue.dropping(capacity);
+        const offerLock = yield* Effect.makeSemaphore(1);
         /** @type {EventSource} */
         const source = { id, events: Stream.fromQueue(queue) };
         /**
@@ -51,11 +52,30 @@ export function makeWebhookSource(options) {
             for (const candidate of candidates) {
                 events.push(yield* decodeExternalEvent(candidate).pipe(Effect.mapError((cause) => new IntegrationError("decode-failed", `Webhook decoder produced an invalid ExternalEvent for source "${id}".`, { sourceId: id }, { cause }))));
             }
-            const accepted = yield* Queue.offerAll(queue, events).pipe(Effect.mapError(() => new IntegrationError("queue-closed", `Webhook source "${id}" is shut down.`, { sourceId: id })));
-            if (!accepted) {
-                return yield* Effect.fail(new IntegrationError("queue-closed", `Webhook source "${id}" rejected the event batch.`, { sourceId: id }));
-            }
-            return { accepted: events.length };
+            return yield* offerLock.withPermits(1)(Effect.gen(function* () {
+                if (yield* Queue.isShutdown(queue)) {
+                    return yield* Effect.fail(new IntegrationError("queue-closed", `Webhook source "${id}" is shut down.`, { sourceId: id }));
+                }
+                // Serialize producers so the capacity check and batch offer are
+                // atomic relative to other webhook requests. Consumers can only
+                // free capacity between these operations.
+                const queued = Math.max(yield* Queue.size(queue), 0);
+                if (events.length > capacity - queued) {
+                    return yield* Effect.fail(new IntegrationError("queue-full", `Webhook source "${id}" does not have capacity for the event batch.`, {
+                        sourceId: id,
+                        capacity,
+                        queued,
+                        requested: events.length,
+                    }));
+                }
+                const accepted = yield* Queue.offerAll(queue, events);
+                if (!accepted) {
+                    return yield* Effect.fail(new IntegrationError("queue-full", `Webhook source "${id}" rejected the event batch.`, { sourceId: id, capacity, requested: events.length }));
+                }
+                return { accepted: events.length };
+            })).pipe(Effect.catchAllCause((cause) => Queue.isShutdown(queue).pipe(Effect.flatMap((isShutdown) => isShutdown
+                ? Effect.fail(new IntegrationError("queue-closed", `Webhook source "${id}" is shut down.`, { sourceId: id }))
+                : Effect.failCause(cause)))));
         });
         return { source, offer, shutdown: Queue.shutdown(queue) };
     });

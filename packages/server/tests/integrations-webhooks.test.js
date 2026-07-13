@@ -210,4 +210,24 @@ describe("POST /v1/webhooks/:sourceId", () => {
         const res = await postWebhook(port, "test", body, sign(body));
         expect(res.status).toBe(400);
     });
+    test("returns 503 when the webhook ingress queue has no capacity", async () => {
+        const { db } = createDb();
+        const port = startWebhookServer(db, {
+            webhooks: [{
+                id: "full",
+                secret: SECRET,
+                event: EVENT_NAME,
+                capacity: 0,
+            }],
+        });
+        const body = JSON.stringify({ deliveryId: "d-full" });
+        const res = await postWebhook(port, "full", body, sign(body));
+        expect(res.status).toBe(503);
+        expect(await res.json()).toEqual({
+            error: {
+                code: "SERVER_ERROR",
+                message: "Webhook delivery is temporarily unavailable",
+            },
+        });
+    });
 });

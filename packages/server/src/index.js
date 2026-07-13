@@ -927,6 +927,9 @@ function startServerInternal(opts = {}) {
                         if (reason === "decode-failed") {
                             throw new HttpError(400, "INVALID_REQUEST", "Webhook payload decode failed");
                         }
+                        if (reason === "queue-full" || reason === "queue-closed") {
+                            throw new HttpError(503, "SERVER_ERROR", "Webhook delivery is temporarily unavailable");
+                        }
                     }
                     throw new HttpError(500, "SERVER_ERROR", error instanceof Error ? error.message : "Webhook handling failed");
                 }

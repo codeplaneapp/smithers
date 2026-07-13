@@ -118,14 +118,43 @@ describe("makeWebhookSource offer failure branches", () => {
         expect(error.message).toContain("invalid ExternalEvent");
         await Effect.runPromise(webhook.shutdown);
     });
-    test("offering after shutdown reports the queue is closed", async () => {
+    test("rejects an event batch immediately and atomically when the queue lacks capacity", async () => {
+        const webhook = await Effect.runPromise(makeWebhookSource({
+            id: "hook-full",
+            capacity: 2,
+            decode: (request) => request.rawBody === "batch"
+                ? [
+                    makeEvent({ source: "hook-full", dedupeKey: "batch-1" }),
+                    makeEvent({ source: "hook-full", dedupeKey: "batch-2" }),
+                ]
+                : makeEvent({ source: "hook-full", dedupeKey: request.rawBody }),
+        }));
+        try {
+            expect(await Effect.runPromise(webhook.offer({ headers: {}, rawBody: "queued" }))).toEqual({ accepted: 1 });
+            const error = await Effect.runPromise(webhook.offer({ headers: {}, rawBody: "batch" }).pipe(Effect.flip, Effect.timeout("1 second")));
+            expect(error).toBeInstanceOf(IntegrationError);
+            expect(error.reason).toBe("queue-full");
+            expect(error.details).toMatchObject({ capacity: 2, queued: 1, requested: 2 });
+
+            const queued = await Effect.runPromise(webhook.source.events.pipe(Stream.take(1), Stream.runCollect));
+            expect(Array.from(queued, (event) => event.dedupeKey)).toEqual(["queued"]);
+            expect(await Effect.runPromise(webhook.offer({ headers: {}, rawBody: "after" }))).toEqual({ accepted: 1 });
+            const after = await Effect.runPromise(webhook.source.events.pipe(Stream.take(1), Stream.runCollect));
+            expect(Array.from(after, (event) => event.dedupeKey)).toEqual(["after"]);
+        }
+        finally {
+            await Effect.runPromise(webhook.shutdown);
+        }
+    });
+    test("offering after shutdown reports a typed queue-closed failure", async () => {
         const webhook = await Effect.runPromise(makeWebhookSource({
             id: "hook-closed",
             decode: () => makeEvent({ source: "hook-closed" }),
         }));
         await Effect.runPromise(webhook.shutdown);
-        const exit = await Effect.runPromiseExit(webhook.offer({ headers: {}, rawBody: "{}" }));
-        expect(exit._tag).toBe("Failure");
+        const error = await Effect.runPromise(webhook.offer({ headers: {}, rawBody: "{}" }).pipe(Effect.flip));
+        expect(error).toBeInstanceOf(IntegrationError);
+        expect(error.reason).toBe("queue-closed");
     });
 });
 
@@ -218,7 +247,7 @@ describe("makeIntegrationRuntime", () => {
         }
     });
 
-    test("handleWebhook against a shut-down source surfaces the squashed interrupt (defect path)", async () => {
+    test("handleWebhook against a shut-down source surfaces a typed queue-closed failure", async () => {
         const { adapter } = createTestAdapter();
         const runtime = makeIntegrationRuntime({
             adapter,
@@ -230,6 +259,8 @@ describe("makeIntegrationRuntime", () => {
             (error) => ({ rejected: true, error }),
         );
         expect(outcome.rejected).toBe(true);
+        expect(isIntegrationError(outcome.error)).toBe(true);
+        expect(outcome.error.reason).toBe("queue-closed");
     });
 
     test("a source stream that fails is logged and supervised (restart back-off), then shut down cleanly", async () => {

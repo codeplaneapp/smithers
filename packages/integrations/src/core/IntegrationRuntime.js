@@ -57,12 +57,16 @@ export function makeIntegrationRuntime(options) {
         sourceCount: sources.length,
     }, "integrations:runtime");
     let shutdownPromise = null;
+    let shuttingDown = false;
     return {
         hasWebhookSource: (sourceId) => webhookOffers.has(sourceId),
         handleWebhook: (sourceId, request) => {
             const offer = webhookOffers.get(sourceId);
             if (!offer) {
                 return Promise.reject(new IntegrationError("unknown-source", `Unknown webhook source: ${sourceId}`, { sourceId }));
+            }
+            if (shuttingDown) {
+                return Promise.reject(new IntegrationError("queue-closed", `Webhook source "${sourceId}" is shut down.`, { sourceId }));
             }
             // Reject with the RAW typed error (IntegrationError), not the
             // FiberFailure wrapper `runPromise` would throw, so HTTP ingress
@@ -79,6 +83,7 @@ export function makeIntegrationRuntime(options) {
         },
         shutdown: () => {
             if (!shutdownPromise) {
+                shuttingDown = true;
                 shutdownPromise = (async () => {
                     try {
                         // Close the webhook queues first so in-flight events drain,

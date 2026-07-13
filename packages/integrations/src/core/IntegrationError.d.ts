@@ -6,7 +6,7 @@ import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
  */
 declare function isIntegrationError(error: unknown): error is IntegrationError;
 /**
- * @typedef {"invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-closed"} IntegrationErrorReason
+ * @typedef {"invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-full" | "queue-closed"} IntegrationErrorReason
  */
 /**
  * Error raised by integration event sources and the delivery pipeline.
@@ -27,6 +27,6 @@ declare class IntegrationError extends SmithersError {
     /** @type {IntegrationErrorReason} */
     reason: IntegrationErrorReason;
 }
-type IntegrationErrorReason = "invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-closed";
+type IntegrationErrorReason = "invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-full" | "queue-closed";
 
 export { IntegrationError, type IntegrationErrorReason, isIntegrationError };

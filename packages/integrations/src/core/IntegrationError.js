@@ -1,7 +1,7 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 /**
- * @typedef {"invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-closed"} IntegrationErrorReason
+ * @typedef {"invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-full" | "queue-closed"} IntegrationErrorReason
  */
 
 /**
