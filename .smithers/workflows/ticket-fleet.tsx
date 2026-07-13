@@ -1507,8 +1507,8 @@ function finalizeRebase(n: number, cwd: string, rebase: Rebase, resolution: Reso
     return { issueNumber: n, ready: false, baseSha: rebase.baseSha, headSha, patchId: "", sameAsCandidate: false, changedPaths, reviewDiff: "", summary: String(error) };
   }
 }
-async function landAndPush(input: Input, n: number, prep: LandingPrep, reviewApproved: boolean, gate: Gate | undefined): Promise<Merge> {
-  const valid = prep.ready && reviewApproved && gate?.passed === true && gate.headSha === prep.headSha;
+async function landAndPush(input: Input, n: number, prep: LandingPrep, reviewApproved: boolean, gatePassed: boolean): Promise<Merge> {
+  const valid = prep.ready && reviewApproved && gatePassed;
   if (!valid) return { issueNumber: n, merged: false, pushed: false, baseSha: prep.baseSha, headSha: prep.headSha, remoteSha: "", summary: "Final review or landing gate did not pass on the exact rebased head." };
   try {
     git(["update-ref", "refs/heads/main", prep.headSha, prep.baseSha]);
@@ -1711,7 +1711,7 @@ export default smithers((ctx) => {
                           ) : null}
                           {prep?.ready && gate ? (
                             <Task id="ci-fix:land" output={outputs.tfMerge} timeoutMs={30 * 60_000} continueOnFail>
-                              {() => landAndPush(input, 0, prep, gate.passed === true && gate.headSha === prep.headSha, gate)}
+                              {() => landAndPush(input, 0, prep, true, gate.passed === true && gate.headSha === prep.headSha)}
                             </Task>
                           ) : null}
                         </Sequence>
@@ -1982,9 +1982,19 @@ export default smithers((ctx) => {
                 const prep = latest<LandingPrep>(ctx, outputs.tfLandingPrep, "i" + n + ":queue-prep");
                 const queueReview = latest<Review>(ctx, outputs.tfReview, reviewNodeIdFor(n, hardTier, "landing"));
                 const queueGate = latest<Gate>(ctx, outputs.tfGate, "i" + n + ":queue-gate");
+                const candidateGate = latest<Gate>(ctx, outputs.tfGate, "i" + n + ":candidate-gate");
                 const merge = latest<Merge>(ctx, outputs.tfMerge, "i" + n + ":land");
                 const reviewApproved = prep?.sameAsCandidate === true
                   || (queueReview?.approved === true && queueReview.headSha === prep?.headSha);
+                // When the rebased head is patch-identical to the reviewed
+                // candidate, the candidate gate already ran the scoped tests
+                // green on this exact change: reuse that result and land
+                // immediately instead of re-running the gate (this is what the
+                // fast manual land does). Only a rebase that actually changed
+                // the content (conflict resolution) re-gates on the new head.
+                const gatePassed = prep?.sameAsCandidate === true
+                  ? candidateGate?.passed === true
+                  : (queueGate?.passed === true && queueGate.headSha === prep?.headSha);
                 return (
                   <Sequence key={"queue-" + n}>
                     <Task id={"i" + n + ":queue-rebase"} output={outputs.tfRebase} timeoutMs={20 * 60_000} continueOnFail>
@@ -2020,14 +2030,16 @@ export default smithers((ctx) => {
                             </Task>
                           )
                         ) : null}
-                        <Task id={"i" + n + ":queue-gate"} output={outputs.tfGate} timeoutMs={110 * 60_000} continueOnFail>
-                          {() => runGate(n, "landing", cwd, prep.headSha, landingGateCommand(asStrArray(prep.changedPaths)), 100 * 60_000)}
-                        </Task>
+                        {!prep.sameAsCandidate ? (
+                          <Task id={"i" + n + ":queue-gate"} output={outputs.tfGate} timeoutMs={110 * 60_000} continueOnFail>
+                            {() => runGate(n, "landing", cwd, prep.headSha, landingGateCommand(asStrArray(prep.changedPaths)), 100 * 60_000)}
+                          </Task>
+                        ) : null}
                       </Parallel>
                     ) : null}
                     {prep ? (
                       <Task id={"i" + n + ":land"} output={outputs.tfMerge} timeoutMs={30 * 60_000} continueOnFail>
-                        {() => landAndPush(input, n, prep, reviewApproved, queueGate)}
+                        {() => landAndPush(input, n, prep, reviewApproved, gatePassed)}
                       </Task>
                     ) : null}
                     {merge?.merged ? (
