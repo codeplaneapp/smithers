@@ -573,7 +573,7 @@ function createSmithersCollectionsWithClient(
               runId: row.runId,
               nodeId: row.nodeId,
               iteration: row.iteration,
-              approved: true,
+              approved: row.decision?.approved ?? true,
               decision: row.decision ?? { approved: true },
             });
           }

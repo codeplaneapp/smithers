@@ -211,7 +211,7 @@ describe("createSmithersCollections local mutations", () => {
     await expect(badStatus.isPersisted.promise).rejects.toThrow(/cannot persist status/i);
   });
 
-  test("approvals update approves and delete denies through submitApproval", async () => {
+  test("approvals update mirrors the row decision and delete denies through submitApproval", async () => {
     const { collections, calls } = makeCollections();
     const approvals = collections.approvals({ filter: { runId: "run-1" } });
     await approvals.preload();
@@ -219,9 +219,16 @@ describe("createSmithersCollections local mutations", () => {
 
     const approve = approvals.update(key, (draft: Record<string, unknown>) => { draft.status = "approved"; });
     await approve.isPersisted.promise;
+    const denyByUpdate = approvals.update(key, (draft: Record<string, unknown>) => {
+      draft.decision = { approved: false };
+    });
+    await denyByUpdate.isPersisted.promise;
     const deny = approvals.delete(key);
     await deny.isPersisted.promise;
-    expect(calls.filter((call) => call.path.startsWith("/v1/api/approvals/")).length).toBeGreaterThanOrEqual(2);
+    const approvalCalls = calls.filter((call) => call.path.startsWith("/v1/api/approvals/"));
+    expect(approvalCalls.length).toBeGreaterThanOrEqual(3);
+    expect(approvalCalls[1]?.body).toMatchObject({ approved: false, decision: { approved: false } });
+    expect(approvalCalls[2]?.body).toMatchObject({ approved: false, decision: { approved: false } });
   });
 
   test("crons insert/update/delete map to cronCreate and cronDelete", async () => {
