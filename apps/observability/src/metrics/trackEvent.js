@@ -285,9 +285,10 @@ export function trackEvent(event) {
                 Metric.update(sandboxPatchCount, event.patchCount),
             ], { discard: true });
         case "SandboxCompleted": {
+            const byStatus = Metric.tagged(sandboxCompletedTotal, "status", event.status);
             const byRuntime = event.runtime && event.runtime.length > 0
-                ? Metric.tagged(Metric.tagged(sandboxCompletedTotal, "runtime", event.runtime), "status", event.status)
-                : sandboxCompletedTotal;
+                ? Metric.tagged(byStatus, "runtime", event.runtime)
+                : byStatus;
             return Effect.all([
                 countEvent,
                 Metric.increment(byRuntime),

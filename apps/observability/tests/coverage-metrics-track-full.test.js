@@ -65,11 +65,11 @@ describe("trackEvent — sandbox lifecycle", () => {
         expect(delta(before, after, "smithers.sandbox.active", { runtime: "docker" })).toBe(-1);
         expect(histCount(before, after, "smithers.sandbox.duration_ms")).toBe(1);
     });
-    test("SandboxCompleted without runtime uses unlabeled counters", async () => {
+    test("SandboxCompleted without runtime tags completed_total by status", async () => {
         const before = await snapshot();
         await runTrack({ type: "SandboxCompleted", runId: "r", runtime: "", status: "failed", durationMs: 10, timestampMs: Date.now() });
         const after = await snapshot();
-        expect(delta(before, after, "smithers.sandbox.completed_total")).toBe(1);
+        expect(delta(before, after, "smithers.sandbox.completed_total", { status: "failed" })).toBe(1);
         expect(delta(before, after, "smithers.sandbox.active")).toBe(-1);
     });
     test("SandboxFailed increments errors", async () => {
