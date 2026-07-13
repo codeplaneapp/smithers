@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSmithers, renderFrame } from "smithers-orchestrator";
 import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
 import { LinearClient, LinearClientLive, makeLinearClient, normalizeLinearPriority } from "../src/linear/LinearClient.js";
 import { configureLinear } from "../src/linear/config.js";
 import { verifyLinearWebhook, makeLinearWebhookSource, decodeLinearWebhook } from "../src/linear/LinearWebhookSource.js";
@@ -338,6 +339,31 @@ describe("Linear listener render-prop branches", () => {
 });
 
 describe("Linear outbound deps guard", () => {
+    test("forwards a custom smithers context to the inner Task", async () => {
+        const outputSchema = z.object({ id: z.string(), identifier: z.string(), title: z.string(), url: z.string() });
+        const api = makeApi({ result: outputSchema });
+        const customSmithersContext = api.Task({ id: "context-probe", children: null }).props.smithersContext;
+        const workflow = api.smithers(() => React.createElement(api.Workflow, { name: "linear-custom-context" },
+            React.createElement(CreateIssue, {
+                id: "create",
+                output: outputSchema,
+                smithersContext: customSmithersContext,
+                teamKey: "ENG",
+                title: "x",
+                config: { apiKey: API_KEY, apiBaseUrl: "http://unused" },
+            })));
+        const renderer = new SmithersRenderer();
+        await renderer.render(workflow.build(new SmithersCtx({
+            runId: "linear-custom-context",
+            iteration: 0,
+            input: {},
+            outputs: {},
+            zodToKeyName: workflow.zodToKeyName,
+        })));
+        const task = renderer.getRoot()?.children?.[0];
+        expect(task?.rawProps.smithersContext).toBe(customSmithersContext);
+    });
+
     test("an outbound component with deps but no workflow context throws", () => {
         const outputSchema = z.object({ id: z.string(), identifier: z.string(), title: z.string(), url: z.string() });
         expect(() => renderToStaticMarkup(React.createElement(CreateIssue, {

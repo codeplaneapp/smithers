@@ -177,6 +177,7 @@ function makeLinearOutbound(displayName, buildCall) {
             retryPolicy,
             timeoutMs,
             async: waitAsync,
+            smithersContext,
             dependsOn: depNodeIds
                 ? [...new Set([...(dependsOn ?? []), ...depNodeIds])]
                 : dependsOn,
