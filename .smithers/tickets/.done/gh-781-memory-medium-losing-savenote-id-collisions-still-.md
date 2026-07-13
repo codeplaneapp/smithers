@@ -33,3 +33,6 @@ Insert side effects only when the note insert wins. On conflict, make the entire
 ## Dedupe notes
 
 #533 and #712/#714 cover unrelated memory behavior.
+
+
+> Closed by ticket-fleet: landed on main in f8b7bbf420404917971d67b689695248e6cf1d8d.
