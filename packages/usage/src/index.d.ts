@@ -199,8 +199,12 @@ type UsageWindow$3 = UsageWindow$4;
 /**
  * Normalizes the Codex usage payload (from `GET /backend-api/wham/usage`, or the
  * `codex.rate_limits` event) into windows plus plan and credit metadata. The
- * rate-limit object may sit at the top level or under a `rate_limits` key; both
- * shapes are accepted.
+ * rate-limit object may sit at the top level, under a `rate_limits` key (the
+ * app-server/event shape, with `primary`/`secondary` windows), or under a
+ * `rate_limit` key (the HTTP shape, with `primary_window`/`secondary_window`);
+ * all are accepted. Either window may be null/absent — OpenAI removed the
+ * 5-hour window from some plans, leaving only the weekly window — and each is
+ * parsed independently so a surviving window still surfaces.
  *
  * @param {unknown} payload
  * @returns {{ windows: UsageWindow[]; planType?: string; credits?: { hasCredits: boolean; unlimited: boolean; balance?: string } }}

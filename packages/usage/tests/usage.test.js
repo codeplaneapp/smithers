@@ -148,6 +148,40 @@ describe("parseCodexUsage", () => {
         });
         expect(windows).toHaveLength(1);
     });
+    test("maps the HTTP wham/usage shape (rate_limit.*_window, limit_window_seconds)", () => {
+        const { windows, planType, credits } = parseCodexUsage({
+            plan_type: "pro",
+            rate_limit: {
+                allowed: true,
+                limit_reached: false,
+                primary_window: { used_percent: 12.5, limit_window_seconds: 18000, reset_at: Math.floor(NOW / 1000) + 3600 },
+                secondary_window: { used_percent: 40, limit_window_seconds: 604800, reset_at: Math.floor(NOW / 1000) + 86400 },
+            },
+            credits: { has_credits: true, unlimited: false, balance: "12.34" },
+        });
+        expect(planType).toBe("pro");
+        expect(windows.map((w) => w.id)).toEqual(["5h", "weekly"]);
+        expect(windows[0].usedPercent).toBe(12.5);
+        expect(windows[0].resetsAt).toBe(isoIn(3600));
+        expect(credits).toEqual({ hasCredits: true, unlimited: false, balance: "12.34" });
+    });
+    test("surfaces the weekly window when the 5-hour window is removed", () => {
+        const { windows, planType, credits } = parseCodexUsage({
+            plan_type: "pro",
+            rate_limit: {
+                allowed: true,
+                limit_reached: false,
+                primary_window: { used_percent: 50, limit_window_seconds: 604800, reset_at: Math.floor(NOW / 1000) + 542850 },
+                secondary_window: null,
+            },
+            credits: { has_credits: false, unlimited: false, balance: "0" },
+        });
+        expect(planType).toBe("pro");
+        expect(windows).toHaveLength(1);
+        expect(windows[0]).toMatchObject({ id: "weekly", unit: "percent", usedPercent: 50 });
+        expect(windows[0].resetsAt).toBe(isoIn(542850));
+        expect(credits).toEqual({ hasCredits: false, unlimited: false, balance: "0" });
+    });
 });
 
 describe("rate-limit header parsers", () => {
