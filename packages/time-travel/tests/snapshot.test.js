@@ -118,7 +118,8 @@ describe("captureSnapshot", () => {
         expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_contents").get().count).toBe(0);
         baseline.close();
         sqlite.close();
-        rmSync(dir, { recursive: true, force: true });
+        // Windows: rm of a just-closed sqlite dir races EBUSY without retries.
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }, 60_000);
     test("cleans replaced and deleted payloads without deleting shared references", async () => {
         const { sqlite, adapter } = createTestDb();

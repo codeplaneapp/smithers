@@ -223,7 +223,7 @@ describe("Memory E2E", () => {
                 if (process.platform !== "win32" || (error?.code !== "EBUSY" && error?.code !== "EPERM" && error?.code !== "ENOTEMPTY")) throw error;
             }
         }
-    });
+    }, 60_000);
     test("deleteMessages prunes large real SQLite id sets without crossing thread boundaries", async () => {
         const target = await store.createThread(WF_NS, "Large Delete Target");
         const other = await store.createThread(WF_NS, "Other Thread");
