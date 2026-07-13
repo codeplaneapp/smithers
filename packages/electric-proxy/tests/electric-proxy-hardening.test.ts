@@ -272,6 +272,30 @@ describe("the Electric proxy emits structured events + OTLP spans", () => {
     expect(spans.some((span) => span.name === "smithers.electric.shape.rejected")).toBe(true);
   });
 
+  test("a forwarded event reports bytes for its own shape stream", async () => {
+    const events: SmithersElectricProxyEvent[] = [];
+    let upstreamCalls = 0;
+    const proxy = createSmithersElectricProxy({
+      electricUrl: "http://electric.local/v1/shape",
+      authenticate: () => auth(),
+      observer: { event: (event) => events.push(event) },
+      fetchClient: async () => {
+        upstreamCalls += 1;
+        return new Response("x".repeat(upstreamCalls * 10));
+      },
+    });
+
+    const first = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs"));
+    const second = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs"));
+    await first.arrayBuffer();
+    await second.arrayBuffer();
+
+    const forwarded = events
+      .filter((event) => event.type === "electric.shape.forwarded")
+      .map((event) => event.forwardedBytes);
+    expect(forwarded).toEqual([10, 20]);
+  });
+
   test("an upstream outage emits a structured error event + span with the reason and bumps the metric", async () => {
     const events: SmithersElectricProxyEvent[] = [];
     const spans: SmithersElectricProxySpan[] = [];
