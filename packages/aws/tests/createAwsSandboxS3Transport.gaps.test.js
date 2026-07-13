@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createAwsSandboxS3Transport } from "../src/index.js";
 
 /** Minimal in-memory S3 double. */
@@ -98,5 +98,69 @@ describe("createAwsSandboxS3Transport — readFile Body decoding", () => {
 		}
 		expect(message).toMatch(/S3 download failed/);
 		expect(message).not.toContain("DLSECRET");
+	});
+});
+
+describe("createAwsSandboxS3Transport — retryable cleanup", () => {
+	test("retries every tracked key after deleteObjects rejects", async () => {
+		const s3 = memoryS3();
+		const attempts = [];
+		let fail = true;
+		s3.deleteObjects = async (input) => {
+			attempts.push(input.Delete.Objects.map((object) => object.Key));
+			if (fail) {
+				fail = false;
+				throw new Error("temporary S3 failure");
+			}
+			return {};
+		};
+		const warning = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const transport = createAwsSandboxS3Transport({ s3, bucket: "b", prefix: "p", workdir: "/workspace" });
+			await transport.writeFile("/workspace/a.txt", "A");
+			await transport.writeFile("/workspace/b.txt", "B");
+
+			await transport.deleteAll();
+			expect(transport.writtenKeys()).toEqual(["p/a.txt", "p/b.txt"]);
+			await transport.deleteAll();
+			await transport.deleteAll();
+
+			expect(attempts).toEqual([
+				["p/a.txt", "p/b.txt"],
+				["p/a.txt", "p/b.txt"],
+			]);
+			expect(transport.writtenKeys()).toEqual([]);
+			expect(warning).toHaveBeenCalledTimes(1);
+		} finally {
+			warning.mockRestore();
+		}
+	});
+
+	test("retries only keys reported as per-object failures", async () => {
+		const s3 = memoryS3();
+		const attempts = [];
+		const failedKey = "p/b.txt";
+		s3.deleteObjects = async (input) => {
+			const keys = input.Delete.Objects.map((object) => object.Key);
+			attempts.push(keys);
+			return attempts.length === 1 ? { Errors: [{ Key: failedKey, Code: "AccessDenied" }] } : {};
+		};
+		const warning = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const transport = createAwsSandboxS3Transport({ s3, bucket: "b", prefix: "p", workdir: "/workspace" });
+			await transport.writeFile("/workspace/a.txt", "A");
+			await transport.writeFile("/workspace/b.txt", "B");
+			await transport.writeFile("/workspace/c.txt", "C");
+
+			await transport.deleteAll();
+			expect(transport.writtenKeys()).toEqual([failedKey]);
+			await transport.deleteAll();
+
+			expect(attempts).toEqual([["p/a.txt", "p/b.txt", "p/c.txt"], [failedKey]]);
+			expect(transport.writtenKeys()).toEqual([]);
+			expect(warning).toHaveBeenCalledTimes(1);
+		} finally {
+			warning.mockRestore();
+		}
 	});
 });

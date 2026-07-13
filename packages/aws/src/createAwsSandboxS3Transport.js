@@ -141,12 +141,22 @@ export function createAwsSandboxS3Transport(config) {
 		async deleteAll() {
 			if (touchedKeys.size === 0) return;
 			const keys = [...touchedKeys];
-			writtenKeys.clear();
-			touchedKeys.clear();
 			try {
-				await s3.deleteObjects({ Bucket: bucket, Delete: { Objects: keys.map((Key) => ({ Key })) } });
-			} catch {
+				const result = await s3.deleteObjects({ Bucket: bucket, Delete: { Objects: keys.map((Key) => ({ Key })) } });
+				const errors = Array.isArray(result?.Errors) ? result.Errors : [];
+				const failedKeys = new Set(errors.map((error) => error?.Key).filter((key) => typeof key === "string"));
+				for (const key of keys) {
+					if (failedKeys.has(key)) continue;
+					writtenKeys.delete(key);
+					touchedKeys.delete(key);
+				}
+				if (failedKeys.size > 0) {
+					console.warn(`[smithers/aws] S3 cleanup left ${failedKeys.size} object(s) in s3://${bucket}/${prefix}; retry deleteAll()`);
+				}
+			} catch (error) {
 				// Best-effort cleanup: a leftover object must never fail the run.
+				const detail = scrubAwsSandboxSecrets(error instanceof Error ? error.message : String(error), secrets);
+				console.warn(`[smithers/aws] S3 cleanup failed for s3://${bucket}/${prefix}; retry deleteAll(): ${detail}`);
 			}
 		},
 	};
