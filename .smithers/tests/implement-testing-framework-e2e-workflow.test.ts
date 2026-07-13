@@ -75,8 +75,14 @@ describe("implement-testing-framework-e2e workflow", () => {
     expect(source).toContain("currentSol.reviewedDiffDigest === currentEvidence.diffDigest");
     expect(source).toContain("currentFable.iterationId === currentEvidence.iterationId");
     expect(source).toContain("currentFable.reviewedDiffDigest === currentEvidence.diffDigest");
-    expect(source).toContain('nodeId: "verify-review-snapshot"');
-    expect(source).toContain('nodeId: "verify-sol-readiness-snapshot"');
+    expect(source).toContain('ctx.latest(outputs.snapshotVerification, "verify-review-snapshot")');
+    expect(source).toContain('ctx.latest(outputs.snapshotVerification, "verify-sol-readiness-snapshot")');
+    expect(source).toContain('ctx.latest(outputs.consensus, "assess-consensus")');
+    expect(source).toContain('ctx.latest(outputs.readiness, "assess-sol-readiness")');
+    expect(source).toContain('ctx.latest(outputs.improvement, "sol-readiness-luna-improvement")');
+    expect(source).toContain('previousImprovement={promptJson(previousReadinessImprovement)}');
+    expect(source).not.toContain('ctx.outputMaybe(outputs.consensus, { nodeId: "assess-consensus" })');
+    expect(source).not.toContain('ctx.outputMaybe(outputs.readiness, { nodeId: "assess-sol-readiness" })');
     expect(source).toContain('onMaxReached="fail"');
     expect(source.indexOf('<Loop id="sol-readiness"')).toBeLessThan(source.indexOf('<Loop id="final-consensus"'));
 
@@ -129,6 +135,9 @@ describe("implement-testing-framework-e2e workflow", () => {
     expect(source).toContain('spawnChild("bash", ["-c", command]');
     expect(source).toContain("fatalSignatures");
     expect(source).toContain("rejected zero exit because output matched fatal signature");
+    expect(source).toContain('signalProcessGroup("SIGTERM")');
+    expect(source).toContain('signalProcessGroup("SIGKILL")');
+    expect(source).toContain("retries={AGENT_RETRIES}");
     expect(source).toContain('fableReview={promptJson(null)}');
     expect(source).not.toContain('id="verify-initial-fix"');
     expect(source).not.toContain('id="verify-improvement"');

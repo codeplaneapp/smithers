@@ -25,7 +25,9 @@ import ResearchPrompt from "../prompts/implement-testing-framework-e2e-research.
 const ROOT = process.cwd();
 const LONG = 1_800_000;
 const HEARTBEAT = 600_000;
-const CHECK_TIMEOUT_MS = 2_700_000;
+const AGENT_RETRIES = 2;
+const CHECK_TIMEOUT_MS = 3_600_000;
+const CHECK_KILL_GRACE_MS = 10_000;
 const OUTPUT_TAIL = 8_000;
 const SNAPSHOT_PATHS = [
   "packages/testing",
@@ -338,14 +340,29 @@ function run(command: string, args: string[], maxBuffer = 256 * 1024 * 1024): st
   });
 }
 
+function runJj(args: string[], maxBuffer = 256 * 1024 * 1024): string {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      return run("jj", args, maxBuffer);
+    } catch (error) {
+      lastError = error;
+      const details = `${String(error)}\n${String((error as { stderr?: unknown })?.stderr ?? "")}`;
+      if (!/index\.lock|Could not acquire lock|Failed to reset Git HEAD state/i.test(details)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(1_000, 100 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 function gitHead(): string {
   return run("git", ["rev-parse", "HEAD"]).trim();
 }
 
 function snapshot() {
   const paths = ["--", ...SNAPSHOT_PATHS];
-  const diff = run("jj", ["diff", "--git", "--color=never", ...paths]);
-  const summary = run("jj", ["diff", "--summary", "--color=never", ...paths]);
+  const diff = runJj(["diff", "--git", "--color=never", ...paths]);
+  const summary = runJj(["diff", "--summary", "--color=never", ...paths]);
   const changedFiles = summary
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -461,21 +478,30 @@ async function runCheck(kind: CheckKind, command: string): Promise<CheckResult> 
     };
     child.stdout?.on("data", (chunk) => append("stdout", chunk));
     child.stderr?.on("data", (chunk) => append("stderr", chunk));
-    const timer = setTimeout(() => {
-      timedOut = true;
-      if (child.pid) {
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const signalProcessGroup = (signal: NodeJS.Signals) => {
+      if (!child.pid) return;
+      try {
+        globalThis.process.kill(-child.pid, signal);
+      } catch {
         try {
-          globalThis.process.kill(-child.pid, "SIGTERM");
+          child.kill(signal);
         } catch {
-          child.kill("SIGTERM");
+          // The process may have exited between the close check and signal delivery.
         }
       }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      signalProcessGroup("SIGTERM");
+      killTimer = setTimeout(() => signalProcessGroup("SIGKILL"), CHECK_KILL_GRACE_MS);
     }, CHECK_TIMEOUT_MS);
     const { code, signal } = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
       child.once("error", reject);
       child.once("close", (code, signal) => resolve({ code, signal }));
     });
     clearTimeout(timer);
+    if (killTimer) clearTimeout(killTimer);
     const exitCode = code ?? (signal ? -1 : 0);
     const passed = exitCode === 0 && signal === null && !timedOut && fatalSignature === null;
     const evidenceNote = fatalSignature
@@ -629,17 +655,18 @@ export default smithers((ctx) => {
     (!initialEvidence.allRequiredChecksPassed || !initialReview.lgtm || !initialReviewCurrent),
   );
 
-  const consensusEvidence = ctx.outputMaybe(outputs.evidence, { nodeId: "capture-consensus-iteration" });
-  const consensusSolReview = ctx.outputMaybe(outputs.review, { nodeId: "consensus-sol-review" });
-  const consensusFableReview = ctx.outputMaybe(outputs.review, { nodeId: "consensus-fable-review" });
-  const latestAssessment = ctx.outputMaybe(outputs.consensus, { nodeId: "assess-consensus" });
+  const consensusEvidence = ctx.latest(outputs.evidence, "capture-consensus-iteration");
+  const consensusSolReview = ctx.latest(outputs.review, "consensus-sol-review");
+  const consensusFableReview = ctx.latest(outputs.review, "consensus-fable-review");
+  const latestAssessment = ctx.latest(outputs.consensus, "assess-consensus");
   const consensusApproved = latestAssessment?.approved === true;
   const consensusNeedsImprovement = latestAssessment?.approved === false;
   const nextConsensusRound = (ctx.outputs.consensus?.length ?? 0) + 1;
 
-  const readinessEvidence = ctx.outputMaybe(outputs.evidence, { nodeId: "capture-sol-readiness" });
-  const readinessSolReview = ctx.outputMaybe(outputs.review, { nodeId: "sol-readiness-review" });
-  const latestReadiness = ctx.outputMaybe(outputs.readiness, { nodeId: "assess-sol-readiness" });
+  const readinessEvidence = ctx.latest(outputs.evidence, "capture-sol-readiness");
+  const readinessSolReview = ctx.latest(outputs.review, "sol-readiness-review");
+  const latestReadiness = ctx.latest(outputs.readiness, "assess-sol-readiness");
+  const previousReadinessImprovement = ctx.latest(outputs.improvement, "sol-readiness-luna-improvement");
   const solReady = latestReadiness?.approved === true;
   const solNeedsImprovement = latestReadiness?.approved === false;
   const nextReadinessRound = (ctx.outputs.readiness?.length ?? 0) + 1;
@@ -676,7 +703,7 @@ export default smithers((ctx) => {
           }}
         </Task>
 
-        <Task id="research" output={outputs.research} agent={lunaResearch} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+        <Task id="research" output={outputs.research} agent={lunaResearch} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
           <ResearchPrompt objective={objective} contract={DEFAULT_OBJECTIVE} baseline={promptJson(baseline)} />
         </Task>
 
@@ -688,13 +715,13 @@ export default smithers((ctx) => {
             </Task>
           }
           else={
-            <Task id="plan" output={outputs.plan} agent={fable} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+            <Task id="plan" output={outputs.plan} agent={fable} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
               <PlanPrompt objective={objective} contract={DEFAULT_OBJECTIVE} research={promptJson(research)} />
             </Task>
           }
         />
 
-        <Task id="implement" output={outputs.implementation} agent={lunaImplementation} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+        <Task id="implement" output={outputs.implementation} agent={lunaImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
           <ImplementPrompt
             objective={objective}
             contract={DEFAULT_OBJECTIVE}
@@ -708,7 +735,7 @@ export default smithers((ctx) => {
           {async () => captureEvidence({ runId: ctx.runId, phase: "initial", round: 0, baseline: baseline! })}
         </Task>
 
-        <Task id="initial-sol-review" output={outputs.review} agent={sol} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+        <Task id="initial-sol-review" output={outputs.review} agent={sol} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
           <InitialSolReviewPrompt
             objective={objective}
             contract={DEFAULT_OBJECTIVE}
@@ -721,7 +748,7 @@ export default smithers((ctx) => {
           if={initialNeedsFix}
           then={
             <Sequence>
-              <Task id="initial-luna-fix" output={outputs.improvement} agent={lunaImplementation} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+              <Task id="initial-luna-fix" output={outputs.improvement} agent={lunaImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
                 <InitialFixPrompt
                   objective={objective}
                   contract={DEFAULT_OBJECTIVE}
@@ -741,7 +768,7 @@ export default smithers((ctx) => {
               {async () => captureEvidence({ runId: ctx.runId, phase: "sol-readiness", round: nextReadinessRound, baseline: baseline! })}
             </Task>
 
-            <Task id="sol-readiness-review" output={outputs.review} agent={sol} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+            <Task id="sol-readiness-review" output={outputs.review} agent={sol} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
               <ConsensusSolReviewPrompt
                 objective={objective}
                 contract={DEFAULT_OBJECTIVE}
@@ -752,7 +779,7 @@ export default smithers((ctx) => {
 
             <Task id="verify-sol-readiness-snapshot" output={outputs.snapshotVerification} noRetry>
               {() => {
-                const expected = ctx.outputMaybe(outputs.evidence, { nodeId: "capture-sol-readiness" });
+                const expected = ctx.latest(outputs.evidence, "capture-sol-readiness");
                 const current = snapshot();
                 const unchanged = Boolean(expected && expected.diffDigest === current.diffDigest);
                 return {
@@ -770,9 +797,9 @@ export default smithers((ctx) => {
 
             <Task id="assess-sol-readiness" output={outputs.readiness} noRetry>
               {() => {
-                const currentEvidence = ctx.outputMaybe(outputs.evidence, { nodeId: "capture-sol-readiness" });
-                const currentSol = ctx.outputMaybe(outputs.review, { nodeId: "sol-readiness-review" });
-                const currentSnapshot = ctx.outputMaybe(outputs.snapshotVerification, { nodeId: "verify-sol-readiness-snapshot" });
+                const currentEvidence = ctx.latest(outputs.evidence, "capture-sol-readiness");
+                const currentSol = ctx.latest(outputs.review, "sol-readiness-review");
+                const currentSnapshot = ctx.latest(outputs.snapshotVerification, "verify-sol-readiness-snapshot");
                 const reasons: string[] = [];
                 const solCurrent = Boolean(
                   currentEvidence &&
@@ -815,7 +842,7 @@ export default smithers((ctx) => {
             <Branch
               if={solNeedsImprovement}
               then={
-                <Task id="sol-readiness-luna-improvement" output={outputs.improvement} agent={lunaImplementation} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+                <Task id="sol-readiness-luna-improvement" output={outputs.improvement} agent={lunaImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
                   <ConsensusImprovementPrompt
                     objective={objective}
                     contract={DEFAULT_OBJECTIVE}
@@ -823,6 +850,7 @@ export default smithers((ctx) => {
                     solReview={promptJson(readinessSolReview)}
                     fableReview={promptJson(null)}
                     consensus={promptJson(latestReadiness)}
+                    previousImprovement={promptJson(previousReadinessImprovement)}
                     plan={promptJson(acceptedPlan)}
                   />
                 </Task>
@@ -839,7 +867,7 @@ export default smithers((ctx) => {
             </Task>
 
             <Parallel maxConcurrency={2}>
-              <Task id="consensus-sol-review" output={outputs.review} agent={sol} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+              <Task id="consensus-sol-review" output={outputs.review} agent={sol} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
                 <ConsensusSolReviewPrompt
                   objective={objective}
                   contract={DEFAULT_OBJECTIVE}
@@ -847,7 +875,7 @@ export default smithers((ctx) => {
                   plan={promptJson(acceptedPlan)}
                 />
               </Task>
-              <Task id="consensus-fable-review" output={outputs.review} agent={fable} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+              <Task id="consensus-fable-review" output={outputs.review} agent={fable} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
                 <ConsensusFableReviewPrompt
                   objective={objective}
                   contract={DEFAULT_OBJECTIVE}
@@ -859,7 +887,7 @@ export default smithers((ctx) => {
 
             <Task id="verify-review-snapshot" output={outputs.snapshotVerification} noRetry>
               {() => {
-                const expected = ctx.outputMaybe(outputs.evidence, { nodeId: "capture-consensus-iteration" });
+                const expected = ctx.latest(outputs.evidence, "capture-consensus-iteration");
                 const current = snapshot();
                 const unchanged = Boolean(expected && expected.diffDigest === current.diffDigest);
                 return {
@@ -877,10 +905,10 @@ export default smithers((ctx) => {
 
             <Task id="assess-consensus" output={outputs.consensus} noRetry>
               {() => {
-                const currentEvidence = ctx.outputMaybe(outputs.evidence, { nodeId: "capture-consensus-iteration" });
-                const currentSol = ctx.outputMaybe(outputs.review, { nodeId: "consensus-sol-review" });
-                const currentFable = ctx.outputMaybe(outputs.review, { nodeId: "consensus-fable-review" });
-                const currentSnapshot = ctx.outputMaybe(outputs.snapshotVerification, { nodeId: "verify-review-snapshot" });
+                const currentEvidence = ctx.latest(outputs.evidence, "capture-consensus-iteration");
+                const currentSol = ctx.latest(outputs.review, "consensus-sol-review");
+                const currentFable = ctx.latest(outputs.review, "consensus-fable-review");
+                const currentSnapshot = ctx.latest(outputs.snapshotVerification, "verify-review-snapshot");
                 const reasons: string[] = [];
                 const solCurrent = Boolean(
                   currentEvidence &&
@@ -933,7 +961,7 @@ export default smithers((ctx) => {
               if={consensusNeedsImprovement}
               then={
                 <Sequence>
-                  <Task id="consensus-luna-improvement" output={outputs.improvement} agent={lunaImplementation} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+                  <Task id="consensus-luna-improvement" output={outputs.improvement} agent={lunaImplementation} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
                     <ConsensusImprovementPrompt
                       objective={objective}
                       contract={DEFAULT_OBJECTIVE}
@@ -941,6 +969,7 @@ export default smithers((ctx) => {
                       solReview={promptJson(consensusSolReview)}
                       fableReview={promptJson(consensusFableReview)}
                       consensus={promptJson(latestAssessment)}
+                      previousImprovement={promptJson(ctx.latest(outputs.improvement, "consensus-luna-improvement"))}
                       plan={promptJson(acceptedPlan)}
                     />
                   </Task>
@@ -953,8 +982,8 @@ export default smithers((ctx) => {
 
         <Task id="final-verify-and-summarize" output={outputs.finalResult} noRetry>
           {() => {
-            const assessment = ctx.outputMaybe(outputs.consensus, { nodeId: "assess-consensus" });
-            const finalEvidence = ctx.outputMaybe(outputs.evidence, { nodeId: "capture-consensus-iteration" });
+            const assessment = ctx.latest(outputs.consensus, "assess-consensus");
+            const finalEvidence = ctx.latest(outputs.evidence, "capture-consensus-iteration");
             const finalSnapshot = snapshot();
             if (!assessment?.approved || !finalEvidence) {
               throw new Error("Finalization attempted without deterministic dual-review consensus.");
