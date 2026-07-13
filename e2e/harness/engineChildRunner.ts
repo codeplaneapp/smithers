@@ -35,7 +35,7 @@ function fail(message: string): never {
 }
 
 async function main(): Promise<void> {
-  const [dbPath, runId, modeArg, markerDir, counterFile, bSleepMsArg] =
+  const [dbPath, runId, modeArg, markerDir, counterFile, bSleepMsArg, nonce] =
     process.argv.slice(2);
 
   if (!dbPath || !runId || !modeArg || !markerDir || !counterFile) {
@@ -50,7 +50,8 @@ async function main(): Promise<void> {
   // This is the authenticated production-runner protocol marker consumed by
   // realProcessAdapter admission; an arbitrary long-lived child cannot pass
   // real-process admission by merely claiming a name in memory.
-  process.stdout.write("SMITHERS_ENGINE_HANDSHAKE=runWorkflow\n");
+  if (!nonce) fail("missing adapter nonce");
+  process.stdout.write(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}\n`);
   const bSleepMs = bSleepMsArg ? Number(bSleepMsArg) : undefined;
 
   const { workflow, db } = buildKillResumeWorkflow({

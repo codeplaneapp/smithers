@@ -13,19 +13,21 @@ describe("testing framework real-process durability", () => {
     mkdirSync(markerDir, { recursive: true });
     const runner = fileURLToPath(new URL("../harness/engineChildRunner.ts", import.meta.url));
     let initialOutput = "";
-    const spawnChild = (mode: "initial" | "resume") => { const processChild = spawn("bun", [runner, dbPath, "testing-framework-kill", mode, markerDir, counter, "60000"], { stdio: ["ignore", "pipe", "pipe"] }); if (mode === "initial") processChild.stdout?.on("data", (chunk) => { initialOutput += String(chunk); }); return processChild; };
+    const spawnChild = (mode: "initial" | "resume", nonce: string) => { const processChild = spawn("bun", [runner, dbPath, "testing-framework-kill", mode, markerDir, counter, "60000", nonce], { stdio: ["ignore", "pipe", "pipe"] }); if (mode === "initial") processChild.stdout?.on("data", (chunk) => { initialOutput += String(chunk); }); return processChild; };
     let child: ChildProcess | undefined; let resumed: ChildProcess | undefined;
     const started = join(markerDir, "B.started");
     try {
-      const adapter = realProcessAdapter({ spawn: async () => {
-        child = spawnChild("initial");
+      const adapter = realProcessAdapter({ spawn: async (nonce: string) => {
+        child = spawnChild("initial", nonce);
         const waitFor = async (predicate: () => boolean) => { const deadline = Date.now() + 5_000; while (!predicate() && Date.now() < deadline) await Bun.sleep(10); return predicate(); };
         await waitFor(() => existsSync(started));
-        return { pid: child.pid!, child, handshake: () => waitFor(() => initialOutput.includes("SMITHERS_ENGINE_HANDSHAKE=runWorkflow")), kill: (signal?: string) => { child!.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined, resume: async () => {
-          resumed = spawnChild("resume");
+        return { pid: child.pid!, child, handshake: async (expected: string) => { await waitFor(() => initialOutput.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${expected}`)); return expected; }, kill: (signal?: string) => { child!.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined, resume: async (resumeNonce: string) => {
+          resumed = spawnChild("resume", resumeNonce);
           const resumedChild = resumed;
+          let resumedOutput = "";
+          resumedChild.stdout?.on("data", (chunk) => { resumedOutput += String(chunk); });
           await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error("resume child did not exit within 30s")), 30_000); resumedChild.once("exit", () => { clearTimeout(timer); resolve(); }); resumedChild.once("error", (error) => { clearTimeout(timer); reject(error); }); });
-          return { pid: resumedChild.pid!, child: resumedChild, handshake: () => true, kill: (signal?: string) => { resumedChild.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined };
+          return { pid: resumedChild.pid!, child: resumedChild, handshake: async (nonce: string) => resumedOutput.includes(`SMITHERS_ENGINE_HANDSHAKE=runWorkflow:${nonce}`) ? nonce : "", kill: (signal?: string) => { resumedChild.kill(signal as NodeJS.Signals | undefined); }, close: () => undefined };
         } };
       } });
       const result = await runScenario(scenario("real-process-restart", { steps: [step("resume", { run: (runtime) => runtime.effect("durable-output", () => "resumed") })], faults: [fault("sigkill", "during-task", "resume")] }), { harness: e2eHarness({ adapter }), waitBudget: 30_000 });
