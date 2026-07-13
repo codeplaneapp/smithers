@@ -68,5 +68,6 @@ export { firstDivergence } from "./replay/firstDivergence.ts";
 export { shrink } from "./replay/shrink.ts";
 export { realDbAdapter } from "./adapters/realDbAdapter.ts";
 export type { RealDbAdapterOptions, RealDbResource } from "./adapters/realDbAdapter.ts";
+export { realDbCutPoints } from "./adapters/realDbCutPoints.ts";
 export { realProcessAdapter } from "./adapters/realProcessAdapter.ts";
 export type { RealProcessAdapterOptions, RealProcessResource } from "./adapters/realProcessAdapter.ts";

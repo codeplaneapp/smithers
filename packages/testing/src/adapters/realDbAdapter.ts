@@ -1,11 +1,18 @@
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Effect } from "effect";
 import { registerTrustedAdapter, type HarnessAdapter } from "../harness/Harness.ts";
 
 export type RealDbResource = SmithersDb & Readonly<{ readonly path?: string; readonly productionIdentity?: "SmithersDb"; readonly close: () => void | Promise<void>; readonly operations?: Readonly<Record<string, (...args: readonly unknown[]) => unknown | Promise<unknown>>> }>;
 export type RealDbAdapterOptions = Readonly<{ readonly open: () => RealDbResource | Promise<RealDbResource>; readonly identity?: string }>;
 
 export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => {
+  const productionOperations = new Set(["claimAttemptCompletion", "claimRunForResume", "heartbeatRun", "completeRun", "requestRunCancel", "claimRunCancellation", "heartbeatAttempt"]);
   let resource: RealDbResource | undefined;
+  const runDb = async <T>(value: T | Promise<T>): Promise<T> => {
+    if (value && typeof (value as unknown as { then?: unknown }).then === "function") return await value;
+    if (value && typeof (value as unknown as { pipe?: unknown }).pipe === "function") return Effect.runPromise(value as never) as Promise<T>;
+    return value as T;
+  };
   return registerTrustedAdapter({
     identity: options.identity ?? "real-db:sqlite",
     verifiedProductionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb",
@@ -18,15 +25,26 @@ export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => 
       if (!(resource instanceof SmithersDb) || !resource.db || typeof resource.insertRun !== "function" || typeof resource.heartbeatRun !== "function" || typeof resource.close !== "function") {
         throw Object.assign(new Error("real-db adapter requires a live SmithersDb backed by Bun SQLite; declarations and echo objects are not proof"), { code: "ADMISSION_FAILED" });
       }
+      // `instanceof` is only the first gate.  Exercise the actual SQLite
+      // handle and read the row back through the production adapter before a
+      // real-db capability is admitted.  Shape-compatible impostors must not
+      // be able to manufacture this proof.
+      try {
+        const sqlite = (resource.db as unknown as { $client?: { query: (sql: string) => { get: () => unknown } }; query?: (sql: string) => { get: () => unknown } }).$client ?? resource.db as unknown as { query: (sql: string) => { get: () => unknown } };
+        sqlite.query("SELECT 1").get();
+      } catch (cause) { throw Object.assign(new Error("real-db admission could not execute SQLite"), { code: "ADMISSION_FAILED", cause }); }
       const id = `testing-admission-${crypto.randomUUID()}`;
-      await resource.insertRun({ runId: id, workflowName: "testing-framework", status: "running", createdAtMs: Date.now(), startedAtMs: Date.now(), heartbeatAtMs: null, runtimeOwnerId: "testing-framework" });
-      await resource.heartbeatRun(id, "testing-framework", Date.now());
+      await runDb(resource.insertRun({ runId: id, workflowName: "testing-framework", status: "running", createdAtMs: Date.now(), startedAtMs: Date.now(), heartbeatAtMs: null, runtimeOwnerId: "testing-framework" }));
+      await runDb(resource.heartbeatRun(id, "testing-framework", Date.now()));
+      const rows = await runDb(resource.listRuns(100, undefined, "testing-framework"));
+      if (!rows.some((row) => row.runId === id)) throw Object.assign(new Error("real-db admission write was not durably readable"), { code: "ADMISSION_FAILED" });
     },
     cleanup: async () => { if (resource?.close) await resource.close(); if (resource?.db) { try { resource.db.query("SELECT 1"); throw Object.assign(new Error("CLEANUP_LEAK: database handle remained open after adapter cleanup"), { code: "CLEANUP_LEAK" }); } catch (error) { if ((error as { code?: string }).code === "CLEANUP_LEAK") throw error; } } resource = undefined; },
     runStep: async (operation, ...args) => {
       if (!resource) throw new Error("REAL_DB_NOT_ADMITTED");
       const direct = (resource as unknown as Record<string, unknown>)[String(operation)];
-      if (typeof direct === "function") return (direct as (...values: readonly unknown[]) => unknown).apply(resource, args);
+      if (typeof direct === "function") return runDb((direct as (...values: readonly unknown[]) => unknown).apply(resource, args));
+      if (productionOperations.has(String(operation))) throw Object.assign(new Error(`REAL_DB_OPERATION_UNAVAILABLE:${String(operation)} requires the admitted SmithersDb production method`), { code: "ADMISSION_FAILED" });
       const fn = resource.operations?.[String(operation)];
       if (!fn) throw new Error(`REAL_DB_OPERATION_UNAVAILABLE:${String(operation)}`);
       return fn.apply(resource, args);
