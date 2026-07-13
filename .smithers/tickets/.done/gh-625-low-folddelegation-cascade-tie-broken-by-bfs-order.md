@@ -23,3 +23,6 @@ Traced `cascadeStage` (`421-468`): X registered as dependent of both A and B; si
 
 ---
 *Found in the pre-0.28.0 review of `v0.27.0..HEAD` (@0ed2c28710), adversarially verified against the code. Part of the `pre-0.28-review` batch.*
+
+
+> Closed by ticket-fleet: landed on main in 44bcef7d756bf2deff7b84f518a46dcaf45840b4.
