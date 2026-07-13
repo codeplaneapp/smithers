@@ -85,4 +85,26 @@ describe("SmithersDevTools wrapped fiber traversal", () => {
 
         devtools.stop();
     });
+
+    test("ignores commits from roots without a Smithers workflow", () => {
+        const workflow = fiber("smithers:workflow", { name: "persistent" });
+        const foreignRoot = fiber("div");
+        const commits = [];
+        const devtools = new SmithersDevTools({
+            onCommit: (event, snapshot) => commits.push({ event, snapshot }),
+        });
+        devtools.start();
+
+        const hook = /** @type {any} */ (globalThis[HOOK_KEY]);
+        hook.onCommitFiberRoot(1, { current: workflow });
+        const snapshot = devtools.snapshot;
+
+        hook.onCommitFiberRoot(2, { current: foreignRoot });
+
+        expect(devtools.snapshot).toBe(snapshot);
+        expect(devtools.tree?.type).toBe("workflow");
+        expect(commits).toHaveLength(1);
+
+        devtools.stop();
+    });
 });

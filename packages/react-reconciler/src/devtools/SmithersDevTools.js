@@ -238,9 +238,11 @@ export class SmithersDevTools {
      */
             onCommitFiberRoot(rendererID, root) {
                 const smithersRoot = findSmithersRoot(root);
-                const tree = smithersRoot ? fiberToNode(smithersRoot, 0) : null;
+                if (!smithersRoot)
+                    return;
+                const tree = fiberToNode(smithersRoot, 0);
                 const snapshot = self.core.captureSnapshot(tree);
-                if (verbose && tree) {
+                if (verbose) {
                     console.log("\n🔍 [smithers-devtools] Commit detected:\n" +
                         printTree(tree) +
                         `   ${snapshot.nodeCount} nodes, ${snapshot.taskCount} tasks\n`);
