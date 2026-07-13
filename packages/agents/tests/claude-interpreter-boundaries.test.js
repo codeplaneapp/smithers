@@ -60,6 +60,26 @@ describe("ClaudeCodeAgent rate_limit_event boundaries", () => {
     expect(completed.error).not.toContain("weekly");
   });
 
+  test("org_level_disabled (org concurrency throttle) does not emit the full-window retry hint", () => {
+    const interpreter = interpret();
+    const future = Math.floor(Date.now() / 1000) + 9880;
+    interpreter.onStdoutLine(
+      rateLimitLine({
+        status: "rejected",
+        overageStatus: "rejected",
+        rateLimitType: "five_hour",
+        resetsAt: future,
+        overageDisabledReason: "org_level_disabled",
+      }),
+    );
+
+    const [completed] = interpreter.onStdoutLine(resultLine());
+    expect(completed.ok).toBe(false);
+    expect(completed.error).toContain("org_level_disabled");
+    // The far-future window reset must NOT surface as a multi-hour retry hint.
+    expect(completed.error).not.toMatch(/Retry after \d{4,} seconds/);
+  });
+
   test("a non-numeric resetsAt is ignored rather than producing a NaN retry hint", () => {
     const interpreter = interpret();
     interpreter.onStdoutLine(

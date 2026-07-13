@@ -38,6 +38,11 @@ const QUOTA_PATTERNS = [
     /"rate_limit_event"[\s\S]{0,300}?"(?:status"\s*:\s*"rejected|rejected)"/i,
 ];
 
+// Upper bound on the park for an org-level concurrency throttle
+// (org_level_disabled), which clears in seconds-to-minutes rather than at the
+// subscriber's usage-window reset.
+const ORG_THROTTLE_MAX_BACKOFF_MS = 120_000;
+
 /**
  * Detects provider quota/rate-limit errors and returns a SmithersError with
  * AGENT_QUOTA_EXCEEDED code. The reset time is parsed when present.
@@ -88,6 +93,18 @@ export function classifyQuotaError(message, command, context = {}) {
             }
             resetHint = secondsMatch[0];
         }
+    }
+    // org_level_disabled is Anthropic's ORG-level concurrency/policy throttle
+    // (too many concurrent Claude sessions), not the subscriber's usage window
+    // being spent. Parking to the full window reset (hours) is wrong — the
+    // throttle clears in seconds-to-minutes. Cap the backoff so the node parks
+    // briefly and auto-resumes on the same agent; always set a reset so it does
+    // not park indefinitely awaiting a manual resume.
+    if (/\borg_level_disabled\b/i.test(message)) {
+        const cappedResetAtMs = now + ORG_THROTTLE_MAX_BACKOFF_MS;
+        quotaResetAtMs =
+            quotaResetAtMs != null ? Math.min(quotaResetAtMs, cappedResetAtMs) : cappedResetAtMs;
+        resetHint = `org-level concurrency throttle; retrying in ${ORG_THROTTLE_MAX_BACKOFF_MS / 1000}s`;
     }
     const modelLabel = agentModel ?? "<unset>";
     const idLabel = agentId ?? "<anonymous>";

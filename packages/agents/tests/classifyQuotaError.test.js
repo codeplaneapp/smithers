@@ -157,6 +157,41 @@ describe("classifyQuotaError — error metadata", () => {
     });
 });
 
+describe("classifyQuotaError — org_level_disabled concurrency throttle", () => {
+    // org_level_disabled is Anthropic's ORG-level concurrency/policy throttle
+    // (too many concurrent Claude sessions), NOT the subscriber's usage window
+    // being spent. It clears in seconds-to-minutes, so it must back off briefly
+    // and retry on the same agent — never park to the full window reset.
+    test("caps the backoff to a short bounded window even when a long reset is parsed", () => {
+        const msg = "Claude five_hour usage limit exceeded (rate_limit_event rejected: org_level_disabled). Retry after 9880 seconds.";
+        const err = classifyQuotaError(msg, "claude-code", ctx);
+        expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+        const resetAt = err?.details?.quotaResetAtMs;
+        expect(typeof resetAt).toBe("number");
+        expect(resetAt).toBeGreaterThan(NOW_MS);
+        expect(resetAt).toBeLessThanOrEqual(NOW_MS + 120_000);
+    });
+
+    test("gets a short bounded reset even when no retry hint is present (auto-resume, not indefinite park)", () => {
+        const msg = "Claude usage usage limit exceeded (rate_limit_event rejected: org_level_disabled).";
+        const err = classifyQuotaError(msg, "claude-code", ctx);
+        expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+        const resetAt = err?.details?.quotaResetAtMs;
+        expect(typeof resetAt).toBe("number");
+        expect(resetAt).toBeGreaterThan(NOW_MS);
+        expect(resetAt).toBeLessThanOrEqual(NOW_MS + 120_000);
+    });
+
+    test("a genuine window exhaustion (out_of_credits) keeps the full reset unchanged", () => {
+        const msg = "Claude five_hour usage limit exceeded (rate_limit_event rejected: out_of_credits). Retry after 9880 seconds.";
+        const err = classifyQuotaError(msg, "claude-code", ctx);
+        expect(err?.code).toBe("AGENT_QUOTA_EXCEEDED");
+        const resetAt = err?.details?.quotaResetAtMs;
+        expect(typeof resetAt).toBe("number");
+        expect(resetAt).toBeGreaterThan(NOW_MS + 120_000);
+    });
+});
+
 describe("classifyQuotaError — machine tokens", () => {
     test("detects out_of_credits (claude rate_limit_event overageDisabledReason)", () => {
         const err = classifyQuotaError('{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","overageStatus":"rejected","overageDisabledReason":"out_of_credits"}}', "claude");

@@ -205,7 +205,15 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                 if (rejected && !limitBannerText) {
                     const windowLabel = asString(info.rateLimitType) ?? "usage";
                     const reason = asString(info.overageDisabledReason);
-                    const resetsAt = typeof info.resetsAt === "number" ? info.resetsAt : null;
+                    // org_level_disabled is an ORG-level concurrency/policy
+                    // throttle (too many concurrent Claude sessions), not the
+                    // subscriber's usage window being spent. Its resetsAt is the
+                    // full window reset (hours away) — the wrong backoff. Omit
+                    // the retry hint so the shared classifier applies a short
+                    // bounded backoff and retries on the same agent instead of
+                    // parking for the whole window.
+                    const isOrgThrottle = reason === "org_level_disabled";
+                    const resetsAt = !isOrgThrottle && typeof info.resetsAt === "number" ? info.resetsAt : null;
                     const resetSeconds = resetsAt != null
                         ? Math.max(1, Math.round(resetsAt - Date.now() / 1000))
                         : null;
