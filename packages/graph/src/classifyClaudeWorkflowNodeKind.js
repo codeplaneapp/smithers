@@ -20,12 +20,12 @@ export function classifyClaudeWorkflowNodeKind(task) {
     // kind preserves the human classification (see extract.js), so trust it here.
     if (task.kind === "human") return "human";
     if (task.agent) return "agent";
+    if (task.meta?.__subflow) return "subflow";
+    if (task.meta?.__sandbox) return "sandbox";
     if (task.computeFn) return "compute";
     if (task.staticPayload !== undefined) return "static";
     if (task.meta?.__timer) return "timer";
     if (task.waitAsync || task.meta?.__waitForEvent) return "wait";
-    if (task.meta?.__subflow) return "subflow";
-    if (task.meta?.__sandbox) return "sandbox";
     if (task.needsApproval) return "approval";
     return "unknown";
 }

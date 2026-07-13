@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { classifyClaudeWorkflowNodeKind } from "../src/classifyClaudeWorkflowNodeKind.js";
 import { deriveClaudeWorkflowPhases } from "../src/deriveClaudeWorkflowPhases.js";
 import { extractGraph } from "../src/extract.js";
 
@@ -95,6 +96,16 @@ describe("deriveClaudeWorkflowPhases", () => {
         });
     });
 
+    test("classifies legacy DOM subflow and sandbox descriptors before compute", () => {
+        const computeFn = () => ({ ok: true });
+
+        expect(classifyClaudeWorkflowNodeKind({ computeFn, meta: { __subflow: true } })).toBe("subflow");
+        expect(classifyClaudeWorkflowNodeKind({ computeFn, meta: { __sandbox: true } })).toBe("sandbox");
+        expect(classifyClaudeWorkflowNodeKind({ computeFn, staticPayload: {} })).toBe("compute");
+        expect(classifyClaudeWorkflowNodeKind({ computeFn, meta: { __timer: true } })).toBe("compute");
+        expect(classifyClaudeWorkflowNodeKind({ computeFn, waitAsync: async () => {} })).toBe("compute");
+    });
+
     test("collapses all nodes into one phase when requested", () => {
         const graph = extractGraph(hostEl("smithers:workflow", { name: "wf" }, [
             hostEl("smithers:sequence", { label: "A" }, [hostEl("smithers:task", { id: "a", output: "out" })]),
@@ -108,7 +119,6 @@ describe("deriveClaudeWorkflowPhases", () => {
 });
 
 import { deriveClaudeWorkflowPhasesFromFrame } from "../src/deriveClaudeWorkflowPhasesFromFrame.js";
-import { classifyClaudeWorkflowNodeKind } from "../src/classifyClaudeWorkflowNodeKind.js";
 import { canonicalizeXml } from "../src/utils/xml.js";
 
 /**
