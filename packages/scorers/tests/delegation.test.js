@@ -33,6 +33,14 @@ describe("extractDelegationEvents", () => {
         });
         expect(payload?.events).toHaveLength(1);
     });
+    it("falls back to context when object output has no valid events", () => {
+        const contextEvents = [{ t: "NODE_INVALIDATED", node: "c1" }];
+        const payload = extractDelegationEvents({
+            output: { events: [], nodes: [{ id: "c1", kind: "chunk" }] },
+            context: { events: contextEvents },
+        });
+        expect(payload?.events).toEqual(contextEvents);
+    });
     it("returns null when neither output nor context carries events", () => {
         expect(extractDelegationEvents({ output: "text", context: 42 })).toBeNull();
         expect(extractDelegationEvents({ output: [] })).toBeNull();

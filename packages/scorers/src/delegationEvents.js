@@ -24,9 +24,12 @@ function toPayload(candidate) {
     if (typeof candidate === "object" && candidate !== null) {
         const events = /** @type {{ events?: unknown }} */ (candidate).events;
         if (Array.isArray(events)) {
+            const filteredEvents = events.filter(isDelegationEvent);
+            if (filteredEvents.length === 0)
+                return null;
             const nodes = /** @type {{ nodes?: unknown }} */ (candidate).nodes;
             return {
-                events: events.filter(isDelegationEvent),
+                events: filteredEvents,
                 nodes: Array.isArray(nodes)
                     ? /** @type {{ id: string; kind?: string }[]} */ (nodes)
                     : undefined,
