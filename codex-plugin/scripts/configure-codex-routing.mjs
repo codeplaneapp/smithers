@@ -183,15 +183,22 @@ export function lockStatus(home, now = Date.now(), pidAlive = processIsAlive) {
   const staleOwner = owner ? isStaleLock(owner, now, pidAlive) : now - modifiedAt > LOCK_MAX_AGE_MS;
   return { locked: true, path, owner, stale: staleOwner };
 }
+function journalSignature(path) {
+  // Revision guard for the journal: writeState replaces via rename, so any
+  // rewrite — even byte-identical (ABA) — yields a new inode/mtime.
+  try { const s = statSync(path); return `${s.ino}:${s.mtimeMs}:${s.size}`; } catch (error) { if (error.code !== "ENOENT") throw error; return null; }
+}
 export function statusSnapshot(home) {
   const path = statePath(home);
   let before = null;
   try { before = readFileSync(path, "utf8"); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  const sigBefore = journalSignature(path);
   const state = readState(home);
   const lock = lockStatus(home);
   let after = null;
   try { after = readFileSync(path, "utf8"); } catch (error) { if (error.code !== "ENOENT") throw error; }
-  return { state, lock, journalBefore: before, journalAfter: after, stable: before === after };
+  const sigAfter = journalSignature(path);
+  return { state, lock, journalBefore: before, journalAfter: after, sigBefore, sigAfter, stable: before === after && sigBefore === sigAfter };
 }
 
 export async function readStatus(home, read) {
@@ -201,7 +208,7 @@ export async function readStatus(home, read) {
       if (!before.stable) continue;
       const data = await read();
       const after = statusSnapshot(home);
-      if (before.stable && after.stable && before.journalAfter === after.journalBefore) {
+      if (before.stable && after.stable && before.journalAfter === after.journalBefore && before.sigAfter === after.sigBefore) {
         return { ...data, state: after.state, lock: after.lock, journalBefore: before.journalBefore, journalAfter: after.journalAfter };
       }
     } catch (error) {
@@ -210,6 +217,11 @@ export async function readStatus(home, read) {
   }
   throw new Error("Routing journal changed while reading status; please retry.");
 }
+export function journalOwnership(state, configPath) {
+  if (!state?.configPath || resolve(state.configPath) === resolve(configPath)) return { owned: true };
+  return { owned: false, journalConfigPath: state.configPath };
+}
+export function tomlBasicString(value) { return JSON.stringify(String(value)); }
 export function withLock(home) {
   const path = `${statePath(home)}.lock`;
   const nonce = randomUUID();
@@ -356,18 +368,21 @@ async function main() {
     await app.initialize();
     if (args.action === "status") {
       const status = await readStatus(app.codexHome, () => readConfig(app));
-      const data = status; const state = status.state; const lock = status.lock;
+      const data = status; const lock = status.lock;
+      const ownership = journalOwnership(status.state, app.configPath);
+      const state = ownership.owned ? status.state : null;
+      const foreign = ownership.owned ? "" : `\nJournal: ignored; belongs to a different Codex config file (${ownership.journalConfigPath})`;
       const stateClass = classifyState(data.user, data.effective, state); const compatible = compatibleVersion(version);
       const pending = state?.phase?.startsWith("pending-") ? `\nPending recovery: ${state.phase} (not modified by --status)` : "";
       const layer = data.effectiveLayer ? `\nEffective layer: ${data.effectiveLayer.type || "unknown"}${data.effectiveLayer.profile ? `/${data.effectiveLayer.profile}` : ""}` : "";
       const lockText = lock.locked ? `\nOperation lock: ${lock.path} (${lock.stale ? "stale; reclaimable" : "active"})` : "";
       printEffectiveFields(data);
-      console.log(`Codex: ${version}\nConfig: ${app.configPath}\nNative policy: ${stateClass}${layer}${pending}${lockText}\nClient compatibility: ${compatible ? "compatible" : "incompatible (requires Codex >= 0.144)"}`);
-      return args.requireEffective && (stateClass !== "installed" || !compatible) ? 1 : 0;
+      console.log(`Codex: ${version}\nConfig: ${app.configPath}\nNative policy: ${stateClass}${foreign}${layer}${pending}${lockText}\nClient compatibility: ${compatible ? "compatible" : "incompatible (requires Codex >= 0.144)"}`);
+      return args.requireEffective && (stateClass !== "installed" || !compatible || !ownership.owned) ? 1 : 0;
     }
     releaseLock = withLock(app.codexHome);
     let data = await readConfig(app); let state = readState(app.codexHome);
-    if (state && resolve(state.configPath) !== resolve(app.configPath)) throw new Error("Routing state belongs to a different Codex config file");
+    if (!journalOwnership(state, app.configPath).owned) throw new Error("Routing state belongs to a different Codex config file");
     let completedDisableRecovery = false;
     if (args.action !== "status" && state?.phase?.startsWith("pending-")) {
       const recovered = recoverPendingState(state, currentFields(data.user), currentFields(data.effective));

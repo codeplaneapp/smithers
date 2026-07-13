@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
   AppServer,
@@ -28,6 +28,8 @@ import {
   readConfig,
   readStatus,
   statusSnapshot,
+  journalOwnership,
+  tomlBasicString,
 } from "./configure-codex-routing.mjs";
 
 const config = (mode, usage) => ({ features: { multi_agent_v2: { multi_agent_mode_hint_text: mode, usage_hint_text: usage } } });
@@ -136,7 +138,7 @@ describe("Codex routing pure logic", () => {
         reads += 1;
         readStarted();
         if (reads === 1) writeFileSync(`${home}/.smithers-codex-routing.json`, `${JSON.stringify({ ...pending, marker: "interleaved" }, null, 2)}\n`);
-        else writeFileSync(`${home}/.smithers-codex-routing.json`, before);
+        else if (reads === 2) writeFileSync(`${home}/.smithers-codex-routing.json`, before);
         await Promise.resolve();
         return { user: {}, effective: {}, effectiveLayerByField: {} };
       });
@@ -152,6 +154,46 @@ describe("Codex routing pure logic", () => {
       expect(status.journalAfter).toBe(before);
       expect(readFileSync(`${home}/.smithers-codex-routing.json`, "utf8")).toBe(before);
     } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  test("byte-identical journal rewrites (ABA) are detected as instability", async () => {
+    const home = mkdtempSync(`${tmpdir()}/smithers-routing-aba-`);
+    try {
+      const journal = `${home}/.smithers-codex-routing.json`;
+      writeFileSync(journal, `${JSON.stringify(buildSnapshot({}, "/tmp/codex/config.toml", "v1"), null, 2)}\n`);
+      const bytes = readFileSync(journal, "utf8");
+      await expect(readStatus(home, async () => {
+        // Rewrite identical bytes through the production temp+rename path:
+        // the content matches but the inode does not, so the revision guard
+        // must treat every attempt as unstable.
+        const temporary = `${journal}.aba.tmp`;
+        writeFileSync(temporary, bytes);
+        renameSync(temporary, journal);
+        return { user: {}, effective: {}, effectiveLayerByField: {} };
+      })).rejects.toThrow("Routing journal changed while reading status");
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  test("journal ownership follows the journal's recorded config path", () => {
+    const state = buildSnapshot({}, "/tmp/codex-a/config.toml", "v1");
+    expect(journalOwnership(state, "/tmp/codex-a/config.toml")).toEqual({ owned: true });
+    expect(journalOwnership(state, "/tmp/codex-a/../codex-a/config.toml")).toEqual({ owned: true });
+    expect(journalOwnership(null, "/tmp/codex-a/config.toml")).toEqual({ owned: true });
+    expect(journalOwnership(state, "/tmp/codex-b/config.toml")).toEqual({ owned: false, journalConfigPath: "/tmp/codex-a/config.toml" });
+  });
+
+  test("a foreign journal is ignored for status classification", () => {
+    const state = buildSnapshot({}, "/tmp/codex-a/config.toml", "v1");
+    const ownership = journalOwnership(state, "/tmp/codex-b/config.toml");
+    expect(ownership.owned).toBe(false);
+    // Status must classify against a null state (journal not trusted), so an
+    // empty config on the other CODEX_HOME reads as "not installed", not "installed".
+    expect(classifyState({}, {}, ownership.owned ? state : null)).toBe("not installed");
+  });
+
+  test("tomlBasicString escapes Windows path separators for TOML keys", () => {
+    expect(tomlBasicString("C:\\Users\\dev\\project")).toBe('"C:\\\\Users\\\\dev\\\\project"');
+    expect(tomlBasicString('/tmp/with "quotes"')).toBe('"/tmp/with \\"quotes\\""');
   });
 
   test("reclaims a stale lock and never releases another owner's lock", () => {
@@ -348,7 +390,7 @@ realTest("real Codex status and dry-run attribute each effective field to its wi
   const project = mkdtempSync(`${tmpdir()}/smithers-codex-routing-project-`);
   mkdirSync(`${project}/.codex`);
   writeFileSync(`${project}/.codex/config.toml`, "[features.multi_agent_v2]\n");
-  writeFileSync(`${home}/config.toml`, `[projects."${realpathSync(project)}"]\ntrust_level = "trusted"\n`);
+  writeFileSync(`${home}/config.toml`, `[projects.${tomlBasicString(realpathSync(project))}]\ntrust_level = "trusted"\n`);
   const script = new URL("./configure-codex-routing.mjs", import.meta.url).pathname;
   const run = (args) => Bun.spawnSync({ cmd: ["node", script, "--codex-bin", binary, ...args], cwd: project, env: { ...process.env, CODEX_HOME: home }, stdout: "pipe", stderr: "pipe" });
   const output = (result) => `${result.stdout.toString()}${result.stderr.toString()}`;
