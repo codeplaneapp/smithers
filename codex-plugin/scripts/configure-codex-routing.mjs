@@ -4,7 +4,7 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, unlinkSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, unlinkSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, resolve, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -96,16 +96,38 @@ export function mergeSnapshot(state, configPath) {
 
 export function targetValues(state) { return state?.pending?.to || state?.managed; }
 export function priorManagedValues(state) { return state?.pending?.from || state?.managed; }
-export function recoverPendingState(state, user) {
+export function installTransition(state, current, configPath, version, { replaceExistingPolicy = false } = {}) {
+  if (state && !FIELD_PATHS.every((path) => fieldsEqual(current[path], state.managed[path]))) {
+    throw new Error("Managed fields drifted outside this plugin; refusing to overwrite them.");
+  }
+  if (!state && FIELD_PATHS.some((path) => !absent(current[path])) && !replaceExistingPolicy) {
+    throw new Error("A user-authored managed hint exists; review it and pass --replace-existing-policy to replace and snapshot it.");
+  }
+  const nextState = state ? mergeSnapshot(state, configPath) : buildSnapshot(current, configPath, version);
+  return { nextState, target: targetValues(nextState), createdState: !state };
+}
+export function installFailureRecovery(nextState, createdState) {
+  return createdState
+    ? { action: "remove", state: null, values: restoreValues(nextState) }
+    : { action: "rollback", state: { ...nextState, phase: "committed", managed: { ...priorManagedValues(nextState) }, pending: undefined }, values: priorManagedValues(nextState) };
+}
+export function disableTransition(state, current) {
+  if (!state) throw new Error("No Smithers snapshot found; refusing to disable user-authored fields.");
+  if (!FIELD_PATHS.every((path) => fieldsEqual(current[path], state.managed[path]))) throw new Error("Managed fields were edited after setup; refusing to clobber the user edit.");
+  return restoreValues(state);
+}
+export function recoverPendingState(state, user, effective = user) {
   if (!state || !state.phase?.startsWith("pending-")) return { state, action: "none" };
   const previous = restoreValues(state);
   if (state.phase === "pending-install") {
     const target = targetValues(state);
     const prior = state.pending ? priorManagedValues(state) : previous;
-    if (FIELD_PATHS.every((path) => fieldsEqual(user[path], target[path]))) {
+    if (FIELD_PATHS.every((path) => fieldsEqual(user[path], target[path]))
+      && FIELD_PATHS.every((path) => fieldsEqual(effective[path], target[path]))) {
       return { state: { ...state, phase: "committed", managed: { ...target }, pending: undefined }, action: "commit" };
     }
-    if (FIELD_PATHS.every((path) => fieldsEqual(user[path], prior[path]))) {
+    if (FIELD_PATHS.every((path) => fieldsEqual(user[path], prior[path]))
+      && FIELD_PATHS.every((path) => fieldsEqual(effective[path], prior[path]))) {
       return state.pending
         ? { state: { ...state, phase: "committed", managed: { ...prior }, pending: undefined }, action: "rollback" }
         : { state: null, action: "remove" };
@@ -151,37 +173,56 @@ export function lockStatus(home, now = Date.now(), pidAlive = processIsAlive) {
   if (!existsSync(path)) return { locked: false, path };
   let owner;
   try { owner = JSON.parse(readFileSync(join(path, "owner"), "utf8")); } catch {}
-  return { locked: true, path, owner, stale: isStaleLock(owner, now, pidAlive) };
+  let modifiedAt = now;
+  try { modifiedAt = statSync(path).mtimeMs; } catch {}
+  const staleOwner = owner ? isStaleLock(owner, now, pidAlive) : now - modifiedAt > LOCK_MAX_AGE_MS;
+  return { locked: true, path, owner, stale: staleOwner };
 }
-function withLock(home) {
+export function withLock(home) {
   const path = `${statePath(home)}.lock`;
   const nonce = randomUUID();
-  const ownerPath = join(path, "owner");
   const owner = { pid: process.pid, createdAt: Date.now(), nonce };
   for (;;) {
-    try { mkdirSync(path); writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`, { encoding: "utf8", mode: 0o600 }); break; }
+    const candidate = `${path}.new-${nonce}`;
+    try {
+      mkdirSync(candidate);
+      writeFileSync(join(candidate, "owner"), `${JSON.stringify(owner)}\n`, { encoding: "utf8", mode: 0o600 });
+      renameSync(candidate, path);
+      break;
+    }
     catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (existsSync(candidate)) rmSync(candidate, { recursive: true, force: true });
+      if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY") throw error;
       const status = lockStatus(home);
       if (!status.stale) throw new Error(`Another routing operation owns ${path}`);
       const reclaimPath = `${path}.reclaim-${randomUUID()}`;
       try {
         renameSync(path, reclaimPath);
-        rmSync(reclaimPath, { recursive: true, force: true });
+        let movedOwner;
+        try { movedOwner = JSON.parse(readFileSync(join(reclaimPath, "owner"), "utf8")); } catch {}
+        const sameOwner = status.owner && movedOwner
+          ? status.owner.pid === movedOwner.pid && status.owner.createdAt === movedOwner.createdAt && status.owner.nonce === movedOwner.nonce
+          : !status.owner && !movedOwner;
+        if (sameOwner) rmSync(reclaimPath, { recursive: true, force: true });
+        else {
+          try { if (!existsSync(path)) renameSync(reclaimPath, path); } catch (restoreError) {
+            if (restoreError.code !== "EEXIST" && restoreError.code !== "ENOTEMPTY") throw restoreError;
+          }
+          throw new Error(`Lock ownership changed while reclaiming ${path}`);
+        }
       } catch (reclaimError) {
         if (reclaimError.code !== "ENOENT" && reclaimError.code !== "EEXIST") throw reclaimError;
       }
     }
   }
   return () => {
+    const ownerPath = join(path, "owner");
     try {
       const current = JSON.parse(readFileSync(ownerPath, "utf8"));
       if (current.nonce === nonce) rmSync(path, { recursive: true, force: true });
     } catch (error) { if (error.code !== "ENOENT") throw error; }
   };
 }
-
-export { withLock };
 
 export function resolveExecutable(name, { platform = process.platform, path = process.env.PATH || "", pathext = process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD", exists = existsSync } = {}) {
   if (name.includes("/") || name.includes("\\")) return resolve(name);
@@ -195,7 +236,11 @@ export function resolveExecutable(name, { platform = process.platform, path = pr
 function findBinary(name) { return resolveExecutable(name); }
 export function spawnSpec(binary, args, platform = process.platform, comspec = process.env.ComSpec || process.env.COMSPEC || "cmd.exe") {
   const lower = binary.toLowerCase();
-  if (platform === "win32" && (lower.endsWith(".cmd") || lower.endsWith(".bat"))) return { command: comspec, args: ["/d", "/s", "/c", binary, ...args] };
+  if (platform === "win32" && (lower.endsWith(".cmd") || lower.endsWith(".bat"))) {
+    const quote = (value) => `"${String(value).replaceAll('"', '\\"')}"`;
+    const command = [quote(binary), ...args.map(quote)].join(" ");
+    return { command: comspec, args: ["/d", "/s", "/c", command] };
+  }
   return { command: binary, args };
 }
 export function compatibleVersion(version) {
@@ -257,7 +302,7 @@ async function main() {
     if (state && resolve(state.configPath) !== resolve(app.configPath)) throw new Error("Routing state belongs to a different Codex config file");
     let completedDisableRecovery = false;
     if (args.action !== "status" && state?.phase?.startsWith("pending-")) {
-      const recovered = recoverPendingState(state, currentFields(data.user));
+      const recovered = recoverPendingState(state, currentFields(data.user), currentFields(data.effective));
       completedDisableRecovery = state.phase === "pending-disable" && recovered.action === "remove";
       if (recovered.action === "remove") removeState(app.codexHome);
       else if (recovered.action !== "none") writeState(app.codexHome, recovered.state);
@@ -280,21 +325,18 @@ async function main() {
     const current = currentFields(data.user);
     if (args.action === "disable") {
       if (completedDisableRecovery) { console.log("Native routing disabled; snapshot already restored."); return 0; }
-      if (!state) throw new Error("No Smithers snapshot found; refusing to disable user-authored fields.");
-      if (!FIELD_PATHS.every((path) => fieldsEqual(current[path], state.managed[path]))) throw new Error("Managed fields were edited after setup; refusing to clobber the user edit.");
-      const restore = restoreValues(state); printFields("Current values", current); printFields("Restore values", restore); if (!args.apply) { console.log("Dry run only. Re-run with --disable --apply to restore the snapshot."); return 0; }
+      const restore = disableTransition(state, current); printFields("Current values", current); printFields("Restore values", restore); if (!args.apply) { console.log("Dry run only. Re-run with --disable --apply to restore the snapshot."); return 0; }
       writeState(app.codexHome, { ...state, phase: "pending-disable" });
       try { await rollback(app, data.version, restore); removeState(app.codexHome); console.log("Native routing disabled; snapshot restored."); return 0; } catch (error) { throw new Error(`${error.message}; managed fields may remain.`); }
     }
-    if (state && !FIELD_PATHS.every((path) => fieldsEqual(current[path], state.managed[path]))) throw new Error("Managed fields drifted outside this plugin; refusing to overwrite them.");
-    if (!state && FIELD_PATHS.some((path) => !absent(current[path])) && !args.replaceExistingPolicy) { printFields("User-authored conflict", current); throw new Error("A user-authored managed hint exists; review it and pass --replace-existing-policy to replace and snapshot it."); }
-    const nextState = state ? mergeSnapshot(state, app.configPath) : buildSnapshot(data.user, app.configPath, data.version);
+    if (!state && !args.replaceExistingPolicy && FIELD_PATHS.some((path) => !absent(current[path]))) { printFields("User-authored conflict", current); printEffectiveFields(data); }
+    const transition = installTransition(state, current, app.configPath, data.version, { replaceExistingPolicy: args.replaceExistingPolicy });
+    const { nextState } = transition;
     printFields("Current values", current); printEffectiveFields(data); printFields("Proposed values", Object.fromEntries(FIELD_PATHS.map((path) => [path, HINT_TEXT]))); console.log(`Snapshot: ${JSON.stringify(nextState, null, 2)}`); if (!args.apply) { console.log("Dry run only. Re-run with --apply to install the policy."); return 0; }
-    const createdState = !state;
+    const { createdState, target } = transition;
     writeState(app.codexHome, { ...nextState, phase: "pending-install" });
     let written;
     try {
-      const target = targetValues(nextState);
       written = await batchWrite(app, makeEdits(target), data.version);
       const verified = await readConfig(app); const verifiedClass = classifyState(verified.user, verified.effective, { ...nextState, managed: target, pending: undefined });
       if (verifiedClass !== "installed") throw new Error(`Effective installation validation failed: ${verifiedClass}`);
@@ -304,8 +346,9 @@ async function main() {
       written ||= error.writeResult;
       if (written?.version) { try { await rollback(app, written.version, createdState ? restoreValues(nextState) : Object.fromEntries(FIELD_PATHS.map((path) => [path, state.managed[path]]))); } catch (rollbackError) { throw new Error(`${error.message}; rollback also failed: ${rollbackError.message}; managed fields may remain.`); } }
       if (written?.version) {
-        if (createdState) removeState(app.codexHome);
-        else writeState(app.codexHome, { ...nextState, phase: "committed", managed: { ...priorManagedValues(nextState) }, pending: undefined });
+        const recovery = installFailureRecovery(nextState, createdState);
+        if (recovery.action === "remove") removeState(app.codexHome);
+        else writeState(app.codexHome, recovery.state);
       }
       throw error;
     }

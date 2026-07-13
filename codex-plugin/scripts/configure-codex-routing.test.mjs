@@ -22,6 +22,9 @@ import {
   batchWrite,
   spawnSpec,
   withLock,
+  installTransition,
+  installFailureRecovery,
+  disableTransition,
 } from "./configure-codex-routing.mjs";
 
 const config = (mode, usage) => ({ features: { multi_agent_v2: { multi_agent_mode_hint_text: mode, usage_hint_text: usage } } });
@@ -83,6 +86,13 @@ describe("Codex routing pure logic", () => {
     expect(recoverPendingState(state, currentFields({}))).toEqual({ state: null, action: "remove" });
   });
 
+  test("pending upgrade requires both user and effective layers to validate", () => {
+    const old = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, "old policy"])) };
+    const pending = { ...mergeSnapshot(old, old.configPath), phase: "pending-install" };
+    expect(() => recoverPendingState(pending, currentFields(config(HINT_TEXT, HINT_TEXT)), currentFields(config("higher layer", "higher layer")))).toThrow("pending recovery");
+    expect(recoverPendingState(pending, currentFields(config("old policy", "old policy")), currentFields(config("old policy", "old policy"))).action).toBe("rollback");
+  });
+
   test("pending disable recovery is read-only until a mutation command handles it", () => {
     const state = { ...buildSnapshot({}, "/tmp/codex/config.toml", "v1"), phase: "pending-disable" };
     expect(recoverPendingState(state, currentFields(config(undefined, undefined)))).toEqual({ state: null, action: "remove" });
@@ -129,9 +139,9 @@ describe("Codex routing pure logic", () => {
   });
 
   test("launches Windows command wrappers through ComSpec", () => {
-    expect(spawnSpec("C:\\bin\\codex.CMD", ["--version"], "win32", "C:\\Windows\\System32\\cmd.exe")).toEqual({
+    expect(spawnSpec("C:\\Program Files\\Codex\\codex.CMD", ["--version"], "win32", "C:\\Windows\\System32\\cmd.exe")).toEqual({
       command: "C:\\Windows\\System32\\cmd.exe",
-      args: ["/d", "/s", "/c", "C:\\bin\\codex.CMD", "--version"],
+      args: ["/d", "/s", "/c", '"C:\\Program Files\\Codex\\codex.CMD" "--version"'],
     });
     expect(spawnSpec("/usr/local/bin/codex", ["--version"], "linux")).toEqual({ command: "/usr/local/bin/codex", args: ["--version"] });
   });
@@ -151,6 +161,16 @@ describe("Codex routing pure logic", () => {
     const afterRollback = recoverPendingState(pending, currentFields(config("old policy", "old policy")));
     expect(afterRollback.action).toBe("rollback");
     expect(afterRollback.state.managed[FIELD_PATHS[0]]).toBe("old policy");
+  });
+
+  test("pure install and disable transitions preserve the first snapshot", () => {
+    const first = installTransition(null, currentFields({}), "/tmp/codex/config.toml", "v1");
+    expect(first.createdState).toBe(true);
+    expect(installFailureRecovery(first.nextState, true)).toMatchObject({ action: "remove", values: { [FIELD_PATHS[0]]: { present: false } } });
+    const upgrade = installTransition({ ...first.nextState, managed: Object.fromEntries(FIELD_PATHS.map((path) => [path, "old policy"])) }, currentFields(config("old policy", "old policy")), "/tmp/codex/config.toml", "v2");
+    expect(upgrade.nextState.pending.from[FIELD_PATHS[0]]).toBe("old policy");
+    expect(installFailureRecovery(upgrade.nextState, false).state.managed[FIELD_PATHS[0]]).toBe("old policy");
+    expect(disableTransition({ ...upgrade.nextState, managed: { ...upgrade.nextState.pending.from } }, currentFields(config("old policy", "old policy")))[FIELD_PATHS[0]]).toEqual({ present: false });
   });
 
   test("version mismatch leaves an upgrade journal recoverable at the prior policy", async () => {
