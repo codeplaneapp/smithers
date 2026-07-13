@@ -42,7 +42,7 @@ export function makeIntegrationRuntime(options) {
     })), Effect.retry(SOURCE_RESTART_SCHEDULE), Effect.catchAll(() => Effect.void));
     for (const config of webhookSources) {
         if (webhookOffers.has(config.id)) {
-            throw new IntegrationError("unknown-source", `Duplicate webhook source id "${config.id}".`, { sourceId: config.id });
+            throw new IntegrationError("invalid-config", `Duplicate webhook source id "${config.id}".`, { sourceId: config.id });
         }
         const webhook = runtime.runSync(makeWebhookSource(config));
         webhookOffers.set(config.id, webhook.offer);

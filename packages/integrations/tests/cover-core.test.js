@@ -208,15 +208,25 @@ describe("deliverEvent / deliverEvents error handling", () => {
 });
 
 describe("makeIntegrationRuntime", () => {
-    test("rejects duplicate webhook source ids", () => {
+    test("rejects duplicate webhook source ids with an invalid-config IntegrationError", () => {
         const { adapter } = createTestAdapter();
-        expect(() => makeIntegrationRuntime({
-            adapter,
-            webhookSources: [
-                { id: "dup", decode: () => makeEvent() },
-                { id: "dup", decode: () => makeEvent() },
-            ],
-        })).toThrow(/Duplicate webhook source id/);
+        let error;
+        try {
+            makeIntegrationRuntime({
+                adapter,
+                webhookSources: [
+                    { id: "dup", decode: () => makeEvent() },
+                    { id: "dup", decode: () => makeEvent() },
+                ],
+            });
+        }
+        catch (thrown) {
+            error = thrown;
+        }
+        expect(isIntegrationError(error)).toBe(true);
+        expect(error.message).toMatch(/Duplicate webhook source id/);
+        expect(error.reason).toBe("invalid-config");
+        expect(error.details?.sourceId).toBe("dup");
     });
 
     test("handleWebhook rejects an unknown source id with the raw IntegrationError", async () => {

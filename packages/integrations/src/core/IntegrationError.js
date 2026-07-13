@@ -1,7 +1,7 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 /**
- * @typedef {"invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-full" | "queue-closed"} IntegrationErrorReason
+ * @typedef {"invalid-config" | "invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-full" | "queue-closed"} IntegrationErrorReason
  */
 
 /**
@@ -9,6 +9,8 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * A `SmithersError` (code `INTEGRATION_ERROR`) with a machine-readable
  * `reason` so ingress code can map failures to HTTP statuses
  * (`invalid-signature` → 401, `unknown-source` → 404, ...).
+ * `invalid-config` marks construction-time configuration errors that never
+ * reach ingress.
  */
 export class IntegrationError extends SmithersError {
     /** @type {IntegrationErrorReason} */
