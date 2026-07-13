@@ -234,7 +234,13 @@ jobs:
       - name: Run Postgres-gated tests
         env:
           SMITHERS_TEST_PG_URL: postgresql://smithers:smithers_pw@127.0.0.1:54329/smithers
-        run: bun test apps/cli/tests/*postgres* packages/smithers/tests/migrateSmithersStore.test.js
+        # Two bun invocations on purpose: each PGlite instance holds >1GB of
+        # WASM memory that bun cannot reliably reclaim in-process, so the CLI
+        # postgres tests plus the migrate-store suite in one process cross the
+        # ~2GB WASM ceiling and die with a Bus error (exit 132).
+        run: |
+          bun test apps/cli/tests/*postgres*
+          bun test packages/smithers/tests/migrateSmithersStore.test.js
 
       - name: Stop Postgres
         if: always()
