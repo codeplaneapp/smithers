@@ -10,8 +10,8 @@ to terminate the server process.
 
 stderr contract: the child's stderr is piped and must be continuously drained
 or a chatty server deadlocks (~64-80KB OS pipe buffer); `options.onStderr`
-routes chunks somewhere other than the host `process.stderr`. Known issue: the
-drain is currently attached twice, so sinks see each chunk twice.
+routes chunks somewhere other than the host `process.stderr`. The drain is
+attached before connecting and forwards each chunk exactly once.
 
 Tool results reduce to `structuredContent` when present, else joined text;
 `isError` becomes `{ error, message, status }`.

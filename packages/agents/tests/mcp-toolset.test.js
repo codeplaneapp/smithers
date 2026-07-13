@@ -74,6 +74,7 @@ describe("createMcpToolset (real MCP server over stdio)", () => {
         // The reply can land before the last stderr chunks are read, so wait for
         // the sink to catch up. Without draining, received stays 0 and this times out.
         await waitUntil(() => received >= flood, 10000);
+        expect(received).toBe(flood);
       } finally {
         await toolset.close();
       }

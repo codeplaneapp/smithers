@@ -34,27 +34,6 @@ export async function createMcpToolset(config, options = {}) {
   });
   await client.connect(transport);
 
-  // Drain the child's stderr. With `stderr: "pipe"` nothing reads the pipe, so
-  // a server that logs verbosely blocks on write once the OS buffer (~64-80KB)
-  // fills, deadlocking the session. Forward each chunk to a sink (default: the
-  // host stderr) rather than discarding, so server diagnostics survive; a
-  // throwing sink must never break the drain.
-  const stderrStream = transport.stderr;
-  if (stderrStream) {
-    const sink = options.onStderr ?? ((chunk) => process.stderr.write(chunk));
-    stderrStream.on("data", (chunk) => {
-      try {
-        sink(chunk.toString());
-      }
-      catch {
-        // ignore sink failures; draining must continue
-      }
-    });
-    stderrStream.on("error", () => {
-      // a stderr stream error must not crash the toolset
-    });
-  }
-
   const prefix = options.namePrefix ?? "";
   const listed = await client.listTools();
   /** @type {Record<string, import("ai").Tool>} */
@@ -98,6 +77,9 @@ function drainStderr(transport, onStderr) {
     } catch {
       // A throwing sink must never break the drain loop, or the pipe re-fills.
     }
+  });
+  stream.on("error", () => {
+    // A stderr stream error must not crash the toolset.
   });
 }
 
