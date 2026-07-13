@@ -89,6 +89,8 @@ describe("devtools: bippy + custom reconciler", () => {
         expect(tree.type).toBe("workflow");
         const seq = tree.children.find((c) => c.type === "sequence");
         expect(seq).toBeDefined();
+        expect(Number.isInteger(tree.id)).toBe(true);
+        expect(seq.children.every((child) => Number.isInteger(child.id))).toBe(true);
         const tasks = devtools.listTasks();
         expect(tasks.length).toBeGreaterThanOrEqual(2);
         const t1 = devtools.findTask("step1");

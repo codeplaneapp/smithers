@@ -153,7 +153,7 @@ function fiberToNode(fiber, depth) {
     const nodeType = resolveNodeType(fiber);
     if (!nodeType)
         return null;
-    const id = getFiberId(fiber) ?? setFiberId(fiber);
+    const id = getFiberId(fiber);
     const children = [];
     collectSmithersDescendants(fiber.child, depth + 1, children);
     return {
