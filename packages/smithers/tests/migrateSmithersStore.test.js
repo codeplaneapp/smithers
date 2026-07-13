@@ -33,12 +33,20 @@ function makeWorkspace(name) {
 async function closeApi(api) {
   await api?.close?.();
   api?.db?.$client?.close?.();
+  // Reclaim the closed PGlite's WASM memory immediately: with several
+  // multi-extension instances per test, lazy collection lets mapped WASM
+  // regions stack up until bun dies with a Bus error near 2GB.
+  Bun.gc(true);
 }
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
+  // Every test boots at least one PGlite (WASM) instance; without a forced
+  // collection between tests the mapped WASM memories accumulate until bun
+  // dies with a Bus error near the 2GB mark (reproducible from ~3 tests in).
+  Bun.gc(true);
 });
 
 function seedSqliteStore(cwd, dbPath = join(cwd, "smithers.db")) {
