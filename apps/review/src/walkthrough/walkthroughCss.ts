@@ -88,7 +88,7 @@ header.page .synopsis { margin: 0; color: var(--muted); max-width: 72ch; font-si
 .chart-label { font-size: 12px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chart-files { color: var(--faint); font-weight: 400; }
 .chart-count { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.chart-track { grid-column: 1 / -1; height: 7px; border-radius: 2px; background: var(--surface-3); display: flex; gap: 2px; overflow: hidden; }
+.chart-track { grid-column: 1 / -1; height: 7px; border-radius: 2px; background: var(--surface-3); display: flex; overflow: hidden; }
 .chart-add { background: var(--add); border-radius: 2px; flex: none; }
 .chart-del { background: var(--del); border-radius: 2px; flex: none; }
 .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }

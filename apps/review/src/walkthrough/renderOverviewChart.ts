@@ -27,8 +27,15 @@ function barSegments(entry: AreaEntry, maxChurn: number): string {
   const total = Math.sqrt(churn / maxChurn) * 100;
   let addPct = (entry.insertions / churn) * total;
   let delPct = total - addPct;
-  if (entry.insertions > 0 && addPct < MIN_SEGMENT_PCT) addPct = MIN_SEGMENT_PCT;
-  if (entry.deletions > 0 && delPct < MIN_SEGMENT_PCT) delPct = MIN_SEGMENT_PCT;
+  if (entry.insertions > 0 && entry.deletions > 0) {
+    const minSegmentPct = Math.min(MIN_SEGMENT_PCT, total / 2);
+    addPct = Math.min(Math.max(addPct, minSegmentPct), total - minSegmentPct);
+    delPct = total - addPct;
+  } else if (entry.insertions > 0 && addPct < MIN_SEGMENT_PCT) {
+    addPct = MIN_SEGMENT_PCT;
+  } else if (entry.deletions > 0 && delPct < MIN_SEGMENT_PCT) {
+    delPct = MIN_SEGMENT_PCT;
+  }
   const parts: string[] = [];
   if (entry.insertions > 0) parts.push(`<div class="chart-add" style="width:${pct(addPct)}"></div>`);
   if (entry.deletions > 0) parts.push(`<div class="chart-del" style="width:${pct(delPct)}"></div>`);

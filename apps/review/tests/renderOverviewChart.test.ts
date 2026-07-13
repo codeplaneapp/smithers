@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChangedFile } from "../src/walkthrough/changedFileSchema";
 import { renderOverviewChart } from "../src/walkthrough/renderOverviewChart";
+import { walkthroughCss } from "../src/walkthrough/walkthroughCss";
 
 function file(path: string, insertions: number, deletions: number): ChangedFile {
   return { path, status: "modified", insertions, deletions, diff: "", reviewed: true, excludeReason: "" };
@@ -13,6 +14,18 @@ function rowsOf(html: string): string[] {
 function rowWidth(row: string): number {
   const widths = [...row.matchAll(/width:([\d.]+)%/g)].map((match) => Number(match[1]));
   return widths.reduce((sum, width) => sum + width, 0);
+}
+
+function chartTrackGapPx(): number {
+  const trackRule = walkthroughCss.match(/\.chart-track\s*\{([^}]*)\}/)?.[1];
+  if (trackRule === undefined) throw new Error("Missing .chart-track CSS rule");
+  const gap = trackRule.match(/\bgap:\s*([\d.]+)px/);
+  return gap ? Number(gap[1]) : 0;
+}
+
+function renderedRowWidthPx(row: string, trackWidthPx: number): number {
+  const segmentCount = [...row.matchAll(/width:[\d.]+%/g)].length;
+  return (rowWidth(row) / 100) * trackWidthPx + Math.max(segmentCount - 1, 0) * chartTrackGapPx();
 }
 
 describe("renderOverviewChart", () => {
@@ -50,6 +63,19 @@ describe("renderOverviewChart", () => {
     // clearly visible (a linear scale would give it 0.1%).
     expect(widths[0]).toBeGreaterThan(95);
     expect(widths[2]).toBeGreaterThan(1);
+  });
+
+  test("keeps minimum-size segments within the rendered track width", () => {
+    const trackWidthPx = 100;
+    const mostlyAdditions = rowsOf(renderOverviewChart([file("src/add.ts", 9990, 10)]))[0];
+    expect(mostlyAdditions).toContain('class="chart-add" style="width:98.5%"');
+    expect(mostlyAdditions).toContain('class="chart-del" style="width:1.5%"');
+    expect(renderedRowWidthPx(mostlyAdditions, trackWidthPx)).toBeLessThanOrEqual(trackWidthPx);
+
+    const mostlyDeletions = rowsOf(renderOverviewChart([file("src/delete.ts", 10, 9990)]))[0];
+    expect(mostlyDeletions).toContain('class="chart-add" style="width:1.5%"');
+    expect(mostlyDeletions).toContain('class="chart-del" style="width:98.5%"');
+    expect(renderedRowWidthPx(mostlyDeletions, trackWidthPx)).toBeLessThanOrEqual(trackWidthPx);
   });
 
   test("collapses overflow areas into a truthful +N more row", () => {
