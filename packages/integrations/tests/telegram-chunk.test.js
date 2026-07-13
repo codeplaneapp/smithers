@@ -61,6 +61,11 @@ describe("MarkdownV2 escaping", () => {
         expect(convertMarkdownToTelegram("# Title\nplain. text!")).toBe("*Title*\nplain\\. text\\!");
         expect(convertMarkdownToTelegram("see [docs](https://x.dev/a_b.html)!")).toBe("see [docs](https://x.dev/a_b.html)\\!");
     });
+    test("expands inline formatting sentinels inside headers", () => {
+        expect(convertMarkdownToTelegram("# see `code` here")).toBe("*see `code` here*");
+        expect(convertMarkdownToTelegram("# **Bold** title")).toBe("**Bold* title*");
+        expect(convertMarkdownToTelegram("# see `code` here")).not.toContain("\u0000");
+    });
     test("code blocks keep content unescaped except ` and \\", () => {
         expect(convertMarkdownToTelegram("run `a_b*c` now.")).toBe("run `a_b*c` now\\.");
         expect(convertMarkdownToTelegram("```js\nconst a = b.c(1);\n```")).toBe("```js\nconst a = b.c(1);\n```");

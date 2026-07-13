@@ -121,7 +121,15 @@ export function convertMarkdownToTelegram(markdown) {
         ? segment
         : escapePlainTextPreservingBlockquote(segment))
         .join("");
-    return finalEscaped.replace(SENTINEL_REPLACE, (_, index) => replacements[Number.parseInt(index, 10)]);
+    let expanded = finalEscaped;
+    for (let pass = 0; pass < replacements.length; pass += 1) {
+        const next = expanded.replace(SENTINEL_REPLACE, (_, index) => replacements[Number.parseInt(index, 10)]);
+        if (next === expanded) {
+            break;
+        }
+        expanded = next;
+    }
+    return expanded;
 }
 
 /**
