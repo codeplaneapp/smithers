@@ -113,7 +113,7 @@ export function applyDelta(snapshot, delta) {
             if (op.task === undefined) {
                 delete target.node.task;
             }
-            else if (typeof op.task !== "object") {
+            else if (op.task === null || typeof op.task !== "object") {
                 throw new InvalidDeltaError("updateTask requires a task object or undefined.");
             }
             else {

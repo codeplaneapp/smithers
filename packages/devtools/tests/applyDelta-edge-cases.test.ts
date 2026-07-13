@@ -158,4 +158,17 @@ describe("applyDelta — out-of-order and inconsistent ops", () => {
       }),
     ).toThrowError(InvalidDeltaError);
   });
+
+  test("updateTask with a null task is rejected", () => {
+    const snap = baseSnapshot();
+    expect(() =>
+      applyDelta(snap, {
+        version: 1,
+        baseSeq: 1,
+        seq: 2,
+        // @ts-expect-error malformed payload: task is null
+        ops: [{ op: "updateTask", id: 2, task: null }],
+      }),
+    ).toThrowError(InvalidDeltaError);
+  });
 });
