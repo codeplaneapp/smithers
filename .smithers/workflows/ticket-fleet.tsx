@@ -222,6 +222,15 @@ const candidateSchema = z.object({
   summary: z.string().default(""),
 });
 type Candidate = z.infer<typeof candidateSchema>;
+// Luna writes the atomic emoji + conventional-commit message for each lane's
+// fix, so landed history reads like hand-authored work instead of a templated
+// "resolve tracked issue" stub.
+const commitMessageSchema = z.object({
+  issueNumber: z.number().int(),
+  subject: z.string().min(10).max(100),
+  body: z.string().default(""),
+});
+type CommitMessage = z.infer<typeof commitMessageSchema>;
 const reviewFields = {
   issueNumber: z.number().int(),
   headSha: z.string(),
@@ -349,6 +358,7 @@ const {
   tfMergeApproval: approvalDecisionSchema,
   tfSetup: setupSchema,
   tfImplementation: implementationSchema,
+  tfCommitMessage: commitMessageSchema,
   tfCandidate: candidateSchema,
   tfReviewSeat: reviewSeatSchema,
   tfReview: reviewSchema,
@@ -393,15 +403,21 @@ function lunaAgent(effort: "medium" | "high" | "xhigh", cwd?: string) {
 function supportAgent(cwd?: string) {
   return lunaAgent("high", cwd);
 }
+// Sol and Fable are each other's failover: if one is rate-limited or otherwise
+// unavailable, the chain advances to the other strong model instead of stalling
+// the lane, with luna/sonnet behind them as a last resort.
 function solAgent(cwd?: string) {
   return subscriptionCodexFirst(codexOptions("gpt-5.6-sol", "xhigh", cwd), [
     new ClaudeCodeAgent({ model: "claude-fable-5", ...(cwd ? { cwd } : {}) }),
+    new ClaudeCodeAgent({ model: "claude-sonnet-5", ...(cwd ? { cwd } : {}) }),
   ]);
 }
 function fableAgent(cwd?: string) {
   return [
     new ClaudeCodeAgent({ model: "claude-fable-5", ...(cwd ? { cwd } : {}) }),
-    ...subscriptionCodexFirst(codexOptions("gpt-5.6-sol", "xhigh", cwd)),
+    ...subscriptionCodexFirst(codexOptions("gpt-5.6-sol", "xhigh", cwd), [
+      new ClaudeCodeAgent({ model: "claude-sonnet-5", ...(cwd ? { cwd } : {}) }),
+    ]),
   ];
 }
 function moderatorAgent(cwd?: string) {
@@ -1253,6 +1269,18 @@ function implementPrompt(issue: Issue, triage: Triage, plan: Plan | undefined, r
     "Add focused tests. Follow repo conventions (CLAUDE.md/AGENTS.md). Do not commit, push, alter VCS metadata, or touch files outside this worktree. Return an accurate summary.",
   ].filter(Boolean).join("\n");
 }
+function commitMessagePrompt(issue: Issue): string {
+  return [
+    UNTRUSTED,
+    "Write the commit message for the fix just implemented in this worktree (cwd) for issue #" + issue.number + " (" + JSON.stringify(issue.title) + ").",
+    "Inspect the actual change first: `git status --porcelain` and `git diff` (the edits are uncommitted).",
+    "Repo convention: an emoji, then a conventional-commit subject, e.g. \"🐛 fix(gateway): reject cross-origin PTY upgrades\" or \"✨ feat(cli): add ui command\".",
+    "subject: the full emoji + conventional-commit subject line, under 100 characters, describing what the change actually does (not the issue number).",
+    "body: 1-3 plain sentences on the root cause and the fix. No bullet lists, no marketing, no em-dashes. Leave empty if the subject says it all.",
+    "Do not include a Fixes/Refs trailer or a Co-Authored-By line; those are appended automatically. Do not commit or edit any files.",
+    "Set issueNumber to exactly " + issue.number + ".",
+  ].join("\n");
+}
 function reviewPrompt(issue: Issue, candidate: { headSha: string; changedPaths: string[]; reviewDiff: string }, phase: string): string {
   return [
     UNTRUSTED,
@@ -1275,18 +1303,41 @@ async function setupWorktree(issueNumber: number, cwd: string): Promise<Setup> {
     summary: result.exitCode === 0 ? "Dependencies ready." : (result.stderr || result.stdout).slice(-8_000),
   };
 }
-function captureCandidate(issueNumber: number, setup: Setup): Candidate {
+function commitTextFor(issueNumber: number, message: CommitMessage | undefined): string {
+  const subject = message?.subject?.trim()
+    || "🐛 fix(issue-" + issueNumber + "): resolve tracked issue";
+  const body = message?.body?.trim();
+  return [
+    subject,
+    "",
+    ...(body ? [body, ""] : []),
+    "Fixes #" + issueNumber,
+    "",
+    "Co-Authored-By: Smithers ticket-fleet <noreply@smithers.sh>",
+  ].join("\n");
+}
+function captureCandidate(issueNumber: number, setup: Setup, message?: CommitMessage): Candidate {
   if (!setup.ready) return { issueNumber, baseSha: setup.baseSha, headSha: "", patchId: "", changedPaths: [], reviewDiff: "", ready: false, summary: setup.summary };
+  // Commit the agent's edits into ONE atomic commit immediately. The engine's
+  // worktree sync rebases each lane onto origin/main between frames, and
+  // `git rebase` hard-fails ("cannot rebase: You have unstaged changes") on a
+  // dirty tree, which used to wedge the lane into an endless retry loop. The
+  // tree must therefore be clean the moment the implement agent returns.
   const paths = changedWorkingPaths(setup.cwd);
   if (paths.length) git(["add", "--", ...paths], setup.cwd);
   const staged = splitZero(git(["diff", "--cached", "--name-only", "-z"], setup.cwd));
   if (staged.length) {
     const count = Number(git(["rev-list", "--count", setup.baseSha + "..HEAD"], setup.cwd));
-    if (count === 0) {
-      git(["commit", "-m", "🐛 fix(issue-" + issueNumber + "): resolve tracked issue\n\nRefs #" + issueNumber + "\n\nCo-Authored-By: Smithers ticket-fleet <noreply@smithers.sh>"], setup.cwd);
-    } else {
-      if (count > 1) git(["reset", "--soft", setup.baseSha], setup.cwd);
-      git(["commit", "--amend", "--no-edit"], setup.cwd);
+    if (count > 0) git(["reset", "--soft", setup.baseSha], setup.cwd);
+    git(["commit", "-m", commitTextFor(issueNumber, message)], setup.cwd);
+  } else {
+    // Re-word an existing lane commit (e.g. a retry after the message task ran).
+    const count = Number(git(["rev-list", "--count", setup.baseSha + "..HEAD"], setup.cwd));
+    if (count > 1) {
+      git(["reset", "--soft", setup.baseSha], setup.cwd);
+      git(["commit", "-m", commitTextFor(issueNumber, message)], setup.cwd);
+    } else if (count === 1 && message) {
+      git(["commit", "--amend", "-m", commitTextFor(issueNumber, message)], setup.cwd);
     }
   }
   const headSha = currentHead(setup.cwd);
@@ -1841,8 +1892,14 @@ export default smithers((ctx) => {
                             agent={assignedImplementer(input, n, triage.difficulty, cwd)} {...agentTaskProps}>
                             {implementPrompt(issue, triage, plan, research, feedbackFor(ctx, n, hardTier), splitMode ? { repo: input.repo } : undefined)}
                           </Task>
+                          <Task id={"i" + n + ":commit-message"} output={outputs.tfCommitMessage}
+                            agent={supportAgent(cwd)} {...agentTaskProps}>
+                            {commitMessagePrompt(issue)}
+                          </Task>
                           <Task id={"i" + n + ":candidate"} output={outputs.tfCandidate} continueOnFail>
-                            {() => setup ? captureCandidate(n, setup) : { issueNumber: n, baseSha: "", headSha: "", patchId: "", changedPaths: [], reviewDiff: "", ready: false, summary: "No setup output." }}
+                            {() => setup
+                              ? captureCandidate(n, setup, latest<CommitMessage>(ctx, outputs.tfCommitMessage, "i" + n + ":commit-message"))
+                              : { issueNumber: n, baseSha: "", headSha: "", patchId: "", changedPaths: [], reviewDiff: "", ready: false, summary: "No setup output." }}
                           </Task>
                           <Task id={"i" + n + ":guard"} output={outputs.tfGuard}>
                             {() => runGuard(ctx, "i" + n + ":iteration")}
