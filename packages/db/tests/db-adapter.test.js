@@ -4,6 +4,7 @@ import { ensureSmithersTables } from "../src/ensure.js";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
+import { Effect } from "effect";
 function createTestDb() {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);
@@ -280,11 +281,31 @@ describe("SmithersDb adapter", () => {
             state: "in-progress",
             startedAtMs: now,
         });
-        await adapter.heartbeatAttempt("r1", "n1", 0, 1, now + 500, JSON.stringify({ progress: 50 }));
+        await Effect.runPromise(adapter.heartbeatAttempt("r1", "n1", 0, 1, now + 500, JSON.stringify({ progress: 50 }), null));
         const attempt = await adapter.getAttempt("r1", "n1", 0, 1);
         expect(attempt?.heartbeatAtMs).toBe(now + 500);
         expect(attempt?.heartbeatDataJson).toBe(JSON.stringify({ progress: 50 }));
         expect((await adapter.getRun("r1"))?.heartbeatAtMs).toBe(now + 500);
+    });
+    test("rolls back the run heartbeat when the attempt fence is already terminal", async () => {
+        const { adapter } = createTestDb();
+        await Effect.runPromise(adapter.insertRun(runRow("fenced", "running", {
+            runtimeOwnerId: "owner-a",
+            heartbeatAtMs: now,
+        })));
+        await Effect.runPromise(adapter.insertAttempt({
+            runId: "fenced",
+            nodeId: "n1",
+            iteration: 0,
+            attempt: 1,
+            state: "in-progress",
+            startedAtMs: now,
+        }));
+        expect(await Effect.runPromise(adapter.claimAttemptTerminal("fenced", "n1", 0, 1, "owner-a", "finished", now + 1))).toBe(true);
+        expect(await Effect.runPromise(adapter.heartbeatAttempt("fenced", "n1", 0, 1, now + 2, JSON.stringify({ progress: 2 }), "owner-a"))).toBe(false);
+        expect((await Effect.runPromise(adapter.getRun("fenced")))?.heartbeatAtMs).toBe(now);
+        expect((await Effect.runPromise(adapter.getAttempt("fenced", "n1", 0, 1)))?.state).toBe("finished");
+        expect((await Effect.runPromise(adapter.getAttempt("fenced", "n1", 0, 1)))?.heartbeatAtMs).toBeNull();
     });
     test("listAttempts returns attempts in descending order", async () => {
         const { adapter } = createTestDb();

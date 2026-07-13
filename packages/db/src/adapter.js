@@ -15,8 +15,10 @@
 import { getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Effect, Exit, FiberId, Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { getSqlMessageStorage } from "./sql-message-storage.js";
 import { sha256Hex } from "./sha256Hex.js";
 import { POSTGRES, beginTransactionSql } from "./dialect.js";
@@ -423,7 +425,7 @@ function runnableEffect(effect) {
     return runnable;
 }
 /**
- * @typedef {{ depth: number; ownerThread: string | null; tail: Promise<unknown> }} SqliteTransactionState
+ * @typedef {{ depth: number; ownerAdapter: SmithersDb | null; tail: Promise<unknown> }} SqliteTransactionState
  */
 /** @type {WeakMap<object, SqliteTransactionState>} */
 // Cross-adapter coordination: one sqlite connection cannot run overlapping BEGIN IMMEDIATE statements.
@@ -442,6 +444,10 @@ const sqliteTransactionStateByClient = (() => {
     });
     return stateByClient;
 })();
+// Adapter identity alone is not enough to identify the transaction owner:
+// unrelated fibers using the same adapter must queue behind the transaction,
+// while the operation's child fiber must use the already-open connection.
+const sqliteTransactionContext = new AsyncLocalStorage();
 /**
  * @param {unknown} client
  * @returns {object}
@@ -471,7 +477,7 @@ function getSqliteTransactionState(client) {
     if (!state) {
         state = {
             depth: 0,
-            ownerThread: null,
+            ownerAdapter: null,
             tail: Promise.resolve(),
         };
         sqliteTransactionStateByClient.set(key, state);
@@ -769,10 +775,11 @@ export class SmithersDb {
     ownsActiveTransaction(currentFiberThread) {
         const state = getSqliteTransactionState(resolveSqliteClientKey(this.db));
         this.transactionDepth = state.depth;
-        this.transactionOwnerThread = state.ownerThread;
+        this.transactionOwnerThread = state.ownerAdapter ? "*" : null;
         this.transactionTail = state.tail;
         return (state.depth > 0 &&
-            (state.ownerThread === currentFiberThread || state.ownerThread === "*"));
+            state.ownerAdapter === this &&
+            sqliteTransactionContext.getStore() === this);
     }
     /**
    * @template A
@@ -954,20 +961,20 @@ export class SmithersDb {
                 return yield* Effect.tryPromise({
                     try: async () => {
                         transactionState.depth += 1;
-                        transactionState.ownerThread = "*";
+                        transactionState.ownerAdapter = self;
                         self.transactionDepth = transactionState.depth;
-                        self.transactionOwnerThread = transactionState.ownerThread;
+                        self.transactionOwnerThread = transactionState.ownerAdapter ? "*" : null;
                         self.transactionTail = transactionState.tail;
                         try {
-                            return await self.internalStorage.transaction(() => Effect.runPromise(operation));
+                            return await self.internalStorage.transaction(() => sqliteTransactionContext.run(self, () => Effect.runPromise(operation)));
                         }
                         finally {
                             transactionState.depth = Math.max(0, transactionState.depth - 1);
                             if (transactionState.depth === 0) {
-                                transactionState.ownerThread = null;
+                                transactionState.ownerAdapter = null;
                             }
                             self.transactionDepth = transactionState.depth;
-                            self.transactionOwnerThread = transactionState.ownerThread;
+                            self.transactionOwnerThread = transactionState.ownerAdapter ? "*" : null;
                             self.transactionTail = transactionState.tail;
                             await Effect.runPromise(Metric.update(dbTransactionDuration, performance.now() - start));
                         }
@@ -1012,9 +1019,9 @@ export class SmithersDb {
                         // resume on a child Effect fiber. Treat the active
                         // transaction as owned by this adapter until COMMIT;
                         // the transaction turn still serializes entry.
-                        transactionState.ownerThread = "*";
+                        transactionState.ownerAdapter = self;
                         self.transactionDepth = transactionState.depth;
-                        self.transactionOwnerThread = transactionState.ownerThread;
+                        self.transactionOwnerThread = transactionState.ownerAdapter ? "*" : null;
                         self.transactionTail = transactionState.tail;
                     },
                     catch: (cause) => toSmithersError(cause, "begin sqlite transaction", {
@@ -1022,7 +1029,7 @@ export class SmithersDb {
                         details: { writeGroup, phase: "begin" },
                     }),
                 });
-	                const operationExit = yield* Effect.exit(operation);
+                const operationExit = yield* Effect.promise(() => sqliteTransactionContext.run(self, () => Effect.runPromise(Effect.exit(operation))));
 	                if (Exit.isFailure(operationExit)) {
 	                    yield* rollback("operation", operationExit.cause);
 	                    return yield* Effect.failCause(operationExit.cause);
@@ -1061,10 +1068,10 @@ export class SmithersDb {
             }).pipe(Effect.ensuring(Effect.gen(function* () {
                 transactionState.depth = Math.max(0, transactionState.depth - 1);
                 if (transactionState.depth === 0) {
-                    transactionState.ownerThread = null;
+                    transactionState.ownerAdapter = null;
                 }
                 self.transactionDepth = transactionState.depth;
-                self.transactionOwnerThread = transactionState.ownerThread;
+                self.transactionOwnerThread = transactionState.ownerAdapter ? "*" : null;
                 self.transactionTail = transactionState.tail;
                 yield* Metric.update(dbTransactionDuration, performance.now() - start);
             })));
@@ -1109,6 +1116,11 @@ export class SmithersDb {
     updateRunIfNotCancelled(runId, patch) {
         validateRunPatch(patch);
         return this.write(`guarded update run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", patch, "run_id = ? AND status NOT IN (?, ?, ?, ?, ?) AND cancel_requested_at_ms IS NULL", [runId, "finished", "failed", "cancelled", "canceled", "continued"]).then((count) => count > 0));
+    }
+    /** @returns {RunnableEffect<boolean, SmithersError>} */
+    updateRunIfNotCancelledOwned(runId, runtimeOwnerId, patch) {
+        validateRunPatch(patch);
+        return this.write(`owned guarded update run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", patch, "run_id = ? AND status NOT IN (?, ?, ?, ?, ?) AND cancel_requested_at_ms IS NULL AND ((runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR runtime_owner_id = ?)", [runId, "finished", "failed", "cancelled", "canceled", "continued", runtimeOwnerId, runtimeOwnerId]).then((count) => count > 0));
     }
     /**
    * @param {string} runId
@@ -1809,6 +1821,19 @@ export class SmithersDb {
                 AND ((r.runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR r.runtime_owner_id = ?))
         `, [runId, nodeId, iteration, attempt, runtimeOwnerId, runtimeOwnerId]).then((count) => count > 0));
     }
+    claimAttemptTerminal(runId, nodeId, iteration, attempt, runtimeOwnerId, state, finishedAtMs, errorJson) {
+        return this.write(`claim attempt ${state} ${nodeId}#${attempt}`, () => this.internalStorage.updateWhere("_smithers_attempts", {
+            state,
+            finishedAtMs,
+            ...(errorJson === undefined ? {} : { errorJson }),
+        }, `run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND state = 'in-progress'
+            AND EXISTS (SELECT 1 FROM _smithers_runs r
+              WHERE r.run_id = _smithers_attempts.run_id
+                AND r.status = 'running'
+                AND r.cancel_requested_at_ms IS NULL
+                AND ((r.runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR r.runtime_owner_id = ?))
+        `, [runId, nodeId, iteration, attempt, runtimeOwnerId, runtimeOwnerId]).then((count) => count > 0));
+    }
     /**
    * @param {string} runId
    * @param {string} nodeId
@@ -1820,28 +1845,24 @@ export class SmithersDb {
      * @returns {RunnableEffect<boolean, SmithersError>}
      */
     heartbeatAttempt(runId, nodeId, iteration, attempt, heartbeatAtMs, heartbeatDataJson, runtimeOwnerId) {
-        return this.write(`heartbeat attempt ${nodeId}#${attempt}`, () => {
-            const updated = this.internalStorage.updateWhere("_smithers_attempts", {
+        // Both rows are one ownership-fenced fact.  Deliberately abort the
+        // transaction when either side loses the fence; returning false after
+        // only updating the attempt would leave stale-owner evidence visible to
+        // the monitor.
+        const ownerId = runtimeOwnerId ?? null;
+        return this.withTransactionEffect(`heartbeat attempt ${nodeId}#${attempt}`, Effect.gen(this, function* () {
+            const runUpdated = yield* Effect.tryPromise(() => this.internalStorage.updateWhere("_smithers_runs", { heartbeatAtMs }, "run_id = ? AND status = ? AND cancel_requested_at_ms IS NULL AND ((runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR runtime_owner_id = ?)", [runId, "running", ownerId, ownerId]).then((count) => count > 0));
+            if (!runUpdated) return yield* Effect.fail(new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat run fence lost."));
+            const updated = yield* Effect.tryPromise(() => this.internalStorage.updateWhere("_smithers_attempts", {
                 heartbeatAtMs,
                 ...(heartbeatDataJson === null ? {} : { heartbeatDataJson }),
-            }, `run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND state = ?
-                AND EXISTS (SELECT 1 FROM _smithers_runs r
-                  WHERE r.run_id = _smithers_attempts.run_id
-                    AND r.status = 'running'
-                    AND r.cancel_requested_at_ms IS NULL
-                    AND ((r.runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR r.runtime_owner_id = ?))
-                `, [runId, nodeId, iteration, attempt, "in-progress", runtimeOwnerId, runtimeOwnerId]);
-            // Task output/tool callbacks are the durable proof that the engine is
-            // alive. Refresh the run heartbeat from the same write path so the
-            // monitor does not depend solely on the scheduler timer, which can be
-            // starved while a live stream or subprocess is consuming CPU.
-            return updated.then((count) => {
-                if (count > 0) {
-                    return this.internalStorage.updateWhere("_smithers_runs", { heartbeatAtMs }, "run_id = ? AND status = ? AND cancel_requested_at_ms IS NULL AND ((runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR runtime_owner_id = ?)", [runId, "running", runtimeOwnerId, runtimeOwnerId]).then((runCount) => runCount > 0);
-                }
-                return false;
-            });
-        });
+            }, `run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND state = 'in-progress'`, [runId, nodeId, iteration, attempt]).then((count) => count > 0));
+            if (!updated) return yield* Effect.fail(new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat attempt fence lost."));
+            return true;
+        })).pipe(Effect.catchAll((error) => {
+            if (error instanceof SmithersError && error.code === "HEARTBEAT_FENCE_LOST") return Effect.succeed(false);
+            return Effect.fail(error);
+        }));
     }
     /**
    * @param {string} runId

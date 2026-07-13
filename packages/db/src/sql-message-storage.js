@@ -1072,20 +1072,16 @@ export class SqlMessageStorage {
         if (!built) {
             return Promise.resolve(0);
         }
-        // Return the affected-row count from the same conditional statement.
-        // This is the primitive used by durable compare-and-set callers; a
-        // follow-up SELECT would reintroduce the race this result is meant to
-        // close.
-        if (this.dialect === POSTGRES || this.externalSqlite) {
-            return this.queryAllRaw(`${built.statement} RETURNING 1`, built.params)
-                .then((rows) => rows.length);
-        }
-        const client = this.sqlite;
-        // Bun returns the affected-row count from the same synchronous UPDATE
-        // statement. Reading changes() in a second operation is racy when two
-        // adapters share a database connection.
-        const result = client.query(built.statement).run(...built.params.map(encodeParam));
-        return Promise.resolve(Number(result?.changes ?? 0));
+        // Return the affected-row count from the same conditional statement
+        // via RETURNING: this is the primitive used by durable compare-and-set
+        // callers, and a follow-up SELECT (or a separate changes() read) would
+        // reintroduce the race this result is meant to close. The statement
+        // must go through the reserved connection like every other write; a
+        // direct client.run bypasses the connection serialisation and can
+        // interleave into another adapter's open transaction (getting rolled
+        // back with it).
+        return this.queryAllRaw(`${built.statement} RETURNING 1`, built.params)
+            .then((rows) => rows.length);
     }
     /**
    * @param {string} table
